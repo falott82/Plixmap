@@ -79,6 +79,13 @@ const openDb = () => {
 };
 
 const getOrCreateAuthSecret = (db) => {
+  const envSecret = process.env.DESKLY_AUTH_SECRET;
+  if (envSecret && typeof envSecret === 'string' && envSecret.trim().length >= 32) return envSecret.trim();
+  // In development, rotate the signing secret on each server start so a restart always forces re-login.
+  // In production (NODE_ENV=production, e.g. Dockerfile), keep a stable secret in DB for persistent sessions.
+  if (process.env.NODE_ENV !== 'production') {
+    return crypto.randomBytes(32).toString('base64');
+  }
   const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('authSecret');
   if (row?.value) return row.value;
   const secret = crypto.randomBytes(32).toString('base64');

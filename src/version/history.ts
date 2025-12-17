@@ -7,6 +7,15 @@ export interface ReleaseNote {
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '0.9.4',
+    date: '2025-12-16',
+    type: 'fix',
+    notes: [
+      'Login: in sviluppo (NODE_ENV != production) il server ruota la chiave di sessione ad ogni avvio, quindi un restart forza sempre la schermata di login',
+      'CI: workflow `security-audit` ora fallisce solo per vulnerabilità con severità >= high (riduce falsi allarmi su low/moderate)'
+    ]
+  },
+  {
     version: '0.9.3',
     date: '2025-12-16',
     type: 'fix',
