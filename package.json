@@ -1,0 +1,42 @@
+{
+  "name": "deskly",
+  "version": "0.9.3",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "node server/index.cjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "start": "node server/index.cjs"
+  },
+  "dependencies": {
+    "@headlessui/react": "^1.7.18",
+    "better-sqlite3": "^12.5.0",
+    "classnames": "^2.5.1",
+    "express": "^5.2.1",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^3.0.4",
+    "konva": "^9.3.6",
+    "lucide-react": "^0.308.0",
+    "nanoid": "^5.1.6",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-konva": "^18.2.7",
+    "react-router-dom": "^6.21.3",
+    "use-image": "^1.1.1",
+    "zustand": "^4.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.7",
+    "@types/react": "^18.2.41",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.6",
+    "typescript": "^5.3.3",
+    "vite": "^7.3.0"
+  }
+}

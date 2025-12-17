@@ -1,0 +1,13 @@
+version: '3.9'
+
+services:
+  deskly:
+    build: .
+    ports:
+      - '8787:8787'
+    volumes:
+      - deskly_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  deskly_data:
