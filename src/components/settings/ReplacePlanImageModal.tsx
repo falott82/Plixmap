@@ -1,0 +1,113 @@
+import { Fragment, useEffect, useState } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
+import { Check, X } from 'lucide-react';
+
+interface Props {
+  open: boolean;
+  planName: string;
+  hasObjects: boolean;
+  onClose: () => void;
+  onConfirm: (options: { carryObjects: boolean }) => void;
+}
+
+const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm }: Props) => {
+  const [carryObjects, setCarryObjects] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setCarryObjects(false);
+  }, [open]);
+
+  return (
+    <Transition show={open} as={Fragment}>
+      <Dialog as="div" className="relative z-50" onClose={onClose}>
+        <Transition.Child
+          as={Fragment}
+          enter="ease-out duration-150"
+          enterFrom="opacity-0"
+          enterTo="opacity-100"
+          leave="ease-in duration-100"
+          leaveFrom="opacity-100"
+          leaveTo="opacity-0"
+        >
+          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+        </Transition.Child>
+        <div className="fixed inset-0 overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center px-4 py-8">
+            <Transition.Child
+              as={Fragment}
+              enter="ease-out duration-150"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
+              leave="ease-in duration-100"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
+            >
+              <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                <div className="flex items-center justify-between">
+                  <Dialog.Title className="text-lg font-semibold text-ink">Aggiorna planimetria</Dialog.Title>
+                  <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <Dialog.Description className="mt-2 text-sm text-slate-600">
+                  Stai aggiornando l’immagine di <span className="font-semibold text-ink">{planName}</span>. La planimetria precedente verrà archiviata come revisione.
+                </Dialog.Description>
+
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                  {hasObjects ? (
+                    <>
+                      <div className="font-semibold text-ink">Oggetti esistenti</div>
+                      <div className="mt-1 text-slate-600">
+                        Puoi scegliere se riportare gli oggetti nella nuova planimetria. In tal caso resteranno con le stesse coordinate e dovrai eventualmente risistemarli.
+                      </div>
+                      <label className="mt-3 flex items-start gap-2 font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={carryObjects}
+                          onChange={(e) => setCarryObjects(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
+                        />
+                        <span>Riporta gli oggetti nella nuova planimetria</span>
+                      </label>
+                      {!carryObjects ? (
+                        <div className="mt-2 text-rose-700">
+                          Gli oggetti verranno rimossi nella nuova versione e dovranno essere reinseriti.
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="text-slate-600">Nessun oggetto presente: la nuova planimetria verrà applicata senza ulteriori modifiche.</div>
+                  )}
+                </div>
+
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    onClick={onClose}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Annulla
+                  </button>
+                  <button
+                    onClick={() => {
+                      onConfirm({ carryObjects });
+                      onClose();
+                    }}
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                  >
+                    <Check size={16} />
+                    Conferma
+                  </button>
+                </div>
+              </Dialog.Panel>
+            </Transition.Child>
+          </div>
+        </div>
+      </Dialog>
+    </Transition>
+  );
+};
+
+export default ReplacePlanImageModal;
+

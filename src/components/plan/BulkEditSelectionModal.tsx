@@ -1,0 +1,192 @@
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
+import { X } from 'lucide-react';
+import { IconName, MapObject } from '../../store/types';
+import { useT } from '../../i18n/useT';
+import Icon from '../ui/Icon';
+
+type Row = {
+  id: string;
+  type: string;
+  name: string;
+  description?: string;
+  scale?: number;
+};
+
+interface Props {
+  open: boolean;
+  objects: MapObject[];
+  getTypeLabel: (typeId: string) => string;
+  getTypeIcon: (typeId: string) => IconName | undefined;
+  onClose: () => void;
+  onApply: (changesById: Record<string, Partial<Pick<MapObject, 'name' | 'description' | 'scale'>>>) => void;
+}
+
+const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onClose, onApply }: Props) => {
+  const t = useT();
+  const [rows, setRows] = useState<Row[]>([]);
+  const initialRef = useRef<Record<string, { name: string; description?: string; scale?: number }>>({});
+
+  useEffect(() => {
+    if (!open) return;
+    const init: Record<string, any> = {};
+    const next = (objects || []).map((o) => {
+      init[o.id] = { name: o.name, description: o.description, scale: o.scale ?? 1 };
+      return { id: o.id, type: o.type, name: o.name, description: o.description, scale: o.scale ?? 1 };
+    });
+    initialRef.current = init;
+    setRows(next);
+  }, [open, objects]);
+
+  const canApply = useMemo(() => rows.some((r) => r.name.trim().length > 0), [rows]);
+
+  const apply = () => {
+    if (!canApply) return;
+    const changesById: Record<string, any> = {};
+    for (const r of rows) {
+      const prev = initialRef.current[r.id];
+      if (!prev) continue;
+      const nextName = r.name.trim();
+      const nextDesc = (r.description || '').trim() || undefined;
+      const nextScale = Number.isFinite(r.scale as any) ? Number(r.scale) : 1;
+      const patch: any = {};
+      if (nextName && nextName !== prev.name) patch.name = nextName;
+      if (nextDesc !== (prev.description || undefined)) patch.description = nextDesc;
+      if ((prev.scale ?? 1) !== nextScale) patch.scale = nextScale;
+      if (Object.keys(patch).length) changesById[r.id] = patch;
+    }
+    onApply(changesById);
+    onClose();
+  };
+
+  return (
+    <Transition show={open} as={Fragment}>
+      <Dialog as="div" className="relative z-50" onClose={onClose}>
+        <Transition.Child
+          as={Fragment}
+          enter="ease-out duration-150"
+          enterFrom="opacity-0"
+          enterTo="opacity-100"
+          leave="ease-in duration-100"
+          leaveFrom="opacity-100"
+          leaveTo="opacity-0"
+        >
+          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+        </Transition.Child>
+        <div className="fixed inset-0 overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center px-4 py-8">
+            <Transition.Child
+              as={Fragment}
+              enter="ease-out duration-150"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
+              leave="ease-in duration-100"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
+            >
+              <Dialog.Panel className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <Dialog.Title className="text-lg font-semibold text-ink">
+                      {t({ it: 'Modifica selezione', en: 'Edit selection' })}
+                    </Dialog.Title>
+                    <div className="mt-1 text-sm text-slate-600">
+                      {t({
+                        it: `Stai modificando ${rows.length} oggetti selezionati.`,
+                        en: `You are editing ${rows.length} selected objects.`
+                      })}
+                    </div>
+                  </div>
+                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="mt-4 max-h-[60vh] overflow-auto rounded-2xl border border-slate-200">
+                  <div className="grid grid-cols-12 gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase text-slate-500">
+                    <div className="col-span-3">{t({ it: 'Oggetto', en: 'Object' })}</div>
+                    <div className="col-span-4">{t({ it: 'Nome', en: 'Name' })}</div>
+                    <div className="col-span-3">{t({ it: 'Descrizione', en: 'Description' })}</div>
+                    <div className="col-span-2 text-right">{t({ it: 'Scala', en: 'Scale' })}</div>
+                  </div>
+                  {rows.map((r) => {
+                    const icon = getTypeIcon(r.type);
+                    return (
+                      <div key={r.id} className="grid grid-cols-12 gap-3 px-4 py-3 text-sm hover:bg-slate-50">
+                        <div className="col-span-3 flex items-center gap-2 min-w-0">
+                          {icon ? <Icon name={icon} size={16} className="text-primary" /> : null}
+                          <div className="min-w-0">
+                            <div className="truncate font-semibold text-ink">{getTypeLabel(r.type)}</div>
+                            <div className="truncate text-xs text-slate-500">{r.id.slice(0, 8)}</div>
+                          </div>
+                        </div>
+                        <div className="col-span-4">
+                          <input
+                            value={r.name}
+                            onChange={(e) =>
+                              setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, name: e.target.value } : x)))
+                            }
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Nome (obbligatorio)', en: 'Name (required)' })}
+                          />
+                        </div>
+                        <div className="col-span-3">
+                          <input
+                            value={r.description || ''}
+                            onChange={(e) =>
+                              setRows((prev) =>
+                                prev.map((x) => (x.id === r.id ? { ...x, description: e.target.value } : x))
+                              )
+                            }
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Descrizione (opzionale)', en: 'Description (optional)' })}
+                          />
+                        </div>
+                        <div className="col-span-2 flex items-center justify-end gap-2">
+                          <input
+                            type="range"
+                            min={0.6}
+                            max={1.8}
+                            step={0.1}
+                            value={r.scale ?? 1}
+                            onChange={(e) => {
+                              const next = Number(e.target.value);
+                              setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, scale: next } : x)));
+                            }}
+                            className="w-24"
+                            title={t({ it: 'Scala', en: 'Scale' })}
+                          />
+                          <div className="w-10 text-right text-xs font-semibold text-slate-600 tabular-nums">
+                            {(r.scale ?? 1).toFixed(1)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    onClick={onClose}
+                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    {t({ it: 'Annulla', en: 'Cancel' })}
+                  </button>
+                  <button
+                    onClick={apply}
+                    disabled={!canApply}
+                    className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                  >
+                    {t({ it: 'Applica modifiche', en: 'Apply changes' })}
+                  </button>
+                </div>
+              </Dialog.Panel>
+            </Transition.Child>
+          </div>
+        </div>
+      </Dialog>
+    </Transition>
+  );
+};
+
+export default BulkEditSelectionModal;
