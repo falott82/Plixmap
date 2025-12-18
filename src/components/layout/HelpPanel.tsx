@@ -52,6 +52,12 @@ const HelpPanel = () => {
                       <li>{t({ it: 'Per accedere serve un account (admin o utente).', en: 'Access requires an account (admin or user).' })}</li>
                       <li>
                         {t({
+                          it: 'Al primo accesso del superadmin viene richiesto di cambiare password e scegliere la lingua.',
+                          en: 'On the superadmin’s first login, you must change the password and choose the language.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'I permessi possono essere assegnati per Cliente/Sede/Planimetria in sola lettura o lettura+scrittura.',
                           en: 'Permissions can be assigned per Client/Site/Floor plan in read-only or read+write.'
                         })}
@@ -122,14 +128,26 @@ const HelpPanel = () => {
                     <ul className="ml-5 list-disc space-y-1 pt-2">
                       <li>
                         {t({
-                          it: 'Crea una stanza disegnando un rettangolo sulla mappa (menu destro → Nuova stanza).',
-                          en: 'Create a room by drawing a rectangle on the map (right-click menu → New room).'
+                          it: 'Crea una stanza: tasto destro sulla mappa → Nuova stanza → Rettangolo (oppure Poligono).',
+                          en: 'Create a room: right-click on the map → New room → Rectangle (or Polygon).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Poligono: clicca più punti. Clicca sul primo punto (o premi Invio) per chiudere l’area. Backspace rimuove l’ultimo punto.',
+                          en: 'Polygon: click multiple points. Click the first point (or press Enter) to close the area. Backspace removes the last point.'
                         })}
                       </li>
                       <li>
                         {t({
                           it: 'Gli oggetti dentro il rettangolo vengono collegati automaticamente alla stanza.',
                           en: 'Objects inside the rectangle are automatically linked to the room.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Puoi modificare il perimetro: seleziona la stanza e trascina i punti blu (poligono) oppure ridimensiona/sposta (rettangolo).',
+                          en: 'You can edit the perimeter: select the room and drag the blue points (polygon) or resize/move it (rectangle).'
                         })}
                       </li>
                       <li>
@@ -151,7 +169,19 @@ const HelpPanel = () => {
                           en: 'Search bar in the floor plan view: filters by name/description.'
                         })}
                       </li>
+                      <li>
+                        {t({
+                          it: 'Puoi cercare anche una stanza per nome.',
+                          en: 'You can also search rooms by name.'
+                        })}
+                      </li>
                       <li>{t({ it: 'Se trovato: l’oggetto viene evidenziato (blink/highlight) sulla mappa.', en: 'If found: the object is highlighted (blink) on the map.' })}</li>
+                      <li>
+                        {t({
+                          it: 'Se trovi una stanza: lampeggia il perimetro della stanza.',
+                          en: 'If a room is found: the room perimeter blinks.'
+                        })}
+                      </li>
                     </ul>
                   </div>
                   <div className="rounded-xl bg-mist p-3">

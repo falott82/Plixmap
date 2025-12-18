@@ -2,17 +2,105 @@ export interface ReleaseNote {
   version: string;
   date: string;
   type: 'fix' | 'minor' | 'major';
-  notes: string[];
+  notes: { it: string; en: string }[];
 }
 
+const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
+
 export const releaseHistory: ReleaseNote[] = [
+  {
+    version: '0.11.1',
+    date: '2025-12-16',
+    type: 'fix',
+    notes: [
+      n(
+        'Login dopo riavvio server: le sessioni vengono invalidate al reboot/redeploy (richiesto nuovo accesso)',
+        'Login after server restart: sessions are invalidated on reboot/redeploy (new login required)'
+      ),
+      n(
+        'Utenti: creazione utente con conferma password e requisiti “password forte” (maiuscola/minuscola/numero/simbolo)',
+        'Users: user creation now includes password confirmation and “strong password” requirements (upper/lower/number/symbol)'
+      ),
+      n(
+        'Footer: tooltip tradotti (GitHub/Email) e .gitignore aggiornato per lockfile e dati runtime',
+        'Footer: translated tooltips (GitHub/Email) and updated .gitignore for lockfile and runtime data'
+      )
+    ]
+  },
+  {
+    version: '0.11.0',
+    date: '2025-12-16',
+    type: 'minor',
+    notes: [
+      n(
+        'Bootstrap: un solo superadmin predefinito (username: superadmin, password: deskly) con cambio password obbligatorio al primo accesso',
+        'Bootstrap: a single default superadmin (username: superadmin, password: deskly) with mandatory password change on first login'
+      ),
+      n(
+        'First-run: schermata dedicata per impostare nuova password e lingua (IT/EN)',
+        'First-run: dedicated screen to set a new password and language (IT/EN)'
+      ),
+      n(
+        'Seed: workspace iniziale “ACME Inc. → Wall Street 01 → Floor 0” con planimetria di esempio centrata (senza oggetti)',
+        'Seed: initial workspace “ACME Inc. → Wall Street 01 → Floor 0” with a centered sample floor plan (no objects)'
+      )
+    ]
+  },
+  {
+    version: '0.10.1',
+    date: '2025-12-16',
+    type: 'fix',
+    notes: [
+      n(
+        'Stanze: “Nuova stanza” ora è un menu con Rettangolo/Poligono (traduzioni ripulite)',
+        'Rooms: “New room” is now a submenu with Rectangle/Polygon (cleaned up translations)'
+      ),
+      n(
+        'Stanze: bordo tratteggiato più sottile e vertici più piccoli',
+        'Rooms: thinner dashed border and smaller vertices'
+      ),
+      n(
+        'Ricerca: ora include anche le stanze (blink del perimetro)',
+        'Search: now includes rooms as well (perimeter blink)'
+      )
+    ]
+  },
+  {
+    version: '0.10.0',
+    date: '2025-12-16',
+    type: 'minor',
+    notes: [
+      n(
+        'Stanze: aggiunta “stanza irregolare” disegnata a poligono (clic multipli, chiusura su primo punto o Invio)',
+        'Rooms: added “irregular room” polygon drawing (multiple clicks, close by clicking first point or pressing Enter)'
+      ),
+      n(
+        'Stanze: modifica perimetro poligono trascinando i vertici; spostamento stanza tramite drag',
+        'Rooms: edit polygon perimeter by dragging vertices; move the room by dragging'
+      ),
+      n(
+        'Changelog: contenuti IT/EN in base alla lingua (anche export PDF)',
+        'Changelog: content is now IT/EN based on language (including PDF export)'
+      ),
+      n(
+        'Performance: ottimizzato bounding box selezione (Set invece di includes) e preview poligono con requestAnimationFrame',
+        'Performance: optimized selection bounding box (Set instead of includes) and polygon preview via requestAnimationFrame'
+      )
+    ]
+  },
   {
     version: '0.9.4',
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Login: in sviluppo (NODE_ENV != production) il server ruota la chiave di sessione ad ogni avvio, quindi un restart forza sempre la schermata di login',
-      'CI: workflow `security-audit` ora fallisce solo per vulnerabilità con severità >= high (riduce falsi allarmi su low/moderate)'
+      n(
+        'Login: in sviluppo (NODE_ENV != production) il server ruota la chiave di sessione ad ogni avvio, quindi un restart forza sempre la schermata di login',
+        'Login: in development (NODE_ENV != production) the server rotates the session signing key on each start, so a restart always forces the login screen'
+      ),
+      n(
+        'CI: workflow `security-audit` ora fallisce solo per vulnerabilità con severità >= high (riduce falsi allarmi su low/moderate)',
+        'CI: the `security-audit` workflow now fails only for vulnerabilities with severity >= high (reduces noise from low/moderate)'
+      )
     ]
   },
   {
@@ -20,10 +108,22 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Cambio planimetria con modifiche non salvate: “Cambia senza salvare” ripristina davvero lo stato precedente (ultima revisione o snapshot iniziale)',
-      'Albero sidebar: menu tasto destro sulla planimetria con “Time machine…” (rispetta il flusso di salvataggio se ci sono modifiche)',
-      'Time machine: pulsante “Confronta” per selezionare 2 revisioni e visualizzarle (A più nuova sopra, B più vecchia sotto) con breadcrumb e date',
-      'Fix: risolto crash nel confronto revisioni quando la selezione cambia/si chiude la modale'
+      n(
+        'Cambio planimetria con modifiche non salvate: “Cambia senza salvare” ripristina davvero lo stato precedente (ultima revisione o snapshot iniziale)',
+        'Switching floor plans with unsaved changes: “Switch without saving” now truly restores the previous state (latest revision or initial snapshot)'
+      ),
+      n(
+        'Albero sidebar: menu tasto destro sulla planimetria con “Time machine…” (rispetta il flusso di salvataggio se ci sono modifiche)',
+        'Sidebar tree: floor plan right-click menu now includes “Time machine…” (and respects the save flow when there are unsaved changes)'
+      ),
+      n(
+        'Time machine: pulsante “Confronta” per selezionare 2 revisioni e visualizzarle (A più nuova sopra, B più vecchia sotto) con breadcrumb e date',
+        'Time machine: “Compare” button to select 2 revisions and view them (newer A on top, older B below) with breadcrumb and dates'
+      ),
+      n(
+        'Fix: risolto crash nel confronto revisioni quando la selezione cambia/si chiude la modale',
+        'Fix: resolved a crash in revision compare when selection changes / modal closes'
+      )
     ]
   },
   {
@@ -31,9 +131,18 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Performance: Canvas separato in layer (sfondo/stanze/oggetti) per evitare redraw dell’immagine durante drag e ridurre drasticamente `drawImage`',
-      'Performance: ResizeObserver throttled con `requestAnimationFrame` per prevenire `setHeight/resizeDOM` ripetuti',
-      'Performance: PlanView non sottoscrive più l’intero Zustand store (selector granulari) per evitare render storm e lag in input/modali'
+      n(
+        'Performance: Canvas separato in layer (sfondo/stanze/oggetti) per evitare redraw dell’immagine durante drag e ridurre drasticamente `drawImage`',
+        'Performance: canvas split into layers (background/rooms/objects) to avoid redrawing the image during drag and drastically reduce `drawImage` calls'
+      ),
+      n(
+        'Performance: ResizeObserver throttled con `requestAnimationFrame` per prevenire `setHeight/resizeDOM` ripetuti',
+        'Performance: ResizeObserver throttled via `requestAnimationFrame` to prevent repeated `setHeight/resizeDOM`'
+      ),
+      n(
+        'Performance: PlanView non sottoscrive più l’intero Zustand store (selector granulari) per evitare render storm e lag in input/modali',
+        'Performance: PlanView no longer subscribes to the entire Zustand store (granular selectors) to avoid render storms and input/modal lag'
+      )
     ]
   },
   {
@@ -41,9 +150,18 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Performance: ridotti re-render inutili (App/Sidebar/Help) usando selector Zustand granulari',
-      'Autosave: per admin evita di rimpiazzare l’intero grafo state a ogni save (riduce GC e possibile churn Konva); aggiorna dal server solo quando serve (data URL → /uploads)',
-      'Canvas: ResizeObserver non aggiorna lo state se le dimensioni non cambiano (evita loop di resize)'
+      n(
+        'Performance: ridotti re-render inutili (App/Sidebar/Help) usando selector Zustand granulari',
+        'Performance: reduced unnecessary re-renders (App/Sidebar/Help) using granular Zustand selectors'
+      ),
+      n(
+        'Autosave: per admin evita di rimpiazzare l’intero grafo state a ogni save (riduce GC e possibile churn Konva); aggiorna dal server solo quando serve (data URL → /uploads)',
+        'Autosave: for admins avoid replacing the whole state graph on every save (reduces GC and possible Konva churn); refresh from server only when needed (data URL → /uploads)'
+      ),
+      n(
+        'Canvas: ResizeObserver non aggiorna lo state se le dimensioni non cambiano (evita loop di resize)',
+        'Canvas: ResizeObserver does not update state if dimensions did not change (prevents resize loops)'
+      )
     ]
   },
   {
@@ -51,10 +169,22 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'Palette: nomi oggetti tradotti ITA/ENG e guidati dal catalogo tipi oggetto',
-      'Settings: nuova sezione “Oggetti” per creare tipi personalizzati (IT/EN) e scegliere icone da una lista coerente',
-      'Icone: puoi cambiare l’icona anche dei tipi esistenti; tutti gli oggetti in mappa si aggiornano automaticamente',
-      'PDF: lista oggetti esportata con il nome tipo (non solo id) dove disponibile'
+      n(
+        'Palette: nomi oggetti tradotti ITA/ENG e guidati dal catalogo tipi oggetto',
+        'Palette: object names translated IT/EN and driven by the object type catalog'
+      ),
+      n(
+        'Settings: nuova sezione “Oggetti” per creare tipi personalizzati (IT/EN) e scegliere icone da una lista coerente',
+        'Settings: new “Objects” section to create custom types (IT/EN) and pick icons from a consistent set'
+      ),
+      n(
+        'Icone: puoi cambiare l’icona anche dei tipi esistenti; tutti gli oggetti in mappa si aggiornano automaticamente',
+        'Icons: you can change icons for existing types; all map objects update automatically'
+      ),
+      n(
+        'PDF: lista oggetti esportata con il nome tipo (non solo id) dove disponibile',
+        'PDF: exported object list uses the type label (not just the id) when available'
+      )
     ]
   },
   {
@@ -62,10 +192,22 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Performance: ridotto drasticamente il lavoro sul main thread durante typing/drag evitando re-render del canvas per eventi non correlati',
-      'PlanView: subscription Zustand granulari (shallow selector) e rimossa dipendenza da toast updates per prevenire render storm',
-      'Data store: aggiornamenti con structural sharing (no deep-clone totale) per evitare GC churn e riferimenti che cambiavano inutilmente',
-      'Canvas: `CanvasStage` memoized + callback stabilizzate per non rigenerare migliaia di nodi Konva durante input/modali'
+      n(
+        'Performance: ridotto drasticamente il lavoro sul main thread durante typing/drag evitando re-render del canvas per eventi non correlati',
+        'Performance: drastically reduced main-thread work during typing/drag by avoiding canvas re-renders for unrelated events'
+      ),
+      n(
+        'PlanView: subscription Zustand granulari (shallow selector) e rimossa dipendenza da toast updates per prevenire render storm',
+        'PlanView: granular Zustand subscriptions (shallow selectors) and removed toast-driven updates to prevent render storms'
+      ),
+      n(
+        'Data store: aggiornamenti con structural sharing (no deep-clone totale) per evitare GC churn e riferimenti che cambiavano inutilmente',
+        'Data store: updates use structural sharing (no full deep-clone) to avoid GC churn and unnecessary reference changes'
+      ),
+      n(
+        'Canvas: `CanvasStage` memoized + callback stabilizzate per non rigenerare migliaia di nodi Konva durante input/modali',
+        'Canvas: `CanvasStage` memoized + stabilized callbacks to avoid regenerating thousands of Konva nodes during input/modals'
+      )
     ]
   },
   {
@@ -73,11 +215,26 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Performance: eliminato JSON.stringify massivo dello state (soprattutto con immagini/asset in data URL) per evitare GC churn e rallentamenti progressivi',
-      'Autosave: salvataggi serializzati (no richieste concorrenti) con debounce più robusto e aggiornamento state canonico dal server',
-      'Backend: planimetrie/loghi/allegati in data URL vengono salvati come file in `data/uploads` e referenziati via URL, riducendo drasticamente la dimensione dello state',
-      'Time machine: entrando nell’area di lavoro si parte sempre dal “presente” (non da una revisione selezionata in precedenza)',
-      'Canvas: cleanup onload icone SVG→Image per evitare setState dopo unmount'
+      n(
+        'Performance: eliminato JSON.stringify massivo dello state (soprattutto con immagini/asset in data URL) per evitare GC churn e rallentamenti progressivi',
+        'Performance: removed massive JSON.stringify of the state (especially with data URL images/assets) to avoid GC churn and progressive slowdowns'
+      ),
+      n(
+        'Autosave: salvataggi serializzati (no richieste concorrenti) con debounce più robusto e aggiornamento state canonico dal server',
+        'Autosave: serialized saves (no concurrent requests) with stronger debounce and canonical state update from the server'
+      ),
+      n(
+        'Backend: planimetrie/loghi/allegati in data URL vengono salvati come file in `data/uploads` e referenziati via URL, riducendo drasticamente la dimensione dello state',
+        'Backend: floor plans/logos/PDF attachments in data URLs are stored as files in `data/uploads` and referenced via URLs, drastically reducing state size'
+      ),
+      n(
+        'Time machine: entrando nell’area di lavoro si parte sempre dal “presente” (non da una revisione selezionata in precedenza)',
+        'Time machine: entering the workspace always starts from the “present” (not a previously selected revision)'
+      ),
+      n(
+        'Canvas: cleanup onload icone SVG→Image per evitare setState dopo unmount',
+        'Canvas: cleaned up SVG→Image onload handlers to avoid setState after unmount'
+      )
     ]
   },
   {
@@ -85,13 +242,34 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Utenti: aggiunta ricerca e colonna Attivo/Disattivo nella lista',
-      'Logs: ricerca immediata lato UI (oltre alla ricerca server con Invio/Refresh)',
-      'Login: rimossi esempi credenziali dalla pagina',
-      'Footer: spostato in basso a destra e aggiunto link mailto: ottavio.falsini@me.com',
-      'Changelog: tooltip sul badge versione',
-      'Header: Aiuto spostato a destra di Impostazioni, Salva revisione evidenziato e abilitato solo con modifiche',
-      'Viste: nome bloccato a “Default” quando la vista è default'
+      n(
+        'Utenti: aggiunta ricerca e colonna Attivo/Disattivo nella lista',
+        'Users: added search and Active/Disabled column in the list'
+      ),
+      n(
+        'Logs: ricerca immediata lato UI (oltre alla ricerca server con Invio/Refresh)',
+        'Logs: instant UI search (in addition to server search via Enter/Refresh)'
+      ),
+      n(
+        'Login: rimossi esempi credenziali dalla pagina',
+        'Login: removed credential examples from the login page'
+      ),
+      n(
+        'Footer: spostato in basso a destra e aggiunto link mailto: ottavio.falsini@me.com',
+        'Footer: moved to bottom-right and added mailto: ottavio.falsini@me.com'
+      ),
+      n(
+        'Changelog: tooltip sul badge versione',
+        'Changelog: tooltip on the version badge'
+      ),
+      n(
+        'Header: Aiuto spostato a destra di Impostazioni, Salva revisione evidenziato e abilitato solo con modifiche',
+        'Header: Help moved to the right of Settings; Save revision highlighted and enabled only when there are changes'
+      ),
+      n(
+        'Viste: nome bloccato a “Default” quando la vista è default',
+        'Views: name is locked to “Default” when the view is the default'
+      )
     ]
   },
   {
@@ -99,13 +277,34 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'UI: Settings come sola icona top-right (accanto al menu utente), rimosso box account in sidebar',
-      'Selezione: riclick su oggetto selezionato → deselect',
-      'Settings: tab “Clienti” evidenziata; CRUD Clienti/Sedi via modali con pulsante “+”',
-      'Clienti: campi completi (nome breve usato nell’area di lavoro + ragione sociale estesa, indirizzo, contatti), logo auto-ridimensionato, allegati PDF',
-      'Lingua: profilo utente ITA/ENG con switch nel menu utente e persistenza su DB',
-      'Logs: ora registra solo login/logout (anche tentativi falliti) con legenda; rimossi eventi interni post-login',
-      'Security: aggiunti Dependabot e GitHub Action per `npm audit --omit=dev`'
+      n(
+        'UI: Settings come sola icona top-right (accanto al menu utente), rimosso box account in sidebar',
+        'UI: Settings as icon-only (top-right, next to user menu); removed redundant account box in sidebar'
+      ),
+      n(
+        'Selezione: riclick su oggetto selezionato → deselect',
+        'Selection: clicking a selected object again deselects it'
+      ),
+      n(
+        'Settings: tab “Clienti” evidenziata; CRUD Clienti/Sedi via modali con pulsante “+”',
+        'Settings: highlighted “Clients” tab; Clients/Sites CRUD via modals with “+” button'
+      ),
+      n(
+        'Clienti: campi completi (nome breve usato nell’area di lavoro + ragione sociale estesa, indirizzo, contatti), logo auto-ridimensionato, allegati PDF',
+        'Clients: full fields (short name used in workspace + legal name, address, contacts), auto-resized logo, PDF attachments'
+      ),
+      n(
+        'Lingua: profilo utente ITA/ENG con switch nel menu utente e persistenza su DB',
+        'Language: user profile IT/EN switch in the user menu with DB persistence'
+      ),
+      n(
+        'Logs: ora registra solo login/logout (anche tentativi falliti) con legenda; rimossi eventi interni post-login',
+        'Logs: now records only login/logout (including failed attempts) with legend; removed post-login internal events'
+      ),
+      n(
+        'Security: aggiunti Dependabot e GitHub Action per `npm audit --omit=dev`',
+        'Security: added Dependabot and a GitHub Action for `npm audit --omit=dev`'
+      )
     ]
   },
   {
@@ -113,11 +312,26 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Account menu: menu utente in alto a destra con “Gestione profilo” e “Logout”',
-      'Ruoli: introdotto superadmin (solo superadmin può creare admin e vedere audit log)',
-      'Utenti: supporto disattivazione account, blocco modifica/reset/elimina superadmin per admin',
-      'Audit log: tracciamento login/logout/me e accessi state (IP + request meta), pannello Logs in Settings (solo superadmin)',
-      'Settings: rimossa sezione Info e header semplificato'
+      n(
+        'Account menu: menu utente in alto a destra con “Gestione profilo” e “Logout”',
+        'Account menu: top-right user menu with “Profile” and “Logout”'
+      ),
+      n(
+        'Ruoli: introdotto superadmin (solo superadmin può creare admin e vedere audit log)',
+        'Roles: introduced superadmin (only superadmin can create admins and see the audit log)'
+      ),
+      n(
+        'Utenti: supporto disattivazione account, blocco modifica/reset/elimina superadmin per admin',
+        'Users: added account disabling; admins cannot edit/reset/delete superadmins'
+      ),
+      n(
+        'Audit log: tracciamento login/logout/me e accessi state (IP + request meta), pannello Logs in Settings (solo superadmin)',
+        'Audit log: tracks login/logout/me and state access (IP + request meta); Logs panel in Settings (superadmin only)'
+      ),
+      n(
+        'Settings: rimossa sezione Info e header semplificato',
+        'Settings: removed Info section and simplified header'
+      )
     ]
   },
   {
@@ -125,12 +339,30 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'Login: accesso obbligatorio con sessione (cookie) e utenti bootstrap admin/admin2',
-      'Utenti: gestione completa in Settings (anagrafica + reset/cambio password) con password hashate (scrypt)',
-      'Permessi: assegnazione RO/RW per Cliente/Sede/Planimetria con enforcement lato server e UI in sola lettura',
-      'Clienti: upload logo e visualizzazione in sidebar',
-      'Changelog: export in PDF dal badge versione',
-      'Stanze: disegno rettangolo + collegamento automatico oggetti, edit e delete con ricalcolo'
+      n(
+        'Login: accesso obbligatorio con sessione (cookie) e utenti bootstrap admin/admin2',
+        'Login: required authentication via session cookie with bootstrap users admin/admin2'
+      ),
+      n(
+        'Utenti: gestione completa in Settings (anagrafica + reset/cambio password) con password hashate (scrypt)',
+        'Users: full management in Settings (profile + reset/change password) with hashed passwords (scrypt)'
+      ),
+      n(
+        'Permessi: assegnazione RO/RW per Cliente/Sede/Planimetria con enforcement lato server e UI in sola lettura',
+        'Permissions: RO/RW per Client/Site/Floor plan with server-side enforcement and read-only UI'
+      ),
+      n(
+        'Clienti: upload logo e visualizzazione in sidebar',
+        'Clients: logo upload and display in the sidebar'
+      ),
+      n(
+        'Changelog: export in PDF dal badge versione',
+        'Changelog: PDF export from the version badge'
+      ),
+      n(
+        'Stanze: disegno rettangolo + collegamento automatico oggetti, edit e delete con ricalcolo',
+        'Rooms: rectangle drawing + automatic object linking, edit and delete with recalculation'
+      )
     ]
   },
   {
@@ -138,9 +370,18 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'Selezione multipla: Ctrl/⌘ click per selezionare più oggetti, Canc elimina in batch con conferma',
-      'Lista oggetti: ricerca + icone, click su un elemento → blink/highlight in mappa',
-      'Revisioni: formato Rev X.Y con scelta Major/Minor al salvataggio, pulsante “Elimina tutte”, e diff aggiunti/rimossi'
+      n(
+        'Selezione multipla: Ctrl/⌘ click per selezionare più oggetti, Canc elimina in batch con conferma',
+        'Multi-selection: Ctrl/⌘ click to select multiple objects; Delete removes them in batch with confirmation'
+      ),
+      n(
+        'Lista oggetti: ricerca + icone, click su un elemento → blink/highlight in mappa',
+        'Object list: search + icons; clicking an item triggers blink/highlight on the map'
+      ),
+      n(
+        'Revisioni: formato Rev X.Y con scelta Major/Minor al salvataggio, pulsante “Elimina tutte”, e diff aggiunti/rimossi',
+        'Revisions: Rev X.Y format with Major/Minor choice on save, “Delete all” button, and added/removed diff'
+      )
     ]
   },
   {
@@ -148,10 +389,16 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'Ricerca: highlight/blink dell’oggetto senza spostare la mappa',
-      'Revisioni: salvataggio guidato (vX + nota), no-op se nessuna modifica, eliminazione revisioni dalla time machine',
-      'Aggiorna planimetria: modal con scelta “riporta oggetti” o “rimuovi oggetti” + archivia automatica della precedente',
-      'Footer: “Sviluppato da Ottavio Falsini” con link GitHub'
+      n('Ricerca: highlight/blink dell’oggetto senza spostare la mappa', 'Search: highlight/blink the object without moving the map'),
+      n(
+        'Revisioni: salvataggio guidato (vX + nota), no-op se nessuna modifica, eliminazione revisioni dalla time machine',
+        'Revisions: guided save (vX + note), no-op when there are no changes, delete revisions from the time machine'
+      ),
+      n(
+        'Aggiorna planimetria: modal con scelta “riporta oggetti” o “rimuovi oggetti” + archivia automatica della precedente',
+        'Update floor plan: modal to “keep objects” or “remove objects” + automatic archive of the previous one'
+      ),
+      n('Footer: “Sviluppato da Ottavio Falsini” con link GitHub', 'Footer: “Developed by Ottavio Falsini” with GitHub link')
     ]
   },
   {
@@ -159,10 +406,22 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'PDF: export configurabile (orientamento auto/orizzontale/verticale + lista oggetti opzionale)',
-      'Revisioni: “Salva revisione” crea uno storico immutabile (sola lettura) della planimetria e degli oggetti',
-      'Time machine: icona dedicata per navigare le revisioni e tornare al presente',
-      'Settings: aggiunta planimetria via popup (nome + immagine) con blocco duplicati; update immagine archivia la precedente'
+      n(
+        'PDF: export configurabile (orientamento auto/orizzontale/verticale + lista oggetti opzionale)',
+        'PDF: configurable export (auto/landscape/portrait orientation + optional object list)'
+      ),
+      n(
+        'Revisioni: “Salva revisione” crea uno storico immutabile (sola lettura) della planimetria e degli oggetti',
+        'Revisions: “Save revision” creates an immutable (read-only) history of the floor plan and its objects'
+      ),
+      n(
+        'Time machine: icona dedicata per navigare le revisioni e tornare al presente',
+        'Time machine: dedicated icon to browse revisions and return to the present'
+      ),
+      n(
+        'Settings: aggiunta planimetria via popup (nome + immagine) con blocco duplicati; update immagine archivia la precedente',
+        'Settings: add floor plan via popup (name + image) with duplicate name prevention; image update archives the previous one'
+      )
     ]
   },
   {
@@ -170,27 +429,50 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'Menu contestuale mappa: Salva vista, Vai a default, Aggiungi (palette), Esporta PDF, Elimina tutti gli oggetti',
-      'Viste: azioni a icone (stella/cestino), conferma delete e flusso guidato per riassegnare la default',
-      'Oggetti: duplica da menu con popup nome/descrizione e posizionamento accanto all’originale',
-      'Canvas: clamp pan rework per planimetrie piccole + centratura ricerca più affidabile',
-      'UI marker: stile coerente con la palette (tile arrotondato + icona)'
+      n(
+        'Menu contestuale mappa: Salva vista, Vai a default, Aggiungi (palette), Esporta PDF, Elimina tutti gli oggetti',
+        'Map context menu: Save view, Go to default, Add (palette), Export PDF, Delete all objects'
+      ),
+      n(
+        'Viste: azioni a icone (stella/cestino), conferma delete e flusso guidato per riassegnare la default',
+        'Views: icon actions (star/trash), delete confirmation, and guided flow to reassign the default'
+      ),
+      n(
+        'Oggetti: duplica da menu con popup nome/descrizione e posizionamento accanto all’originale',
+        'Objects: duplicate from context menu with name/description popup and placement next to the original'
+      ),
+      n(
+        'Canvas: clamp pan rework per planimetrie piccole + centratura ricerca più affidabile',
+        'Canvas: pan clamp rework for small floor plans + more reliable search centering'
+      ),
+      n(
+        'UI marker: stile coerente con la palette (tile arrotondato + icona)',
+        'UI markers: style aligned with the palette (rounded tile + icon)'
+      )
     ]
   },
   {
     version: '0.3.3',
     date: '2025-12-16',
     type: 'fix',
-    notes: ['Layout: barra selezione oggetto resa stabile nella stessa riga del titolo per evitare shift della mappa']
+    notes: [
+      n(
+        'Layout: barra selezione oggetto resa stabile nella stessa riga del titolo per evitare shift della mappa',
+        'Layout: selection bar kept stable on the title row to avoid the map shifting'
+      )
+    ]
   },
   {
     version: '0.3.2',
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Toast: durata dimezzata',
-      'Marker: label più vicina e più compatta',
-      'Performance: ottimizzata gestione keydown e conteggi oggetti (memoizzazione) per evitare rallentamenti progressivi'
+      n('Toast: durata dimezzata', 'Toasts: duration halved'),
+      n('Marker: label più vicina e più compatta', 'Markers: tighter label spacing'),
+      n(
+        'Performance: ottimizzata gestione keydown e conteggi oggetti (memoizzazione) per evitare rallentamenti progressivi',
+        'Performance: optimized keydown handling and object counts (memoization) to avoid progressive slowdowns'
+      )
     ]
   },
   {
@@ -198,8 +480,11 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Oggetti: scala “sticky” (nuovi oggetti ereditano l’ultima scala impostata)',
-      'UI: marker e label ridotti (~25%) e label più compatta in palette'
+      n(
+        'Oggetti: scala “sticky” (nuovi oggetti ereditano l’ultima scala impostata)',
+        'Objects: “sticky” scale (new objects inherit the last used scale)'
+      ),
+      n('UI: marker e label ridotti (~25%) e label più compatta in palette', 'UI: markers/labels reduced (~25%) and tighter palette labels')
     ]
   },
   {
@@ -207,9 +492,18 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'UX: delete da tastiera (Del/Backspace) con conferma, Enter per confermare ed Esc per annullare',
-      'UI: conteggio oggetti accanto al nome planimetria con breakdown per tipo e lista nomi',
-      'Zoom: più fluido e fit non-upscale per evitare marker troppo grandi su planimetrie piccole'
+      n(
+        'UX: delete da tastiera (Del/Backspace) con conferma, Enter per confermare ed Esc per annullare',
+        'UX: keyboard delete (Del/Backspace) with confirmation, Enter to confirm and Esc to cancel'
+      ),
+      n(
+        'UI: conteggio oggetti accanto al nome planimetria con breakdown per tipo e lista nomi',
+        'UI: object count next to the floor plan name with per-type breakdown and name list'
+      ),
+      n(
+        'Zoom: più fluido e fit non-upscale per evitare marker troppo grandi su planimetrie piccole',
+        'Zoom: smoother and “no-upscale” fit to avoid huge markers on small floor plans'
+      )
     ]
   },
   {
@@ -217,8 +511,14 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Upload planimetria: lettura automatica dimensioni (width×height) e salvataggio nel modello FloorPlan',
-      'Maggiore precisione coordinate e base di scaling per mappe di dimensioni note'
+      n(
+        'Upload planimetria: lettura automatica dimensioni (width×height) e salvataggio nel modello FloorPlan',
+        'Floor plan upload: automatically reads dimensions (width×height) and stores them in the FloorPlan model'
+      ),
+      n(
+        'Maggiore precisione coordinate e base di scaling per mappe di dimensioni note',
+        'Improved coordinate accuracy and scaling base for maps with known dimensions'
+      )
     ]
   },
   {
@@ -226,9 +526,15 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Ricerca: centratura usa lo zoom corrente del canvas per evitare mismatch durante wheel-zoom',
-      'Drag oggetti: coordinate world corrette anche con stage scalata (fix mismatch e centratura)',
-      'Stabilità: clamp pan con guardie su dimensioni/NaN'
+      n(
+        'Ricerca: centratura usa lo zoom corrente del canvas per evitare mismatch durante wheel-zoom',
+        'Search: centering uses current canvas zoom to avoid mismatches during wheel-zoom'
+      ),
+      n(
+        'Drag oggetti: coordinate world corrette anche con stage scalata (fix mismatch e centratura)',
+        'Object drag: correct world coordinates even with scaled stage (fix mismatch/centering)'
+      ),
+      n('Stabilità: clamp pan con guardie su dimensioni/NaN', 'Stability: pan clamping with guards for invalid dimensions/NaN')
     ]
   },
   {
@@ -236,8 +542,14 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'Ricerca: se ci sono più match, selezione del risultato prima della centratura',
-      'Stabilità centratura: guardie extra su coordinate non valide per evitare “mappa sparita”'
+      n(
+        'Ricerca: se ci sono più match, selezione del risultato prima della centratura',
+        'Search: if there are multiple matches, select the result before focusing'
+      ),
+      n(
+        'Stabilità centratura: guardie extra su coordinate non valide per evitare “mappa sparita”',
+        'Centering stability: extra guards for invalid coordinates to prevent “map disappears”'
+      )
     ]
   },
   {
@@ -245,9 +557,15 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Ricerca: coordinate corrette per inserimento/centratura (bug conversione pointer→world)',
-      'Stabilità: clamp del pan per prevenire “mappa sparita” e drift dopo focus/zoom',
-      'Panning/zoom più robusti con limiti elastici'
+      n(
+        'Ricerca: coordinate corrette per inserimento/centratura (bug conversione pointer→world)',
+        'Search: correct coordinates for placement/centering (pointer→world conversion bug)'
+      ),
+      n(
+        'Stabilità: clamp del pan per prevenire “mappa sparita” e drift dopo focus/zoom',
+        'Stability: pan clamping to prevent “map disappears” and drift after focus/zoom'
+      ),
+      n('Panning/zoom più robusti con limiti elastici', 'More robust panning/zoom with elastic limits')
     ]
   },
   {
@@ -255,8 +573,14 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Ricerca: rework centratura per evitare ri-applicazioni e panning “infinito”',
-      'Focus calcolato una sola volta per richiesta, con retry solo quando le dimensioni canvas sono pronte'
+      n(
+        'Ricerca: rework centratura per evitare ri-applicazioni e panning “infinito”',
+        'Search: centering rework to avoid repeated application and “infinite” panning'
+      ),
+      n(
+        'Focus calcolato una sola volta per richiesta, con retry solo quando le dimensioni canvas sono pronte',
+        'Focus computed once per request, retrying only when canvas dimensions are ready'
+      )
     ]
   },
   {
@@ -264,8 +588,14 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Ricerca: centratura spostata nel canvas per evitare misure DOM errate e pan/zoom NaN',
-      'Stabilità: evita salvataggi di viewport non validi e previene “mappa che sparisce”'
+      n(
+        'Ricerca: centratura spostata nel canvas per evitare misure DOM errate e pan/zoom NaN',
+        'Search: centering moved into the canvas to avoid wrong DOM measurements and pan/zoom NaN'
+      ),
+      n(
+        'Stabilità: evita salvataggi di viewport non validi e previene “mappa che sparisce”',
+        'Stability: prevents saving invalid viewports and avoids “map disappears”'
+      )
     ]
   },
   {
@@ -273,8 +603,14 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Ricerca: centratura affidabile sull’oggetto trovato con highlight pulsante',
-      'Stabilità viewport: annulla commit wheel pendenti quando la view viene aggiornata da ricerca/azioni'
+      n(
+        'Ricerca: centratura affidabile sull’oggetto trovato con highlight pulsante',
+        'Search: reliable centering on the found object with highlight'
+      ),
+      n(
+        'Stabilità viewport: annulla commit wheel pendenti quando la view viene aggiornata da ricerca/azioni',
+        'Viewport stability: cancels pending wheel commits when the view is updated by search/actions'
+      )
     ]
   },
   {
@@ -282,9 +618,18 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'Viste salvate per planimetria: salva zoom/pan con nome/descrizione e imposta una vista di default',
-      'Menu a tendina “Viste” per richiamare, eliminare o cambiare la default (una sola default per planimetria)',
-      'Azione “Salva vista” nel menu contestuale (tasto destro) che salva la visualizzazione corrente'
+      n(
+        'Viste salvate per planimetria: salva zoom/pan con nome/descrizione e imposta una vista di default',
+        'Saved views per floor plan: store zoom/pan with name/description and set a default view'
+      ),
+      n(
+        'Menu a tendina “Viste” per richiamare, eliminare o cambiare la default (una sola default per planimetria)',
+        '“Views” dropdown to recall, delete, or change the default (only one default per floor plan)'
+      ),
+      n(
+        'Azione “Salva vista” nel menu contestuale (tasto destro) che salva la visualizzazione corrente',
+        '“Save view” action in the context menu (right-click) to store the current viewport'
+      )
     ]
   },
   {
@@ -292,9 +637,18 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Persistenza viewport (pan/zoom) per planimetria e autofit disattivato se hai già posizionato la mappa',
-      'Palette sticky a destra in alto, canvas con bordo inferiore tipo tela, topbar ottimizzata',
-      'Icona Settings a ingranaggio, popup delete mostra il nome dell’oggetto'
+      n(
+        'Persistenza viewport (pan/zoom) per planimetria e autofit disattivato se hai già posizionato la mappa',
+        'Viewport persistence (pan/zoom) per floor plan and autofit disabled once you’ve positioned the map'
+      ),
+      n(
+        'Palette sticky a destra in alto, canvas con bordo inferiore tipo tela, topbar ottimizzata',
+        'Sticky palette on the top-right, canvas with a “paper” bottom border, optimized top bar'
+      ),
+      n(
+        'Icona Settings a ingranaggio, popup delete mostra il nome dell’oggetto',
+        'Settings icon as a gear; delete popup includes the object name'
+      )
     ]
   },
   {
@@ -302,9 +656,18 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'Palette verticale e topbar con icone per Aiuto/Export + badge versione ricercabile',
-      'Pan della mappa trascinando lo sfondo, fit migliorato e controlli zoom compatti',
-      'Ricerca con Enter che centra e highlighta; footer info brand; logo aggiornato'
+      n(
+        'Palette verticale e topbar con icone per Aiuto/Export + badge versione ricercabile',
+        'Vertical palette and top bar with Help/Export icons + searchable version badge'
+      ),
+      n(
+        'Pan della mappa trascinando lo sfondo, fit migliorato e controlli zoom compatti',
+        'Map pan by dragging the background, improved fit and compact zoom controls'
+      ),
+      n(
+        'Ricerca con Enter che centra e highlighta; footer info brand; logo aggiornato',
+        'Search with Enter focuses and highlights; branded footer info; updated logo'
+      )
     ]
   },
   {
@@ -312,9 +675,18 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'fix',
     notes: [
-      'Fix fit planimetria caricata e immagini locali visibili',
-      'Pan/zoom migliorati con fit automatico e drag per riposizionare',
-      'Menu contestuale: duplica, scala oggetti, resize label'
+      n(
+        'Fix fit planimetria caricata e immagini locali visibili',
+        'Fix: floor plan fit and local images visibility'
+      ),
+      n(
+        'Pan/zoom migliorati con fit automatico e drag per riposizionare',
+        'Improved pan/zoom with automatic fit and drag to reposition'
+      ),
+      n(
+        'Menu contestuale: duplica, scala oggetti, resize label',
+        'Context menu: duplicate, object scaling, label resizing'
+      )
     ]
   },
   {
@@ -322,7 +694,10 @@ export const releaseHistory: ReleaseNote[] = [
     date: '2025-12-16',
     type: 'minor',
     notes: [
-      'Versione iniziale: CRUD clienti/sedi/planimetrie, canvas oggetti drag&drop, ricerca, export PDF, help'
+      n(
+        'Versione iniziale: CRUD clienti/sedi/planimetrie, canvas oggetti drag&drop, ricerca, export PDF, help',
+        'Initial release: CRUD clients/sites/floor plans, drag&drop object canvas, search, PDF export, help'
+      )
     ]
   }
 ];

@@ -62,7 +62,12 @@ export const exportPlanToPdf = async (
   pdf.save(`${planName.replace(/\s+/g, '_')}.pdf`);
 };
 
-export const exportChangelogToPdf = (history: ReleaseNote[], filename = 'deskly_changelog.pdf') => {
+export const exportChangelogToPdf = (
+  history: ReleaseNote[],
+  options: { lang?: 'it' | 'en'; filename?: string } = {}
+) => {
+  const lang = options.lang === 'en' ? 'en' : 'it';
+  const filename = options.filename || 'deskly_changelog.pdf';
   const pdf = new jsPDF('p', 'pt', 'a4');
   const margin = 32;
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -76,7 +81,13 @@ export const exportChangelogToPdf = (history: ReleaseNote[], filename = 'deskly_
 
   pdf.setFontSize(10);
   pdf.setTextColor(100);
-  pdf.text(`Generato il ${new Date().toISOString().slice(0, 10)}`, margin, y);
+  pdf.text(
+    lang === 'en'
+      ? `Generated on ${new Date().toISOString().slice(0, 10)}`
+      : `Generato il ${new Date().toISOString().slice(0, 10)}`,
+    margin,
+    y
+  );
   pdf.setTextColor(0);
   y += 18;
 
@@ -99,7 +110,8 @@ export const exportChangelogToPdf = (history: ReleaseNote[], filename = 'deskly_
 
     pdf.setFontSize(10);
     for (const note of rel.notes) {
-      const lines = pdf.splitTextToSize(`• ${note}`, maxWidth);
+      const text = lang === 'en' ? note.en : note.it;
+      const lines = pdf.splitTextToSize(`• ${text}`, maxWidth);
       ensureSpace(lines.length * 12 + 6);
       pdf.text(lines, margin, y);
       y += lines.length * 12;

@@ -1,7 +1,7 @@
 const getUserWithPermissions = (db, userId) => {
   const user = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, tokenVersion, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
+      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, mustChangePassword, tokenVersion, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
     )
     .get(userId);
   if (!user) return null;
@@ -12,7 +12,7 @@ const getUserWithPermissions = (db, userId) => {
     : db
         .prepare('SELECT scopeType, scopeId, access FROM permissions WHERE userId = ? ORDER BY scopeType, scopeId')
         .all(userId);
-  return { user: { ...user, isAdmin, isSuperAdmin, disabled: !!user.disabled }, permissions };
+  return { user: { ...user, isAdmin, isSuperAdmin, disabled: !!user.disabled, mustChangePassword: !!user.mustChangePassword }, permissions };
 };
 
 const computePlanAccess = (clients, permissions) => {

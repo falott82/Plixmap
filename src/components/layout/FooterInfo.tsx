@@ -1,10 +1,12 @@
 import { Github, Mail } from 'lucide-react';
+import { useT } from '../../i18n/useT';
 
 interface Props {
   variant?: 'sidebar' | 'collapsed';
 }
 
 const FooterInfo = ({ variant = 'sidebar' }: Props) => {
+  const t = useT();
   if (variant === 'collapsed') {
     return (
       <div className="mt-auto flex flex-col items-center gap-2 pb-4">
@@ -13,14 +15,14 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
           target="_blank"
           rel="noreferrer"
           className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-ink"
-          title="GitHub"
+          title={t({ it: 'Apri GitHub', en: 'Open GitHub' })}
         >
           <Github size={16} />
         </a>
         <a
           href="mailto:ottavio.falsini@me.com"
           className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-ink"
-          title="Email"
+          title={t({ it: 'Invia email', en: 'Send email' })}
         >
           <Mail size={16} />
         </a>
@@ -38,7 +40,7 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-slate-700 hover:bg-slate-100 hover:text-ink"
-            title="Apri GitHub"
+            title={t({ it: 'Apri GitHub', en: 'Open GitHub' })}
           >
             <Github size={14} />
             <span className="sr-only">GitHub</span>
@@ -46,7 +48,7 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
           <a
             href="mailto:ottavio.falsini@me.com"
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-slate-700 hover:bg-slate-100 hover:text-ink"
-            title="Invia email"
+            title={t({ it: 'Invia email', en: 'Send email' })}
           >
             <Mail size={14} />
             <span className="sr-only">Email</span>

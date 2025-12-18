@@ -7,6 +7,7 @@ const {
   parseCookies,
   verifyPassword,
   hashPassword,
+  isStrongPassword,
   signSession,
   verifySession,
   setSessionCookie,
@@ -37,6 +38,8 @@ app.use(
 const db = openDb();
 ensureBootstrapAdmins(db);
 const authSecret = getOrCreateAuthSecret(db);
+// Invalidate sessions on each server restart (forces login after reboot/redeploy).
+const serverInstanceId = crypto.randomBytes(16).toString('hex');
 
 const parseDataUrl = (value) => {
   if (typeof value !== 'string') return null;
@@ -130,11 +133,18 @@ const requireAuth = (req, res, next) => {
   const cookies = parseCookies(req.headers.cookie);
   const token = cookies.deskly_session;
   const session = verifySession(authSecret, token);
-  if (!session?.userId || !session?.tokenVersion) {
+  if (!session?.userId || !session?.tokenVersion || !session?.sid) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
-  const userRow = db.prepare('SELECT id, tokenVersion, isAdmin, isSuperAdmin, disabled FROM users WHERE id = ?').get(session.userId);
+  if (session.sid !== serverInstanceId) {
+    clearSessionCookie(res);
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const userRow = db
+    .prepare('SELECT id, tokenVersion, isAdmin, isSuperAdmin, disabled, mustChangePassword FROM users WHERE id = ?')
+    .get(session.userId);
   if (!userRow) {
     clearSessionCookie(res);
     res.status(401).json({ error: 'Unauthorized' });
@@ -150,11 +160,29 @@ const requireAuth = (req, res, next) => {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
+  // Force first-run password change: only allow minimal endpoints until the user sets a new password.
+  if (Number(userRow.mustChangePassword) === 1) {
+    const allowed = new Set(['/api/auth/me', '/api/auth/first-run', '/api/auth/logout']);
+    if (!allowed.has(req.path)) {
+      res.status(403).json({ error: 'Password change required' });
+      return;
+    }
+  }
   req.userId = session.userId;
   req.isAdmin = !!userRow.isAdmin;
   req.isSuperAdmin = !!userRow.isSuperAdmin;
   next();
 };
+
+// Public: used by the login UI to decide whether to show first-run credentials.
+app.get('/api/auth/bootstrap-status', (_req, res) => {
+  try {
+    const row = db.prepare("SELECT mustChangePassword FROM users WHERE username = 'superadmin'").get();
+    res.json({ showFirstRunCredentials: !!row && Number(row.mustChangePassword) === 1 });
+  } catch {
+    res.json({ showFirstRunCredentials: false });
+  }
+});
 
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body || {};
@@ -180,7 +208,12 @@ app.post('/api/auth/login', (req, res) => {
     res.status(401).json({ error: 'Invalid credentials' });
     return;
   }
-  const token = signSession(authSecret, { userId: row.id, tokenVersion: row.tokenVersion, iat: Date.now() });
+  const token = signSession(authSecret, {
+    userId: row.id,
+    tokenVersion: row.tokenVersion,
+    sid: serverInstanceId,
+    iat: Date.now()
+  });
   setSessionCookie(res, token);
   writeAuthLog(db, { event: 'login', success: true, userId: row.id, username: row.username, ...requestMeta(req) });
   res.json({ ok: true });
@@ -204,6 +237,44 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     return;
   }
   res.json({ user: ctx.user, permissions: ctx.permissions });
+});
+
+app.post('/api/auth/first-run', requireAuth, (req, res) => {
+  const { newPassword, language } = req.body || {};
+  const nextLanguage = language === 'en' ? 'en' : 'it';
+  if (!isStrongPassword(String(newPassword || ''))) {
+    res.status(400).json({ error: 'Weak password' });
+    return;
+  }
+  const row = db
+    .prepare('SELECT id, tokenVersion, mustChangePassword FROM users WHERE id = ?')
+    .get(req.userId);
+  if (!row) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  if (Number(row.mustChangePassword) !== 1) {
+    res.status(400).json({ error: 'Not in first-run mode' });
+    return;
+  }
+  const { salt, hash } = hashPassword(String(newPassword));
+  const nextTokenVersion = Number(row.tokenVersion) + 1;
+  db.prepare('UPDATE users SET passwordSalt = ?, passwordHash = ?, tokenVersion = ?, mustChangePassword = 0, language = ?, updatedAt = ? WHERE id = ?').run(
+    salt,
+    hash,
+    nextTokenVersion,
+    nextLanguage,
+    Date.now(),
+    req.userId
+  );
+  const token = signSession(authSecret, {
+    userId: req.userId,
+    tokenVersion: nextTokenVersion,
+    sid: serverInstanceId,
+    iat: Date.now()
+  });
+  setSessionCookie(res, token);
+  res.json({ ok: true });
 });
 
 app.put('/api/auth/me', requireAuth, (req, res) => {
@@ -335,6 +406,10 @@ app.post('/api/users', requireAuth, (req, res) => {
     res.status(400).json({ error: 'Missing username/password' });
     return;
   }
+  if (!isStrongPassword(String(password || ''))) {
+    res.status(400).json({ error: 'Weak password' });
+    return;
+  }
   if (language !== 'it' && language !== 'en') {
     res.status(400).json({ error: 'Invalid language' });
     return;
@@ -432,8 +507,8 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
 app.post('/api/users/:id/password', requireAuth, (req, res) => {
   const targetId = req.params.id;
   const { oldPassword, newPassword } = req.body || {};
-  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
-    res.status(400).json({ error: 'Password too short' });
+  if (!isStrongPassword(String(newPassword || ''))) {
+    res.status(400).json({ error: 'Weak password' });
     return;
   }
   const isSelf = targetId === req.userId;

@@ -41,10 +41,14 @@ export interface MapObject {
 export interface Room {
   id: string;
   name: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  kind?: 'rect' | 'poly';
+  // rect
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  // poly (world-space points)
+  points?: { x: number; y: number }[];
 }
 
 export interface FloorPlan {

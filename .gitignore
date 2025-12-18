@@ -3,7 +3,9 @@ dist
 .DS_Store
 *.log
 pnpm-lock.yaml
-package-lock.json
 yarn.lock
 /.vite
 .env
+data/*.sqlite
+data/*.sqlite-*
+data/uploads

@@ -12,6 +12,7 @@ export interface AuthUser {
   disabled?: boolean;
   language: 'it' | 'en';
   defaultPlanId?: string | null;
+  mustChangePassword?: boolean;
   firstName: string;
   lastName: string;
   phone: string;
@@ -37,6 +38,22 @@ export const login = async (username: string, password: string): Promise<void> =
 export const logout = async (): Promise<void> => {
   const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
   if (!res.ok) throw new Error(`Logout failed (${res.status})`);
+};
+
+export const fetchBootstrapStatus = async (): Promise<{ showFirstRunCredentials: boolean }> => {
+  const res = await fetch('/api/auth/bootstrap-status', { credentials: 'include' });
+  if (!res.ok) return { showFirstRunCredentials: false };
+  return res.json();
+};
+
+export const firstRunSetup = async (payload: { newPassword: string; language: 'it' | 'en' }): Promise<void> => {
+  const res = await fetch('/api/auth/first-run', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error(`First-run setup failed (${res.status})`);
 };
 
 export const updateMyProfile = async (payload: { language?: 'it' | 'en'; defaultPlanId?: string | null }): Promise<void> => {

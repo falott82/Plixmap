@@ -9,6 +9,7 @@ import { useDataStore } from './store/useDataStore';
 import { useUIStore } from './store/useUIStore';
 import { fetchState, saveState } from './api/state';
 import LoginView from './components/auth/LoginView';
+import FirstRunView from './components/auth/FirstRunView';
 import { useAuthStore } from './store/useAuthStore';
 import { shallow } from 'zustand/shallow';
 import EmptyWorkspace from './components/layout/EmptyWorkspace';
@@ -257,11 +258,16 @@ const App = () => {
     return <Navigate to="/login" replace />;
   }
 
+  if (user && (user as any).mustChangePassword && location.pathname !== '/first-run') {
+    return <Navigate to="/first-run" replace />;
+  }
+
   if (!user && location.pathname === '/login') {
     return (
       <>
         <Routes>
           <Route path="/login" element={<LoginView />} />
+          <Route path="/first-run" element={<Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         <ToastStack />
@@ -275,6 +281,12 @@ const App = () => {
       <main className="flex-1 overflow-hidden">
         <Routes>
           <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route
+            path="/first-run"
+            element={
+              (user as any)?.mustChangePassword ? <FirstRunView /> : <Navigate to="/" replace />
+            }
+          />
           <Route path="/" element={<HomeRoute />} />
           <Route path="/plan/:planId" element={<PlanRoute />} />
           <Route path="/settings" element={<SettingsView />} />

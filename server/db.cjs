@@ -31,6 +31,7 @@ const openDb = () => {
       disabled INTEGER NOT NULL DEFAULT 0,
       language TEXT NOT NULL DEFAULT 'it',
       defaultPlanId TEXT,
+      mustChangePassword INTEGER NOT NULL DEFAULT 0,
       firstName TEXT NOT NULL DEFAULT '',
       lastName TEXT NOT NULL DEFAULT '',
       phone TEXT NOT NULL DEFAULT '',
@@ -68,8 +69,9 @@ const openDb = () => {
   if (!cols.includes('disabled')) db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
   if (!cols.includes('language')) db.exec("ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'it'");
   if (!cols.includes('defaultPlanId')) db.exec("ALTER TABLE users ADD COLUMN defaultPlanId TEXT");
+  if (!cols.includes('mustChangePassword')) db.exec('ALTER TABLE users ADD COLUMN mustChangePassword INTEGER NOT NULL DEFAULT 0');
 
-  // mark bootstrap users as superadmins if present
+  // mark bootstrap users as superadmins if present (legacy)
   try {
     db.prepare("UPDATE users SET isSuperAdmin = 1, isAdmin = 1 WHERE username IN ('admin','admin2')").run();
   } catch {
