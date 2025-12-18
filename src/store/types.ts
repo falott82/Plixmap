@@ -93,6 +93,7 @@ export interface Site {
   id: string;
   clientId: string;
   name: string;
+  coords?: string;
   floorPlans: FloorPlan[];
 }
 

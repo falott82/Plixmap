@@ -25,8 +25,8 @@ interface DataState {
     >
   ) => void;
   deleteClient: (id: string) => void;
-  addSite: (clientId: string, name: string) => string;
-  updateSite: (id: string, name: string) => void;
+  addSite: (clientId: string, payload: { name: string; coords?: string }) => string;
+  updateSite: (id: string, payload: { name?: string; coords?: string }) => void;
   deleteSite: (id: string) => void;
   addFloorPlan: (siteId: string, name: string, imageUrl: string, width?: number, height?: number) => string;
   updateFloorPlan: (id: string, payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height'>>) => void;
@@ -262,23 +262,33 @@ export const useDataStore = create<DataState>()(
       deleteClient: (id) => {
         set((state) => ({ clients: state.clients.filter((c) => c.id !== id), version: state.version + 1 }));
       },
-      addSite: (clientId, name) => {
+      addSite: (clientId, payload) => {
         const id = nanoid();
+        const name = payload?.name || '';
+        const coords = payload?.coords;
         set((state) => ({
           clients: state.clients.map((client) =>
             client.id === clientId
-              ? { ...client, sites: [...client.sites, { id, clientId, name, floorPlans: [] }] }
+              ? { ...client, sites: [...client.sites, { id, clientId, name, coords, floorPlans: [] }] }
               : client
           ),
           version: state.version + 1
         }));
         return id;
       },
-      updateSite: (id, name) => {
+      updateSite: (id, payload) => {
         set((state) => ({
           clients: state.clients.map((client) => ({
             ...client,
-            sites: client.sites.map((site) => (site.id === id ? { ...site, name } : site))
+            sites: client.sites.map((site) =>
+              site.id === id
+                ? {
+                    ...site,
+                    ...(payload?.name !== undefined ? { name: payload.name || '' } : {}),
+                    ...(payload?.coords !== undefined ? { coords: payload.coords || undefined } : {})
+                  }
+                : site
+            )
           })),
           version: state.version + 1
         }));

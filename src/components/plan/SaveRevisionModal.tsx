@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { Check, X } from 'lucide-react';
+import { Check, Info, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 
 interface Props {
@@ -18,6 +18,8 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
   const t = useT();
   const [bump, setBump] = useState<'major' | 'minor'>('minor');
   const [note, setNote] = useState('');
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpRef = useRef<HTMLDivElement | null>(null);
 
   const next = !hasExisting
     ? { major: 1, minor: 0 }
@@ -29,7 +31,18 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
     if (!open) return;
     setBump('minor');
     setNote('');
+    setHelpOpen(false);
   }, [open]);
+
+  useEffect(() => {
+    if (!helpOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!helpRef.current) return;
+      if (!helpRef.current.contains(e.target as any)) setHelpOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [helpOpen]);
 
   return (
     <Transition show={open} as={Fragment}>
@@ -78,7 +91,53 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                 </Dialog.Description>
 
                 <div className="mt-4 space-y-2">
-                  <div className="text-sm font-semibold text-slate-700">{t({ it: 'Tipo', en: 'Type' })}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-slate-700">{t({ it: 'Tipo', en: 'Type' })}</div>
+                    <div ref={helpRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setHelpOpen((v) => !v)}
+                        className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        title={t({ it: 'Differenza major/minor', en: 'Major vs minor' })}
+                      >
+                        <Info size={14} />
+                      </button>
+                      {helpOpen ? (
+                        <div className="absolute left-0 z-50 mt-2 w-80 rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-card">
+                          <div className="font-semibold text-ink">{t({ it: 'Major vs Minor', en: 'Major vs Minor' })}</div>
+                          <div className="mt-2 space-y-2 text-sm text-slate-600">
+                            <div>
+                              <span className="font-semibold text-slate-800">
+                                {t({ it: 'Minor', en: 'Minor' })}
+                              </span>
+                              :{' '}
+                              {t({
+                                it: 'modifiche minori (es. aggiunta/rimozione oggetti, spostamenti, cambio stanza).',
+                                en: 'small changes (e.g. add/remove objects, small moves, change room).'
+                              })}
+                            </div>
+                            <div>
+                              <span className="font-semibold text-slate-800">
+                                {t({ it: 'Major', en: 'Major' })}
+                              </span>
+                              :{' '}
+                              {t({
+                                it: 'cambiamenti importanti (es. grossi spostamenti o riorganizzazione significativa della planimetria).',
+                                en: 'significant changes (e.g. large moves or major reorganization of the floor plan).'
+                              })}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setHelpOpen(false)}
+                            className="mt-3 text-xs font-semibold text-primary hover:underline"
+                          >
+                            {t({ it: 'Chiudi', en: 'Close' })}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => setBump('minor')}

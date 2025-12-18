@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, History, Info, Map, Star, Trash } from 'lucide-react';
+import { ChevronLeft, ChevronRight, History, Info, Map as MapIcon, MapPinned, Search, Star, Trash } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -16,7 +16,20 @@ type TreeClient = {
   name: string;
   shortName?: string;
   logoUrl?: string;
-  sites: { id: string; name: string; floorPlans: { id: string; name: string; order?: number }[] }[];
+  sites: { id: string; name: string; coords?: string; floorPlans: { id: string; name: string; order?: number }[] }[];
+};
+
+const parseCoords = (value: string | undefined): { lat: number; lng: number } | null => {
+  const s = String(value || '').trim();
+  if (!s) return null;
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(s);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90) return null;
+  if (lng < -180 || lng > 180) return null;
+  return { lat, lng };
 };
 
 const sameTree = (a: TreeClient[], b: TreeClient[]) => {
@@ -36,6 +49,7 @@ const sameTree = (a: TreeClient[], b: TreeClient[]) => {
       const bs = bc.sites[j];
       if (as.id !== bs.id) return false;
       if (as.name !== bs.name) return false;
+      if ((as.coords || '') !== (bs.coords || '')) return false;
       if (as.floorPlans.length !== bs.floorPlans.length) return false;
       for (let k = 0; k < as.floorPlans.length; k++) {
         const ap = as.floorPlans[k];
@@ -60,6 +74,7 @@ const SidebarTree = () => {
         sites: c.sites.map((site) => ({
           id: site.id,
           name: site.name,
+          coords: (site as any).coords,
           floorPlans: site.floorPlans.map((p) => ({ id: p.id, name: p.name, order: (p as any).order }))
         }))
       })),
@@ -91,12 +106,16 @@ const SidebarTree = () => {
   const location = useLocation();
   const { user } = useAuthStore();
   const defaultPlanId = (user as any)?.defaultPlanId as string | null | undefined;
-  const [planMenu, setPlanMenu] = useState<{ planId: string; x: number; y: number } | null>(null);
+  const clientOrder = (((user as any)?.clientOrder || []) as string[]).filter((x) => typeof x === 'string');
+  const [treeQuery, setTreeQuery] = useState('');
+  const [planMenu, setPlanMenu] = useState<{ planId: string; coords?: string; x: number; y: number } | null>(null);
   const [clientMenu, setClientMenu] = useState<{ clientId: string; x: number; y: number } | null>(null);
+  const [siteMenu, setSiteMenu] = useState<{ siteName: string; coords?: string; x: number; y: number } | null>(null);
   const [clientInfoId, setClientInfoId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ kind: 'client' | 'plan'; id: string; label: string } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ siteId: string; planId: string } | null>(null);
+  const clientDragRef = useRef<string | null>(null);
 
   const fullClient = useDataStore(
     useMemo(
@@ -110,16 +129,55 @@ const SidebarTree = () => {
       if (!menuRef.current) {
         setPlanMenu(null);
         setClientMenu(null);
+        setSiteMenu(null);
         return;
       }
       if (!menuRef.current.contains(e.target as any)) {
         setPlanMenu(null);
         setClientMenu(null);
+        setSiteMenu(null);
       }
     };
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
   }, []);
+
+  const orderedClients = useMemo(() => {
+    if (!clientOrder.length) return clients;
+    const byId = new Map<string, TreeClient>(clients.map((c) => [c.id, c]));
+    const out: TreeClient[] = [];
+    for (const id of clientOrder) {
+      const c = byId.get(id);
+      if (c) out.push(c);
+    }
+    for (const c of clients) {
+      if (!clientOrder.includes(c.id)) out.push(c);
+    }
+    return out;
+  }, [clientOrder, clients]);
+
+  const filteredClients = useMemo(() => {
+    const q = treeQuery.trim().toLowerCase();
+    if (!q) return orderedClients;
+    const matchesText = (s: string | undefined) => String(s || '').toLowerCase().includes(q);
+    return orderedClients
+      .map((client) => {
+        const clientMatch = matchesText(client.name) || matchesText(client.shortName);
+        if (clientMatch) return client;
+        const nextSites = client.sites
+          .map((site): TreeClient['sites'][number] | null => {
+            const siteMatch = matchesText(site.name);
+            if (siteMatch) return site;
+            const nextPlans = site.floorPlans.filter((p) => matchesText(p.name));
+            if (!nextPlans.length) return null;
+            return { ...site, floorPlans: nextPlans };
+          })
+          .filter((s): s is TreeClient['sites'][number] => !!s);
+        if (!nextSites.length) return null;
+        return { ...client, sites: nextSites };
+      })
+      .filter((c): c is TreeClient => !!c);
+  }, [orderedClients, treeQuery]);
 
   if (sidebarCollapsed) {
     return (
@@ -158,17 +216,60 @@ const SidebarTree = () => {
           </button>
         </div>
       </div>
+      <div className="px-4 pb-3">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+          <input
+            value={treeQuery}
+            onChange={(e) => setTreeQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setTreeQuery('');
+            }}
+            placeholder={t({ it: 'Cerca cliente/sede/planimetria…', en: 'Search client/site/floor plan…' })}
+            className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+          />
+        </div>
+      </div>
       <div className="px-4 pb-3 text-xs font-semibold uppercase text-slate-500">
         {t({ it: 'Cliente → Sede → Planimetria', en: 'Client → Site → Floor plan' })}
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto px-3 pb-6">
-        {clients.map((client) => (
+        {filteredClients.map((client) => (
           <div key={client.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
             <div
               className="flex items-center gap-2 text-sm font-semibold text-ink"
               onContextMenu={(e) => {
                 e.preventDefault();
                 setClientMenu({ clientId: client.id, x: e.clientX, y: e.clientY });
+              }}
+              draggable
+              onDragStart={() => {
+                clientDragRef.current = client.id;
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+              }}
+              onDrop={async () => {
+                const movingId = clientDragRef.current;
+                clientDragRef.current = null;
+                if (!movingId || movingId === client.id) return;
+                const current = orderedClients.map((c) => c.id);
+                const from = current.indexOf(movingId);
+                const to = current.indexOf(client.id);
+                if (from === -1 || to === -1) return;
+                const next = current.slice();
+                next.splice(from, 1);
+                next.splice(to, 0, movingId);
+                try {
+                  await updateMyProfile({ clientOrder: next });
+                  useAuthStore.setState((s) =>
+                    s.user
+                      ? { user: { ...(s.user as any), clientOrder: next } as any, permissions: s.permissions, hydrated: s.hydrated }
+                      : s
+                  );
+                } catch {
+                  // ignore
+                }
               }}
               title={t({ it: 'Tasto destro: info cliente', en: 'Right-click: client info' })}
             >
@@ -187,7 +288,16 @@ const SidebarTree = () => {
             </div>
             {client.sites.map((site) => (
               <div key={site.id} className="mt-3 space-y-2 rounded-lg bg-white p-2 shadow-inner">
-                <div className="text-xs font-semibold text-slate-500">{site.name}</div>
+                <div
+                  className="text-xs font-semibold text-slate-500"
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSiteMenu({ siteName: site.name, coords: site.coords, x: e.clientX, y: e.clientY });
+                  }}
+                >
+                  {site.name}
+                </div>
                 <div className="space-y-1">
                   {[...site.floorPlans]
                     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
@@ -208,7 +318,7 @@ const SidebarTree = () => {
                         onContextMenu={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          setPlanMenu({ planId: plan.id, x: e.clientX, y: e.clientY });
+                          setPlanMenu({ planId: plan.id, coords: site.coords, x: e.clientX, y: e.clientY });
                         }}
                         draggable={!!user?.isAdmin}
                         onDragStart={() => {
@@ -230,7 +340,7 @@ const SidebarTree = () => {
                         }}
                         className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition hover:bg-slate-100 ${active ? 'bg-slate-200 font-semibold' : ''}`}
                       >
-                        <Map size={16} className="text-primary" />
+                        <MapIcon size={16} className="text-primary" />
                         <span className="truncate">{plan.name}</span>
                         {isDefault ? <Star size={14} className="text-amber-500" /> : null}
                         <ChevronRight size={14} className="ml-auto text-slate-400" />
@@ -250,7 +360,7 @@ const SidebarTree = () => {
       </div>
       <FooterInfo />
 
-      {(planMenu || clientMenu) ? (
+      {(planMenu || clientMenu || siteMenu) ? (
         <div ref={menuRef} className="fixed z-50">
           {planMenu ? (
             <div
@@ -260,6 +370,17 @@ const SidebarTree = () => {
               <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">
                 {t({ it: 'Planimetria', en: 'Floor plan' })}
               </div>
+              {parseCoords(planMenu.coords) ? (
+                <a
+                  href={`https://www.google.com/maps?q=${parseCoords(planMenu.coords)!.lat},${parseCoords(planMenu.coords)!.lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                >
+                  <MapPinned size={14} className="text-emerald-700" />
+                  {t({ it: 'Apri su Google Maps', en: 'View in Google Maps' })}
+                </a>
+              ) : null}
               <button
                 onClick={async () => {
                   const next = defaultPlanId === planMenu.planId ? null : planMenu.planId;
@@ -346,6 +467,32 @@ const SidebarTree = () => {
                   {t({ it: 'Elimina cliente…', en: 'Delete client…' })}
                 </button>
               ) : null}
+            </div>
+          ) : null}
+
+          {siteMenu ? (
+            <div
+              className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+              style={{ top: siteMenu.y, left: siteMenu.x }}
+            >
+              <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">
+                {t({ it: 'Sede', en: 'Site' })}
+              </div>
+              {parseCoords(siteMenu.coords) ? (
+                <a
+                  href={`https://www.google.com/maps?q=${parseCoords(siteMenu.coords)!.lat},${parseCoords(siteMenu.coords)!.lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                >
+                  <MapPinned size={14} className="text-emerald-700" />
+                  {t({ it: 'Apri su Google Maps', en: 'View in Google Maps' })}
+                </a>
+              ) : (
+                <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  {t({ it: 'Nessuna coordinata salvata.', en: 'No coordinates saved.' })}
+                </div>
+              )}
             </div>
           ) : null}
         </div>

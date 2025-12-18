@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Check, X } from 'lucide-react';
+import { useT } from '../../i18n/useT';
 
 interface Props {
   open: boolean;
@@ -11,6 +12,7 @@ interface Props {
 }
 
 const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm }: Props) => {
+  const t = useT();
   const [carryObjects, setCarryObjects] = useState(false);
 
   useEffect(() => {
@@ -45,22 +47,29 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
             >
               <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
                 <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">Aggiorna planimetria</Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                  <Dialog.Title className="text-lg font-semibold text-ink">
+                    {t({ it: 'Aggiorna planimetria', en: 'Update floor plan' })}
+                  </Dialog.Title>
+                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
 
                 <Dialog.Description className="mt-2 text-sm text-slate-600">
-                  Stai aggiornando l’immagine di <span className="font-semibold text-ink">{planName}</span>. La planimetria precedente verrà archiviata come revisione.
+                  {t({ it: 'Stai aggiornando l’immagine di', en: 'You are updating the image for' })}{' '}
+                  <span className="font-semibold text-ink">{planName}</span>.{' '}
+                  {t({ it: 'La planimetria precedente verrà archiviata come revisione.', en: 'The previous floor plan will be archived as a revision.' })}
                 </Dialog.Description>
 
                 <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                   {hasObjects ? (
                     <>
-                      <div className="font-semibold text-ink">Oggetti esistenti</div>
+                      <div className="font-semibold text-ink">{t({ it: 'Oggetti esistenti', en: 'Existing objects' })}</div>
                       <div className="mt-1 text-slate-600">
-                        Puoi scegliere se riportare gli oggetti nella nuova planimetria. In tal caso resteranno con le stesse coordinate e dovrai eventualmente risistemarli.
+                        {t({
+                          it: 'Puoi scegliere se riportare gli oggetti nella nuova planimetria. In tal caso resteranno con le stesse coordinate e dovrai eventualmente risistemarli.',
+                          en: 'You can choose whether to carry objects into the new floor plan. If you do, they keep the same coordinates and you may need to reposition them.'
+                        })}
                       </div>
                       <label className="mt-3 flex items-start gap-2 font-semibold">
                         <input
@@ -69,16 +78,24 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
                           onChange={(e) => setCarryObjects(e.target.checked)}
                           className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
                         />
-                        <span>Riporta gli oggetti nella nuova planimetria</span>
+                        <span>{t({ it: 'Riporta gli oggetti nella nuova planimetria', en: 'Carry objects into the new floor plan' })}</span>
                       </label>
                       {!carryObjects ? (
                         <div className="mt-2 text-rose-700">
-                          Gli oggetti verranno rimossi nella nuova versione e dovranno essere reinseriti.
+                          {t({
+                            it: 'Gli oggetti verranno rimossi nella nuova versione e dovranno essere reinseriti.',
+                            en: 'Objects will be removed in the new version and must be re-added.'
+                          })}
                         </div>
                       ) : null}
                     </>
                   ) : (
-                    <div className="text-slate-600">Nessun oggetto presente: la nuova planimetria verrà applicata senza ulteriori modifiche.</div>
+                    <div className="text-slate-600">
+                      {t({
+                        it: 'Nessun oggetto presente: la nuova planimetria verrà applicata senza ulteriori modifiche.',
+                        en: 'No objects present: the new floor plan will be applied without further changes.'
+                      })}
+                    </div>
                   )}
                 </div>
 
@@ -87,7 +104,7 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    Annulla
+                    {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     onClick={() => {
@@ -97,7 +114,7 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                   >
                     <Check size={16} />
-                    Conferma
+                    {t({ it: 'Conferma', en: 'Confirm' })}
                   </button>
                 </div>
               </Dialog.Panel>
@@ -110,4 +127,3 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
 };
 
 export default ReplacePlanImageModal;
-

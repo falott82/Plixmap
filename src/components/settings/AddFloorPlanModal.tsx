@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Upload, X } from 'lucide-react';
 import { readFileAsDataUrl } from '../../utils/files';
+import { useT } from '../../i18n/useT';
 
 interface Payload {
   name: string;
@@ -20,6 +21,7 @@ interface Props {
 const normalize = (value: string) => value.trim().toLowerCase();
 
 const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) => {
+  const t = useT();
   const existing = useMemo(() => new Set(existingNames.map(normalize)), [existingNames]);
   const [name, setName] = useState('');
   const [imageUrl, setImageUrl] = useState<string>('');
@@ -59,11 +61,11 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
       return;
     }
     if (existing.has(n)) {
-      setError('Esiste già una planimetria con questo nome.');
+      setError(t({ it: 'Esiste già una planimetria con questo nome.', en: 'A floor plan with this name already exists.' }));
       return;
     }
     setError('');
-  }, [existing, name, open]);
+  }, [existing, name, open, t]);
 
   return (
     <Transition show={open} as={Fragment}>
@@ -92,20 +94,20 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
             >
               <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
                 <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">Aggiungi planimetria</Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                  <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Aggiungi planimetria', en: 'Add floor plan' })}</Dialog.Title>
+                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
 
                 <div className="mt-4 space-y-3">
                   <label className="block text-sm font-medium text-slate-700">
-                    Nome
+                    {t({ it: 'Nome', en: 'Name' })} <span className="text-rose-600">*</span>
                     <input
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                      placeholder="Es. Piano Terra"
+                      placeholder={t({ it: 'Es. Piano Terra', en: 'e.g. Ground floor' })}
                     />
                   </label>
                   {error ? <div className="text-sm font-semibold text-rose-600">{error}</div> : null}
@@ -115,13 +117,29 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
                       <Upload size={18} className="text-primary" />
                       <div className="text-slate-700">
                         {imageUrl
-                          ? `Immagine caricata${size ? ` (${size.width}×${size.height})` : ''}`
-                          : 'Carica immagine (JPG/PNG)'}
+                          ? t({
+                              it: `Immagine caricata${size ? ` (${size.width}×${size.height})` : ''}`,
+                              en: `Image uploaded${size ? ` (${size.width}×${size.height})` : ''}`
+                            })
+                          : t({ it: 'Carica immagine (JPG/PNG)', en: 'Upload image (JPG/PNG)' })}
                       </div>
                     </div>
-                    <input type="file" accept="image/*" className="hidden" onChange={(e) => onPickFile(e.target.files)} />
-                    <span className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white">Scegli</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg"
+                      className="hidden"
+                      onChange={(e) => onPickFile(e.target.files)}
+                    />
+                    <span className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white">
+                      {t({ it: 'Scegli', en: 'Choose' })}
+                    </span>
                   </label>
+                  <div className="text-xs text-slate-500">
+                    {t({
+                      it: 'Formati accettati: JPG, PNG.',
+                      en: 'Accepted formats: JPG, PNG.'
+                    })}
+                  </div>
 
                   {imageUrl ? (
                     <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
@@ -135,7 +153,7 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    Annulla
+                    {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     disabled={!canSubmit}
@@ -146,7 +164,7 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
                     }}
                     className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-50"
                   >
-                    Aggiungi
+                    {t({ it: 'Aggiungi', en: 'Add' })}
                   </button>
                 </div>
               </Dialog.Panel>
@@ -159,4 +177,3 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
 };
 
 export default AddFloorPlanModal;
-

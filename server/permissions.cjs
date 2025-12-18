@@ -1,18 +1,31 @@
 const getUserWithPermissions = (db, userId) => {
   const user = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, mustChangePassword, tokenVersion, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
+      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, mustChangePassword, tokenVersion, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
     )
     .get(userId);
   if (!user) return null;
   const isAdmin = !!user.isAdmin;
   const isSuperAdmin = !!user.isSuperAdmin;
+  const clientOrder = (() => {
+    try {
+      const arr = JSON.parse(user.clientOrderJson || '[]');
+      return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  })();
   const permissions = isAdmin
     ? []
     : db
         .prepare('SELECT scopeType, scopeId, access FROM permissions WHERE userId = ? ORDER BY scopeType, scopeId')
         .all(userId);
-  return { user: { ...user, isAdmin, isSuperAdmin, disabled: !!user.disabled, mustChangePassword: !!user.mustChangePassword }, permissions };
+  // Do not leak raw JSON column.
+  delete user.clientOrderJson;
+  return {
+    user: { ...user, clientOrder, isAdmin, isSuperAdmin, disabled: !!user.disabled, mustChangePassword: !!user.mustChangePassword },
+    permissions
+  };
 };
 
 const computePlanAccess = (clients, permissions) => {

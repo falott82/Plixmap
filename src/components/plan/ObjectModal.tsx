@@ -3,6 +3,7 @@ import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { IconName, MapObjectType } from '../../store/types';
 import Icon from '../ui/Icon';
+import { useT } from '../../i18n/useT';
 
 interface Props {
   open: boolean;
@@ -25,6 +26,7 @@ const ObjectModal = ({
   type,
   icon
 }: Props) => {
+  const t = useT();
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
   const nameRef = useRef<HTMLInputElement | null>(null);
@@ -71,9 +73,9 @@ const ObjectModal = ({
               <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
                 <div className="flex items-center justify-between">
                   <Dialog.Title className="text-lg font-semibold text-ink">
-                    {initialName ? 'Modifica oggetto' : 'Nuovo oggetto'}
+                    {initialName ? t({ it: 'Modifica oggetto', en: 'Edit object' }) : t({ it: 'Nuovo oggetto', en: 'New object' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -85,7 +87,7 @@ const ObjectModal = ({
                 ) : null}
                 <div className="mt-4 space-y-3">
                   <label className="block text-sm font-medium text-slate-700">
-                    Nome
+                    {t({ it: 'Nome', en: 'Name' })} <span className="text-rose-600">*</span>
                     <input
                       ref={nameRef}
                       value={name}
@@ -97,16 +99,16 @@ const ObjectModal = ({
                         }
                       }}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                      placeholder="Es. Stampante HR"
+                      placeholder={t({ it: 'Es. Stampante HR', en: 'e.g. HR Printer' })}
                     />
                   </label>
                   <label className="block text-sm font-medium text-slate-700">
-                    Descrizione
+                    {t({ it: 'Descrizione', en: 'Description' })}
                     <textarea
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                      placeholder="Facoltativa"
+                      placeholder={t({ it: 'Facoltativa', en: 'Optional' })}
                       rows={3}
                     />
                   </label>
@@ -116,13 +118,13 @@ const ObjectModal = ({
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    Annulla
+                    {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     onClick={handleSave}
                     className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                   >
-                    Salva
+                    {t({ it: 'Salva', en: 'Save' })}
                   </button>
                 </div>
               </Dialog.Panel>
