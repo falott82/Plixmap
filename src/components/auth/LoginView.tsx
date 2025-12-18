@@ -1,17 +1,32 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Lock, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useT } from '../../i18n/useT';
+import { fetchBootstrapStatus } from '../../api/auth';
 
 const LoginView = () => {
   const navigate = useNavigate();
   const { login } = useAuthStore();
   const t = useT();
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showFirstRunCredentials, setShowFirstRunCredentials] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchBootstrapStatus()
+      .then((s) => {
+        if (cancelled) return;
+        setShowFirstRunCredentials(!!s.showFirstRunCredentials);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const submit = async () => {
     setError(null);
@@ -20,7 +35,7 @@ const LoginView = () => {
       await login(username.trim(), password);
       navigate('/', { replace: true });
     } catch {
-      setError('Credenziali non valide');
+      setError(t({ it: 'Credenziali non valide', en: 'Invalid credentials' }));
     } finally {
       setLoading(false);
     }
@@ -48,7 +63,7 @@ const LoginView = () => {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                placeholder="admin"
+                placeholder={t({ it: 'Nome utente', en: 'Username' })}
                 autoComplete="username"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') submit();
@@ -88,6 +103,17 @@ const LoginView = () => {
           {loading ? t({ it: 'Accesso…', en: 'Signing in…' }) : t({ it: 'Entra', en: 'Sign in' })}
         </button>
 
+        {showFirstRunCredentials ? (
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="font-semibold">{t({ it: 'Primo accesso', en: 'First access' })}</div>
+            <div className="mt-1 text-sm">
+              {t({
+                it: 'Credenziali iniziali: superadmin / deskly. Al primo login verrà richiesto il cambio password.',
+                en: 'Initial credentials: superadmin / deskly. On first login you will be asked to change the password.'
+              })}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

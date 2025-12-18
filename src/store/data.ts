@@ -1,48 +1,38 @@
-import { nanoid } from 'nanoid';
-import { Client, FloorPlan, ObjectTypeDefinition } from './types';
+import { Client, ObjectTypeDefinition } from './types';
 
-const sampleFloorPlan = (siteId: string, name: string, imageUrl: string): FloorPlan => ({
-  id: nanoid(),
-  siteId,
-  name,
-  imageUrl,
-  width: 1600,
-  height: 900,
-  views: [],
-  objects: [
-    {
-      id: nanoid(),
-      floorPlanId: '',
-      type: 'user',
-      name: 'Reception',
-      description: 'Front desk',
-      x: 320,
-      y: 220,
-      scale: 1
-    }
-  ]
-});
+export const SEED_CLIENT_ID = 'seed-client-acme';
+export const SEED_SITE_ID = 'seed-site-wall-street-01';
+export const SEED_PLAN_ID = 'seed-plan-floor-0';
+export const SEED_PLAN_IMAGE_URL = '/seed/acme-floor0.svg';
 
 export const defaultData = (): Client[] => {
-  const clientId = nanoid();
-  const siteId = nanoid();
-  const plan = sampleFloorPlan(
-    siteId,
-    'Piano Terra',
-    'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1600&q=80'
-  );
-  plan.objects[0].floorPlanId = plan.id;
   return [
     {
-      id: clientId,
-      name: 'Pippo SRL',
+      id: SEED_CLIENT_ID,
+      name: 'ACME Inc.',
+      shortName: 'ACME',
+      address: 'Wall Street 01',
+      description: 'Seed workspace',
       logoUrl: undefined,
       sites: [
         {
-          id: siteId,
-          clientId,
-          name: 'HQ Via Nave 11',
-          floorPlans: [plan]
+          id: SEED_SITE_ID,
+          clientId: SEED_CLIENT_ID,
+          name: 'Wall Street 01',
+          floorPlans: [
+            {
+              id: SEED_PLAN_ID,
+              siteId: SEED_SITE_ID,
+              name: 'Floor 0',
+              imageUrl: SEED_PLAN_IMAGE_URL,
+              width: 1536,
+              height: 1117,
+              views: [],
+              rooms: [],
+              revisions: [],
+              objects: []
+            }
+          ]
         }
       ]
     }

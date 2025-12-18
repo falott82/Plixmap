@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1117" viewBox="0 0 1536 1117">
+  <rect x="0" y="0" width="1536" height="1117" fill="#ffffff"/>
+  <g fill="none" stroke="#111827" stroke-width="14" stroke-linejoin="round">
+    <!-- Outer shell (stylized) -->
+    <path d="M140 160 H1396 V892 H1030 V1030 H506 V892 H140 Z"/>
+    <!-- Inner partitions -->
+    <path d="M560 892 V520 H976 V892"/>
+    <path d="M560 520 H420 V360 H1116 V520 H976"/>
+    <path d="M420 520 V892"/>
+    <path d="M1116 520 V892"/>
+    <path d="M720 360 V520"/>
+    <path d="M816 360 V520"/>
+    <!-- Small rooms on right -->
+    <path d="M1116 520 H1320 V690 H1116 Z"/>
+    <path d="M1116 690 H1320 V892 H1116 Z"/>
+    <!-- Small rooms near center -->
+    <path d="M720 520 H816 V640 H720 Z"/>
+    <path d="M720 640 H816 V760 H720 Z"/>
+  </g>
+  <g fill="none" stroke="#111827" stroke-width="6" stroke-linecap="round">
+    <!-- Doors arcs (simple) -->
+    <path d="M420 520 q60 0 60 60"/>
+    <path d="M1116 520 q-60 0 -60 60"/>
+    <path d="M560 892 q60 0 60 -60"/>
+    <path d="M976 892 q-60 0 -60 -60"/>
+  </g>
+  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" fill="#0f172a">
+    <text x="160" y="126" font-size="18" opacity="0.65">ACME Inc. — Wall Street 01 — Floor 0</text>
+  </g>
+</svg>

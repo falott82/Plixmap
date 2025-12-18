@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Group, Image as KonvaImage, Layer, Rect, Stage, Text, Transformer } from 'react-konva';
+import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { FloorPlan, IconName, MapObjectType } from '../../store/types';
@@ -18,7 +18,7 @@ interface Props {
   focusTarget?: { x: number; y: number; zoom?: number; nonce: number };
   pendingType?: MapObjectType | null;
   readOnly?: boolean;
-  roomDrawMode?: boolean;
+  roomDrawMode?: 'rect' | 'poly' | null;
   objectTypeIcons: Record<string, IconName | undefined>;
   zoom: number;
   pan: { x: number; y: number };
@@ -35,8 +35,22 @@ interface Props {
   onContextMenu: (payload: { id: string; clientX: number; clientY: number }) => void;
   onMapContextMenu: (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onSelectRoom?: (roomId?: string) => void;
-  onCreateRoom?: (rect: { x: number; y: number; width: number; height: number }) => void;
-  onUpdateRoom?: (roomId: string, rect: { x: number; y: number; width: number; height: number }) => void;
+  onCreateRoom?: (
+    shape:
+      | { kind: 'rect'; rect: { x: number; y: number; width: number; height: number } }
+      | { kind: 'poly'; points: { x: number; y: number }[] }
+  ) => void;
+  onUpdateRoom?: (
+    roomId: string,
+    payload: {
+      kind?: 'rect' | 'poly';
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      points?: { x: number; y: number }[];
+    }
+  ) => void;
 }
 
 const CanvasStage = ({
@@ -51,7 +65,7 @@ const CanvasStage = ({
   focusTarget,
   pendingType,
   readOnly = false,
-  roomDrawMode = false,
+  roomDrawMode = null,
   objectTypeIcons,
   zoom,
   pan,
@@ -86,10 +100,15 @@ const CanvasStage = ({
   const fitApplied = useRef<string | null>(null);
   const lastContextMenuAtRef = useRef(0);
   const [roomHighlightNow, setRoomHighlightNow] = useState(Date.now());
-  const [draftRoom, setDraftRoom] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftOrigin = useRef<{ x: number; y: number } | null>(null);
+  const [draftPolyPoints, setDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
+  const [draftPolyPointer, setDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
+  const draftPolyRaf = useRef<number | null>(null);
   const transformerRef = useRef<any>(null);
   const selectedRoomNodeRef = useRef<any>(null);
+  const polyLineRefs = useRef<Record<string, any>>({});
+  const polyVertexRefs = useRef<Record<string, Record<number, any>>>({});
   const objectsLayerRef = useRef<any>(null);
   const objectNodeRefs = useRef<Record<string, any>>({});
   const [iconImages, setIconImages] = useState<Record<string, HTMLImageElement | null>>({});
@@ -218,12 +237,18 @@ const CanvasStage = ({
   useEffect(() => {
     if (roomDrawMode) return;
     draftOrigin.current = null;
-    setDraftRoom(null);
+    setDraftRect(null);
+    setDraftPolyPoints([]);
+    setDraftPolyPointer(null);
+    if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
+    draftPolyRaf.current = null;
   }, [roomDrawMode]);
 
   useEffect(() => {
     if (!transformerRef.current) return;
-    if (!selectedRoomId || !selectedRoomNodeRef.current) {
+    const selectedRoom = (plan.rooms || []).find((r) => r.id === selectedRoomId);
+    const selectedKind = (selectedRoom?.kind || (selectedRoom?.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+    if (!selectedRoomId || !selectedRoomNodeRef.current || selectedKind !== 'rect') {
       transformerRef.current.nodes([]);
       transformerRef.current.getLayer()?.batchDraw?.();
       return;
@@ -466,8 +491,8 @@ const CanvasStage = ({
     onPlaceNew(pendingType, x, y);
   };
 
-  const updateDraftRoom = (event: any) => {
-    if (!roomDrawMode || readOnly) return false;
+  const updateDraftRect = (event: any) => {
+    if (roomDrawMode !== 'rect' || readOnly) return false;
     const origin = draftOrigin.current;
     if (!origin) return false;
     const stage = event.target.getStage();
@@ -482,23 +507,23 @@ const CanvasStage = ({
     const y = Math.min(y1, y2);
     const width = Math.abs(x2 - x1);
     const height = Math.abs(y2 - y1);
-    setDraftRoom({ x, y, width, height });
+    setDraftRect({ x, y, width, height });
     return true;
   };
 
-  const finalizeDraftRoom = () => {
-    if (!roomDrawMode || readOnly) return false;
-    if (!draftOrigin.current || !draftRoom) return false;
+  const finalizeDraftRect = () => {
+    if (roomDrawMode !== 'rect' || readOnly) return false;
+    if (!draftOrigin.current || !draftRect) return false;
     const rect = {
-      x: draftRoom.x,
-      y: draftRoom.y,
-      width: Math.max(0, draftRoom.width),
-      height: Math.max(0, draftRoom.height)
+      x: draftRect.x,
+      y: draftRect.y,
+      width: Math.max(0, draftRect.width),
+      height: Math.max(0, draftRect.height)
     };
     draftOrigin.current = null;
-    setDraftRoom(null);
+    setDraftRect(null);
     if (rect.width < 20 || rect.height < 20) return true;
-    onCreateRoom?.(rect);
+    onCreateRoom?.({ kind: 'rect', rect });
     return true;
   };
 
@@ -514,15 +539,51 @@ const CanvasStage = ({
     [bgImage, baseWidth, baseHeight]
   );
 
+  const previewDraftPolyLine = useMemo(() => {
+    if (roomDrawMode !== 'poly') return null;
+    if (!draftPolyPoints.length) return null;
+    const pts = [...draftPolyPoints];
+    if (draftPolyPointer) pts.push(draftPolyPointer);
+    return pts.flatMap((p) => [p.x, p.y]);
+  }, [draftPolyPointer, draftPolyPoints, roomDrawMode]);
+
+  const finalizeDraftPoly = useCallback(() => {
+    if (roomDrawMode !== 'poly' || readOnly) return false;
+    if (draftPolyPoints.length < 3) return true;
+    const points = draftPolyPoints.slice();
+    setDraftPolyPoints([]);
+    setDraftPolyPointer(null);
+    onCreateRoom?.({ kind: 'poly', points });
+    return true;
+  }, [draftPolyPoints, onCreateRoom, readOnly, roomDrawMode]);
+
+  useEffect(() => {
+    if (roomDrawMode !== 'poly') return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finalizeDraftPoly();
+      }
+      if (e.key === 'Backspace') {
+        if (!draftPolyPoints.length) return;
+        e.preventDefault();
+        setDraftPolyPoints((prev) => prev.slice(0, -1));
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [draftPolyPoints.length, finalizeDraftPoly, roomDrawMode]);
+
   const selectedBounds = useMemo(() => {
-    const ids = selectedIds || (selectedId ? [selectedId] : []);
-    if (!ids.length) return null;
+    const idsArr = selectedIds || (selectedId ? [selectedId] : []);
+    if (!idsArr.length) return null;
+    const ids = new Set(idsArr);
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const obj of plan.objects) {
-      if (!ids.includes(obj.id)) continue;
+      if (!ids.has(obj.id)) continue;
       minX = Math.min(minX, obj.x);
       minY = Math.min(minY, obj.y);
       maxX = Math.max(maxX, obj.x);
@@ -560,13 +621,31 @@ const CanvasStage = ({
             return;
           }
           if (isContextClick(e.evt)) return;
-          if (roomDrawMode && !readOnly && e.evt.button === 0) {
+          if (roomDrawMode === 'rect' && !readOnly && e.evt.button === 0) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
             draftOrigin.current = { x: world.x, y: world.y };
-            setDraftRoom({ x: world.x, y: world.y, width: 0, height: 0 });
+            setDraftRect({ x: world.x, y: world.y, width: 0, height: 0 });
+            return;
+          }
+          if (roomDrawMode === 'poly' && !readOnly && e.evt.button === 0) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (!pos) return;
+            const world = pointerToWorld(pos.x, pos.y);
+            const closeThreshold = 12 / Math.max(0.2, viewportRef.current.zoom || 1);
+            if (draftPolyPoints.length >= 3) {
+              const first = draftPolyPoints[0];
+              const dx = world.x - first.x;
+              const dy = world.y - first.y;
+              if (Math.hypot(dx, dy) <= closeThreshold) {
+                finalizeDraftPoly();
+                return;
+              }
+            }
+            setDraftPolyPoints((prev) => [...prev, { x: world.x, y: world.y }]);
             return;
           }
           // Pan: middle click or drag empty stage
@@ -581,18 +660,30 @@ const CanvasStage = ({
         }}
         onMouseMove={(e) => {
           if (updateSelectionBox(e)) return;
-          if (updateDraftRoom(e)) return;
+          if (updateDraftRect(e)) return;
+          if (roomDrawMode === 'poly' && !readOnly) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (pos) {
+              const world = pointerToWorld(pos.x, pos.y);
+              if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
+              draftPolyRaf.current = requestAnimationFrame(() => {
+                setDraftPolyPointer({ x: world.x, y: world.y });
+              });
+            }
+            return;
+          }
           movePan(e);
         }}
         onMouseUp={(e) => {
           if (finalizeSelectionBox()) return;
           if (isContextClick(e.evt)) return;
-          if (finalizeDraftRoom()) return;
+          if (finalizeDraftRect()) return;
           endPan();
         }}
         onMouseLeave={() => {
           if (finalizeSelectionBox()) return;
-          if (finalizeDraftRoom()) return;
+          if (finalizeDraftRect()) return;
           endPan();
         }}
       >
@@ -631,6 +722,7 @@ const CanvasStage = ({
         <Layer perfectDrawEnabled={false}>
           {(plan.rooms || []).map((room) => {
             const isSelectedRoom = selectedRoomId === room.id;
+            const kind = (room.kind || (room.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
             const highlightActive = !!(
               highlightRoomId &&
               highlightRoomUntil &&
@@ -639,22 +731,104 @@ const CanvasStage = ({
             );
             const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(roomHighlightNow / 80) : 0;
             const stroke = highlightActive ? '#22d3ee' : isSelectedRoom ? '#2563eb' : '#94a3b8';
-            const strokeWidth = highlightActive ? 3 + 2 * pulse : isSelectedRoom ? 3 : 2;
+            const strokeWidth = highlightActive ? 2 + 1.2 * pulse : isSelectedRoom ? 2 : 1.4;
+            if (kind === 'poly') {
+              const pts = room.points || [];
+              const flat = pts.flatMap((p) => [p.x, p.y]);
+              return (
+                <Group
+                  key={room.id}
+                  draggable={!readOnly}
+                  onClick={(e) => {
+                    e.cancelBubble = true;
+                    onSelectRoom?.(room.id);
+                  }}
+                  onContextMenu={(e) => {
+                    e.evt.preventDefault();
+                    e.cancelBubble = true;
+                    if (isBoxSelectGesture(e.evt) || isBoxSelecting()) return;
+                    onSelectRoom?.(room.id);
+                  }}
+                  onDragEnd={(e) => {
+                    if (readOnly) return;
+                    const node = e.target;
+                    const dx = node.x();
+                    const dy = node.y();
+                    node.position({ x: 0, y: 0 });
+                    if (!dx && !dy) return;
+                    onUpdateRoom?.(room.id, { kind: 'poly', points: pts.map((p) => ({ x: p.x + dx, y: p.y + dy })) });
+                  }}
+                >
+                  <Line
+                    ref={(node) => {
+                      if (node) polyLineRefs.current[room.id] = node;
+                      else delete polyLineRefs.current[room.id];
+                    }}
+                    points={flat}
+                    closed
+                    fill="rgba(37,99,235,0.05)"
+                    stroke={stroke}
+                    strokeWidth={strokeWidth}
+                    dash={[6, 5]}
+                    lineJoin="round"
+                  />
+                  {isSelectedRoom && !readOnly
+                    ? pts.map((p, idx) => (
+                        <Circle
+                          key={`${room.id}:${idx}`}
+                          ref={(node) => {
+                            if (!polyVertexRefs.current[room.id]) polyVertexRefs.current[room.id] = {};
+                            if (node) polyVertexRefs.current[room.id][idx] = node;
+                            else if (polyVertexRefs.current[room.id]) delete polyVertexRefs.current[room.id][idx];
+                          }}
+                          x={p.x}
+                          y={p.y}
+                          radius={5}
+                          fill="#ffffff"
+                          stroke="#2563eb"
+                          strokeWidth={1.5}
+                          draggable
+                          onDragMove={() => {
+                            const line = polyLineRefs.current[room.id];
+                            const verts = polyVertexRefs.current[room.id];
+                            if (!line || !verts) return;
+                            const next = Object.keys(verts)
+                              .map((k) => Number(k))
+                              .sort((a, b) => a - b)
+                              .flatMap((i) => [verts[i].x(), verts[i].y()]);
+                            line.points(next);
+                            line.getLayer()?.batchDraw?.();
+                          }}
+                          onDragEnd={() => {
+                            const verts = polyVertexRefs.current[room.id];
+                            if (!verts) return;
+                            const nextPoints = Object.keys(verts)
+                              .map((k) => Number(k))
+                              .sort((a, b) => a - b)
+                              .map((i) => ({ x: verts[i].x(), y: verts[i].y() }));
+                            onUpdateRoom?.(room.id, { kind: 'poly', points: nextPoints });
+                          }}
+                        />
+                      ))
+                    : null}
+                </Group>
+              );
+            }
             return (
               <Rect
                 key={room.id}
                 ref={(node) => {
                   if (isSelectedRoom) selectedRoomNodeRef.current = node;
                 }}
-                x={room.x}
-                y={room.y}
-                width={room.width}
-                height={room.height}
+                x={room.x || 0}
+                y={room.y || 0}
+                width={room.width || 0}
+                height={room.height || 0}
                 fill="rgba(37,99,235,0.05)"
                 stroke={stroke}
                 strokeWidth={strokeWidth}
-                dash={[8, 6]}
-                cornerRadius={10}
+                dash={[6, 5]}
+                cornerRadius={8}
                 draggable={!readOnly}
                 onClick={(e) => {
                   e.cancelBubble = true;
@@ -670,10 +844,11 @@ const CanvasStage = ({
                   if (readOnly) return;
                   const node = e.target;
                   onUpdateRoom?.(room.id, {
+                    kind: 'rect',
                     x: node.x(),
                     y: node.y(),
-                    width: room.width,
-                    height: room.height
+                    width: room.width || 0,
+                    height: room.height || 0
                   });
                 }}
                 onTransformEnd={(e) => {
@@ -684,6 +859,7 @@ const CanvasStage = ({
                   node.scaleX(1);
                   node.scaleY(1);
                   onUpdateRoom?.(room.id, {
+                    kind: 'rect',
                     x: node.x(),
                     y: node.y(),
                     width: Math.max(10, node.width() * scaleX),
@@ -694,7 +870,13 @@ const CanvasStage = ({
             );
           })}
 
-          {selectedRoomId && !readOnly ? (
+          {selectedRoomId &&
+          !readOnly &&
+          (() => {
+            const r = (plan.rooms || []).find((x) => x.id === selectedRoomId);
+            const k = (r?.kind || (r?.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+            return k === 'rect';
+          })() ? (
             <Transformer
               ref={transformerRef}
               rotateEnabled={false}
@@ -706,19 +888,44 @@ const CanvasStage = ({
             />
           ) : null}
 
-          {/* Draft room */}
-          {draftRoom ? (
+          {/* Draft rect */}
+          {draftRect ? (
             <Rect
-              x={draftRoom.x}
-              y={draftRoom.y}
-              width={draftRoom.width}
-              height={draftRoom.height}
+              x={draftRect.x}
+              y={draftRect.y}
+              width={draftRect.width}
+              height={draftRect.height}
               fill="rgba(37,99,235,0.08)"
               stroke="#2563eb"
-              strokeWidth={2}
+              strokeWidth={1.5}
               dash={[6, 6]}
               listening={false}
-              cornerRadius={10}
+              cornerRadius={8}
+            />
+          ) : null}
+
+          {/* Draft poly */}
+          {previewDraftPolyLine ? (
+            <Line
+              points={previewDraftPolyLine}
+              closed={draftPolyPoints.length >= 3}
+              fill="rgba(37,99,235,0.06)"
+              stroke="#2563eb"
+              strokeWidth={1.5}
+              dash={[6, 6]}
+              lineJoin="round"
+              listening={false}
+            />
+          ) : null}
+          {roomDrawMode === 'poly' && draftPolyPoints.length ? (
+            <Circle
+              x={draftPolyPoints[0].x}
+              y={draftPolyPoints[0].y}
+              radius={6}
+              fill="#ffffff"
+              stroke="#2563eb"
+              strokeWidth={1.5}
+              listening={false}
             />
           ) : null}
         </Layer>

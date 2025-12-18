@@ -31,6 +31,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
   const t = useT();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
@@ -46,6 +47,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
     if (mode === 'create') {
       setUsername('');
       setPassword('');
+      setConfirmPassword('');
       setFirstName('');
       setLastName('');
       setPhone('');
@@ -57,6 +59,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
     } else {
       setUsername(initial?.username || '');
       setPassword('');
+      setConfirmPassword('');
       setFirstName(initial?.firstName || '');
       setLastName(initial?.lastName || '');
       setPhone(initial?.phone || '');
@@ -69,12 +72,35 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
     window.setTimeout(() => userRef.current?.focus(), 0);
   }, [initial, mode, open]);
 
+  const passwordRules = useMemo(() => {
+    const s = password;
+    return {
+      min: s.length >= 8,
+      lower: /[a-z]/.test(s),
+      upper: /[A-Z]/.test(s),
+      number: /[0-9]/.test(s),
+      symbol: /[^A-Za-z0-9]/.test(s)
+    };
+  }, [password]);
+  const isStrongPassword =
+    passwordRules.min &&
+    passwordRules.lower &&
+    passwordRules.upper &&
+    passwordRules.number &&
+    passwordRules.symbol;
+
   const canSubmit = useMemo(() => {
     if (!firstName.trim() || !lastName.trim()) return false;
     if (!email.trim()) return false;
-    if (mode === 'create') return !!username.trim() && !!password.trim();
+    if (mode === 'create') {
+      if (!username.trim()) return false;
+      if (!password.trim()) return false;
+      if (!isStrongPassword) return false;
+      if (password !== confirmPassword) return false;
+      return true;
+    }
     return true;
-  }, [email, firstName, lastName, mode, password, username]);
+  }, [confirmPassword, email, firstName, isStrongPassword, lastName, mode, password, username]);
 
   const submit = () => {
     if (!canSubmit) return;
@@ -152,6 +178,51 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
                             placeholder=""
                           />
                         </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Conferma password', en: 'Confirm password' })}{' '}
+                          <span className="text-rose-600">*</span>
+                          <input
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            required
+                            className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            type="password"
+                            placeholder="••••••••"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                submit();
+                              }
+                            }}
+                          />
+                          {confirmPassword && password !== confirmPassword ? (
+                            <div className="mt-1 text-xs font-semibold text-rose-700">
+                              {t({ it: 'Le password non coincidono', en: 'Passwords do not match' })}
+                            </div>
+                          ) : null}
+                        </label>
+                        <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                          <div className="font-semibold text-slate-800">
+                            {t({ it: 'Requisiti password', en: 'Password requirements' })}
+                          </div>
+                          <ul className="ml-4 list-disc space-y-0.5 pt-1">
+                            <li className={passwordRules.min ? 'text-emerald-700' : ''}>
+                              {t({ it: 'Almeno 8 caratteri', en: 'At least 8 characters' })}
+                            </li>
+                            <li className={passwordRules.upper ? 'text-emerald-700' : ''}>
+                              {t({ it: 'Almeno 1 maiuscola', en: 'At least 1 uppercase letter' })}
+                            </li>
+                            <li className={passwordRules.lower ? 'text-emerald-700' : ''}>
+                              {t({ it: 'Almeno 1 minuscola', en: 'At least 1 lowercase letter' })}
+                            </li>
+                            <li className={passwordRules.number ? 'text-emerald-700' : ''}>
+                              {t({ it: 'Almeno 1 numero', en: 'At least 1 number' })}
+                            </li>
+                            <li className={passwordRules.symbol ? 'text-emerald-700' : ''}>
+                              {t({ it: 'Almeno 1 simbolo', en: 'At least 1 symbol' })}
+                            </li>
+                          </ul>
+                        </div>
                       </>
                     ) : null}
 

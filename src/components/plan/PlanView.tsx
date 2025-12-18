@@ -196,7 +196,7 @@ const PlanView = ({ planId }: Props) => {
   const [saveRevisionOpen, setSaveRevisionOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<
     | { kind: 'object'; id: string; x: number; y: number }
-    | { kind: 'map'; x: number; y: number; worldX: number; worldY: number; addOpen: boolean }
+    | { kind: 'map'; x: number; y: number; worldX: number; worldY: number; addOpen: boolean; roomOpen: boolean }
     | null
   >(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -206,16 +206,19 @@ const PlanView = ({ planId }: Props) => {
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
   const [searchResultsTerm, setSearchResultsTerm] = useState('');
   const [searchResultsIds, setSearchResultsIds] = useState<string[]>([]);
+  const [searchRoomIds, setSearchRoomIds] = useState<string[]>([]);
   const [countsOpen, setCountsOpen] = useState(false);
   const [expandedType, setExpandedType] = useState<string | null>(null);
   const [objectListQuery, setObjectListQuery] = useState('');
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
-  const [roomDrawMode, setRoomDrawMode] = useState(false);
+  const [roomDrawMode, setRoomDrawMode] = useState<'rect' | 'poly' | null>(null);
+  const [newRoomMenuOpen, setNewRoomMenuOpen] = useState(false);
   const [highlightRoom, setHighlightRoom] = useState<{ roomId: string; until: number } | null>(null);
   const [roomModal, setRoomModal] = useState<
-    | { mode: 'create'; rect: { x: number; y: number; width: number; height: number } }
+    | { mode: 'create'; kind: 'rect'; rect: { x: number; y: number; width: number; height: number } }
+    | { mode: 'create'; kind: 'poly'; points: { x: number; y: number }[] }
     | { mode: 'edit'; roomId: string; initialName: string }
     | null
   >(null);
@@ -603,7 +606,7 @@ const PlanView = ({ planId }: Props) => {
 
   const handleMapContextMenu = useCallback(
     ({ clientX, clientY, worldX, worldY }: { clientX: number; clientY: number; worldX: number; worldY: number }) =>
-      setContextMenu({ kind: 'map', x: clientX, y: clientY, worldX, worldY, addOpen: false }),
+      setContextMenu({ kind: 'map', x: clientX, y: clientY, worldX, worldY, addOpen: false, roomOpen: false }),
     []
   );
 
@@ -655,8 +658,47 @@ const PlanView = ({ planId }: Props) => {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const isPointInRoom = (room: any, x: number, y: number) =>
-    x >= room.x && x <= room.x + room.width && y >= room.y && y <= room.y + room.height;
+  const isPointInPoly = (points: { x: number; y: number }[], x: number, y: number) => {
+    // Ray casting algorithm
+    let inside = false;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const xi = points[i].x;
+      const yi = points[i].y;
+      const xj = points[j].x;
+      const yj = points[j].y;
+      const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 0.0) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  };
+
+  const isPointInRoom = (room: any, x: number, y: number) => {
+    const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as
+      | 'rect'
+      | 'poly';
+    if (kind === 'poly') {
+      const pts = Array.isArray(room?.points) ? room.points : [];
+      if (pts.length < 3) return false;
+      // quick bbox check
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const p of pts) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+      if (x < minX || x > maxX || y < minY || y > maxY) return false;
+      return isPointInPoly(pts, x, y);
+    }
+    const rx = Number(room?.x || 0);
+    const ry = Number(room?.y || 0);
+    const rw = Number(room?.width || 0);
+    const rh = Number(room?.height || 0);
+    return x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+  };
 
   const getRoomIdAt = (rooms: any[] | undefined, x: number, y: number) => {
     const list = rooms || [];
@@ -691,8 +733,8 @@ const PlanView = ({ planId }: Props) => {
 
       if (roomDrawMode && e.key === 'Escape') {
         e.preventDefault();
-        setRoomDrawMode(false);
-        push('Disegno stanza annullato', 'info');
+        setRoomDrawMode(null);
+        push(t({ it: 'Disegno stanza annullato', en: 'Room drawing cancelled' }), 'info');
         return;
       }
 
@@ -813,15 +855,31 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     if (!roomsOpen) return;
     setExpandedRoomId(null);
+    setNewRoomMenuOpen(false);
   }, [roomsOpen]);
 
   const beginRoomDraw = () => {
     if (isReadOnly) return;
     setPendingType(null);
-    setRoomDrawMode(true);
+    setRoomDrawMode('rect');
     setRoomsOpen(false);
     setContextMenu(null);
-    push('Disegna un rettangolo sulla mappa per creare una stanza', 'info');
+    push(t({ it: 'Disegna un rettangolo sulla mappa per creare una stanza', en: 'Draw a rectangle on the map to create a room' }), 'info');
+  };
+
+  const beginRoomPolyDraw = () => {
+    if (isReadOnly) return;
+    setPendingType(null);
+    setRoomDrawMode('poly');
+    setRoomsOpen(false);
+    setContextMenu(null);
+    push(
+      t({
+        it: 'Clicca più punti per disegnare un poligono. Clicca sul primo punto (o premi Invio) per chiudere.',
+        en: 'Click multiple points to draw a polygon. Click the first point (or press Enter) to close.'
+      }),
+      'info'
+    );
   };
 
   const openEditRoom = (roomId: string) => {
@@ -832,8 +890,14 @@ const PlanView = ({ planId }: Props) => {
 
   const handleCreateRoomFromRect = (rect: { x: number; y: number; width: number; height: number }) => {
     if (isReadOnly) return;
-    setRoomDrawMode(false);
-    setRoomModal({ mode: 'create', rect });
+    setRoomDrawMode(null);
+    setRoomModal({ mode: 'create', kind: 'rect', rect });
+  };
+
+  const handleCreateRoomFromPoly = (points: { x: number; y: number }[]) => {
+    if (isReadOnly) return;
+    setRoomDrawMode(null);
+    setRoomModal({ mode: 'create', kind: 'poly', points });
   };
 
   const handlePlaceNew = (type: MapObjectType, x: number, y: number) => {
@@ -895,24 +959,34 @@ const PlanView = ({ planId }: Props) => {
     if (!renderPlan) return;
     if (!term.trim()) return;
     const normalized = term.toLowerCase();
-    const matches = renderPlan.objects.filter(
+    const objectMatches = renderPlan.objects.filter(
       (o) =>
         o.name.toLowerCase().includes(normalized) ||
         (o.description && o.description.toLowerCase().includes(normalized))
     );
-    if (!matches.length) {
-      push('Nessun oggetto trovato', 'info');
+    const roomMatches = (renderPlan.rooms || []).filter((r) => (r.name || '').toLowerCase().includes(normalized));
+
+    if (!objectMatches.length && !roomMatches.length) {
+      push(t({ it: 'Nessun risultato trovato', en: 'No results found' }), 'info');
       return;
     }
-    if (matches.length === 1) {
-      const found = matches[0];
-      setSelectedObject(found.id);
-      triggerHighlight(found.id);
+    if (objectMatches.length + roomMatches.length === 1) {
+      if (objectMatches.length === 1) {
+        const found = objectMatches[0];
+        setSelectedObject(found.id);
+        triggerHighlight(found.id);
+        return;
+      }
+      const room = roomMatches[0];
+      clearSelection();
+      setSelectedRoomId(room.id);
+      setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
       return;
     }
     // Multiple matches: let the user pick which one to focus
     setSearchResultsTerm(term);
-    setSearchResultsIds(matches.map((m) => m.id));
+    setSearchResultsIds(objectMatches.map((m) => m.id));
+    setSearchRoomIds(roomMatches.map((r) => r.id));
     setSearchResultsOpen(true);
   };
 
@@ -1072,34 +1146,61 @@ const PlanView = ({ planId }: Props) => {
               <button
                 onClick={() => setRoomsOpen((v) => !v)}
                 className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                title="Stanze"
+                title={t({ it: 'Stanze', en: 'Rooms' })}
               >
-                {rooms.length} stanze
+                {rooms.length} {t({ it: 'stanze', en: 'rooms' })}
               </button>
               {roomsOpen ? (
                 <div className="absolute left-0 z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
                   <div className="flex items-center justify-between px-2 pb-2">
-                    <div className="text-sm font-semibold text-ink">Stanze</div>
+                    <div className="text-sm font-semibold text-ink">{t({ it: 'Stanze', en: 'Rooms' })}</div>
                     <button onClick={() => setRoomsOpen(false)} className="text-slate-400 hover:text-ink">
                       <X size={14} />
                     </button>
                   </div>
                   <div className="px-2 pb-2">
                     {!isReadOnly ? (
-                      <button
-                        onClick={beginRoomDraw}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-                      >
-                        <Square size={16} /> Nuova stanza (disegna)
-                      </button>
+                      <div className="relative">
+                        <button
+                          onClick={() => setNewRoomMenuOpen((v) => !v)}
+                          className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                        >
+                          <Square size={16} /> {t({ it: 'Nuova stanza', en: 'New room' })}
+                          <ChevronDown size={16} className="text-white/90" />
+                        </button>
+                        {newRoomMenuOpen ? (
+                          <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+                            <button
+                              onClick={() => {
+                                setNewRoomMenuOpen(false);
+                                beginRoomDraw();
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              <Square size={16} className="text-slate-500" /> {t({ it: 'Rettangolo', en: 'Rectangle' })}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setNewRoomMenuOpen(false);
+                                beginRoomPolyDraw();
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              <Square size={16} className="text-slate-500" /> {t({ it: 'Poligono', en: 'Polygon' })}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     ) : (
-                      <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Sola lettura.</div>
+                      <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                        {t({ it: 'Sola lettura.', en: 'Read-only.' })}
+                      </div>
                     )}
                     {roomDrawMode && !isReadOnly ? (
                       <div className="mt-2 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-                        <span>Modalità disegno attiva</span>
+                        <span>{t({ it: 'Modalità disegno attiva', en: 'Drawing mode active' })}</span>
                         <button
-                          onClick={() => setRoomDrawMode(false)}
+                          onClick={() => setRoomDrawMode(null)}
                           className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
                         >
                           Esc
@@ -1439,11 +1540,14 @@ const PlanView = ({ planId }: Props) => {
                       setSelectedRoomId(roomId);
                       setContextMenu(null);
                     }}
-                    onCreateRoom={handleCreateRoomFromRect}
-                    onUpdateRoom={(roomId, rect) => {
+                    onCreateRoom={(shape) => {
+                      if (shape.kind === 'rect') handleCreateRoomFromRect(shape.rect);
+                      else handleCreateRoomFromPoly(shape.points);
+                    }}
+                    onUpdateRoom={(roomId, payload) => {
                       if (isReadOnly) return;
-                      const nextRooms = ((plan as FloorPlan).rooms || []).map((r) => (r.id === roomId ? { ...r, ...rect } : r));
-                      updateRoom((plan as FloorPlan).id, roomId, rect);
+                      const nextRooms = ((plan as FloorPlan).rooms || []).map((r) => (r.id === roomId ? { ...r, ...payload } : r));
+                      updateRoom((plan as FloorPlan).id, roomId, payload as any);
                       const updates = computeRoomReassignments(nextRooms, (plan as FloorPlan).objects);
                       if (Object.keys(updates).length) setObjectRoomIds((plan as FloorPlan).id, updates);
                     }}
@@ -1570,11 +1674,34 @@ const PlanView = ({ planId }: Props) => {
               ) : null}
               {!isReadOnly ? (
                 <button
-                  onClick={beginRoomDraw}
+                  onClick={() => setContextMenu({ ...contextMenu, roomOpen: !contextMenu.roomOpen, addOpen: false })}
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
                 >
-                  <Square size={14} className="text-slate-500" /> Nuova stanza (disegna)
+                  <Square size={14} className="text-slate-500" /> {t({ it: 'Nuova stanza', en: 'New room' })}
+                  <ChevronDown size={14} className="ml-auto text-slate-400" />
                 </button>
+              ) : null}
+              {contextMenu.roomOpen && !isReadOnly ? (
+                <div className="mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <button
+                    onClick={() => {
+                      beginRoomDraw();
+                      setContextMenu(null);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Square size={14} className="text-slate-500" /> {t({ it: 'Rettangolo', en: 'Rectangle' })}
+                  </button>
+                  <button
+                    onClick={() => {
+                      beginRoomPolyDraw();
+                      setContextMenu(null);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Square size={14} className="text-slate-500" /> {t({ it: 'Poligono', en: 'Polygon' })}
+                  </button>
+                </div>
               ) : null}
               <button
                 onClick={() => {
@@ -1673,11 +1800,17 @@ const PlanView = ({ planId }: Props) => {
             setRoomModal(null);
             return;
           }
-          const rect = roomModal.rect;
-          const id = addRoom(basePlan.id, { name, ...rect });
+          const id =
+            roomModal.kind === 'rect'
+              ? addRoom(basePlan.id, { name, kind: 'rect', ...roomModal.rect })
+              : addRoom(basePlan.id, { name, kind: 'poly', points: roomModal.points });
+          const testRoom =
+            roomModal.kind === 'rect'
+              ? { id, name, kind: 'rect', ...roomModal.rect }
+              : { id, name, kind: 'poly', points: roomModal.points };
           const updates: Record<string, string | undefined> = {};
           for (const obj of basePlan.objects) {
-            if (isPointInRoom({ id, name, ...rect }, obj.x, obj.y)) {
+            if (isPointInRoom(testRoom, obj.x, obj.y)) {
               updates[obj.id] = id;
             }
           }
@@ -1960,13 +2093,25 @@ const PlanView = ({ planId }: Props) => {
       <SearchResultsModal
         open={searchResultsOpen}
         term={searchResultsTerm}
-        results={(renderPlan?.objects || []).filter((o) => searchResultsIds.includes(o.id))}
-        onClose={() => setSearchResultsOpen(false)}
-        onSelect={(objectId) => {
+        objectResults={(renderPlan?.objects || []).filter((o) => searchResultsIds.includes(o.id))}
+        roomResults={(renderPlan?.rooms || []).filter((r) => searchRoomIds.includes(r.id))}
+        onClose={() => {
+          setSearchResultsOpen(false);
+          setSearchRoomIds([]);
+          setSearchResultsIds([]);
+        }}
+        onSelectObject={(objectId) => {
           const obj = renderPlan.objects.find((o) => o.id === objectId);
           if (!obj) return;
           setSelectedObject(obj.id);
           triggerHighlight(obj.id);
+        }}
+        onSelectRoom={(roomId) => {
+          const room = (renderPlan.rooms || []).find((r) => r.id === roomId);
+          if (!room) return;
+          clearSelection();
+          setSelectedRoomId(room.id);
+          setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
         }}
       />
     </div>

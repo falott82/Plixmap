@@ -40,6 +40,17 @@ const verifyPassword = (password, saltB64, hashB64) => {
   return crypto.timingSafeEqual(computed, expected);
 };
 
+const isStrongPassword = (password) => {
+  if (!password || typeof password !== 'string') return false;
+  const s = password;
+  if (s.length < 8) return false;
+  if (!/[a-z]/.test(s)) return false;
+  if (!/[A-Z]/.test(s)) return false;
+  if (!/[0-9]/.test(s)) return false;
+  if (!/[^A-Za-z0-9]/.test(s)) return false;
+  return true;
+};
+
 const signSession = (secret, payload) => {
   const json = JSON.stringify(payload);
   const body = base64UrlEncode(Buffer.from(json, 'utf8'));
@@ -83,21 +94,21 @@ const ensureBootstrapAdmins = (db) => {
   if (count > 0) return;
   const now = Date.now();
   const insert = db.prepare(
-    `INSERT INTO users (id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, language, firstName, lastName, phone, email, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, 1, 1, 1, 0, 'it', ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO users (id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, mustChangePassword, firstName, lastName, phone, email, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, 1, 1, 1, 0, 'it', ?, 1, ?, ?, ?, ?, ?, ?)`
   );
-  const createAdmin = (username, password, firstName, lastName, email) => {
+  const createSuperAdmin = (username, password, defaultPlanId, firstName, lastName, email) => {
     const { salt, hash } = hashPassword(password);
-    insert.run(crypto.randomUUID(), username, salt, hash, firstName, lastName, '', email, now, now);
+    insert.run(crypto.randomUUID(), username, salt, hash, defaultPlanId, firstName, lastName, '', email, now, now);
   };
-  createAdmin('admin', 'C3g_room01', 'Admin', 'Deskly', 'admin@deskly.local');
-  createAdmin('admin2', 'C3g_backup01', 'Admin', 'Backup', 'admin2@deskly.local');
+  createSuperAdmin('superadmin', 'deskly', 'seed-plan-floor-0', 'Super', 'Admin', 'superadmin@deskly.local');
 };
 
 module.exports = {
   parseCookies,
   hashPassword,
   verifyPassword,
+  isStrongPassword,
   signSession,
   verifySession,
   setSessionCookie,
