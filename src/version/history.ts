@@ -9,6 +9,33 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '0.11.2',
+    date: '2025-12-16',
+    type: 'fix',
+    notes: [
+      n(
+        'Traduzioni: revisione estesa UI (modali, watermark, bottoni) + refresh pagina quando si cambia lingua',
+        'Translations: extended UI review (modals, watermarks, buttons) + full page refresh when switching language'
+      ),
+      n(
+        'Clienti: “Nome breve” obbligatorio (max 12, tooltip) + “Ragione sociale estesa” obbligatoria + PDF allegati apribili in nuova tab',
+        'Clients: required “Short name” (max 12, tooltip) + required “Full legal name” + PDF attachments can be opened in a new tab'
+      ),
+      n(
+        'Sedi: coordinate opzionali con link Google Maps (anche da menu contestuale)',
+        'Sites: optional coordinates with Google Maps link (also from context menu)'
+      ),
+      n(
+        'Sidebar: ricerca client/sede/planimetria e ordinamento clienti via drag&drop salvato per utente',
+        'Sidebar: search client/site/floor plan and per-user client ordering via drag&drop'
+      ),
+      n(
+        'Upload planimetrie: indicati formati accettati (JPG/PNG) e input bloccato su quei tipi',
+        'Floor plan upload: accepted formats shown (JPG/PNG) and file inputs restricted to those types'
+      )
+    ]
+  },
+  {
     version: '0.11.1',
     date: '2025-12-16',
     type: 'fix',

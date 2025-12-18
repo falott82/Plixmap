@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, RefreshCw } from 'lucide-react';
 import { fetchAuditLogs, AuditLogRow } from '../../api/auth';
 import { useToastStore } from '../../store/useToast';
+import { useT } from '../../i18n/useT';
 
 const formatTs = (ts: number) => {
   const d = new Date(ts);
@@ -10,6 +11,7 @@ const formatTs = (ts: number) => {
 
 const LogsPanel = () => {
   const { push } = useToastStore();
+  const t = useT();
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<AuditLogRow[]>([]);
@@ -21,7 +23,7 @@ const LogsPanel = () => {
       const res = await fetchAuditLogs({ q: query.trim() || undefined, limit });
       setRows(res.rows);
     } catch {
-      push('Errore caricamento logs', 'danger');
+      push(t({ it: 'Errore caricamento log', en: 'Failed to load logs' }), 'danger');
     } finally {
       setLoading(false);
     }
@@ -134,7 +136,9 @@ const LogsPanel = () => {
             </div>
           ))
         ) : (
-          <div className="px-4 py-6 text-sm text-slate-600">{query.trim() ? 'Nessun risultato.' : 'Nessun log.'}</div>
+          <div className="px-4 py-6 text-sm text-slate-600">
+            {query.trim() ? t({ it: 'Nessun risultato.', en: 'No results.' }) : t({ it: 'Nessun log.', en: 'No logs.' })}
+          </div>
         )}
       </div>
     </div>

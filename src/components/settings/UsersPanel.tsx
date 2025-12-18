@@ -28,7 +28,7 @@ const UsersPanel = () => {
       const res = await adminFetchUsers();
       setUsers(res.users);
     } catch {
-      push('Errore caricamento utenti', 'danger');
+      push(t({ it: 'Errore caricamento utenti', en: 'Failed to load users' }), 'danger');
     } finally {
       setLoading(false);
     }

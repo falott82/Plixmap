@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
+import { useT } from '../../i18n/useT';
 
 interface Props {
   open: boolean;
@@ -19,6 +20,7 @@ const ViewModal = ({
   initialDescription = '',
   initialDefault = false
 }: Props) => {
+  const t = useT();
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
   const [isDefault, setIsDefault] = useState(initialDefault);
@@ -73,14 +75,14 @@ const ViewModal = ({
             >
               <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
                 <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">Salva vista</Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                  <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Salva vista', en: 'Save view' })}</Dialog.Title>
+                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
                 <div className="mt-4 space-y-3">
                   <label className="block text-sm font-medium text-slate-700">
-                    Nome vista
+                    {t({ it: 'Nome vista', en: 'View name' })} {isDefault ? null : <span className="text-rose-600">*</span>}
                     <input
                       value={name}
                       onChange={(e) => {
@@ -90,16 +92,16 @@ const ViewModal = ({
                       }}
                       disabled={isDefault}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                      placeholder="Es. Sala riunioni"
+                      placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
                     />
                   </label>
                   <label className="block text-sm font-medium text-slate-700">
-                    Descrizione (opzionale)
+                    {t({ it: 'Descrizione (opzionale)', en: 'Description (optional)' })}
                     <textarea
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                      placeholder="Es. Zoom su stanza A, lato nord"
+                      placeholder={t({ it: 'Es. Zoom su stanza A, lato nord', en: 'e.g. Zoom on room A, north side' })}
                       rows={3}
                     />
                   </label>
@@ -122,7 +124,10 @@ const ViewModal = ({
                     Default
                   </label>
                   <div className="text-xs text-slate-500">
-                    Se impostata come default, questa vista verrà caricata automaticamente per questa planimetria.
+                    {t({
+                      it: 'Se impostata come default, questa vista verrà caricata automaticamente per questa planimetria.',
+                      en: 'If set as default, this view will be loaded automatically for this floor plan.'
+                    })}
                   </div>
                 </div>
                 <div className="mt-5 flex justify-end gap-2">
@@ -130,13 +135,13 @@ const ViewModal = ({
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    Annulla
+                    {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     onClick={handleSave}
                     className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                   >
-                    Salva
+                    {t({ it: 'Salva', en: 'Save' })}
                   </button>
                 </div>
               </Dialog.Panel>

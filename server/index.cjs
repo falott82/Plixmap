@@ -278,12 +278,18 @@ app.post('/api/auth/first-run', requireAuth, (req, res) => {
 });
 
 app.put('/api/auth/me', requireAuth, (req, res) => {
-  const { language, defaultPlanId } = req.body || {};
+  const { language, defaultPlanId, clientOrder } = req.body || {};
   const nextLanguage = language === 'en' ? 'en' : language === 'it' ? 'it' : undefined;
   const nextDefaultPlanId =
     typeof defaultPlanId === 'string' ? defaultPlanId : defaultPlanId === null ? null : undefined;
+  const nextClientOrder =
+    Array.isArray(clientOrder) && clientOrder.every((x) => typeof x === 'string')
+      ? [...new Set(clientOrder.map((x) => String(x)))]
+      : clientOrder === null
+        ? []
+        : undefined;
 
-  if (nextLanguage === undefined && nextDefaultPlanId === undefined) {
+  if (nextLanguage === undefined && nextDefaultPlanId === undefined && nextClientOrder === undefined) {
     res.status(400).json({ error: 'Invalid payload' });
     return;
   }
@@ -316,6 +322,10 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
   if (nextDefaultPlanId !== undefined) {
     sets.push('defaultPlanId = ?');
     params.push(nextDefaultPlanId);
+  }
+  if (nextClientOrder !== undefined) {
+    sets.push('clientOrderJson = ?');
+    params.push(JSON.stringify(nextClientOrder));
   }
   sets.push('updatedAt = ?');
   params.push(now);

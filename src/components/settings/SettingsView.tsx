@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderPlus, Home, Map, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown } from 'lucide-react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -42,7 +42,7 @@ const SettingsView = () => {
   const [selectedClient, setSelectedClient] = useState<string | undefined>(clients[0]?.id);
   const [selectedSite, setSelectedSite] = useState<string | undefined>(clients[0]?.sites[0]?.id);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; type: 'client' | 'site' | 'plan' } | null>(null);
-  const [siteModal, setSiteModal] = useState<{ siteId?: string; initialName?: string } | null>(null);
+  const [siteModal, setSiteModal] = useState<{ siteId?: string; initialName?: string; initialCoords?: string } | null>(null);
   const [editingPlan, setEditingPlan] = useState<string | null>(null);
   const [addPlanOpen, setAddPlanOpen] = useState(false);
   const [replaceModal, setReplaceModal] = useState<
@@ -90,6 +90,19 @@ const SettingsView = () => {
     () => currentClient?.sites.find((s) => s.id === selectedSite) || currentClient?.sites[0],
     [currentClient, selectedSite]
   );
+
+  const parseCoords = (value: string | undefined): { lat: number; lng: number } | null => {
+    const s = String(value || '').trim();
+    if (!s) return null;
+    const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(s);
+    if (!m) return null;
+    const lat = Number(m[1]);
+    const lng = Number(m[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (lat < -90 || lat > 90) return null;
+    if (lng < -180 || lng > 180) return null;
+    return { lat, lng };
+  };
   const sortedFloorPlans = useMemo(() => {
     const list = currentSite?.floorPlans || [];
     return [...list].sort((a, b) => ((a as any).order ?? 0) - ((b as any).order ?? 0));
@@ -327,10 +340,22 @@ const SettingsView = () => {
                   >
                     <div className="truncate text-sm font-semibold text-ink">{site.name}</div>
                     <div className="flex items-center gap-2">
+                      {parseCoords((site as any).coords) ? (
+                        <a
+                          href={`https://www.google.com/maps?q=${parseCoords((site as any).coords)!.lat},${parseCoords((site as any).coords)!.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                          title={t({ it: 'Apri su Google Maps', en: 'Open in Google Maps' })}
+                        >
+                          <MapPinned size={14} className="text-emerald-700" />
+                        </a>
+                      ) : null}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSiteModal({ siteId: site.id, initialName: site.name });
+                          setSiteModal({ siteId: site.id, initialName: site.name, initialCoords: (site as any).coords || '' });
                         }}
                         title={t({ it: 'Modifica', en: 'Edit' })}
                         className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
@@ -430,7 +455,7 @@ const SettingsView = () => {
                         <Upload size={14} />
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/png,image/jpeg"
                           className="hidden"
                           onChange={(e) => handleReplacePlanImage(plan.id, e.target.files)}
                         />
@@ -472,11 +497,11 @@ const SettingsView = () => {
           const normalized = payload.name.trim().toLowerCase();
           const exists = (currentSite.floorPlans || []).some((p) => p.name.trim().toLowerCase() === normalized);
           if (exists) {
-            push('Esiste già una planimetria con questo nome', 'danger');
+            push(t({ it: 'Esiste già una planimetria con questo nome', en: 'A floor plan with this name already exists' }), 'danger');
             return;
           }
           addFloorPlan(currentSite.id, payload.name, payload.imageUrl, payload.width, payload.height);
-          push('Planimetria creata', 'success');
+          push(t({ it: 'Planimetria creata', en: 'Floor plan created' }), 'success');
         }}
       />
 
@@ -536,14 +561,14 @@ const SettingsView = () => {
         onSubmit={(payload) => {
           if (clientModal?.client) {
             updateClient(clientModal.client.id, payload);
-            push('Cliente aggiornato', 'success');
+            push(t({ it: 'Cliente aggiornato', en: 'Client updated' }), 'success');
             setClientModal(null);
             return;
           }
           const id = addClient(payload.name);
           updateClient(id, payload);
           setSelectedClient(id);
-          push('Cliente creato', 'success');
+          push(t({ it: 'Cliente creato', en: 'Client created' }), 'success');
           setClientModal(null);
         }}
       />
@@ -551,17 +576,18 @@ const SettingsView = () => {
       <SiteModal
         open={!!siteModal}
         initialName={siteModal?.initialName || ''}
+        initialCoords={siteModal?.initialCoords || ''}
         title={siteModal?.siteId ? t({ it: 'Modifica sede', en: 'Edit site' }) : t({ it: 'Nuova sede', en: 'New site' })}
         onClose={() => setSiteModal(null)}
-        onSubmit={({ name }) => {
+        onSubmit={({ name, coords }) => {
           if (!currentClient) return;
           if (siteModal?.siteId) {
-            updateSite(siteModal.siteId, name);
+            updateSite(siteModal.siteId, { name, coords });
             push(t({ it: 'Sede aggiornata', en: 'Site updated' }), 'success');
             setSiteModal(null);
             return;
           }
-          const id = addSite(currentClient.id, name);
+          const id = addSite(currentClient.id, { name, coords });
           setSelectedSite(id);
           push(t({ it: 'Sede creata', en: 'Site created' }), 'success');
           setSiteModal(null);

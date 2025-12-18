@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Client } from '../../store/types';
 import { Permission } from '../../api/auth';
+import { useT } from '../../i18n/useT';
 
 type Access = '' | 'ro' | 'rw';
 
@@ -13,6 +14,7 @@ interface Props {
 const keyOf = (scopeType: Permission['scopeType'], scopeId: string) => `${scopeType}:${scopeId}`;
 
 const PermissionsEditor = ({ clients, value, onChange }: Props) => {
+  const t = useT();
   const entries = useMemo(() => {
     const out: { key: string; scopeType: Permission['scopeType']; scopeId: string; label: string; depth: number }[] = [];
     for (const c of clients) {
@@ -29,7 +31,7 @@ const PermissionsEditor = ({ clients, value, onChange }: Props) => {
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3">
-      <div className="text-xs font-semibold uppercase text-slate-500">Permessi</div>
+      <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Permessi', en: 'Permissions' })}</div>
       <div className="mt-2 max-h-72 overflow-auto rounded-xl border border-slate-100">
         {entries.length ? (
           entries.map((e) => (
@@ -49,20 +51,25 @@ const PermissionsEditor = ({ clients, value, onChange }: Props) => {
                   onChange(next);
                 }}
                 className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
-                title="Permesso"
+                title={t({ it: 'Permesso', en: 'Permission' })}
               >
-                <option value="">Nessuno</option>
-                <option value="ro">Sola lettura</option>
-                <option value="rw">Lettura+scrittura</option>
+                <option value="">{t({ it: 'Nessuno', en: 'None' })}</option>
+                <option value="ro">{t({ it: 'Sola lettura', en: 'Read-only' })}</option>
+                <option value="rw">{t({ it: 'Lettura+scrittura', en: 'Read/write' })}</option>
               </select>
             </div>
           ))
         ) : (
-          <div className="px-3 py-3 text-sm text-slate-600">Nessun cliente disponibile.</div>
+          <div className="px-3 py-3 text-sm text-slate-600">
+            {t({ it: 'Nessun cliente disponibile.', en: 'No clients available.' })}
+          </div>
         )}
       </div>
       <div className="mt-2 text-xs text-slate-500">
-        Nota: il permesso più specifico vince (planimetria &gt; sede &gt; cliente).
+        {t({
+          it: 'Nota: il permesso più specifico vince (planimetria > sede > cliente).',
+          en: 'Note: the most specific permission wins (floor plan > site > client).'
+        })}
       </div>
     </div>
   );
@@ -88,4 +95,3 @@ export const permissionsListToMap = (list: Permission[] | undefined): Record<str
 };
 
 export default PermissionsEditor;
-

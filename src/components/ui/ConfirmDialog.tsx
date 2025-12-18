@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
+import { useT } from '../../i18n/useT';
 
 interface Props {
   open: boolean;
@@ -18,11 +19,15 @@ const ConfirmDialog = ({
   description,
   onCancel,
   onConfirm,
-  confirmLabel = 'Conferma',
-  cancelLabel = 'Annulla'
-}: Props) => (
-  <Transition appear show={open} as={Fragment}>
-    <Dialog as="div" className="relative z-50" onClose={onCancel}>
+  confirmLabel,
+  cancelLabel
+}: Props) => {
+  const t = useT();
+  const okLabel = confirmLabel || t({ it: 'Conferma', en: 'Confirm' });
+  const noLabel = cancelLabel || t({ it: 'Annulla', en: 'Cancel' });
+  return (
+    <Transition appear show={open} as={Fragment}>
+      <Dialog as="div" className="relative z-50" onClose={onCancel}>
       <Transition.Child
         as={Fragment}
         enter="ease-out duration-150"
@@ -49,7 +54,11 @@ const ConfirmDialog = ({
             <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-card transition-all">
               <div className="flex items-center justify-between">
                 <Dialog.Title className="text-lg font-semibold text-ink">{title}</Dialog.Title>
-                <button onClick={onCancel} className="text-slate-400 hover:text-ink">
+                <button
+                  onClick={onCancel}
+                  className="text-slate-400 hover:text-ink"
+                  title={t({ it: 'Chiudi', en: 'Close' })}
+                >
                   <X size={18} />
                 </button>
               </div>
@@ -63,13 +72,13 @@ const ConfirmDialog = ({
                   onClick={onCancel}
                   className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  {cancelLabel}
+                  {noLabel}
                 </button>
                 <button
                   onClick={onConfirm}
                   className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                 >
-                  {confirmLabel}
+                  {okLabel}
                 </button>
               </div>
             </Dialog.Panel>
@@ -78,6 +87,7 @@ const ConfirmDialog = ({
       </div>
     </Dialog>
   </Transition>
-);
+  );
+};
 
 export default ConfirmDialog;

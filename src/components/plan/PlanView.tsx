@@ -296,7 +296,8 @@ const PlanView = ({ planId }: Props) => {
 
   const latestRev = useMemo(() => {
     const revs: any[] = plan?.revisions || [];
-    const first = revs[0];
+    const sorted = [...revs].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0));
+    const first = sorted[0];
     if (first && typeof first.revMajor === 'number' && typeof first.revMinor === 'number') {
       return { major: first.revMajor, minor: first.revMinor };
     }
@@ -315,6 +316,26 @@ const PlanView = ({ planId }: Props) => {
     views?: any[];
     rooms?: any[];
   } | null>(null);
+  const entrySnapshotRef = useRef<{
+    imageUrl: string;
+    width?: number;
+    height?: number;
+    objects: any[];
+    views?: any[];
+    rooms?: any[];
+  } | null>(null);
+  const touchedRef = useRef(false);
+  const [touchedTick, setTouchedTick] = useState(0);
+  const markTouched = useCallback(() => {
+    if (touchedRef.current) return;
+    touchedRef.current = true;
+    setTouchedTick((x) => x + 1);
+  }, []);
+  const resetTouched = useCallback(() => {
+    if (!touchedRef.current) return;
+    touchedRef.current = false;
+    setTouchedTick((x) => x + 1);
+  }, []);
 
   const toSnapshot = useCallback((p: any) => {
     return {
@@ -329,6 +350,9 @@ const PlanView = ({ planId }: Props) => {
 
   useEffect(() => {
     baselineSnapshotRef.current = null;
+    entrySnapshotRef.current = null;
+    touchedRef.current = false;
+    setTouchedTick((x) => x + 1);
   }, [planId]);
 
   useEffect(() => {
@@ -338,9 +362,9 @@ const PlanView = ({ planId }: Props) => {
       baselineSnapshotRef.current = null;
       return;
     }
-    if (!baselineSnapshotRef.current) {
-      baselineSnapshotRef.current = toSnapshot(plan);
-    }
+    const snap = toSnapshot(plan);
+    // Keep baseline aligned with background normalizations until the user edits.
+    if (!baselineSnapshotRef.current || !touchedRef.current) baselineSnapshotRef.current = snap;
   }, [plan, toSnapshot]);
 
   const samePlanSnapshot = (
@@ -413,6 +437,35 @@ const PlanView = ({ planId }: Props) => {
     return true;
   };
 
+  const samePlanSnapshotIgnoringDims = useCallback(
+    (
+      a: {
+        imageUrl: string;
+        width?: number;
+        height?: number;
+        objects: any[];
+        views?: any[];
+        rooms?: any[];
+      },
+      b: {
+        imageUrl: string;
+        width?: number;
+        height?: number;
+        objects: any[];
+        views?: any[];
+        rooms?: any[];
+      }
+    ) => samePlanSnapshot({ ...a, width: undefined, height: undefined }, { ...b, width: undefined, height: undefined }),
+    []
+  );
+
+  // Track plan state when the user enters it. Used for the navigation prompt.
+  useEffect(() => {
+    if (!plan) return;
+    const snap = toSnapshot(plan);
+    if (!entrySnapshotRef.current || !touchedRef.current) entrySnapshotRef.current = snap;
+  }, [plan, toSnapshot]);
+
   const hasUnsavedChanges = useMemo(() => {
     if (!plan) return false;
     const revisions = plan.revisions || [];
@@ -421,7 +474,7 @@ const PlanView = ({ planId }: Props) => {
       if (!base) return false;
       return !samePlanSnapshot(toSnapshot(plan), base);
     }
-    const latest: any = revisions[0];
+    const latest: any = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))[0];
     return !samePlanSnapshot(toSnapshot(plan), {
       imageUrl: latest.imageUrl,
       width: latest.width,
@@ -431,6 +484,38 @@ const PlanView = ({ planId }: Props) => {
       rooms: latest.rooms
     });
   }, [plan, toSnapshot]);
+
+  const hasLocalEdits = useMemo(() => {
+    if (!plan) return false;
+    const entry = entrySnapshotRef.current;
+    if (!entry) return false;
+    return !samePlanSnapshotIgnoringDims(entry, toSnapshot(plan));
+  }, [plan, samePlanSnapshotIgnoringDims, toSnapshot]);
+
+  const hasNavigationEdits = useMemo(
+    () => touchedRef.current && hasLocalEdits,
+    // touchedRef is a ref; touchedTick is used to re-evaluate when touched changes.
+    [hasLocalEdits, touchedTick]
+  );
+
+  useEffect(() => {
+    // If the only change is an automatic width/height fill (e.g. measured from image), do not treat it as
+    // a "revision-worthy" unsaved change when the plan has no revision history yet.
+    if (!plan) return;
+    const revisions = plan.revisions || [];
+    if (revisions.length) return;
+    const base = baselineSnapshotRef.current;
+    if (!base) return;
+    const current = toSnapshot(plan);
+    if (samePlanSnapshot(current, base)) return;
+
+    const baseDimsMissing = (base.width ?? null) === null && (base.height ?? null) === null;
+    const currentHasDims = typeof current.width === 'number' || typeof current.height === 'number';
+    if (!baseDimsMissing || !currentHasDims) return;
+    if (!samePlanSnapshotIgnoringDims(base, current)) return;
+
+    baselineSnapshotRef.current = current;
+  }, [plan, samePlanSnapshotIgnoringDims, toSnapshot]);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -449,7 +534,8 @@ const PlanView = ({ planId }: Props) => {
     if (!plan) return;
     const revisions = plan.revisions || [];
     if (revisions.length) {
-      restoreRevision(plan.id, revisions[0].id);
+      const latest = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))[0];
+      if (latest?.id) restoreRevision(plan.id, latest.id);
       return;
     }
     const base = baselineSnapshotRef.current;
@@ -465,11 +551,11 @@ const PlanView = ({ planId }: Props) => {
   }, [plan, restoreRevision, setFloorPlanContent]);
 
   useEffect(() => {
-    setPlanDirty?.(planId, !!hasUnsavedChanges);
+    setPlanDirty?.(planId, !!hasNavigationEdits);
     return () => {
       setPlanDirty?.(planId, false);
     };
-  }, [hasUnsavedChanges, planId, setPlanDirty]);
+  }, [hasNavigationEdits, planId, setPlanDirty]);
 
   useEffect(() => {
     if (!pendingSaveNavigateTo) return;
@@ -478,14 +564,14 @@ const PlanView = ({ planId }: Props) => {
       clearPendingSaveNavigate?.();
       return;
     }
-    if (!hasUnsavedChanges) {
+    if (!hasNavigationEdits) {
       navigate(pendingSaveNavigateTo);
       clearPendingSaveNavigate?.();
       return;
     }
     pendingNavigateRef.current = pendingSaveNavigateTo;
     setSaveRevisionOpen(true);
-  }, [clearPendingSaveNavigate, hasUnsavedChanges, isReadOnly, navigate, pendingSaveNavigateTo]);
+  }, [clearPendingSaveNavigate, hasNavigationEdits, isReadOnly, navigate, pendingSaveNavigateTo]);
   const contextObject = useMemo(() => {
     if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return undefined;
     return renderPlan.objects.find((o) => o.id === contextMenu.id);
@@ -584,6 +670,7 @@ const PlanView = ({ planId }: Props) => {
 
   const handleStageMove = useCallback(
     (id: string, x: number, y: number) => {
+      if (!isReadOnlyRef.current) markTouched();
       moveObject(id, x, y);
       if (isReadOnlyRef.current) return;
       const currentPlan = planRef.current as FloorPlan | undefined;
@@ -595,7 +682,7 @@ const PlanView = ({ planId }: Props) => {
         updateObject(id, { roomId: nextRoomId });
       }
     },
-    [moveObject, updateObject]
+    [markTouched, moveObject, updateObject]
   );
 
   const handleObjectContextMenu = useCallback(
@@ -622,7 +709,7 @@ const PlanView = ({ planId }: Props) => {
   const handleSaveView = (payload: { name: string; description?: string; isDefault: boolean }) => {
     if (!plan || isReadOnly) return;
     const id = addView(plan.id, { ...payload, zoom, pan, isDefault: payload.isDefault });
-    push('Vista salvata', 'success');
+    push(t({ it: 'Vista salvata', en: 'View saved' }), 'success');
     setSelectedViewId(id);
     setViewsMenuOpen(false);
   };
@@ -632,11 +719,11 @@ const PlanView = ({ planId }: Props) => {
     if (!current) return;
     const def = current.views?.find((v) => v.isDefault);
     if (!def) {
-      push('Nessuna vista di default', 'info');
+      push(t({ it: 'Nessuna vista di default', en: 'No default view' }), 'info');
       return;
     }
     applyView(def);
-    push('Vista default caricata', 'success');
+    push(t({ it: 'Vista di default caricata', en: 'Default view loaded' }), 'success');
   };
 
   const openDuplicate = (objectId: string) => {
@@ -909,6 +996,7 @@ const PlanView = ({ planId }: Props) => {
   const handleCreate = (payload: { name: string; description?: string }) => {
     if (!plan || !modalState || isReadOnly) return;
     if (modalState.mode === 'create') {
+      markTouched();
       const id = addObject(
         plan.id,
         modalState.type,
@@ -923,6 +1011,7 @@ const PlanView = ({ planId }: Props) => {
       push('Oggetto creato', 'success');
     }
     if (modalState.mode === 'duplicate') {
+      markTouched();
       const base = plan.objects.find((o) => o.id === modalState.objectId);
       const scale = base?.scale ?? 1;
       const id = addObject(
@@ -944,6 +1033,7 @@ const PlanView = ({ planId }: Props) => {
 
   const handleUpdate = (payload: { name: string; description?: string }) => {
     if (!modalState || modalState.mode !== 'edit' || isReadOnly) return;
+    markTouched();
     updateObject(modalState.objectId, payload);
     push('Oggetto aggiornato', 'success');
   };
@@ -1032,27 +1122,31 @@ const PlanView = ({ planId }: Props) => {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs font-semibold uppercase text-slate-500">
-            {client?.name} → {site?.name}
+            {client?.shortName || client?.name} → {site?.name}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-3">
             <h1 className="truncate text-2xl font-semibold text-ink">{renderPlan.name}</h1>
             {isReadOnly ? (
               <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
-                {activeRevision ? `Sola lettura: ${activeRevision.name}` : 'Sola lettura (permessi)'}
+                {activeRevision
+                  ? t({ it: `Sola lettura: ${activeRevision.name}`, en: `Read-only: ${activeRevision.name}` })
+                  : t({ it: 'Sola lettura (permessi)', en: 'Read-only (permissions)' })}
               </span>
             ) : null}
             <div className="relative">
               <button
                 onClick={() => setCountsOpen((v) => !v)}
                 className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                title="Numero oggetti"
+                title={t({ it: 'Numero oggetti', en: 'Object count' })}
               >
-                {renderPlan.objects.length} oggetti
+                {t({ it: `${renderPlan.objects.length} oggetti`, en: `${renderPlan.objects.length} objects` })}
               </button>
 	              {countsOpen ? (
 	                <div className="absolute left-0 z-50 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
 	                  <div className="flex items-center justify-between px-2 pb-2">
-	                    <div className="text-sm font-semibold text-ink">Dettaglio oggetti</div>
+	                    <div className="text-sm font-semibold text-ink">
+                        {t({ it: 'Dettaglio oggetti', en: 'Objects' })}
+                      </div>
 	                    <button onClick={() => setCountsOpen(false)} className="text-slate-400 hover:text-ink">
 	                      <X size={14} />
 	                    </button>
@@ -1061,7 +1155,7 @@ const PlanView = ({ planId }: Props) => {
 	                    <input
 	                      value={objectListQuery}
 	                      onChange={(e) => setObjectListQuery(e.target.value)}
-	                      placeholder="Cerca oggetto…"
+	                      placeholder={t({ it: 'Cerca oggetto…', en: 'Search object…' })}
 	                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
 	                    />
 	                  </div>
@@ -1092,7 +1186,9 @@ const PlanView = ({ planId }: Props) => {
 		                          );
 		                        })}
 	                        {!objectListMatches.length ? (
-	                          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">Nessun risultato.</div>
+	                          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                              {t({ it: 'Nessun risultato.', en: 'No results.' })}
+                            </div>
 	                        ) : null}
 	                      </>
 	                    ) : (
@@ -1134,7 +1230,9 @@ const PlanView = ({ planId }: Props) => {
 		                          </div>
 		                        ))}
 	                        {!renderPlan.objects.length ? (
-	                          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">Nessun oggetto.</div>
+	                          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                              {t({ it: 'Nessun oggetto.', en: 'No objects.' })}
+                            </div>
 	                        ) : null}
 	                      </>
 	                    )}
@@ -1228,12 +1326,14 @@ const PlanView = ({ planId }: Props) => {
                                 }`}
                               >
                                 <div className="truncate">{room.name}</div>
-                                <div className="text-xs text-slate-500">{assigned.length} oggetti</div>
+                                <div className="text-xs text-slate-500">
+                                  {t({ it: `${assigned.length} oggetti`, en: `${assigned.length} objects` })}
+                                </div>
                               </button>
                               {!isReadOnly ? (
                                 <div className="flex items-center gap-1">
                                   <button
-                                    title="Rinomina"
+                                    title={t({ it: 'Rinomina', en: 'Rename' })}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       openEditRoom(room.id);
@@ -1244,7 +1344,7 @@ const PlanView = ({ planId }: Props) => {
                                     <Pencil size={14} />
                                   </button>
                                   <button
-                                    title="Elimina"
+                                    title={t({ it: 'Elimina', en: 'Delete' })}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setConfirmDeleteRoomId(room.id);
@@ -1280,7 +1380,7 @@ const PlanView = ({ planId }: Props) => {
                                   </div>
                                 ) : (
                                   <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                                    Nessun oggetto in questa stanza.
+                                    {t({ it: 'Nessun oggetto in questa stanza.', en: 'No objects in this room.' })}
                                   </div>
                                 )}
                               </div>
@@ -1290,7 +1390,10 @@ const PlanView = ({ planId }: Props) => {
                       })
                     ) : (
                       <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                        Nessuna stanza. Crea una stanza per organizzare gli oggetti.
+                        {t({
+                          it: 'Nessuna stanza. Crea una stanza per organizzare gli oggetti.',
+                          en: 'No rooms. Create a room to organize objects.'
+                        })}
                       </div>
                     )}
                   </div>
@@ -1300,17 +1403,19 @@ const PlanView = ({ planId }: Props) => {
             <div className="ml-1 flex h-9 items-center gap-2">
               {selectedObjectId ? (
                 <>
-                  <span className="text-sm font-semibold text-slate-600">Selezionato:</span>
+                  <span className="text-sm font-semibold text-slate-600">
+                    {t({ it: 'Selezionato:', en: 'Selected:' })}
+                  </span>
                   <span className="max-w-[220px] truncate rounded-full bg-primary/10 px-2 py-1 text-sm font-semibold text-primary">
                     {selectedObjectIds.length > 1
-                      ? `${selectedObjectIds.length} elementi`
+                      ? t({ it: `${selectedObjectIds.length} elementi`, en: `${selectedObjectIds.length} items` })
                       : renderPlan.objects.find((o) => o.id === selectedObjectId)?.name}
                   </span>
                   <button
                     onClick={() => handleEdit(selectedObjectId)}
                     disabled={isReadOnly}
                     className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
-                    title="Modifica"
+                    title={t({ it: 'Modifica', en: 'Edit' })}
                   >
                     <Pencil size={14} />
                   </button>
@@ -1318,7 +1423,7 @@ const PlanView = ({ planId }: Props) => {
                     onClick={() => setConfirmDelete([...selectedObjectIds])}
                     disabled={isReadOnly}
                     className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                    title="Elimina"
+                    title={t({ it: 'Elimina', en: 'Delete' })}
                   >
                     <Trash size={14} />
                   </button>
@@ -1326,23 +1431,23 @@ const PlanView = ({ planId }: Props) => {
               ) : (
                 selectedRoomId ? (
                   <>
-                    <span className="text-sm font-semibold text-slate-600">Stanza:</span>
+                    <span className="text-sm font-semibold text-slate-600">{t({ it: 'Stanza:', en: 'Room:' })}</span>
                     <span className="max-w-[220px] truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
-                      {rooms.find((r) => r.id === selectedRoomId)?.name || 'Stanza'}
+                      {rooms.find((r) => r.id === selectedRoomId)?.name || t({ it: 'Stanza', en: 'Room' })}
                     </span>
                     {!isReadOnly ? (
                       <>
                         <button
                           onClick={() => openEditRoom(selectedRoomId)}
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
-                          title="Rinomina stanza"
+                          title={t({ it: 'Rinomina stanza', en: 'Rename room' })}
                         >
                           <Pencil size={14} />
                         </button>
                         <button
                           onClick={() => setConfirmDeleteRoomId(selectedRoomId)}
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                          title="Elimina stanza"
+                          title={t({ it: 'Elimina stanza', en: 'Delete room' })}
                         >
                           <Trash size={14} />
                         </button>
@@ -1350,7 +1455,7 @@ const PlanView = ({ planId }: Props) => {
                     ) : null}
                   </>
                 ) : (
-                  <span className="text-sm text-slate-400">Nessuna selezione</span>
+                  <span className="text-sm text-slate-400">{t({ it: 'Nessuna selezione', en: 'No selection' })}</span>
                 )
               )}
             </div>
@@ -1363,7 +1468,7 @@ const PlanView = ({ planId }: Props) => {
               onClick={() => {
                 if (!plan) return;
                 if (!hasUnsavedChanges) {
-                  push('Nessuna modifica da salvare', 'info');
+                  push(t({ it: 'Nessuna modifica da salvare', en: 'No changes to save' }), 'info');
                   return;
                 }
                 setSaveRevisionOpen(true);
@@ -1398,8 +1503,12 @@ const PlanView = ({ planId }: Props) => {
             {viewsMenuOpen ? (
               <div className="absolute right-0 z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
                 <div className="flex items-center justify-between px-2 pb-2">
-                  <div className="text-sm font-semibold text-ink">Viste salvate</div>
-                  <button onClick={() => setViewsMenuOpen(false)} className="text-slate-400 hover:text-ink" title="Chiudi">
+                  <div className="text-sm font-semibold text-ink">{t({ it: 'Viste salvate', en: 'Saved views' })}</div>
+                  <button
+                    onClick={() => setViewsMenuOpen(false)}
+                    className="text-slate-400 hover:text-ink"
+                    title={t({ it: 'Chiudi', en: 'Close' })}
+                  >
                     <X size={14} />
                   </button>
                 </div>
@@ -1447,7 +1556,7 @@ const PlanView = ({ planId }: Props) => {
                           <Star size={14} className={view.isDefault ? 'text-amber-500' : 'text-slate-400'} />
                         </button>
                         <button
-                          title="Elimina vista"
+                          title={t({ it: 'Elimina vista', en: 'Delete view' })}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (view.isDefault && (basePlan.views || []).length > 1) {
@@ -1472,7 +1581,7 @@ const PlanView = ({ planId }: Props) => {
                     }}
                     className="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                   >
-                    Salva nuova vista
+                    {t({ it: 'Salva nuova vista', en: 'Save new view' })}
                   </button>
                 </div>
               </div>
@@ -1546,6 +1655,7 @@ const PlanView = ({ planId }: Props) => {
                     }}
                     onUpdateRoom={(roomId, payload) => {
                       if (isReadOnly) return;
+                      markTouched();
                       const nextRooms = ((plan as FloorPlan).rooms || []).map((r) => (r.id === roomId ? { ...r, ...payload } : r));
                       updateRoom((plan as FloorPlan).id, roomId, payload as any);
                       const updates = computeRoomReassignments(nextRooms, (plan as FloorPlan).objects);
@@ -1669,7 +1779,7 @@ const PlanView = ({ planId }: Props) => {
                 }}
                 className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
               >
-                <BookmarkPlus size={14} className="text-slate-500" /> Salva vista
+                <BookmarkPlus size={14} className="text-slate-500" /> {t({ it: 'Salva vista', en: 'Save view' })}
               </button>
               ) : null}
               {!isReadOnly ? (
@@ -1710,7 +1820,7 @@ const PlanView = ({ planId }: Props) => {
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
               >
-                <Home size={14} className="text-slate-500" /> Vai a default
+                <Home size={14} className="text-slate-500" /> {t({ it: 'Vai a default', en: 'Go to default' })}
               </button>
               {!isReadOnly ? (
                 <button
@@ -1752,7 +1862,7 @@ const PlanView = ({ planId }: Props) => {
                 }}
                 className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
               >
-                <Trash size={14} /> Elimina tutti gli oggetti
+                <Trash size={14} /> {t({ it: 'Elimina tutti gli oggetti', en: 'Delete all objects' })}
               </button>
               ) : null}
               <button
@@ -1762,7 +1872,7 @@ const PlanView = ({ planId }: Props) => {
                 }}
                 className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
               >
-                <FileDown size={14} className="text-slate-500" /> Esporta PDF
+                <FileDown size={14} className="text-slate-500" /> {t({ it: 'Esporta PDF', en: 'Export PDF' })}
               </button>
             </>
           )}
@@ -1793,13 +1903,15 @@ const PlanView = ({ planId }: Props) => {
         onSubmit={({ name }) => {
           if (!roomModal || isReadOnly) return;
           if (roomModal.mode === 'edit') {
+            markTouched();
             updateRoom(basePlan.id, roomModal.roomId, { name });
-            push('Stanza aggiornata', 'success');
+            push(t({ it: 'Stanza aggiornata', en: 'Room updated' }), 'success');
             setSelectedRoomId(roomModal.roomId);
             setHighlightRoom({ roomId: roomModal.roomId, until: Date.now() + 2600 });
             setRoomModal(null);
             return;
           }
+          markTouched();
           const id =
             roomModal.kind === 'rect'
               ? addRoom(basePlan.id, { name, kind: 'rect', ...roomModal.rect })
@@ -1815,7 +1927,7 @@ const PlanView = ({ planId }: Props) => {
             }
           }
           if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
-          push('Stanza creata', 'success');
+          push(t({ it: 'Stanza creata', en: 'Room created' }), 'success');
           setSelectedRoomId(id);
           setHighlightRoom({ roomId: id, until: Date.now() + 3200 });
           setRoomModal(null);
@@ -1844,6 +1956,7 @@ const PlanView = ({ planId }: Props) => {
         onClose={() => setBulkEditSelectionOpen(false)}
         onApply={(changesById) => {
           if (isReadOnly) return;
+          if (Object.keys(changesById || {}).length) markTouched();
           const ids = Object.keys(changesById || {});
           for (const id of ids) {
             updateObject(id, changesById[id]);
@@ -1854,29 +1967,49 @@ const PlanView = ({ planId }: Props) => {
 
 	      <ConfirmDialog
 	        open={!!confirmDelete}
-	        title={confirmDelete && confirmDelete.length > 1 ? 'Eliminare gli oggetti?' : 'Eliminare l’oggetto?'}
+	        title={
+            confirmDelete && confirmDelete.length > 1
+              ? t({ it: 'Eliminare gli oggetti?', en: 'Delete objects?' })
+              : t({ it: 'Eliminare l’oggetto?', en: 'Delete object?' })
+          }
 	        description={
 	          (() => {
-	            if (!confirmDelete || !confirmDelete.length) return 'L’oggetto verrà rimosso dalla planimetria.';
+	            if (!confirmDelete || !confirmDelete.length)
+                return t({
+                  it: 'L’oggetto verrà rimosso dalla planimetria.',
+                  en: 'The object will be removed from the floor plan.'
+                });
 	            if (confirmDelete.length === 1) {
 	              const obj = renderPlan.objects.find((o) => o.id === confirmDelete[0]);
 	              const label = obj ? getTypeLabel(obj.type) : undefined;
-	              const name = obj?.name || 'oggetto';
-	              return `Rimuovere ${label ? `${label.toLowerCase()} ` : ''}"${name}" dalla planimetria?`;
+	              const name = obj?.name || t({ it: 'oggetto', en: 'object' });
+                return t({
+                  it: `Rimuovere ${label ? `${label.toLowerCase()} ` : ''}"${name}" dalla planimetria?`,
+                  en: `Remove ${label ? `${label} ` : ''}"${name}" from the floor plan?`
+                });
 	            }
-	            return `Rimuovere ${confirmDelete.length} oggetti dalla planimetria?`;
+	            return t({
+                it: `Rimuovere ${confirmDelete.length} oggetti dalla planimetria?`,
+                en: `Remove ${confirmDelete.length} objects from the floor plan?`
+              });
 	          })()
 	        }
         onCancel={() => setConfirmDelete(null)}
         onConfirm={() => {
           if (!confirmDelete || !confirmDelete.length) return;
+          markTouched();
           confirmDelete.forEach((id) => deleteObject(id));
-          push(confirmDelete.length === 1 ? 'Oggetto eliminato' : 'Oggetti eliminati', 'info');
+          push(
+            confirmDelete.length === 1
+              ? t({ it: 'Oggetto eliminato', en: 'Object deleted' })
+              : t({ it: 'Oggetti eliminati', en: 'Objects deleted' }),
+            'info'
+          );
           setConfirmDelete(null);
           setContextMenu(null);
           clearSelection();
         }}
-        confirmLabel="Elimina"
+        confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
         cancelLabel="Esc"
       />
 
@@ -1900,67 +2033,78 @@ const PlanView = ({ planId }: Props) => {
 
       <ConfirmDialog
         open={!!confirmDeleteRoomId}
-        title="Eliminare la stanza?"
+        title={t({ it: 'Eliminare la stanza?', en: 'Delete room?' })}
         description={
           confirmDeleteRoomId
-            ? `Eliminare la stanza "${rooms.find((r) => r.id === confirmDeleteRoomId)?.name || 'stanza'}" e scollegare gli oggetti associati?`
+            ? t({
+                it: `Eliminare la stanza "${rooms.find((r) => r.id === confirmDeleteRoomId)?.name || 'stanza'}" e scollegare gli oggetti associati?`,
+                en: `Delete room "${rooms.find((r) => r.id === confirmDeleteRoomId)?.name || 'room'}" and unlink associated objects?`
+              })
             : undefined
         }
         onCancel={() => setConfirmDeleteRoomId(null)}
         onConfirm={() => {
           if (!confirmDeleteRoomId) return;
+          markTouched();
           const remainingRooms = rooms.filter((r) => r.id !== confirmDeleteRoomId);
           const updates = computeRoomReassignments(remainingRooms, basePlan.objects);
           deleteRoom(basePlan.id, confirmDeleteRoomId);
           if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
           if (selectedRoomId === confirmDeleteRoomId) setSelectedRoomId(undefined);
-          push('Stanza eliminata', 'info');
+          push(t({ it: 'Stanza eliminata', en: 'Room deleted' }), 'info');
           setConfirmDeleteRoomId(null);
         }}
-        confirmLabel="Elimina"
-        cancelLabel="Annulla"
+        confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
       />
 
       <ConfirmDialog
         open={!!confirmDeleteViewId}
-        title="Eliminare la vista?"
+        title={t({ it: 'Eliminare la vista?', en: 'Delete view?' })}
         description={
           confirmDeleteViewId
-            ? `Eliminare la vista "${basePlan.views?.find((v) => v.id === confirmDeleteViewId)?.name || 'vista'}"?`
+            ? t({
+                it: `Eliminare la vista "${basePlan.views?.find((v) => v.id === confirmDeleteViewId)?.name || 'vista'}"?`,
+                en: `Delete view "${basePlan.views?.find((v) => v.id === confirmDeleteViewId)?.name || 'view'}"?`
+              })
             : undefined
         }
         onCancel={() => setConfirmDeleteViewId(null)}
         onConfirm={() => {
           if (!confirmDeleteViewId) return;
+          markTouched();
           const deleting = basePlan.views?.find((v) => v.id === confirmDeleteViewId);
           deleteView(basePlan.id, confirmDeleteViewId);
           setConfirmDeleteViewId(null);
           setViewsMenuOpen(false);
-          push('Vista eliminata', 'info');
+          push(t({ it: 'Vista eliminata', en: 'View deleted' }), 'info');
           if (selectedViewId === confirmDeleteViewId) setSelectedViewId('__last__');
           // After deleting, always return to default view if available.
           window.setTimeout(() => goToDefaultView(), 0);
           if (deleting?.isDefault && (basePlan.views || []).length <= 1) {
-            push('Nessuna vista di default rimasta', 'info');
+            push(t({ it: 'Nessuna vista di default rimasta', en: 'No default view remaining' }), 'info');
           }
         }}
-        confirmLabel="Elimina"
-        cancelLabel="Annulla"
+        confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
       />
 
       <ConfirmDialog
         open={confirmClearObjects}
-        title="Eliminare tutti gli oggetti?"
-        description="Tutti gli oggetti della planimetria verranno rimossi. Operazione non annullabile."
+        title={t({ it: 'Eliminare tutti gli oggetti?', en: 'Delete all objects?' })}
+        description={t({
+          it: 'Tutti gli oggetti della planimetria verranno rimossi. Operazione non annullabile.',
+          en: 'All objects in this floor plan will be removed. This cannot be undone.'
+        })}
         onCancel={() => setConfirmClearObjects(false)}
         onConfirm={() => {
           clearObjects(basePlan.id);
-          push('Oggetti rimossi', 'info');
+          push(t({ it: 'Oggetti rimossi', en: 'Objects removed' }), 'info');
           setConfirmClearObjects(false);
           setSelectedObject(undefined);
         }}
-        confirmLabel="Elimina tutti"
-        cancelLabel="Annulla"
+        confirmLabel={t({ it: 'Elimina tutti', en: 'Delete all' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
       />
 
       <ViewModal
@@ -2040,6 +2184,8 @@ const PlanView = ({ planId }: Props) => {
                 const to = pendingNavigateRef.current;
                 pendingNavigateRef.current = null;
                 revertUnsavedChanges();
+                resetTouched();
+                entrySnapshotRef.current = toSnapshot(planRef.current || plan);
                 clearPendingSaveNavigate?.();
                 setSaveRevisionOpen(false);
                 if (to) navigate(to);
@@ -2064,6 +2210,9 @@ const PlanView = ({ planId }: Props) => {
             description: note
           });
           push(`Revisione salvata: Rev ${next.major}.${next.minor}`, 'success');
+          // New revision = clean state for navigation prompts.
+          resetTouched();
+          entrySnapshotRef.current = toSnapshot(planRef.current || plan);
           if (pendingNavigateRef.current) {
             const to = pendingNavigateRef.current;
             pendingNavigateRef.current = null;
@@ -2085,7 +2234,7 @@ const PlanView = ({ planId }: Props) => {
           setDefaultView(basePlan.id, newDefaultId);
           deleteView(basePlan.id, deletingId);
           if (selectedViewId === deletingId) setSelectedViewId(newDefaultId);
-          push('Vista eliminata e default aggiornata', 'success');
+          push(t({ it: 'Vista eliminata e default aggiornata', en: 'View deleted and default updated' }), 'success');
           window.setTimeout(() => goToDefaultView(), 0);
         }}
       />

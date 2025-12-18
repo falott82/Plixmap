@@ -34,7 +34,7 @@ const UserMenu = () => {
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink shadow-card hover:bg-slate-50"
-        title="Account"
+        title={t({ it: 'Account', en: 'Account' })}
       >
         <UserCircle2 size={18} className="text-slate-600" />
         <span className="max-w-[180px] truncate">{label}</span>
@@ -50,10 +50,13 @@ const UserMenu = () => {
                 key={lang}
                 onClick={async () => {
                   try {
+                    if ((user as any).language === lang) return;
                     await updateMyProfile({ language: lang });
                     useAuthStore.setState((s) =>
                       s.user ? { user: { ...s.user, language: lang } as any, permissions: s.permissions, hydrated: s.hydrated } : s
                     );
+                    // Force full refresh so every view picks up the new language consistently.
+                    window.location.reload();
                   } catch {
                     // ignore
                   }

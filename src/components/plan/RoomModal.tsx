@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
+import { useT } from '../../i18n/useT';
 
 interface Props {
   open: boolean;
@@ -10,6 +11,7 @@ interface Props {
 }
 
 const RoomModal = ({ open, initialName = '', onClose, onSubmit }: Props) => {
+  const t = useT();
   const [name, setName] = useState(initialName);
   const nameRef = useRef<HTMLInputElement | null>(null);
 
@@ -53,15 +55,19 @@ const RoomModal = ({ open, initialName = '', onClose, onSubmit }: Props) => {
               <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
                 <div className="flex items-center justify-between">
                   <Dialog.Title className="text-lg font-semibold text-ink">
-                    {initialName ? 'Modifica stanza' : 'Nuova stanza'}
+                    {initialName ? t({ it: 'Modifica stanza', en: 'Edit room' }) : t({ it: 'Nuova stanza', en: 'New room' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                  <button
+                    onClick={onClose}
+                    className="text-slate-500 hover:text-ink"
+                    title={t({ it: 'Chiudi', en: 'Close' })}
+                  >
                     <X size={18} />
                   </button>
                 </div>
                 <div className="mt-4 space-y-3">
                   <label className="block text-sm font-medium text-slate-700">
-                    Nome stanza
+                    {t({ it: 'Nome stanza', en: 'Room name' })}
                     <input
                       ref={nameRef}
                       value={name}
@@ -73,7 +79,7 @@ const RoomModal = ({ open, initialName = '', onClose, onSubmit }: Props) => {
                         }
                       }}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                      placeholder="Es. Sala riunioni"
+                      placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
                     />
                   </label>
                 </div>
@@ -82,13 +88,13 @@ const RoomModal = ({ open, initialName = '', onClose, onSubmit }: Props) => {
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    Annulla
+                    {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     onClick={submit}
                     className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                   >
-                    Salva
+                    {t({ it: 'Salva', en: 'Save' })}
                   </button>
                 </div>
               </Dialog.Panel>
@@ -101,4 +107,3 @@ const RoomModal = ({ open, initialName = '', onClose, onSubmit }: Props) => {
 };
 
 export default RoomModal;
-

@@ -12,6 +12,7 @@ export interface AuthUser {
   disabled?: boolean;
   language: 'it' | 'en';
   defaultPlanId?: string | null;
+  clientOrder?: string[];
   mustChangePassword?: boolean;
   firstName: string;
   lastName: string;
@@ -56,7 +57,7 @@ export const firstRunSetup = async (payload: { newPassword: string; language: 'i
   if (!res.ok) throw new Error(`First-run setup failed (${res.status})`);
 };
 
-export const updateMyProfile = async (payload: { language?: 'it' | 'en'; defaultPlanId?: string | null }): Promise<void> => {
+export const updateMyProfile = async (payload: { language?: 'it' | 'en'; defaultPlanId?: string | null; clientOrder?: string[] }): Promise<void> => {
   const res = await fetch('/api/auth/me', {
     method: 'PUT',
     credentials: 'include',
