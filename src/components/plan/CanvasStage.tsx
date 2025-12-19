@@ -1,16 +1,21 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { FloorPlan, IconName, MapObjectType } from '../../store/types';
 import { clamp } from '../../utils/geometry';
 import Icon from '../ui/Icon';
+import { useT } from '../../i18n/useT';
 
 interface Props {
   plan: FloorPlan;
   selectedId?: string;
   selectedIds?: string[];
   selectedRoomId?: string;
+  selectedLinkId?: string | null;
+  snapEnabled?: boolean;
+  gridSize?: number;
+  showGrid?: boolean;
   highlightId?: string;
   highlightUntil?: number;
   highlightRoomId?: string;
@@ -19,6 +24,9 @@ interface Props {
   pendingType?: MapObjectType | null;
   readOnly?: boolean;
   roomDrawMode?: 'rect' | 'poly' | null;
+  printArea?: { x: number; y: number; width: number; height: number } | null;
+  printAreaMode?: boolean;
+  showPrintArea?: boolean;
   objectTypeIcons: Record<string, IconName | undefined>;
   zoom: number;
   pan: { x: number; y: number };
@@ -33,8 +41,10 @@ interface Props {
   onPlaceNew: (type: MapObjectType, x: number, y: number) => void;
   onEdit: (id: string) => void;
   onContextMenu: (payload: { id: string; clientX: number; clientY: number }) => void;
+  onLinkContextMenu?: (payload: { id: string; clientX: number; clientY: number }) => void;
   onMapContextMenu: (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onSelectRoom?: (roomId?: string) => void;
+  onSelectLink?: (id?: string) => void;
   onCreateRoom?: (
     shape:
       | { kind: 'rect'; rect: { x: number; y: number; width: number; height: number } }
@@ -51,13 +61,34 @@ interface Props {
       points?: { x: number; y: number }[];
     }
   ) => void;
+  onSetPrintArea?: (rect: { x: number; y: number; width: number; height: number }) => void;
 }
 
-const CanvasStage = ({
+export interface CanvasStageHandle {
+  getSize: () => { width: number; height: number };
+  exportDataUrl: (options?: { pixelRatio?: number; mimeType?: string; quality?: number }) => { dataUrl: string; width: number; height: number };
+}
+
+const hexToRgba = (hex: string, alpha: number) => {
+  const h = String(hex || '').trim().replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return `rgba(100,116,139,${alpha})`; // slate-500 fallback
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, alpha))})`;
+};
+
+const CanvasStageImpl = (
+  {
   plan,
   selectedId,
   selectedIds,
   selectedRoomId,
+  selectedLinkId = null,
+  snapEnabled = false,
+  gridSize = 20,
+  showGrid = false,
   highlightId,
   highlightUntil,
   highlightRoomId,
@@ -66,6 +97,9 @@ const CanvasStage = ({
   pendingType,
   readOnly = false,
   roomDrawMode = null,
+  printArea = null,
+  printAreaMode = false,
+  showPrintArea = false,
   objectTypeIcons,
   zoom,
   pan,
@@ -80,12 +114,27 @@ const CanvasStage = ({
   onPlaceNew,
   onEdit,
   onContextMenu,
+  onLinkContextMenu,
   onMapContextMenu,
   onSelectRoom,
+  onSelectLink,
   onCreateRoom,
-  onUpdateRoom
-}: Props) => {
+  onUpdateRoom,
+  onSetPrintArea
+}: Props,
+  ref: React.ForwardedRef<CanvasStageHandle>
+) => {
+  const t = useT();
   const stageRef = useRef<any>(null);
+  const [hoverCard, setHoverCard] = useState<
+    | null
+    | {
+        clientX: number;
+        clientY: number;
+        obj: any;
+      }
+  >(null);
+  const hoverRaf = useRef<number | null>(null);
   const [highlightNow, setHighlightNow] = useState(Date.now());
   const [dimensions, setDimensions] = useState({ width: 1200, height: 800 });
   const [bgImage] = useImage(plan.imageUrl, plan.imageUrl.startsWith('http') ? 'anonymous' : undefined);
@@ -102,9 +151,49 @@ const CanvasStage = ({
   const [roomHighlightNow, setRoomHighlightNow] = useState(Date.now());
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftOrigin = useRef<{ x: number; y: number } | null>(null);
+  const [draftPrintRect, setDraftPrintRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const printOrigin = useRef<{ x: number; y: number } | null>(null);
   const [draftPolyPoints, setDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
   const [draftPolyPointer, setDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
   const draftPolyRaf = useRef<number | null>(null);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getSize: () => ({ width: dimensions.width, height: dimensions.height }),
+      exportDataUrl: (options) => {
+        const stage = stageRef.current;
+        const pixelRatio = Math.max(1, Number(options?.pixelRatio || 1));
+        const mimeType = options?.mimeType || 'image/jpeg';
+        const quality = typeof options?.quality === 'number' ? options.quality : 0.82;
+        const width = Math.round(dimensions.width * pixelRatio);
+        const height = Math.round(dimensions.height * pixelRatio);
+        if (!stage) return { dataUrl: '', width, height };
+        try {
+          // Konva JPEG export fills transparency with black. Render to canvas, then composite on white.
+          const rawCanvas: HTMLCanvasElement | null = stage.toCanvas ? stage.toCanvas({ pixelRatio }) : null;
+          if (!rawCanvas) {
+            if (!stage.toDataURL) return { dataUrl: '', width, height };
+            const dataUrl = stage.toDataURL({ pixelRatio, mimeType, quality });
+            return { dataUrl, width, height };
+          }
+          const out = document.createElement('canvas');
+          out.width = rawCanvas.width;
+          out.height = rawCanvas.height;
+          const ctx = out.getContext('2d');
+          if (!ctx) return { dataUrl: '', width, height };
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, out.width, out.height);
+          ctx.drawImage(rawCanvas, 0, 0);
+          const dataUrl = out.toDataURL(mimeType, quality);
+          return { dataUrl, width: out.width, height: out.height };
+        } catch {
+          return { dataUrl: '', width, height };
+        }
+      }
+    }),
+    [dimensions.height, dimensions.width]
+  );
   const transformerRef = useRef<any>(null);
   const selectedRoomNodeRef = useRef<any>(null);
   const polyLineRefs = useRef<Record<string, any>>({});
@@ -134,6 +223,33 @@ const CanvasStage = ({
     stage.batchDraw();
   }, []);
 
+  const snap = useCallback(
+    (value: number) => {
+      const step = Math.max(1, Number(gridSize) || 1);
+      return Math.round(value / step) * step;
+    },
+    [gridSize]
+  );
+
+  const gridLines = useMemo(() => {
+    if (!showGrid) return null;
+    const step = Math.max(5, Number(gridSize) || 20);
+    const maxV = Math.floor(baseWidth / step);
+    const maxH = Math.floor(baseHeight / step);
+    if (maxV + maxH > 400) return null;
+    const stroke = 'rgba(15,23,42,0.07)';
+    const lines: any[] = [];
+    for (let i = 0; i <= maxV; i++) {
+      const x = i * step;
+      lines.push(<Line key={`gv-${i}`} points={[x, 0, x, baseHeight]} stroke={stroke} strokeWidth={1} listening={false} />);
+    }
+    for (let j = 0; j <= maxH; j++) {
+      const y = j * step;
+      lines.push(<Line key={`gh-${j}`} points={[0, y, baseWidth, y]} stroke={stroke} strokeWidth={1} listening={false} />);
+    }
+    return lines;
+  }, [baseHeight, baseWidth, gridSize, showGrid]);
+
   useEffect(() => {
     const last = { width: -1, height: -1 };
     let raf = 0;
@@ -145,6 +261,9 @@ const CanvasStage = ({
       if (!el) return;
       const width = el.clientWidth;
       const height = el.clientHeight;
+      // Avoid committing zero sizes during transient layout states (e.g. modal/panel animations),
+      // which can cause the Stage to "disappear" and become unresponsive until the next resize.
+      if (width <= 0 || height <= 0) return;
       if (width === last.width && height === last.height) return;
       last.width = width;
       last.height = height;
@@ -511,6 +630,26 @@ const CanvasStage = ({
     return true;
   };
 
+  const updateDraftPrintRect = (event: any) => {
+    if (!printAreaMode || readOnly) return false;
+    const origin = printOrigin.current;
+    if (!origin) return false;
+    const stage = event.target.getStage();
+    const pos = stage?.getPointerPosition();
+    if (!pos) return true;
+    const world = pointerToWorld(pos.x, pos.y);
+    const x1 = origin.x;
+    const y1 = origin.y;
+    const x2 = world.x;
+    const y2 = world.y;
+    const x = Math.min(x1, x2);
+    const y = Math.min(y1, y2);
+    const width = Math.abs(x2 - x1);
+    const height = Math.abs(y2 - y1);
+    setDraftPrintRect({ x, y, width, height });
+    return true;
+  };
+
   const finalizeDraftRect = () => {
     if (roomDrawMode !== 'rect' || readOnly) return false;
     if (!draftOrigin.current || !draftRect) return false;
@@ -524,6 +663,22 @@ const CanvasStage = ({
     setDraftRect(null);
     if (rect.width < 20 || rect.height < 20) return true;
     onCreateRoom?.({ kind: 'rect', rect });
+    return true;
+  };
+
+  const finalizeDraftPrintRect = () => {
+    if (!printAreaMode || readOnly) return false;
+    if (!printOrigin.current || !draftPrintRect) return false;
+    const rect = {
+      x: draftPrintRect.x,
+      y: draftPrintRect.y,
+      width: Math.max(0, draftPrintRect.width),
+      height: Math.max(0, draftPrintRect.height)
+    };
+    printOrigin.current = null;
+    setDraftPrintRect(null);
+    if (rect.width < 20 || rect.height < 20) return true;
+    onSetPrintArea?.(rect);
     return true;
   };
 
@@ -574,6 +729,12 @@ const CanvasStage = ({
     return () => window.removeEventListener('keydown', handler);
   }, [draftPolyPoints.length, finalizeDraftPoly, roomDrawMode]);
 
+  useEffect(() => {
+    if (printAreaMode) return;
+    printOrigin.current = null;
+    setDraftPrintRect(null);
+  }, [printAreaMode]);
+
   const selectedBounds = useMemo(() => {
     const idsArr = selectedIds || (selectedId ? [selectedId] : []);
     if (!idsArr.length) return null;
@@ -597,11 +758,69 @@ const CanvasStage = ({
     <div
       ref={containerRef}
       className={`relative h-full w-full rounded-2xl border border-slate-200 border-b-4 border-b-slate-200 bg-white shadow-card ${
-        roomDrawMode && !readOnly ? 'cursor-crosshair' : ''
+        (roomDrawMode || printAreaMode) && !readOnly ? 'cursor-crosshair' : ''
       }`}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        // If another Konva context menu was just opened (object/link/bg), don't open map menu too.
+        if (Date.now() - lastContextMenuAtRef.current < 60) return;
+        if (pendingType || readOnly) return;
+        if (isBoxSelectGesture(e as any) || isBoxSelecting()) return;
+        const stage = stageRef.current;
+        if (!stage) return;
+        try {
+          stage.setPointersPositions(e);
+        } catch {
+          // ignore
+        }
+        const pos = stage.getPointerPosition?.();
+        if (!pos) return;
+        const world = pointerToWorld(pos.x, pos.y);
+        onMapContextMenu({ clientX: e.clientX, clientY: e.clientY, worldX: world.x, worldY: world.y });
+      }}
       onDrop={handleDrop}
       onDragOver={(e) => e.preventDefault()}
     >
+      {hoverCard ? (
+        <div
+          className="pointer-events-none fixed z-50 w-[280px] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-card backdrop-blur"
+          style={{ left: hoverCard.clientX, top: hoverCard.clientY + 14 }}
+        >
+          <div className="text-sm font-semibold text-ink">
+            {(hoverCard.obj.firstName || hoverCard.obj.name || '').toString()} {(hoverCard.obj.lastName || '').toString()}
+          </div>
+          <div className="mt-1 space-y-1">
+            {hoverCard.obj.externalRole ? (
+              <div>
+                <span className="font-semibold text-slate-600">{t({ it: 'Ruolo', en: 'Role' })}:</span> {hoverCard.obj.externalRole}
+              </div>
+            ) : null}
+            {[hoverCard.obj.externalDept1, hoverCard.obj.externalDept2, hoverCard.obj.externalDept3].filter(Boolean).length ? (
+              <div>
+                <span className="font-semibold text-slate-600">{t({ it: 'Reparto', en: 'Department' })}:</span>{' '}
+                {[hoverCard.obj.externalDept1, hoverCard.obj.externalDept2, hoverCard.obj.externalDept3].filter(Boolean).join(' / ')}
+              </div>
+            ) : null}
+            {hoverCard.obj.externalEmail ? (
+              <div>
+                <span className="font-semibold text-slate-600">Email:</span> {hoverCard.obj.externalEmail}
+              </div>
+            ) : null}
+            {[hoverCard.obj.externalExt1, hoverCard.obj.externalExt2, hoverCard.obj.externalExt3].filter(Boolean).length ? (
+              <div>
+                <span className="font-semibold text-slate-600">{t({ it: 'Interni', en: 'Extensions' })}:</span>{' '}
+                {[hoverCard.obj.externalExt1, hoverCard.obj.externalExt2, hoverCard.obj.externalExt3].filter(Boolean).join(', ')}
+              </div>
+            ) : null}
+            {hoverCard.obj.externalUserId ? (
+              <div className="text-[11px] text-slate-500">
+                ID: <span className="font-mono">{hoverCard.obj.externalUserId}</span>
+                {hoverCard.obj.externalIsExternal ? ` · ${t({ it: 'Esterno', en: 'External' })}` : ''}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       <Stage
         ref={stageRef}
         width={dimensions.width}
@@ -621,6 +840,15 @@ const CanvasStage = ({
             return;
           }
           if (isContextClick(e.evt)) return;
+          if (printAreaMode && !readOnly && e.evt.button === 0) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (!pos) return;
+            const world = pointerToWorld(pos.x, pos.y);
+            printOrigin.current = { x: world.x, y: world.y };
+            setDraftPrintRect({ x: world.x, y: world.y, width: 0, height: 0 });
+            return;
+          }
           if (roomDrawMode === 'rect' && !readOnly && e.evt.button === 0) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
@@ -660,6 +888,7 @@ const CanvasStage = ({
         }}
         onMouseMove={(e) => {
           if (updateSelectionBox(e)) return;
+          if (updateDraftPrintRect(e)) return;
           if (updateDraftRect(e)) return;
           if (roomDrawMode === 'poly' && !readOnly) {
             const stage = e.target.getStage();
@@ -678,11 +907,13 @@ const CanvasStage = ({
         onMouseUp={(e) => {
           if (finalizeSelectionBox()) return;
           if (isContextClick(e.evt)) return;
+          if (finalizeDraftPrintRect()) return;
           if (finalizeDraftRect()) return;
           endPan();
         }}
         onMouseLeave={() => {
           if (finalizeSelectionBox()) return;
+          if (finalizeDraftPrintRect()) return;
           if (finalizeDraftRect()) return;
           endPan();
         }}
@@ -705,7 +936,7 @@ const CanvasStage = ({
           }}
           onMouseDown={(e) => {
             if (isContextClick(e.evt)) return;
-            if (roomDrawMode && !readOnly) return;
+            if ((roomDrawMode || printAreaMode) && !readOnly) return;
             if (e.target?.attrs?.name === 'bg-rect' && !pendingType) {
               startPan(e);
               return;
@@ -716,6 +947,7 @@ const CanvasStage = ({
           }}
         >
           {backPlate}
+          {gridLines}
         </Layer>
 
         {/* Rooms layer */}
@@ -723,6 +955,7 @@ const CanvasStage = ({
           {(plan.rooms || []).map((room) => {
             const isSelectedRoom = selectedRoomId === room.id;
             const kind = (room.kind || (room.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+            const baseColor = (room as any).color || '#64748b';
             const highlightActive = !!(
               highlightRoomId &&
               highlightRoomUntil &&
@@ -730,8 +963,8 @@ const CanvasStage = ({
               highlightRoomUntil > roomHighlightNow
             );
             const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(roomHighlightNow / 80) : 0;
-            const stroke = highlightActive ? '#22d3ee' : isSelectedRoom ? '#2563eb' : '#94a3b8';
-            const strokeWidth = highlightActive ? 2 + 1.2 * pulse : isSelectedRoom ? 2 : 1.4;
+            const stroke = highlightActive ? '#22d3ee' : isSelectedRoom ? '#2563eb' : baseColor;
+            const strokeWidth = highlightActive ? 2 + 0.8 * pulse : isSelectedRoom ? 2 : 1.1;
             if (kind === 'poly') {
               const pts = room.points || [];
               const flat = pts.flatMap((p) => [p.x, p.y]);
@@ -755,6 +988,7 @@ const CanvasStage = ({
                     const dx = node.x();
                     const dy = node.y();
                     node.position({ x: 0, y: 0 });
+                    node.getLayer()?.batchDraw?.();
                     if (!dx && !dy) return;
                     onUpdateRoom?.(room.id, { kind: 'poly', points: pts.map((p) => ({ x: p.x + dx, y: p.y + dy })) });
                   }}
@@ -766,10 +1000,10 @@ const CanvasStage = ({
                     }}
                     points={flat}
                     closed
-                    fill="rgba(37,99,235,0.05)"
+                    fill={hexToRgba(baseColor, 0.08)}
                     stroke={stroke}
                     strokeWidth={strokeWidth}
-                    dash={[6, 5]}
+                    dash={[5, 4]}
                     lineJoin="round"
                   />
                   {isSelectedRoom && !readOnly
@@ -783,10 +1017,10 @@ const CanvasStage = ({
                           }}
                           x={p.x}
                           y={p.y}
-                          radius={5}
+                          radius={3.5}
                           fill="#ffffff"
                           stroke="#2563eb"
-                          strokeWidth={1.5}
+                          strokeWidth={1.2}
                           draggable
                           onDragMove={() => {
                             const line = polyLineRefs.current[room.id];
@@ -824,11 +1058,11 @@ const CanvasStage = ({
                 y={room.y || 0}
                 width={room.width || 0}
                 height={room.height || 0}
-                fill="rgba(37,99,235,0.05)"
+                fill={hexToRgba(baseColor, 0.08)}
                 stroke={stroke}
                 strokeWidth={strokeWidth}
-                dash={[6, 5]}
-                cornerRadius={8}
+                dash={[5, 4]}
+                cornerRadius={6}
                 draggable={!readOnly}
                 onClick={(e) => {
                   e.cancelBubble = true;
@@ -888,7 +1122,34 @@ const CanvasStage = ({
             />
           ) : null}
 
-          {/* Draft rect */}
+          {/* Print area overlay (optional) */}
+          {printArea && (printAreaMode || showPrintArea) ? (
+            <Rect
+              x={printArea.x}
+              y={printArea.y}
+              width={printArea.width}
+              height={printArea.height}
+              stroke="#0ea5e9"
+              strokeWidth={1.5}
+              dash={[6, 6]}
+              listening={false}
+              cornerRadius={8}
+            />
+          ) : null}
+          {draftPrintRect ? (
+            <Rect
+              x={draftPrintRect.x}
+              y={draftPrintRect.y}
+              width={draftPrintRect.width}
+              height={draftPrintRect.height}
+              fill="rgba(14,165,233,0.06)"
+              stroke="#0ea5e9"
+              strokeWidth={1.5}
+              dash={[6, 6]}
+              listening={false}
+              cornerRadius={8}
+            />
+          ) : null}
           {draftRect ? (
             <Rect
               x={draftRect.x}
@@ -930,6 +1191,40 @@ const CanvasStage = ({
           ) : null}
         </Layer>
 
+        {/* Links layer */}
+        <Layer perfectDrawEnabled={false}>
+          {(plan.links || []).map((link) => {
+            const from = plan.objects.find((o) => o.id === link.fromId);
+            const to = plan.objects.find((o) => o.id === link.toId);
+            if (!from || !to) return null;
+            const isSelected = !!selectedLinkId && selectedLinkId === link.id;
+            const stroke = isSelected ? '#2563eb' : link.color || '#94a3b8';
+            return (
+              <Arrow
+                key={link.id}
+                points={[from.x, from.y, to.x, to.y]}
+                stroke={stroke}
+                fill={stroke}
+                pointerLength={8}
+                pointerWidth={8}
+                strokeWidth={isSelected ? 3 : 2}
+                opacity={0.85}
+                onClick={(e) => {
+                  e.cancelBubble = true;
+                  onSelectLink?.(link.id);
+                }}
+                onContextMenu={(e) => {
+                  e.evt.preventDefault();
+                  e.cancelBubble = true;
+                  if (!onLinkContextMenu) return;
+                  onSelectLink?.(link.id);
+                  onLinkContextMenu({ id: link.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+                }}
+              />
+            );
+          })}
+        </Layer>
+
         {/* Objects layer */}
         <Layer perfectDrawEnabled={false} ref={objectsLayerRef}>
           {plan.objects.map((obj) => {
@@ -938,6 +1233,11 @@ const CanvasStage = ({
             const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(highlightNow / 80) : 0;
             const scale = obj.scale ?? 1;
             const iconImg = iconImages[obj.type];
+            const labelText =
+              obj.type === 'real_user' && (((obj as any).firstName && String((obj as any).firstName).trim()) || ((obj as any).lastName && String((obj as any).lastName).trim()))
+                ? `${String((obj as any).firstName || '').trim()}\n${String((obj as any).lastName || '').trim()}`.trim()
+                : obj.name;
+            const labelLines = labelText.includes('\n') ? 2 : 1;
             return (
               <Group
                 key={obj.id}
@@ -951,18 +1251,40 @@ const CanvasStage = ({
                 onDragStart={(e) => {
                   onSelect(obj.id, { multi: !!(e?.evt?.ctrlKey || e?.evt?.metaKey) });
                 }}
+                onMouseEnter={(e) => {
+                  if (obj.type !== 'real_user') return;
+                  setHoverCard({ clientX: e.evt.clientX, clientY: e.evt.clientY, obj });
+                }}
+                onMouseMove={(e) => {
+                  if (obj.type !== 'real_user') return;
+                  if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
+                  const cx = e.evt.clientX;
+                  const cy = e.evt.clientY;
+                  hoverRaf.current = requestAnimationFrame(() => {
+                    setHoverCard((prev) => (prev ? { ...prev, clientX: cx, clientY: cy } : { clientX: cx, clientY: cy, obj }));
+                  });
+                }}
+                onMouseLeave={() => {
+                  if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
+                  hoverRaf.current = null;
+                  setHoverCard(null);
+                }}
                 onDragEnd={(e) => {
                   if (readOnly) return;
                   const stage = stageRef.current;
                   if (!stage) {
-                    onMove(obj.id, e.target.x(), e.target.y());
+                    const nextX = snapEnabled ? snap(e.target.x()) : e.target.x();
+                    const nextY = snapEnabled ? snap(e.target.y()) : e.target.y();
+                    onMove(obj.id, nextX, nextY);
                     return;
                   }
                   const transform = stage.getAbsoluteTransform().copy();
                   transform.invert();
                   const abs = e.target.getAbsolutePosition();
                   const world = transform.point(abs);
-                  onMove(obj.id, world.x, world.y);
+                  const nextX = snapEnabled ? snap(world.x) : world.x;
+                  const nextY = snapEnabled ? snap(world.y) : world.y;
+                  onMove(obj.id, nextX, nextY);
                 }}
                 onClick={(e) => {
                   e.cancelBubble = true;
@@ -991,9 +1313,9 @@ const CanvasStage = ({
                 }}
               >
                 <Text
-                  text={obj.name}
+                  text={labelText}
                   x={-80}
-                  y={-(18 * scale) - 12}
+                  y={-(18 * scale) - (labelLines === 2 ? 22 : 12)}
                   width={160}
                   align="center"
                   fontStyle="bold"
@@ -1102,7 +1424,9 @@ const CanvasStage = ({
                 const dx = e.target.x() - ref.startX;
                 const dy = e.target.y() - ref.startY;
                 for (const [id, start] of Object.entries(ref.startById)) {
-                  onMove(id, start.x + dx, start.y + dy);
+                  const nx = start.x + dx;
+                  const ny = start.y + dy;
+                  onMove(id, snapEnabled ? snap(nx) : nx, snapEnabled ? snap(ny) : ny);
                 }
               }}
             >
@@ -1124,7 +1448,7 @@ const CanvasStage = ({
       </Stage>
       <div className="absolute right-4 top-4 flex flex-col gap-2 rounded-xl bg-white/90 p-2 shadow-card backdrop-blur">
 	        <button
-	          title="Zoom in"
+	          title={t({ it: 'Aumenta zoom', en: 'Zoom in' })}
 	          onClick={() => {
 	            const nextZoom = clamp(viewportRef.current.zoom * 1.1, 0.2, 3);
 	            viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
@@ -1136,7 +1460,7 @@ const CanvasStage = ({
 	          +
 	        </button>
 	        <button
-	          title="Zoom out"
+	          title={t({ it: 'Riduci zoom', en: 'Zoom out' })}
 	          onClick={() => {
 	            const nextZoom = clamp(viewportRef.current.zoom / 1.1, 0.2, 3);
 	            viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
@@ -1148,7 +1472,7 @@ const CanvasStage = ({
 	          -
 	        </button>
         <button
-          title="Vai a vista di default"
+          title={t({ it: 'Vai alla vista predefinita', en: 'Go to default view' })}
           onClick={() => onGoDefaultView?.()}
           className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-xs font-semibold text-ink hover:bg-slate-50"
         >
@@ -1159,4 +1483,6 @@ const CanvasStage = ({
   );
 };
 
-export default memo(CanvasStage);
+const CanvasStage = memo(forwardRef(CanvasStageImpl));
+CanvasStage.displayName = 'CanvasStage';
+export default CanvasStage;

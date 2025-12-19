@@ -2,6 +2,7 @@ export type MapObjectType = string;
 
 export type IconName =
   | 'user'
+  | 'userCheck'
   | 'printer'
   | 'server'
   | 'wifi'
@@ -10,6 +11,10 @@ export type IconName =
   | 'desktop'
   | 'laptop'
   | 'camera'
+  | 'intercom'
+  | 'videoIntercom'
+  | 'scanner'
+  | 'mic'
   | 'router'
   | 'switch'
   | 'phone'
@@ -32,15 +37,46 @@ export interface MapObject {
   type: MapObjectType;
   name: string;
   description?: string;
+  // Real users (imported from external directory)
+  externalClientId?: string;
+  externalUserId?: string;
+  firstName?: string;
+  lastName?: string;
+  externalRole?: string;
+  externalDept1?: string;
+  externalDept2?: string;
+  externalDept3?: string;
+  externalEmail?: string;
+  externalExt1?: string;
+  externalExt2?: string;
+  externalExt3?: string;
+  externalIsExternal?: boolean;
   x: number;
   y: number;
   scale?: number;
   roomId?: string;
+  layerIds?: string[];
+}
+
+export interface LayerDefinition {
+  id: string; // stable key
+  name: { it: string; en: string };
+  color?: string;
+  order?: number;
+}
+
+export interface PlanLink {
+  id: string;
+  fromId: string;
+  toId: string;
+  label?: string;
+  color?: string;
 }
 
 export interface Room {
   id: string;
   name: string;
+  color?: string;
   kind?: 'rect' | 'poly';
   // rect
   x?: number;
@@ -59,9 +95,12 @@ export interface FloorPlan {
   order?: number;
   width?: number;
   height?: number;
+  printArea?: { x: number; y: number; width: number; height: number };
+  layers?: LayerDefinition[];
   views?: FloorPlanView[];
   revisions?: FloorPlanRevision[];
   rooms?: Room[];
+  links?: PlanLink[];
   objects: MapObject[];
 }
 
@@ -84,8 +123,10 @@ export interface FloorPlanRevision {
   imageUrl: string;
   width?: number;
   height?: number;
+  layers?: LayerDefinition[];
   views?: FloorPlanView[];
   rooms?: Room[];
+  links?: PlanLink[];
   objects: MapObject[];
 }
 

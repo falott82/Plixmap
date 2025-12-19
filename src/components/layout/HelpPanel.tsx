@@ -58,6 +58,12 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'MFA (opzionale): dal tuo Account puoi attivare/disattivare il codice TOTP (app Authenticator).',
+                          en: 'MFA (optional): from your Account you can enable/disable TOTP codes (Authenticator app).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'I permessi possono essere assegnati per Cliente/Sede/Planimetria in sola lettura o lettura+scrittura.',
                           en: 'Permissions can be assigned per Client/Site/Floor plan in read-only or read+write.'
                         })}
@@ -89,6 +95,12 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'Se un altro utente sta modificando la stessa planimetria, viene applicato un lock: tu la vedrai in sola lettura finché non viene sbloccata.',
+                          en: 'If another user is editing the same floor plan, an exclusive lock is applied: you will see it in read-only until it is released.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'Impostazioni: gestisci clienti/sedi/planimetrie e carica l’immagine (solo admin).',
                           en: 'Settings: manage clients/sites/floor plans and upload the image (admin only).'
                         })}
@@ -105,6 +117,12 @@ const HelpPanel = () => {
                         {t({
                           it: 'Trascina un’icona dalla palette sulla mappa (oppure usa Aggiungi dal menu destro).',
                           en: 'Drag an icon from the palette onto the map (or use Add from the right-click menu).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Utente reale: se configurato l’import, puoi trascinare “Utente reale” e scegliere il dipendente da una lista (con ricerca e filtro “solo non assegnati”).',
+                          en: 'Real user: if import is configured, you can drag “Real user” and pick an employee from a searchable list (with “only unassigned” filter).'
                         })}
                       </li>
                       <li>{t({ it: 'Alla creazione inserisci nome (obbligatorio) e descrizione (opzionale).', en: 'On creation, enter a name (required) and a description (optional).' })}</li>
@@ -154,6 +172,38 @@ const HelpPanel = () => {
                         {t({
                           it: 'Puoi spostare/ridimensionare la stanza; i collegamenti vengono aggiornati.',
                           en: 'You can move/resize the room; links are updated.'
+                        })}
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="rounded-xl bg-mist p-3">
+                    <div className="flex items-center gap-2 font-semibold text-ink">
+                      <Layers size={16} /> {t({ it: 'Livelli, griglia e collegamenti', en: 'Layers, grid and links' })}
+                    </div>
+                    <ul className="ml-5 list-disc space-y-1 pt-2">
+                      <li>
+                        {t({
+                          it: 'Livelli: nella palette puoi attivare/disattivare i livelli per mostrare/nascondere gruppi di oggetti (es. Utenti, Dispositivi, Cablaggi).',
+                          en: 'Layers: from the palette you can toggle layers to show/hide groups of objects (e.g. Users, Devices, Cabling).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Oggetto: nella modale puoi assegnare uno o più livelli; serve per filtrare la mappa.',
+                          en: 'Object: in the modal you can assign one or more layers; it’s used to filter the map.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Griglia: puoi attivare “Snap” e/o “Mostra” per posizionamenti più precisi.',
+                          en: 'Grid: enable “Snap” and/or “Show” for more precise placement.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Collegamenti: tasto destro su un oggetto → “Crea collegamento…” poi clicca un secondo oggetto. Canc per eliminare un collegamento selezionato.',
+                          en: 'Links: right-click an object → “Create link…” then click a second object. Delete removes the selected link.'
                         })}
                       </li>
                     </ul>

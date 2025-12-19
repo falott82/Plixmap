@@ -1,5 +1,8 @@
 import {
   User,
+  UserCheck,
+  DoorClosed,
+  DoorOpen,
   Printer,
   Server,
   Wifi,
@@ -8,6 +11,8 @@ import {
   MonitorPlay,
   Laptop,
   Video,
+  ScanLine,
+  Mic,
   Router,
   SwitchCamera,
   Phone,
@@ -55,6 +60,8 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
   switch (resolved) {
     case 'user':
       return <User {...common} />;
+    case 'userCheck':
+      return <UserCheck {...common} />;
     case 'printer':
       return <Printer {...common} />;
     case 'server':
@@ -71,6 +78,14 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
       return <Laptop {...common} />;
     case 'camera':
       return <Video {...common} />;
+    case 'intercom':
+      return <DoorClosed {...common} />;
+    case 'videoIntercom':
+      return <DoorOpen {...common} />;
+    case 'scanner':
+      return <ScanLine {...common} />;
+    case 'mic':
+      return <Mic {...common} />;
     case 'router':
       return <Router {...common} />;
     case 'switch':

@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
-import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, MapObject, MapObjectType, ObjectTypeDefinition, Room, Site } from './types';
+import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, Room, Site } from './types';
 import { defaultData, defaultObjectTypes } from './data';
 
 interface DataState {
@@ -29,18 +29,71 @@ interface DataState {
   updateSite: (id: string, payload: { name?: string; coords?: string }) => void;
   deleteSite: (id: string) => void;
   addFloorPlan: (siteId: string, name: string, imageUrl: string, width?: number, height?: number) => string;
-  updateFloorPlan: (id: string, payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height'>>) => void;
+  updateFloorPlan: (id: string, payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height' | 'printArea'>>) => void;
   deleteFloorPlan: (id: string) => void;
   reorderFloorPlans: (siteId: string, movingPlanId: string, targetPlanId: string, before?: boolean) => void;
   setFloorPlanContent: (
     floorPlanId: string,
-    payload: Pick<FloorPlan, 'imageUrl' | 'width' | 'height' | 'objects' | 'rooms' | 'views'>
+    payload: Pick<FloorPlan, 'imageUrl' | 'width' | 'height' | 'objects' | 'rooms' | 'views' | 'links'>
   ) => void;
-  addObject: (floorPlanId: string, type: MapObjectType, name: string, description: string | undefined, x: number, y: number, scale?: number) => string;
-  updateObject: (id: string, changes: Partial<Pick<MapObject, 'name' | 'description' | 'scale' | 'roomId'>>) => void;
+  addObject: (
+    floorPlanId: string,
+    type: MapObjectType,
+    name: string,
+    description: string | undefined,
+    x: number,
+    y: number,
+    scale?: number,
+    layerIds?: string[],
+    extra?: Partial<
+      Pick<
+        MapObject,
+        | 'externalClientId'
+        | 'externalUserId'
+        | 'firstName'
+        | 'lastName'
+        | 'externalRole'
+        | 'externalDept1'
+        | 'externalDept2'
+        | 'externalDept3'
+        | 'externalEmail'
+        | 'externalExt1'
+        | 'externalExt2'
+        | 'externalExt3'
+        | 'externalIsExternal'
+      >
+    >
+  ) => string;
+  updateObject: (
+    id: string,
+    changes: Partial<
+      Pick<
+        MapObject,
+        | 'name'
+        | 'description'
+        | 'scale'
+        | 'roomId'
+        | 'layerIds'
+        | 'externalClientId'
+        | 'externalUserId'
+        | 'firstName'
+        | 'lastName'
+        | 'externalRole'
+        | 'externalDept1'
+        | 'externalDept2'
+        | 'externalDept3'
+        | 'externalEmail'
+        | 'externalExt1'
+        | 'externalExt2'
+        | 'externalExt3'
+        | 'externalIsExternal'
+      >
+    >
+  ) => void;
   moveObject: (id: string, x: number, y: number) => void;
   deleteObject: (id: string) => void;
   clearObjects: (floorPlanId: string) => void;
+  removeRealUserAllocations: (clientId: string, externalUserId: string) => void;
   setObjectRoomIds: (floorPlanId: string, roomIdByObjectId: Record<string, string | undefined>) => void;
   addRoom: (floorPlanId: string, room: Omit<Room, 'id'>) => string;
   updateRoom: (floorPlanId: string, roomId: string, changes: Partial<Omit<Room, 'id'>>) => void;
@@ -56,6 +109,12 @@ interface DataState {
   updateView: (floorPlanId: string, viewId: string, changes: Partial<Omit<FloorPlanView, 'id'>>) => void;
   deleteView: (floorPlanId: string, viewId: string) => void;
   setDefaultView: (floorPlanId: string, viewId: string) => void;
+  addLink: (floorPlanId: string, fromId: string, toId: string, payload?: { label?: string; color?: string }) => string;
+  deleteLink: (floorPlanId: string, linkId: string) => void;
+  cloneFloorPlan: (
+    sourcePlanId: string,
+    options?: { name?: string; includeRooms?: boolean; includeObjects?: boolean; includeViews?: boolean; includeLayers?: boolean }
+  ) => string | null;
 }
 
 const updateFloorPlanById = (
@@ -177,10 +236,30 @@ const snapshotRevision = (
     imageUrl: plan.imageUrl,
     width: plan.width,
     height: plan.height,
+    layers: plan.layers ? plan.layers.map((l) => ({ ...l, name: { ...l.name } })) : undefined,
     views: plan.views ? plan.views.map((v) => ({ ...v, pan: { ...v.pan } })) : undefined,
     rooms: plan.rooms ? plan.rooms.map((r) => ({ ...r })) : undefined,
+    links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
     objects: plan.objects.map((o) => ({ ...o }))
   };
+};
+
+const defaultLayers = (): LayerDefinition[] => [
+  { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1 },
+  { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2 },
+  { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 3 },
+  { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 4 }
+];
+
+const normalizePlan = (plan: FloorPlan): FloorPlan => {
+  const next = { ...plan } as any;
+  if (!next.layers || !next.layers.length) next.layers = defaultLayers();
+  if (!Array.isArray(next.links)) next.links = [];
+  if (!Array.isArray(next.views)) next.views = [];
+  if (!Array.isArray(next.rooms)) next.rooms = [];
+  if (!Array.isArray(next.revisions)) next.revisions = [];
+  if (!Array.isArray(next.objects)) next.objects = [];
+  return next;
 };
 
 export const useDataStore = create<DataState>()(
@@ -192,9 +271,31 @@ export const useDataStore = create<DataState>()(
     setServerState: ({ clients, objectTypes }) =>
       set((state) => {
         const nextVersion = state.version + 1;
+        const incomingTypes = Array.isArray(objectTypes) && objectTypes.length ? objectTypes : state.objectTypes;
+        const builtins = defaultObjectTypes.filter((t) => t.builtin);
+        const byId = new Map(incomingTypes.map((t) => [t.id, t]));
+        for (const b of builtins) {
+          if (!byId.has(b.id)) byId.set(b.id, b);
+        }
+        // Rename legacy "user" label only if it was never customized.
+        const userType = byId.get('user');
+        if (userType && (userType as any).builtin) {
+          const it = userType.name?.it;
+          const en = userType.name?.en;
+          if (it === 'Utente' && en === 'User') {
+            byId.set('user', { ...userType, name: { it: 'Utente generico', en: 'Generic user' } });
+          }
+        }
+        const mergedTypes = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
         return {
-          clients,
-          objectTypes: Array.isArray(objectTypes) && objectTypes.length ? objectTypes : state.objectTypes,
+          clients: (clients || []).map((c) => ({
+            ...c,
+            sites: (c.sites || []).map((s) => ({
+              ...s,
+              floorPlans: (s.floorPlans || []).map((p) => normalizePlan(p))
+            }))
+          })),
+          objectTypes: mergedTypes,
           version: nextVersion,
           savedVersion: nextVersion
         };
@@ -319,6 +420,8 @@ export const useDataStore = create<DataState>()(
               order: maxOrder + 1,
               width,
               height,
+              layers: defaultLayers(),
+              links: [],
               objects: []
             };
             return { ...site, floorPlans: [...existing, newPlan] };
@@ -376,19 +479,36 @@ export const useDataStore = create<DataState>()(
             imageUrl: payload.imageUrl,
             width: payload.width,
             height: payload.height,
+            ...(payload as any).printArea !== undefined ? { printArea: (payload as any).printArea } : {},
+            ...(payload as any).layers ? { layers: (payload as any).layers } : {},
             objects: Array.isArray(payload.objects) ? payload.objects : [],
             rooms: Array.isArray(payload.rooms) ? payload.rooms : [],
-            views: Array.isArray(payload.views) ? payload.views : []
+            views: Array.isArray(payload.views) ? payload.views : [],
+            links: Array.isArray((payload as any).links) ? (payload as any).links : (plan as any).links
           })),
           version: state.version + 1
         }));
       },
-      addObject: (floorPlanId, type, name, description, x, y, scale = 1) => {
+      addObject: (floorPlanId, type, name, description, x, y, scale = 1, layerIds, extra) => {
         const id = nanoid();
         set((state) => ({
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
             ...plan,
-            objects: [...plan.objects, { id, floorPlanId, type, name, description, x, y, scale }]
+            objects: [
+              ...plan.objects,
+              {
+                id,
+                floorPlanId,
+                type,
+                name,
+                description,
+                x,
+                y,
+                scale,
+                layerIds,
+                ...(extra || {})
+              }
+            ]
           })),
           version: state.version + 1
         }));
@@ -409,6 +529,30 @@ export const useDataStore = create<DataState>()(
       deleteObject: (id) => {
         set((state) => ({
           clients: updateObjectById(state.clients, id, () => null),
+          version: state.version + 1
+        }));
+      },
+      removeRealUserAllocations: (clientId, externalUserId) => {
+        const cid = String(clientId || '').trim();
+        const eid = String(externalUserId || '').trim();
+        if (!cid || !eid) return;
+        set((state) => ({
+          clients: state.clients.map((c) =>
+            c.id !== cid
+              ? c
+              : {
+                  ...c,
+                  sites: c.sites.map((s) => ({
+                    ...s,
+                    floorPlans: s.floorPlans.map((p) => ({
+                      ...p,
+                      objects: (p.objects || []).filter(
+                        (o) => !(o.type === 'real_user' && (o as any).externalClientId === cid && (o as any).externalUserId === eid)
+                      )
+                    }))
+                  }))
+                }
+          ),
           version: state.version + 1
         }));
       },
@@ -487,9 +631,11 @@ export const useDataStore = create<DataState>()(
               imageUrl: rev.imageUrl,
               width: rev.width,
               height: rev.height,
+              layers: Array.isArray((rev as any).layers) ? (rev as any).layers : plan.layers,
               objects: Array.isArray(rev.objects) ? rev.objects : [],
               rooms: Array.isArray(rev.rooms) ? rev.rooms : [],
-              views: Array.isArray(rev.views) ? rev.views : []
+              views: Array.isArray(rev.views) ? rev.views : [],
+              links: Array.isArray((rev as any).links) ? (rev as any).links : (plan as any).links
             };
           }),
           version: state.version + 1
@@ -571,6 +717,122 @@ export const useDataStore = create<DataState>()(
           })),
           version: state.version + 1
         }));
+      },
+      addLink: (floorPlanId, fromId, toId, payload) => {
+        const id = nanoid();
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            links: [...((plan as any).links || []), { id, fromId, toId, label: payload?.label, color: payload?.color }]
+          })),
+          version: state.version + 1
+        }));
+        return id;
+      },
+      deleteLink: (floorPlanId, linkId) => {
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            links: ((plan as any).links || []).filter((l: PlanLink) => l.id !== linkId)
+          })),
+          version: state.version + 1
+        }));
+      },
+      cloneFloorPlan: (sourcePlanId, options) => {
+        const source = get().findFloorPlan(sourcePlanId);
+        if (!source) return null;
+        const includeRooms = options?.includeRooms !== false;
+        const includeObjects = !!options?.includeObjects;
+        const includeViews = options?.includeViews !== false;
+        const includeLayers = options?.includeLayers !== false;
+        const id = nanoid();
+
+        set((state) => {
+          let sitePlans: FloorPlan[] = [];
+          for (const c of state.clients) {
+            for (const s of c.sites) {
+              if (s.id !== source.siteId) continue;
+              sitePlans = s.floorPlans || [];
+            }
+          }
+          const baseName = String(options?.name || `${source.name} (Copy)`).trim() || `${source.name} (Copy)`;
+          const existingNames = new Set(sitePlans.map((p) => p.name));
+          let name = baseName;
+          if (existingNames.has(name)) {
+            let n = 2;
+            while (existingNames.has(`${baseName} ${n}`)) n++;
+            name = `${baseName} ${n}`;
+          }
+          const maxOrder = Math.max(-1, ...sitePlans.map((p) => (typeof (p as any).order === 'number' ? (p as any).order : -1)));
+
+          const roomIdMap = new Map();
+          const nextRooms = includeRooms
+            ? (source.rooms || []).map((r) => {
+                const nextId = nanoid();
+                roomIdMap.set(r.id, nextId);
+                return { ...r, id: nextId };
+              })
+            : [];
+
+          const objectIdMap = new Map<string, string>();
+          const nextObjects = includeObjects
+            ? (source.objects || []).map((o) => {
+                const nextId = nanoid();
+                objectIdMap.set(o.id, nextId);
+                return {
+                  ...o,
+                  id: nextId,
+                  floorPlanId: id,
+                  roomId: includeRooms ? (o.roomId ? roomIdMap.get(o.roomId) : undefined) : undefined
+                };
+              })
+            : [];
+
+          const nextLinks = includeObjects
+            ? ((source as any).links || [])
+                .map((l: any) => {
+                  const fromId = objectIdMap.get(l.fromId);
+                  const toId = objectIdMap.get(l.toId);
+                  if (!fromId || !toId) return null;
+                  return { ...l, id: nanoid(), fromId, toId };
+                })
+                .filter(Boolean)
+            : [];
+
+          const nextViews = includeViews
+            ? (source.views || []).map((v) => ({ ...v, id: nanoid(), pan: { ...v.pan } }))
+            : [];
+
+          if (nextViews.length) {
+            const def = nextViews.find((v) => v.isDefault);
+            if (!def) nextViews[0].isDefault = true;
+            else for (const v of nextViews) v.isDefault = v.id === def.id;
+          }
+
+          const nextPlan: FloorPlan = normalizePlan({
+            id,
+            siteId: source.siteId,
+            name,
+            imageUrl: source.imageUrl,
+            order: maxOrder + 1,
+            width: source.width,
+            height: source.height,
+            layers: includeLayers ? source.layers?.map((l) => ({ ...l, name: { ...l.name } })) : defaultLayers(),
+            views: nextViews,
+            rooms: nextRooms,
+            revisions: [],
+            links: nextLinks,
+            objects: nextObjects
+          });
+
+          const nextClients = updateSiteById(state.clients, source.siteId, (site) => ({
+            ...site,
+            floorPlans: [...(site.floorPlans || []), nextPlan]
+          }));
+          return { clients: nextClients, version: state.version + 1 };
+        });
+
+        return id;
       }
   })
 );

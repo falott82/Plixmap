@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const express = require('express');
 const crypto = require('crypto');
-const { openDb, getOrCreateAuthSecret } = require('./db.cjs');
+const { WebSocketServer } = require('ws');
+const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret } = require('./db.cjs');
 const {
   parseCookies,
   verifyPassword,
@@ -16,12 +18,38 @@ const {
 } = require('./auth.cjs');
 const { getUserWithPermissions, computePlanAccess, filterStateForUser, mergeWritablePlanContent } = require('./permissions.cjs');
 const { writeAuthLog, requestMeta } = require('./log.cjs');
+const { getAuditVerboseEnabled, setAuditVerboseEnabled, writeAuditLog } = require('./audit.cjs');
+const { encryptSecret, decryptSecret, generateTotpSecret, verifyTotp } = require('./mfa.cjs');
+const {
+  listCustomFields,
+  createCustomField,
+  updateCustomField,
+  deleteCustomField,
+  getObjectCustomValues,
+  setObjectCustomValues,
+  validateValuesAgainstFields
+} = require('./customFields.cjs');
+const {
+  fetchEmployeesFromApi,
+  getImportConfig,
+  getImportConfigSafe,
+  upsertImportConfig,
+  upsertExternalUsers,
+  listExternalUsers,
+  setExternalUserHidden
+} = require('./customImport.cjs');
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 
 const app = express();
 app.use(express.json({ limit: '80mb' }));
+// Prevent browser/proxy caching for API responses (avoids stale auth state and UI inconsistencies after restarts).
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
+  next();
+});
 
 const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
 try {
@@ -38,8 +66,88 @@ app.use(
 const db = openDb();
 ensureBootstrapAdmins(db);
 const authSecret = getOrCreateAuthSecret(db);
+const dataSecret = getOrCreateDataSecret(db);
 // Invalidate sessions on each server restart (forces login after reboot/redeploy).
 const serverInstanceId = crypto.randomBytes(16).toString('hex');
+
+// --- Realtime (WebSocket): plan presence + plan locking (exclusive editor) ---
+const wsPlanMembers = new Map(); // planId -> Set<ws>
+const wsClientInfo = new Map(); // ws -> { userId, username, plans:Set<string> }
+const planLocks = new Map(); // planId -> { userId, username, ts }
+
+const jsonSend = (ws, obj) => {
+  try {
+    ws.send(JSON.stringify(obj));
+  } catch {
+    // ignore
+  }
+};
+
+const broadcastToPlan = (planId, obj) => {
+  const members = wsPlanMembers.get(planId);
+  if (!members) return;
+  for (const ws of members) jsonSend(ws, obj);
+};
+
+const computePresence = (planId) => {
+  const members = wsPlanMembers.get(planId);
+  const users = [];
+  if (members) {
+    const seen = new Set();
+    for (const ws of members) {
+      const info = wsClientInfo.get(ws);
+      if (!info) continue;
+      const key = info.userId;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      users.push({ userId: info.userId, username: info.username });
+    }
+  }
+  return users;
+};
+
+const emitPresence = (planId) => {
+  broadcastToPlan(planId, { type: 'presence', planId, users: computePresence(planId) });
+};
+
+const emitLockState = (planId) => {
+  const lock = planLocks.get(planId) || null;
+  broadcastToPlan(planId, { type: 'lock_state', planId, lockedBy: lock ? { userId: lock.userId, username: lock.username } : null });
+};
+
+const releaseLocksForWs = (ws) => {
+  const info = wsClientInfo.get(ws);
+  if (!info) return;
+  for (const planId of info.plans) {
+    const members = wsPlanMembers.get(planId);
+    if (members) {
+      members.delete(ws);
+      if (!members.size) wsPlanMembers.delete(planId);
+    }
+    const lock = planLocks.get(planId);
+    if (lock && lock.userId === info.userId) {
+      // release only if no other sockets from same user are still in the plan
+      const remaining = wsPlanMembers.get(planId);
+      let stillThere = false;
+      if (remaining) {
+        for (const otherWs of remaining) {
+          const otherInfo = wsClientInfo.get(otherWs);
+          if (otherInfo?.userId === info.userId) {
+            stillThere = true;
+            break;
+          }
+        }
+      }
+      if (!stillThere) {
+        planLocks.delete(planId);
+        writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'ws_close' } });
+        emitLockState(planId);
+      }
+    }
+    emitPresence(planId);
+  }
+  wsClientInfo.delete(ws);
+};
 
 const parseDataUrl = (value) => {
   if (typeof value !== 'string') return null;
@@ -174,6 +282,18 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
+const getWsAuthContext = (req) => {
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies.deskly_session;
+  const session = verifySession(authSecret, token);
+  if (!session?.userId || !session?.tokenVersion || !session?.sid) return null;
+  if (session.sid !== serverInstanceId) return null;
+  const row = db.prepare('SELECT id, username, disabled FROM users WHERE id = ?').get(session.userId);
+  if (!row) return null;
+  if (Number(row.disabled) === 1) return null;
+  return { userId: row.id, username: row.username };
+};
+
 // Public: used by the login UI to decide whether to show first-run credentials.
 app.get('/api/auth/bootstrap-status', (_req, res) => {
   try {
@@ -184,29 +304,63 @@ app.get('/api/auth/bootstrap-status', (_req, res) => {
   }
 });
 
+const loginAttemptBucket = new Map(); // ip -> { count, resetAt }
+const allowLoginAttempt = (ip) => {
+  const key = ip || 'unknown';
+  const now = Date.now();
+  const row = loginAttemptBucket.get(key);
+  if (!row || now > row.resetAt) {
+    loginAttemptBucket.set(key, { count: 1, resetAt: now + 5 * 60 * 1000 });
+    return true;
+  }
+  row.count += 1;
+  if (row.count > 20) return false;
+  return true;
+};
+
 app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, otp } = req.body || {};
   if (!username || !password) {
     res.status(400).json({ error: 'Missing username/password' });
     return;
   }
+  const meta = requestMeta(req);
+  if (!allowLoginAttempt(meta.ip)) {
+    res.status(429).json({ error: 'Too many attempts' });
+    return;
+  }
   const row = db
-    .prepare('SELECT id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled FROM users WHERE username = ?')
+    .prepare(
+      'SELECT id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, mfaEnabled, mfaSecretEnc FROM users WHERE username = ?'
+    )
     .get(String(username).trim());
   if (!row) {
-    writeAuthLog(db, { event: 'login', success: false, username: String(username), ...requestMeta(req), details: { reason: 'user_not_found' } });
+    writeAuthLog(db, { event: 'login', success: false, username: String(username), ...meta, details: { reason: 'user_not_found' } });
     res.status(401).json({ error: 'Invalid credentials' });
     return;
   }
   if (row && Number(row.disabled) === 1) {
-    writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...requestMeta(req), details: { reason: 'disabled' } });
+    writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'disabled' } });
     res.status(403).json({ error: 'User disabled' });
     return;
   }
   if (!verifyPassword(String(password), row.passwordSalt, row.passwordHash)) {
-    writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...requestMeta(req), details: { reason: 'bad_password' } });
+    writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'bad_password' } });
     res.status(401).json({ error: 'Invalid credentials' });
     return;
+  }
+  if (Number(row.mfaEnabled) === 1) {
+    if (!otp) {
+      writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'mfa_required' } });
+      res.status(401).json({ error: 'MFA required', mfaRequired: true });
+      return;
+    }
+    const secret = decryptSecret(authSecret, row.mfaSecretEnc);
+    if (!secret || !verifyTotp(secret, otp)) {
+      writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'bad_mfa' } });
+      res.status(401).json({ error: 'Invalid credentials' });
+      return;
+    }
   }
   const token = signSession(authSecret, {
     userId: row.id,
@@ -215,7 +369,7 @@ app.post('/api/auth/login', (req, res) => {
     iat: Date.now()
   });
   setSessionCookie(res, token);
-  writeAuthLog(db, { event: 'login', success: true, userId: row.id, username: row.username, ...requestMeta(req) });
+  writeAuthLog(db, { event: 'login', success: true, userId: row.id, username: row.username, ...meta });
   res.json({ ok: true });
 });
 
@@ -237,6 +391,442 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     return;
   }
   res.json({ user: ctx.user, permissions: ctx.permissions });
+});
+
+app.get('/api/auth/mfa', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT mfaEnabled FROM users WHERE id = ?').get(req.userId);
+  res.json({ enabled: !!row && Number(row.mfaEnabled) === 1 });
+});
+
+app.post('/api/auth/mfa/setup', requireAuth, (req, res) => {
+  const { password } = req.body || {};
+  if (!password) {
+    res.status(400).json({ error: 'Missing password' });
+    return;
+  }
+  const row = db.prepare('SELECT username, passwordSalt, passwordHash, mfaEnabled FROM users WHERE id = ?').get(req.userId);
+  if (!row) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  if (!verifyPassword(String(password), row.passwordSalt, row.passwordHash)) {
+    res.status(401).json({ error: 'Invalid credentials' });
+    return;
+  }
+  if (Number(row.mfaEnabled) === 1) {
+    res.status(400).json({ error: 'MFA already enabled' });
+    return;
+  }
+  const secret = generateTotpSecret(row.username);
+  const enc = encryptSecret(authSecret, secret.base32);
+  db.prepare('UPDATE users SET mfaSecretEnc = ?, mfaEnabled = 0, updatedAt = ? WHERE id = ?').run(enc, Date.now(), req.userId);
+  writeAuditLog(db, { level: 'important', event: 'mfa_setup', userId: req.userId, username: row.username, ...requestMeta(req) });
+  res.json({ secret: secret.base32, otpauthUrl: secret.otpauth_url });
+});
+
+app.post('/api/auth/mfa/enable', requireAuth, (req, res) => {
+  const { otp } = req.body || {};
+  if (!otp) {
+    res.status(400).json({ error: 'Missing otp' });
+    return;
+  }
+  const row = db.prepare('SELECT username, mfaSecretEnc, mfaEnabled FROM users WHERE id = ?').get(req.userId);
+  if (!row) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  if (Number(row.mfaEnabled) === 1) {
+    res.status(400).json({ error: 'MFA already enabled' });
+    return;
+  }
+  const secret = decryptSecret(authSecret, row.mfaSecretEnc);
+  if (!secret || !verifyTotp(secret, otp)) {
+    res.status(400).json({ error: 'Invalid otp' });
+    return;
+  }
+  db.prepare('UPDATE users SET mfaEnabled = 1, updatedAt = ? WHERE id = ?').run(Date.now(), req.userId);
+  writeAuditLog(db, { level: 'important', event: 'mfa_enabled', userId: req.userId, username: row.username, ...requestMeta(req) });
+  res.json({ ok: true });
+});
+
+app.post('/api/auth/mfa/disable', requireAuth, (req, res) => {
+  const { password, otp } = req.body || {};
+  if (!password || !otp) {
+    res.status(400).json({ error: 'Missing password/otp' });
+    return;
+  }
+  const row = db.prepare('SELECT username, passwordSalt, passwordHash, mfaSecretEnc, mfaEnabled, tokenVersion FROM users WHERE id = ?').get(req.userId);
+  if (!row) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  if (!verifyPassword(String(password), row.passwordSalt, row.passwordHash)) {
+    res.status(401).json({ error: 'Invalid credentials' });
+    return;
+  }
+  if (Number(row.mfaEnabled) !== 1) {
+    res.status(400).json({ error: 'MFA not enabled' });
+    return;
+  }
+  const secret = decryptSecret(authSecret, row.mfaSecretEnc);
+  if (!secret || !verifyTotp(secret, otp)) {
+    res.status(400).json({ error: 'Invalid otp' });
+    return;
+  }
+  db.prepare('UPDATE users SET mfaEnabled = 0, mfaSecretEnc = NULL, tokenVersion = ?, updatedAt = ? WHERE id = ?').run(
+    Number(row.tokenVersion) + 1,
+    Date.now(),
+    req.userId
+  );
+  writeAuditLog(db, { level: 'important', event: 'mfa_disabled', userId: req.userId, username: row.username, ...requestMeta(req) });
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.get('/api/settings/audit', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  res.json({ auditVerbose: getAuditVerboseEnabled(db) });
+});
+
+// --- Custom Import: external "real users" per client (superadmin) ---
+app.get('/api/import/config', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const clientId = String(req.query.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  res.json({ config: getImportConfigSafe(db, clientId) });
+});
+
+app.put('/api/import/config', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const { clientId, url, username, password, bodyJson } = req.body || {};
+  const cid = String(clientId || '').trim();
+  const u = String(url || '').trim();
+  const un = String(username || '').trim();
+  if (!cid || !u || !un) {
+    res.status(400).json({ error: 'Missing clientId/url/username' });
+    return;
+  }
+  if (bodyJson !== undefined && String(bodyJson || '').trim()) {
+    try {
+      JSON.parse(String(bodyJson));
+    } catch {
+      res.status(400).json({ error: 'Invalid JSON body' });
+      return;
+    }
+  }
+  const cfg = upsertImportConfig(db, dataSecret, { clientId: cid, url: u, username: un, password, bodyJson });
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'import_config_update',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: cid,
+    ...requestMeta(req),
+    details: { url: u, username: un, passwordChanged: password !== undefined, bodyChanged: bodyJson !== undefined }
+  });
+  res.json({ ok: true, config: cfg });
+});
+
+app.post('/api/import/test', requireAuth, async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const cid = String(req.body?.clientId || '').trim();
+  if (!cid) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const cfg = getImportConfig(db, dataSecret, cid);
+  if (!cfg || !cfg.url || !cfg.username || !cfg.password) {
+    res.status(400).json({ error: 'Missing import config (url/username/password)' });
+    return;
+  }
+  const result = await fetchEmployeesFromApi(cfg);
+  writeAuditLog(db, { level: 'important', event: 'import_test', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { ok: !!result.ok, status: result.status } });
+  if (!result.ok) {
+    res.status(400).json({
+      ok: false,
+      status: result.status,
+      error: result.error || 'Request failed',
+      contentType: result.contentType || '',
+      rawSnippet: result.rawSnippet || ''
+    });
+    return;
+  }
+  const preview = (result.employees || []).slice(0, 25);
+  res.json({ ok: true, status: result.status, count: (result.employees || []).length, preview });
+});
+
+app.post('/api/import/sync', requireAuth, async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const cid = String(req.body?.clientId || '').trim();
+  if (!cid) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const cfg = getImportConfig(db, dataSecret, cid);
+  if (!cfg || !cfg.url || !cfg.username || !cfg.password) {
+    res.status(400).json({ error: 'Missing import config (url/username/password)' });
+    return;
+  }
+  const result = await fetchEmployeesFromApi(cfg);
+  if (!result.ok) {
+    writeAuditLog(db, { level: 'important', event: 'import_sync', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { ok: false, status: result.status, error: result.error || '' } });
+    res.status(400).json({
+      ok: false,
+      status: result.status,
+      error: result.error || 'Request failed',
+      contentType: result.contentType || '',
+      rawSnippet: result.rawSnippet || ''
+    });
+    return;
+  }
+  const sync = upsertExternalUsers(db, cid, result.employees || []);
+  writeAuditLog(db, { level: 'important', event: 'import_sync', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: sync.summary });
+  res.json({ ok: true, ...sync });
+});
+
+app.post('/api/import/diff', requireAuth, async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const cid = String(req.body?.clientId || '').trim();
+  if (!cid) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const cfg = getImportConfig(db, dataSecret, cid);
+  if (!cfg || !cfg.url || !cfg.username || !cfg.password) {
+    res.status(400).json({ error: 'Missing import config (url/username/password)' });
+    return;
+  }
+  const result = await fetchEmployeesFromApi(cfg);
+  if (!result.ok) {
+    res.status(400).json({ ok: false, status: result.status, error: result.error || 'Request failed', contentType: result.contentType || '', rawSnippet: result.rawSnippet || '' });
+    return;
+  }
+  const remote = result.employees || [];
+  const existing = db
+    .prepare(
+      'SELECT externalId, firstName, lastName, role, dept1, dept2, dept3, email, ext1, ext2, ext3, isExternal, present FROM external_users WHERE clientId = ?'
+    )
+    .all(cid);
+  const byId = new Map(existing.map((r) => [String(r.externalId), r]));
+  const remoteIds = new Set(remote.map((e) => String(e.externalId)));
+  let newCount = 0;
+  let updatedCount = 0;
+  let missingCount = 0;
+  const missingSample = [];
+  const newSample = [];
+
+  const norm = (s) => String(s || '').trim();
+  for (const e of remote) {
+    const id = String(e.externalId);
+    const prev = byId.get(id);
+    if (!prev) {
+      newCount += 1;
+      if (newSample.length < 10) newSample.push({ externalId: id, firstName: e.firstName || '', lastName: e.lastName || '' });
+      continue;
+    }
+    const changed =
+      norm(prev.firstName) !== norm(e.firstName) ||
+      norm(prev.lastName) !== norm(e.lastName) ||
+      norm(prev.role) !== norm(e.role) ||
+      norm(prev.dept1) !== norm(e.dept1) ||
+      norm(prev.dept2) !== norm(e.dept2) ||
+      norm(prev.dept3) !== norm(e.dept3) ||
+      norm(prev.email) !== norm(e.email) ||
+      norm(prev.ext1) !== norm(e.ext1) ||
+      norm(prev.ext2) !== norm(e.ext2) ||
+      norm(prev.ext3) !== norm(e.ext3) ||
+      Number(prev.isExternal || 0) !== (e.isExternal ? 1 : 0) ||
+      Number(prev.present || 1) !== 1;
+    if (changed) updatedCount += 1;
+  }
+  for (const prev of existing) {
+    const id = String(prev.externalId);
+    if (remoteIds.has(id)) continue;
+    if (Number(prev.present || 1) !== 1) continue;
+    missingCount += 1;
+    if (missingSample.length < 10) missingSample.push({ externalId: id, firstName: prev.firstName || '', lastName: prev.lastName || '' });
+  }
+  res.json({
+    ok: true,
+    remoteCount: remote.length,
+    localCount: existing.length,
+    newCount,
+    updatedCount,
+    missingCount,
+    newSample,
+    missingSample
+  });
+});
+
+app.post('/api/import/clear', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const cid = String(req.body?.clientId || '').trim();
+  if (!cid) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const removedUsers = db.prepare('DELETE FROM external_users WHERE clientId = ?').run(cid).changes || 0;
+  const state = readState();
+  let removedObjects = 0;
+  const nextClients = (state.clients || []).map((c) => {
+    if (c.id !== cid) return c;
+    return {
+      ...c,
+      sites: (c.sites || []).map((s) => ({
+        ...s,
+        floorPlans: (s.floorPlans || []).map((p) => {
+          const prevCount = (p.objects || []).length;
+          const nextObjects = (p.objects || []).filter((o) => !(o.type === 'real_user' && o.externalClientId === cid));
+          removedObjects += prevCount - nextObjects.length;
+          return { ...p, objects: nextObjects };
+        })
+      }))
+    };
+  });
+  const payload = { clients: nextClients, objectTypes: state.objectTypes };
+  const updatedAt = writeState(payload);
+  writeAuditLog(db, { level: 'important', event: 'import_clear', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { removedUsers, removedObjects } });
+  res.json({ ok: true, removedUsers, removedObjects, updatedAt });
+});
+
+app.get('/api/external-users', requireAuth, (req, res) => {
+  const clientId = String(req.query.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  if (!req.isAdmin && !req.isSuperAdmin) {
+    // Non-admin users can list external users only for clients they can see (ro/rw).
+    const serverState = readState();
+    const ctx = getUserWithPermissions(db, req.userId);
+    const access = computePlanAccess(serverState.clients, ctx?.permissions || []);
+    const filtered = filterStateForUser(serverState.clients, access, false);
+    const allowed = (filtered || []).some((c) => c.id === clientId);
+    if (!allowed) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+  }
+  const q = String(req.query.q || '').trim();
+  const includeHidden = String(req.query.includeHidden || '') === '1';
+  const includeMissing = String(req.query.includeMissing || '') === '1';
+  const rows = listExternalUsers(db, { clientId, q, includeHidden, includeMissing });
+  res.json({ ok: true, rows });
+});
+
+app.post('/api/external-users/hide', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const { clientId, externalId, hidden } = req.body || {};
+  const cid = String(clientId || '').trim();
+  const eid = String(externalId || '').trim();
+  if (!cid || !eid) {
+    res.status(400).json({ error: 'Missing clientId/externalId' });
+    return;
+  }
+  setExternalUserHidden(db, cid, eid, !!hidden);
+  writeAuditLog(db, { level: 'important', event: 'external_user_hide', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { externalId: eid, hidden: !!hidden } });
+  res.json({ ok: true });
+});
+
+app.put('/api/settings/audit', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const enabled = !!req.body?.auditVerbose;
+  setAuditVerboseEnabled(db, enabled);
+  writeAuditLog(db, { level: 'important', event: 'audit_settings_update', userId: req.userId, ...requestMeta(req), details: { auditVerbose: enabled } });
+  res.json({ ok: true, auditVerbose: enabled });
+});
+
+app.post('/api/audit', requireAuth, (req, res) => {
+  const { event, level, scopeType, scopeId, details } = req.body || {};
+  if (!event || typeof event !== 'string') {
+    res.status(400).json({ error: 'Missing event' });
+    return;
+  }
+  // Only allow client-side audit events from authenticated users; the server decides whether verbose is enabled.
+  const ctx = getUserWithPermissions(db, req.userId);
+  writeAuditLog(db, {
+    level: level === 'verbose' ? 'verbose' : 'important',
+    event: String(event).slice(0, 80),
+    userId: req.userId,
+    username: ctx?.user?.username || null,
+    scopeType: scopeType ? String(scopeType).slice(0, 16) : null,
+    scopeId: scopeId ? String(scopeId).slice(0, 128) : null,
+    ...requestMeta(req),
+    details: details && typeof details === 'object' ? details : details ? { value: String(details) } : null
+  });
+  res.json({ ok: true });
+});
+
+app.get('/api/audit', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const level = String(req.query.level || 'all');
+  const limit = Math.max(1, Math.min(500, Number(req.query.limit || 100)));
+  const offset = Math.max(0, Number(req.query.offset || 0));
+  const where = [];
+  const params = {};
+  if (level === 'important' || level === 'verbose') {
+    where.push('level = @level');
+    params.level = level;
+  }
+  if (q) {
+    where.push(`(LOWER(event) LIKE @q OR LOWER(COALESCE(username,'')) LIKE @q OR LOWER(COALESCE(details,'')) LIKE @q OR LOWER(COALESCE(scopeId,'')) LIKE @q)`);
+    params.q = `%${q}%`;
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const rows = db
+    .prepare(
+      `SELECT id, ts, level, event, userId, username, ip, method, path, userAgent, scopeType, scopeId, details
+       FROM audit_log
+       ${whereSql}
+       ORDER BY id DESC
+       LIMIT @limit OFFSET @offset`
+    )
+    .all({ ...params, limit, offset })
+    .map((r) => ({
+      ...r,
+      details: (() => {
+        try {
+          return r.details ? JSON.parse(r.details) : null;
+        } catch {
+          return r.details;
+        }
+      })()
+    }));
+  res.json({ rows, limit, offset });
 });
 
 app.post('/api/auth/first-run', requireAuth, (req, res) => {
@@ -278,7 +868,7 @@ app.post('/api/auth/first-run', requireAuth, (req, res) => {
 });
 
 app.put('/api/auth/me', requireAuth, (req, res) => {
-  const { language, defaultPlanId, clientOrder } = req.body || {};
+  const { language, defaultPlanId, clientOrder, paletteFavorites } = req.body || {};
   const nextLanguage = language === 'en' ? 'en' : language === 'it' ? 'it' : undefined;
   const nextDefaultPlanId =
     typeof defaultPlanId === 'string' ? defaultPlanId : defaultPlanId === null ? null : undefined;
@@ -288,8 +878,19 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
       : clientOrder === null
         ? []
         : undefined;
+  const nextPaletteFavorites =
+    Array.isArray(paletteFavorites) && paletteFavorites.every((x) => typeof x === 'string')
+      ? paletteFavorites.map((x) => String(x))
+      : paletteFavorites === null
+        ? []
+        : undefined;
 
-  if (nextLanguage === undefined && nextDefaultPlanId === undefined && nextClientOrder === undefined) {
+  if (
+    nextLanguage === undefined &&
+    nextDefaultPlanId === undefined &&
+    nextClientOrder === undefined &&
+    nextPaletteFavorites === undefined
+  ) {
     res.status(400).json({ error: 'Invalid payload' });
     return;
   }
@@ -312,6 +913,22 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
     }
   }
 
+  if (nextPaletteFavorites !== undefined) {
+    const state = readState();
+    const allowed = new Set((state.objectTypes || []).map((d) => d.id));
+    const uniq = [];
+    const seen = new Set();
+    for (const id of nextPaletteFavorites) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (allowed.size && !allowed.has(id)) continue;
+      uniq.push(id);
+    }
+    // If objectTypes is missing (very old state), accept but still de-dupe.
+    // (uniq already de-dupes even if allowed is empty)
+    var validatedPaletteFavorites = uniq;
+  }
+
   const now = Date.now();
   const sets = [];
   const params = [];
@@ -327,10 +944,72 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
     sets.push('clientOrderJson = ?');
     params.push(JSON.stringify(nextClientOrder));
   }
+  if (nextPaletteFavorites !== undefined) {
+    sets.push('paletteFavoritesJson = ?');
+    params.push(JSON.stringify(validatedPaletteFavorites || []));
+  }
   sets.push('updatedAt = ?');
   params.push(now);
   params.push(req.userId);
   db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  res.json({ ok: true });
+});
+
+// --- Per-user custom fields for objects (profile-scoped) ---
+app.get('/api/custom-fields', requireAuth, (req, res) => {
+  res.json({ fields: listCustomFields(db, req.userId) });
+});
+
+app.post('/api/custom-fields', requireAuth, (req, res) => {
+  const result = createCustomField(db, req.userId, req.body || {});
+  if (!result.ok) {
+    res.status(400).json({ error: result.error || 'Invalid payload' });
+    return;
+  }
+  writeAuditLog(db, { level: 'important', event: 'custom_field_create', userId: req.userId, ...requestMeta(req), details: { id: result.id } });
+  res.json({ ok: true, id: result.id });
+});
+
+app.put('/api/custom-fields/:id', requireAuth, (req, res) => {
+  const result = updateCustomField(db, req.userId, req.params.id, req.body || {});
+  if (!result.ok) {
+    res.status(400).json({ error: result.error || 'Invalid payload' });
+    return;
+  }
+  writeAuditLog(db, { level: 'important', event: 'custom_field_update', userId: req.userId, ...requestMeta(req), details: { id: String(req.params.id) } });
+  res.json({ ok: true });
+});
+
+app.delete('/api/custom-fields/:id', requireAuth, (req, res) => {
+  const result = deleteCustomField(db, req.userId, req.params.id);
+  if (!result.ok) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  writeAuditLog(db, { level: 'important', event: 'custom_field_delete', userId: req.userId, ...requestMeta(req), details: { id: String(req.params.id) } });
+  res.json({ ok: true });
+});
+
+app.get('/api/object-custom/:objectId', requireAuth, (req, res) => {
+  const objectId = String(req.params.objectId || '').trim();
+  if (!objectId) {
+    res.status(400).json({ error: 'Missing objectId' });
+    return;
+  }
+  const values = getObjectCustomValues(db, req.userId, objectId);
+  res.json({ values });
+});
+
+app.put('/api/object-custom/:objectId', requireAuth, (req, res) => {
+  const objectId = String(req.params.objectId || '').trim();
+  const typeId = String(req.body?.typeId || '').trim();
+  if (!objectId || !typeId) {
+    res.status(400).json({ error: 'Missing objectId/typeId' });
+    return;
+  }
+  const fields = listCustomFields(db, req.userId).filter((f) => String(f.typeId) === typeId);
+  const next = validateValuesAgainstFields(fields, req.body?.values || {});
+  setObjectCustomValues(db, req.userId, objectId, next);
   res.json({ ok: true });
 });
 
@@ -353,8 +1032,65 @@ app.put('/api/state', requireAuth, (req, res) => {
     return;
   }
   const serverState = readState();
+  const lockedByOthers = new Set();
+  for (const [planId, lock] of planLocks.entries()) {
+    if (!lock) continue;
+    if (lock.userId && lock.userId !== req.userId) lockedByOthers.add(planId);
+  }
+
+  const buildPlanMap = (clients) => {
+    const map = new Map();
+    for (const c of clients || []) {
+      for (const s of c?.sites || []) {
+        for (const p of s?.floorPlans || []) {
+          if (p?.id) map.set(p.id, p);
+        }
+      }
+    }
+    return map;
+  };
+
+  const hasPlanId = (clients, planId) => {
+    for (const c of clients || []) {
+      for (const s of c?.sites || []) {
+        for (const p of s?.floorPlans || []) {
+          if (p?.id === planId) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const applyLockedPlans = (incomingClients) => {
+    if (!lockedByOthers.size) return incomingClients;
+    const serverPlans = buildPlanMap(serverState.clients);
+    // Prevent destructive operations on a plan that is currently locked by another user.
+    for (const planId of lockedByOthers) {
+      if (hasPlanId(serverState.clients, planId) && !hasPlanId(incomingClients, planId)) {
+        res.status(423).json({ error: 'Plan is locked', planId });
+        return null;
+      }
+    }
+    // Replace any locked plan with the server version to avoid overwriting concurrent edits.
+    for (const c of incomingClients || []) {
+      for (const s of c?.sites || []) {
+        for (let i = 0; i < (s?.floorPlans || []).length; i += 1) {
+          const p = s.floorPlans[i];
+          if (!p?.id) continue;
+          if (!lockedByOthers.has(p.id)) continue;
+          const serverPlan = serverPlans.get(p.id);
+          if (serverPlan) s.floorPlans[i] = serverPlan;
+        }
+      }
+    }
+    return incomingClients;
+  };
+
   if (req.isAdmin) {
-    const payload = { clients: body.clients, objectTypes: Array.isArray(body.objectTypes) ? body.objectTypes : serverState.objectTypes };
+    const incomingClients = Array.isArray(body.clients) ? body.clients : [];
+    const lockedApplied = applyLockedPlans(incomingClients);
+    if (!lockedApplied) return;
+    const payload = { clients: lockedApplied, objectTypes: Array.isArray(body.objectTypes) ? body.objectTypes : serverState.objectTypes };
     const updatedAt = writeState(payload);
     res.json({ ok: true, updatedAt, clients: payload.clients, objectTypes: payload.objectTypes });
     return;
@@ -365,6 +1101,8 @@ app.put('/api/state', requireAuth, (req, res) => {
   for (const [planId, a] of access.entries()) {
     if (a === 'rw') writablePlanIds.add(planId);
   }
+  // Enforce exclusive lock: even if the user has RW permission, they cannot write if another user holds the plan lock.
+  for (const planId of lockedByOthers) writablePlanIds.delete(planId);
   const nextClients = mergeWritablePlanContent(serverState.clients, body.clients, writablePlanIds);
   const payload = { clients: nextClients, objectTypes: serverState.objectTypes };
   const updatedAt = writeState(payload);
@@ -603,6 +1341,134 @@ if (fs.existsSync(distDir)) {
   app.get(/.*/, (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
 }
 
-app.listen(PORT, HOST, () => {
+const server = http.createServer(app);
+
+const wss = new WebSocketServer({ server, path: '/ws' });
+wss.on('connection', (ws, req) => {
+  const auth = getWsAuthContext(req);
+  if (!auth) {
+    try {
+      ws.close(1008, 'unauthorized');
+    } catch {}
+    return;
+  }
+  wsClientInfo.set(ws, { userId: auth.userId, username: auth.username, plans: new Set() });
+  jsonSend(ws, { type: 'hello', userId: auth.userId, username: auth.username });
+
+  ws.on('message', (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(String(raw || ''));
+    } catch {
+      return;
+    }
+    const info = wsClientInfo.get(ws);
+    if (!info) return;
+
+    if (msg?.type === 'join') {
+      const planId = String(msg.planId || '').trim();
+      if (!planId) return;
+      if (!wsPlanMembers.has(planId)) wsPlanMembers.set(planId, new Set());
+      wsPlanMembers.get(planId).add(ws);
+      info.plans.add(planId);
+
+      const lock = planLocks.get(planId) || null;
+      jsonSend(ws, { type: 'lock_state', planId, lockedBy: lock ? { userId: lock.userId, username: lock.username } : null });
+      jsonSend(ws, { type: 'presence', planId, users: computePresence(planId) });
+
+      if (!!msg.wantLock) {
+        const existing = planLocks.get(planId);
+        if (!existing || existing.userId === info.userId) {
+          planLocks.set(planId, { userId: info.userId, username: info.username, ts: Date.now() });
+          writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
+          emitLockState(planId);
+        } else {
+          jsonSend(ws, { type: 'lock_denied', planId, lockedBy: { userId: existing.userId, username: existing.username } });
+          writeAuditLog(db, {
+            level: 'important',
+            event: 'plan_lock_denied',
+            userId: info.userId,
+            username: info.username,
+            scopeType: 'plan',
+            scopeId: planId,
+            details: { lockedBy: { userId: existing.userId, username: existing.username } }
+          });
+        }
+      }
+      emitPresence(planId);
+      return;
+    }
+
+    if (msg?.type === 'leave') {
+      const planId = String(msg.planId || '').trim();
+      if (!planId) return;
+      const members = wsPlanMembers.get(planId);
+      if (members) {
+        members.delete(ws);
+        if (!members.size) wsPlanMembers.delete(planId);
+      }
+      info.plans.delete(planId);
+      const lock = planLocks.get(planId);
+      if (lock && lock.userId === info.userId) {
+        const remaining = wsPlanMembers.get(planId);
+        let stillThere = false;
+        if (remaining) {
+          for (const otherWs of remaining) {
+            const otherInfo = wsClientInfo.get(otherWs);
+            if (otherInfo?.userId === info.userId) {
+              stillThere = true;
+              break;
+            }
+          }
+        }
+        if (!stillThere) {
+          planLocks.delete(planId);
+          writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'leave' } });
+          emitLockState(planId);
+        }
+      }
+      emitPresence(planId);
+      return;
+    }
+
+    if (msg?.type === 'release_lock') {
+      const planId = String(msg.planId || '').trim();
+      const lock = planLocks.get(planId);
+      if (lock && lock.userId === info.userId) {
+        planLocks.delete(planId);
+        writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'release' } });
+        emitLockState(planId);
+      }
+    }
+  });
+
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
+  ws.on('close', () => {
+    releaseLocksForWs(ws);
+  });
+});
+
+const heartbeatTimer = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) {
+      try {
+        ws.terminate();
+      } catch {}
+      continue;
+    }
+    ws.isAlive = false;
+    try {
+      ws.ping();
+    } catch {}
+  }
+}, 30_000);
+
+wss.on('close', () => clearInterval(heartbeatTimer));
+
+server.listen(PORT, HOST, () => {
   console.log(`[deskly] API listening on http://${HOST}:${PORT}`);
 });
