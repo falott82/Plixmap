@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, History, Info, Map as MapIcon, MapPinned, Search, Star, Trash } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, Crop, History, Info, Map as MapIcon, MapPinned, Search, Star, Trash } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -10,13 +10,14 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
 import ClientInfoModal from './ClientInfoModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
+import CloneFloorPlanModal from './CloneFloorPlanModal';
 
 type TreeClient = {
   id: string;
   name: string;
   shortName?: string;
   logoUrl?: string;
-  sites: { id: string; name: string; coords?: string; floorPlans: { id: string; name: string; order?: number }[] }[];
+  sites: { id: string; name: string; coords?: string; floorPlans: { id: string; name: string; order?: number; printArea?: any }[] }[];
 };
 
 const parseCoords = (value: string | undefined): { lat: number; lng: number } | null => {
@@ -57,6 +58,9 @@ const sameTree = (a: TreeClient[], b: TreeClient[]) => {
         if (ap.id !== bp.id) return false;
         if (ap.name !== bp.name) return false;
         if ((ap.order ?? null) !== (bp.order ?? null)) return false;
+        const apPA = ap.printArea ? JSON.stringify(ap.printArea) : '';
+        const bpPA = bp.printArea ? JSON.stringify(bp.printArea) : '';
+        if (apPA !== bpPA) return false;
       }
     }
   }
@@ -75,7 +79,7 @@ const SidebarTree = () => {
           id: site.id,
           name: site.name,
           coords: (site as any).coords,
-          floorPlans: site.floorPlans.map((p) => ({ id: p.id, name: p.name, order: (p as any).order }))
+          floorPlans: site.floorPlans.map((p) => ({ id: p.id, name: p.name, order: (p as any).order, printArea: (p as any).printArea }))
         }))
       })),
     sameTree
@@ -88,6 +92,8 @@ const SidebarTree = () => {
     }),
     shallow
   );
+  const updateFloorPlan = useDataStore((s) => s.updateFloorPlan);
+  const cloneFloorPlan = useDataStore((s) => (s as any).cloneFloorPlan);
   const { selectedPlanId, setSelectedPlan, sidebarCollapsed, toggleSidebar } = useUIStore(
     (s) => ({
       selectedPlanId: s.selectedPlanId,
@@ -113,6 +119,7 @@ const SidebarTree = () => {
   const [siteMenu, setSiteMenu] = useState<{ siteName: string; coords?: string; x: number; y: number } | null>(null);
   const [clientInfoId, setClientInfoId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ kind: 'client' | 'plan'; id: string; label: string } | null>(null);
+  const [clonePlan, setClonePlan] = useState<{ planId: string; name: string } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ siteId: string; planId: string } | null>(null);
   const clientDragRef = useRef<string | null>(null);
@@ -304,6 +311,7 @@ const SidebarTree = () => {
                     .map((plan) => {
                     const active = selectedPlanId === plan.id || location.pathname.includes(plan.id);
                     const isDefault = !!defaultPlanId && defaultPlanId === plan.id;
+                    const hasPrintArea = !!plan.printArea;
                     return (
                       <button
                         key={plan.id}
@@ -343,7 +351,15 @@ const SidebarTree = () => {
                         <MapIcon size={16} className="text-primary" />
                         <span className="truncate">{plan.name}</span>
                         {isDefault ? <Star size={14} className="text-amber-500" /> : null}
-                        <ChevronRight size={14} className="ml-auto text-slate-400" />
+                        <span
+                          className={`ml-auto flex h-7 w-7 items-center justify-center rounded-lg border ${
+                            hasPrintArea ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-400'
+                          }`}
+                          title={hasPrintArea ? t({ it: 'Area di stampa impostata', en: 'Print area set' }) : t({ it: 'Area di stampa automatica', en: 'Auto print area' })}
+                        >
+                          <Crop size={14} />
+                        </span>
+                        <ChevronRight size={14} className="text-slate-400" />
                       </button>
                     );
                   })}
@@ -418,6 +434,56 @@ const SidebarTree = () => {
                 <History size={14} className="text-slate-600" />
                 {t({ it: 'Time machine…', en: 'Time machine…' })}
               </button>
+              <button
+                onClick={() => {
+                  const to = `/plan/${planMenu.planId}?pa=1`;
+                  setPlanMenu(null);
+                  if (selectedPlanId && selectedPlanId !== planMenu.planId && dirtyByPlan[selectedPlanId]) {
+                    requestSaveAndNavigate?.(to);
+                    return;
+                  }
+                  setSelectedPlan(planMenu.planId);
+                  navigate(to);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+              >
+                <Crop size={14} className="text-sky-700" />
+                {t({ it: 'Imposta area di stampa…', en: 'Set print area…' })}
+              </button>
+              {(() => {
+                const has = clients
+                  .flatMap((c) => c.sites.flatMap((s) => s.floorPlans))
+                  .find((p) => p.id === planMenu.planId)?.printArea;
+                if (!has) return null;
+                return (
+                  <button
+                    onClick={() => {
+                      updateFloorPlan(planMenu.planId, { printArea: undefined });
+                      setPlanMenu(null);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                  >
+                    <Crop size={14} className="text-slate-500" />
+                    {t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })}
+                  </button>
+                );
+              })()}
+              {user?.isAdmin ? (
+                <button
+                  onClick={() => {
+                    const label =
+                      clients
+                        .flatMap((c) => c.sites.flatMap((s) => s.floorPlans))
+                        .find((p) => p.id === planMenu.planId)?.name || planMenu.planId;
+                    setClonePlan({ planId: planMenu.planId, name: label });
+                    setPlanMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                >
+                  <Copy size={14} className="text-slate-600" />
+                  {t({ it: 'Duplica…', en: 'Duplicate…' })}
+                </button>
+              ) : null}
               {user?.isAdmin ? (
                 <button
                   onClick={() => {
@@ -499,6 +565,18 @@ const SidebarTree = () => {
       ) : null}
 
       <ClientInfoModal open={!!clientInfoId} client={fullClient || undefined} onClose={() => setClientInfoId(null)} />
+
+      <CloneFloorPlanModal
+        open={!!clonePlan}
+        sourceName={clonePlan?.name || ''}
+        onClose={() => setClonePlan(null)}
+        onConfirm={({ name, includeLayers, includeViews, includeRooms, includeObjects }) => {
+          if (!clonePlan) return;
+          const newId = cloneFloorPlan?.(clonePlan.planId, { name, includeLayers, includeViews, includeRooms, includeObjects });
+          setClonePlan(null);
+          if (newId) navigate(`/plan/${newId}`);
+        }}
+      />
 
       <ConfirmDialog
         open={!!confirmDelete}

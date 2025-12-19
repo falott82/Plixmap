@@ -63,29 +63,35 @@ const LogsPanel = () => {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-semibold text-ink">Audit log (superadmin)</div>
+          <div className="text-sm font-semibold text-ink">{t({ it: 'Log accessi (superadmin)', en: 'Authentication logs (superadmin)' })}</div>
           <div className="text-xs text-slate-500">
-            Solo eventi di autenticazione: login (anche falliti) e logout.
+            {t({
+              it: 'Solo eventi di autenticazione: login (anche falliti) e logout.',
+              en: 'Authentication events only: login attempts (including failures) and logout.'
+            })}
           </div>
         </div>
         <button
           onClick={load}
           className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-          title="Aggiorna"
+          title={t({ it: 'Aggiorna', en: 'Refresh' })}
         >
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-card">
-        <div className="text-sm font-semibold text-ink">Legenda eventi</div>
+        <div className="text-sm font-semibold text-ink">{t({ it: 'Legenda eventi', en: 'Event legend' })}</div>
         <ul className="mt-2 list-disc pl-5 text-sm text-slate-700">
           <li>
-            <span className="font-semibold">login</span>: tentativo di accesso (success/fail). In <span className="font-mono">details.reason</span> puoi trovare{' '}
-            <span className="font-mono">bad_password</span> / <span className="font-mono">user_not_found</span> / <span className="font-mono">disabled</span>.
+            <span className="font-semibold">login</span>:{' '}
+            {t({
+              it: 'tentativo di accesso (success/fail). In details.reason puoi trovare bad_password / user_not_found / disabled.',
+              en: 'login attempt (success/fail). In details.reason you may see bad_password / user_not_found / disabled.'
+            })}
           </li>
           <li>
-            <span className="font-semibold">logout</span>: uscita dell’utente.
+            <span className="font-semibold">logout</span>: {t({ it: 'uscita dell’utente.', en: 'user signed out.' })}
           </li>
         </ul>
       </div>
@@ -95,7 +101,7 @@ const LogsPanel = () => {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Cerca per username, IP, path o evento…"
+          placeholder={t({ it: 'Cerca per username, IP, path o evento…', en: 'Search by username, IP, path or event…' })}
           className="w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-3 py-2.5 text-sm outline-none ring-primary/30 focus:ring-2"
           onKeyDown={(e) => {
             if (e.key === 'Enter') load();
@@ -105,12 +111,12 @@ const LogsPanel = () => {
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-card">
         <div className="grid grid-cols-12 gap-2 border-b border-slate-200 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
-          <div className="col-span-2">Quando</div>
-          <div className="col-span-2">Evento</div>
-          <div className="col-span-2">Utente</div>
+          <div className="col-span-2">{t({ it: 'Quando', en: 'When' })}</div>
+          <div className="col-span-2">{t({ it: 'Evento', en: 'Event' })}</div>
+          <div className="col-span-2">{t({ it: 'Utente', en: 'User' })}</div>
           <div className="col-span-2">IP</div>
           <div className="col-span-2">HTTP</div>
-          <div className="col-span-2">Dettagli</div>
+          <div className="col-span-2">{t({ it: 'Dettagli', en: 'Details' })}</div>
         </div>
         {filtered.length ? (
           filtered.map((r) => (

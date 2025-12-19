@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Star, X } from 'lucide-react';
 import { FloorPlanView } from '../../store/types';
+import { useT } from '../../i18n/useT';
 
 interface Props {
   open: boolean;
@@ -13,6 +14,7 @@ interface Props {
 const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
   const firstId = useMemo(() => views[0]?.id, [views]);
   const [selectedId, setSelectedId] = useState<string>(firstId || '');
+  const t = useT();
 
   useEffect(() => {
     if (!open) return;
@@ -46,13 +48,18 @@ const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
             >
               <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
                 <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">Scegli la nuova vista di default</Dialog.Title>
+                  <Dialog.Title className="text-lg font-semibold text-ink">
+                    {t({ it: 'Scegli la nuova vista predefinita', en: 'Choose the new default view' })}
+                  </Dialog.Title>
                   <button onClick={onClose} className="text-slate-500 hover:text-ink">
                     <X size={18} />
                   </button>
                 </div>
                 <Dialog.Description className="mt-2 text-sm text-slate-600">
-                  Stai eliminando la vista di default: seleziona quale vista impostare come nuova default.
+                  {t({
+                    it: 'Stai eliminando la vista predefinita: seleziona quale vista impostare come nuova predefinita.',
+                    en: 'You are deleting the default view: choose which view should become the new default.'
+                  })}
                 </Dialog.Description>
 
                 <div className="mt-4 space-y-2">
@@ -81,7 +88,9 @@ const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
                       </label>
                     ))
                   ) : (
-                    <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">Nessuna vista disponibile.</div>
+                    <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+                      {t({ it: 'Nessuna vista disponibile.', en: 'No views available.' })}
+                    </div>
                   )}
                 </div>
 
@@ -90,7 +99,7 @@ const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    Annulla
+                    {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     disabled={!selectedId}
@@ -101,7 +110,7 @@ const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-50"
                   >
                     <Star size={16} className="text-amber-300" />
-                    Imposta default
+                    {t({ it: 'Imposta predefinita', en: 'Set default' })}
                   </button>
                 </div>
               </Dialog.Panel>
@@ -114,4 +123,3 @@ const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
 };
 
 export default ChooseDefaultViewModal;
-

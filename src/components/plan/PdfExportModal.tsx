@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Check, X } from 'lucide-react';
 import { PdfExportOptions, PdfOrientation } from '../../utils/pdf';
+import { useT } from '../../i18n/useT';
 
 interface Props {
   open: boolean;
@@ -11,12 +12,11 @@ interface Props {
 
 const PdfExportModal = ({ open, onClose, onConfirm }: Props) => {
   const [orientation, setOrientation] = useState<PdfOrientation>('auto');
-  const [includeList, setIncludeList] = useState(true);
+  const t = useT();
 
   useEffect(() => {
     if (!open) return;
     setOrientation('auto');
-    setIncludeList(true);
   }, [open]);
 
   return (
@@ -46,7 +46,7 @@ const PdfExportModal = ({ open, onClose, onConfirm }: Props) => {
             >
               <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
                 <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">Esporta PDF</Dialog.Title>
+                  <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Esporta PDF', en: 'Export PDF' })}</Dialog.Title>
                   <button onClick={onClose} className="text-slate-500 hover:text-ink">
                     <X size={18} />
                   </button>
@@ -54,12 +54,12 @@ const PdfExportModal = ({ open, onClose, onConfirm }: Props) => {
 
                 <div className="mt-4 space-y-4">
                   <div>
-                    <div className="text-sm font-semibold text-slate-700">Orientamento</div>
+                    <div className="text-sm font-semibold text-slate-700">{t({ it: 'Orientamento', en: 'Orientation' })}</div>
                     <div className="mt-2 grid grid-cols-3 gap-2">
                       {([
-                        { value: 'auto', label: 'Auto' },
-                        { value: 'landscape', label: 'Orizz.' },
-                        { value: 'portrait', label: 'Vert.' }
+                        { value: 'auto', label: t({ it: 'Auto', en: 'Auto' }) },
+                        { value: 'landscape', label: t({ it: 'Orizz.', en: 'Land.' }) },
+                        { value: 'portrait', label: t({ it: 'Vert.', en: 'Port.' }) }
                       ] as const).map((opt) => (
                         <button
                           key={opt.value}
@@ -75,19 +75,12 @@ const PdfExportModal = ({ open, onClose, onConfirm }: Props) => {
                       ))}
                     </div>
                     <div className="mt-2 text-xs text-slate-500">
-                      Auto sceglie in base alle proporzioni della planimetria.
+                      {t({
+                        it: 'Auto sceglie in base alle proporzioni della planimetria.',
+                        en: 'Auto chooses based on the floor plan aspect ratio.'
+                      })}
                     </div>
                   </div>
-
-                  <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={includeList}
-                      onChange={(e) => setIncludeList(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-primary"
-                    />
-                    Includi lista oggetti
-                  </label>
                 </div>
 
                 <div className="mt-6 flex justify-end gap-2">
@@ -95,17 +88,17 @@ const PdfExportModal = ({ open, onClose, onConfirm }: Props) => {
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    Annulla
+                    {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     onClick={() => {
-                      onConfirm({ orientation, includeList });
+                      onConfirm({ orientation, includeList: false });
                       onClose();
                     }}
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                   >
                     <Check size={16} />
-                    Esporta
+                    {t({ it: 'Esporta', en: 'Export' })}
                   </button>
                 </div>
               </Dialog.Panel>
@@ -118,4 +111,3 @@ const PdfExportModal = ({ open, onClose, onConfirm }: Props) => {
 };
 
 export default PdfExportModal;
-

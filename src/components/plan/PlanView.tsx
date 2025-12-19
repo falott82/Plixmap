@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
+  ChevronRight,
   Eye,
+  LayoutGrid,
   HelpCircle,
   Trash,
   Copy,
@@ -13,13 +15,15 @@ import {
   BookmarkPlus,
   Plus,
   FileDown,
+  Crop,
   Home,
   History,
   Save,
-  Cog
+  Cog,
+  EyeOff
 } from 'lucide-react';
 import Toolbar from './Toolbar';
-import CanvasStage from './CanvasStage';
+import CanvasStage, { CanvasStageHandle } from './CanvasStage';
 import SearchBar from './SearchBar';
 import ExportButton from './ExportButton';
 import ObjectModal from './ObjectModal';
@@ -33,18 +37,22 @@ import VersionBadge from '../ui/VersionBadge';
 import UserMenu from '../layout/UserMenu';
 import ViewModal from './ViewModal';
 import SearchResultsModal from './SearchResultsModal';
-import { exportPlanToPdf } from '../../utils/pdf';
 import ChooseDefaultViewModal from './ChooseDefaultViewModal';
 import Icon from '../ui/Icon';
-import PdfExportModal from './PdfExportModal';
 import RevisionsModal from './RevisionsModal';
 import SaveRevisionModal from './SaveRevisionModal';
 import RoomModal from './RoomModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
 import BulkEditSelectionModal from './BulkEditSelectionModal';
+import RealUserPickerModal from './RealUserPickerModal';
+import PrintModal from './PrintModal';
+import CrossPlanSearchModal, { CrossPlanSearchResult } from './CrossPlanSearchModal';
+import AllObjectTypesModal from './AllObjectTypesModal';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
 import { shallow } from 'zustand/shallow';
+import { postAuditEvent } from '../../api/audit';
+import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 
 interface Props {
   planId: string;
@@ -52,6 +60,7 @@ interface Props {
 
 const PlanView = ({ planId }: Props) => {
   const mapRef = useRef<HTMLDivElement>(null);
+  const canvasStageRef = useRef<CanvasStageHandle | null>(null);
   const fitApplied = useRef<string | null>(null);
   const t = useT();
   const lang = useLang();
@@ -60,6 +69,7 @@ const PlanView = ({ planId }: Props) => {
     updateObject,
     deleteObject,
     moveObject,
+    updateFloorPlan,
     setFloorPlanContent,
     addView,
     deleteView,
@@ -72,13 +82,16 @@ const PlanView = ({ planId }: Props) => {
     addRevision,
     restoreRevision,
     deleteRevision,
-    clearRevisions
+    clearRevisions,
+    addLink,
+    deleteLink
   } = useDataStore(
     (s) => ({
       addObject: s.addObject,
       updateObject: s.updateObject,
       deleteObject: s.deleteObject,
       moveObject: s.moveObject,
+      updateFloorPlan: s.updateFloorPlan,
       setFloorPlanContent: s.setFloorPlanContent,
       addView: s.addView,
       deleteView: s.deleteView,
@@ -91,7 +104,9 @@ const PlanView = ({ planId }: Props) => {
       addRevision: s.addRevision,
       restoreRevision: (s as any).restoreRevision,
       deleteRevision: s.deleteRevision,
-      clearRevisions: s.clearRevisions
+      clearRevisions: s.clearRevisions,
+      addLink: (s as any).addLink,
+      deleteLink: (s as any).deleteLink
     }),
     shallow
   );
@@ -125,6 +140,8 @@ const PlanView = ({ planId }: Props) => {
     return out;
   }, [getTypeLabel, objectTypeDefs]);
 
+  const inferDefaultLayerIds = useCallback((typeId: string) => (typeId === 'user' || typeId === 'real_user' ? ['users'] : ['devices']), []);
+
   const {
     selectedObjectId,
     selectedObjectIds,
@@ -145,6 +162,17 @@ const PlanView = ({ planId }: Props) => {
     highlight,
     openHelp,
     lastObjectScale,
+    visibleLayerIdsByPlan,
+    toggleLayerVisibility,
+    setVisibleLayerIds,
+    gridSnapEnabled,
+    gridSize,
+    showGrid,
+    setGridSnapEnabled,
+    setGridSize,
+    setShowGrid,
+    showPrintAreaByPlan,
+    toggleShowPrintArea,
     setPlanDirty,
     pendingSaveNavigateTo,
     clearPendingSaveNavigate
@@ -169,6 +197,17 @@ const PlanView = ({ planId }: Props) => {
       highlight: s.highlight,
       openHelp: s.openHelp,
       lastObjectScale: s.lastObjectScale,
+      visibleLayerIdsByPlan: (s as any).visibleLayerIdsByPlan,
+      toggleLayerVisibility: (s as any).toggleLayerVisibility,
+      setVisibleLayerIds: (s as any).setVisibleLayerIds,
+      gridSnapEnabled: (s as any).gridSnapEnabled,
+      gridSize: (s as any).gridSize,
+      showGrid: (s as any).showGrid,
+      setGridSnapEnabled: (s as any).setGridSnapEnabled,
+      setGridSize: (s as any).setGridSize,
+      setShowGrid: (s as any).setShowGrid,
+      showPrintAreaByPlan: (s as any).showPrintAreaByPlan,
+      toggleShowPrintArea: (s as any).toggleShowPrintArea,
       setPlanDirty: (s as any).setPlanDirty,
       pendingSaveNavigateTo: (s as any).pendingSaveNavigateTo,
       clearPendingSaveNavigate: (s as any).clearPendingSaveNavigate
@@ -177,6 +216,7 @@ const PlanView = ({ planId }: Props) => {
   );
 
   const push = useToastStore((s) => s.push);
+  const saveCustomValues = useCustomFieldsStore((s) => s.saveObjectValues);
   const [pendingType, setPendingType] = useState<MapObjectType | null>(null);
   const [modalState, setModalState] = useState<
     | { mode: 'create'; type: MapObjectType; coords: { x: number; y: number } }
@@ -192,10 +232,15 @@ const PlanView = ({ planId }: Props) => {
   const [bulkEditSelectionOpen, setBulkEditSelectionOpen] = useState(false);
   const [chooseDefaultModal, setChooseDefaultModal] = useState<{ deletingViewId: string } | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  // reserved for future multi-plan export (disabled for now)
+  const [printAreaMode, setPrintAreaMode] = useState(false);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [saveRevisionOpen, setSaveRevisionOpen] = useState(false);
+  const [realUserPicker, setRealUserPicker] = useState<{ x: number; y: number } | null>(null);
+  const [allTypesOpen, setAllTypesOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<
     | { kind: 'object'; id: string; x: number; y: number }
+    | { kind: 'link'; id: string; x: number; y: number }
     | { kind: 'map'; x: number; y: number; worldX: number; worldY: number; addOpen: boolean; roomOpen: boolean }
     | null
   >(null);
@@ -207,12 +252,19 @@ const PlanView = ({ planId }: Props) => {
   const [searchResultsTerm, setSearchResultsTerm] = useState('');
   const [searchResultsIds, setSearchResultsIds] = useState<string[]>([]);
   const [searchRoomIds, setSearchRoomIds] = useState<string[]>([]);
+  const [crossPlanSearchOpen, setCrossPlanSearchOpen] = useState(false);
+  const [crossPlanSearchTerm, setCrossPlanSearchTerm] = useState('');
+  const [crossPlanResults, setCrossPlanResults] = useState<CrossPlanSearchResult[]>([]);
   const [countsOpen, setCountsOpen] = useState(false);
   const [expandedType, setExpandedType] = useState<string | null>(null);
   const [objectListQuery, setObjectListQuery] = useState('');
   const [roomsOpen, setRoomsOpen] = useState(false);
+  const [gridMenuOpen, setGridMenuOpen] = useState(false);
+  const gridMenuRef = useRef<HTMLDivElement | null>(null);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
+  const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
+  const [linkFromId, setLinkFromId] = useState<string | null>(null);
   const [roomDrawMode, setRoomDrawMode] = useState<'rect' | 'poly' | null>(null);
   const [newRoomMenuOpen, setNewRoomMenuOpen] = useState(false);
   const [highlightRoom, setHighlightRoom] = useState<{ roomId: string; until: number } | null>(null);
@@ -227,6 +279,7 @@ const PlanView = ({ planId }: Props) => {
   const planRef = useRef<FloorPlan | undefined>(undefined);
   const selectedObjectIdRef = useRef<string | undefined>(selectedObjectId);
   const selectedObjectIdsRef = useRef<string[]>(selectedObjectIds);
+  const selectedLinkIdRef = useRef<string | null>(selectedLinkId);
   const confirmDeleteRef = useRef<string[] | null>(confirmDelete);
   const zoomRef = useRef<number>(zoom);
 
@@ -256,6 +309,11 @@ const PlanView = ({ planId }: Props) => {
     setSelectedRevision(planId, null);
   }, [planId, setSelectedRevision]);
 
+  useEffect(() => {
+    // Close any open context menus when switching plans.
+    setContextMenu(null);
+  }, [planId]);
+
   // Avoid re-applying viewport on every data change (plan updates clone references).
   const viewportInitRef = useRef<string | null>(null);
 
@@ -275,7 +333,72 @@ const PlanView = ({ planId }: Props) => {
     return 'ro';
   }, [client?.id, permissions, planId, site?.id, user]);
 
-  const isReadOnly = !!activeRevision || planAccess !== 'rw';
+  const [lockState, setLockState] = useState<{ lockedBy: { userId: string; username: string } | null; mine: boolean }>(
+    { lockedBy: null, mine: false }
+  );
+  const [presenceUsers, setPresenceUsers] = useState<{ userId: string; username: string }[]>([]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const canRequestLock = !activeRevision && planAccess === 'rw';
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${proto}://${window.location.host}/ws`;
+    const ws = new WebSocket(wsUrl);
+    let closed = false;
+
+    const send = (obj: any) => {
+      try {
+        ws.send(JSON.stringify(obj));
+      } catch {
+        // ignore
+      }
+    };
+
+    ws.onopen = () => {
+      send({ type: 'join', planId, wantLock: canRequestLock });
+    };
+    ws.onmessage = (ev) => {
+      let msg: any;
+      try {
+        msg = JSON.parse(String(ev.data || ''));
+      } catch {
+        return;
+      }
+      if (msg?.type === 'lock_state' && msg.planId === planId) {
+        const lockedBy = msg.lockedBy || null;
+        setLockState({ lockedBy, mine: !!lockedBy && lockedBy.userId === user.id });
+      }
+      if (msg?.type === 'lock_denied' && msg.planId === planId) {
+        const lockedBy = msg.lockedBy || null;
+        setLockState({ lockedBy, mine: false });
+      }
+      if (msg?.type === 'presence' && msg.planId === planId) {
+        setPresenceUsers(Array.isArray(msg.users) ? msg.users : []);
+      }
+    };
+    ws.onclose = () => {
+      if (closed) return;
+      closed = true;
+      setPresenceUsers([]);
+      setLockState({ lockedBy: null, mine: false });
+    };
+    ws.onerror = () => {
+      // ignore
+    };
+
+    return () => {
+      closed = true;
+      try {
+        if (ws.readyState === WebSocket.OPEN) send({ type: 'leave', planId });
+        ws.close();
+      } catch {
+        // ignore
+      }
+    };
+  }, [activeRevision, planAccess, planId, user?.id]);
+
+  const lockedByOther = !!lockState.lockedBy && !lockState.mine;
+  const isReadOnly = !!activeRevision || planAccess !== 'rw' || lockedByOther;
   const isReadOnlyRef = useRef(isReadOnly);
   useEffect(() => {
     isReadOnlyRef.current = isReadOnly;
@@ -288,11 +411,39 @@ const PlanView = ({ planId }: Props) => {
       imageUrl: activeRevision.imageUrl,
       width: activeRevision.width,
       height: activeRevision.height,
+      layers: (activeRevision as any).layers || plan.layers,
       rooms: activeRevision.rooms,
+      links: (activeRevision as any).links || (plan as any).links,
       objects: activeRevision.objects,
       views: activeRevision.views
     };
   }, [activeRevision, plan]);
+
+  const planLayers = useMemo(() => {
+    const layers = (renderPlan as any)?.layers || [];
+    return [...layers].sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
+  }, [renderPlan]);
+  const visibleLayerIds = visibleLayerIdsByPlan[planId] || planLayers.map((l: any) => l.id);
+  useEffect(() => {
+    if (!visibleLayerIdsByPlan[planId] && planLayers.length) {
+      setVisibleLayerIds(planId, planLayers.map((l: any) => l.id));
+    }
+  }, [planId, planLayers, setVisibleLayerIds, visibleLayerIdsByPlan]);
+
+  const canvasPlan = useMemo(() => {
+    if (!renderPlan) return renderPlan;
+    const visible = new Set(visibleLayerIds);
+    const normalizedLayerIdsForType = (typeId: string) => {
+      if (typeId === 'user') return ['users'];
+      return ['devices'];
+    };
+    const objects = renderPlan.objects.filter((o: any) => {
+      const ids = Array.isArray(o.layerIds) && o.layerIds.length ? o.layerIds : normalizedLayerIdsForType(o.type);
+      return ids.some((id: string) => visible.has(id));
+    });
+    const rooms = visible.has('rooms') ? renderPlan.rooms : [];
+    return { ...renderPlan, objects, rooms };
+  }, [renderPlan, visibleLayerIds]);
 
   const latestRev = useMemo(() => {
     const revs: any[] = plan?.revisions || [];
@@ -522,6 +673,27 @@ const PlanView = ({ planId }: Props) => {
   const pendingNavigateRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const sp = new URLSearchParams(location.search || '');
+    const focusObject = sp.get('focusObject');
+    const focusRoom = sp.get('focusRoom');
+    if (!focusObject && !focusRoom) return;
+    const timer = window.setTimeout(() => {
+      if (focusObject) {
+        setSelectedObject(focusObject);
+        triggerHighlight(focusObject);
+      }
+      if (focusRoom) {
+        clearSelection();
+        setSelectedRoomId(focusRoom);
+        setHighlightRoom({ roomId: focusRoom, until: Date.now() + 3200 });
+      }
+      navigate(`/plan/${planId}`, { replace: true });
+    }, 40);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planId, location.search]);
+
+  useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('tm') !== '1') return;
     setRevisionsOpen(true);
@@ -529,6 +701,37 @@ const PlanView = ({ planId }: Props) => {
     const search = params.toString();
     navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
   }, [location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('pa') !== '1') return;
+    if (isReadOnly) return;
+    setPrintAreaMode(true);
+    push(
+      t({
+        it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
+        en: 'Draw a rectangle on the map to set the print area.'
+      }),
+      'info'
+    );
+    params.delete('pa');
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!printAreaMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setPrintAreaMode(false);
+        push(t({ it: 'Impostazione area di stampa annullata', en: 'Print area selection cancelled' }), 'info');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [printAreaMode, push, t]);
 
   const revertUnsavedChanges = useCallback(() => {
     if (!plan) return;
@@ -577,6 +780,11 @@ const PlanView = ({ planId }: Props) => {
     return renderPlan.objects.find((o) => o.id === contextMenu.id);
   }, [renderPlan, contextMenu]);
 
+  const contextLink = useMemo(() => {
+    if (!renderPlan || !contextMenu || contextMenu.kind !== 'link') return undefined;
+    return ((renderPlan as any).links || []).find((l: any) => l.id === contextMenu.id);
+  }, [renderPlan, contextMenu]);
+
   const contextIsMulti = useMemo(() => {
     if (!contextMenu || contextMenu.kind !== 'object') return false;
     if (!selectedObjectIds?.length || selectedObjectIds.length < 2) return false;
@@ -592,6 +800,9 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     selectedObjectIdsRef.current = selectedObjectIds;
   }, [selectedObjectIds]);
+  useEffect(() => {
+    selectedLinkIdRef.current = selectedLinkId;
+  }, [selectedLinkId]);
   useEffect(() => {
     confirmDeleteRef.current = confirmDelete;
   }, [confirmDelete]);
@@ -628,6 +839,8 @@ const PlanView = ({ planId }: Props) => {
     setPendingType(null);
     setContextMenu(null);
     clearSelection();
+    setSelectedLinkId(null);
+    setLinkFromId(null);
   }, [isReadOnly]);
 
   const saveTimer = useRef<number | null>(null);
@@ -645,14 +858,26 @@ const PlanView = ({ planId }: Props) => {
 
   const handleStageSelect = useCallback(
     (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => {
+      if (linkFromId && id && planRef.current && !isReadOnlyRef.current) {
+        if (id !== linkFromId) {
+          markTouched();
+          addLink((planRef.current as any).id, linkFromId, id);
+          postAuditEvent({ event: 'link_create', scopeType: 'plan', scopeId: (planRef.current as any).id, details: { fromId: linkFromId, toId: id } });
+          push(t({ it: 'Collegamento creato', en: 'Link created' }), 'success');
+        }
+        setLinkFromId(null);
+      }
       if (!id) {
         clearSelection();
         setSelectedRoomId(undefined);
+        setSelectedLinkId(null);
       } else if (options?.multi) {
         setSelectedRoomId(undefined);
+        setSelectedLinkId(null);
         toggleSelectedObject(id);
       } else {
         setSelectedRoomId(undefined);
+        setSelectedLinkId(null);
         const currentSelectedIds = selectedObjectIdsRef.current;
         const currentSelectedId = selectedObjectIdRef.current;
         if (currentSelectedIds.length === 1 && currentSelectedId === id) {
@@ -665,7 +890,7 @@ const PlanView = ({ planId }: Props) => {
         setContextMenu(null);
       }
     },
-    [clearSelection, setSelectedObject, toggleSelectedObject]
+    [addLink, clearSelection, linkFromId, markTouched, push, setSelectedObject, t, toggleSelectedObject]
   );
 
   const handleStageMove = useCallback(
@@ -688,6 +913,12 @@ const PlanView = ({ planId }: Props) => {
   const handleObjectContextMenu = useCallback(
     ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) =>
       setContextMenu({ kind: 'object', id, x: clientX, y: clientY }),
+    []
+  );
+
+  const handleLinkContextMenu = useCallback(
+    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) =>
+      setContextMenu({ kind: 'link', id, x: clientX, y: clientY }),
     []
   );
 
@@ -825,6 +1056,13 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
+      if (e.key === 'Escape' && linkFromId) {
+        e.preventDefault();
+        setLinkFromId(null);
+        push(t({ it: 'Creazione collegamento annullata', en: 'Link creation cancelled' }), 'info');
+        return;
+      }
+
       if (currentConfirm) {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -850,6 +1088,7 @@ const PlanView = ({ planId }: Props) => {
           setContextMenu(null);
           clearSelection();
           setSelectedRoomId(undefined);
+          setSelectedLinkId(null);
         }
         return;
       }
@@ -878,6 +1117,17 @@ const PlanView = ({ planId }: Props) => {
         }
         return;
       }
+      const linkId = selectedLinkIdRef.current;
+      if (!currentSelectedIds.length && !selectedRoomId && linkId && (e.key === 'Delete' || e.key === 'Backspace') && currentPlan) {
+        e.preventDefault();
+        if (isReadOnlyRef.current) return;
+        markTouched();
+        deleteLink((currentPlan as FloorPlan).id, linkId);
+        postAuditEvent({ event: 'link_delete', scopeType: 'plan', scopeId: (currentPlan as FloorPlan).id, details: { id: linkId } });
+        push(t({ it: 'Collegamento eliminato', en: 'Link deleted' }), 'info');
+        setSelectedLinkId(null);
+        return;
+      }
       if (!currentSelectedIds.length || !currentPlan) return;
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
@@ -886,7 +1136,7 @@ const PlanView = ({ planId }: Props) => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [deleteObject, push, clearSelection, roomDrawMode, moveObject, updateObject, selectedRoomId]);
+  }, [deleteObject, push, clearSelection, roomDrawMode, moveObject, updateObject, selectedRoomId, linkFromId, deleteLink, markTouched, t]);
 
   const objectsByType = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -913,6 +1163,33 @@ const PlanView = ({ planId }: Props) => {
   );
 
   const rooms = useMemo(() => renderPlan?.rooms || [], [renderPlan?.rooms]);
+
+  const paletteFavorites = useAuthStore((s) => (s.user as any)?.paletteFavorites) as string[] | undefined;
+  const paletteOrder = useMemo(() => (Array.isArray(paletteFavorites) ? paletteFavorites : []), [paletteFavorites]);
+  // User-configured palette: list can be empty (meaning no objects enabled).
+  const paletteHasCustom = paletteOrder.length > 0;
+  const paletteHasMore = useMemo(() => {
+    const all = (objectTypeDefs || []).map((d) => d.id);
+    const fav = new Set(paletteOrder);
+    return all.some((id) => !fav.has(id));
+  }, [objectTypeDefs, paletteOrder]);
+
+  const mapAddMenuTypes = useMemo(() => {
+    const defs = objectTypeDefs || [];
+    if (!paletteHasCustom) return defs;
+    const fav = new Set(paletteOrder);
+    return defs.filter((d) => !fav.has(d.id));
+  }, [objectTypeDefs, paletteHasCustom, paletteOrder]);
+
+  useEffect(() => {
+    if (!gridMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!gridMenuRef.current) return;
+      if (!gridMenuRef.current.contains(e.target as any)) setGridMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [gridMenuOpen]);
 
   const objectsByRoomId = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -989,11 +1266,16 @@ const PlanView = ({ planId }: Props) => {
 
   const handlePlaceNew = (type: MapObjectType, x: number, y: number) => {
     if (isReadOnly) return;
+    if (type === 'real_user') {
+      setRealUserPicker({ x, y });
+      setPendingType(null);
+      return;
+    }
     setModalState({ mode: 'create', type, coords: { x, y } });
     setPendingType(null);
   };
 
-  const handleCreate = (payload: { name: string; description?: string }) => {
+  const handleCreate = (payload: { name: string; description?: string; layerIds?: string[]; customValues?: Record<string, any> }) => {
     if (!plan || !modalState || isReadOnly) return;
     if (modalState.mode === 'create') {
       markTouched();
@@ -1004,11 +1286,21 @@ const PlanView = ({ planId }: Props) => {
         payload.description,
         modalState.coords.x,
         modalState.coords.y,
-        lastObjectScale
+        lastObjectScale,
+        payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(modalState.type)
       );
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
       if (roomId) updateObject(id, { roomId });
-      push('Oggetto creato', 'success');
+      if (payload.customValues && Object.keys(payload.customValues).length) {
+        saveCustomValues(id, modalState.type, payload.customValues).catch(() => {});
+      }
+      push(t({ it: 'Oggetto creato', en: 'Object created' }), 'success');
+      postAuditEvent({
+        event: 'object_create',
+        scopeType: 'plan',
+        scopeId: plan.id,
+        details: { id, type: modalState.type, name: payload.name, roomId: roomId || null }
+      });
     }
     if (modalState.mode === 'duplicate') {
       markTouched();
@@ -1021,21 +1313,41 @@ const PlanView = ({ planId }: Props) => {
         payload.description,
         modalState.coords.x,
         modalState.coords.y,
-        scale
+        scale,
+        payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(base?.type || 'user')
       );
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
       if (roomId) updateObject(id, { roomId });
-      push('Oggetto duplicato', 'success');
+      if (payload.customValues && Object.keys(payload.customValues).length) {
+        saveCustomValues(id, base?.type || 'user', payload.customValues).catch(() => {});
+      }
+      push(t({ it: 'Oggetto duplicato', en: 'Object duplicated' }), 'success');
+      postAuditEvent({
+        event: 'object_duplicate',
+        scopeType: 'plan',
+        scopeId: plan.id,
+        details: { fromId: modalState.objectId, id, type: base?.type, name: payload.name, roomId: roomId || null }
+      });
     }
   };
 
   const handleEdit = (objectId: string) => setModalState({ mode: 'edit', objectId });
 
-  const handleUpdate = (payload: { name: string; description?: string }) => {
+  const handleUpdate = (payload: { name: string; description?: string; layerIds?: string[]; customValues?: Record<string, any> }) => {
     if (!modalState || modalState.mode !== 'edit' || isReadOnly) return;
     markTouched();
-    updateObject(modalState.objectId, payload);
-    push('Oggetto aggiornato', 'success');
+    updateObject(modalState.objectId, { name: payload.name, description: payload.description, layerIds: payload.layerIds });
+    const obj = plan?.objects?.find((o) => o.id === modalState.objectId);
+    if (obj && payload.customValues) {
+      saveCustomValues(modalState.objectId, obj.type, payload.customValues).catch(() => {});
+    }
+    push(t({ it: 'Oggetto aggiornato', en: 'Object updated' }), 'success');
+    postAuditEvent({
+      event: 'object_update',
+      scopeType: 'plan',
+      scopeId: planId,
+      details: { id: modalState.objectId, name: payload.name, description: payload.description || '', layerIds: payload.layerIds || [] }
+    });
   };
 
   const handleSearch = (_term: string) => {
@@ -1052,12 +1364,107 @@ const PlanView = ({ planId }: Props) => {
     const objectMatches = renderPlan.objects.filter(
       (o) =>
         o.name.toLowerCase().includes(normalized) ||
+        ((o as any).firstName && String((o as any).firstName).toLowerCase().includes(normalized)) ||
+        ((o as any).lastName && String((o as any).lastName).toLowerCase().includes(normalized)) ||
         (o.description && o.description.toLowerCase().includes(normalized))
     );
     const roomMatches = (renderPlan.rooms || []).filter((r) => (r.name || '').toLowerCase().includes(normalized));
 
-    if (!objectMatches.length && !roomMatches.length) {
+    const crossResults: CrossPlanSearchResult[] = [];
+    if (client) {
+      for (const s of client.sites || []) {
+        for (const p of s.floorPlans || []) {
+          const objs = (p.objects || []).filter(
+            (o) =>
+              o.name.toLowerCase().includes(normalized) ||
+              ((o as any).firstName && String((o as any).firstName).toLowerCase().includes(normalized)) ||
+              ((o as any).lastName && String((o as any).lastName).toLowerCase().includes(normalized)) ||
+              (o.description && o.description.toLowerCase().includes(normalized))
+          );
+          for (const o of objs) {
+            const label =
+              o.type === 'real_user' &&
+              (((o as any).firstName && String((o as any).firstName).trim()) || ((o as any).lastName && String((o as any).lastName).trim()))
+                ? `${String((o as any).firstName || '').trim()} ${String((o as any).lastName || '').trim()}`.trim()
+                : o.name;
+            crossResults.push({
+              kind: 'object',
+              clientId: client.id,
+              clientName: client.shortName || client.name,
+              siteId: s.id,
+              siteName: s.name,
+              planId: p.id,
+              planName: p.name,
+              objectId: o.id,
+              objectType: o.type,
+              objectLabel: label,
+              objectDescription: o.description || ''
+            });
+          }
+          const rms = (p.rooms || []).filter((r) => (r.name || '').toLowerCase().includes(normalized));
+          for (const r of rms) {
+            crossResults.push({
+              kind: 'room',
+              clientId: client.id,
+              clientName: client.shortName || client.name,
+              siteId: s.id,
+              siteName: s.name,
+              planId: p.id,
+              planName: p.name,
+              roomId: r.id,
+              roomName: r.name
+            });
+          }
+        }
+      }
+    } else {
+      // Fallback: if client context isn't available, search only within the current plan.
+      for (const o of objectMatches) {
+        const label =
+          o.type === 'real_user' &&
+          (((o as any).firstName && String((o as any).firstName).trim()) || ((o as any).lastName && String((o as any).lastName).trim()))
+            ? `${String((o as any).firstName || '').trim()} ${String((o as any).lastName || '').trim()}`.trim()
+            : o.name;
+        crossResults.push({
+          kind: 'object',
+          clientId: '',
+          clientName: '',
+          siteId: '',
+          siteName: '',
+          planId,
+          planName: renderPlan.name,
+          objectId: o.id,
+          objectType: o.type,
+          objectLabel: label,
+          objectDescription: o.description || ''
+        });
+      }
+      for (const r of roomMatches) {
+        crossResults.push({
+          kind: 'room',
+          clientId: '',
+          clientName: '',
+          siteId: '',
+          siteName: '',
+          planId,
+          planName: renderPlan.name,
+          roomId: r.id,
+          roomName: r.name
+        });
+      }
+    }
+
+    if (!crossResults.length) {
       push(t({ it: 'Nessun risultato trovato', en: 'No results found' }), 'info');
+      return;
+    }
+
+    const uniquePlans = new Set(crossResults.map((r) => r.planId));
+    const needsCrossPlanChooser = crossResults.some((r) => r.planId !== planId) || uniquePlans.size > 1;
+    if (needsCrossPlanChooser) {
+      setCrossPlanSearchTerm(term);
+      setCrossPlanResults(crossResults);
+      setCrossPlanSearchOpen(true);
       return;
     }
     if (objectMatches.length + roomMatches.length === 1) {
@@ -1083,12 +1490,34 @@ const PlanView = ({ planId }: Props) => {
   const modalInitials = useMemo(() => {
     if (!modalState || !renderPlan) return null;
     if (modalState.mode === 'create') {
-      return { type: modalState.type, name: '', description: '' };
+      return { type: modalState.type, name: '', description: '', layerIds: inferDefaultLayerIds(modalState.type) };
     }
     const obj = renderPlan.objects.find((o) => o.id === modalState.objectId);
     if (!obj) return null;
-    return { type: obj.type, name: modalState.mode === 'duplicate' ? '' : obj.name, description: modalState.mode === 'duplicate' ? '' : obj.description || '' };
-  }, [modalState, renderPlan]);
+    return {
+      type: obj.type,
+      name: modalState.mode === 'duplicate' ? '' : obj.name,
+      description: modalState.mode === 'duplicate' ? '' : obj.description || '',
+      layerIds: modalState.mode === 'duplicate' ? (obj.layerIds || inferDefaultLayerIds(obj.type)) : (obj.layerIds || inferDefaultLayerIds(obj.type))
+    };
+  }, [inferDefaultLayerIds, modalState, renderPlan]);
+
+  const assignedCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!client) return map;
+    for (const s of client.sites || []) {
+      for (const p of s.floorPlans || []) {
+        for (const o of p.objects || []) {
+          const cid = (o as any).externalClientId;
+          const eid = (o as any).externalUserId;
+          if (!cid || !eid) continue;
+          const key = `${cid}:${eid}`;
+          map.set(key, (map.get(key) || 0) + 1);
+        }
+      }
+    }
+    return map;
+  }, [client]);
 
   if (!renderPlan) {
     return (
@@ -1116,6 +1545,7 @@ const PlanView = ({ planId }: Props) => {
   }
 
   const basePlan = plan as FloorPlan;
+  const showPrintArea = !!(showPrintAreaByPlan as any)?.[basePlan.id];
 
   return (
     <div className="flex h-screen flex-col gap-4 overflow-hidden p-6">
@@ -1126,11 +1556,60 @@ const PlanView = ({ planId }: Props) => {
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-3">
             <h1 className="truncate text-2xl font-semibold text-ink">{renderPlan.name}</h1>
+            {!isReadOnly ? (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    setPrintAreaMode(true);
+                    push(
+                      t({
+                        it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
+                        en: 'Draw a rectangle on the map to set the print area.'
+                      }),
+                      'info'
+                    );
+                  }}
+                  title={t({ it: 'Imposta area di stampa', en: 'Set print area' })}
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl border shadow-sm hover:bg-slate-50 ${
+                    (basePlan as any)?.printArea ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-700'
+                  }`}
+                >
+                  <Crop size={16} />
+                </button>
+                {(basePlan as any)?.printArea ? (
+                  <button
+                    onClick={() => {
+                      updateFloorPlan(basePlan.id, { printArea: undefined });
+                      push(t({ it: 'Area di stampa rimossa', en: 'Print area cleared' }), 'info');
+                    }}
+                    title={t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })}
+                    className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+                  >
+                    <X size={16} />
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             {isReadOnly ? (
               <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
                 {activeRevision
                   ? t({ it: `Sola lettura: ${activeRevision.name}`, en: `Read-only: ${activeRevision.name}` })
-                  : t({ it: 'Sola lettura (permessi)', en: 'Read-only (permissions)' })}
+                  : planAccess !== 'rw'
+                    ? t({ it: 'Sola lettura (permessi)', en: 'Read-only (permissions)' })
+                    : lockedByOther
+                      ? t({
+                          it: `Bloccata da ${lockState.lockedBy?.username || 'utente'}`,
+                          en: `Locked by ${lockState.lockedBy?.username || 'user'}`
+                        })
+                      : t({ it: 'Sola lettura', en: 'Read-only' })}
+              </span>
+            ) : null}
+            {presenceUsers.length ? (
+              <span
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                title={presenceUsers.map((u) => u.username).join(', ')}
+              >
+                {t({ it: `${presenceUsers.length} utenti online`, en: `${presenceUsers.length} users online` })}
               </span>
             ) : null}
             <div className="relative">
@@ -1517,14 +1996,14 @@ const PlanView = ({ planId }: Props) => {
                     onClick={() => {
                       setSelectedViewId('__last__');
                       setViewsMenuOpen(false);
-                      push('Vista: ultima posizione', 'info');
+                      push(t({ it: 'Vista: ultima posizione', en: 'View: last position' }), 'info');
                     }}
                     className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50 ${
                       selectedViewId === '__last__' ? 'bg-slate-100 font-semibold' : ''
                     }`}
                   >
                     <Eye size={16} className="text-slate-500" />
-                    Ultima posizione
+                    {t({ it: 'Ultima posizione', en: 'Last position' })}
                   </button>
                   {(basePlan.views || []).map((view) => (
                     <div key={view.id} className="flex items-start gap-2 rounded-lg border border-slate-100 px-2 py-2 hover:bg-slate-50">
@@ -1588,7 +2067,57 @@ const PlanView = ({ planId }: Props) => {
             ) : null}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <ExportButton elementRef={mapRef} objects={renderPlan.objects} planName={renderPlan.name} />
+            <div ref={gridMenuRef} className="relative">
+              <button
+                onClick={() => setGridMenuOpen((v) => !v)}
+                title={t({ it: 'Griglia', en: 'Grid' })}
+                className={`flex h-10 w-10 items-center justify-center rounded-xl border bg-white shadow-card hover:bg-slate-50 ${
+                  gridMenuOpen ? 'border-primary text-primary' : 'border-slate-200 text-ink'
+                }`}
+              >
+                <LayoutGrid size={18} />
+              </button>
+              {gridMenuOpen ? (
+                <div className="absolute right-0 z-50 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+                  <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Griglia', en: 'Grid' })}</div>
+                  <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                    <span>{t({ it: 'Snap', en: 'Snap' })}</span>
+                    <input
+                      type="checkbox"
+                      checked={gridSnapEnabled}
+                      onChange={(e) => setGridSnapEnabled(e.target.checked)}
+                      aria-label={t({ it: 'Snap', en: 'Snap' })}
+                    />
+                  </label>
+                  <label className="mt-2 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                    <span>{t({ it: 'Mostra', en: 'Show' })}</span>
+                    <input
+                      type="checkbox"
+                      checked={showGrid}
+                      onChange={(e) => setShowGrid(e.target.checked)}
+                      aria-label={t({ it: 'Mostra', en: 'Show' })}
+                    />
+                  </label>
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                      <span>{t({ it: 'Step', en: 'Step' })}</span>
+                      <span className="tabular-nums">{gridSize}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={5}
+                      max={80}
+                      step={5}
+                      value={gridSize}
+                      onChange={(e) => setGridSize(Number(e.target.value))}
+                      className="mt-2 w-full"
+                      title={t({ it: 'Dimensione griglia', en: 'Grid size' })}
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <ExportButton onClick={() => setExportModalOpen(true)} />
             <VersionBadge />
             <Link
               to="/settings"
@@ -1613,36 +2142,57 @@ const PlanView = ({ planId }: Props) => {
         <div className="relative flex h-full gap-4 overflow-hidden">
 	        <div className="flex-1 min-w-0">
 	            <div className="h-full" ref={mapRef}>
-		              <CanvasStage
-		                containerRef={mapRef}
-		                plan={renderPlan}
-		                selectedId={selectedObjectId}
-		                selectedIds={selectedObjectIds}
-                    selectedRoomId={selectedRoomId}
-		                highlightId={highlight?.objectId}
-		                highlightUntil={highlight?.until}
-                    highlightRoomId={highlightRoom?.roomId}
-                    highlightRoomUntil={highlightRoom?.until}
-		                pendingType={pendingType}
-		                readOnly={isReadOnly}
-                    roomDrawMode={roomDrawMode}
-                    objectTypeIcons={objectTypeIcons}
-		                zoom={zoom}
-		                pan={pan}
-		                autoFit={!fitApplied.current}
-	                onZoomChange={handleZoomChange}
-	                onPanChange={handlePanChange}
-	                onSelect={handleStageSelect}
-                  onSelectMany={(ids) => {
-                    setSelectedRoomId(undefined);
-                    setSelection(ids);
-                    setContextMenu(null);
-                  }}
+				              <CanvasStage
+                        ref={canvasStageRef}
+				                containerRef={mapRef}
+				                plan={(canvasPlan || renderPlan) as any}
+				                selectedId={selectedObjectId}
+				                selectedIds={selectedObjectIds}
+	                    selectedRoomId={selectedRoomId}
+	                    selectedLinkId={selectedLinkId}
+				                highlightId={highlight?.objectId}
+				                highlightUntil={highlight?.until}
+	                    highlightRoomId={highlightRoom?.roomId}
+	                    highlightRoomUntil={highlightRoom?.until}
+				                pendingType={pendingType}
+				                readOnly={isReadOnly}
+	                    roomDrawMode={roomDrawMode}
+                      printArea={(basePlan as any)?.printArea || null}
+                      printAreaMode={printAreaMode}
+                      showPrintArea={showPrintArea}
+                      onSetPrintArea={(rect) => {
+                        if (isReadOnly) return;
+                        updateFloorPlan(basePlan.id, { printArea: rect });
+                        setPrintAreaMode(false);
+                      }}
+	                    objectTypeIcons={objectTypeIcons}
+                      snapEnabled={gridSnapEnabled}
+                      gridSize={gridSize}
+                      showGrid={showGrid}
+				                zoom={zoom}
+				                pan={pan}
+				                autoFit={!fitApplied.current}
+		                onZoomChange={handleZoomChange}
+		                onPanChange={handlePanChange}
+			                onSelect={handleStageSelect}
+                    onSelectLink={(id) => {
+                      setSelectedLinkId(id || null);
+                      setContextMenu(null);
+                      clearSelection();
+                      setSelectedRoomId(undefined);
+                    }}
+	                  onSelectMany={(ids) => {
+	                    setSelectedRoomId(undefined);
+                      setSelectedLinkId(null);
+	                    setSelection(ids);
+	                    setContextMenu(null);
+	                  }}
 		                onMove={handleStageMove}
 		                onPlaceNew={handlePlaceNew}
 		                onEdit={handleEdit}
-	                onContextMenu={handleObjectContextMenu}
-	                onMapContextMenu={handleMapContextMenu}
+		        onContextMenu={handleObjectContextMenu}
+                    onLinkContextMenu={handleLinkContextMenu}
+		                onMapContextMenu={handleMapContextMenu}
 	                onGoDefaultView={goToDefaultView}
                     onSelectRoom={(roomId) => {
                       clearSelection();
@@ -1664,47 +2214,130 @@ const PlanView = ({ planId }: Props) => {
 	              />
 	            </div>
 	          </div>
-	          {!isReadOnly ? (
-	            <aside className="sticky top-0 h-fit w-28 shrink-0 self-start rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
-	            <div className="flex items-center justify-between text-[11px] font-semibold uppercase text-slate-500">
-                <span>Palette</span>
-                <Link
-                  to="/settings?tab=objects"
-                  title={t({ it: 'Modifica tipi oggetto', en: 'Edit object types' })}
-                  className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
-                >
-                  <Pencil size={14} />
-                </Link>
-              </div>
-	            <div className="mt-3 flex flex-col items-center gap-3">
-	              <Toolbar onSelectType={(type) => setPendingType(type)} activeType={pendingType} />
-	            </div>
-	          </aside>
-	          ) : null}
+		          {!isReadOnly ? (
+		            <aside className="sticky top-0 h-fit w-28 shrink-0 self-start rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+		            <div className="flex items-center justify-between text-[11px] font-semibold uppercase text-slate-500">
+	                <span>{t({ it: 'Palette', en: 'Palette' })}</span>
+                  <div className="flex items-center gap-1">
+                    <Link
+                      to="/settings?tab=objects"
+                      title={t({ it: 'Gestisci palette', en: 'Manage palette' })}
+                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+                    >
+                      <Star size={14} />
+                    </Link>
+                    <Link
+                      to="/settings?tab=objects"
+                      title={t({ it: 'Impostazioni oggetti', en: 'Object settings' })}
+                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+                    >
+                      <Pencil size={14} />
+                    </Link>
+                  </div>
+	              </div>
+                {planLayers.length ? (
+                  <div className="mt-3">
+                    <div className="text-[10px] font-semibold uppercase text-slate-500">{t({ it: 'Livelli', en: 'Layers' })}</div>
+                    <div className="mt-2 flex flex-col gap-2">
+                      {planLayers.map((l: any) => {
+                        const isOn = visibleLayerIds.includes(l.id);
+                        const label = (l?.name?.[lang] as string) || (l?.name?.it as string) || l.id;
+                        return (
+                          <button
+                            key={l.id}
+                            onClick={() => toggleLayerVisibility(planId, l.id)}
+                            className={`flex items-center justify-between rounded-xl border px-2 py-1 text-[11px] font-semibold ${
+                              isOn ? 'border-primary bg-primary/5 text-primary' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                            }`}
+                            title={label}
+                          >
+                            <span className="truncate">{label}</span>
+                            <span
+                              className="ml-2 h-2 w-2 shrink-0 rounded-full"
+                              style={{ background: l.color || (isOn ? '#2563eb' : '#cbd5e1') }}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+			            <div className="mt-3 flex flex-col items-center gap-3">
+			              <Toolbar
+                      defs={objectTypeDefs || []}
+                      order={paletteOrder}
+                      onSelectType={(type) => setPendingType(type)}
+                      activeType={pendingType}
+                    />
+			            </div>
+                {/* Bottom action: show all types when favorites are enabled */}
+                {paletteHasCustom && paletteHasMore ? (
+                  <button
+                    onClick={() => setAllTypesOpen(true)}
+                    className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Mostra tutti gli oggetti', en: 'Show all objects' })}
+                  >
+                    {t({ it: 'Mostra tutti', en: 'Show all' })}
+                  </button>
+                ) : null}
+		          </aside>
+		          ) : null}
 	        </div>
 	      </div>
 
       {contextMenu && plan ? (
+        <>
         <div
           className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <span className="font-semibold text-ink">Menu</span>
+            <span className="font-semibold text-ink">{t({ it: 'Menu', en: 'Menu' })}</span>
             <button onClick={() => setContextMenu(null)} className="text-slate-400 hover:text-ink">
               <X size={14} />
             </button>
           </div>
 
-          {contextMenu.kind === 'object' ? (
-            <>
-              {contextIsMulti ? (
+	          {contextMenu.kind === 'link' ? (
+              <>
                 <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600">
-                  {t({ it: `${selectedObjectIds.length} oggetti selezionati`, en: `${selectedObjectIds.length} objects selected` })}
+                  {t({ it: 'Collegamento selezionato', en: 'Selected link' })}
+                  {contextLink ? (
+                    <div className="mt-1 text-[11px] font-normal text-slate-600">
+                      {(() => {
+                        const from = renderPlan.objects.find((o) => o.id === contextLink.fromId);
+                        const to = renderPlan.objects.find((o) => o.id === contextLink.toId);
+                        return `${from?.name || contextLink.fromId} → ${to?.name || contextLink.toId}`;
+                      })()}
+                    </div>
+                  ) : null}
                 </div>
-              ) : (
-                <>
+                {!isReadOnly ? (
+                  <button
+                    onClick={() => {
+                      if (contextMenu.kind !== 'link') return;
+                      markTouched();
+                      deleteLink(basePlan.id, contextMenu.id);
+                      postAuditEvent({ event: 'link_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: contextMenu.id } });
+                      push(t({ it: 'Collegamento eliminato', en: 'Link deleted' }), 'info');
+                      setContextMenu(null);
+                      setSelectedLinkId(null);
+                    }}
+                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
+                  >
+                    <Trash size={14} /> {t({ it: 'Elimina collegamento', en: 'Delete link' })}
+                  </button>
+                ) : null}
+              </>
+            ) : contextMenu.kind === 'object' ? (
+	            <>
+	              {contextIsMulti ? (
+	                <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600">
+	                  {t({ it: `${selectedObjectIds.length} oggetti selezionati`, en: `${selectedObjectIds.length} objects selected` })}
+	                </div>
+	              ) : (
+	                <>
                   <button
                     onClick={() => {
                       handleEdit(contextMenu.id);
@@ -1714,15 +2347,32 @@ const PlanView = ({ planId }: Props) => {
                   >
                     <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
                   </button>
-                  <button
-                    onClick={() => {
-                      openDuplicate(contextMenu.id);
-                      setContextMenu(null);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                  >
-                    <Copy size={14} /> {t({ it: 'Duplica', en: 'Duplicate' })}
-                  </button>
+	                  <button
+	                    onClick={() => {
+	                      if (isReadOnly) return;
+	                      setLinkFromId(contextMenu.id);
+	                      setContextMenu(null);
+	                      push(
+	                        t({
+	                          it: 'Seleziona un secondo oggetto per creare un collegamento (Esc per annullare).',
+	                          en: 'Select a second object to create a link (Esc to cancel).'
+	                        }),
+	                        'info'
+	                      );
+	                    }}
+	                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                  >
+	                    <MoveDiagonal size={14} className="text-slate-500" /> {t({ it: 'Crea collegamento…', en: 'Create link…' })}
+	                  </button>
+	                  <button
+	                    onClick={() => {
+	                      openDuplicate(contextMenu.id);
+	                      setContextMenu(null);
+	                    }}
+	                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                  >
+	                    <Copy size={14} /> {t({ it: 'Duplica', en: 'Duplicate' })}
+	                  </button>
                   <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
                     <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                       <MoveDiagonal size={14} /> {t({ it: 'Scala', en: 'Scale' })}
@@ -1788,30 +2438,8 @@ const PlanView = ({ planId }: Props) => {
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
                 >
                   <Square size={14} className="text-slate-500" /> {t({ it: 'Nuova stanza', en: 'New room' })}
-                  <ChevronDown size={14} className="ml-auto text-slate-400" />
+                  <ChevronRight size={14} className="ml-auto text-slate-400" />
                 </button>
-              ) : null}
-              {contextMenu.roomOpen && !isReadOnly ? (
-                <div className="mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white">
-                  <button
-                    onClick={() => {
-                      beginRoomDraw();
-                      setContextMenu(null);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    <Square size={14} className="text-slate-500" /> {t({ it: 'Rettangolo', en: 'Rectangle' })}
-                  </button>
-                  <button
-                    onClick={() => {
-                      beginRoomPolyDraw();
-                      setContextMenu(null);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    <Square size={14} className="text-slate-500" /> {t({ it: 'Poligono', en: 'Polygon' })}
-                  </button>
-                </div>
               ) : null}
               <button
                 onClick={() => {
@@ -1827,32 +2455,9 @@ const PlanView = ({ planId }: Props) => {
                 onClick={() => setContextMenu({ ...contextMenu, addOpen: !contextMenu.addOpen })}
                 className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
               >
-                <Plus size={14} className="text-slate-500" /> Aggiungi…
+                <Plus size={14} className="text-slate-500" /> {t({ it: 'Aggiungi oggetto…', en: 'Add object…' })}
+                <ChevronRight size={14} className="ml-auto text-slate-400" />
               </button>
-              ) : null}
-              {contextMenu.addOpen ? (
-                <div className="mt-2 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-2">
-                  {(objectTypeDefs || []).map((def) => (
-                    <button
-                      key={def.id}
-                      onClick={() => {
-                        setModalState({
-                          mode: 'create',
-                          type: def.id,
-                          coords: { x: contextMenu.worldX, y: contextMenu.worldY }
-                        });
-                        setContextMenu(null);
-                      }}
-                      className="flex flex-col items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                      title={getTypeLabel(def.id)}
-                    >
-                      <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary shadow-sm">
-                        <Icon name={def.icon} />
-                      </span>
-                      <span className="leading-tight">{getTypeLabel(def.id)}</span>
-                    </button>
-                  ))}
-                </div>
               ) : null}
               {!isReadOnly ? (
                 <button
@@ -1864,6 +2469,48 @@ const PlanView = ({ planId }: Props) => {
               >
                 <Trash size={14} /> {t({ it: 'Elimina tutti gli oggetti', en: 'Delete all objects' })}
               </button>
+              ) : null}
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    if ((basePlan as any)?.printArea) {
+                      updateFloorPlan(basePlan.id, { printArea: undefined });
+                      setContextMenu(null);
+                      push(t({ it: 'Area di stampa rimossa', en: 'Print area cleared' }), 'info');
+                      return;
+                    }
+                    setPrintAreaMode(true);
+                    setContextMenu(null);
+                    push(
+                      t({
+                        it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
+                        en: 'Draw a rectangle on the map to set the print area.'
+                      }),
+                      'info'
+                    );
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                >
+                  <Crop size={14} className="text-slate-500" />{' '}
+                  {(basePlan as any)?.printArea
+                    ? t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })
+                    : t({ it: 'Imposta area di stampa', en: 'Set print area' })}
+                </button>
+              ) : null}
+              {(basePlan as any)?.printArea ? (
+                <button
+                  onClick={() => {
+                    toggleShowPrintArea(basePlan.id);
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Mostra/nascondi area di stampa come overlay', en: 'Show/hide the print area overlay' })}
+                >
+                  {showPrintArea ? <EyeOff size={14} className="text-slate-500" /> : <Eye size={14} className="text-slate-500" />}{' '}
+                  {showPrintArea
+                    ? t({ it: 'Nascondi area di stampa', en: 'Hide print area' })
+                    : t({ it: 'Mostra area di stampa', en: 'Show print area' })}
+                </button>
               ) : null}
               <button
                 onClick={() => {
@@ -1877,35 +2524,162 @@ const PlanView = ({ planId }: Props) => {
             </>
           )}
         </div>
+
+        {contextMenu.kind !== 'object' && contextMenu.kind !== 'link' && (contextMenu as any).addOpen ? (
+          <div
+            className="fixed z-50 w-72 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            style={{ top: contextMenu.y, left: contextMenu.x + 236 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">{t({ it: 'Aggiungi oggetto', en: 'Add object' })}</div>
+            <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-2">
+              {mapAddMenuTypes.map((def) => (
+                <button
+                  key={def.id}
+                  onClick={() => {
+                    if ((contextMenu as any).kind !== 'map') return;
+                    if (def.id === 'real_user') {
+                      setRealUserPicker({ x: (contextMenu as any).worldX, y: (contextMenu as any).worldY });
+                      setContextMenu(null);
+                      return;
+                    }
+                    setModalState({
+                      mode: 'create',
+                      type: def.id,
+                      coords: { x: (contextMenu as any).worldX, y: (contextMenu as any).worldY }
+                    });
+                    setContextMenu(null);
+                  }}
+                  className="flex flex-col items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                  title={getTypeLabel(def.id)}
+                >
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary shadow-sm">
+                    <Icon name={def.icon} />
+                  </span>
+                  <span className="leading-tight">{getTypeLabel(def.id)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {contextMenu.kind !== 'object' && contextMenu.kind !== 'link' && (contextMenu as any).roomOpen && !isReadOnly ? (
+          <div
+            className="fixed z-50 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            style={{ top: contextMenu.y + 40, left: contextMenu.x + 236 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">{t({ it: 'Nuova stanza', en: 'New room' })}</div>
+            <button
+              onClick={() => {
+                beginRoomDraw();
+                setContextMenu(null);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Square size={14} className="text-slate-500" /> {t({ it: 'Rettangolo', en: 'Rectangle' })}
+            </button>
+            <button
+              onClick={() => {
+                beginRoomPolyDraw();
+                setContextMenu(null);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Square size={14} className="text-slate-500" /> {t({ it: 'Poligono', en: 'Polygon' })}
+            </button>
+          </div>
+        ) : null}
+        </>
       ) : null}
 
       <ObjectModal
-	        open={!!modalState}
-	        type={modalInitials?.type}
-          icon={modalInitials?.type ? getTypeIcon(modalInitials.type) : undefined}
-	        typeLabel={
-	          modalState?.mode === 'create'
-	            ? `${t({ it: 'Nuovo', en: 'New' })} ${modalInitials?.type ? getTypeLabel(modalInitials.type) : ''} (${Math.round((modalState as any)?.coords?.x || 0)}, ${Math.round(
-	                (modalState as any)?.coords?.y || 0
-	              )})`
-	            : undefined
-	        }
-	        initialName={modalInitials?.name}
-	        initialDescription={modalInitials?.description}
-	        onClose={() => setModalState(null)}
-	        onSubmit={modalState?.mode === 'edit' ? handleUpdate : handleCreate}
-	      />
+		        open={!!modalState}
+            objectId={modalState?.mode === 'edit' ? (modalState as any).objectId : undefined}
+		        type={modalInitials?.type}
+	          icon={modalInitials?.type ? getTypeIcon(modalInitials.type) : undefined}
+            layers={planLayers.filter((l: any) => l.id !== 'rooms').map((l: any) => ({ id: l.id, label: (l?.name?.[lang] as string) || (l?.name?.it as string) || l.id, color: l.color }))}
+            initialLayerIds={(modalInitials as any)?.layerIds || []}
+		        typeLabel={
+		          modalState?.mode === 'create'
+		            ? `${t({ it: 'Nuovo', en: 'New' })} ${modalInitials?.type ? getTypeLabel(modalInitials.type) : ''} (${Math.round((modalState as any)?.coords?.x || 0)}, ${Math.round(
+		                (modalState as any)?.coords?.y || 0
+		              )})`
+		            : undefined
+		        }
+		        initialName={modalInitials?.name}
+		        initialDescription={modalInitials?.description}
+            readOnly={isReadOnly}
+		        onClose={() => setModalState(null)}
+		        onSubmit={modalState?.mode === 'edit' ? handleUpdate : handleCreate}
+		      />
+
+      <RealUserPickerModal
+        open={!!realUserPicker}
+        clientId={client?.id || ''}
+        assignedCounts={assignedCounts}
+        onClose={() => setRealUserPicker(null)}
+        onSelect={(u) => {
+          if (!plan || !realUserPicker || isReadOnly) return;
+          markTouched();
+          const name = `${u.firstName} ${u.lastName}`.trim() || u.externalId;
+          const desc =
+            [u.role, [u.dept1, u.dept2, u.dept3].filter(Boolean).join(' / ')].filter(Boolean).join(' · ') || undefined;
+          const id = addObject(
+            plan.id,
+            'real_user',
+            name,
+            desc,
+            realUserPicker.x,
+            realUserPicker.y,
+            lastObjectScale,
+            ['users'],
+            {
+              externalClientId: client?.id,
+              externalUserId: u.externalId,
+              firstName: u.firstName,
+              lastName: u.lastName,
+              externalRole: u.role,
+              externalDept1: u.dept1,
+              externalDept2: u.dept2,
+              externalDept3: u.dept3,
+              externalEmail: u.email,
+              externalExt1: u.ext1,
+              externalExt2: u.ext2,
+              externalExt3: u.ext3,
+              externalIsExternal: u.isExternal
+            }
+          );
+          const roomId = getRoomIdAt((plan as FloorPlan).rooms, realUserPicker.x, realUserPicker.y);
+          if (roomId) updateObject(id, { roomId });
+          push(t({ it: 'Utente reale inserito', en: 'Real user placed' }), 'success');
+          postAuditEvent({
+            event: 'real_user_place',
+            scopeType: 'plan',
+            scopeId: plan.id,
+            details: { id, externalId: u.externalId, name, roomId: roomId || null }
+          });
+          setRealUserPicker(null);
+          setPendingType(null);
+        }}
+      />
 
       <RoomModal
         open={!!roomModal}
         initialName={roomModal?.mode === 'edit' ? roomModal.initialName : ''}
+        initialColor={
+          roomModal?.mode === 'edit'
+            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.color
+            : undefined
+        }
         onClose={() => setRoomModal(null)}
-        onSubmit={({ name }) => {
+        onSubmit={({ name, color }) => {
           if (!roomModal || isReadOnly) return;
           if (roomModal.mode === 'edit') {
             markTouched();
-            updateRoom(basePlan.id, roomModal.roomId, { name });
+            updateRoom(basePlan.id, roomModal.roomId, { name, color });
             push(t({ it: 'Stanza aggiornata', en: 'Room updated' }), 'success');
+            postAuditEvent({ event: 'room_update', scopeType: 'plan', scopeId: basePlan.id, details: { id: roomModal.roomId, name, color: color || null } });
             setSelectedRoomId(roomModal.roomId);
             setHighlightRoom({ roomId: roomModal.roomId, until: Date.now() + 2600 });
             setRoomModal(null);
@@ -1914,12 +2688,18 @@ const PlanView = ({ planId }: Props) => {
           markTouched();
           const id =
             roomModal.kind === 'rect'
-              ? addRoom(basePlan.id, { name, kind: 'rect', ...roomModal.rect })
-              : addRoom(basePlan.id, { name, kind: 'poly', points: roomModal.points });
+              ? addRoom(basePlan.id, { name, color, kind: 'rect', ...roomModal.rect })
+              : addRoom(basePlan.id, { name, color, kind: 'poly', points: roomModal.points });
+          postAuditEvent({
+            event: 'room_create',
+            scopeType: 'plan',
+            scopeId: basePlan.id,
+            details: { id, name, kind: roomModal.kind, color: color || null }
+          });
           const testRoom =
             roomModal.kind === 'rect'
-              ? { id, name, kind: 'rect', ...roomModal.rect }
-              : { id, name, kind: 'poly', points: roomModal.points };
+              ? { id, name, color, kind: 'rect', ...roomModal.rect }
+              : { id, name, color, kind: 'poly', points: roomModal.points };
           const updates: Record<string, string | undefined> = {};
           for (const obj of basePlan.objects) {
             if (isPointInRoom(testRoom, obj.x, obj.y)) {
@@ -1941,10 +2721,19 @@ const PlanView = ({ planId }: Props) => {
         onClose={() => setBulkEditOpen(false)}
         onSubmit={({ description }) => {
           if (isReadOnly) return;
+          if (selectedObjectIds.length) markTouched();
           for (const id of selectedObjectIds) {
             updateObject(id, { description });
           }
           push(t({ it: 'Descrizione aggiornata', en: 'Description updated' }), 'success');
+          if (selectedObjectIds.length) {
+            postAuditEvent({
+              event: 'objects_bulk_update',
+              scopeType: 'plan',
+              scopeId: planId,
+              details: { ids: selectedObjectIds, changes: { description } }
+            });
+          }
         }}
       />
 
@@ -1962,6 +2751,14 @@ const PlanView = ({ planId }: Props) => {
             updateObject(id, changesById[id]);
           }
           if (ids.length) push(t({ it: 'Oggetti aggiornati', en: 'Objects updated' }), 'success');
+          if (ids.length) {
+            postAuditEvent({
+              event: 'objects_bulk_update',
+              scopeType: 'plan',
+              scopeId: planId,
+              details: { ids, changesById }
+            });
+          }
         }}
       />
 
@@ -2005,6 +2802,12 @@ const PlanView = ({ planId }: Props) => {
               : t({ it: 'Oggetti eliminati', en: 'Objects deleted' }),
             'info'
           );
+          postAuditEvent({
+            event: confirmDelete.length === 1 ? 'object_delete' : 'objects_delete',
+            scopeType: 'plan',
+            scopeId: planId,
+            details: { ids: confirmDelete }
+          });
           setConfirmDelete(null);
           setContextMenu(null);
           clearSelection();
@@ -2049,6 +2852,7 @@ const PlanView = ({ planId }: Props) => {
           const remainingRooms = rooms.filter((r) => r.id !== confirmDeleteRoomId);
           const updates = computeRoomReassignments(remainingRooms, basePlan.objects);
           deleteRoom(basePlan.id, confirmDeleteRoomId);
+          postAuditEvent({ event: 'room_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: confirmDeleteRoomId } });
           if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
           if (selectedRoomId === confirmDeleteRoomId) setSelectedRoomId(undefined);
           push(t({ it: 'Stanza eliminata', en: 'Room deleted' }), 'info');
@@ -2113,22 +2917,17 @@ const PlanView = ({ planId }: Props) => {
         onSubmit={handleSaveView}
       />
 
-	      <PdfExportModal
-	        open={exportModalOpen}
-	        onClose={() => setExportModalOpen(false)}
-	        onConfirm={async (options) => {
-	          if (!renderPlan) return;
-	          const el = mapRef.current;
-	          if (!el) return;
-	          try {
-	            await exportPlanToPdf(el, renderPlan.objects, renderPlan.name, options, objectTypeLabels);
-	            push('PDF esportato', 'success');
-	          } catch (error) {
-	            push('Errore durante export', 'danger');
-	            console.error(error);
-	          }
-	        }}
-	      />
+      <PrintModal open={exportModalOpen} onClose={() => setExportModalOpen(false)} mode="single" singlePlanId={basePlan.id} />
+
+      <AllObjectTypesModal
+        open={allTypesOpen}
+        defs={objectTypeDefs || []}
+        onClose={() => setAllTypesOpen(false)}
+        onPick={(typeId) => {
+          setPendingType(typeId);
+          push(t({ it: 'Seleziona un punto sulla mappa per inserire l’oggetto', en: 'Click on the map to place the object' }), 'info');
+        }}
+      />
 
       <RevisionsModal
         open={revisionsOpen}
@@ -2138,30 +2937,33 @@ const PlanView = ({ planId }: Props) => {
         onClose={() => setRevisionsOpen(false)}
         onSelect={(revisionId) => {
           setSelectedRevision(planId, revisionId);
-          push('Revisione caricata (sola lettura)', 'info');
+          push(t({ it: 'Revisione caricata (sola lettura)', en: 'Revision loaded (read-only)' }), 'info');
         }}
         onBackToPresent={() => {
           setSelectedRevision(planId, null);
-          push('Tornato al presente', 'info');
+          push(t({ it: 'Tornato al presente', en: 'Back to present' }), 'info');
         }}
         onDelete={(revisionId) => {
           deleteRevision(basePlan.id, revisionId);
           if (selectedRevisionId === revisionId) {
             setSelectedRevision(planId, null);
           }
-          push('Revisione eliminata', 'info');
+          push(t({ it: 'Revisione eliminata', en: 'Revision deleted' }), 'info');
         }}
         onClearAll={() => {
           clearRevisions(basePlan.id);
           setSelectedRevision(planId, null);
-          push('Revisioni eliminate', 'info');
+          push(t({ it: 'Revisioni eliminate', en: 'Revisions deleted' }), 'info');
         }}
         canRestore={planAccess === 'rw'}
         onRestore={(revisionId) => {
           if (planAccess !== 'rw') return;
           restoreRevision(basePlan.id, revisionId);
           setSelectedRevision(planId, null);
-          push('Revisione ripristinata (stato attuale aggiornato)', 'success');
+          push(
+            t({ it: 'Revisione ripristinata (stato attuale aggiornato)', en: 'Revision restored (current state updated)' }),
+            'success'
+          );
         }}
       />
 
@@ -2210,6 +3012,12 @@ const PlanView = ({ planId }: Props) => {
             description: note
           });
           push(`Revisione salvata: Rev ${next.major}.${next.minor}`, 'success');
+          postAuditEvent({
+            event: 'revision_save',
+            scopeType: 'plan',
+            scopeId: plan.id,
+            details: { bump, rev: `${next.major}.${next.minor}`, note: note || '' }
+          });
           // New revision = clean state for navigation prompts.
           resetTouched();
           entrySnapshotRef.current = toSnapshot(planRef.current || plan);
@@ -2263,6 +3071,41 @@ const PlanView = ({ planId }: Props) => {
           setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
         }}
       />
+
+      <CrossPlanSearchModal
+        open={crossPlanSearchOpen}
+        currentPlanId={planId}
+        term={crossPlanSearchTerm}
+        results={crossPlanResults}
+        objectTypeIcons={objectTypeIcons}
+        objectTypeLabels={objectTypeLabels}
+        onClose={() => {
+          setCrossPlanSearchOpen(false);
+          setCrossPlanSearchTerm('');
+          setCrossPlanResults([]);
+        }}
+        onPick={(r) => {
+          setCrossPlanSearchOpen(false);
+          setCrossPlanSearchTerm('');
+          setCrossPlanResults([]);
+          if (r.planId !== planId) {
+            setSelectedPlan(r.planId);
+            if (r.kind === 'object') navigate(`/plan/${r.planId}?focusObject=${encodeURIComponent(r.objectId)}`);
+            else navigate(`/plan/${r.planId}?focusRoom=${encodeURIComponent(r.roomId)}`);
+            return;
+          }
+          if (r.kind === 'object') {
+            setSelectedObject(r.objectId);
+            triggerHighlight(r.objectId);
+          } else {
+            clearSelection();
+            setSelectedRoomId(r.roomId);
+            setHighlightRoom({ roomId: r.roomId, until: Date.now() + 3200 });
+          }
+        }}
+      />
+
+      {/* legacy multi-print modal kept for future use */}
     </div>
   );
 };

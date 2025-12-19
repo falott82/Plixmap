@@ -6,24 +6,29 @@ import { useT } from '../../i18n/useT';
 interface Props {
   open: boolean;
   initialName?: string;
+  initialColor?: string;
   onClose: () => void;
-  onSubmit: (payload: { name: string }) => void;
+  onSubmit: (payload: { name: string; color?: string }) => void;
 }
 
-const RoomModal = ({ open, initialName = '', onClose, onSubmit }: Props) => {
+const COLORS = ['#64748b', '#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0ea5e9', '#14b8a6'];
+
+const RoomModal = ({ open, initialName = '', initialColor = COLORS[0], onClose, onSubmit }: Props) => {
   const t = useT();
   const [name, setName] = useState(initialName);
+  const [color, setColor] = useState(initialColor);
   const nameRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setName(initialName);
+    setColor(initialColor || COLORS[0]);
     window.setTimeout(() => nameRef.current?.focus(), 0);
-  }, [initialName, open]);
+  }, [initialColor, initialName, open]);
 
   const submit = () => {
     if (!name.trim()) return;
-    onSubmit({ name: name.trim() });
+    onSubmit({ name: name.trim(), color: color || COLORS[0] });
     onClose();
   };
 
@@ -82,6 +87,28 @@ const RoomModal = ({ open, initialName = '', onClose, onSubmit }: Props) => {
                       placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
                     />
                   </label>
+
+                  <div>
+                    <div className="text-sm font-medium text-slate-700">{t({ it: 'Colore', en: 'Color' })}</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {COLORS.map((c) => {
+                        const active = (color || COLORS[0]).toLowerCase() === c.toLowerCase();
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setColor(c)}
+                            className={`h-9 w-9 rounded-xl border ${active ? 'border-ink ring-2 ring-primary/30' : 'border-slate-200'}`}
+                            style={{ background: c }}
+                            title={c}
+                          />
+                        );
+                      })}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {t({ it: 'Il colore viene usato per evidenziare l’area della stanza.', en: 'The color is used to highlight the room area.' })}
+                    </div>
+                  </div>
                 </div>
                 <div className="mt-6 flex justify-end gap-2">
                   <button

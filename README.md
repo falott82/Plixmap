@@ -12,9 +12,9 @@ The UI supports **Italian and English**. When you change language from the user 
 ## Core Data Model (high level)
 - `Client { id, shortName, name, address?, phone?, email?, vatId?, pecEmail?, description?, logoUrl?, attachments?[], sites[] }`
 - `Site { id, clientId, name, coords?, floorPlans[] }` where `coords` is an optional `lat, lng` string
-- `FloorPlan { id, siteId, name, imageUrl, width?, height?, objects[], rooms?, views?, revisions? }`
+- `FloorPlan { id, siteId, name, imageUrl, width?, height?, printArea?, objects[], rooms?, views?, revisions? }`
 - `MapObject { id, type, name, description?, x, y, scale?, roomId? }`
-- `Room { id, name, kind: 'rect'|'poly', ... }` (rectangles and polygons supported)
+- `Room { id, name, color?, kind: 'rect'|'poly', ... }` (rectangles and polygons supported)
 - `FloorPlanView { id, name, description?, zoom, pan, isDefault? }`
 - `FloorPlanRevision { id, createdAt, revMajor, revMinor, name, description?, imageUrl, objects, rooms?, views? }`
 
@@ -40,6 +40,11 @@ New passwords must be **strong**:
 - **User:** can be granted **read-only** or **read/write** access per Client / Site / Floor plan
 
 ## Main Features
+### Realtime collaboration (safe editing)
+- **Exclusive lock per floor plan**: only one user can edit a floor plan at a time (prevents conflicts).
+- **Presence**: shows who is currently online on the same floor plan.
+- If a floor plan is locked by someone else, it opens in **read-only** automatically.
+
 ### Navigation
 - Tree sidebar with fixed hierarchy **Client → Site → Floor plan**
 - Quick search in the sidebar (filters clients/sites/floor plans by name)
@@ -55,17 +60,24 @@ New passwords must be **strong**:
 - Site optional coordinates (`lat, lng`) with **Google Maps** link
 - Floor plan image upload (JPG/PNG only), replace image with automatic archival as a revision
 - Object types management (custom types + icon mapping), updating type/icon updates all objects
+- Workspace backup:
+  - **Export JSON workspace** (optionally embed images/attachments)
+  - **Import JSON workspace** (replace workspace on this server)
+  - **Export Excel** workbook (object types, clients, sites, floor plans, layers, rooms, views, objects)
 - User management:
   - create/edit/disable users
   - language per user
   - CSV/Excel-style export of the users table
 - Superadmin only:
-  - audit logs (login/logout + failed attempts)
+  - logs: login/logout + failed attempts, plus an **audit trail** of important events (optional Extended mode)
   - Nerd Area: packages and versions used by the app
+  - Nerd Area: **Custom Import (Real users)** to configure a per-client WebAPI (Basic Auth) and sync an employee directory
 
 ### Workspace (Floor plan)
 - Floor plan shown as background; objects rendered on top with an icon and always-visible label
 - Add objects via palette or context menu (type → name required, description optional)
+- The palette can be customized per user (enabled objects + ordering) from **Settings → Objects**
+- The context menu works across the whole workspace area (even outside the visible plan image)
 - Select / multi-select:
   - click to select
   - Ctrl/⌘ to multi-select
@@ -77,13 +89,22 @@ New passwords must be **strong**:
   - duplicate (asks for new name/description; placed next to original)
   - scale per object (slider)
   - delete
+- Real users (optional):
+  - if the directory import is configured, a **Real user** object is available in the palette
+  - dropping it opens a picker with search and “only unassigned” filter
+  - the label shows first name and last name on two lines
 - Pan & zoom:
   - zoom controls (+ / -)
   - pan the map (background + objects move together)
   - viewport is persisted per floor plan (reload-safe)
+- Layers, grid and links:
+  - assign objects to one or more **layers** and toggle visibility (work by “layers”)
+  - optional **grid overlay** and configurable **grid snapping**
+  - create **links** (arrows) between objects from the context menu
 - Rooms:
   - create **rectangle** or **polygon** rooms
   - resize/edit room shape
+  - set a per-room color (helps visually separate areas)
   - objects inside the room are automatically linked
   - room list with assigned objects and quick highlight
 - Search:
@@ -100,8 +121,21 @@ New passwords must be **strong**:
   - restore revisions, compare revisions, delete a revision, delete all revisions
   - when saving, you can add a note
 - Export:
-  - export to PDF (orientation selectable; object list optional)
+  - export **plan-only** PDF (background only: no UI, no toolbars)
+  - optional per-floor-plan **print area** (rectangle)
+  - PDF options include orientation, clickable index (when exporting multiple plans), and a quality/size slider
   - export the changelog to PDF
+
+## Custom Fields (per user)
+Deskly supports **per-user custom fields** for objects:
+- Define fields per object type in **Settings → Objects** (right-click an enabled object type)
+- Field types: **Text**, **Number**, **Boolean**
+- Values are stored **per user and per object** (not shared with other users)
+
+### PWA (optional)
+Deskly is a Progressive Web App:
+- can be installed on supported browsers
+- caches static assets and previously visited floor plan images (`/uploads`, `/seed`) for faster reloads
 
 ### Google Maps integration
 - If a Site has valid coordinates (`lat, lng`):

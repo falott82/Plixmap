@@ -16,6 +16,11 @@ interface UIState {
   lastObjectScale: number;
   dirtyByPlan: Record<string, boolean>;
   pendingSaveNavigateTo?: string | null;
+  visibleLayerIdsByPlan: Record<string, string[]>;
+  gridSnapEnabled: boolean;
+  gridSize: number;
+  showGrid: boolean;
+  showPrintAreaByPlan: Record<string, boolean>;
   setSelectedPlan: (id?: string) => void;
   setSelectedObject: (id?: string) => void;
   setSelection: (ids: string[]) => void;
@@ -34,6 +39,12 @@ interface UIState {
   setPlanDirty: (planId: string, dirty: boolean) => void;
   requestSaveAndNavigate: (to: string) => void;
   clearPendingSaveNavigate: () => void;
+  setVisibleLayerIds: (planId: string, layerIds: string[]) => void;
+  toggleLayerVisibility: (planId: string, layerId: string) => void;
+  setGridSnapEnabled: (enabled: boolean) => void;
+  setGridSize: (size: number) => void;
+  setShowGrid: (show: boolean) => void;
+  toggleShowPrintArea: (planId: string) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -49,6 +60,11 @@ export const useUIStore = create<UIState>()(
       lastObjectScale: 1,
       dirtyByPlan: {},
       pendingSaveNavigateTo: null,
+      visibleLayerIdsByPlan: {},
+      gridSnapEnabled: false,
+      gridSize: 20,
+      showGrid: false,
+      showPrintAreaByPlan: {},
       setSelectedPlan: (id) => set({ selectedPlanId: id, selectedObjectId: undefined, selectedObjectIds: [] }),
       setSelectedObject: (id) =>
         set({
@@ -90,7 +106,25 @@ export const useUIStore = create<UIState>()(
           dirtyByPlan: { ...state.dirtyByPlan, [planId]: dirty }
         })),
       requestSaveAndNavigate: (to) => set({ pendingSaveNavigateTo: to }),
-      clearPendingSaveNavigate: () => set({ pendingSaveNavigateTo: null })
+      clearPendingSaveNavigate: () => set({ pendingSaveNavigateTo: null }),
+      setVisibleLayerIds: (planId, layerIds) =>
+        set((state) => ({
+          visibleLayerIdsByPlan: { ...state.visibleLayerIdsByPlan, [planId]: Array.from(new Set(layerIds)) }
+        })),
+      toggleLayerVisibility: (planId, layerId) =>
+        set((state) => {
+          const current = state.visibleLayerIdsByPlan[planId] || [];
+          const exists = current.includes(layerId);
+          const next = exists ? current.filter((x) => x !== layerId) : [...current, layerId];
+          return { visibleLayerIdsByPlan: { ...state.visibleLayerIdsByPlan, [planId]: next } };
+        }),
+      setGridSnapEnabled: (enabled) => set({ gridSnapEnabled: !!enabled }),
+      setGridSize: (size) => set({ gridSize: Math.max(5, Math.min(200, Number(size) || 20)) }),
+      setShowGrid: (show) => set({ showGrid: !!show }),
+      toggleShowPrintArea: (planId) =>
+        set((state) => ({
+          showPrintAreaByPlan: { ...state.showPrintAreaByPlan, [planId]: !state.showPrintAreaByPlan[planId] }
+        }))
     }),
     {
       name: 'deskly-ui',
@@ -105,7 +139,12 @@ export const useUIStore = create<UIState>()(
       partialize: (state) => ({
         panForPlan: state.panForPlan,
         sidebarCollapsed: state.sidebarCollapsed,
-        lastObjectScale: state.lastObjectScale
+        lastObjectScale: state.lastObjectScale,
+        visibleLayerIdsByPlan: state.visibleLayerIdsByPlan,
+        gridSnapEnabled: state.gridSnapEnabled,
+        gridSize: state.gridSize,
+        showGrid: state.showGrid,
+        showPrintAreaByPlan: state.showPrintAreaByPlan
       })
     }
   )
