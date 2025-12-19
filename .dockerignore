@@ -1,0 +1,11 @@
+node_modules
+dist
+.DS_Store
+*.log
+pnpm-lock.yaml
+yarn.lock
+/.vite
+.env
+data/*.sqlite
+data/*.sqlite-*
+data/uploads
