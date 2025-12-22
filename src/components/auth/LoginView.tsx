@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Lock, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useT } from '../../i18n/useT';
-import { fetchBootstrapStatus } from '../../api/auth';
+import { fetchBootstrapStatus, MFARequiredError } from '../../api/auth';
 
 const LoginView = () => {
   const navigate = useNavigate();
@@ -11,9 +11,12 @@ const LoginView = () => {
   const t = useT();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpRequired, setOtpRequired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFirstRunCredentials, setShowFirstRunCredentials] = useState(false);
+  const otpRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,9 +35,15 @@ const LoginView = () => {
     setError(null);
     setLoading(true);
     try {
-      await login(username.trim(), password);
+      await login(username.trim(), password, otpRequired ? otp.trim() : undefined);
       navigate('/', { replace: true });
-    } catch {
+    } catch (e: any) {
+      if (e instanceof MFARequiredError || e?.name === 'MFARequiredError') {
+        setOtpRequired(true);
+        setOtp('');
+        window.setTimeout(() => otpRef.current?.focus(), 0);
+        return;
+      }
       setError(t({ it: 'Credenziali non valide', en: 'Invalid credentials' }));
     } finally {
       setLoading(false);
@@ -88,6 +97,36 @@ const LoginView = () => {
               />
             </div>
           </label>
+          {otpRequired ? (
+            <label className="block text-sm font-medium text-slate-700">
+              {t({ it: 'Codice MFA', en: 'MFA code' })}
+              <div className="relative mt-1">
+                <Lock size={16} className="absolute left-3 top-3 text-slate-400" />
+                <input
+                  ref={otpRef}
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                  placeholder={t({ it: 'Codice a 6 cifre', en: '6-digit code' })}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') submit();
+                    if (e.key === 'Escape') {
+                      setOtpRequired(false);
+                      setOtp('');
+                    }
+                  }}
+                />
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {t({
+                  it: 'Inserisci il codice della tua app di autenticazione.',
+                  en: 'Enter the code from your authenticator app.'
+                })}
+              </div>
+            </label>
+          ) : null}
           {error ? (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {error}
@@ -97,7 +136,7 @@ const LoginView = () => {
 
         <button
           onClick={submit}
-          disabled={loading || !username.trim() || !password}
+          disabled={loading || !username.trim() || !password || (otpRequired && !otp.trim())}
           className="mt-6 w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-card enabled:hover:bg-primary/90 disabled:opacity-60"
         >
           {loading ? t({ it: 'Accesso…', en: 'Signing in…' }) : t({ it: 'Entra', en: 'Sign in' })}

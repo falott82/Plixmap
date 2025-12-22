@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown } from 'lucide-react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown, DownloadCloud } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -13,11 +13,14 @@ import UsersPanel from './UsersPanel';
 import AccountPanel from './AccountPanel';
 import UserMenu from '../layout/UserMenu';
 import LogsPanel from './LogsPanel';
+import AuditTrailPanel from './AuditTrailPanel';
 import ClientModal from './ClientModal';
 import NerdAreaPanel from './NerdAreaPanel';
 import { useT } from '../../i18n/useT';
 import SiteModal from './SiteModal';
 import ObjectTypesPanel from './ObjectTypesPanel';
+import BackupPanel from './BackupPanel';
+import CustomImportPanel from './CustomImportPanel';
 
 const SettingsView = () => {
   const {
@@ -59,16 +62,18 @@ const SettingsView = () => {
   const { user } = useAuthStore();
   const isAdmin = !!user?.isAdmin;
   const isSuperAdmin = !!user?.isSuperAdmin;
-  const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'nerd'>(isAdmin ? 'data' : 'account');
+  const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'backup' | 'import' | 'nerd'>(isAdmin ? 'data' : 'account');
   const [clientModal, setClientModal] = useState<{ client?: any } | null>(null);
 
   useEffect(() => {
     const search = new URLSearchParams(location.search);
     const t = (search.get('tab') || '').toLowerCase();
     if (t === 'account') setTab('account');
-    else if (t === 'objects' && isAdmin) setTab('objects');
+    else if (t === 'objects') setTab('objects');
     else if (t === 'users' && isAdmin) setTab('users');
     else if (t === 'logs' && isSuperAdmin) setTab('logs');
+    else if (t === 'backup' && isSuperAdmin) setTab('backup');
+    else if (t === 'import' && isSuperAdmin) setTab('import');
     else if (t === 'nerd' && isSuperAdmin) setTab('nerd');
     else if (t === 'data' && isAdmin) setTab('data');
   }, [isAdmin, isSuperAdmin, location.search]);
@@ -175,15 +180,38 @@ const SettingsView = () => {
             >
               <Users size={16} /> {t({ it: 'Utenti', en: 'Users' })}
             </button>
+            <button
+              onClick={() => {
+                if (!isSuperAdmin) {
+                  push(t({ it: 'Solo i superadmin possono accedere ai logs.', en: 'Only super admins can access logs.' }), 'info');
+                  return;
+                }
+                setTab('logs');
+              }}
+              className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+                tab === 'logs' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+              } ${!isSuperAdmin ? 'opacity-70' : ''}`}
+              title={!isSuperAdmin ? t({ it: 'Solo superadmin', en: 'Super admin only' }) : undefined}
+            >
+              {t({ it: 'Logs', en: 'Logs' })}
+            </button>
             {isSuperAdmin ? (
               <>
                 <button
-                  onClick={() => setTab('logs')}
+                  onClick={() => setTab('backup')}
                   className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
-                    tab === 'logs' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+                    tab === 'backup' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
                   }`}
                 >
-                  {t({ it: 'Logs', en: 'Logs' })}
+                  <Upload size={16} /> {t({ it: 'Backup', en: 'Backup' })}
+                </button>
+                <button
+                  onClick={() => setTab('import')}
+                  className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+                    tab === 'import' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+                  }`}
+                >
+                  <DownloadCloud size={16} /> {t({ it: 'Custom Import', en: 'Custom Import' })}
                 </button>
                 <button
                   onClick={() => setTab('nerd')}
@@ -195,6 +223,25 @@ const SettingsView = () => {
                 </button>
               </>
             ) : null}
+          </>
+        ) : null}
+        {!isAdmin ? (
+          <>
+            <button
+              onClick={() => setTab('objects')}
+              className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+                tab === 'objects' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+              }`}
+            >
+              <LayoutGrid size={16} /> {t({ it: 'Oggetti', en: 'Objects' })}
+            </button>
+            <button
+              onClick={() => push(t({ it: 'Solo i superadmin possono accedere ai logs.', en: 'Only super admins can access logs.' }), 'info')}
+              className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink opacity-70 hover:bg-slate-50"
+              title={t({ it: 'Solo superadmin', en: 'Super admin only' })}
+            >
+              {t({ it: 'Logs', en: 'Logs' })}
+            </button>
           </>
         ) : null}
         <button
@@ -209,7 +256,7 @@ const SettingsView = () => {
 
       {tab === 'account' ? <AccountPanel /> : null}
 
-      {tab === 'objects' ? (isAdmin ? <ObjectTypesPanel /> : null) : null}
+      {tab === 'objects' ? <ObjectTypesPanel /> : null}
 
       {tab === 'users' ? (
         isAdmin ? (
@@ -223,13 +270,20 @@ const SettingsView = () => {
 
       {tab === 'logs' ? (
         isSuperAdmin ? (
-          <LogsPanel />
+          <div className="space-y-8">
+            <LogsPanel />
+            <AuditTrailPanel />
+          </div>
         ) : (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
             {t({ it: 'Non hai i permessi per vedere i logs.', en: 'You do not have permission to view logs.' })}
           </div>
         )
       ) : null}
+
+      {tab === 'backup' ? (isSuperAdmin ? <BackupPanel /> : null) : null}
+
+      {tab === 'import' ? (isSuperAdmin ? <CustomImportPanel /> : null) : null}
 
       {tab === 'nerd' ? (
         isSuperAdmin ? (
