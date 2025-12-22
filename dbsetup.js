@@ -1,6 +1,6 @@
-// Fly.io (and some deployment templates) may run `node ./dbsetup.js` before starting the server.
+// Some deployment templates run `node ./dbsetup.js` before starting the server.
 // Deskly doesn't require a setup step, but we ensure data directories exist and (when available)
-// we prefer storing the SQLite DB on a mounted volume (e.g. `/data` on Fly).
+// we prefer storing the SQLite DB on a mounted volume (e.g. `/data`) so data survives restarts.
 
 const fs = require('fs');
 const path = require('path');
@@ -24,7 +24,7 @@ const safeSymlinkDir = (from, to) => {
   }
 };
 
-// Fly volume commonly mounted here
+// Common volume mount
 ensureDir('/data');
 
 // Default app data dir (when running in containers)
@@ -43,4 +43,3 @@ try {
 }
 
 console.log('[deskly] dbsetup complete');
-
