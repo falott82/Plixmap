@@ -1,20 +1,39 @@
 import { useMemo } from 'react';
-import { useDataStore } from '../../store/useDataStore';
-import { MapObjectType } from '../../store/types';
+import { MapObjectType, ObjectTypeDefinition } from '../../store/types';
 import Icon from '../ui/Icon';
 import { useLang, useT } from '../../i18n/useT';
 
 interface Props {
+  defs: ObjectTypeDefinition[];
+  order?: string[] | null;
   onSelectType: (type: MapObjectType) => void;
   activeType?: MapObjectType | null;
 }
 
-const Toolbar = ({ onSelectType, activeType }: Props) => {
-  const defs = useDataStore((s) => s.objectTypes);
+const Toolbar = ({ defs, order, onSelectType, activeType }: Props) => {
   const lang = useLang();
   const t = useT();
 
-  const list = useMemo(() => (defs || []).slice().sort((a, b) => a.name[lang].localeCompare(b.name[lang])), [defs, lang]);
+  const list = useMemo(() => {
+    const base = defs || [];
+    const byId = new Map(base.map((d) => [d.id, d]));
+    if (order !== undefined && order !== null) {
+      // When an explicit order is provided, the palette is considered user-configured.
+      // An empty list means "show nothing".
+      const ord = (order || []).filter((id): id is string => typeof id === 'string' && !!id);
+      const out: ObjectTypeDefinition[] = [];
+      const used = new Set<string>();
+      for (const id of ord) {
+        const def = byId.get(id);
+        if (!def || used.has(id)) continue;
+        used.add(id);
+        out.push(def);
+      }
+      return out;
+    }
+    // Back-compat: if no order is provided, show all available types.
+    return base.slice().sort((a, b) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
+  }, [defs, lang, order]);
 
   return (
     <div className="flex flex-col items-center gap-2">

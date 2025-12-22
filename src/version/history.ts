@@ -9,8 +9,243 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.0.4',
+    date: '2025-12-22',
+    type: 'minor',
+    notes: [
+      n(
+        'Collegamenti: unificati collegamenti lineari e 90° nel layer Cablaggi + filtro visibilità unico',
+        'Links: unified straight and 90° links under the Cabling layer + single visibility filter'
+      ),
+      n(
+        'Collegamenti: modale “Mostra collegamenti” su oggetto con tabella (include tipo oggetto) + “Collega oggetti” su multi-selezione (2 oggetti)',
+        'Links: “Show links” modal on objects with a table (includes object type) + “Link objects” for a 2-item multi-selection'
+      ),
+      n(
+        'Collegamenti: doppio click su link (lineare o 90°) per modificare nome/descrizione',
+        'Links: double-click any link (straight or 90°) to edit name/description'
+      ),
+      n(
+        'PDF: indice più curato con logo Deskly + menu centrato + contatore pagine + Rev/data nel footer delle planimetrie',
+        'PDF: nicer index page with Deskly logo + centered TOC + page counter + revision/date footer on plan pages'
+      ),
+      n(
+        'PDF: opzioni aggiuntive “Includi collegamenti” e “Includi stanze”',
+        'PDF: added “Include links” and “Include rooms” options'
+      ),
+      n(
+        'Utenti reali: voce “Dettagli utente” nel menu con modale dei dati importati (WebAPI)',
+        'Real users: “User details” context-menu item with a modal showing imported WebAPI data'
+      ),
+      n(
+        'Stabilità canvas: resize re-sync quando la tab torna visibile per ridurre casi di mappa che sparisce/riappare',
+        'Canvas stability: resize re-sync on tab visibility to reduce intermittent map disappear/reappear'
+      ),
+      n(
+        'Auth: ridotto rumore di 401 su /api/auth/me a freddo (session hint locale)',
+        'Auth: reduced noisy 401s on /api/auth/me on cold start (local session hint)'
+      ),
+      n(
+        'Cleanup: rimossa configurazione Fly.io',
+        'Cleanup: removed Fly.io configuration'
+      )
+    ]
+  },
+  {
+    version: '1.0.3',
+    date: '2025-12-22',
+    type: 'minor',
+    notes: [
+      n(
+        'Workspace: disabilitato autosave mentre ci sono modifiche non salvate (revisione) e aggiunto guard quando si apre Settings',
+        'Workspace: autosave is disabled while there are unsaved (revision) edits and Settings navigation is now guarded'
+      ),
+      n(
+        'Backup: export asset più robusto (supporta URL assoluti /uploads) + import persiste subito su server (/api/state) per reimportare anche planimetrie/immagini',
+        'Backup: more robust asset export (supports absolute /uploads URLs) + import now persists immediately via /api/state to restore floor plans/images'
+      ),
+      n(
+        'Utenti reali: gestione “missing” migliorata (mostra dove sono allocati, selezione multipla, rimozione crea revisioni e scrive audit)',
+        'Real users: improved “missing” workflow (shows allocations, multi-select, removal creates revisions and writes audit)'
+      ),
+      n(
+        'Oggetti: scala minima ridotta (fino a 0.20) con step più fine',
+        'Objects: lower minimum scale (down to 0.20) with finer steps'
+      ),
+      n(
+        'Cablaggi: nuova linea a 90° “magnetica” tra oggetti con colore/spessore/tratteggio/nome/descrizione ed edit da menu',
+        'Cables: new 90° “magnetic” cable between objects with color/width/dash/name/description and edit from context menu'
+      )
+    ]
+  },
+  {
+    version: '1.0.2',
+    date: '2025-12-22',
+    type: 'minor',
+    notes: [
+      n(
+        'Campi personalizzati: creazione semplificata (solo Etichetta + Tipo campo; chiave generata automaticamente)',
+        'Custom fields: simplified creation (Label + Field type only; key is auto-generated)'
+      ),
+      n(
+        'Logs: paginazione + selettore righe (max 200) + export CSV + svuota log (solo superadmin)',
+        'Logs: pagination + rows-per-page selector (max 200) + CSV export + clear logs (superadmin only)'
+      ),
+      n(
+        'Backup: selezione planimetrie da esportare (albero) + export include campi custom e filtra “Utente reale” dagli oggetti',
+        'Backup: export selection tree + export includes custom fields and filters out “Real user” objects'
+      ),
+      n(
+        'PDF: opzione “Includi oggetti” (default ON) per esportare planimetria + marker senza UI',
+        'PDF: “Include objects” option (default ON) to export the plan with markers (no UI)'
+      ),
+      n(
+        'Area di stampa: toast di conferma su impostazione/rimozione',
+        'Print area: confirmation toasts on set/clear'
+      )
+    ]
+  },
+  {
+    version: '1.0.1',
+    date: '2025-12-19',
+    type: 'minor',
+    notes: [
+      n(
+        'Oggetti: gestione palette spostata in Settings → Oggetti (lista per-utente, parte vuota, “Aggiungi oggetto” da elenco disponibile)',
+        'Objects: palette management moved to Settings → Objects (per-user list, starts empty, “Add object” from the available catalog)'
+      ),
+      n(
+        'Oggetti: nel workspace la palette mostra solo gli oggetti abilitati per l’utente (ordine personalizzato)',
+        'Objects: in the workspace, the palette shows only the user-enabled objects (custom order)'
+      ),
+      n(
+        'Campi custom: tasto destro su un oggetto abilitato nei Settings → Oggetti per aggiungere campi personalizzati (testo/numero/booleano)',
+        'Custom fields: right-click an enabled object in Settings → Objects to add custom fields (text/number/boolean)'
+      ),
+      n(
+        'MFA: aggiunta guida rapida in Account per generare/scansionare il QR e confermare il codice',
+        'MFA: added a quick guide in Account to generate/scan the QR and confirm the code'
+      )
+    ]
+  },
+  {
+    version: '1.0.0',
+    date: '2025-12-19',
+    type: 'major',
+    notes: [
+      n(
+        'Realtime: lock esclusivo per planimetria + presenza utenti online (evita conflitti)',
+        'Realtime: exclusive floor plan lock + online presence (prevents conflicts)'
+      ),
+      n(
+        'Audit trail: log eventi importanti + modalità “Estesa” attivabile dai superadmin',
+        'Audit trail: important events log + optional “Extended” mode for superadmins'
+      ),
+      n(
+        'Template: duplica una planimetria come base (stanze/viste/livelli e opzionalmente oggetti)',
+        'Templates: duplicate a floor plan as a starting point (rooms/views/layers, optionally objects)'
+      ),
+      n(
+        'Layers: livelli multi‑selezionabili per oggetti + toggle visibilità per lavorare per “strati”',
+        'Layers: multi-select layers for objects + visibility toggles to work by “layers”'
+      ),
+      n(
+        'Backup: export/import workspace in JSON (opzione include immagini/allegati) + export Excel completo',
+        'Backup: workspace JSON export/import (optional embedded images/attachments) + full Excel export'
+      ),
+      n(
+        'Griglia: overlay opzionale + snap a griglia configurabile per posizionamenti precisi',
+        'Grid: optional overlay + configurable grid snapping for precise placement'
+      ),
+      n(
+        'Collegamenti: connessioni tra oggetti (freccia) con creazione da menu e cancellazione',
+        'Links: connections between objects (arrow) with context-menu creation and deletion'
+      ),
+      n(
+        'Sicurezza: MFA TOTP opzionale (enable/disable) + rate‑limit sui tentativi di login',
+        'Security: optional TOTP MFA (enable/disable) + login attempt rate limiting'
+      ),
+      n(
+        'PWA: installabile e con cache offline di asset e planimetrie già visitate (/uploads, /seed)',
+        'PWA: installable with offline caching for visited assets and floor plans (/uploads, /seed)'
+      ),
+      n(
+        'Utenti reali: import “Custom Import” per Cliente (WebAPI POST + Basic Auth) e nuovo oggetto “Utente reale” con picker e filtro “solo non assegnati”',
+        'Real users: per-Client “Custom Import” (WebAPI POST + Basic Auth) and new “Real user” object with picker and “only unassigned” filter'
+      ),
+      n(
+        'UI: “Custom Import” spostato in una tab dedicata nei Settings (con info box e strumenti Test/Import/Resync)',
+        'UI: “Custom Import” moved to its own Settings tab (with an info box and Test/Import/Resync tools)'
+      ),
+      n(
+        'Custom Import: supporto body JSON opzionale (oltre a Basic Auth) per API che richiedono payload (default {})',
+        'Custom Import: optional JSON body support (in addition to Basic Auth) for APIs that require a payload (default {})'
+      ),
+      n(
+        'Custom Import: parser più tollerante per risposte “frammento JSON” e debug della risposta ricevuta in caso di errore',
+        'Custom Import: more tolerant parsing for “JSON fragment” responses and debug preview of the received response on errors'
+      ),
+      n(
+        'Custom Import: configurazione comprimibile con timestamp ultimo salvataggio e messaggi Test/Import più chiari',
+        'Custom Import: collapsible configuration with “last saved” timestamp and clearer Test/Import messaging'
+      ),
+      n(
+        'PDF: export “plan-only” ottimizzato (sfondo bianco, compressione JPEG, niente UI/toolbar) per file più leggeri e zoom leggibile',
+        'PDF: optimized “plan-only” export (white background, JPEG compression, no UI/toolbar) for smaller files and readable zoom'
+      ),
+      n(
+        'Stampa: area di stampa per planimetria (rettangolo) + indicatore nell’albero + stampa multipla con selezione Clienti/Sedi/Planimetrie e indice cliccabile',
+        'Print: per-floor-plan print area (rectangle) + tree indicator + multi-print with Client/Site/Floor plan selection and clickable index'
+      ),
+      n(
+        'Palette: preferiti per utente (selezione + ordinamento) con gestione da Settings → Oggetti',
+        'Palette: per-user favorites (selection + ordering) managed from Settings → Objects'
+      ),
+      n(
+        'UI: controlli griglia (Snap/Show/Step) spostati nella barra in alto per liberare spazio nella palette',
+        'UI: grid controls (Snap/Show/Step) moved to the top bar to free up palette space'
+      ),
+      n(
+        'Stanze: supporto colori per stanza (rettangoli e poligoni) + bordo più pulito',
+        'Rooms: per-room colors (rectangles and polygons) + cleaner outline'
+      ),
+      n(
+        'Fix: il ridimensionamento/spostamento delle stanze poligonali non “salta” più di posizione',
+        'Fix: polygon room resize/move no longer “jumps” to a different position'
+      ),
+      n(
+        'Fix: prevenuti resize transitori a dimensioni 0 che potevano far sparire la mappa finché non si faceva refresh',
+        'Fix: prevented transient 0-size resizes that could make the map disappear until a refresh'
+      ),
+      n(
+        'Menu: tasto destro ora funziona su tutta l’area di lavoro (anche fuori dalla planimetria visibile)',
+        'Menu: right-click now works across the whole workspace area (even outside the visible floor plan)'
+      ),
+      n(
+        'Area di stampa: aggiunta voce “Mostra/Nascondi area di stampa” dal menu contestuale (overlay opzionale)',
+        'Print area: added “Show/Hide print area” in the context menu (optional overlay)'
+      ),
+      n(
+        'Oggetti: nel menu “Aggiungi oggetto…” vengono mostrati solo i tipi non già presenti nei preferiti della palette (quando i preferiti sono attivi)',
+        'Objects: the “Add object…” menu shows only types not already in palette favorites (when favorites are enabled)'
+      ),
+      n(
+        'Campi personalizzati (per utente): definizione campi per tipo oggetto (testo/numero/booleano) e valori per-oggetto',
+        'Custom fields (per user): define per-type object fields (text/number/boolean) and per-object values'
+      ),
+      n(
+        'Lock “duro”: il backend blocca la sovrascrittura di planimetrie bloccate da altri utenti anche in caso di salvataggi concorrenti',
+        'Hard lock: the backend prevents overwriting floor plans locked by other users even during concurrent saves'
+      ),
+      n(
+        'Auth: header `Cache-Control: no-store` sulle API e fetch “no-store” su /api/auth/me per evitare stati di login obsoleti dopo restart',
+        'Auth: `Cache-Control: no-store` on API responses and a no-store fetch for /api/auth/me to avoid stale login state after restart'
+      )
+    ]
+  },
+  {
     version: '0.11.2',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'fix',
     notes: [
       n(
@@ -37,7 +272,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.11.1',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'fix',
     notes: [
       n(
@@ -56,7 +291,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.11.0',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'minor',
     notes: [
       n(
@@ -75,7 +310,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.10.1',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'fix',
     notes: [
       n(
@@ -94,7 +329,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.10.0',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'minor',
     notes: [
       n(
@@ -117,7 +352,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.9.4',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'fix',
     notes: [
       n(
@@ -132,7 +367,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.9.3',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'fix',
     notes: [
       n(
@@ -155,7 +390,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.9.2',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'fix',
     notes: [
       n(
@@ -174,7 +409,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.9.1',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'fix',
     notes: [
       n(
@@ -193,7 +428,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.9.0',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'minor',
     notes: [
       n(
@@ -216,7 +451,7 @@ export const releaseHistory: ReleaseNote[] = [
   },
   {
     version: '0.8.5',
-    date: '2025-12-16',
+    date: '2025-12-19',
     type: 'fix',
     notes: [
       n(

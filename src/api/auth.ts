@@ -13,6 +13,7 @@ export interface AuthUser {
   language: 'it' | 'en';
   defaultPlanId?: string | null;
   clientOrder?: string[];
+  paletteFavorites?: string[];
   mustChangePassword?: boolean;
   firstName: string;
   lastName: string;
@@ -21,19 +22,36 @@ export interface AuthUser {
 }
 
 export const fetchMe = async (): Promise<{ user: AuthUser; permissions: Permission[] }> => {
-  const res = await fetch('/api/auth/me', { credentials: 'include' });
+  const res = await fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch me (${res.status})`);
   return res.json();
 };
 
-export const login = async (username: string, password: string): Promise<void> => {
+export class MFARequiredError extends Error {
+  constructor() {
+    super('MFA required');
+    this.name = 'MFARequiredError';
+  }
+}
+
+export const login = async (username: string, password: string, otp?: string): Promise<void> => {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
+    body: JSON.stringify({ username, password, ...(otp ? { otp } : {}) })
   });
-  if (!res.ok) throw new Error(`Login failed (${res.status})`);
+  if (!res.ok) {
+    if (res.status === 401) {
+      try {
+        const body = await res.json();
+        if (body?.mfaRequired) throw new MFARequiredError();
+      } catch (e) {
+        if (e instanceof MFARequiredError) throw e;
+      }
+    }
+    throw new Error(`Login failed (${res.status})`);
+  }
 };
 
 export const logout = async (): Promise<void> => {
@@ -57,7 +75,12 @@ export const firstRunSetup = async (payload: { newPassword: string; language: 'i
   if (!res.ok) throw new Error(`First-run setup failed (${res.status})`);
 };
 
-export const updateMyProfile = async (payload: { language?: 'it' | 'en'; defaultPlanId?: string | null; clientOrder?: string[] }): Promise<void> => {
+export const updateMyProfile = async (payload: {
+  language?: 'it' | 'en';
+  defaultPlanId?: string | null;
+  clientOrder?: string[];
+  paletteFavorites?: string[];
+}): Promise<void> => {
   const res = await fetch('/api/auth/me', {
     method: 'PUT',
     credentials: 'include',
@@ -161,7 +184,11 @@ export interface AuditLogRow {
   details?: string | null;
 }
 
-export const fetchAuditLogs = async (params?: { q?: string; limit?: number; offset?: number }): Promise<{ rows: AuditLogRow[] }> => {
+export const fetchAuditLogs = async (params?: {
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ rows: AuditLogRow[]; limit: number; offset: number; total: number }> => {
   const qs = new URLSearchParams();
   if (params?.q) qs.set('q', params.q);
   if (params?.limit) qs.set('limit', String(params.limit));
@@ -169,4 +196,9 @@ export const fetchAuditLogs = async (params?: { q?: string; limit?: number; offs
   const res = await fetch(`/api/admin/logs?${qs.toString()}`, { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch logs (${res.status})`);
   return res.json();
+};
+
+export const clearAuthLogs = async (): Promise<void> => {
+  const res = await fetch('/api/admin/logs/clear', { method: 'POST', credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to clear logs (${res.status})`);
 };

@@ -69,6 +69,7 @@ const App = () => {
   const navigate = useNavigate();
   const [hydrated, setHydrated] = useState(false);
   const hydratedForUserId = useRef<string | null>(null);
+  const defaultPlanRedirectAppliedForUserId = useRef<string | null>(null);
   const saveTimer = useRef<number | null>(null);
   const saveInFlight = useRef(false);
   const saveQueued = useRef(false);
@@ -119,6 +120,11 @@ const App = () => {
     if (!user) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     if (version === savedVersion) return;
+    // Do not autosave while the user has unsaved edits that must be committed as a revision.
+    // This prevents "implicit saves" when navigating to Settings or switching floor plans.
+    const dirtyByPlan = (useUIStore.getState() as any)?.dirtyByPlan || {};
+    const hasUnsavedEdits = Object.values(dirtyByPlan).some(Boolean);
+    if (hasUnsavedEdits) return;
     saveTimer.current = window.setTimeout(() => {
       if (saveInFlight.current) {
         saveQueued.current = true;
@@ -243,6 +249,49 @@ const App = () => {
       }
     }
   }, [clients, selectedPlanId, setSelectedPlan, navigate, location.pathname, user]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!user) return;
+    if (defaultPlanRedirectAppliedForUserId.current === user.id) return;
+
+    // Ensure the workspace always opens on the user's default floor plan (if set and available),
+    // even when the app boots on a non-default /plan/:id URL.
+    const defaultPlanId = (user as any)?.defaultPlanId as string | null | undefined;
+    if (!defaultPlanId) {
+      defaultPlanRedirectAppliedForUserId.current = user.id;
+      return;
+    }
+    let exists = false;
+    for (const c of clients) {
+      for (const s of c.sites) {
+        if (s.floorPlans.some((p) => p.id === defaultPlanId)) {
+          exists = true;
+          break;
+        }
+      }
+      if (exists) break;
+    }
+    if (!exists) {
+      defaultPlanRedirectAppliedForUserId.current = user.id;
+      return;
+    }
+
+    const path = location.pathname || '';
+    const isWorkspace = path === '/' || path.startsWith('/plan/');
+    if (!isWorkspace) {
+      defaultPlanRedirectAppliedForUserId.current = user.id;
+      return;
+    }
+    if (path === `/plan/${defaultPlanId}`) {
+      defaultPlanRedirectAppliedForUserId.current = user.id;
+      return;
+    }
+
+    setSelectedPlan(defaultPlanId);
+    navigate(`/plan/${defaultPlanId}`, { replace: true });
+    defaultPlanRedirectAppliedForUserId.current = user.id;
+  }, [clients, hydrated, location.pathname, navigate, setSelectedPlan, user]);
 
   if (!authHydrated || !hydrated) {
     return (

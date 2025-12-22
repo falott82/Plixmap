@@ -1,7 +1,7 @@
 const getUserWithPermissions = (db, userId) => {
   const user = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, mustChangePassword, tokenVersion, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
+      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, paletteFavoritesJson, mustChangePassword, tokenVersion, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
     )
     .get(userId);
   if (!user) return null;
@@ -15,6 +15,14 @@ const getUserWithPermissions = (db, userId) => {
       return [];
     }
   })();
+  const paletteFavorites = (() => {
+    try {
+      const arr = JSON.parse(user.paletteFavoritesJson || '[]');
+      return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  })();
   const permissions = isAdmin
     ? []
     : db
@@ -22,8 +30,17 @@ const getUserWithPermissions = (db, userId) => {
         .all(userId);
   // Do not leak raw JSON column.
   delete user.clientOrderJson;
+  delete user.paletteFavoritesJson;
   return {
-    user: { ...user, clientOrder, isAdmin, isSuperAdmin, disabled: !!user.disabled, mustChangePassword: !!user.mustChangePassword },
+    user: {
+      ...user,
+      clientOrder,
+      paletteFavorites,
+      isAdmin,
+      isSuperAdmin,
+      disabled: !!user.disabled,
+      mustChangePassword: !!user.mustChangePassword
+    },
     permissions
   };
 };
@@ -94,6 +111,8 @@ const mergeWritablePlanContent = (serverClients, incomingClients, writablePlanId
           objects: Array.isArray(incoming.objects) ? incoming.objects : plan.objects,
           rooms: Array.isArray(incoming.rooms) ? incoming.rooms : plan.rooms,
           views: Array.isArray(incoming.views) ? incoming.views : plan.views,
+          layers: Array.isArray(incoming.layers) ? incoming.layers : plan.layers,
+          links: Array.isArray(incoming.links) ? incoming.links : plan.links,
           revisions: Array.isArray(incoming.revisions) ? incoming.revisions : plan.revisions
         };
       })

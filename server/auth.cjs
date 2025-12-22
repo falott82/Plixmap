@@ -82,6 +82,7 @@ const setSessionCookie = (res, token, maxAgeSeconds = 60 * 60 * 24 * 30) => {
     `SameSite=Lax`,
     `Max-Age=${maxAgeSeconds}`
   ];
+  if (process.env.NODE_ENV === 'production') parts.push('Secure');
   res.setHeader('Set-Cookie', parts.join('; '));
 };
 
