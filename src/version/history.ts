@@ -9,6 +9,49 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.0.4',
+    date: '2025-12-22',
+    type: 'minor',
+    notes: [
+      n(
+        'Collegamenti: unificati collegamenti lineari e 90° nel layer Cablaggi + filtro visibilità unico',
+        'Links: unified straight and 90° links under the Cabling layer + single visibility filter'
+      ),
+      n(
+        'Collegamenti: modale “Mostra collegamenti” su oggetto con tabella (include tipo oggetto) + “Collega oggetti” su multi-selezione (2 oggetti)',
+        'Links: “Show links” modal on objects with a table (includes object type) + “Link objects” for a 2-item multi-selection'
+      ),
+      n(
+        'Collegamenti: doppio click su link (lineare o 90°) per modificare nome/descrizione',
+        'Links: double-click any link (straight or 90°) to edit name/description'
+      ),
+      n(
+        'PDF: indice più curato con logo Deskly + menu centrato + contatore pagine + Rev/data nel footer delle planimetrie',
+        'PDF: nicer index page with Deskly logo + centered TOC + page counter + revision/date footer on plan pages'
+      ),
+      n(
+        'PDF: opzioni aggiuntive “Includi collegamenti” e “Includi stanze”',
+        'PDF: added “Include links” and “Include rooms” options'
+      ),
+      n(
+        'Utenti reali: voce “Dettagli utente” nel menu con modale dei dati importati (WebAPI)',
+        'Real users: “User details” context-menu item with a modal showing imported WebAPI data'
+      ),
+      n(
+        'Stabilità canvas: resize re-sync quando la tab torna visibile per ridurre casi di mappa che sparisce/riappare',
+        'Canvas stability: resize re-sync on tab visibility to reduce intermittent map disappear/reappear'
+      ),
+      n(
+        'Auth: ridotto rumore di 401 su /api/auth/me a freddo (session hint locale)',
+        'Auth: reduced noisy 401s on /api/auth/me on cold start (local session hint)'
+      ),
+      n(
+        'Cleanup: rimossa configurazione Fly.io',
+        'Cleanup: removed Fly.io configuration'
+      )
+    ]
+  },
+  {
     version: '1.0.3',
     date: '2025-12-22',
     type: 'minor',
