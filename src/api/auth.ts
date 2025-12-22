@@ -184,7 +184,11 @@ export interface AuditLogRow {
   details?: string | null;
 }
 
-export const fetchAuditLogs = async (params?: { q?: string; limit?: number; offset?: number }): Promise<{ rows: AuditLogRow[] }> => {
+export const fetchAuditLogs = async (params?: {
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ rows: AuditLogRow[]; limit: number; offset: number; total: number }> => {
   const qs = new URLSearchParams();
   if (params?.q) qs.set('q', params.q);
   if (params?.limit) qs.set('limit', String(params.limit));
@@ -192,4 +196,9 @@ export const fetchAuditLogs = async (params?: { q?: string; limit?: number; offs
   const res = await fetch(`/api/admin/logs?${qs.toString()}`, { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch logs (${res.status})`);
   return res.json();
+};
+
+export const clearAuthLogs = async (): Promise<void> => {
+  const res = await fetch('/api/admin/logs/clear', { method: 'POST', credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to clear logs (${res.status})`);
 };

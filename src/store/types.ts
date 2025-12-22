@@ -69,8 +69,15 @@ export interface PlanLink {
   id: string;
   fromId: string;
   toId: string;
-  label?: string;
+  kind?: 'arrow' | 'cable';
+  name?: string;
+  description?: string;
   color?: string;
+  width?: number;
+  dashed?: boolean;
+  route?: 'vh' | 'hv';
+  // legacy
+  label?: string;
 }
 
 export interface Room {

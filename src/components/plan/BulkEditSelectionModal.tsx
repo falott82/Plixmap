@@ -143,24 +143,24 @@ const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onCl
                           />
                         </div>
                         <div className="col-span-2 flex items-center justify-end gap-2">
-                          <input
-                            type="range"
-                            min={0.6}
-                            max={1.8}
-                            step={0.1}
-                            value={r.scale ?? 1}
-                            onChange={(e) => {
-                              const next = Number(e.target.value);
-                              setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, scale: next } : x)));
-                            }}
-                            className="w-24"
-                            title={t({ it: 'Scala', en: 'Scale' })}
-                          />
-                          <div className="w-10 text-right text-xs font-semibold text-slate-600 tabular-nums">
-                            {(r.scale ?? 1).toFixed(1)}
-                          </div>
-                        </div>
-                      </div>
+	                          <input
+	                            type="range"
+	                            min={0.2}
+	                            max={2.4}
+	                            step={0.05}
+	                            value={r.scale ?? 1}
+	                            onChange={(e) => {
+	                              const next = Number(e.target.value);
+	                              setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, scale: next } : x)));
+	                            }}
+	                            className="w-24"
+	                            title={t({ it: 'Scala', en: 'Scale' })}
+	                          />
+	                          <div className="w-10 text-right text-xs font-semibold text-slate-600 tabular-nums">
+	                            {(r.scale ?? 1).toFixed(2)}
+	                          </div>
+	                        </div>
+	                      </div>
                     );
                   })}
                 </div>

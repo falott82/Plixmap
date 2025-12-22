@@ -7,6 +7,7 @@ import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
 import Icon from '../ui/Icon';
 import CustomFieldsModal from './CustomFieldsModal';
+import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { useLang, useT } from '../../i18n/useT';
 
 const ObjectTypesPanel = () => {
@@ -15,6 +16,7 @@ const ObjectTypesPanel = () => {
   const { objectTypes } = useDataStore();
   const { push } = useToastStore();
   const user = useAuthStore((s) => s.user);
+  const customFields = useCustomFieldsStore((s) => s.fields);
 
   const [addOpen, setAddOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -82,6 +84,16 @@ const ObjectTypesPanel = () => {
   };
 
   const removeType = async (typeId: string) => {
+    const fieldsForType = (customFields || []).filter((f) => f.typeId === typeId);
+    if (fieldsForType.length) {
+      const ok = window.confirm(
+        t({
+          it: `Questo oggetto ha ${fieldsForType.length} campo/i personalizzato/i. Rimuoverlo dalla palette?`,
+          en: `This object has ${fieldsForType.length} custom field(s). Remove it from your palette?`
+        })
+      );
+      if (!ok) return;
+    }
     const next = enabled.filter((x) => x !== typeId);
     const ok = await saveEnabled(next);
     if (ok) push(t({ it: 'Oggetto rimosso', en: 'Object removed' }), 'info');

@@ -794,7 +794,7 @@ app.get('/api/audit', requireAuth, (req, res) => {
   }
   const q = String(req.query.q || '').trim().toLowerCase();
   const level = String(req.query.level || 'all');
-  const limit = Math.max(1, Math.min(500, Number(req.query.limit || 100)));
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit || 100)));
   const offset = Math.max(0, Number(req.query.offset || 0));
   const where = [];
   const params = {};
@@ -807,6 +807,15 @@ app.get('/api/audit', requireAuth, (req, res) => {
     params.q = `%${q}%`;
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const total = Number(
+    db
+      .prepare(
+        `SELECT COUNT(1) as c
+         FROM audit_log
+         ${whereSql}`
+      )
+      .get({ ...params })?.c || 0
+  );
   const rows = db
     .prepare(
       `SELECT id, ts, level, event, userId, username, ip, method, path, userAgent, scopeType, scopeId, details
@@ -826,7 +835,17 @@ app.get('/api/audit', requireAuth, (req, res) => {
         }
       })()
     }));
-  res.json({ rows, limit, offset });
+  res.json({ rows, limit, offset, total });
+});
+
+app.post('/api/audit/clear', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  db.prepare('DELETE FROM audit_log').run();
+  writeAuditLog(db, { level: 'important', event: 'audit_log_cleared', userId: req.userId, username: req.username, ...requestMeta(req) });
+  res.json({ ok: true });
 });
 
 app.post('/api/auth/first-run', requireAuth, (req, res) => {
@@ -1320,18 +1339,40 @@ app.get('/api/admin/logs', requireAuth, (req, res) => {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
-  const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 200));
   const offset = Math.max(0, Number(req.query.offset) || 0);
   const q = (req.query.q || '').toString().trim().toLowerCase();
+  const where = q ? "WHERE lower(coalesce(username,'')) LIKE ? OR lower(coalesce(ip,'')) LIKE ? OR lower(coalesce(path,'')) LIKE ? OR lower(coalesce(event,'')) LIKE ?" : '';
   const base = `
     SELECT id, ts, event, success, userId, username, ip, method, path, userAgent, details
     FROM auth_log
-    ${q ? "WHERE lower(coalesce(username,'')) LIKE ? OR lower(coalesce(ip,'')) LIKE ? OR lower(coalesce(path,'')) LIKE ? OR lower(coalesce(event,'')) LIKE ?" : ''}
+    ${where}
     ORDER BY ts DESC
     LIMIT ? OFFSET ?`;
   const params = q ? [`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, limit, offset] : [limit, offset];
   const rows = db.prepare(base).all(...params).map((r) => ({ ...r, success: !!r.success }));
-  res.json({ rows });
+  const total = q
+    ? Number(
+        db
+          .prepare(
+            `SELECT COUNT(1) as c
+             FROM auth_log
+             ${where}`
+          )
+          .get(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`)?.c || 0
+      )
+    : Number(db.prepare('SELECT COUNT(1) as c FROM auth_log').get()?.c || 0);
+  res.json({ rows, limit, offset, total });
+});
+
+app.post('/api/admin/logs/clear', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  db.prepare('DELETE FROM auth_log').run();
+  writeAuditLog(db, { level: 'important', event: 'auth_log_cleared', userId: req.userId, username: req.username, ...requestMeta(req) });
+  res.json({ ok: true });
 });
 
 // Serve built frontend (optional, for docker/prod)

@@ -21,12 +21,22 @@ interface Props {
 const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => {
   const t = useT();
   const clients = useDataStore((s) => s.clients);
+  const objectTypes = useDataStore((s) => s.objectTypes);
   const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
   const [expandedSites, setExpandedSites] = useState<Record<string, boolean>>({});
   const [selectedPlanIds, setSelectedPlanIds] = useState<Record<string, boolean>>({});
   const [includeIndex, setIncludeIndex] = useState(true);
+  const [includeObjects, setIncludeObjects] = useState(true);
+  const [includeLinks, setIncludeLinks] = useState(true);
+  const [includeRooms, setIncludeRooms] = useState(true);
   const [quality, setQuality] = useState(78); // 40..95
   const [busy, setBusy] = useState(false);
+
+  const objectTypeIcons = useMemo(() => {
+    const out: Record<string, any> = {};
+    for (const d of objectTypes || []) out[d.id] = d.icon;
+    return out;
+  }, [objectTypes]);
 
   const tree: Tree[] = useMemo(() => {
     return (clients || []).map((c) => ({
@@ -106,8 +116,14 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                     <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Esporta PDF', en: 'Export PDF' })}</Dialog.Title>
                     <Dialog.Description className="mt-1 text-sm text-slate-600">
                       {t({
-                        it: mode === 'single' ? 'Verrà esportata solo la planimetria (sfondo), senza UI.' : 'Seleziona le planimetrie da includere nel PDF. Verrà esportata solo la planimetria (sfondo), senza UI.',
-                        en: mode === 'single' ? 'Only the floor plan background is exported (no UI).' : 'Select the floor plans to include in the PDF. Only the floor plan background is exported (no UI).'
+                        it:
+                          mode === 'single'
+                            ? 'Esporta la planimetria senza UI. Puoi includere opzionalmente oggetti, collegamenti e stanze.'
+                            : 'Seleziona le planimetrie da includere nel PDF. L’export non include UI e può includere opzionalmente oggetti, collegamenti e stanze.',
+                        en:
+                          mode === 'single'
+                            ? 'Exports the floor plan without UI. You can optionally include objects, links and rooms.'
+                            : 'Select the floor plans to include in the PDF. The export has no UI and can optionally include objects, links and rooms.'
                       })}
                     </Dialog.Description>
                   </div>
@@ -213,12 +229,24 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="text-sm font-semibold text-ink">{t({ it: 'Opzioni', en: 'Options' })}</div>
-                    <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
-                      <span>{t({ it: 'Indice cliccabile', en: 'Clickable index' })}</span>
-                      <input type="checkbox" checked={includeIndex} onChange={(e) => setIncludeIndex(e.target.checked)} />
-                    </label>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="text-sm font-semibold text-ink">{t({ it: 'Opzioni', en: 'Options' })}</div>
+                      <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Includi oggetti', en: 'Include objects' })}</span>
+                        <input type="checkbox" checked={includeObjects} onChange={(e) => setIncludeObjects(e.target.checked)} />
+                      </label>
+                      <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Includi collegamenti', en: 'Include links' })}</span>
+                        <input type="checkbox" checked={includeLinks} onChange={(e) => setIncludeLinks(e.target.checked)} />
+                      </label>
+                      <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Includi stanze', en: 'Include rooms' })}</span>
+                        <input type="checkbox" checked={includeRooms} onChange={(e) => setIncludeRooms(e.target.checked)} />
+                      </label>
+                      <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Indice cliccabile', en: 'Clickable index' })}</span>
+                        <input type="checkbox" checked={includeIndex} onChange={(e) => setIncludeIndex(e.target.checked)} />
+                      </label>
 
                     <div className="mt-4">
                       <div className="flex items-center justify-between gap-2">
@@ -275,6 +303,10 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                               })),
                               {
                                 includeIndex,
+                                includeObjects,
+                                includeLinks,
+                                includeRooms,
+                                objectTypeIcons,
                                 jpegQuality: qualityPreset.jpegQuality,
                                 targetLongPx: qualityPreset.targetLongPx
                               }

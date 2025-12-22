@@ -18,7 +18,7 @@ export const fetchCustomFields = async (): Promise<{ fields: CustomField[] }> =>
 
 export const createCustomField = async (payload: {
   typeId: string;
-  fieldKey: string;
+  fieldKey?: string;
   label: string;
   valueType: CustomFieldValueType;
 }): Promise<{ ok: boolean; id: string }> => {
@@ -62,4 +62,3 @@ export const saveObjectCustomValues = async (objectId: string, payload: { typeId
   });
   if (!res.ok) throw new Error(`Failed to save object custom values (${res.status})`);
 };
-

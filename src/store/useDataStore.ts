@@ -94,6 +94,10 @@ interface DataState {
   deleteObject: (id: string) => void;
   clearObjects: (floorPlanId: string) => void;
   removeRealUserAllocations: (clientId: string, externalUserId: string) => void;
+  removeRealUserAllocationsBulk: (
+    clientId: string,
+    externalUserIds: string[]
+  ) => { affectedPlans: { planId: string; removedObjectIds: string[] }[] };
   setObjectRoomIds: (floorPlanId: string, roomIdByObjectId: Record<string, string | undefined>) => void;
   addRoom: (floorPlanId: string, room: Omit<Room, 'id'>) => string;
   updateRoom: (floorPlanId: string, roomId: string, changes: Partial<Omit<Room, 'id'>>) => void;
@@ -109,8 +113,14 @@ interface DataState {
   updateView: (floorPlanId: string, viewId: string, changes: Partial<Omit<FloorPlanView, 'id'>>) => void;
   deleteView: (floorPlanId: string, viewId: string) => void;
   setDefaultView: (floorPlanId: string, viewId: string) => void;
-  addLink: (floorPlanId: string, fromId: string, toId: string, payload?: { label?: string; color?: string }) => string;
+  addLink: (
+    floorPlanId: string,
+    fromId: string,
+    toId: string,
+    payload?: { kind?: 'arrow' | 'cable'; name?: string; description?: string; label?: string; color?: string; width?: number; dashed?: boolean; route?: 'vh' | 'hv' }
+  ) => string;
   deleteLink: (floorPlanId: string, linkId: string) => void;
+  updateLink: (floorPlanId: string, linkId: string, payload: Partial<Pick<PlanLink, 'name' | 'description' | 'color' | 'width' | 'dashed' | 'route'>>) => void;
   cloneFloorPlan: (
     sourcePlanId: string,
     options?: { name?: string; includeRooms?: boolean; includeObjects?: boolean; includeViews?: boolean; includeLayers?: boolean }
@@ -556,6 +566,42 @@ export const useDataStore = create<DataState>()(
           version: state.version + 1
         }));
       },
+      removeRealUserAllocationsBulk: (clientId, externalUserIds) => {
+        const cid = String(clientId || '').trim();
+        const ids = Array.isArray(externalUserIds) ? externalUserIds.map((x) => String(x || '').trim()).filter(Boolean) : [];
+        const unique = Array.from(new Set(ids));
+        if (!cid || !unique.length) return { affectedPlans: [] };
+
+        const affectedPlans: { planId: string; removedObjectIds: string[] }[] = [];
+
+        set((state) => {
+          const nextClients = state.clients.map((c) => {
+            if (c.id !== cid) return c;
+            return {
+              ...c,
+              sites: c.sites.map((s) => ({
+                ...s,
+                floorPlans: s.floorPlans.map((p) => {
+                  const removed: string[] = [];
+                  const nextObjects = (p.objects || []).filter((o) => {
+                    if (o.type !== 'real_user') return true;
+                    const ocid = String((o as any).externalClientId || '').trim();
+                    const oeid = String((o as any).externalUserId || '').trim();
+                    const match = ocid === cid && unique.includes(oeid);
+                    if (match) removed.push(o.id);
+                    return !match;
+                  });
+                  if (removed.length) affectedPlans.push({ planId: p.id, removedObjectIds: removed });
+                  return removed.length ? { ...p, objects: nextObjects } : p;
+                })
+              }))
+            };
+          });
+          return { clients: nextClients, version: state.version + 1 };
+        });
+
+        return { affectedPlans };
+      },
       clearObjects: (floorPlanId) => {
         set((state) => ({
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({ ...plan, objects: [] })),
@@ -723,7 +769,22 @@ export const useDataStore = create<DataState>()(
         set((state) => ({
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
             ...plan,
-            links: [...((plan as any).links || []), { id, fromId, toId, label: payload?.label, color: payload?.color }]
+            links: [
+              ...((plan as any).links || []),
+              {
+                id,
+                fromId,
+                toId,
+                kind: payload?.kind || 'arrow',
+                name: payload?.name,
+                description: payload?.description,
+                label: payload?.label,
+                color: payload?.color,
+                width: payload?.width,
+                dashed: payload?.dashed,
+                route: payload?.route
+              }
+            ]
           })),
           version: state.version + 1
         }));
@@ -734,6 +795,15 @@ export const useDataStore = create<DataState>()(
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
             ...plan,
             links: ((plan as any).links || []).filter((l: PlanLink) => l.id !== linkId)
+          })),
+          version: state.version + 1
+        }));
+      },
+      updateLink: (floorPlanId, linkId, payload) => {
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            links: ((plan as any).links || []).map((l: PlanLink) => (l.id === linkId ? { ...l, ...payload } : l))
           })),
           version: state.version + 1
         }));

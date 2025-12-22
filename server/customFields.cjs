@@ -8,10 +8,32 @@ const listCustomFields = (db, userId) => {
 
 const createCustomField = (db, userId, payload) => {
   const typeId = String(payload?.typeId || '').trim();
-  const fieldKey = String(payload?.fieldKey || '').trim();
   const label = String(payload?.label || '').trim();
   const valueType = payload?.valueType === 'number' ? 'number' : payload?.valueType === 'boolean' ? 'boolean' : payload?.valueType === 'string' ? 'string' : '';
-  if (!typeId || !fieldKey || !label || !valueType) return { ok: false, error: 'Missing fields' };
+  const normalizeKey = (value) =>
+    String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_')
+      .replace(/[^a-z0-9_]/g, '')
+      .replace(/^_+/, '')
+      .slice(0, 32);
+
+  let fieldKey = String(payload?.fieldKey || '').trim();
+  if (!fieldKey) {
+    const base = normalizeKey(label) || 'field';
+    fieldKey = base;
+    // Ensure uniqueness (per user + type).
+    for (let i = 2; i < 100; i += 1) {
+      const exists = db
+        .prepare('SELECT 1 FROM user_custom_fields WHERE userId = ? AND typeId = ? AND fieldKey = ?')
+        .get(userId, typeId, fieldKey);
+      if (!exists) break;
+      fieldKey = `${base}_${i}`.slice(0, 32);
+    }
+  }
+
+  if (!typeId || !label || !valueType) return { ok: false, error: 'Missing fields' };
   if (!/^[a-zA-Z][a-zA-Z0-9_]{1,31}$/.test(fieldKey)) return { ok: false, error: 'Invalid fieldKey' };
   const id = crypto.randomUUID();
   const now = Date.now();
@@ -91,4 +113,3 @@ module.exports = {
   setObjectCustomValues,
   validateValuesAgainstFields
 };
-

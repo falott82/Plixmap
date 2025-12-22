@@ -89,8 +89,8 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
-                          it: 'Tasto destro su una planimetria: puoi impostarla come predefinita per il tuo utente (stellina) o aprire la Time machine.',
-                          en: 'Right-click a floor plan: you can set it as your default (star) or open the Time machine.'
+                          it: 'Tasto destro su una planimetria: puoi impostarla come preferita per il tuo utente (stellina) o aprire la Time machine.',
+                          en: 'Right-click a floor plan: you can set it as your favorite (star) or open the Time machine.'
                         })}
                       </li>
                       <li>
@@ -203,7 +203,13 @@ const HelpPanel = () => {
                       <li>
                         {t({
                           it: 'Collegamenti: tasto destro su un oggetto → “Crea collegamento…” poi clicca un secondo oggetto. Canc per eliminare un collegamento selezionato.',
-                          en: 'Links: right-click an object → “Create link…” then click a second object. Delete removes the selected link.'
+                          en: 'Links: right-click an object → “Create link” then click a second object. Delete removes the selected link.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Collegamenti: puoi creare un collegamento lineare o un collegamento a 90°. Tasto destro su un oggetto → “Crea collegamento” oppure “Crea collegamento 90°”, poi clicca un secondo oggetto.',
+                          en: 'Links: you can create a straight link or a 90° link. Right-click an object → “Create link” or “Create 90° link”, then click a second object.'
                         })}
                       </li>
                     </ul>
@@ -271,7 +277,12 @@ const HelpPanel = () => {
                     </div>
                     <ul className="ml-5 list-disc space-y-1 pt-2">
                       <li>{t({ it: 'Usa “Esporta PDF” nella planimetria corrente.', en: 'Use “Export PDF” in the current floor plan.' })}</li>
-                      <li>{t({ it: 'Include snapshot della mappa e (opzionale) lista oggetti.', en: 'Includes a map snapshot and (optional) object list.' })}</li>
+                      <li>
+                        {t({
+                          it: 'Esporta la planimetria senza UI; puoi includere o escludere gli oggetti (default: inclusi).',
+                          en: 'Exports the floor plan without UI; you can include or exclude objects (default: included).'
+                        })}
+                      </li>
                       <li>{t({ it: 'Dal changelog puoi anche esportare in PDF la history delle versioni.', en: 'From the changelog you can also export the version history to PDF.' })}</li>
                     </ul>
                   </div>

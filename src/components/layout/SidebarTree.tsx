@@ -415,8 +415,8 @@ const SidebarTree = () => {
               >
                 <Star size={14} className={defaultPlanId === planMenu.planId ? 'text-slate-400' : 'text-amber-500'} />
                 {defaultPlanId === planMenu.planId
-                  ? t({ it: 'Rimuovi planimetria predefinita', en: 'Clear default floor plan' })
-                  : t({ it: 'Rendi planimetria predefinita', en: 'Set as default floor plan' })}
+                  ? t({ it: 'Rimuovi preferita', en: 'Remove favorite' })
+                  : t({ it: 'Preferita', en: 'Favorite' })}
               </button>
               <button
                 onClick={() => {
@@ -432,7 +432,7 @@ const SidebarTree = () => {
                 className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
               >
                 <History size={14} className="text-slate-600" />
-                {t({ it: 'Time machine…', en: 'Time machine…' })}
+                {t({ it: 'Time machine', en: 'Time machine' })}
               </button>
               <button
                 onClick={() => {
@@ -448,7 +448,7 @@ const SidebarTree = () => {
                 className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
               >
                 <Crop size={14} className="text-sky-700" />
-                {t({ it: 'Imposta area di stampa…', en: 'Set print area…' })}
+                {t({ it: 'Imposta area di stampa', en: 'Set print area' })}
               </button>
               {(() => {
                 const has = clients
@@ -481,7 +481,7 @@ const SidebarTree = () => {
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
                 >
                   <Copy size={14} className="text-slate-600" />
-                  {t({ it: 'Duplica…', en: 'Duplicate…' })}
+                  {t({ it: 'Duplica', en: 'Duplicate' })}
                 </button>
               ) : null}
               {user?.isAdmin ? (
@@ -496,7 +496,7 @@ const SidebarTree = () => {
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-rose-700 hover:bg-rose-50"
                 >
                   <Trash size={14} />
-                  {t({ it: 'Elimina planimetria…', en: 'Delete floor plan…' })}
+                  {t({ it: 'Elimina planimetria', en: 'Delete floor plan' })}
                 </button>
               ) : null}
             </div>
@@ -530,7 +530,7 @@ const SidebarTree = () => {
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-rose-700 hover:bg-rose-50"
                 >
                   <Trash size={14} />
-                  {t({ it: 'Elimina cliente…', en: 'Delete client…' })}
+                  {t({ it: 'Elimina cliente', en: 'Delete client' })}
                 </button>
               ) : null}
             </div>

@@ -9,6 +9,60 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.0.3',
+    date: '2025-12-22',
+    type: 'minor',
+    notes: [
+      n(
+        'Workspace: disabilitato autosave mentre ci sono modifiche non salvate (revisione) e aggiunto guard quando si apre Settings',
+        'Workspace: autosave is disabled while there are unsaved (revision) edits and Settings navigation is now guarded'
+      ),
+      n(
+        'Backup: export asset più robusto (supporta URL assoluti /uploads) + import persiste subito su server (/api/state) per reimportare anche planimetrie/immagini',
+        'Backup: more robust asset export (supports absolute /uploads URLs) + import now persists immediately via /api/state to restore floor plans/images'
+      ),
+      n(
+        'Utenti reali: gestione “missing” migliorata (mostra dove sono allocati, selezione multipla, rimozione crea revisioni e scrive audit)',
+        'Real users: improved “missing” workflow (shows allocations, multi-select, removal creates revisions and writes audit)'
+      ),
+      n(
+        'Oggetti: scala minima ridotta (fino a 0.20) con step più fine',
+        'Objects: lower minimum scale (down to 0.20) with finer steps'
+      ),
+      n(
+        'Cablaggi: nuova linea a 90° “magnetica” tra oggetti con colore/spessore/tratteggio/nome/descrizione ed edit da menu',
+        'Cables: new 90° “magnetic” cable between objects with color/width/dash/name/description and edit from context menu'
+      )
+    ]
+  },
+  {
+    version: '1.0.2',
+    date: '2025-12-22',
+    type: 'minor',
+    notes: [
+      n(
+        'Campi personalizzati: creazione semplificata (solo Etichetta + Tipo campo; chiave generata automaticamente)',
+        'Custom fields: simplified creation (Label + Field type only; key is auto-generated)'
+      ),
+      n(
+        'Logs: paginazione + selettore righe (max 200) + export CSV + svuota log (solo superadmin)',
+        'Logs: pagination + rows-per-page selector (max 200) + CSV export + clear logs (superadmin only)'
+      ),
+      n(
+        'Backup: selezione planimetrie da esportare (albero) + export include campi custom e filtra “Utente reale” dagli oggetti',
+        'Backup: export selection tree + export includes custom fields and filters out “Real user” objects'
+      ),
+      n(
+        'PDF: opzione “Includi oggetti” (default ON) per esportare planimetria + marker senza UI',
+        'PDF: “Include objects” option (default ON) to export the plan with markers (no UI)'
+      ),
+      n(
+        'Area di stampa: toast di conferma su impostazione/rimozione',
+        'Print area: confirmation toasts on set/clear'
+      )
+    ]
+  },
+  {
     version: '1.0.1',
     date: '2025-12-19',
     type: 'minor',
