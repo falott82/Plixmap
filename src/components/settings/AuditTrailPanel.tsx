@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Search, Shield, ToggleLeft, ToggleRight } from 'lucide-react';
-import { fetchAuditTrail, getAuditSettings, setAuditSettings, AuditRow } from '../../api/audit';
+import { Download, Info, RefreshCw, Shield, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react';
+import { AuditRow, clearAuditTrail, fetchAuditTrail, getAuditSettings, setAuditSettings } from '../../api/audit';
 import { useToastStore } from '../../store/useToast';
 import { useT } from '../../i18n/useT';
 
@@ -15,6 +15,9 @@ const AuditTrailPanel = () => {
   const [query, setQuery] = useState('');
   const [level, setLevel] = useState<'all' | 'important' | 'verbose'>('all');
   const [rows, setRows] = useState<AuditRow[]>([]);
+  const [limit, setLimit] = useState(200);
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [auditVerbose, setAuditVerbose] = useState(false);
   const [auditVerboseLoading, setAuditVerboseLoading] = useState(false);
@@ -31,8 +34,9 @@ const AuditTrailPanel = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetchAuditTrail({ q: query.trim() || undefined, level, limit: 250 });
+      const res = await fetchAuditTrail({ q: query.trim() || undefined, level, limit, offset });
       setRows(res.rows);
+      setTotal(res.total || 0);
     } catch {
       push(t({ it: 'Errore caricamento audit trail', en: 'Failed to load audit trail' }), 'danger');
     } finally {
@@ -42,9 +46,53 @@ const AuditTrailPanel = () => {
 
   useEffect(() => {
     loadSettings();
-    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    load().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limit, offset, level]);
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const toCsv = (rows: AuditRow[]) => {
+    const esc = (v: any) => {
+      const s = String(v ?? '');
+      if (!/[,"\n]/.test(s)) return s;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const header = ['ts', 'level', 'event', 'username', 'scopeType', 'scopeId', 'ip', 'method', 'path', 'details'];
+    const out = [header.join(',')];
+    for (const r of rows) {
+      out.push(
+        [
+          formatTs(r.ts),
+          r.level,
+          r.event,
+          r.username || '',
+          r.scopeType || '',
+          r.scopeId || '',
+          r.ip || '',
+          r.method || '',
+          r.path || '',
+          r.details ? (typeof r.details === 'string' ? r.details : JSON.stringify(r.details)) : ''
+        ]
+          .map(esc)
+          .join(',')
+      );
+    }
+    return out.join('\n');
+  };
 
   const displayRows = useMemo(
     () =>
@@ -81,6 +129,41 @@ const AuditTrailPanel = () => {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => {
+              const csv = toCsv(rows);
+              downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `deskly-audit-${new Date().toISOString().slice(0, 10)}.csv`);
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            title={t({ it: 'Esporta CSV', en: 'Export CSV' })}
+          >
+            <Download size={16} />
+          </button>
+          <button
+            onClick={async () => {
+              if (
+                !window.confirm(
+                  t({
+                    it: 'Svuotare tutto l’audit trail? Operazione irreversibile.',
+                    en: 'Clear the entire audit trail? This cannot be undone.'
+                  })
+                )
+              )
+                return;
+              try {
+                await clearAuditTrail();
+                setOffset(0);
+                await load();
+                push(t({ it: 'Audit trail svuotato', en: 'Audit trail cleared' }), 'success');
+              } catch {
+                push(t({ it: 'Impossibile svuotare audit trail', en: 'Failed to clear audit trail' }), 'danger');
+              }
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+            title={t({ it: 'Svuota audit trail', en: 'Clear audit trail' })}
+          >
+            <Trash2 size={16} />
+          </button>
+          <button
             onClick={async () => {
               setAuditVerboseLoading(true);
               try {
@@ -116,16 +199,38 @@ const AuditTrailPanel = () => {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-card">
+        <div className="flex items-start gap-2">
+          <div className="mt-0.5 text-slate-500">
+            <Info size={16} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-ink">{t({ it: 'Log estesi', en: 'Extended logs' })}</div>
+            <div className="mt-1 text-sm text-slate-700">
+              {t({
+                it: 'L’audit trail registra eventi di sistema e azioni importanti. Se abiliti “Estesa”, verranno registrati anche eventi più dettagliati (utile per diagnosi, ma genera più righe).',
+                en: 'The audit trail records system events and important actions. If you enable “Extended”, more detailed events are recorded as well (useful for troubleshooting, but it generates more entries).'
+              })}
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              {t({ it: `Righe: ${Math.min(total, offset + 1)}-${Math.min(total, offset + rows.length)} / ${total}`, en: `Rows: ${Math.min(total, offset + 1)}-${Math.min(total, offset + rows.length)} / ${total}` })}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative flex-1">
-          <Search size={16} className="absolute left-3 top-3 text-slate-400" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t({ it: 'Cerca evento, utente, scope o dettagli…', en: 'Search event, user, scope or details…' })}
-            className="w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-3 py-2.5 text-sm outline-none ring-primary/30 focus:ring-2"
+            className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-primary/30 focus:ring-2"
             onKeyDown={(e) => {
-              if (e.key === 'Enter') load();
+              if (e.key === 'Enter') {
+                setOffset(0);
+                load();
+              }
             }}
           />
         </div>
@@ -138,6 +243,20 @@ const AuditTrailPanel = () => {
           <option value="all">{t({ it: 'Tutti', en: 'All' })}</option>
           <option value="important">{t({ it: 'Importanti', en: 'Important' })}</option>
           <option value="verbose">{t({ it: 'Estesi', en: 'Verbose' })}</option>
+        </select>
+        <select
+          value={limit}
+          onChange={(e) => {
+            setOffset(0);
+            setLimit(Math.min(200, Math.max(1, Number(e.target.value) || 200)));
+          }}
+          className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-ink outline-none ring-primary/30 focus:ring-2"
+          title={t({ it: 'Mostra righe', en: 'Rows per page' })}
+        >
+          <option value={25}>25</option>
+          <option value={50}>50</option>
+          <option value={100}>100</option>
+          <option value={200}>200</option>
         </select>
         <button
           onClick={load}
@@ -183,9 +302,25 @@ const AuditTrailPanel = () => {
           </div>
         )}
       </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <button
+          disabled={offset <= 0 || loading}
+          onClick={() => setOffset((o) => Math.max(0, o - limit))}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {t({ it: 'Precedente', en: 'Previous' })}
+        </button>
+        <button
+          disabled={offset + rows.length >= total || loading}
+          onClick={() => setOffset((o) => o + limit)}
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {t({ it: 'Successiva', en: 'Next' })}
+        </button>
+      </div>
     </div>
   );
 };
 
 export default AuditTrailPanel;
-

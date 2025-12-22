@@ -20,7 +20,10 @@ import {
   History,
   Save,
   Cog,
-  EyeOff
+  EyeOff,
+  CornerDownRight,
+  Link2,
+  User
 } from 'lucide-react';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
@@ -48,6 +51,10 @@ import RealUserPickerModal from './RealUserPickerModal';
 import PrintModal from './PrintModal';
 import CrossPlanSearchModal, { CrossPlanSearchResult } from './CrossPlanSearchModal';
 import AllObjectTypesModal from './AllObjectTypesModal';
+import CableModal from './CableModal';
+import LinksModal from './LinksModal';
+import LinkEditModal from './LinkEditModal';
+import RealUserDetailsModal from './RealUserDetailsModal';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
 import { shallow } from 'zustand/shallow';
@@ -83,9 +90,10 @@ const PlanView = ({ planId }: Props) => {
     restoreRevision,
     deleteRevision,
     clearRevisions,
-    addLink,
-    deleteLink
-  } = useDataStore(
+	    addLink,
+	    deleteLink,
+      updateLink
+	  } = useDataStore(
     (s) => ({
       addObject: s.addObject,
       updateObject: s.updateObject,
@@ -105,11 +113,12 @@ const PlanView = ({ planId }: Props) => {
       restoreRevision: (s as any).restoreRevision,
       deleteRevision: s.deleteRevision,
       clearRevisions: s.clearRevisions,
-      addLink: (s as any).addLink,
-      deleteLink: (s as any).deleteLink
-    }),
-    shallow
-  );
+	      addLink: (s as any).addLink,
+	      deleteLink: (s as any).deleteLink,
+        updateLink: (s as any).updateLink
+	    }),
+	    shallow
+	  );
 
   const objectTypeDefs = useDataStore((s) => s.objectTypes);
   const objectTypeById = useMemo(() => {
@@ -140,7 +149,7 @@ const PlanView = ({ planId }: Props) => {
     return out;
   }, [getTypeLabel, objectTypeDefs]);
 
-  const inferDefaultLayerIds = useCallback((typeId: string) => (typeId === 'user' || typeId === 'real_user' ? ['users'] : ['devices']), []);
+  const inferDefaultLayerIds = useCallback((typeId: string) => (typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user' ? ['users'] : ['devices']), []);
 
   const {
     selectedObjectId,
@@ -174,6 +183,7 @@ const PlanView = ({ planId }: Props) => {
     showPrintAreaByPlan,
     toggleShowPrintArea,
     setPlanDirty,
+    requestSaveAndNavigate,
     pendingSaveNavigateTo,
     clearPendingSaveNavigate
   } = useUIStore(
@@ -209,6 +219,7 @@ const PlanView = ({ planId }: Props) => {
       showPrintAreaByPlan: (s as any).showPrintAreaByPlan,
       toggleShowPrintArea: (s as any).toggleShowPrintArea,
       setPlanDirty: (s as any).setPlanDirty,
+      requestSaveAndNavigate: (s as any).requestSaveAndNavigate,
       pendingSaveNavigateTo: (s as any).pendingSaveNavigateTo,
       clearPendingSaveNavigate: (s as any).clearPendingSaveNavigate
     }),
@@ -218,6 +229,7 @@ const PlanView = ({ planId }: Props) => {
   const push = useToastStore((s) => s.push);
   const saveCustomValues = useCustomFieldsStore((s) => s.saveObjectValues);
   const [pendingType, setPendingType] = useState<MapObjectType | null>(null);
+  const [linkCreateMode, setLinkCreateMode] = useState<'arrow' | 'cable'>('arrow');
   const [modalState, setModalState] = useState<
     | { mode: 'create'; type: MapObjectType; coords: { x: number; y: number } }
     | { mode: 'edit'; objectId: string }
@@ -265,6 +277,10 @@ const PlanView = ({ planId }: Props) => {
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [linkFromId, setLinkFromId] = useState<string | null>(null);
+  const [cableModal, setCableModal] = useState<{ mode: 'create'; fromId: string; toId: string } | { mode: 'edit'; linkId: string } | null>(null);
+  const [linksModalObjectId, setLinksModalObjectId] = useState<string | null>(null);
+  const [linkEditId, setLinkEditId] = useState<string | null>(null);
+  const [realUserDetailsId, setRealUserDetailsId] = useState<string | null>(null);
   const [roomDrawMode, setRoomDrawMode] = useState<'rect' | 'poly' | null>(null);
   const [newRoomMenuOpen, setNewRoomMenuOpen] = useState(false);
   const [highlightRoom, setHighlightRoom] = useState<{ roomId: string; until: number } | null>(null);
@@ -312,6 +328,7 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     // Close any open context menus when switching plans.
     setContextMenu(null);
+    setLinksModalObjectId(null);
   }, [planId]);
 
   // Avoid re-applying viewport on every data change (plan updates clone references).
@@ -434,7 +451,7 @@ const PlanView = ({ planId }: Props) => {
     if (!renderPlan) return renderPlan;
     const visible = new Set(visibleLayerIds);
     const normalizedLayerIdsForType = (typeId: string) => {
-      if (typeId === 'user') return ['users'];
+      if (typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user') return ['users'];
       return ['devices'];
     };
     const objects = renderPlan.objects.filter((o: any) => {
@@ -442,8 +459,71 @@ const PlanView = ({ planId }: Props) => {
       return ids.some((id: string) => visible.has(id));
     });
     const rooms = visible.has('rooms') ? renderPlan.rooms : [];
-    return { ...renderPlan, objects, rooms };
+    const visibleObjectIds = new Set(objects.map((o: any) => o.id));
+    const links = Array.isArray((renderPlan as any).links)
+      ? ((renderPlan as any).links as any[]).filter((l) => {
+          if (!visible.has('cabling')) return false;
+          return visibleObjectIds.has(String((l as any).fromId || '')) && visibleObjectIds.has(String((l as any).toId || ''));
+        })
+      : (renderPlan as any).links;
+    return { ...renderPlan, objects, rooms, links };
   }, [renderPlan, visibleLayerIds]);
+
+  const linksModalObjectName = useMemo(() => {
+    if (!linksModalObjectId) return '';
+    const obj = ((renderPlan as any)?.objects || []).find((o: any) => o.id === linksModalObjectId);
+    return String(obj?.name || linksModalObjectId);
+  }, [linksModalObjectId, renderPlan]);
+
+  const linksModalRows = useMemo(() => {
+    if (!linksModalObjectId || !renderPlan) return [];
+    const links = (((renderPlan as any).links || []) as any[]).filter(
+      (l) => String(l?.fromId || '') === linksModalObjectId || String(l?.toId || '') === linksModalObjectId
+    );
+    const byId = new Map<string, any>(((renderPlan as any).objects || []).map((o: any) => [o.id, o]));
+    const typeLabelById = new Map<string, string>();
+    for (const d of objectTypeDefs || []) {
+      typeLabelById.set(String(d.id), String((d as any)?.name?.[lang] || (d as any)?.name?.it || d.id));
+    }
+    return links.map((l) => {
+      const kind = String((l as any).kind || 'arrow') === 'cable' ? 'cable' : 'arrow';
+      const otherId = String(l.fromId) === linksModalObjectId ? String(l.toId) : String(l.fromId);
+      const other = byId.get(otherId);
+      return {
+        id: String(l.id),
+        kind,
+        name: String((l as any).name || (l as any).label || '').trim(),
+        description: String((l as any).description || '').trim() || undefined,
+        otherId,
+        otherName: String(other?.name || otherId),
+        otherTypeLabel: other ? typeLabelById.get(String(other.type || '')) || String(other.type || '') : undefined,
+        color: (l as any).color,
+        width: typeof (l as any).width === 'number' ? (l as any).width : undefined,
+        dashed: !!(l as any).dashed,
+        route: (l as any).route === 'hv' ? 'hv' : (l as any).route === 'vh' ? 'vh' : undefined
+      };
+    });
+  }, [lang, linksModalObjectId, objectTypeDefs, renderPlan]);
+
+  const linkCreateHint = useMemo(() => {
+    if (!linkFromId || isReadOnly) return null;
+    const from = (renderPlan as any)?.objects?.find((o: any) => o.id === linkFromId);
+    const fromName = String(from?.name || '').trim();
+    const modeLabel =
+      linkCreateMode === 'cable'
+        ? t({ it: 'collegamento 90°', en: '90° link' })
+        : t({ it: 'collegamento', en: 'link' });
+    return {
+      title: t({
+        it: `Seleziona un secondo oggetto per creare un ${modeLabel}.`,
+        en: `Select a second object to create a ${modeLabel}.`
+      }),
+      subtitle: t({
+        it: `${fromName ? `Origine: ${fromName}. ` : ''}Premi Esc per annullare.`,
+        en: `${fromName ? `From: ${fromName}. ` : ''}Press Esc to cancel.`
+      })
+    };
+  }, [isReadOnly, linkCreateMode, linkFromId, renderPlan, t]);
 
   const latestRev = useMemo(() => {
     const revs: any[] = plan?.revisions || [];
@@ -780,10 +860,43 @@ const PlanView = ({ planId }: Props) => {
     return renderPlan.objects.find((o) => o.id === contextMenu.id);
   }, [renderPlan, contextMenu]);
 
+  const realUserDetails = useMemo(() => {
+    if (!realUserDetailsId || !renderPlan) return null;
+    const obj = renderPlan.objects.find((o: any) => o.id === realUserDetailsId);
+    if (!obj || obj.type !== 'real_user') return null;
+    return {
+      externalUserId: (obj as any).externalUserId,
+      firstName: (obj as any).firstName,
+      lastName: (obj as any).lastName,
+      externalEmail: (obj as any).externalEmail,
+      externalRole: (obj as any).externalRole,
+      externalDept1: (obj as any).externalDept1,
+      externalDept2: (obj as any).externalDept2,
+      externalDept3: (obj as any).externalDept3,
+      externalExt1: (obj as any).externalExt1,
+      externalExt2: (obj as any).externalExt2,
+      externalExt3: (obj as any).externalExt3,
+      externalIsExternal: (obj as any).externalIsExternal
+    };
+  }, [realUserDetailsId, renderPlan]);
+
+  const realUserDetailsName = useMemo(() => {
+    if (!realUserDetailsId || !renderPlan) return '';
+    const obj = renderPlan.objects.find((o: any) => o.id === realUserDetailsId);
+    return String(obj?.name || realUserDetailsId);
+  }, [realUserDetailsId, renderPlan]);
+
   const contextLink = useMemo(() => {
     if (!renderPlan || !contextMenu || contextMenu.kind !== 'link') return undefined;
     return ((renderPlan as any).links || []).find((l: any) => l.id === contextMenu.id);
   }, [renderPlan, contextMenu]);
+
+  const contextObjectLinkCount = useMemo(() => {
+    if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return 0;
+    const links = ((renderPlan as any).links || []) as any[];
+    const id = contextMenu.id;
+    return links.filter((l) => String(l?.fromId || '') === id || String(l?.toId || '') === id).length;
+  }, [contextMenu, renderPlan]);
 
   const contextIsMulti = useMemo(() => {
     if (!contextMenu || contextMenu.kind !== 'object') return false;
@@ -856,17 +969,21 @@ const PlanView = ({ planId }: Props) => {
     };
   }, [plan, zoom, pan, saveViewport]);
 
-  const handleStageSelect = useCallback(
-    (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => {
-      if (linkFromId && id && planRef.current && !isReadOnlyRef.current) {
-        if (id !== linkFromId) {
-          markTouched();
-          addLink((planRef.current as any).id, linkFromId, id);
-          postAuditEvent({ event: 'link_create', scopeType: 'plan', scopeId: (planRef.current as any).id, details: { fromId: linkFromId, toId: id } });
-          push(t({ it: 'Collegamento creato', en: 'Link created' }), 'success');
-        }
-        setLinkFromId(null);
-      }
+	  const handleStageSelect = useCallback(
+	    (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => {
+	      if (linkFromId && id && planRef.current && !isReadOnlyRef.current) {
+	        if (id !== linkFromId) {
+	          markTouched();
+            if (linkCreateMode === 'cable') {
+              setCableModal({ mode: 'create', fromId: linkFromId, toId: id });
+            } else {
+              addLink((planRef.current as any).id, linkFromId, id, { kind: 'arrow' });
+              postAuditEvent({ event: 'link_create', scopeType: 'plan', scopeId: (planRef.current as any).id, details: { fromId: linkFromId, toId: id } });
+              push(t({ it: 'Collegamento creato', en: 'Link created' }), 'success');
+            }
+	        }
+	        setLinkFromId(null);
+	      }
       if (!id) {
         clearSelection();
         setSelectedRoomId(undefined);
@@ -889,9 +1006,9 @@ const PlanView = ({ planId }: Props) => {
       if (!options?.keepContext) {
         setContextMenu(null);
       }
-    },
-    [addLink, clearSelection, linkFromId, markTouched, push, setSelectedObject, t, toggleSelectedObject]
-  );
+	    },
+	    [addLink, clearSelection, linkCreateMode, linkFromId, markTouched, push, setSelectedObject, t, toggleSelectedObject]
+	  );
 
   const handleStageMove = useCallback(
     (id: string, x: number, y: number) => {
@@ -1580,7 +1697,7 @@ const PlanView = ({ planId }: Props) => {
                   <button
                     onClick={() => {
                       updateFloorPlan(basePlan.id, { printArea: undefined });
-                      push(t({ it: 'Area di stampa rimossa', en: 'Print area cleared' }), 'info');
+                      push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
                     }}
                     title={t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })}
                     className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
@@ -2119,13 +2236,19 @@ const PlanView = ({ planId }: Props) => {
             </div>
             <ExportButton onClick={() => setExportModalOpen(true)} />
             <VersionBadge />
-            <Link
-              to="/settings"
+            <button
+              onClick={() => {
+                if (hasNavigationEdits && !isReadOnly) {
+                  requestSaveAndNavigate('/settings');
+                  return;
+                }
+                navigate('/settings');
+              }}
               title={t({ it: 'Impostazioni', en: 'Settings' })}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
             >
               <Cog size={18} />
-            </Link>
+            </button>
             <button
               onClick={openHelp}
               title={t({ it: 'Aiuto', en: 'Help' })}
@@ -2164,6 +2287,7 @@ const PlanView = ({ planId }: Props) => {
                         if (isReadOnly) return;
                         updateFloorPlan(basePlan.id, { printArea: rect });
                         setPrintAreaMode(false);
+                        push(t({ it: 'Area di stampa impostata correttamente', en: 'Print area set successfully' }), 'success');
                       }}
 	                    objectTypeIcons={objectTypeIcons}
                       snapEnabled={gridSnapEnabled}
@@ -2192,6 +2316,10 @@ const PlanView = ({ planId }: Props) => {
 		                onEdit={handleEdit}
 		        onContextMenu={handleObjectContextMenu}
                     onLinkContextMenu={handleLinkContextMenu}
+                    onLinkDblClick={(id) => {
+                      if (isReadOnly) return;
+                      setLinkEditId(id);
+                    }}
 		                onMapContextMenu={handleMapContextMenu}
 	                onGoDefaultView={goToDefaultView}
                     onSelectRoom={(roomId) => {
@@ -2214,26 +2342,46 @@ const PlanView = ({ planId }: Props) => {
 	              />
 	            </div>
 	          </div>
+            {linkCreateHint ? (
+              <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+                <div className="max-w-[720px] rounded-2xl bg-slate-900/90 px-4 py-3 text-white shadow-card backdrop-blur">
+                  <div className="text-sm font-semibold">{linkCreateHint.title}</div>
+                  <div className="mt-0.5 text-xs text-white/80">{linkCreateHint.subtitle}</div>
+                </div>
+              </div>
+            ) : null}
 		          {!isReadOnly ? (
 		            <aside className="sticky top-0 h-fit w-28 shrink-0 self-start rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
 		            <div className="flex items-center justify-between text-[11px] font-semibold uppercase text-slate-500">
 	                <span>{t({ it: 'Palette', en: 'Palette' })}</span>
-                  <div className="flex items-center gap-1">
-                    <Link
-                      to="/settings?tab=objects"
-                      title={t({ it: 'Gestisci palette', en: 'Manage palette' })}
-                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
-                    >
-                      <Star size={14} />
-                    </Link>
-                    <Link
-                      to="/settings?tab=objects"
-                      title={t({ it: 'Impostazioni oggetti', en: 'Object settings' })}
-                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
-                    >
-                      <Pencil size={14} />
-                    </Link>
-                  </div>
+	                  <div className="flex items-center gap-1">
+	                    <button
+	                      onClick={() => {
+	                        if (hasNavigationEdits && !isReadOnly) {
+	                          requestSaveAndNavigate('/settings?tab=objects');
+	                          return;
+	                        }
+	                        navigate('/settings?tab=objects');
+	                      }}
+	                      title={t({ it: 'Gestisci palette', en: 'Manage palette' })}
+	                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+	                    >
+	                      <Star size={14} />
+	                    </button>
+	                    <button
+	                      onClick={() => {
+	                        if (hasNavigationEdits && !isReadOnly) {
+	                          requestSaveAndNavigate('/settings?tab=objects');
+	                          return;
+	                        }
+	                        navigate('/settings?tab=objects');
+	                      }}
+	                      title={t({ it: 'Impostazioni oggetti', en: 'Object settings' })}
+	                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+	                    >
+	                      <Pencil size={14} />
+	                    </button>
+	                  </div>
 	              </div>
                 {planLayers.length ? (
                   <div className="mt-3">
@@ -2317,8 +2465,34 @@ const PlanView = ({ planId }: Props) => {
                   <button
                     onClick={() => {
                       if (contextMenu.kind !== 'link') return;
-                      markTouched();
-                      deleteLink(basePlan.id, contextMenu.id);
+                      setLinkEditId(contextMenu.id);
+                      setContextMenu(null);
+                    }}
+                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  >
+                    <Pencil size={14} /> {t({ it: 'Modifica descrizione', en: 'Edit description' })}
+                  </button>
+                ) : null}
+	                {!isReadOnly ? (
+                    (contextLink as any)?.kind === 'cable' ? (
+                      <button
+                        onClick={() => {
+                          if (contextMenu.kind !== 'link') return;
+                          setCableModal({ mode: 'edit', linkId: contextMenu.id });
+                          setContextMenu(null);
+                        }}
+                        className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                      >
+                        <Pencil size={14} /> {t({ it: 'Modifica stile', en: 'Edit style' })}
+                      </button>
+                    ) : null
+                  ) : null}
+                  {!isReadOnly ? (
+	                  <button
+	                    onClick={() => {
+	                      if (contextMenu.kind !== 'link') return;
+	                      markTouched();
+	                      deleteLink(basePlan.id, contextMenu.id);
                       postAuditEvent({ event: 'link_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: contextMenu.id } });
                       push(t({ it: 'Collegamento eliminato', en: 'Link deleted' }), 'info');
                       setContextMenu(null);
@@ -2332,11 +2506,11 @@ const PlanView = ({ planId }: Props) => {
               </>
             ) : contextMenu.kind === 'object' ? (
 	            <>
-	              {contextIsMulti ? (
-	                <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600">
-	                  {t({ it: `${selectedObjectIds.length} oggetti selezionati`, en: `${selectedObjectIds.length} objects selected` })}
-	                </div>
-	              ) : (
+              {contextIsMulti ? (
+                <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600">
+                  {t({ it: `${selectedObjectIds.length} oggetti selezionati`, en: `${selectedObjectIds.length} objects selected` })}
+                </div>
+              ) : (
 	                <>
                   <button
                     onClick={() => {
@@ -2347,28 +2521,61 @@ const PlanView = ({ planId }: Props) => {
                   >
                     <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
                   </button>
-	                  <button
-	                    onClick={() => {
-	                      if (isReadOnly) return;
-	                      setLinkFromId(contextMenu.id);
-	                      setContextMenu(null);
-	                      push(
-	                        t({
-	                          it: 'Seleziona un secondo oggetto per creare un collegamento (Esc per annullare).',
-	                          en: 'Select a second object to create a link (Esc to cancel).'
-	                        }),
-	                        'info'
-	                      );
+                  {contextObject?.type === 'real_user' ? (
+                    <button
+                      onClick={() => {
+                        setRealUserDetailsId(contextMenu.id);
+                        setContextMenu(null);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                      title={t({ it: 'Mostra dettagli importati dell’utente reale', en: 'Show imported details for this real user' })}
+                    >
+                      <User size={14} className="text-slate-500" /> {t({ it: 'Dettagli utente', en: 'User details' })}
+                    </button>
+                  ) : null}
+                  {contextObjectLinkCount ? (
+                    <button
+                      onClick={() => {
+                        setLinksModalObjectId(contextMenu.id);
+                        setContextMenu(null);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                      title={t({ it: 'Mostra tutti i collegamenti di questo oggetto', en: 'Show all links for this object' })}
+                    >
+                      <Link2 size={14} className="text-slate-500" />{' '}
+                      {t({
+                        it: `Mostra collegamenti (${contextObjectLinkCount})`,
+                        en: `Show links (${contextObjectLinkCount})`
+                      })}
+                    </button>
+                  ) : null}
+		                  <button
+		                    onClick={() => {
+		                      if (isReadOnly) return;
+                          setLinkCreateMode('arrow');
+		                      setLinkFromId(contextMenu.id);
+		                      setContextMenu(null);
 	                    }}
-	                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                  >
-	                    <MoveDiagonal size={14} className="text-slate-500" /> {t({ it: 'Crea collegamento…', en: 'Create link…' })}
-	                  </button>
-	                  <button
-	                    onClick={() => {
-	                      openDuplicate(contextMenu.id);
-	                      setContextMenu(null);
-	                    }}
+		                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+		                  >
+		                    <MoveDiagonal size={14} className="text-slate-500" /> {t({ it: 'Crea collegamento', en: 'Create link' })}
+		                  </button>
+                      <button
+                        onClick={() => {
+                          if (isReadOnly) return;
+                          setLinkCreateMode('cable');
+                          setLinkFromId(contextMenu.id);
+                          setContextMenu(null);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                      >
+                        <CornerDownRight size={14} className="text-slate-500" /> {t({ it: 'Crea collegamento 90°', en: 'Create 90° link' })}
+                      </button>
+		                  <button
+		                    onClick={() => {
+		                      openDuplicate(contextMenu.id);
+		                      setContextMenu(null);
+		                    }}
 	                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
 	                  >
 	                    <Copy size={14} /> {t({ it: 'Duplica', en: 'Duplicate' })}
@@ -2377,23 +2584,59 @@ const PlanView = ({ planId }: Props) => {
                     <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                       <MoveDiagonal size={14} /> {t({ it: 'Scala', en: 'Scale' })}
                     </div>
-                    <input
-                      key={contextMenu.id}
-                      type="range"
-                      min={0.6}
-                      max={1.8}
-                      step={0.1}
-                      value={contextObject?.scale ?? 1}
-                      onChange={(e) => {
-                        const next = Number(e.target.value);
-                        updateObject(contextMenu.id, { scale: next });
-                        useUIStore.getState().setLastObjectScale(next);
+	                    <input
+	                      key={contextMenu.id}
+	                      type="range"
+	                      min={0.2}
+	                      max={2.4}
+	                      step={0.05}
+	                      value={contextObject?.scale ?? 1}
+	                      onChange={(e) => {
+	                        const next = Number(e.target.value);
+	                        updateObject(contextMenu.id, { scale: next });
+	                        useUIStore.getState().setLastObjectScale(next);
                       }}
                       className="mt-1 w-full"
                     />
                   </div>
                 </>
               )}
+
+              {contextIsMulti ? (
+                !isReadOnly && selectedObjectIds.length === 2 ? (
+                  <button
+                    onClick={() => {
+                      const [a, b] = selectedObjectIds;
+                      if (!a || !b) return;
+                      const links = (((basePlan as any).links || []) as any[]).filter(Boolean);
+                      const existing = links.find(
+                        (l) =>
+                          (String((l as any).fromId || '') === a && String((l as any).toId || '') === b) ||
+                          (String((l as any).fromId || '') === b && String((l as any).toId || '') === a)
+                      );
+                      if (existing) {
+                        setSelectedLinkId(String(existing.id));
+                        push(t({ it: 'Collegamento già presente', en: 'Link already exists' }), 'info');
+                        setContextMenu(null);
+                        return;
+                      }
+                      markTouched();
+                      const id = addLink(basePlan.id, a, b, { kind: 'arrow' });
+                      postAuditEvent({ event: 'link_create', scopeType: 'plan', scopeId: basePlan.id, details: { id, fromId: a, toId: b, kind: 'arrow' } });
+                      setSelectedLinkId(id);
+                      push(t({ it: 'Collegamento creato', en: 'Link created' }), 'success');
+                      setContextMenu(null);
+                    }}
+                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                    title={t({
+                      it: 'Crea un collegamento lineare tra i 2 oggetti selezionati (se non esiste già).',
+                      en: 'Creates a straight link between the 2 selected objects (if it does not already exist).'
+                    })}
+                  >
+                    <Link2 size={14} className="text-slate-500" /> {t({ it: 'Collega oggetti', en: 'Link objects' })}
+                  </button>
+                ) : null
+              ) : null}
 
               {contextIsMulti ? (
                 <button
@@ -2403,7 +2646,7 @@ const PlanView = ({ planId }: Props) => {
                   }}
                   className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
                 >
-                  <Pencil size={14} /> {t({ it: 'Modifica selezione…', en: 'Edit selection…' })}
+                  <Pencil size={14} /> {t({ it: 'Modifica selezione', en: 'Edit selection' })}
                 </button>
               ) : null}
               <button
@@ -2455,7 +2698,7 @@ const PlanView = ({ planId }: Props) => {
                 onClick={() => setContextMenu({ ...contextMenu, addOpen: !contextMenu.addOpen })}
                 className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
               >
-                <Plus size={14} className="text-slate-500" /> {t({ it: 'Aggiungi oggetto…', en: 'Add object…' })}
+                <Plus size={14} className="text-slate-500" /> {t({ it: 'Aggiungi oggetto', en: 'Add object' })}
                 <ChevronRight size={14} className="ml-auto text-slate-400" />
               </button>
               ) : null}
@@ -2476,7 +2719,7 @@ const PlanView = ({ planId }: Props) => {
                     if ((basePlan as any)?.printArea) {
                       updateFloorPlan(basePlan.id, { printArea: undefined });
                       setContextMenu(null);
-                      push(t({ it: 'Area di stampa rimossa', en: 'Print area cleared' }), 'info');
+                      push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
                       return;
                     }
                     setPrintAreaMode(true);
@@ -2918,6 +3161,124 @@ const PlanView = ({ planId }: Props) => {
       />
 
       <PrintModal open={exportModalOpen} onClose={() => setExportModalOpen(false)} mode="single" singlePlanId={basePlan.id} />
+
+      <CableModal
+        open={!!cableModal}
+        initial={
+          cableModal?.mode === 'edit'
+            ? (() => {
+                const l = ((basePlan as any).links || []).find((x: any) => x.id === (cableModal as any).linkId);
+                if (!l) return undefined;
+                return {
+                  name: l.name || l.label || '',
+                  description: l.description || '',
+                  color: l.color || '#2563eb',
+                  width: l.width || 3,
+                  dashed: !!l.dashed,
+                  route: l.route || 'vh'
+                };
+              })()
+            : undefined
+        }
+        onClose={() => setCableModal(null)}
+        onSubmit={(payload) => {
+          if (isReadOnly) return;
+          if (cableModal?.mode === 'create') {
+            markTouched();
+            const id = addLink(basePlan.id, cableModal.fromId, cableModal.toId, {
+              kind: 'cable',
+              name: payload.name,
+              description: payload.description,
+              color: payload.color,
+              width: payload.width,
+              dashed: payload.dashed,
+              route: payload.route
+            });
+            postAuditEvent({
+              event: 'link_create',
+              scopeType: 'plan',
+              scopeId: basePlan.id,
+              details: { id, kind: 'cable', fromId: cableModal.fromId, toId: cableModal.toId, ...payload }
+            });
+            push(t({ it: 'Collegamento creato', en: 'Link created' }), 'success');
+            setSelectedLinkId(id);
+            setCableModal(null);
+            return;
+          }
+          if (cableModal?.mode === 'edit') {
+            markTouched();
+            updateLink(basePlan.id, cableModal.linkId, {
+              name: payload.name,
+              description: payload.description,
+              color: payload.color,
+              width: payload.width,
+              dashed: payload.dashed,
+              route: payload.route
+            });
+            postAuditEvent({
+              event: 'link_update',
+              scopeType: 'plan',
+              scopeId: basePlan.id,
+              details: { id: cableModal.linkId, kind: 'cable', ...payload }
+            });
+            push(t({ it: 'Collegamento aggiornato', en: 'Link updated' }), 'success');
+            setCableModal(null);
+          }
+        }}
+      />
+
+      <LinksModal
+        open={!!linksModalObjectId}
+        readOnly={isReadOnly}
+        objectName={linksModalObjectName}
+        rows={linksModalRows as any}
+        onClose={() => setLinksModalObjectId(null)}
+        onSelect={(linkId) => {
+          setSelectedLinkId(linkId);
+          setLinksModalObjectId(null);
+        }}
+        onEdit={(linkId) => {
+          setLinksModalObjectId(null);
+          setLinkEditId(linkId);
+        }}
+        onDelete={(linkId) => {
+          if (isReadOnly) return;
+          markTouched();
+          deleteLink(basePlan.id, linkId);
+          postAuditEvent({ event: 'link_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: linkId } });
+          push(t({ it: 'Collegamento eliminato', en: 'Link deleted' }), 'info');
+          if (selectedLinkId === linkId) setSelectedLinkId(null);
+        }}
+      />
+
+      <LinkEditModal
+        open={!!linkEditId}
+        initial={
+          linkEditId
+            ? (() => {
+                const l = ((basePlan as any).links || []).find((x: any) => x.id === linkEditId);
+                if (!l) return undefined;
+                return { name: String(l.name || l.label || ''), description: String(l.description || '') };
+              })()
+            : undefined
+        }
+        onClose={() => setLinkEditId(null)}
+        onSubmit={(payload) => {
+          if (!linkEditId || isReadOnly) return;
+          markTouched();
+          updateLink(basePlan.id, linkEditId, { name: payload.name, description: payload.description });
+          postAuditEvent({ event: 'link_update', scopeType: 'plan', scopeId: basePlan.id, details: { id: linkEditId, ...payload } });
+          push(t({ it: 'Collegamento aggiornato', en: 'Link updated' }), 'success');
+          setLinkEditId(null);
+        }}
+      />
+
+      <RealUserDetailsModal
+        open={!!realUserDetailsId}
+        userName={realUserDetailsName}
+        details={realUserDetails}
+        onClose={() => setRealUserDetailsId(null)}
+      />
 
       <AllObjectTypesModal
         open={allTypesOpen}

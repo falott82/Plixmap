@@ -180,16 +180,23 @@ const SettingsView = () => {
             >
               <Users size={16} /> {t({ it: 'Utenti', en: 'Users' })}
             </button>
+            <button
+              onClick={() => {
+                if (!isSuperAdmin) {
+                  push(t({ it: 'Solo i superadmin possono accedere ai logs.', en: 'Only super admins can access logs.' }), 'info');
+                  return;
+                }
+                setTab('logs');
+              }}
+              className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+                tab === 'logs' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+              } ${!isSuperAdmin ? 'opacity-70' : ''}`}
+              title={!isSuperAdmin ? t({ it: 'Solo superadmin', en: 'Super admin only' }) : undefined}
+            >
+              {t({ it: 'Logs', en: 'Logs' })}
+            </button>
             {isSuperAdmin ? (
               <>
-                <button
-                  onClick={() => setTab('logs')}
-                  className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
-                    tab === 'logs' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
-                  }`}
-                >
-                  {t({ it: 'Logs', en: 'Logs' })}
-                </button>
                 <button
                   onClick={() => setTab('backup')}
                   className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
@@ -219,14 +226,23 @@ const SettingsView = () => {
           </>
         ) : null}
         {!isAdmin ? (
-          <button
-            onClick={() => setTab('objects')}
-            className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
-              tab === 'objects' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
-            }`}
-          >
-            <LayoutGrid size={16} /> {t({ it: 'Oggetti', en: 'Objects' })}
-          </button>
+          <>
+            <button
+              onClick={() => setTab('objects')}
+              className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+                tab === 'objects' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+              }`}
+            >
+              <LayoutGrid size={16} /> {t({ it: 'Oggetti', en: 'Objects' })}
+            </button>
+            <button
+              onClick={() => push(t({ it: 'Solo i superadmin possono accedere ai logs.', en: 'Only super admins can access logs.' }), 'info')}
+              className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink opacity-70 hover:bg-slate-50"
+              title={t({ it: 'Solo superadmin', en: 'Super admin only' })}
+            >
+              {t({ it: 'Logs', en: 'Logs' })}
+            </button>
+          </>
         ) : null}
         <button
           onClick={() => setTab('account')}

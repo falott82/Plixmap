@@ -7,11 +7,13 @@ import { useToastStore } from '../../store/useToast';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { clearImport, diffImport, getImportConfig, listExternalUsers, saveImportConfig, setExternalUserHidden, syncImport, testImport } from '../../api/customImport';
 import { fetchState } from '../../api/state';
+import { postAuditEvent } from '../../api/audit';
 
 const CustomImportPanel = () => {
   const t = useT();
   const clients = useDataStore((s) => s.clients);
-  const removeRealUserAllocations = useDataStore((s: any) => s.removeRealUserAllocations);
+  const removeRealUserAllocationsBulk = useDataStore((s: any) => s.removeRealUserAllocationsBulk);
+  const addRevision = useDataStore((s: any) => s.addRevision);
   const setServerState = useDataStore((s) => s.setServerState);
   const { push } = useToastStore();
 
@@ -45,7 +47,11 @@ const CustomImportPanel = () => {
     dir: 'asc'
   });
   const [infoRow, setInfoRow] = useState<any | null>(null);
-  const [confirmRemoveMissing, setConfirmRemoveMissing] = useState<{ externalId: string; firstName: string; lastName: string } | null>(null);
+  const [selectedMissingIds, setSelectedMissingIds] = useState<Record<string, boolean>>({});
+  const [confirmRemoveMissing, setConfirmRemoveMissing] = useState<{
+    externalIds: string[];
+    label: string;
+  } | null>(null);
   const [confirmImport, setConfirmImport] = useState<any | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
 
@@ -61,6 +67,30 @@ const CustomImportPanel = () => {
           if (!cid || !eid) continue;
           const key = `${cid}:${eid}`;
           map.set(key, (map.get(key) || 0) + 1);
+        }
+      }
+    }
+    return map;
+  }, [activeClient]);
+
+  const allocationsByExternalId = useMemo(() => {
+    const map = new Map<string, { planId: string; siteName: string; planName: string; objectIds: string[] }[]>();
+    if (!activeClient) return map;
+    for (const s of activeClient.sites || []) {
+      for (const p of s.floorPlans || []) {
+        const byId = new Map<string, string[]>();
+        for (const o of p.objects || []) {
+          if (o.type !== 'real_user') continue;
+          const cid = String((o as any).externalClientId || '').trim();
+          const eid = String((o as any).externalUserId || '').trim();
+          if (!cid || !eid) continue;
+          if (cid !== activeClient.id) continue;
+          if (!byId.has(eid)) byId.set(eid, []);
+          byId.get(eid)!.push(o.id);
+        }
+        for (const [eid, objectIds] of byId.entries()) {
+          if (!map.has(eid)) map.set(eid, []);
+          map.get(eid)!.push({ planId: p.id, siteName: s.name, planName: p.name, objectIds });
         }
       }
     }
@@ -145,6 +175,7 @@ const CustomImportPanel = () => {
     setShowRaw(false);
     setConfirmImport(null);
     setConfirmClearAll(false);
+    setSelectedMissingIds({});
     loadCfg();
     loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -433,7 +464,10 @@ const CustomImportPanel = () => {
                     }
                   }}
                   className="flex h-10 items-center gap-2 rounded-xl bg-primary px-3 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-50"
-                  title={t({ it: 'Salva configurazione', en: 'Save configuration' })}
+                  title={t({
+                    it: 'Salva URL, username, body e password (se inserita) per le prossime chiamate WebAPI.',
+                    en: 'Save URL, username, body and password (if provided) for future WebAPI calls.'
+                  })}
                 >
                   <Save size={16} />
                   {t({ it: 'Salva', en: 'Save' })}
@@ -476,7 +510,10 @@ const CustomImportPanel = () => {
                     }
                   }}
                   className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-50"
-                  title={t({ it: 'Esegui test WebAPI', en: 'Run WebAPI test' })}
+                  title={t({
+                    it: 'Esegue una chiamata di test alla WebAPI e mostra un’anteprima: non modifica il database.',
+                    en: 'Runs a WebAPI test call and shows a preview: it does not modify the database.'
+                  })}
                 >
                   <TestTube size={16} className="text-slate-600" />
                   {t({ it: 'Test', en: 'Test' })}
@@ -516,7 +553,10 @@ const CustomImportPanel = () => {
                     }
                   }}
                   className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-50"
-                  title={t({ it: 'Importa / Resync', en: 'Import / Resync' })}
+                  title={t({
+                    it: 'Calcola le differenze con la WebAPI e, se confermi, sincronizza (crea/aggiorna) gli utenti importati.',
+                    en: 'Computes the diff with the WebAPI and, after confirmation, syncs (creates/updates) imported users.'
+                  })}
                 >
                   <RefreshCw size={16} className="text-slate-600" />
                   {t({ it: 'Importa', en: 'Import' })}
@@ -526,7 +566,10 @@ const CustomImportPanel = () => {
                   disabled={clearingAll || !rows.length}
                   onClick={() => setConfirmClearAll(true)}
                   className="flex h-10 items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-                  title={t({ it: 'Elimina tutti gli utenti importati', en: 'Delete all imported users' })}
+                  title={t({
+                    it: 'Elimina tutti gli utenti importati per questo cliente (e rimuove gli oggetti “Utente reale” dalle planimetrie).',
+                    en: 'Deletes all imported users for this client (and removes “Real user” objects from its floor plans).'
+                  })}
                 >
                   <Trash2 size={16} />
                   {t({ it: 'Elimina tutto', en: 'Delete all' })}
@@ -575,33 +618,111 @@ const CustomImportPanel = () => {
               {t({ it: 'Aggiornati', en: 'Updated' })}: <span className="font-semibold">{syncResult.summary?.updated ?? 0}</span> ·{' '}
               {t({ it: 'Mancanti', en: 'Missing' })}: <span className="font-semibold">{syncResult.summary?.missing ?? 0}</span>
             </div>
-            {Array.isArray(syncResult.missing) && syncResult.missing.length ? (
-              <div className="mt-2">
-                <div className="text-xs font-semibold uppercase text-slate-500">
-                  {t({ it: 'Utenti non più presenti nella WebAPI', en: 'Users no longer present in the WebAPI' })}
-                </div>
-                <div className="mt-1 space-y-1">
-                  {syncResult.missing.slice(0, 8).map((m: any) => (
-                    <div key={m.externalId} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2">
-                      <div className="min-w-0">
-                        <div className="truncate font-semibold text-ink">
-                          {m.firstName} {m.lastName}
+	            {Array.isArray(syncResult.missing) && syncResult.missing.length ? (
+	              <div className="mt-2">
+	                <div className="text-xs font-semibold uppercase text-slate-500">
+	                  {t({ it: 'Utenti non più presenti nella WebAPI', en: 'Users no longer present in the WebAPI' })}
+	                </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const next: Record<string, boolean> = {};
+                        for (const m of syncResult.missing || []) next[String(m.externalId)] = true;
+                        setSelectedMissingIds(next);
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Seleziona tutti gli utenti mancanti', en: 'Select all missing users' })}
+                    >
+                      {t({ it: 'Seleziona tutti', en: 'Select all' })}
+                    </button>
+                    <button
+                      onClick={() => setSelectedMissingIds({})}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Rimuove la selezione corrente', en: 'Clears the current selection' })}
+                    >
+                      {t({ it: 'Deseleziona', en: 'Clear selection' })}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const ids = Object.entries(selectedMissingIds)
+                          .filter(([, v]) => !!v)
+                          .map(([k]) => k);
+                        if (!ids.length) return;
+                        setConfirmRemoveMissing({
+                          externalIds: ids,
+                          label: t({
+                            it: `Rimuovere ${ids.length} utenti dalla mappa?`,
+                            en: `Remove ${ids.length} users from the map?`
+                          })
+                        });
+                      }}
+                      disabled={!Object.values(selectedMissingIds).some(Boolean)}
+                      className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 enabled:hover:bg-rose-100 disabled:opacity-50"
+                      title={t({
+                        it: 'Rimuove dalla mappa gli utenti selezionati (e crea una revisione per ogni planimetria coinvolta).',
+                        en: 'Removes selected users from the map (and creates a revision for each affected floor plan).'
+                      })}
+                    >
+                      {t({ it: 'Rimuovi selezionati', en: 'Remove selected' })}
+                    </button>
+                  </div>
+	                <div className="mt-1 space-y-1">
+	                  {syncResult.missing.slice(0, 8).map((m: any) => (
+	                    <div key={m.externalId} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2">
+	                      <div className="flex min-w-0 items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={!!selectedMissingIds[String(m.externalId)]}
+                            onChange={(e) => setSelectedMissingIds((prev) => ({ ...prev, [String(m.externalId)]: e.target.checked }))}
+                          />
+	                        <div className="min-w-0">
+	                          <div className="truncate font-semibold text-ink">
+	                            {m.firstName} {m.lastName}
+	                          </div>
+	                          <div className="text-xs text-slate-500">
+	                            {t({ it: 'ID', en: 'ID' })}: {m.externalId}
+	                          </div>
+                            {(() => {
+                              const locs = allocationsByExternalId.get(String(m.externalId)) || [];
+                              const total = locs.reduce((acc, x) => acc + (x.objectIds?.length || 0), 0);
+                              if (!total) return null;
+                              const preview = locs.slice(0, 2).map((x) => `${x.siteName} → ${x.planName}`).join(' · ');
+                              return (
+                                <div
+                                  className="mt-0.5 text-xs text-slate-600"
+                                  title={locs.map((x) => `${x.siteName} → ${x.planName} (${x.objectIds.length})`).join('\n')}
+                                >
+                                  {t({ it: `Allocazioni: ${total}`, en: `Allocations: ${total}` })}{preview ? ` · ${preview}` : ''}
+                                </div>
+                              );
+                            })()}
+	                        </div>
                         </div>
-                        <div className="text-xs text-slate-500">
-                          {t({ it: 'ID', en: 'ID' })}: {m.externalId}
-                        </div>
+	                      <button
+	                        onClick={() =>
+	                          setConfirmRemoveMissing({
+	                            externalIds: [String(m.externalId)],
+	                            label: t({
+	                              it: `Rimuovere "${m.firstName} ${m.lastName}" dalla mappa?`,
+	                              en: `Remove "${m.firstName} ${m.lastName}" from the map?`
+	                            })
+	                          })
+	                        }
+	                        className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                          title={t({ it: 'Gestisci questo utente mancante', en: 'Handle this missing user' })}
+	                      >
+	                        {t({ it: 'Gestisci', en: 'Handle' })}
+	                      </button>
+	                    </div>
+	                  ))}
+                    {syncResult.missing.length > 8 ? (
+                      <div className="text-xs text-slate-500">
+                        {t({ it: `e altri ${syncResult.missing.length - 8}`, en: `and ${syncResult.missing.length - 8} more` })}
                       </div>
-                      <button
-                        onClick={() => setConfirmRemoveMissing(m)}
-                        className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                      >
-                        {t({ it: 'Gestisci…', en: 'Handle…' })}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+                    ) : null}
+	                </div>
+	              </div>
+	            ) : null}
           </div>
         ) : syncResult && syncResult.ok === false ? (
           <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
@@ -810,24 +931,55 @@ const CustomImportPanel = () => {
       <ConfirmDialog
         open={!!confirmRemoveMissing}
         title={t({ it: 'Utente non più presente nella WebAPI', en: 'User no longer present in the WebAPI' })}
-        description={t({
-          it: `L'utente "${confirmRemoveMissing?.firstName || ''} ${confirmRemoveMissing?.lastName || ''}" (ID ${confirmRemoveMissing?.externalId || ''}) non è più presente nella WebAPI. Vuoi rimuovere anche le sue allocazioni (oggetti "Real User") dalle planimetrie di questo Cliente?`,
-          en: `The user "${confirmRemoveMissing?.firstName || ''} ${confirmRemoveMissing?.lastName || ''}" (ID ${confirmRemoveMissing?.externalId || ''}) is no longer present in the WebAPI. Do you want to remove their allocations ("Real User" objects) from this Client’s floor plans as well?`
-        })}
-        confirmLabel={t({ it: 'Rimuovi oggetti', en: 'Remove objects' })}
-        cancelLabel={t({ it: 'Lascia invariato', en: 'Keep' })}
+        description={(() => {
+          const ids = confirmRemoveMissing?.externalIds || [];
+          const locs = ids.flatMap((id) => allocationsByExternalId.get(String(id)) || []);
+          const locSummary = locs
+            .slice(0, 6)
+            .map((x) => `${x.siteName} → ${x.planName} (${x.objectIds.length})`)
+            .join(' · ');
+          return t({
+            it: `${confirmRemoveMissing?.label || ''}\n\nL’operazione rimuove gli oggetti “Utente reale” dalle planimetrie correnti e crea automaticamente una nuova revisione (minor) per ogni planimetria modificata.\n\nDove si trova (anteprima): ${locSummary || '—'}`,
+            en: `${confirmRemoveMissing?.label || ''}\n\nThis will remove “Real user” objects from the current floor plans and automatically create a new (minor) revision for each modified floor plan.\n\nWhere it is (preview): ${locSummary || '—'}`
+          });
+        })()}
+        confirmLabel={t({ it: 'Rimuovi e crea revisioni', en: 'Remove and create revisions' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
         onCancel={() => setConfirmRemoveMissing(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!confirmRemoveMissing) return;
           try {
-            removeRealUserAllocations?.(clientId, confirmRemoveMissing.externalId);
+            const ids = confirmRemoveMissing.externalIds || [];
+            const { affectedPlans } = removeRealUserAllocationsBulk?.(clientId, ids) || { affectedPlans: [] };
+            let removedObjects = 0;
+            for (const a of affectedPlans) removedObjects += a.removedObjectIds.length;
+            for (const a of affectedPlans) {
+              addRevision?.(a.planId, {
+                bump: 'minor',
+                description: `Removed missing real-user allocations (${ids.join(', ')})`
+              });
+              postAuditEvent({
+                event: 'real_user_missing_removed',
+                scopeType: 'plan',
+                scopeId: a.planId,
+                details: { externalIds: ids, removedObjectIds: a.removedObjectIds }
+              });
+            }
             push(
               t({
-                it: 'Allocazioni rimosse (salva una revisione per rendere persistente)',
-                en: 'Allocations removed (save a revision to make it persistent)'
+                it: `Rimossi ${removedObjects} oggetti e create ${affectedPlans.length} revisioni.`,
+                en: `Removed ${removedObjects} objects and created ${affectedPlans.length} revisions.`
               }),
-              'info'
+              'success'
             );
+            await loadUsers();
+            setSyncResult((prev: any) => {
+              if (!prev?.ok || !Array.isArray(prev.missing)) return prev;
+              const keep = prev.missing.filter((m: any) => !ids.includes(String(m.externalId)));
+              const summary = { ...(prev.summary || {}) };
+              summary.missing = keep.length;
+              return { ...prev, missing: keep, summary };
+            });
           } catch {
             push(t({ it: 'Errore', en: 'Error' }), 'danger');
           } finally {

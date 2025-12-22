@@ -57,7 +57,7 @@ export const fetchAuditTrail = async (params?: {
   level?: 'all' | AuditLevel;
   limit?: number;
   offset?: number;
-}): Promise<{ rows: AuditRow[]; limit: number; offset: number }> => {
+}): Promise<{ rows: AuditRow[]; limit: number; offset: number; total: number }> => {
   const qs = new URLSearchParams();
   if (params?.q) qs.set('q', params.q);
   if (params?.level) qs.set('level', params.level);
@@ -68,3 +68,7 @@ export const fetchAuditTrail = async (params?: {
   return res.json();
 };
 
+export const clearAuditTrail = async (): Promise<void> => {
+  const res = await fetch('/api/audit/clear', { method: 'POST', credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to clear audit trail (${res.status})`);
+};

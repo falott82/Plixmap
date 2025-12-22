@@ -42,6 +42,7 @@ interface Props {
   onEdit: (id: string) => void;
   onContextMenu: (payload: { id: string; clientX: number; clientY: number }) => void;
   onLinkContextMenu?: (payload: { id: string; clientX: number; clientY: number }) => void;
+  onLinkDblClick?: (id: string) => void;
   onMapContextMenu: (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onSelectRoom?: (roomId?: string) => void;
   onSelectLink?: (id?: string) => void;
@@ -115,6 +116,7 @@ const CanvasStageImpl = (
   onEdit,
   onContextMenu,
   onLinkContextMenu,
+  onLinkDblClick,
   onMapContextMenu,
   onSelectRoom,
   onSelectLink,
@@ -273,9 +275,14 @@ const CanvasStageImpl = (
     handleResize();
     const obs = new ResizeObserver(handleResize);
     if (containerRef.current) obs.observe(containerRef.current);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') handleResize();
+    };
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       obs.disconnect();
       if (raf) cancelAnimationFrame(raf);
+      document.removeEventListener('visibilitychange', onVis);
     };
   }, [containerRef]);
 
@@ -1198,7 +1205,86 @@ const CanvasStageImpl = (
             const to = plan.objects.find((o) => o.id === link.toId);
             if (!from || !to) return null;
             const isSelected = !!selectedLinkId && selectedLinkId === link.id;
+            const kind = (link as any).kind || 'arrow';
             const stroke = isSelected ? '#2563eb' : link.color || '#94a3b8';
+            const width = Number((link as any).width || (kind === 'cable' ? 3 : 2));
+            const dash = (link as any).dashed ? [8, 6] : undefined;
+            const route = ((link as any).route || 'vh') as 'vh' | 'hv';
+
+            if (kind === 'cable') {
+              const points =
+                route === 'hv'
+                  ? [from.x, from.y, to.x, from.y, to.x, to.y]
+                  : [from.x, from.y, from.x, to.y, to.x, to.y];
+
+              const label = String((link as any).name || (link as any).label || '').trim();
+              const mid = (() => {
+                const pts = points;
+                let total = 0;
+                for (let i = 0; i < pts.length - 2; i += 2) total += Math.hypot(pts[i + 2] - pts[i], pts[i + 3] - pts[i + 1]);
+                const half = total / 2;
+                let acc = 0;
+                for (let i = 0; i < pts.length - 2; i += 2) {
+                  const x1 = pts[i];
+                  const y1 = pts[i + 1];
+                  const x2 = pts[i + 2];
+                  const y2 = pts[i + 3];
+                  const seg = Math.hypot(x2 - x1, y2 - y1);
+                  if (acc + seg >= half) {
+                    const t = seg ? (half - acc) / seg : 0;
+                    return { x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t };
+                  }
+                  acc += seg;
+                }
+                return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+              })();
+
+              return (
+                <Group key={link.id}>
+                  <Line
+                    points={points}
+                    stroke={stroke}
+                    strokeWidth={isSelected ? width + 1 : width}
+                    dash={dash as any}
+                    lineCap="round"
+                    lineJoin="round"
+                    opacity={0.9}
+                    onClick={(e) => {
+                      e.cancelBubble = true;
+                      onSelectLink?.(link.id);
+                    }}
+                    onDblClick={(e) => {
+                      e.cancelBubble = true;
+                      if (!onLinkDblClick) return;
+                      if (readOnly) return;
+                      onSelectLink?.(link.id);
+                      onLinkDblClick(link.id);
+                    }}
+                    onContextMenu={(e) => {
+                      e.evt.preventDefault();
+                      e.cancelBubble = true;
+                      if (!onLinkContextMenu) return;
+                      onSelectLink?.(link.id);
+                      onLinkContextMenu({ id: link.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+                    }}
+                  />
+                  {label ? (
+                    <Text
+                      text={label}
+                      x={mid.x - 120}
+                      y={mid.y - 14}
+                      width={240}
+                      align="center"
+                      fontSize={11}
+                      fontStyle="bold"
+                      fill="#0f172a"
+                      listening={false}
+                    />
+                  ) : null}
+                </Group>
+              );
+            }
+
             return (
               <Arrow
                 key={link.id}
@@ -1207,11 +1293,18 @@ const CanvasStageImpl = (
                 fill={stroke}
                 pointerLength={8}
                 pointerWidth={8}
-                strokeWidth={isSelected ? 3 : 2}
+                strokeWidth={isSelected ? width + 1 : width}
                 opacity={0.85}
                 onClick={(e) => {
                   e.cancelBubble = true;
                   onSelectLink?.(link.id);
+                }}
+                onDblClick={(e) => {
+                  e.cancelBubble = true;
+                  if (!onLinkDblClick) return;
+                  if (readOnly) return;
+                  onSelectLink?.(link.id);
+                  onLinkDblClick(link.id);
                 }}
                 onContextMenu={(e) => {
                   e.evt.preventDefault();
@@ -1320,7 +1413,7 @@ const CanvasStageImpl = (
                   align="center"
                   fontStyle="bold"
                   fill="#0f172a"
-                  fontSize={10}
+                  fontSize={Math.max(4, 10 * scale)}
                   shadowBlur={0}
                   shadowColor="transparent"
                   listening={false}

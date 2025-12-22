@@ -1,9 +1,12 @@
-import { useMemo, useState } from 'react';
-import { Download, Upload, FileSpreadsheet, AlertTriangle } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ChevronDown, ChevronRight, Download, FileSpreadsheet, Info, Upload } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
 import { useT } from '../../i18n/useT';
+import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
+import { createCustomField } from '../../api/customFields';
+import { saveState } from '../../api/state';
 
 const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
@@ -31,23 +34,86 @@ const BackupPanel = () => {
   const t = useT();
   const push = useToastStore((s) => s.push);
   const { clients, objectTypes, setClients, setServerState } = useDataStore();
+  const customFields = useCustomFieldsStore((s) => s.fields);
   const [exportAssets, setExportAssets] = useState(true);
   const [busy, setBusy] = useState(false);
 
+  const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
+  const [expandedSites, setExpandedSites] = useState<Record<string, boolean>>({});
+  const [selectedPlanIds, setSelectedPlanIds] = useState<Record<string, boolean>>({});
+
+  // Default: select everything (so export works out-of-the-box).
+  useEffect(() => {
+    setSelectedPlanIds((prev) => {
+      const next = { ...prev };
+      for (const c of clients || []) {
+        for (const s of c.sites || []) {
+          for (const p of s.floorPlans || []) {
+            if (!(p.id in next)) next[p.id] = true;
+          }
+        }
+      }
+      // Drop removed planIds from selection.
+      const existing = new Set((clients || []).flatMap((c) => (c.sites || []).flatMap((s) => (s.floorPlans || []).map((p) => p.id))));
+      for (const k of Object.keys(next)) if (!existing.has(k)) delete next[k];
+      return next;
+    });
+  }, [clients]);
+
+  const selectedCount = useMemo(() => Object.values(selectedPlanIds).filter(Boolean).length, [selectedPlanIds]);
+
+  const filteredClients = useMemo(() => {
+    const selected = new Set(Object.entries(selectedPlanIds).filter(([, v]) => !!v).map(([id]) => id));
+    const stripRealUsers = (plan: any) => {
+      const filterObjects = (objs: any) => (Array.isArray(objs) ? objs.filter((o) => o?.type !== 'real_user') : objs);
+      plan.objects = filterObjects(plan.objects);
+      if (Array.isArray(plan.revisions)) {
+        plan.revisions = plan.revisions.map((r: any) => ({ ...r, objects: filterObjects(r.objects) }));
+      }
+      return plan;
+    };
+
+    const next = structuredClone(clients || []);
+    for (const c of next) {
+      c.sites = (c.sites || [])
+        .map((s: any) => {
+          s.floorPlans = (s.floorPlans || []).filter((p: any) => selected.has(p.id)).map(stripRealUsers);
+          return s;
+        })
+        .filter((s: any) => (s.floorPlans || []).length);
+    }
+    return next.filter((c) => (c.sites || []).length);
+  }, [clients, selectedPlanIds]);
+
   const exportJson = async () => {
+    if (!selectedCount) {
+      push(t({ it: 'Seleziona almeno una planimetria', en: 'Select at least one floor plan' }), 'info');
+      return;
+    }
     setBusy(true);
     try {
       const payload: any = {
         kind: 'deskly-workspace',
-        version: 1,
+        version: 2,
         exportedAt: Date.now(),
         objectTypes,
-        clients: structuredClone(clients)
+        // Custom fields are stored per-user in the DB; we export the current user definitions.
+        customFields: customFields || [],
+        clients: structuredClone(filteredClients)
       };
+
       if (exportAssets) {
         const rewriteUrl = async (value: any) => {
           if (typeof value !== 'string') return value;
           if (value.startsWith('data:')) return value;
+          try {
+            const u = new URL(value, window.location.origin);
+            if (u.pathname.startsWith('/uploads/') || u.pathname.startsWith('/seed/')) {
+              return await fetchAsDataUrl(u.toString());
+            }
+          } catch {
+            // ignore
+          }
           if (value.startsWith('/uploads/') || value.startsWith('/seed/')) {
             try {
               return await fetchAsDataUrl(value);
@@ -70,6 +136,7 @@ const BackupPanel = () => {
           }
         }
       }
+
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       downloadBlob(blob, `deskly-workspace-${new Date().toISOString().slice(0, 10)}.json`);
       push(t({ it: 'Esportazione completata', en: 'Export completed' }), 'success');
@@ -81,6 +148,10 @@ const BackupPanel = () => {
   };
 
   const exportExcel = async () => {
+    if (!selectedCount) {
+      push(t({ it: 'Seleziona almeno una planimetria', en: 'Select at least one floor plan' }), 'info');
+      return;
+    }
     setBusy(true);
     try {
       const wb = new ExcelJS.Workbook();
@@ -94,14 +165,6 @@ const BackupPanel = () => {
         ws.addRows(rows);
       };
 
-      const clientsRows: any[] = [];
-      const sitesRows: any[] = [];
-      const plansRows: any[] = [];
-      const layersRows: any[] = [];
-      const roomsRows: any[] = [];
-      const viewsRows: any[] = [];
-      const objectsRows: any[] = [];
-
       addSheet(
         'ObjectTypes',
         [
@@ -114,7 +177,26 @@ const BackupPanel = () => {
         objectTypes.map((o) => ({ id: o.id, name_it: o.name.it, name_en: o.name.en, icon: o.icon, builtin: !!o.builtin }))
       );
 
-      for (const c of clients) {
+      addSheet(
+        'CustomFields',
+        [
+          { header: 'typeId', key: 'typeId', width: 18 },
+          { header: 'fieldKey', key: 'fieldKey', width: 18 },
+          { header: 'label', key: 'label', width: 26 },
+          { header: 'valueType', key: 'valueType', width: 10 }
+        ],
+        (customFields || []).map((f) => ({ typeId: f.typeId, fieldKey: f.fieldKey, label: f.label, valueType: f.valueType }))
+      );
+
+      const clientsRows: any[] = [];
+      const sitesRows: any[] = [];
+      const plansRows: any[] = [];
+      const layersRows: any[] = [];
+      const roomsRows: any[] = [];
+      const viewsRows: any[] = [];
+      const objectsRows: any[] = [];
+
+      for (const c of filteredClients) {
         clientsRows.push({
           id: c.id,
           shortName: c.shortName || '',
@@ -168,6 +250,7 @@ const BackupPanel = () => {
               });
             }
             for (const o of (p.objects || []) as any[]) {
+              if (o.type === 'real_user') continue;
               objectsRows.push({
                 planId: p.id,
                 id: o.id,
@@ -302,16 +385,46 @@ const BackupPanel = () => {
         push(t({ it: 'File non valido', en: 'Invalid file' }), 'danger');
         return;
       }
-      if (!window.confirm(t({ it: 'Importare e sostituire il workspace corrente? Operazione irreversibile.', en: 'Import and replace the current workspace? This cannot be undone.' }))) {
+      if (
+        !window.confirm(
+          t({
+            it: 'Importare e sostituire il workspace corrente? Operazione irreversibile.',
+            en: 'Import and replace the current workspace? This cannot be undone.'
+          })
+        )
+      ) {
         return;
       }
       const nextObjectTypes = Array.isArray(parsed.objectTypes) ? parsed.objectTypes : objectTypes;
       const nextClients = parsed.clients;
-      // Update store (and mark as saved) then force sync via App autosave.
+
+      // Persist on server (also externalizes embedded data URLs into /uploads) then update the local store.
+      try {
+        await saveState(nextClients, nextObjectTypes);
+      } catch {
+        // If server isn't reachable (offline), we still update locally.
+      }
       setServerState({ clients: nextClients, objectTypes: nextObjectTypes });
       setClients(nextClients);
+
+      // Best-effort import custom fields (per-user)
+      if (Array.isArray(parsed.customFields)) {
+        for (const f of parsed.customFields) {
+          const typeId = String(f?.typeId || '').trim();
+          const fieldKey = String(f?.fieldKey || '').trim();
+          const label = String(f?.label || '').trim();
+          const valueType = f?.valueType;
+          if (!typeId || !label || !valueType) continue;
+          try {
+            await createCustomField({ typeId, fieldKey: fieldKey || undefined, label, valueType });
+          } catch {
+            // ignore duplicates / invalid
+          }
+        }
+      }
+
       push(t({ it: 'Import completato. Ricarico…', en: 'Import completed. Reloading…' }), 'success');
-      window.setTimeout(() => window.location.reload(), 500);
+      window.setTimeout(() => window.location.reload(), 600);
     } catch {
       push(t({ it: 'Errore import', en: 'Import failed' }), 'danger');
     } finally {
@@ -319,14 +432,22 @@ const BackupPanel = () => {
     }
   };
 
-  const attachmentNote = useMemo(
+  const infoBox = useMemo(
     () =>
       t({
-        it: 'Nota: questo export riguarda il “workspace” (clienti/sedi/planimetrie/oggetti). Gli utenti e le password sono gestiti nel database e non vengono inclusi.',
-        en: 'Note: this export covers the “workspace” (clients/sites/floor plans/objects). Users and passwords are stored in the database and are not included.'
+        it:
+          'Questa funzione esporta/importa solo: clienti, sedi, planimetrie, stanze/viste/livelli, oggetti (esclusi “Utente reale”), tipologie di oggetti e campi personalizzati. Non include: utenti del portale, password, configurazioni web API, utenti reali importati.',
+        en:
+          'This export/import includes only: clients, sites, floor plans, rooms/views/layers, objects (excluding “Real user”), object types and custom fields. It does NOT include: portal users, passwords, web API configs, imported real users.'
       }),
     [t]
   );
+
+  const toggleAll = (value: boolean) => {
+    const next: Record<string, boolean> = {};
+    for (const c of clients || []) for (const s of c.sites || []) for (const p of s.floorPlans || []) next[p.id] = value;
+    setSelectedPlanIds(next);
+  };
 
   return (
     <div className="space-y-4">
@@ -337,24 +458,147 @@ const BackupPanel = () => {
           </div>
           <div>
             <div className="text-sm font-semibold text-ink">{t({ it: 'Backup & Import/Export', en: 'Backup & Import/Export' })}</div>
-            <div className="mt-1 text-sm text-slate-600">{attachmentNote}</div>
+            <div className="mt-1 text-sm text-slate-600">{infoBox}</div>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <Info size={16} /> {t({ it: 'Selezione export', en: 'Export selection' })}
+            </div>
+            <div className="mt-1 text-sm text-slate-600">
+              {t({
+                it: 'Scegli quali planimetrie includere. Verranno esportate anche le sedi e i clienti necessari.',
+                en: 'Choose which floor plans to include. Related sites and clients are exported automatically.'
+              })}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => toggleAll(true)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+            >
+              {t({ it: 'Tutte', en: 'All' })}
+            </button>
+            <button
+              onClick={() => toggleAll(false)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+            >
+              {t({ it: 'Nessuna', en: 'None' })}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 max-h-[360px] overflow-auto rounded-2xl border border-slate-200">
+          <div className="divide-y divide-slate-100">
+            {(clients || []).map((c) => {
+              const cOpen = !!expandedClients[c.id];
+              const clientPlanIds = (c.sites || []).flatMap((s: any) => (s.floorPlans || []).map((p: any) => p.id));
+              const clientChecked = clientPlanIds.length ? clientPlanIds.every((id: string) => !!selectedPlanIds[id]) : false;
+              return (
+                <div key={c.id} className="bg-white">
+                  <button
+                    onClick={() => setExpandedClients((p) => ({ ...p, [c.id]: !cOpen }))}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold text-ink hover:bg-slate-50"
+                  >
+                    <span className="flex items-center gap-2">
+                      {cOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      <input
+                        type="checkbox"
+                        checked={clientChecked}
+                        onChange={(e) => {
+                          const next = { ...selectedPlanIds };
+                          for (const id of clientPlanIds) next[id] = e.target.checked;
+                          setSelectedPlanIds(next);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <span className="truncate">{c.shortName || c.name}</span>
+                    </span>
+                    <span className="text-xs font-semibold text-slate-500">{clientPlanIds.length}</span>
+                  </button>
+                  {cOpen ? (
+                    <div className="space-y-2 px-3 pb-3">
+                      {(c.sites || []).map((s: any) => {
+                        const skey = `${c.id}:${s.id}`;
+                        const sOpen = !!expandedSites[skey];
+                        const sitePlanIds = (s.floorPlans || []).map((p: any) => p.id);
+                        const siteChecked = sitePlanIds.length ? sitePlanIds.every((id: string) => !!selectedPlanIds[id]) : false;
+                        return (
+                          <div key={s.id} className="rounded-xl border border-slate-200 bg-white">
+                            <button
+                              onClick={() => setExpandedSites((p) => ({ ...p, [skey]: !sOpen }))}
+                              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              <span className="flex items-center gap-2">
+                                {sOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                <input
+                                  type="checkbox"
+                                  checked={siteChecked}
+                                  onChange={(e) => {
+                                    const next = { ...selectedPlanIds };
+                                    for (const id of sitePlanIds) next[id] = e.target.checked;
+                                    setSelectedPlanIds(next);
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <span className="truncate">{s.name}</span>
+                              </span>
+                              <span className="text-xs font-semibold text-slate-500">{sitePlanIds.length}</span>
+                            </button>
+                            {sOpen ? (
+                              <div className="divide-y divide-slate-100">
+                                {(s.floorPlans || []).map((p: any) => (
+                                  <label key={p.id} className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                                    <span className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!selectedPlanIds[p.id]}
+                                        onChange={(e) => setSelectedPlanIds((prev) => ({ ...prev, [p.id]: e.target.checked }))}
+                                      />
+                                      <span className="truncate font-medium">{p.name}</span>
+                                    </span>
+                                  </label>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            {!clients.length ? (
+              <div className="px-3 py-6 text-sm text-slate-600">{t({ it: 'Nessun cliente.', en: 'No clients.' })}</div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <div className="text-sm text-slate-600">
+            {t({ it: `Selezionate: ${selectedCount}`, en: `Selected: ${selectedCount}` })}
+          </div>
+          <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <input type="checkbox" checked={exportAssets} onChange={(e) => setExportAssets(e.target.checked)} />
+            {t({ it: 'Includi immagini e allegati', en: 'Include images and attachments' })}
+          </label>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
-          <div className="text-sm font-semibold text-ink">{t({ it: 'Esporta workspace (JSON)', en: 'Export workspace (JSON)' })}</div>
+          <div className="text-sm font-semibold text-ink">{t({ it: 'Esporta (JSON)', en: 'Export (JSON)' })}</div>
           <div className="mt-2 text-sm text-slate-600">
             {t({
-              it: 'Consigliato per migrare clienti/planimetrie tra installazioni.',
-              en: 'Recommended for migrating clients/floor plans between installations.'
+              it: 'Consigliato per migrare dati tra installazioni.',
+              en: 'Recommended for migrating data between installations.'
             })}
           </div>
-          <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-ink">
-            <input type="checkbox" checked={exportAssets} onChange={(e) => setExportAssets(e.target.checked)} />
-            {t({ it: 'Includi immagini e allegati (file più grande)', en: 'Include images and attachments (larger file)' })}
-          </label>
           <button
             onClick={exportJson}
             disabled={busy}
@@ -365,7 +609,7 @@ const BackupPanel = () => {
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
-          <div className="text-sm font-semibold text-ink">{t({ it: 'Importa workspace (JSON)', en: 'Import workspace (JSON)' })}</div>
+          <div className="text-sm font-semibold text-ink">{t({ it: 'Importa (JSON)', en: 'Import (JSON)' })}</div>
           <div className="mt-2 text-sm text-slate-600">
             {t({
               it: 'Sostituisce il workspace corrente con quello del file.',
@@ -386,11 +630,11 @@ const BackupPanel = () => {
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
-        <div className="text-sm font-semibold text-ink">{t({ it: 'Esporta workspace (Excel)', en: 'Export workspace (Excel)' })}</div>
+        <div className="text-sm font-semibold text-ink">{t({ it: 'Esporta (Excel)', en: 'Export (Excel)' })}</div>
         <div className="mt-2 text-sm text-slate-600">
           {t({
-            it: 'Crea un file XLSX con tutte le tabelle principali (clienti/sedi/planimetrie/oggetti/stanze/viste/livelli).',
-            en: 'Creates an XLSX file with the main tables (clients/sites/floor plans/objects/rooms/views/layers).'
+            it: 'Crea un file XLSX con le tabelle principali. Nota: non include utenti del portale e configurazioni web API.',
+            en: 'Creates an XLSX file with the main tables. Note: it does not include portal users and web API configs.'
           })}
         </div>
         <button

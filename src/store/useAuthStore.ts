@@ -24,11 +24,30 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     ),
   hydrate: async () => {
     try {
+      // Avoid noisy 401s on cold start when there's no session cookie:
+      // we keep a simple local hint that a login has previously succeeded.
+      const sessionHint = (() => {
+        try {
+          return window.localStorage.getItem('deskly_session_hint') === '1';
+        } catch {
+          return true;
+        }
+      })();
+      if (!sessionHint) {
+        set({ user: null, permissions: [], hydrated: true });
+        return;
+      }
       const me = await fetchMe();
       set({ user: me.user, permissions: me.permissions, hydrated: true });
+      try {
+        window.localStorage.setItem('deskly_session_hint', '1');
+      } catch {}
       // Load per-user custom fields in background.
       useCustomFieldsStore.getState().hydrate().catch(() => {});
     } catch {
+      try {
+        window.localStorage.setItem('deskly_session_hint', '0');
+      } catch {}
       set({ user: null, permissions: [], hydrated: true });
     }
   },
@@ -37,12 +56,18 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     await apiLogin(username, password, otp);
     const me = await fetchMe();
     set({ user: me.user, permissions: me.permissions, hydrated: true });
+    try {
+      window.localStorage.setItem('deskly_session_hint', '1');
+    } catch {}
     useCustomFieldsStore.getState().hydrate().catch(() => {});
   },
   logout: async () => {
     try {
       await apiLogout();
     } finally {
+      try {
+        window.localStorage.setItem('deskly_session_hint', '0');
+      } catch {}
       get().setAuth(null);
     }
   }
