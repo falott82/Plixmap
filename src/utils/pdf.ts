@@ -303,16 +303,19 @@ export const renderFloorPlanToJpegDataUrl = async (
       const lines = labelText.split('\n').slice(0, 2);
       const labelLines = lines.length;
 
-      // label position uses world units (not scaled by oScale) in CanvasStage: x=-80 width=160; y depends on scale
       const labelX = cx;
-      const labelY = cy + (-(18 * oScale) - (labelLines === 2 ? 22 : 12) * oScale) * worldToPx;
+      const labelLineHeight = 1.2;
       const fontSize = 10 * worldToPx * oScale;
+      const fontPx = Math.max(4, Math.round(fontSize));
+      const lineH = Math.max(6, Math.round(fontPx * labelLineHeight));
+      const textH = labelLines * lineH;
+      const gapPx = Math.max(3, Math.round(6 * worldToPx));
+      const labelY = cy - 18 * worldToPx * oScale - gapPx - textH;
       ctx.save();
       ctx.fillStyle = '#0f172a';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.font = `bold ${Math.max(4, Math.round(fontSize))}px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif`;
-      const lineH = Math.max(6, Math.round(fontSize * 1.2));
+      ctx.font = `bold ${fontPx}px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif`;
       for (let i = 0; i < lines.length; i += 1) {
         ctx.fillText(lines[i], labelX, labelY + i * lineH);
       }

@@ -1,6 +1,6 @@
 {
   "name": "deskly",
-  "version": "1.0.4",
+  "version": "1.0.11",
   "private": true,
   "type": "module",
   "scripts": {

@@ -31,7 +31,7 @@ import SearchBar from './SearchBar';
 import ExportButton from './ExportButton';
 import ObjectModal from './ObjectModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { FloorPlan, FloorPlanView, MapObjectType } from '../../store/types';
+import { FloorPlan, FloorPlanView, MapObject, MapObjectType, PlanLink } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
@@ -47,6 +47,7 @@ import SaveRevisionModal from './SaveRevisionModal';
 import RoomModal from './RoomModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
 import BulkEditSelectionModal from './BulkEditSelectionModal';
+import SelectedObjectsModal from './SelectedObjectsModal';
 import RealUserPickerModal from './RealUserPickerModal';
 import PrintModal from './PrintModal';
 import CrossPlanSearchModal, { CrossPlanSearchResult } from './CrossPlanSearchModal';
@@ -242,6 +243,7 @@ const PlanView = ({ planId }: Props) => {
   const [confirmClearObjects, setConfirmClearObjects] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkEditSelectionOpen, setBulkEditSelectionOpen] = useState(false);
+  const [selectedObjectsModalOpen, setSelectedObjectsModalOpen] = useState(false);
   const [chooseDefaultModal, setChooseDefaultModal] = useState<{ deletingViewId: string } | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   // reserved for future multi-plan export (disabled for now)
@@ -257,6 +259,7 @@ const PlanView = ({ planId }: Props) => {
     | null
   >(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const returnToSelectionListRef = useRef(false);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewsMenuOpen, setViewsMenuOpen] = useState(false);
   const [selectedViewId, setSelectedViewId] = useState<string>('__last__');
@@ -1204,6 +1207,24 @@ const PlanView = ({ planId }: Props) => {
 
       if (isTyping) return;
 
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        if (!currentPlan) return;
+        e.preventDefault();
+        const allIds = ((currentPlan as FloorPlan).objects || []).map((o) => o.id);
+        setSelection(allIds);
+        setContextMenu(null);
+        setSelectedRoomId(undefined);
+        setSelectedLinkId(null);
+        push(
+          t({
+            it: `Selezionati ${allIds.length} oggetti (Ctrl/Cmd+A).`,
+            en: `Selected ${allIds.length} objects (Ctrl/Cmd+A).`
+          }),
+          'info'
+        );
+        return;
+      }
+
       if (e.key === 'Escape') {
         if (currentSelectedIds.length || selectedRoomId) {
           e.preventDefault();
@@ -1258,7 +1279,7 @@ const PlanView = ({ planId }: Props) => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [deleteObject, push, clearSelection, roomDrawMode, moveObject, updateObject, selectedRoomId, linkFromId, deleteLink, markTouched, t]);
+  }, [deleteObject, push, clearSelection, roomDrawMode, moveObject, updateObject, selectedRoomId, linkFromId, deleteLink, markTouched, setSelection, t]);
 
   const objectsByType = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -1454,6 +1475,22 @@ const PlanView = ({ planId }: Props) => {
   };
 
   const handleEdit = (objectId: string) => setModalState({ mode: 'edit', objectId });
+  const openEditFromSelectionList = (objectId: string) => {
+    returnToSelectionListRef.current = true;
+    setSelectedObjectsModalOpen(false);
+    setModalState({ mode: 'edit', objectId });
+  };
+  const openLinkEditFromSelectionList = (linkId: string) => {
+    returnToSelectionListRef.current = true;
+    setSelectedObjectsModalOpen(false);
+    setLinkEditId(linkId);
+  };
+
+  const closeReturnToSelectionList = () => {
+    if (!returnToSelectionListRef.current) return;
+    returnToSelectionListRef.current = false;
+    setSelectedObjectsModalOpen(true);
+  };
 
   const handleUpdate = (payload: { name: string; description?: string; layerIds?: string[]; customValues?: Record<string, any> }) => {
     if (!modalState || modalState.mode !== 'edit' || isReadOnly) return;
@@ -1479,37 +1516,46 @@ const PlanView = ({ planId }: Props) => {
   const handleZoomChange = useCallback((value: number) => setZoom(value), [setZoom]);
   const handlePanChange = useCallback((value: { x: number; y: number }) => setPan(value), [setPan]);
 
-  const handleSearchEnter = (term: string) => {
-    if (!renderPlan) return;
-    if (!term.trim()) return;
-    const normalized = term.toLowerCase();
-    const objectMatches = renderPlan.objects.filter(
-      (o) =>
-        o.name.toLowerCase().includes(normalized) ||
-        ((o as any).firstName && String((o as any).firstName).toLowerCase().includes(normalized)) ||
-        ((o as any).lastName && String((o as any).lastName).toLowerCase().includes(normalized)) ||
-        (o.description && o.description.toLowerCase().includes(normalized))
-    );
-    const roomMatches = (renderPlan.rooms || []).filter((r) => (r.name || '').toLowerCase().includes(normalized));
+  const renderObjectById = useMemo(
+    () => new Map<string, any>((renderPlan?.objects || []).map((o) => [o.id, o])),
+    [renderPlan?.objects]
+  );
+  const renderRoomById = useMemo(
+    () => new Map<string, any>((renderPlan?.rooms || []).map((r) => [r.id, r])),
+    [renderPlan?.rooms]
+  );
 
-    const crossResults: CrossPlanSearchResult[] = [];
-    if (client) {
-      for (const s of client.sites || []) {
-        for (const p of s.floorPlans || []) {
-          const objs = (p.objects || []).filter(
-            (o) =>
-              o.name.toLowerCase().includes(normalized) ||
-              ((o as any).firstName && String((o as any).firstName).toLowerCase().includes(normalized)) ||
-              ((o as any).lastName && String((o as any).lastName).toLowerCase().includes(normalized)) ||
-              (o.description && o.description.toLowerCase().includes(normalized))
-          );
-          for (const o of objs) {
-            const label =
-              o.type === 'real_user' &&
-              (((o as any).firstName && String((o as any).firstName).trim()) || ((o as any).lastName && String((o as any).lastName).trim()))
-                ? `${String((o as any).firstName || '').trim()} ${String((o as any).lastName || '').trim()}`.trim()
-                : o.name;
-            crossResults.push({
+  const currentPlanSearchIndex = useMemo(() => {
+    if (!renderPlan) return { objects: [] as { id: string; search: string }[], rooms: [] as { id: string; search: string }[] };
+    const objects = (renderPlan.objects || []).map((o) => {
+      const extra =
+        o.type === 'real_user'
+          ? `${String((o as any).firstName || '')} ${String((o as any).lastName || '')}`.trim()
+          : '';
+      const search = `${o.name} ${o.description || ''} ${extra}`.toLowerCase();
+      return { id: o.id, search };
+    });
+    const rooms = (renderPlan.rooms || []).map((r) => ({ id: r.id, search: String(r.name || '').toLowerCase() }));
+    return { objects, rooms };
+  }, [renderPlan]);
+
+  const clientSearchIndex = useMemo(() => {
+    if (!client) return [] as { planId: string; search: string; result: CrossPlanSearchResult }[];
+    const out: { planId: string; search: string; result: CrossPlanSearchResult }[] = [];
+    for (const s of client.sites || []) {
+      for (const p of s.floorPlans || []) {
+        for (const o of p.objects || []) {
+          const label =
+            o.type === 'real_user' &&
+            (((o as any).firstName && String((o as any).firstName).trim()) || ((o as any).lastName && String((o as any).lastName).trim()))
+              ? `${String((o as any).firstName || '').trim()} ${String((o as any).lastName || '').trim()}`.trim()
+              : o.name;
+          const extra = o.type === 'real_user' ? `${String((o as any).firstName || '')} ${String((o as any).lastName || '')}`.trim() : '';
+          const search = `${label} ${o.name} ${o.description || ''} ${extra}`.toLowerCase();
+          out.push({
+            planId: p.id,
+            search,
+            result: {
               kind: 'object',
               clientId: client.id,
               clientName: client.shortName || client.name,
@@ -1521,11 +1567,15 @@ const PlanView = ({ planId }: Props) => {
               objectType: o.type,
               objectLabel: label,
               objectDescription: o.description || ''
-            });
-          }
-          const rms = (p.rooms || []).filter((r) => (r.name || '').toLowerCase().includes(normalized));
-          for (const r of rms) {
-            crossResults.push({
+            }
+          });
+        }
+        for (const r of p.rooms || []) {
+          const search = `${r.name || ''}`.toLowerCase();
+          out.push({
+            planId: p.id,
+            search,
+            result: {
               kind: 'room',
               clientId: client.id,
               clientName: client.shortName || client.name,
@@ -1535,46 +1585,65 @@ const PlanView = ({ planId }: Props) => {
               planName: p.name,
               roomId: r.id,
               roomName: r.name
-            });
-          }
+            }
+          });
         }
       }
-    } else {
-      // Fallback: if client context isn't available, search only within the current plan.
-      for (const o of objectMatches) {
-        const label =
-          o.type === 'real_user' &&
-          (((o as any).firstName && String((o as any).firstName).trim()) || ((o as any).lastName && String((o as any).lastName).trim()))
-            ? `${String((o as any).firstName || '').trim()} ${String((o as any).lastName || '').trim()}`.trim()
-            : o.name;
-        crossResults.push({
-          kind: 'object',
-          clientId: '',
-          clientName: '',
-          siteId: '',
-          siteName: '',
-          planId,
-          planName: renderPlan.name,
-          objectId: o.id,
-          objectType: o.type,
-          objectLabel: label,
-          objectDescription: o.description || ''
-        });
-      }
-      for (const r of roomMatches) {
-        crossResults.push({
-          kind: 'room',
-          clientId: '',
-          clientName: '',
-          siteId: '',
-          siteName: '',
-          planId,
-          planName: renderPlan.name,
-          roomId: r.id,
-          roomName: r.name
-        });
-      }
     }
+    return out;
+  }, [client]);
+
+  const handleSearchEnter = (term: string) => {
+    if (!renderPlan) return;
+    if (!term.trim()) return;
+    const normalized = term.toLowerCase();
+    const objectMatches = currentPlanSearchIndex.objects
+      .filter((o) => o.search.includes(normalized))
+      .map((o) => renderObjectById.get(o.id))
+      .filter(Boolean) as any[];
+    const roomMatches = currentPlanSearchIndex.rooms
+      .filter((r) => r.search.includes(normalized))
+      .map((r) => renderRoomById.get(r.id))
+      .filter(Boolean) as any[];
+
+    const crossResults: CrossPlanSearchResult[] = client
+      ? clientSearchIndex.filter((x) => x.search.includes(normalized)).map((x) => x.result)
+      : [
+          ...objectMatches.map((o) => {
+            const label =
+              o.type === 'real_user' &&
+              (((o as any).firstName && String((o as any).firstName).trim()) || ((o as any).lastName && String((o as any).lastName).trim()))
+                ? `${String((o as any).firstName || '').trim()} ${String((o as any).lastName || '').trim()}`.trim()
+                : o.name;
+            return {
+              kind: 'object',
+              clientId: '',
+              clientName: '',
+              siteId: '',
+              siteName: '',
+              planId,
+              planName: renderPlan.name,
+              objectId: o.id,
+              objectType: o.type,
+              objectLabel: label,
+              objectDescription: o.description || ''
+            } as any;
+          }),
+          ...roomMatches.map(
+            (r) =>
+              ({
+                kind: 'room',
+                clientId: '',
+                clientName: '',
+                siteId: '',
+                siteName: '',
+                planId,
+                planName: renderPlan.name,
+                roomId: r.id,
+                roomName: r.name
+              }) as any
+          )
+        ];
 
     if (!crossResults.length) {
       push(t({ it: 'Nessun risultato trovato', en: 'No results found' }), 'info');
@@ -1668,6 +1737,31 @@ const PlanView = ({ planId }: Props) => {
 
   const basePlan = plan as FloorPlan;
   const showPrintArea = !!(showPrintAreaByPlan as any)?.[basePlan.id];
+
+  const linksInSelection = useMemo(() => {
+    const planLinks = ((basePlan as any)?.links || []) as PlanLink[];
+    const ids = selectedObjectIds;
+    if (!planLinks.length) return [] as PlanLink[];
+    const seen = new Set<string>();
+    const out: PlanLink[] = [];
+    const inSel = new Set(ids);
+    for (const l of planLinks) {
+      if (seen.has(l.id)) continue;
+      const includeSelected = !!selectedLinkId && l.id === selectedLinkId;
+      const includeBetween = ids.length > 1 && inSel.has(l.fromId) && inSel.has(l.toId);
+      if (!includeSelected && !includeBetween) continue;
+      seen.add(l.id);
+      out.push(l);
+    }
+    // Put explicitly selected link first (if present).
+    if (selectedLinkId) out.sort((a, b) => (a.id === selectedLinkId ? -1 : b.id === selectedLinkId ? 1 : 0));
+    return out;
+  }, [basePlan, selectedLinkId, selectedObjectIds]);
+
+  const getObjectNameById = useCallback(
+    (id: string) => renderPlan.objects.find((o) => o.id === id)?.name || id,
+    [renderPlan.objects]
+  );
 
   return (
     <div className="flex h-screen flex-col gap-4 overflow-hidden p-6">
@@ -2008,12 +2102,21 @@ const PlanView = ({ planId }: Props) => {
                     {t({ it: 'Selezionato:', en: 'Selected:' })}
                   </span>
                   <span className="max-w-[220px] truncate rounded-full bg-primary/10 px-2 py-1 text-sm font-semibold text-primary">
-                    {selectedObjectIds.length > 1
-                      ? t({ it: `${selectedObjectIds.length} elementi`, en: `${selectedObjectIds.length} items` })
+                    {selectedObjectIds.length > 1 || linksInSelection.length
+                      ? t({
+                          it: `${selectedObjectIds.length + linksInSelection.length} elementi`,
+                          en: `${selectedObjectIds.length + linksInSelection.length} items`
+                        })
                       : renderPlan.objects.find((o) => o.id === selectedObjectId)?.name}
                   </span>
                   <button
-                    onClick={() => handleEdit(selectedObjectId)}
+                    onClick={() => {
+                      if (selectedObjectIds.length > 1 || linksInSelection.length) {
+                        setSelectedObjectsModalOpen(true);
+                        return;
+                      }
+                      handleEdit(selectedObjectId);
+                    }}
                     disabled={isReadOnly}
                     className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
                     title={t({ it: 'Modifica', en: 'Edit' })}
@@ -2027,6 +2130,27 @@ const PlanView = ({ planId }: Props) => {
                     title={t({ it: 'Elimina', en: 'Delete' })}
                   >
                     <Trash size={14} />
+                  </button>
+                </>
+              ) : selectedLinkId ? (
+                <>
+                  <span className="text-sm font-semibold text-slate-600">{t({ it: 'Collegamento:', en: 'Link:' })}</span>
+                  <span className="max-w-[320px] truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
+                    {(() => {
+                      const l = ((basePlan as any).links || []).find((x: any) => x.id === selectedLinkId);
+                      const a = l ? getObjectNameById(String(l.fromId)) : '';
+                      const b = l ? getObjectNameById(String(l.toId)) : '';
+                      const label = l ? String(l.name || l.label || t({ it: 'Collegamento', en: 'Link' })) : t({ it: 'Collegamento', en: 'Link' });
+                      return `${label}: ${a} → ${b}`;
+                    })()}
+                  </span>
+                  <button
+                    onClick={() => setLinkEditId(selectedLinkId)}
+                    disabled={isReadOnly}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Modifica', en: 'Edit' })}
+                  >
+                    <Pencil size={14} />
                   </button>
                 </>
               ) : (
@@ -2655,7 +2779,7 @@ const PlanView = ({ planId }: Props) => {
                   }}
                   className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
                 >
-                  <Pencil size={14} /> {t({ it: 'Modifica selezione', en: 'Edit selection' })}
+                  <Pencil size={14} /> {t({ it: 'Modifica rapida oggetti', en: 'Quick edit objects' })}
                 </button>
               ) : null}
               <button
@@ -2862,9 +2986,45 @@ const PlanView = ({ planId }: Props) => {
 		        initialName={modalInitials?.name}
 		        initialDescription={modalInitials?.description}
             readOnly={isReadOnly}
-		        onClose={() => setModalState(null)}
+		        onClose={() => {
+              setModalState(null);
+              closeReturnToSelectionList();
+            }}
 		        onSubmit={modalState?.mode === 'edit' ? handleUpdate : handleCreate}
 		      />
+
+      <SelectedObjectsModal
+        open={selectedObjectsModalOpen}
+        objects={
+          selectedObjectIds
+            .map((id) => renderPlan.objects.find((o) => o.id === id))
+            .filter(Boolean) as MapObject[]
+        }
+        links={linksInSelection}
+        getTypeLabel={getTypeLabel}
+        getTypeIcon={getTypeIcon}
+        getObjectName={getObjectNameById}
+        onPickObject={openEditFromSelectionList}
+        onPickLink={openLinkEditFromSelectionList}
+        readOnly={isReadOnly}
+        onSetScaleAll={(scale) => {
+          if (isReadOnly) return;
+          if (!basePlan) return;
+          const next = Math.max(0.2, Math.min(3, Number(scale) || 1));
+          if (!selectedObjectIds.length) return;
+          markTouched();
+          useUIStore.getState().setLastObjectScale(next);
+          for (const id of selectedObjectIds) {
+            updateObject(id, { scale: next });
+          }
+          push(t({ it: 'Scala aggiornata', en: 'Scale updated' }), 'success');
+        }}
+        onRequestDeleteObject={(objectId) => {
+          if (isReadOnly) return;
+          setConfirmDelete([objectId]);
+        }}
+        onClose={() => setSelectedObjectsModalOpen(false)}
+      />
 
       <RealUserPickerModal
         open={!!realUserPicker}
@@ -3267,18 +3427,34 @@ const PlanView = ({ planId }: Props) => {
             ? (() => {
                 const l = ((basePlan as any).links || []).find((x: any) => x.id === linkEditId);
                 if (!l) return undefined;
-                return { name: String(l.name || l.label || ''), description: String(l.description || '') };
+                return {
+                  name: String(l.name || l.label || ''),
+                  description: String(l.description || ''),
+                  color: String(l.color || '#94a3b8'),
+                  width: Number(l.width || ((l as any).kind === 'cable' ? 3 : 2)),
+                  dashed: !!l.dashed
+                };
               })()
             : undefined
         }
-        onClose={() => setLinkEditId(null)}
+        onClose={() => {
+          setLinkEditId(null);
+          closeReturnToSelectionList();
+        }}
         onSubmit={(payload) => {
           if (!linkEditId || isReadOnly) return;
           markTouched();
-          updateLink(basePlan.id, linkEditId, { name: payload.name, description: payload.description });
+          updateLink(basePlan.id, linkEditId, {
+            name: payload.name,
+            description: payload.description,
+            color: payload.color,
+            width: payload.width,
+            dashed: payload.dashed
+          });
           postAuditEvent({ event: 'link_update', scopeType: 'plan', scopeId: basePlan.id, details: { id: linkEditId, ...payload } });
           push(t({ it: 'Collegamento aggiornato', en: 'Link updated' }), 'success');
           setLinkEditId(null);
+          closeReturnToSelectionList();
         }}
       />
 
