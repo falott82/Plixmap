@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useMemo } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { MapObject, Room } from '../../store/types';
@@ -20,7 +20,7 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
   const defs = useDataStore((s) => s.objectTypes);
   const lang = useLang();
   const t = useT();
-  const byId = new Map(defs.map((d) => [d.id, d]));
+  const byId = useMemo(() => new Map(defs.map((d) => [d.id, d])), [defs]);
   const labelOf = (id: string) => byId.get(id)?.name?.[lang] || byId.get(id)?.name?.it || id;
   const iconOf = (id: string) => byId.get(id)?.icon;
 
