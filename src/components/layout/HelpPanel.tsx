@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Layers, History } from 'lucide-react';
+import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Layers, History, Keyboard } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
 import { shallow } from 'zustand/shallow';
 import { useT } from '../../i18n/useT';
@@ -208,6 +208,12 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'Doppio clic su un collegamento: modifica nome/descrizione e stile (colore/spessore/tratteggio).',
+                          en: 'Double-click a link: edit name/description and style (color/width/dashed).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'Collegamenti: puoi creare un collegamento lineare o un collegamento a 90°. Tasto destro su un oggetto → “Crea collegamento” oppure “Crea collegamento 90°”, poi clicca un secondo oggetto.',
                           en: 'Links: you can create a straight link or a 90° link. Right-click an object → “Create link” or “Create 90° link”, then click a second object.'
                         })}
@@ -236,6 +242,73 @@ const HelpPanel = () => {
                         {t({
                           it: 'Se trovi una stanza: lampeggia il perimetro della stanza.',
                           en: 'If a room is found: the room perimeter blinks.'
+                        })}
+                      </li>
+                    </ul>
+                  </div>
+                  <div className="rounded-xl bg-mist p-3">
+                    <div className="flex items-center gap-2 font-semibold text-ink">
+                      <Keyboard size={16} /> {t({ it: 'Scorciatoie da tastiera', en: 'Keyboard shortcuts' })}
+                    </div>
+                    <ul className="ml-5 list-disc space-y-1 pt-2">
+                      <li>
+                        {t({
+                          it: 'Ctrl+F (Windows/Linux) o Cmd+F (macOS): focus sulla ricerca nella planimetria corrente.',
+                          en: 'Ctrl+F (Windows/Linux) or Cmd+F (macOS): focus the search input for the current floor plan.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Invio (nella ricerca): esegue la ricerca e fa lampeggiare l’elemento trovato.',
+                          en: 'Enter (in search): runs the search and blinks the matched element.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Ctrl/Cmd + click: selezione multipla (toggle).',
+                          en: 'Ctrl/Cmd + click: multi-select (toggle).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Trascina con il tasto sinistro su un’area vuota: selezione multipla con riquadro.',
+                          en: 'Left-drag on an empty area: box-select multiple objects.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Pan mappa: tasto centrale del mouse oppure Cmd+click destro (macOS) / Alt+click destro (Windows/Linux).',
+                          en: 'Pan: middle mouse button or Cmd+right-click (macOS) / Alt+right-click (Windows/Linux).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Frecce: spostamento fine degli oggetti selezionati (Shift = passo maggiore).',
+                          en: 'Arrow keys: fine movement for selected objects (Shift = larger step).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Canc: elimina l’oggetto (o i multipli oggetti) selezionati dopo conferma.',
+                          en: 'Delete: removes the selected object(s) after confirmation.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Ctrl+A (Windows/Linux) o Cmd+A (macOS): seleziona tutti gli oggetti della planimetria (i collegamenti tra gli oggetti selezionati vengono inclusi nella lista “Modifica selezione”).',
+                          en: 'Ctrl+A (Windows/Linux) or Cmd+A (macOS): selects all objects in the floor plan (links between selected objects are included in the “Edit selection” list).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Esc: annulla selezione e chiude modali/menu.',
+                          en: 'Esc: clears selection and closes modals/menus.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Stanze poligono: Backspace rimuove l’ultimo punto, Invio chiude l’area.',
+                          en: 'Polygon rooms: Backspace removes the last point, Enter closes the area.'
                         })}
                       </li>
                     </ul>
