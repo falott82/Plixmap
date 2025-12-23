@@ -68,10 +68,21 @@ const RevisionsModal = ({
     const q = term.trim().toLowerCase();
     if (!q) return revisions;
     return revisions.filter((r) => {
-      const hay = `${r.name} ${r.description || ''} ${formatDate(r.createdAt)}`.toLowerCase();
+      const by = (r as any)?.createdBy ? `${(r as any).createdBy.firstName || ''} ${(r as any).createdBy.lastName || ''} @${(r as any).createdBy.username || ''}` : '';
+      const hay = `${r.name} ${r.description || ''} ${formatDate(r.createdAt)} ${by}`.toLowerCase();
       return hay.includes(q);
     });
   }, [revisions, term]);
+
+  const formatAuthor = (r: FloorPlanRevision) => {
+    const by: any = (r as any).createdBy;
+    if (!by) return '';
+    const full = `${String(by.firstName || '').trim()} ${String(by.lastName || '').trim()}`.trim();
+    const user = String(by.username || '').trim();
+    if (full && user) return `${full} (@${user})`;
+    if (user) return `@${user}`;
+    return full;
+  };
 
   const diffs = useMemo(() => {
     const list = revisions;
@@ -249,6 +260,11 @@ const RevisionsModal = ({
                                 {t({ it: 'Rev', en: 'Rev' })}: {formatRev(r)} · {r.name}
                               </div>
                               <div className="mt-0.5 text-xs text-slate-500">{formatDate(r.createdAt)}</div>
+                              {formatAuthor(r) ? (
+                                <div className="mt-0.5 text-xs text-slate-500">
+                                  {t({ it: 'Da', en: 'By' })}: {formatAuthor(r)}
+                                </div>
+                              ) : null}
                               {r.description ? (
                                 <div className="mt-1 line-clamp-2 text-sm text-slate-600">{r.description}</div>
                               ) : null}

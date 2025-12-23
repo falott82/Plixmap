@@ -305,7 +305,7 @@ export const renderFloorPlanToJpegDataUrl = async (
 
       // label position uses world units (not scaled by oScale) in CanvasStage: x=-80 width=160; y depends on scale
       const labelX = cx;
-      const labelY = cy + (-(18 * oScale) - (labelLines === 2 ? 22 : 12)) * worldToPx;
+      const labelY = cy + (-(18 * oScale) - (labelLines === 2 ? 22 : 12) * oScale) * worldToPx;
       const fontSize = 10 * worldToPx * oScale;
       ctx.save();
       ctx.fillStyle = '#0f172a';
