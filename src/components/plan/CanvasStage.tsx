@@ -150,6 +150,7 @@ const CanvasStageImpl = (
   const panOrigin = useRef<{ x: number; y: number } | null>(null);
   const fitApplied = useRef<string | null>(null);
   const lastContextMenuAtRef = useRef(0);
+  const lastBoxSelectAtRef = useRef(0);
   const [roomHighlightNow, setRoomHighlightNow] = useState(Date.now());
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftOrigin = useRef<{ x: number; y: number } | null>(null);
@@ -162,6 +163,7 @@ const CanvasStageImpl = (
   const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
   const selectionBoxRaf = useRef<number | null>(null);
   const pendingSelectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const lastSelectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftRectRaf = useRef<number | null>(null);
   const pendingDraftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftPrintRectRaf = useRef<number | null>(null);
@@ -214,6 +216,7 @@ const CanvasStageImpl = (
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(
     null
   );
+  const objectById = useMemo(() => new Map(plan.objects.map((o) => [o.id, o])), [plan.objects]);
   const selectionOrigin = useRef<{ x: number; y: number } | null>(null);
   const selectionDragRef = useRef<{
     startX: number;
@@ -228,8 +231,17 @@ const CanvasStageImpl = (
   const applyStageTransform = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
     const stage = stageRef.current;
     if (!stage) return;
-    stage.scale({ x: nextZoom, y: nextZoom });
-    stage.position(nextPan);
+    const z = Number(nextZoom);
+    const x = Number(nextPan?.x);
+    const y = Number(nextPan?.y);
+    if (!Number.isFinite(z) || !Number.isFinite(x) || !Number.isFinite(y)) {
+      stage.scale({ x: 1, y: 1 });
+      stage.position({ x: 0, y: 0 });
+      stage.batchDraw();
+      return;
+    }
+    stage.scale({ x: z, y: z });
+    stage.position({ x, y });
     stage.batchDraw();
   }, []);
 
@@ -493,6 +505,41 @@ const CanvasStageImpl = (
     fitView();
   }, [autoFit, bgImage, fitView, plan.id]);
 
+  // Canvas watchdog: fixes rare cases where the Stage becomes 0-sized or the transform becomes invalid,
+  // which can make the map "disappear" until a manual refresh.
+  useEffect(() => {
+    const tick = () => {
+      const el = containerRef.current;
+      const stage = stageRef.current;
+      if (!el || !stage) return;
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w <= 0 || h <= 0) return;
+
+      // Recover from transient 0-sized stage.
+      const sw = Number(stage.width?.() ?? 0);
+      const sh = Number(stage.height?.() ?? 0);
+      if (sw <= 0 || sh <= 0) {
+        setDimensions((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+      }
+
+      // Recover from invalid transforms.
+      const z = Number(viewportRef.current.zoom);
+      const p = viewportRef.current.pan;
+      const px = Number(p?.x);
+      const py = Number(p?.y);
+      if (!Number.isFinite(z) || !Number.isFinite(px) || !Number.isFinite(py) || z <= 0) {
+        const nextZoom = clamp(1, 0.2, 3);
+        const nextPan = clampPan(nextZoom, { x: 0, y: 0 });
+        viewportRef.current = { zoom: nextZoom, pan: nextPan };
+        applyStageTransform(nextZoom, nextPan);
+        commitViewport(nextZoom, nextPan);
+      }
+    };
+    const id = window.setInterval(tick, 1500);
+    return () => window.clearInterval(id);
+  }, [applyStageTransform, clampPan, commitViewport]);
+
   const toStageCoords = (clientX: number, clientY: number) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
@@ -581,7 +628,10 @@ const CanvasStageImpl = (
   };
 
   const isContextClick = (evt: any) => evt?.button === 2 || (evt?.button === 0 && !!evt?.ctrlKey);
-  const isBoxSelectGesture = (evt: any) => evt?.button === 2 && !!evt?.shiftKey;
+  // Pan: middle mouse OR Cmd+right (macOS) / Alt+right (Windows/Linux).
+  const isPanGesture = (evt: any) => evt?.button === 1 || (evt?.button === 2 && (!!evt?.metaKey || !!evt?.altKey));
+  // Box select: left-drag on empty area (desktop-like).
+  const isBoxSelectGesture = (evt: any) => evt?.button === 0;
 
   const updateSelectionBox = (event: any) => {
     if (!selectionOrigin.current) return false;
@@ -598,6 +648,7 @@ const CanvasStageImpl = (
     const width = Math.abs(x2 - x1);
     const height = Math.abs(y2 - y1);
     pendingSelectionBoxRef.current = { x, y, width, height };
+    lastSelectionBoxRef.current = pendingSelectionBoxRef.current;
     if (selectionBoxRaf.current) return true;
     selectionBoxRaf.current = requestAnimationFrame(() => {
       selectionBoxRaf.current = null;
@@ -611,13 +662,21 @@ const CanvasStageImpl = (
 
   const finalizeSelectionBox = () => {
     if (!selectionOrigin.current) return false;
-    const rect = selectionBox;
+    const rect = lastSelectionBoxRef.current || pendingSelectionBoxRef.current || selectionBox;
     selectionOrigin.current = null;
     if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
     selectionBoxRaf.current = null;
     pendingSelectionBoxRef.current = null;
+    lastSelectionBoxRef.current = null;
     setSelectionBox(null);
-    if (!rect || rect.width < 5 || rect.height < 5) return true;
+    if (!rect) return true;
+    const wPx = rect.width * Math.max(0.001, viewportRef.current.zoom || 1);
+    const hPx = rect.height * Math.max(0.001, viewportRef.current.zoom || 1);
+    if (wPx < 8 || hPx < 8) {
+      // Desktop behavior: click on empty area clears selection.
+      onSelect(undefined);
+      return true;
+    }
     const minX = rect.x;
     const maxX = rect.x + rect.width;
     const minY = rect.y;
@@ -630,6 +689,7 @@ const CanvasStageImpl = (
       onSelect(undefined);
       for (const id of ids) onSelect(id, { multi: true });
     }
+    lastBoxSelectAtRef.current = Date.now();
     return true;
   };
 
@@ -645,6 +705,7 @@ const CanvasStageImpl = (
   const handleClickToAdd = (event: any) => {
     if (isContextClick(event?.evt)) return;
     if (Date.now() - lastContextMenuAtRef.current < 420) return;
+    if (Date.now() - lastBoxSelectAtRef.current < 420) return;
     if (readOnly) {
       onSelect(undefined);
       return;
@@ -836,7 +897,8 @@ const CanvasStageImpl = (
         // If another Konva context menu was just opened (object/link/bg), don't open map menu too.
         if (Date.now() - lastContextMenuAtRef.current < 60) return;
         if (pendingType || readOnly) return;
-        if (isBoxSelectGesture(e as any) || isBoxSelecting()) return;
+        if ((e as any).metaKey || (e as any).altKey) return;
+        if (isBoxSelecting()) return;
         const stage = stageRef.current;
         if (!stage) return;
         try {
@@ -899,8 +961,13 @@ const CanvasStageImpl = (
         pixelRatio={stagePixelRatio}
         onWheel={handleWheel}
         onMouseDown={(e) => {
-          // Keep right-click free for context menu
-          if (isBoxSelectGesture(e.evt)) {
+          const isEmptyTarget = e.target === e.target.getStage() || e.target?.attrs?.name === 'bg-rect';
+          if (isPanGesture(e.evt)) {
+            e.evt.preventDefault();
+            startPan(e);
+            return;
+          }
+          if (isEmptyTarget && isBoxSelectGesture(e.evt) && !pendingType && (!roomDrawMode || readOnly) && (!printAreaMode || readOnly)) {
             e.evt.preventDefault();
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
@@ -908,7 +975,9 @@ const CanvasStageImpl = (
             const world = pointerToWorld(pos.x, pos.y);
             selectionOrigin.current = { x: world.x, y: world.y };
             pendingSelectionBoxRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
+            lastSelectionBoxRef.current = pendingSelectionBoxRef.current;
             setSelectionBox(pendingSelectionBoxRef.current);
+            lastBoxSelectAtRef.current = Date.now();
             return;
           }
           if (isContextClick(e.evt)) return;
@@ -950,15 +1019,8 @@ const CanvasStageImpl = (
             setDraftPolyPoints((prev) => [...prev, { x: world.x, y: world.y }]);
             return;
           }
-          // Pan: middle click or drag empty stage
-          if (e.evt.button === 1 || e.target === e.target.getStage()) {
-            startPan(e);
-            return;
-          }
           // Clear selection on left-click empty area (no pending placement)
-          if (!pendingType && e.target === e.target.getStage()) {
-            onSelect(undefined);
-          }
+          if (!pendingType && isEmptyTarget && e.evt.button === 0) onSelect(undefined);
         }}
         onMouseMove={(e) => {
           if (updateSelectionBox(e)) return;
@@ -999,7 +1061,8 @@ const CanvasStageImpl = (
           onContextMenu={(e) => {
             e.evt.preventDefault();
             e.cancelBubble = true;
-            if (isBoxSelectGesture(e.evt) || isBoxSelecting()) return;
+            if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+            if (isBoxSelecting()) return;
             lastContextMenuAtRef.current = Date.now();
             if (pendingType || readOnly) return;
             const stage = stageRef.current;
@@ -1009,10 +1072,12 @@ const CanvasStageImpl = (
             onMapContextMenu({ clientX: e.evt.clientX, clientY: e.evt.clientY, worldX: world.x, worldY: world.y });
           }}
           onMouseDown={(e) => {
+            // Never pan / clear selection while box-selecting.
+            if (isBoxSelecting()) return;
             if (isContextClick(e.evt)) return;
             if ((roomDrawMode || printAreaMode) && !readOnly) return;
             if (e.target?.attrs?.name === 'bg-rect' && !pendingType) {
-              startPan(e);
+              if (isPanGesture(e.evt)) startPan(e);
               return;
             }
             if (!pendingType && e.target?.attrs?.name === 'bg-rect') {
@@ -1053,7 +1118,8 @@ const CanvasStageImpl = (
                   onContextMenu={(e) => {
                     e.evt.preventDefault();
                     e.cancelBubble = true;
-                    if (isBoxSelectGesture(e.evt) || isBoxSelecting()) return;
+                    if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                    if (isBoxSelecting()) return;
                     onSelectRoom?.(room.id);
                   }}
                   onDragEnd={(e) => {
@@ -1145,7 +1211,8 @@ const CanvasStageImpl = (
                 onContextMenu={(e) => {
                   e.evt.preventDefault();
                   e.cancelBubble = true;
-                  if (isBoxSelectGesture(e.evt) || isBoxSelecting()) return;
+                  if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                  if (isBoxSelecting()) return;
                   onSelectRoom?.(room.id);
                 }}
                 onDragEnd={(e) => {
@@ -1268,8 +1335,8 @@ const CanvasStageImpl = (
         {/* Links layer */}
         <Layer perfectDrawEnabled={false}>
           {(plan.links || []).map((link) => {
-            const from = plan.objects.find((o) => o.id === link.fromId);
-            const to = plan.objects.find((o) => o.id === link.toId);
+            const from = objectById.get(link.fromId);
+            const to = objectById.get(link.toId);
             if (!from || !to) return null;
             const isSelected = !!selectedLinkId && selectedLinkId === link.id;
             const kind = (link as any).kind || 'arrow';
@@ -1312,6 +1379,7 @@ const CanvasStageImpl = (
                     points={points}
                     stroke={stroke}
                     strokeWidth={isSelected ? width + 1 : width}
+                    hitStrokeWidth={Math.max(14, (isSelected ? width + 1 : width) + 10)}
                     dash={dash as any}
                     lineCap="round"
                     lineJoin="round"
@@ -1330,6 +1398,7 @@ const CanvasStageImpl = (
                     onContextMenu={(e) => {
                       e.evt.preventDefault();
                       e.cancelBubble = true;
+                      if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
                       if (!onLinkContextMenu) return;
                       onSelectLink?.(link.id);
                       onLinkContextMenu({ id: link.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
@@ -1361,6 +1430,7 @@ const CanvasStageImpl = (
                 pointerLength={8}
                 pointerWidth={8}
                 strokeWidth={isSelected ? width + 1 : width}
+                hitStrokeWidth={Math.max(14, (isSelected ? width + 1 : width) + 10)}
                 opacity={0.85}
                 onClick={(e) => {
                   e.cancelBubble = true;
@@ -1376,6 +1446,7 @@ const CanvasStageImpl = (
                 onContextMenu={(e) => {
                   e.evt.preventDefault();
                   e.cancelBubble = true;
+                  if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
                   if (!onLinkContextMenu) return;
                   onSelectLink?.(link.id);
                   onLinkContextMenu({ id: link.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
@@ -1398,7 +1469,11 @@ const CanvasStageImpl = (
                 ? `${String((obj as any).firstName || '').trim()}\n${String((obj as any).lastName || '').trim()}`.trim()
                 : obj.name;
             const labelLines = labelText.includes('\n') ? 2 : 1;
-            const labelBaseOffset = labelLines === 2 ? 22 : 12;
+            const labelLineHeight = 1.2;
+            const labelFontSize = Math.max(4, 10 * scale);
+            const labelHeight = labelLines * labelFontSize * labelLineHeight;
+            const labelGap = 6;
+            const labelY = -(18 * scale) - labelGap - labelHeight;
             return (
               <Group
                 key={obj.id}
@@ -1461,7 +1536,8 @@ const CanvasStageImpl = (
                 onContextMenu={(e) => {
                   e.evt.preventDefault();
                   e.cancelBubble = true;
-                  if (isBoxSelectGesture(e.evt) || isBoxSelecting()) return;
+                  if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                  if (isBoxSelecting()) return;
                   lastContextMenuAtRef.current = Date.now();
                   // If the object is already within a multi-selection, keep the selection as-is.
                   // Otherwise select it (single) before opening the context menu.
@@ -1476,12 +1552,13 @@ const CanvasStageImpl = (
                 <Text
                   text={labelText}
                   x={-80}
-                  y={-(18 * scale) - labelBaseOffset * scale}
+                  y={labelY}
                   width={160}
                   align="center"
                   fontStyle="bold"
                   fill="#0f172a"
-                  fontSize={Math.max(4, 10 * scale)}
+                  fontSize={labelFontSize}
+                  lineHeight={labelLineHeight}
                   shadowBlur={0}
                   shadowColor="transparent"
                   listening={false}
@@ -1550,7 +1627,8 @@ const CanvasStageImpl = (
               onContextMenu={(e) => {
                 e.evt.preventDefault();
                 e.cancelBubble = true;
-                if (isBoxSelectGesture(e.evt) || isBoxSelecting()) return;
+                if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                if (isBoxSelecting()) return;
                 const firstId = (selectedIds || [])[0];
                 if (!firstId) return;
                 lastContextMenuAtRef.current = Date.now();
@@ -1560,7 +1638,7 @@ const CanvasStageImpl = (
                 const startById: Record<string, { x: number; y: number }> = {};
                 const ids = selectedIds || [];
                 for (const id of ids) {
-                  const obj = plan.objects.find((o) => o.id === id);
+                  const obj = objectById.get(id);
                   if (!obj) continue;
                   startById[id] = { x: obj.x, y: obj.y };
                 }

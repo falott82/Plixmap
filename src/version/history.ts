@@ -9,6 +9,102 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.0.11',
+    date: '2025-12-23',
+    type: 'minor',
+    notes: [
+      n(
+        'Stabilità canvas: aggiunto watchdog per ripristinare Stage/viewport in caso di dimensioni 0 o trasformazioni invalide (riduce i casi di mappa che sparisce)',
+        'Canvas stability: added a watchdog to recover Stage/viewport from 0-size or invalid transforms (reduces map disappear cases)'
+      ),
+      n(
+        'Ricerca: indicizzazione memoizzata (plan corrente + cliente) per ridurre lavoro e GC su ricerche ripetute',
+        'Search: memoized indexing (current plan + client) to reduce work and GC on repeated searches'
+      ),
+      n(
+        'Performance: CanvasStage ottimizzato eliminando find() ripetuti sui collegamenti; SearchResultsModal memoizza la mappa tipi',
+        'Performance: optimized CanvasStage by removing repeated find() on links; SearchResultsModal memoizes type map'
+      )
+    ]
+  },
+  {
+    version: '1.0.10',
+    date: '2025-12-23',
+    type: 'minor',
+    notes: [
+      n(
+        'Selezione: conteggio totale oggetti+collegamenti (“N elementi”) e dettagli collegamento selezionato nella barra in alto',
+        'Selection: total count objects+links (“N items”) and selected link details in the top bar'
+      ),
+      n(
+        'Modifica selezione: aggiunta eliminazione oggetti dalla lista + voce menu “Modifica rapida oggetti”',
+        'Edit selection: added delete actions for objects from the list + renamed menu to “Quick edit objects”'
+      ),
+      n('Shortcut: aggiunto Ctrl/Cmd+A per selezionare tutti gli oggetti', 'Shortcut: added Ctrl/Cmd+A to select all objects')
+    ]
+  },
+  {
+    version: '1.0.9',
+    date: '2025-12-23',
+    type: 'minor',
+    notes: [
+      n(
+        'Collegamenti: doppio click ora permette di modificare anche stile (colore/spessore/tratteggio) oltre a nome/descrizione',
+        'Links: double-click now edits style too (color/width/dashed) in addition to name/description'
+      ),
+      n('Aiuto/README: aggiornati comandi e scorciatoie', 'Help/README: updated commands and shortcuts')
+    ]
+  },
+  {
+    version: '1.0.8',
+    date: '2025-12-23',
+    type: 'minor',
+    notes: [
+      n(
+        'Modifica selezione: inclusi anche i collegamenti (se selezionati o tra oggetti selezionati) + controllo “Scala uguale per tutti” per aggiornare in blocco gli oggetti',
+        'Edit selection: includes links too (selected or between selected objects) + “Set same scale for all” bulk control for objects'
+      )
+    ]
+  },
+  {
+    version: '1.0.7',
+    date: '2025-12-23',
+    type: 'minor',
+    notes: [
+      n(
+        'Interazioni canvas: box selection stile desktop (trascina con sinistro su area vuota) + pan con tasto centrale o Cmd/Alt + click destro',
+        'Canvas interactions: desktop-like box selection (left-drag on empty area) + pan with middle mouse or Cmd/Alt + right-click'
+      )
+    ]
+  },
+  {
+    version: '1.0.6',
+    date: '2025-12-23',
+    type: 'minor',
+    notes: [
+      n(
+        'Selezione multipla: la matita in alto apre una lista degli oggetti selezionati; clic su un oggetto per modificarlo e ritorno automatico alla lista',
+        'Multi-select: the top pencil opens a list of selected objects; click an item to edit it and automatically return to the list'
+      )
+    ]
+  },
+  {
+    version: '1.0.5',
+    date: '2025-12-23',
+    type: 'minor',
+    notes: [
+      n(
+        'Selezione multipla: aggiunta selezione a riquadro con Cmd+trascina (macOS) o Alt+trascina (Windows/Linux)',
+        'Multi-select: added box selection with Cmd+drag (macOS) or Alt+drag (Windows/Linux)'
+      ),
+      n(
+        'Collegamenti: migliorata la selezione aumentando l’area di click su tutta la linea',
+        'Links: improved selection by increasing the clickable hit area along the whole line'
+      ),
+      n('Aiuto: aggiunta sezione scorciatoie da tastiera (IT/EN)', 'Help: added keyboard shortcuts section (IT/EN)')
+    ]
+  },
+  {
     version: '1.0.4',
     date: '2025-12-22',
     type: 'minor',

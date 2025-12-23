@@ -81,9 +81,14 @@ New passwords must be **strong**:
 - Select / multi-select:
   - click to select
   - Ctrl/⌘ to multi-select
+  - Ctrl/⌘ + A selects all objects in the floor plan
+  - left-drag on an empty area to box-select (desktop-like)
   - Esc clears selection
   - Arrow keys nudge selected objects
   - Delete key opens a confirm dialog (Enter confirms, Esc cancels)
+- Quick edit (multi-selection):
+  - the top pencil opens a list that includes selected objects and the links between them
+  - you can apply the same scale to all selected objects from the list
 - Object operations (right click / context menu):
   - edit name/description
   - duplicate (asks for new name/description; placed next to original)
@@ -95,12 +100,13 @@ New passwords must be **strong**:
   - the label shows first name and last name on two lines
 - Pan & zoom:
   - zoom controls (+ / -)
-  - pan the map (background + objects move together)
+  - pan the map (background + objects move together) using the **middle mouse button** or **Cmd/Alt + right-click**
   - viewport is persisted per floor plan (reload-safe)
 - Layers, grid and links:
   - assign objects to one or more **layers** and toggle visibility (work by “layers”)
   - optional **grid overlay** and configurable **grid snapping**
   - create **links** (arrows) between objects from the context menu
+  - **double-click a link** to edit name/description and style (**color / width / dashed**)
 - Rooms:
   - create **rectangle** or **polygon** rooms
   - resize/edit room shape
