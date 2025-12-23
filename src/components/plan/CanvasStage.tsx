@@ -158,6 +158,14 @@ const CanvasStageImpl = (
   const [draftPolyPoints, setDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
   const [draftPolyPointer, setDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
   const draftPolyRaf = useRef<number | null>(null);
+  const panRaf = useRef<number | null>(null);
+  const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
+  const selectionBoxRaf = useRef<number | null>(null);
+  const pendingSelectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const draftRectRaf = useRef<number | null>(null);
+  const pendingDraftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const draftPrintRectRaf = useRef<number | null>(null);
+  const pendingDraftPrintRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   useImperativeHandle(
     ref,
@@ -364,6 +372,9 @@ const CanvasStageImpl = (
     if (roomDrawMode) return;
     draftOrigin.current = null;
     setDraftRect(null);
+    if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
+    draftRectRaf.current = null;
+    pendingDraftRectRef.current = null;
     setDraftPolyPoints([]);
     setDraftPolyPointer(null);
     if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
@@ -386,6 +397,10 @@ const CanvasStageImpl = (
   useEffect(() => {
     return () => {
       if (wheelCommitTimer.current) window.clearTimeout(wheelCommitTimer.current);
+      if (panRaf.current) cancelAnimationFrame(panRaf.current);
+      if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
+      if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
+      if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
     };
   }, []);
 
@@ -539,13 +554,29 @@ const CanvasStageImpl = (
     if (!pos || !panOrigin.current) return;
     const rawPan = { x: pos.x - panOrigin.current.x, y: pos.y - panOrigin.current.y };
     const nextPan = clampPan(viewportRef.current.zoom, rawPan);
-    viewportRef.current = { zoom: viewportRef.current.zoom, pan: nextPan };
-    applyStageTransform(viewportRef.current.zoom, nextPan);
+    pendingPanRef.current = nextPan;
+    if (panRaf.current) return;
+    panRaf.current = requestAnimationFrame(() => {
+      panRaf.current = null;
+      const p = pendingPanRef.current;
+      pendingPanRef.current = null;
+      if (!p) return;
+      viewportRef.current = { zoom: viewportRef.current.zoom, pan: p };
+      applyStageTransform(viewportRef.current.zoom, p);
+    });
   };
 
   const endPan = () => {
     setIsPanning(false);
     panOrigin.current = null;
+    if (panRaf.current) cancelAnimationFrame(panRaf.current);
+    panRaf.current = null;
+    if (pendingPanRef.current) {
+      const p = pendingPanRef.current;
+      pendingPanRef.current = null;
+      viewportRef.current = { zoom: viewportRef.current.zoom, pan: p };
+      applyStageTransform(viewportRef.current.zoom, p);
+    }
     commitViewport(viewportRef.current.zoom, viewportRef.current.pan);
   };
 
@@ -566,7 +597,15 @@ const CanvasStageImpl = (
     const y = Math.min(y1, y2);
     const width = Math.abs(x2 - x1);
     const height = Math.abs(y2 - y1);
-    setSelectionBox({ x, y, width, height });
+    pendingSelectionBoxRef.current = { x, y, width, height };
+    if (selectionBoxRaf.current) return true;
+    selectionBoxRaf.current = requestAnimationFrame(() => {
+      selectionBoxRaf.current = null;
+      const next = pendingSelectionBoxRef.current;
+      pendingSelectionBoxRef.current = null;
+      if (!next) return;
+      setSelectionBox(next);
+    });
     return true;
   };
 
@@ -574,6 +613,9 @@ const CanvasStageImpl = (
     if (!selectionOrigin.current) return false;
     const rect = selectionBox;
     selectionOrigin.current = null;
+    if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
+    selectionBoxRaf.current = null;
+    pendingSelectionBoxRef.current = null;
     setSelectionBox(null);
     if (!rect || rect.width < 5 || rect.height < 5) return true;
     const minX = rect.x;
@@ -633,7 +675,15 @@ const CanvasStageImpl = (
     const y = Math.min(y1, y2);
     const width = Math.abs(x2 - x1);
     const height = Math.abs(y2 - y1);
-    setDraftRect({ x, y, width, height });
+    pendingDraftRectRef.current = { x, y, width, height };
+    if (draftRectRaf.current) return true;
+    draftRectRaf.current = requestAnimationFrame(() => {
+      draftRectRaf.current = null;
+      const next = pendingDraftRectRef.current;
+      pendingDraftRectRef.current = null;
+      if (!next) return;
+      setDraftRect(next);
+    });
     return true;
   };
 
@@ -653,7 +703,15 @@ const CanvasStageImpl = (
     const y = Math.min(y1, y2);
     const width = Math.abs(x2 - x1);
     const height = Math.abs(y2 - y1);
-    setDraftPrintRect({ x, y, width, height });
+    pendingDraftPrintRectRef.current = { x, y, width, height };
+    if (draftPrintRectRaf.current) return true;
+    draftPrintRectRaf.current = requestAnimationFrame(() => {
+      draftPrintRectRaf.current = null;
+      const next = pendingDraftPrintRectRef.current;
+      pendingDraftPrintRectRef.current = null;
+      if (!next) return;
+      setDraftPrintRect(next);
+    });
     return true;
   };
 
@@ -667,6 +725,9 @@ const CanvasStageImpl = (
       height: Math.max(0, draftRect.height)
     };
     draftOrigin.current = null;
+    if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
+    draftRectRaf.current = null;
+    pendingDraftRectRef.current = null;
     setDraftRect(null);
     if (rect.width < 20 || rect.height < 20) return true;
     onCreateRoom?.({ kind: 'rect', rect });
@@ -683,23 +744,23 @@ const CanvasStageImpl = (
       height: Math.max(0, draftPrintRect.height)
     };
     printOrigin.current = null;
+    if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
+    draftPrintRectRaf.current = null;
+    pendingDraftPrintRectRef.current = null;
     setDraftPrintRect(null);
     if (rect.width < 20 || rect.height < 20) return true;
     onSetPrintArea?.(rect);
     return true;
   };
 
-  const backPlate = useMemo(
-    () => (
+  const backPlate = useMemo(() => {
+    return (
       <Group>
         <Rect name="bg-rect" x={0} y={0} width={baseWidth} height={baseHeight} fill="#f8fafc" />
-        {bgImage ? (
-          <KonvaImage image={bgImage} width={baseWidth} height={baseHeight} opacity={0.96} listening={false} />
-        ) : null}
+        {bgImage ? <KonvaImage image={bgImage} width={baseWidth} height={baseHeight} opacity={0.96} listening={false} /> : null}
       </Group>
-    ),
-    [bgImage, baseWidth, baseHeight]
-  );
+    );
+  }, [bgImage, baseWidth, baseHeight]);
 
   const previewDraftPolyLine = useMemo(() => {
     if (roomDrawMode !== 'poly') return null;
@@ -740,6 +801,9 @@ const CanvasStageImpl = (
     if (printAreaMode) return;
     printOrigin.current = null;
     setDraftPrintRect(null);
+    if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
+    draftPrintRectRaf.current = null;
+    pendingDraftPrintRectRef.current = null;
   }, [printAreaMode]);
 
   const selectedBounds = useMemo(() => {
@@ -810,7 +874,7 @@ const CanvasStageImpl = (
             ) : null}
             {hoverCard.obj.externalEmail ? (
               <div>
-                <span className="font-semibold text-slate-600">Email:</span> {hoverCard.obj.externalEmail}
+                <span className="font-semibold text-slate-600">{t({ it: 'Email', en: 'Email' })}:</span> {hoverCard.obj.externalEmail}
               </div>
             ) : null}
             {[hoverCard.obj.externalExt1, hoverCard.obj.externalExt2, hoverCard.obj.externalExt3].filter(Boolean).length ? (
@@ -843,7 +907,8 @@ const CanvasStageImpl = (
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
             selectionOrigin.current = { x: world.x, y: world.y };
-            setSelectionBox({ x: world.x, y: world.y, width: 0, height: 0 });
+            pendingSelectionBoxRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
+            setSelectionBox(pendingSelectionBoxRef.current);
             return;
           }
           if (isContextClick(e.evt)) return;
@@ -853,7 +918,8 @@ const CanvasStageImpl = (
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
             printOrigin.current = { x: world.x, y: world.y };
-            setDraftPrintRect({ x: world.x, y: world.y, width: 0, height: 0 });
+            pendingDraftPrintRectRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
+            setDraftPrintRect(pendingDraftPrintRectRef.current);
             return;
           }
           if (roomDrawMode === 'rect' && !readOnly && e.evt.button === 0) {
@@ -862,7 +928,8 @@ const CanvasStageImpl = (
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
             draftOrigin.current = { x: world.x, y: world.y };
-            setDraftRect({ x: world.x, y: world.y, width: 0, height: 0 });
+            pendingDraftRectRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
+            setDraftRect(pendingDraftRectRef.current);
             return;
           }
           if (roomDrawMode === 'poly' && !readOnly && e.evt.button === 0) {
@@ -1331,6 +1398,7 @@ const CanvasStageImpl = (
                 ? `${String((obj as any).firstName || '').trim()}\n${String((obj as any).lastName || '').trim()}`.trim()
                 : obj.name;
             const labelLines = labelText.includes('\n') ? 2 : 1;
+            const labelBaseOffset = labelLines === 2 ? 22 : 12;
             return (
               <Group
                 key={obj.id}
@@ -1408,7 +1476,7 @@ const CanvasStageImpl = (
                 <Text
                   text={labelText}
                   x={-80}
-                  y={-(18 * scale) - (labelLines === 2 ? 22 : 12)}
+                  y={-(18 * scale) - labelBaseOffset * scale}
                   width={160}
                   align="center"
                   fontStyle="bold"
