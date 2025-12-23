@@ -1189,7 +1189,12 @@ const PlanView = ({ planId }: Props) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           currentConfirm.forEach((id) => deleteObject(id));
-          push(currentConfirm.length === 1 ? 'Oggetto eliminato' : 'Oggetti eliminati', 'info');
+          push(
+            currentConfirm.length === 1
+              ? t({ it: 'Oggetto eliminato', en: 'Object deleted' })
+              : t({ it: 'Oggetti eliminati', en: 'Objects deleted' }),
+            'info'
+          );
           setConfirmDelete(null);
           setContextMenu(null);
           clearSelection();
@@ -2442,7 +2447,11 @@ const PlanView = ({ planId }: Props) => {
         >
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
             <span className="font-semibold text-ink">{t({ it: 'Menu', en: 'Menu' })}</span>
-            <button onClick={() => setContextMenu(null)} className="text-slate-400 hover:text-ink">
+            <button
+              onClick={() => setContextMenu(null)}
+              className="text-slate-400 hover:text-ink"
+              title={t({ it: 'Chiudi', en: 'Close' })}
+            >
               <X size={14} />
             </button>
           </div>
@@ -3372,7 +3381,13 @@ const PlanView = ({ planId }: Props) => {
             name: 'Salvataggio',
             description: note
           });
-          push(`Revisione salvata: Rev ${next.major}.${next.minor}`, 'success');
+          push(
+            t({
+              it: `Revisione salvata: Rev ${next.major}.${next.minor}`,
+              en: `Revision saved: Rev ${next.major}.${next.minor}`
+            }),
+            'success'
+          );
           postAuditEvent({
             event: 'revision_save',
             scopeType: 'plan',

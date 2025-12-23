@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, Room, Site } from './types';
 import { defaultData, defaultObjectTypes } from './data';
+import { useAuthStore } from './useAuthStore';
 
 interface DataState {
   clients: Client[];
@@ -232,13 +233,14 @@ const nextRev = (plan: FloorPlan, bump: 'major' | 'minor') => {
 const snapshotRevision = (
   plan: FloorPlan,
   rev: { major: number; minor: number },
-  payload?: { name?: string; description?: string }
+  payload?: { name?: string; description?: string; createdBy?: FloorPlanRevision['createdBy'] }
 ): FloorPlanRevision => {
   const now = Date.now();
   const baseName = payload?.name?.trim() || 'Snapshot';
   return {
     id: nanoid(),
     createdAt: now,
+    ...(payload?.createdBy ? { createdBy: payload.createdBy } : {}),
     revMajor: rev.major,
     revMinor: rev.minor,
     name: baseName,
@@ -654,11 +656,16 @@ export const useDataStore = create<DataState>()(
       },
       addRevision: (floorPlanId, payload) => {
         const id = nanoid();
+        const actor = (() => {
+          const u = useAuthStore.getState().user as any;
+          if (!u) return undefined;
+          return { id: String(u.id), username: String(u.username), firstName: String(u.firstName || ''), lastName: String(u.lastName || '') };
+        })();
         set((state) => ({
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => {
             const bump = payload?.bump || 'minor';
             const rev = (plan.revisions || []).length ? nextRev(plan, bump) : { major: 1, minor: 0 };
-            const revision = snapshotRevision(plan, rev, payload);
+            const revision = snapshotRevision(plan, rev, { ...payload, ...(actor ? { createdBy: actor } : {}) });
             revision.id = id;
             const existing = plan.revisions || [];
             return { ...plan, revisions: [revision, ...existing] };

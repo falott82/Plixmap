@@ -123,6 +123,7 @@ export interface FloorPlanView {
 export interface FloorPlanRevision {
   id: string;
   createdAt: number;
+  createdBy?: { id: string; username: string; firstName: string; lastName: string };
   revMajor?: number;
   revMinor?: number;
   name: string;
