@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Copy, Crop, History, Info, Map as MapIcon, MapPinned, Search, Star, Trash } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, Crop, FileText, History, Info, Map as MapIcon, MapPinned, Paperclip, Search, Star, Trash } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -9,6 +9,8 @@ import { shallow } from 'zustand/shallow';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
 import ClientInfoModal from './ClientInfoModal';
+import ClientAttachmentsModal from './ClientAttachmentsModal';
+import ClientNotesModal from './ClientNotesModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import CloneFloorPlanModal from './CloneFloorPlanModal';
 
@@ -110,7 +112,7 @@ const SidebarTree = () => {
   const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuthStore();
+  const { user, permissions } = useAuthStore();
   const defaultPlanId = (user as any)?.defaultPlanId as string | null | undefined;
   const clientOrder = (((user as any)?.clientOrder || []) as string[]).filter((x) => typeof x === 'string');
   const [treeQuery, setTreeQuery] = useState('');
@@ -118,6 +120,8 @@ const SidebarTree = () => {
   const [clientMenu, setClientMenu] = useState<{ clientId: string; x: number; y: number } | null>(null);
   const [siteMenu, setSiteMenu] = useState<{ siteName: string; coords?: string; x: number; y: number } | null>(null);
   const [clientInfoId, setClientInfoId] = useState<string | null>(null);
+  const [clientNotesId, setClientNotesId] = useState<string | null>(null);
+  const [clientAttachmentsId, setClientAttachmentsId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ kind: 'client' | 'plan'; id: string; label: string } | null>(null);
   const [clonePlan, setClonePlan] = useState<{ planId: string; name: string } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -130,6 +134,26 @@ const SidebarTree = () => {
       [clientInfoId]
     )
   );
+  const notesClient = useDataStore(
+    useMemo(
+      () => (s: any) => (clientNotesId ? s.clients.find((c: any) => c.id === clientNotesId) : null),
+      [clientNotesId]
+    )
+  );
+  const attachmentsClient = useDataStore(
+    useMemo(
+      () => (s: any) => (clientAttachmentsId ? s.clients.find((c: any) => c.id === clientAttachmentsId) : null),
+      [clientAttachmentsId]
+    )
+  );
+  const updateClient = useDataStore((s: any) => s.updateClient);
+
+  const canEditClientNotes = useMemo(() => {
+    if (!clientNotesId) return false;
+    if (user?.isAdmin) return true;
+    const p = (permissions || []).find((x: any) => x.scopeType === 'client' && x.scopeId === clientNotesId);
+    return p?.access === 'rw';
+  }, [clientNotesId, permissions, user?.isAdmin]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -350,7 +374,16 @@ const SidebarTree = () => {
                       >
                         <MapIcon size={16} className="text-primary" />
                         <span className="truncate">{plan.name}</span>
-                        {isDefault ? <Star size={14} className="text-amber-500" /> : null}
+                        {isDefault ? (
+                          <span
+                            title={t({
+                              it: 'Planimetria predefinita: all’avvio Deskly caricherà automaticamente questa planimetria.',
+                              en: 'Default floor plan: on startup, Deskly will automatically load this floor plan.'
+                            })}
+                          >
+                            <Star size={14} className="text-amber-500" />
+                          </span>
+                        ) : null}
                         <span
                           className={`ml-auto flex h-7 w-7 items-center justify-center rounded-lg border ${
                             hasPrintArea ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-400'
@@ -520,6 +553,28 @@ const SidebarTree = () => {
                 <Info size={14} className="text-slate-500" />
                 {t({ it: 'Info cliente', en: 'Client info' })}
               </button>
+              <button
+                onClick={() => {
+                  setClientAttachmentsId(clientMenu.clientId);
+                  setClientMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({ it: 'Apri l’elenco allegati PDF del cliente', en: 'Open the client PDF attachments list' })}
+              >
+                <Paperclip size={14} className="text-slate-500" />
+                {t({ it: 'Allegati', en: 'Attachments' })}
+              </button>
+              <button
+                onClick={() => {
+                  setClientNotesId(clientMenu.clientId);
+                  setClientMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({ it: 'Aggiungi note formattate per questo cliente', en: 'Add formatted notes for this client' })}
+              >
+                <FileText size={14} className="text-slate-500" />
+                {t({ it: 'Note cliente', en: 'Client notes' })}
+              </button>
               {user?.isAdmin ? (
                 <button
                   onClick={() => {
@@ -565,6 +620,17 @@ const SidebarTree = () => {
       ) : null}
 
       <ClientInfoModal open={!!clientInfoId} client={fullClient || undefined} onClose={() => setClientInfoId(null)} />
+      <ClientAttachmentsModal open={!!clientAttachmentsId} client={attachmentsClient || undefined} onClose={() => setClientAttachmentsId(null)} />
+      <ClientNotesModal
+        open={!!clientNotesId}
+        client={notesClient || undefined}
+        readOnly={!canEditClientNotes}
+        onClose={() => setClientNotesId(null)}
+        onSave={(payload) => {
+          if (!clientNotesId) return;
+          updateClient(clientNotesId, payload);
+        }}
+      />
 
       <CloneFloorPlanModal
         open={!!clonePlan}
