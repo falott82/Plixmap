@@ -9,6 +9,436 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.2.14',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Workspace: avviso su refresh/chiusura pagina se ci sono modifiche non salvate',
+        'Workspace: warns on refresh/close when there are unsaved changes'
+      ),
+      n(
+        'Workspace: collegamenti (arrow) ora mostrano il nome sopra la linea come i cablaggi',
+        'Workspace: arrow links now display their label above the line (like cables)'
+      ),
+      n(
+        'Stanze: clic su un oggetto interrompe la creazione della stanza (rettangolo/poligono)',
+        'Rooms: clicking an object cancels room creation (rectangle/polygon)'
+      ),
+      n(
+        'Palette: nella modale “Mostra tutti” tasto destro → aggiungi alla barra laterale',
+        'Palette: in the “Show all” modal, right-click → add to sidebar'
+      ),
+      n(
+        'Note cliente: export PDF più fedele per elenchi puntati/numerati (marker espliciti)',
+        'Client notes: more faithful PDF export for bulleted/numbered lists (explicit markers)'
+      ),
+      n(
+        'Viste: fix caricamento vista di default dopo ritorno dai Settings (auto-fit non sovrascrive)',
+        'Views: fixed default view restore after returning from Settings (auto-fit no longer overrides)'
+      )
+    ]
+  },
+  {
+    version: '1.2.13',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: resize immagini migliorato (selezione affidabile + maniglie con cursore resize)',
+        'Client notes: improved image resizing (reliable selection + resize handles with cursors)'
+      )
+    ]
+  },
+  {
+    version: '1.2.12',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: abilitate error boundary Lexical per individuare errori runtime (incluso rendering immagini)',
+        'Client notes: enabled Lexical error boundary to surface runtime errors (including image rendering)'
+      )
+    ]
+  },
+  {
+    version: '1.2.11',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: rework ImageNode (DecoratorBlockNode + $insertNodeToNearestRoot) per rendere le immagini sempre visibili in editor',
+        'Client notes: reworked ImageNode (DecoratorBlockNode + $insertNodeToNearestRoot) to make images always visible in the editor'
+      )
+    ]
+  },
+  {
+    version: '1.2.10',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: fix definitivo inserimento immagini (ImageNode ora usa $applyNodeReplacement e DOM contentEditable=false)',
+        'Client notes: definitive fix for image insertion (ImageNode now uses $applyNodeReplacement and DOM contentEditable=false)'
+      )
+    ]
+  },
+  {
+    version: '1.2.9',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: fix rendering immagini (ImageNode ora è inline e non inserisce blocchi dentro span)',
+        'Client notes: fixed image rendering (ImageNode is now inline and avoids block elements inside spans)'
+      ),
+      n(
+        'Note cliente: tasto destro su tabella seleziona automaticamente la cella e apre “Gestisci tabella”',
+        'Client notes: right-click on a table auto-selects a cell and opens “Manage table”'
+      )
+    ]
+  },
+  {
+    version: '1.2.8',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: fix immagini non visibili in editor (serializzazione ImageNode corretta)',
+        'Client notes: fixed images not rendering in editor (correct ImageNode serialization)'
+      ),
+      n(
+        'Note cliente: tasto destro su tabella apre “Gestisci tabella” (righe/colonne/elimina)',
+        'Client notes: right-click on a table opens “Manage table” (rows/columns/delete)'
+      )
+    ]
+  },
+  {
+    version: '1.2.7',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: fix menu contestuale (duplica/copia) che rimaneva bloccato e non eseguiva le azioni',
+        'Client notes: fixed context menu (duplicate/copy) that could get stuck and not execute actions'
+      ),
+      n(
+        'Note cliente: toolbar Lexical più “playground-like” con menu Inserisci (linea orizzontale, immagine, tabella) e controlli dimensione ±',
+        'Client notes: more “playground-like” Lexical toolbar with an Insert menu (horizontal rule, image, table) and size ± controls'
+      )
+    ]
+  },
+  {
+    version: '1.2.6',
+    date: '2025-12-24',
+    type: 'minor',
+    notes: [
+      n(
+        'Note cliente: passaggio nota dopo “Salva” corretto (non resetta più alla prima nota)',
+        'Client notes: switching notes after “Save” fixed (no longer resets to the first note)'
+      ),
+      n(
+        'Note cliente: immagini visibili anche quando la nota viene importata da HTML (fallback) + resize come prima',
+        'Client notes: images now render even when the note is imported from HTML (fallback) + resizing works as before'
+      ),
+      n(
+        'Note cliente: gestione tabella (aggiungi/elimina righe e colonne) + font moderni aggiuntivi',
+        'Client notes: table management (add/delete rows and columns) + extra modern fonts'
+      ),
+      n(
+        'Note cliente: ricerca anche nel testo, duplicazione, drag&drop riordino, copia su altro cliente',
+        'Client notes: search inside text, duplication, drag&drop reorder, copy to another client'
+      ),
+      n(
+        'Changelog: si chiude cliccando fuori (come Info)',
+        'Changelog: closes on outside click (like Info)'
+      ),
+      n(
+        'Tooltip: stellina planimetria predefinita spiega il comportamento all’avvio',
+        'Tooltip: default floor plan star explains startup behavior'
+      )
+    ]
+  },
+  {
+    version: '1.2.5',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: modale “Inserisci link” (niente prompt) + Cmd/Ctrl+Click per aprire i link in nuova tab',
+        'Client notes: “Insert link” modal (no prompt) + Cmd/Ctrl+Click to open links in a new tab'
+      )
+    ]
+  },
+  {
+    version: '1.2.4',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: fix definitivo “Nuova nota” (il campo titolo ora accetta input anche con la modale aperta)',
+        'Client notes: final fix for “New note” (title input now accepts typing while the modal is open)'
+      )
+    ]
+  },
+  {
+    version: '1.2.3',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: fix focus “Nuova nota” (autofocus sul titolo) e focus automatico nell’editor dopo la creazione',
+        'Client notes: fixed “New note” focus (autofocus on title) and automatic editor focus after creation'
+      )
+    ]
+  },
+  {
+    version: '1.2.2',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: fix eliminazione note (non chiude la modale, elimina davvero anche dopo migrazione; mostra titolo nella conferma)',
+        'Client notes: fixed note deletion (does not close the modal, actually deletes even after migration; shows the note title in the confirmation)'
+      ),
+      n(
+        'Note cliente: migrazione automatica legacy → note multiple con pulizia dei campi legacy, per evitare che la “nota legacy” riappaia',
+        'Client notes: automatic legacy → multi-notes migration with legacy fields cleared, preventing the “legacy note” from reappearing'
+      ),
+      n('UI: finestra Note cliente leggermente più larga', 'UI: slightly wider Client notes window')
+    ]
+  },
+  {
+    version: '1.2.1',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: nuova modale “Nuova nota” curata (niente prompt browser) + click su qualsiasi punto dell’area editor mette focus e puoi scrivere subito',
+        'Client notes: polished “New note” modal (no browser prompt) + clicking anywhere in the editor area focuses and you can type immediately'
+      ),
+      n(
+        'Note cliente: toolbar Lexical evoluta con stile paragrafo (H1/H2/H3/quote), font family e font size',
+        'Client notes: upgraded Lexical toolbar with paragraph style (H1/H2/H3/quote), font family and font size'
+      ),
+      n(
+        'Note cliente: elimina nota non richiede salvataggio (scarta eventuali modifiche locali)',
+        'Client notes: deleting a note does not require saving (local edits are discarded)'
+      )
+    ]
+  },
+  {
+    version: '1.2.0',
+    date: '2025-12-24',
+    type: 'minor',
+    notes: [
+      n(
+        'Note cliente: rework completo con supporto multi-note per cliente (titolo, lista, ricerca, creazione, eliminazione) + conferme su chiusura/cambio nota con modifiche non salvate',
+        'Client notes: full rework with multi-notes per client (title, list, search, create, delete) + prompts when closing/switching with unsaved changes'
+      ),
+      n(
+        'Backend: esternalizzazione immagini anche nelle note multiple (HTML e stato Lexical)',
+        'Backend: externalize images also inside multi-notes (HTML and Lexical state)'
+      )
+    ]
+  },
+  {
+    version: '1.1.0',
+    date: '2025-12-24',
+    type: 'major',
+    notes: [
+      n(
+        'Note cliente: migrazione editor a Lexical (liste, link, tabelle e immagini molto più stabili) con resize immagini “stile Word” e salvataggio anche dello stato Lexical',
+        'Client notes: migrated editor to Lexical (much more stable lists, links, tables and images) with Word-like image resizing and Lexical state persistence'
+      ),
+      n(
+        'Backend: esternalizzazione immagini anche dallo stato Lexical (data:image → /uploads) per evitare JSON enormi',
+        'Backend: externalize images from Lexical state too (data:image → /uploads) to avoid huge JSON payloads'
+      ),
+      n(
+        'Selezione multipla: “Scala a tutti” in Modifica rapida oggetti ora aggiorna tutti in modo affidabile e imposta la scala default per i nuovi oggetti',
+        'Multi-selection: “Scale for all” in Quick edit objects now updates all reliably and sets the default scale for new objects'
+      ),
+      n(
+        'Menu oggetto: mostrato il valore numerico della scala nel menu tasto destro',
+        'Object menu: shows the numeric scale value in the right-click menu'
+      )
+    ]
+  },
+  {
+    version: '1.0.24',
+    date: '2025-12-24',
+    type: 'minor',
+    notes: [
+      n(
+        'Modifica rapida oggetti: aggiunta “Scala a tutti” (applica la scala a tutti i selezionati e la salva come default per i nuovi oggetti)',
+        'Quick edit objects: added “Scale for all” (applies scale to all selected and saves it as default for new objects)'
+      ),
+      n(
+        'Note cliente: elenco numerato reso più stabile forzando list-style inline (decimal/disc)',
+        'Client notes: numbered list made more stable by forcing inline list-style (decimal/disc)'
+      )
+    ]
+  },
+  {
+    version: '1.0.23',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: aggiunto pulsante “Rimuovi elenco” per trasformare UL/OL in testo semplice prima di riapplicare puntato/numerato',
+        'Client notes: added “Remove list” button to convert UL/OL into plain text before re-applying bulleted/numbered lists'
+      )
+    ]
+  },
+  {
+    version: '1.0.22',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: fix conversione elenchi per selezioni “multi-riga” in cui il browser incapsula le righe in DIV contenitore (ora genera un punto/numero per ogni riga)',
+        'Client notes: fixed list conversion for multi-line selections where the browser wraps lines in a container DIV (now creates one bullet/number per line)'
+      )
+    ]
+  },
+  {
+    version: '1.0.21',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: conversione elenchi (puntato ↔ numerato) corretta anche quando la selezione è già dentro una lista',
+        'Client notes: list conversion (bulleted ↔ numbered) fixed also when the selection is already inside a list'
+      )
+    ]
+  },
+  {
+    version: '1.0.20',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: conversione elenchi resa “hard reset” (sostituisce la selezione con una nuova lista, azzerando elenchi misti) per evitare punti/numeri errati',
+        'Client notes: list conversion made a “hard reset” (replaces the selection with a fresh list, flattening mixed lists) to avoid wrong bullets/numbers'
+      )
+    ]
+  },
+  {
+    version: '1.0.19',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: rework conversione elenchi per selezione multi-riga (ora tutte le righe selezionate diventano puntate/numerate correttamente)',
+        'Client notes: reworked list conversion for multi-line selections (all selected lines become correctly bulleted/numbered)'
+      )
+    ]
+  },
+  {
+    version: '1.0.18',
+    date: '2025-12-24',
+    type: 'minor',
+    notes: [
+      n(
+        'Note cliente: “Salva” non chiude più la modale, mostra “Ultimo salvataggio” con data/utente e chiede conferma se chiudi con modifiche non salvate',
+        'Client notes: “Save” no longer closes the modal, shows “Last saved” with date/user and asks confirmation when closing with unsaved changes'
+      ),
+      n(
+        'Note cliente: caricamento allegati PDF direttamente dalla modale note',
+        'Client notes: upload PDF attachments directly from the notes modal'
+      ),
+      n(
+        'Export PDF note: aggiunti marker espliciti per elenchi puntati e numerati (html2canvas)',
+        'Notes PDF export: added explicit markers for bulleted and numbered lists (html2canvas)'
+      ),
+      n(
+        'Editor note: elenchi “forzati” su selezione mista (tutte le righe diventano puntate o numerate)',
+        'Notes editor: forced list conversion on mixed selections (all lines become bulleted or numbered)'
+      )
+    ]
+  },
+  {
+    version: '1.0.17',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: allineamento immagini (sx/centro/dx) ora funziona anche dentro le celle delle tabelle',
+        'Client notes: image alignment (left/center/right) now works also inside table cells'
+      )
+    ]
+  },
+  {
+    version: '1.0.16',
+    date: '2025-12-24',
+    type: 'minor',
+    notes: [
+      n(
+        'Note cliente: ridimensionamento immagini manuale con maniglie agli angoli (stile Word)',
+        'Client notes: manual image resizing with corner handles (Word-like)'
+      )
+    ]
+  },
+  {
+    version: '1.0.15',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: elenchi e link ora sono visibili (stile) e i link si aprono con Ctrl/Cmd+click; aggiunto pulsante “Rimuovi formattazione”',
+        'Client notes: lists and links are now visible (styling) and links open with Ctrl/Cmd+click; added “Clear formatting”'
+      ),
+      n(
+        'Note cliente: ridotta la persistenza di formattazione dopo la cancellazione di righe (pulizia formattazione vuota)',
+        'Client notes: reduced formatting “stickiness” after deleting lines (cleanup of empty formatting)'
+      )
+    ]
+  },
+  {
+    version: '1.0.14',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Note cliente: fix selezione editor per link ed elenchi (puntati/numerati) che ora funzionano correttamente',
+        'Client notes: fixed editor selection so links and lists (bulleted/numbered) work correctly'
+      ),
+      n('Clienti: menu tasto destro aggiunta voce “Allegati” per aprire/scaricare i PDF caricati', 'Clients: right-click menu added “Attachments” to open/download uploaded PDFs')
+    ]
+  },
+  {
+    version: '1.0.13',
+    date: '2025-12-24',
+    type: 'minor',
+    notes: [
+      n(
+        'Note cliente: aggiunti comandi per modificare tabelle (aggiungi/elimina righe e colonne) e ridimensionare immagini',
+        'Client notes: added controls to edit tables (add/delete rows and columns) and resize images'
+      ),
+      n('Note cliente: export PDF delle note', 'Client notes: PDF export for notes')
+    ]
+  },
+  {
+    version: '1.0.12',
+    date: '2025-12-24',
+    type: 'minor',
+    notes: [
+      n(
+        'Clienti: aggiunte “Note cliente” (menu tasto destro) con editor formattato stile word (testo, immagini, tabelle) e salvataggio nello stato',
+        'Clients: added “Client notes” (right-click menu) with a word-like rich editor (text, images, tables) stored in state'
+      ),
+      n(
+        'Backend: immagini inserite nelle note vengono esternalizzate in /uploads per evitare HTML/JSON enormi',
+        'Backend: embedded images inside notes are externalized to /uploads to avoid huge HTML/JSON payloads'
+      ),
+      n(
+        'Permessi: le note cliente sono modificabili da admin e da utenti con permesso cliente in lettura+scrittura',
+        'Permissions: client notes are editable by admins and by users with client-level read/write permission'
+      )
+    ]
+  },
+  {
     version: '1.0.11',
     date: '2025-12-23',
     type: 'minor',

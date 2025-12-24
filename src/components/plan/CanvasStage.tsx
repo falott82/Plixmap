@@ -1421,40 +1421,54 @@ const CanvasStageImpl = (
               );
             }
 
-            return (
-              <Arrow
-                key={link.id}
-                points={[from.x, from.y, to.x, to.y]}
-                stroke={stroke}
-                fill={stroke}
-                pointerLength={8}
-                pointerWidth={8}
-                strokeWidth={isSelected ? width + 1 : width}
-                hitStrokeWidth={Math.max(14, (isSelected ? width + 1 : width) + 10)}
-                opacity={0.85}
-                onClick={(e) => {
-                  e.cancelBubble = true;
-                  onSelectLink?.(link.id);
-                }}
-                onDblClick={(e) => {
-                  e.cancelBubble = true;
-                  if (!onLinkDblClick) return;
-                  if (readOnly) return;
-                  onSelectLink?.(link.id);
-                  onLinkDblClick(link.id);
-                }}
-                onContextMenu={(e) => {
-                  e.evt.preventDefault();
-                  e.cancelBubble = true;
-                  if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
-                  if (!onLinkContextMenu) return;
-                  onSelectLink?.(link.id);
-                  onLinkContextMenu({ id: link.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
-                }}
-              />
-            );
-          })}
-        </Layer>
+	            return (
+	              <Group key={link.id}>
+	                <Arrow
+	                  points={[from.x, from.y, to.x, to.y]}
+	                  stroke={stroke}
+	                  fill={stroke}
+	                  pointerLength={8}
+	                  pointerWidth={8}
+	                  strokeWidth={isSelected ? width + 1 : width}
+	                  hitStrokeWidth={Math.max(14, (isSelected ? width + 1 : width) + 10)}
+	                  opacity={0.85}
+	                  onClick={(e) => {
+	                    e.cancelBubble = true;
+	                    onSelectLink?.(link.id);
+	                  }}
+	                  onDblClick={(e) => {
+	                    e.cancelBubble = true;
+	                    if (!onLinkDblClick) return;
+	                    if (readOnly) return;
+	                    onSelectLink?.(link.id);
+	                    onLinkDblClick(link.id);
+	                  }}
+	                  onContextMenu={(e) => {
+	                    e.evt.preventDefault();
+	                    e.cancelBubble = true;
+	                    if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+	                    if (!onLinkContextMenu) return;
+	                    onSelectLink?.(link.id);
+	                    onLinkContextMenu({ id: link.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+	                  }}
+	                />
+	                {String(link.name || link.label || '').trim() ? (
+	                  <Text
+	                    text={String(link.name || link.label || '').trim()}
+	                    x={(from.x + to.x) / 2 - 120}
+	                    y={(from.y + to.y) / 2 - 18}
+	                    width={240}
+	                    align="center"
+	                    fontSize={11}
+	                    fontStyle="bold"
+	                    fill="#0f172a"
+	                    listening={false}
+	                  />
+	                ) : null}
+	              </Group>
+	            );
+	          })}
+	        </Layer>
 
         {/* Objects layer */}
         <Layer perfectDrawEnabled={false} ref={objectsLayerRef}>

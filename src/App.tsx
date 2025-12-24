@@ -74,10 +74,37 @@ const App = () => {
   const saveInFlight = useRef(false);
   const saveQueued = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const hasUnsavedEditsRef = useRef(false);
+  const unsubscribeUnsavedRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     hydrateAuth();
   }, [hydrateAuth]);
+
+  useEffect(() => {
+    // Keep a cheap ref so we can warn on refresh/close without re-rendering App.
+    if (unsubscribeUnsavedRef.current) unsubscribeUnsavedRef.current();
+    unsubscribeUnsavedRef.current = useUIStore.subscribe((state) => {
+      const dirtyByPlan = (state as any)?.dirtyByPlan || {};
+      hasUnsavedEditsRef.current = Object.values(dirtyByPlan).some(Boolean);
+    });
+    return () => {
+      if (unsubscribeUnsavedRef.current) unsubscribeUnsavedRef.current();
+      unsubscribeUnsavedRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!user) return;
+      if (!hasUnsavedEditsRef.current) return;
+      e.preventDefault();
+      // Modern browsers show a generic confirmation message.
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [user]);
 
   useEffect(() => {
     if (!authHydrated) return;

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileDown, History, Search, X } from 'lucide-react';
 import { releaseHistory } from '../../version/history';
 import { exportChangelogToPdf } from '../../utils/pdf';
@@ -9,6 +9,21 @@ const VersionBadge = () => {
   const [query, setQuery] = useState('');
   const t = useT();
   const lang = useLang();
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const el = ref.current;
+      if (!el) return;
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (el.contains(target)) return;
+      setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [open]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
@@ -20,7 +35,7 @@ const VersionBadge = () => {
   const latest = releaseHistory[0];
 
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-ink shadow-card hover:bg-slate-50"
