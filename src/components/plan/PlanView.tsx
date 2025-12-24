@@ -36,6 +36,7 @@ import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
+import { updateMyProfile } from '../../api/auth';
 import VersionBadge from '../ui/VersionBadge';
 import UserMenu from '../layout/UserMenu';
 import ViewModal from './ViewModal';
@@ -69,9 +70,9 @@ interface Props {
 const PlanView = ({ planId }: Props) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasStageRef = useRef<CanvasStageHandle | null>(null);
-  const fitApplied = useRef<string | null>(null);
   const t = useT();
   const lang = useLang();
+  const [autoFitEnabled, setAutoFitEnabled] = useState(true);
   const {
     addObject,
     updateObject,
@@ -928,26 +929,33 @@ const PlanView = ({ planId }: Props) => {
   }, [planId, setSelectedPlan]);
 
   useEffect(() => {
+    // Reset auto-fit whenever a different plan is opened.
+    setAutoFitEnabled(true);
+  }, [planId]);
+
+  useEffect(() => {
     if (!renderPlan) return;
     if (viewportInitRef.current === planId) return;
     viewportInitRef.current = planId;
 
     const def = renderPlan?.views?.find((v) => v.isDefault);
     if (def) {
+      setAutoFitEnabled(false);
       setZoom(def.zoom);
       setPan(def.pan);
       saveViewport(planId, def.zoom, def.pan);
-      fitApplied.current = planId;
       setSelectedViewId(def.id);
       return;
     }
     const saved = loadViewport(planId);
     if (saved) {
+      setAutoFitEnabled(false);
       setZoom(saved.zoom);
       setPan(saved.pan);
-      fitApplied.current = planId;
       setSelectedViewId('__last__');
+      return;
     }
+    setAutoFitEnabled(true);
   }, [loadViewport, planId, renderPlan, saveViewport, setPan, setZoom]);
 
   useEffect(() => {
@@ -974,6 +982,12 @@ const PlanView = ({ planId }: Props) => {
 
 	  const handleStageSelect = useCallback(
 	    (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => {
+	      // If the user is drawing a room (especially polygon mode) and clicks an object,
+	      // treat it as an explicit cancel of the drawing gesture.
+	      if (roomDrawMode && id) {
+	        setRoomDrawMode(null);
+	        setNewRoomMenuOpen(false);
+	      }
 	      if (linkFromId && id && planRef.current && !isReadOnlyRef.current) {
 	        if (id !== linkFromId) {
 	          markTouched();
@@ -1006,11 +1020,22 @@ const PlanView = ({ planId }: Props) => {
           setSelectedObject(id);
         }
       }
-      if (!options?.keepContext) {
-        setContextMenu(null);
-      }
+	      if (!options?.keepContext) {
+	        setContextMenu(null);
+	      }
 	    },
-	    [addLink, clearSelection, linkCreateMode, linkFromId, markTouched, push, setSelectedObject, t, toggleSelectedObject]
+	    [
+	      addLink,
+	      clearSelection,
+	      linkCreateMode,
+	      linkFromId,
+	      markTouched,
+	      push,
+	      roomDrawMode,
+	      setSelectedObject,
+	      t,
+	      toggleSelectedObject
+	    ]
 	  );
 
   const handleStageMove = useCallback(
@@ -1050,12 +1075,12 @@ const PlanView = ({ planId }: Props) => {
 
   const applyView = useCallback((view: FloorPlanView) => {
     if (!renderPlan) return;
+    setAutoFitEnabled(false);
     setZoom(view.zoom);
     setPan(view.pan);
     saveViewport(renderPlan.id, view.zoom, view.pan);
-    fitApplied.current = renderPlan.id;
     setSelectedViewId(view.id);
-  }, [renderPlan, saveViewport, setPan, setZoom]);
+  }, [renderPlan, saveViewport, setAutoFitEnabled, setPan, setZoom]);
 
   const handleSaveView = (payload: { name: string; description?: string; isDefault: boolean }) => {
     if (!plan || isReadOnly) return;
@@ -1317,6 +1342,25 @@ const PlanView = ({ planId }: Props) => {
     return all.some((id) => !fav.has(id));
   }, [objectTypeDefs, paletteOrder]);
 
+  const addTypeToPalette = useCallback(
+    async (typeId: string) => {
+      const user = useAuthStore.getState().user as any;
+      const enabled = Array.isArray(user?.paletteFavorites) ? (user.paletteFavorites as string[]) : [];
+      if (enabled.includes(typeId)) return;
+      const next = [...enabled, typeId];
+      try {
+        await updateMyProfile({ paletteFavorites: next });
+        useAuthStore.setState((s) =>
+          s.user ? ({ user: { ...s.user, paletteFavorites: next } as any, permissions: s.permissions, hydrated: s.hydrated } as any) : s
+        );
+        push(t({ it: 'Oggetto aggiunto alla palette', en: 'Object added to palette' }), 'success');
+      } catch {
+        push(t({ it: 'Salvataggio non riuscito', en: 'Save failed' }), 'danger');
+      }
+    },
+    [push, t]
+  );
+
   const mapAddMenuTypes = useMemo(() => {
     const defs = objectTypeDefs || [];
     if (!paletteHasCustom) return defs;
@@ -1513,8 +1557,20 @@ const PlanView = ({ planId }: Props) => {
     // live search only highlights on Enter to avoid loops
   };
 
-  const handleZoomChange = useCallback((value: number) => setZoom(value), [setZoom]);
-  const handlePanChange = useCallback((value: { x: number; y: number }) => setPan(value), [setPan]);
+  const handleZoomChange = useCallback(
+    (value: number) => {
+      setAutoFitEnabled(false);
+      setZoom(value);
+    },
+    [setZoom]
+  );
+  const handlePanChange = useCallback(
+    (value: { x: number; y: number }) => {
+      setAutoFitEnabled(false);
+      setPan(value);
+    },
+    [setPan]
+  );
 
   const renderObjectById = useMemo(
     () => new Map<string, any>((renderPlan?.objects || []).map((o) => [o.id, o])),
@@ -2424,10 +2480,10 @@ const PlanView = ({ planId }: Props) => {
                       showGrid={showGrid}
 				                zoom={zoom}
 				                pan={pan}
-				                autoFit={!fitApplied.current}
-		                onZoomChange={handleZoomChange}
-		                onPanChange={handlePanChange}
-			                onSelect={handleStageSelect}
+				                autoFit={autoFitEnabled}
+			                onZoomChange={handleZoomChange}
+			                onPanChange={handlePanChange}
+				                onSelect={handleStageSelect}
                     onSelectLink={(id) => {
                       setSelectedLinkId(id || null);
                       setContextMenu(null);
@@ -2716,6 +2772,9 @@ const PlanView = ({ planId }: Props) => {
                   <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
                     <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                       <MoveDiagonal size={14} /> {t({ it: 'Scala', en: 'Scale' })}
+                      <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
+                        {(contextObject?.scale ?? 1).toFixed(2)}
+                      </span>
                     </div>
 	                    <input
 	                      key={contextMenu.id}
@@ -3473,6 +3532,8 @@ const PlanView = ({ planId }: Props) => {
           setPendingType(typeId);
           push(t({ it: 'Seleziona un punto sulla mappa per inserire l’oggetto', en: 'Click on the map to place the object' }), 'info');
         }}
+        paletteTypeIds={paletteOrder}
+        onAddToPalette={addTypeToPalette}
       />
 
       <RevisionsModal

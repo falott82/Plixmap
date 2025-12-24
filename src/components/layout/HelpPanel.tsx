@@ -95,6 +95,36 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'Tasto destro su un cliente: puoi aprire Info cliente e Note cliente (note formattate con testo, immagini e tabelle).',
+                          en: 'Right-click a client: you can open Client info and Client notes (formatted notes with text, images and tables).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Note cliente: per modificare una tabella posiziona il cursore in una cella e usa i pulsanti “+ Riga/+ Col”. Per ridimensionare un’immagine cliccala e scegli la percentuale. Puoi anche esportare le note in PDF.',
+                          en: 'Client notes: to edit a table place the cursor in a cell and use the “+ Row/+ Col” buttons. To resize an image click it and choose a percentage. You can also export notes to PDF.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Ridimensionamento immagini: clicca un’immagine per selezionarla, poi trascina i pallini agli angoli (stile Word).',
+                          en: 'Image resizing: click an image to select it, then drag the corner handles (Word-like).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Link nelle note: per aprire un link senza uscire dall’editor usa Ctrl/Cmd+click sul collegamento.',
+                          en: 'Links in notes: to open a link without leaving the editor, use Ctrl/Cmd+click on it.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Nella modale Note cliente puoi anche gestire gli allegati PDF del cliente e vedere l’ultimo salvataggio. Se chiudi con modifiche non salvate viene chiesta conferma.',
+                          en: 'In the Client notes modal you can also manage the client PDF attachments and see the last saved info. If you close with unsaved changes, you will be prompted.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'Se un altro utente sta modificando la stessa planimetria, viene applicato un lock: tu la vedrai in sola lettura finché non viene sbloccata.',
                           en: 'If another user is editing the same floor plan, an exclusive lock is applied: you will see it in read-only until it is released.'
                         })}

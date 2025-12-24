@@ -160,6 +160,8 @@ const extForMime = (mime) => {
   if (mime === 'image/png') return 'png';
   if (mime === 'image/jpeg') return 'jpg';
   if (mime === 'image/jpg') return 'jpg';
+  if (mime === 'image/gif') return 'gif';
+  if (mime === 'image/webp') return 'webp';
   if (mime === 'application/pdf') return 'pdf';
   return null;
 };
@@ -181,6 +183,41 @@ const externalizeDataUrl = (dataUrl) => {
   }
 };
 
+const externalizeImagesInHtml = (html) => {
+  if (typeof html !== 'string' || !html.includes('data:image/')) return html;
+  return html.replace(/<img\b([^>]*?)\bsrc\s*=\s*"(data:image\/[^;"]+;base64,[^"]+)"([^>]*?)>/gi, (m, pre, dataUrl, post) => {
+    const url = externalizeDataUrl(dataUrl);
+    if (!url) return m;
+    return `<img${pre}src="${url}"${post}>`;
+  });
+};
+
+const externalizeImagesInLexicalState = (stateJson) => {
+  if (typeof stateJson !== 'string' || !stateJson.includes('data:image/')) return stateJson;
+  try {
+    const obj = JSON.parse(stateJson);
+    const walk = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (node.type === 'image' && typeof node.src === 'string' && node.src.startsWith('data:')) {
+        const url = externalizeDataUrl(node.src);
+        if (url) node.src = url;
+      }
+      for (const k of Object.keys(node)) {
+        const v = node[k];
+        if (Array.isArray(v)) {
+          for (const item of v) walk(item);
+        } else if (v && typeof v === 'object') {
+          walk(v);
+        }
+      }
+    };
+    walk(obj);
+    return JSON.stringify(obj);
+  } catch {
+    return stateJson;
+  }
+};
+
 const externalizeAssetsInClients = (clients) => {
   if (!Array.isArray(clients)) return;
   for (const client of clients) {
@@ -193,6 +230,22 @@ const externalizeAssetsInClients = (clients) => {
         if (a?.dataUrl && typeof a.dataUrl === 'string' && a.dataUrl.startsWith('data:')) {
           const url = externalizeDataUrl(a.dataUrl);
           if (url) a.dataUrl = url;
+        }
+      }
+    }
+    if (client?.notesHtml && typeof client.notesHtml === 'string' && client.notesHtml.includes('data:image/')) {
+      client.notesHtml = externalizeImagesInHtml(client.notesHtml);
+    }
+    if (client?.notesLexical && typeof client.notesLexical === 'string' && client.notesLexical.includes('data:image/')) {
+      client.notesLexical = externalizeImagesInLexicalState(client.notesLexical);
+    }
+    if (Array.isArray(client?.notes)) {
+      for (const note of client.notes) {
+        if (note?.notesHtml && typeof note.notesHtml === 'string' && note.notesHtml.includes('data:image/')) {
+          note.notesHtml = externalizeImagesInHtml(note.notesHtml);
+        }
+        if (note?.notesLexical && typeof note.notesLexical === 'string' && note.notesLexical.includes('data:image/')) {
+          note.notesLexical = externalizeImagesInLexicalState(note.notesLexical);
         }
       }
     }

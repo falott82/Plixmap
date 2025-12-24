@@ -146,6 +146,15 @@ export interface Site {
   floorPlans: FloorPlan[];
 }
 
+export interface ClientNote {
+  id: string;
+  title: string;
+  notesHtml?: string;
+  notesLexical?: string;
+  updatedAt?: number;
+  updatedBy?: { id: string; username: string };
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -157,6 +166,13 @@ export interface Client {
   vatId?: string;
   pecEmail?: string;
   description?: string;
+  // Legacy single-note fields (kept for migration/backward compatibility)
+  notesHtml?: string;
+  notesLexical?: string;
+  notesUpdatedAt?: number;
+  notesUpdatedBy?: { id: string; username: string };
+  // New multi-note model
+  notes?: ClientNote[];
   attachments?: { id: string; name: string; dataUrl: string }[];
   sites: Site[];
 }

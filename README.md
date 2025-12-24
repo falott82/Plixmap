@@ -53,6 +53,7 @@ New passwords must be **strong**:
 ### Settings (Admin / Superadmin)
 - CRUD for **Clients**, **Sites**, **Floor plans**
 - Client details: short name (shown in workspace), full legal name, address, VAT/PEC, phone, email, description
+- Client notes: right-click a client in the sidebar and open **Client notes** to write formatted documentation (text, images, tables) — powered by **Lexical** for Word-like stability; supports **multiple notes per client** (titles, create/delete, search); editable by admins and by users with **read/write** permission on that client; includes **Export PDF** and **PDF attachments management**
 - Client logo upload (auto-resized)
 - Client PDF attachments upload:
   - download
