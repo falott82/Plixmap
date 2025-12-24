@@ -9,6 +9,61 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.2.19',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Palette: menu tasto destro ora resta dentro lo schermo (posizionamento automatico)',
+        'Palette: right-click menu now stays within the viewport (auto positioning)'
+      )
+    ]
+  },
+  {
+    version: '1.2.18',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Palette: tasto destro su un oggetto → “Rimuovi da palette” (rimane disponibile in “Mostra tutti”)',
+        'Palette: right-click an item → “Remove from palette” (still available in “Show all”)'
+      )
+    ]
+  },
+  {
+    version: '1.2.17',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Stanze: selezionando un oggetto dalla palette mentre si disegna una stanza poligonale interrompe la creazione',
+        'Rooms: picking an object from the palette while drawing a polygon room now cancels the room creation'
+      )
+    ]
+  },
+  {
+    version: '1.2.16',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Settings → Area di lavoro: rientro forza la vista di default e pulisce l’URL (dv=1)',
+        'Settings → Workspace: return now forces the default view and cleans the URL (dv=1)'
+      )
+    ]
+  },
+  {
+    version: '1.2.15',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Workspace: tornando dai Settings, la planimetria ricarica sempre la vista di default (se impostata)',
+        'Workspace: returning from Settings now always reloads the default view (if set)'
+      )
+    ]
+  },
+  {
     version: '1.2.14',
     date: '2025-12-24',
     type: 'fix',
