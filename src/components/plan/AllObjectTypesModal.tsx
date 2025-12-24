@@ -10,19 +10,37 @@ interface Props {
   defs: ObjectTypeDefinition[];
   onClose: () => void;
   onPick: (typeId: string) => void;
+  paletteTypeIds?: string[];
+  onAddToPalette?: (typeId: string) => void;
 }
 
-const AllObjectTypesModal = ({ open, defs, onClose, onPick }: Props) => {
+const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAddToPalette }: Props) => {
   const t = useT();
   const lang = useLang();
   const [q, setQ] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [context, setContext] = useState<{ x: number; y: number; typeId: string } | null>(null);
+  const contextRef = useRef<HTMLDivElement | null>(null);
+
+  const paletteSet = useMemo(() => new Set(Array.isArray(paletteTypeIds) ? paletteTypeIds : []), [paletteTypeIds]);
 
   useEffect(() => {
     if (!open) return;
     setQ('');
+    setContext(null);
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [open]);
+
+  useEffect(() => {
+    if (!context) return;
+    const onDown = (e: MouseEvent) => {
+      if (!contextRef.current) return setContext(null);
+      if (contextRef.current.contains(e.target as any)) return;
+      setContext(null);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [context]);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -66,12 +84,19 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick }: Props) => {
                 <div className="mt-4 grid max-h-[420px] grid-cols-2 gap-3 overflow-auto sm:grid-cols-3">
                   {filtered.map((d) => {
                     const label = (d?.name?.[lang] as string) || (d?.name?.it as string) || d.id;
+                    const inPalette = paletteSet.has(d.id);
                     return (
                       <button
                         key={d.id}
                         onClick={() => {
                           onPick(d.id);
                           onClose();
+                        }}
+                        onContextMenu={(e) => {
+                          if (!onAddToPalette) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setContext({ x: e.clientX, y: e.clientY, typeId: d.id });
                         }}
                         className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-left hover:bg-slate-50"
                         title={label}
@@ -83,10 +108,52 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick }: Props) => {
                           <div className="truncate text-sm font-semibold text-ink">{label}</div>
                           <div className="truncate text-xs text-slate-500">{d.id}</div>
                         </div>
+                        {onAddToPalette ? (
+                          <div className="ml-auto text-[10px] font-semibold uppercase text-slate-400">
+                            {inPalette ? t({ it: 'In palette', en: 'In palette' }) : t({ it: 'Extra', en: 'Extra' })}
+                          </div>
+                        ) : null}
                       </button>
                     );
                   })}
                 </div>
+
+                {context ? (
+                  <div
+                    ref={contextRef}
+                    className="fixed z-[60] min-w-[220px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card"
+                    style={{ left: context.x, top: context.y }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                  >
+                    <button
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-ink hover:bg-slate-50"
+                      onClick={() => {
+                        onPick(context.typeId);
+                        setContext(null);
+                        onClose();
+                      }}
+                    >
+                      <span>{t({ it: 'Posiziona sulla mappa', en: 'Place on map' })}</span>
+                      <span className="text-xs text-slate-400">↵</span>
+                    </button>
+                    {onAddToPalette ? (
+                      <button
+                        disabled={paletteSet.has(context.typeId)}
+                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => {
+                          onAddToPalette(context.typeId);
+                          setContext(null);
+                        }}
+                      >
+                        <span>{t({ it: 'Aggiungi a barra laterale', en: 'Add to sidebar' })}</span>
+                        <span className="text-xs text-slate-400">+</span>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </Dialog.Panel>
             </Transition.Child>
           </div>
@@ -97,4 +164,3 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick }: Props) => {
 };
 
 export default AllObjectTypesModal;
-
