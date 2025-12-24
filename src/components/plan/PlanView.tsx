@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -324,16 +324,36 @@ const PlanView = ({ planId }: Props) => {
     return (plan.revisions || []).find((r) => r.id === selectedRevisionId);
   }, [plan, selectedRevisionId]);
 
+  const location = useLocation();
+
   useEffect(() => {
     // Always start from the "present" when entering the workspace for a plan.
     setSelectedRevision(planId, null);
   }, [planId, setSelectedRevision]);
+
+  const forceDefaultView = useMemo(() => {
+    try {
+      const sp = new URLSearchParams(location.search || '');
+      return sp.get('dv') === '1';
+    } catch {
+      return false;
+    }
+  }, [location.search]);
 
   useEffect(() => {
     // Close any open context menus when switching plans.
     setContextMenu(null);
     setLinksModalObjectId(null);
   }, [planId]);
+
+  useEffect(() => {
+    if (!forceDefaultView) return;
+    // Clean up the URL (removes dv=1) once we are back in the workspace.
+    window.setTimeout(() => {
+      navigate(`/plan/${planId}`, { replace: true });
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceDefaultView, planId]);
 
   // Avoid re-applying viewport on every data change (plan updates clone references).
   const viewportInitRef = useRef<string | null>(null);
@@ -424,7 +444,7 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     isReadOnlyRef.current = isReadOnly;
   }, [isReadOnly]);
-  const renderPlan = useMemo(() => {
+  const renderPlan = useMemo<FloorPlan | undefined>(() => {
     if (!plan) return undefined;
     if (!activeRevision) return plan;
     return {
@@ -436,8 +456,8 @@ const PlanView = ({ planId }: Props) => {
       rooms: activeRevision.rooms,
       links: (activeRevision as any).links || (plan as any).links,
       objects: activeRevision.objects,
-      views: activeRevision.views
-    };
+      views: (((activeRevision as any).views as FloorPlanView[] | undefined) || plan.views || []) as any
+    } as FloorPlan;
   }, [activeRevision, plan]);
 
   const planLayers = useMemo(() => {
@@ -753,7 +773,6 @@ const PlanView = ({ planId }: Props) => {
   }, [plan, samePlanSnapshotIgnoringDims, toSnapshot]);
 
   const navigate = useNavigate();
-  const location = useLocation();
   const pendingNavigateRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -928,15 +947,11 @@ const PlanView = ({ planId }: Props) => {
     setSelectedPlan(planId);
   }, [planId, setSelectedPlan]);
 
-  useEffect(() => {
-    // Reset auto-fit whenever a different plan is opened.
-    setAutoFitEnabled(true);
-  }, [planId]);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!renderPlan) return;
-    if (viewportInitRef.current === planId) return;
-    viewportInitRef.current = planId;
+    const viewportKey = `${planId}:${selectedRevisionId || 'present'}:${location.key || ''}`;
+    if (viewportInitRef.current === viewportKey) return;
+    viewportInitRef.current = viewportKey;
 
     const def = renderPlan?.views?.find((v) => v.isDefault);
     if (def) {
@@ -945,6 +960,12 @@ const PlanView = ({ planId }: Props) => {
       setPan(def.pan);
       saveViewport(planId, def.zoom, def.pan);
       setSelectedViewId(def.id);
+      return;
+    }
+    if (forceDefaultView) {
+      // Explicit request from Settings → Workspace: do not fall back to last viewport.
+      setAutoFitEnabled(true);
+      setSelectedViewId('__last__');
       return;
     }
     const saved = loadViewport(planId);
@@ -956,7 +977,7 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     setAutoFitEnabled(true);
-  }, [loadViewport, planId, renderPlan, saveViewport, setPan, setZoom]);
+  }, [forceDefaultView, loadViewport, location.key, planId, renderPlan, saveViewport, selectedRevisionId, setPan, setZoom]);
 
   useEffect(() => {
     // entering/leaving read-only mode clears pending placement and context menu
@@ -966,6 +987,14 @@ const PlanView = ({ planId }: Props) => {
     setSelectedLinkId(null);
     setLinkFromId(null);
   }, [isReadOnly]);
+
+  useEffect(() => {
+    // If the user selects an object to place while drawing a room, cancel the room creation mode.
+    if (!roomDrawMode) return;
+    if (!pendingType) return;
+    setRoomDrawMode(null);
+    setNewRoomMenuOpen(false);
+  }, [pendingType, roomDrawMode]);
 
   const saveTimer = useRef<number | null>(null);
   useEffect(() => {
@@ -1354,6 +1383,25 @@ const PlanView = ({ planId }: Props) => {
           s.user ? ({ user: { ...s.user, paletteFavorites: next } as any, permissions: s.permissions, hydrated: s.hydrated } as any) : s
         );
         push(t({ it: 'Oggetto aggiunto alla palette', en: 'Object added to palette' }), 'success');
+      } catch {
+        push(t({ it: 'Salvataggio non riuscito', en: 'Save failed' }), 'danger');
+      }
+    },
+    [push, t]
+  );
+
+  const removeTypeFromPalette = useCallback(
+    async (typeId: string) => {
+      const user = useAuthStore.getState().user as any;
+      const enabled = Array.isArray(user?.paletteFavorites) ? (user.paletteFavorites as string[]) : [];
+      if (!enabled.includes(typeId)) return;
+      const next = enabled.filter((x) => x !== typeId);
+      try {
+        await updateMyProfile({ paletteFavorites: next });
+        useAuthStore.setState((s) =>
+          s.user ? ({ user: { ...s.user, paletteFavorites: next } as any, permissions: s.permissions, hydrated: s.hydrated } as any) : s
+        );
+        push(t({ it: 'Oggetto rimosso dalla palette', en: 'Object removed from palette' }), 'info');
       } catch {
         push(t({ it: 'Salvataggio non riuscito', en: 'Save failed' }), 'danger');
       }
@@ -2596,10 +2644,11 @@ const PlanView = ({ planId }: Props) => {
                   </div>
                 ) : null}
 			            <div className="mt-3 flex flex-col items-center gap-3">
-			              <Toolbar
+				              <Toolbar
                       defs={objectTypeDefs || []}
                       order={paletteOrder}
                       onSelectType={(type) => setPendingType(type)}
+                      onRemoveFromPalette={(type) => removeTypeFromPalette(type)}
                       activeType={pendingType}
                     />
 			            </div>

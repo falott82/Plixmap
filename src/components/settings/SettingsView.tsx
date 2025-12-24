@@ -137,14 +137,14 @@ const SettingsView = () => {
           <h1 className="text-2xl font-semibold text-ink">&nbsp;</h1>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              const target = selectedPlanId || firstPlanId;
-              if (target) navigate(`/plan/${target}`);
-            }}
-            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink shadow-card transition hover:-translate-y-0.5 hover:bg-slate-50"
-          >
-            <ArrowLeftCircle size={16} />
+            <button
+              onClick={() => {
+                const target = selectedPlanId || firstPlanId;
+                if (target) navigate(`/plan/${target}?dv=1`);
+              }}
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink shadow-card transition hover:-translate-y-0.5 hover:bg-slate-50"
+            >
+              <ArrowLeftCircle size={16} />
             {t({ it: 'Area di lavoro', en: 'Workspace' })}
           </button>
           <UserMenu />
