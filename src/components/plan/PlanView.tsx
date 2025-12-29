@@ -26,8 +26,7 @@ import {
   Link2,
   User,
   LocateFixed,
-  Users,
-  Activity
+  Users
 } from 'lucide-react';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
@@ -192,7 +191,6 @@ const PlanView = ({ planId }: Props) => {
     roomCapacityStateByPlan,
     setRoomCapacityState,
     perfOverlayEnabled,
-    togglePerfOverlay,
     setPlanDirty,
     requestSaveAndNavigate,
     pendingSaveNavigateTo,
@@ -232,7 +230,6 @@ const PlanView = ({ planId }: Props) => {
       roomCapacityStateByPlan: (s as any).roomCapacityStateByPlan,
       setRoomCapacityState: (s as any).setRoomCapacityState,
       perfOverlayEnabled: (s as any).perfOverlayEnabled,
-      togglePerfOverlay: (s as any).togglePerfOverlay,
       setPlanDirty: (s as any).setPlanDirty,
       requestSaveAndNavigate: (s as any).requestSaveAndNavigate,
       pendingSaveNavigateTo: (s as any).pendingSaveNavigateTo,
@@ -2911,17 +2908,6 @@ const PlanView = ({ planId }: Props) => {
             </div>
             <ExportButton onClick={() => setExportModalOpen(true)} />
             <VersionBadge />
-            <button
-              onClick={togglePerfOverlay}
-              title={t({ it: 'Telemetria prestazioni', en: 'Performance telemetry' })}
-              className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-card ${
-                perfEnabled
-                  ? 'border-ink bg-ink text-white hover:bg-ink/90'
-                  : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
-              }`}
-            >
-              <Activity size={18} />
-            </button>
             <button
               onClick={() => {
                 if (hasNavigationEdits && !isReadOnly) {

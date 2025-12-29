@@ -9,6 +9,21 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.2.26',
+    date: '2025-12-29',
+    type: 'fix',
+    notes: [
+      n(
+        'Prestazioni: telemetria attivabile da Settings → Nerd Area (pannello prestazioni locale)',
+        'Performance: telemetry toggle in Settings → Nerd Area (local performance panel)'
+      ),
+      n(
+        'Canvas: correzione dei loop di resize con stabilizzazione dimensioni e filtro jitter',
+        'Canvas: resize loop fix with size stabilization and jitter filtering'
+      )
+    ]
+  },
+  {
     version: '1.2.25',
     date: '2025-12-24',
     type: 'minor',
