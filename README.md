@@ -72,6 +72,7 @@ New passwords must be **strong**:
 - Superadmin only:
   - logs: login/logout + failed attempts, plus an **audit trail** of important events (optional Extended mode)
   - Nerd Area: packages and versions used by the app
+  - Nerd Area: **Performance telemetry** toggle (local-only diagnostics panel)
   - Nerd Area: **Custom Import (Real users)** with a per-client status table, quick actions, and WebAPI/CSV configuration
 
 ### Workspace (Floor plan)
