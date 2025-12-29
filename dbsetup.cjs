@@ -1,4 +1,4 @@
-// Some deployment templates run `node ./dbsetup.js` before starting the server.
+// Some deployment templates run `node ./dbsetup.cjs` before starting the server.
 // Deskly doesn't require a setup step, but we ensure data directories exist and (when available)
 // we prefer storing the SQLite DB on a mounted volume (e.g. `/data`) so data survives restarts.
 
