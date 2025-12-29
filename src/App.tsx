@@ -13,6 +13,9 @@ import FirstRunView from './components/auth/FirstRunView';
 import { useAuthStore } from './store/useAuthStore';
 import { shallow } from 'zustand/shallow';
 import EmptyWorkspace from './components/layout/EmptyWorkspace';
+import { useT } from './i18n/useT';
+import PerfOverlay from './components/dev/PerfOverlay';
+import { perfMetrics } from './utils/perfMetrics';
 
 const PlanRoute = () => {
   const { planId } = useParams();
@@ -23,7 +26,10 @@ const PlanRoute = () => {
 const HomeRoute = () => {
   const clients = useDataStore((s) => s.clients);
   const { selectedPlanId, setSelectedPlan } = useUIStore(
-    (s) => ({ selectedPlanId: s.selectedPlanId, setSelectedPlan: s.setSelectedPlan }),
+    (s) => ({
+      selectedPlanId: s.selectedPlanId,
+      setSelectedPlan: s.setSelectedPlan
+    }),
     shallow
   );
   const { user } = useAuthStore();
@@ -49,6 +55,7 @@ const HomeRoute = () => {
 };
 
 const App = () => {
+  const t = useT();
   const { clients, objectTypes, version, savedVersion, setServerState, markSaved } = useDataStore(
     (s) => ({
       clients: s.clients,
@@ -60,13 +67,26 @@ const App = () => {
     }),
     shallow
   );
-  const { selectedPlanId, setSelectedPlan } = useUIStore(
-    (s) => ({ selectedPlanId: s.selectedPlanId, setSelectedPlan: s.setSelectedPlan }),
+  const { selectedPlanId, setSelectedPlan, perfOverlayEnabled } = useUIStore(
+    (s) => ({
+      selectedPlanId: s.selectedPlanId,
+      setSelectedPlan: s.setSelectedPlan,
+      perfOverlayEnabled: s.perfOverlayEnabled
+    }),
     shallow
   );
   const { user, hydrated: authHydrated, hydrate: hydrateAuth } = useAuthStore();
   const location = useLocation();
   const navigate = useNavigate();
+  const hideSidebar = location.pathname.startsWith('/settings');
+  const perfEnabled = (() => {
+    try {
+      const queryEnabled = new URLSearchParams(location.search || '').get('perf') === '1';
+      return queryEnabled || perfOverlayEnabled;
+    } catch {
+      return perfOverlayEnabled;
+    }
+  })();
   const [hydrated, setHydrated] = useState(false);
   const hydratedForUserId = useRef<string | null>(null);
   const defaultPlanRedirectAppliedForUserId = useRef<string | null>(null);
@@ -74,12 +94,16 @@ const App = () => {
   const saveInFlight = useRef(false);
   const saveQueued = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const lastSaveAtRef = useRef(0);
+  const SAVE_DEBOUNCE_MS = 1200;
+  const SAVE_MIN_INTERVAL_MS = 3000;
   const hasUnsavedEditsRef = useRef(false);
   const unsubscribeUnsavedRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     hydrateAuth();
   }, [hydrateAuth]);
+
 
   useEffect(() => {
     // Keep a cheap ref so we can warn on refresh/close without re-rendering App.
@@ -161,6 +185,10 @@ const App = () => {
       saveQueued.current = false;
       if (abortRef.current) abortRef.current.abort();
       abortRef.current = new AbortController();
+      perfMetrics.autosaveCount += 1;
+      perfMetrics.autosaveLastAt = Date.now();
+      const saveStart = performance.now();
+      lastSaveAtRef.current = Date.now();
       const currentClients = useDataStore.getState().clients;
       const currentTypes = useDataStore.getState().objectTypes;
       saveState(currentClients, currentTypes, { signal: abortRef.current.signal })
@@ -199,16 +227,23 @@ const App = () => {
           // ignore; keeps working offline/local
         })
         .finally(() => {
+          perfMetrics.autosaveLastDurationMs = Math.round(performance.now() - saveStart);
           saveInFlight.current = false;
           if (saveQueued.current && useDataStore.getState().version !== useDataStore.getState().savedVersion) {
             // schedule an immediate follow-up save with the latest state
             if (saveTimer.current) window.clearTimeout(saveTimer.current);
+            const elapsed = Date.now() - lastSaveAtRef.current;
+            const delay = Math.max(SAVE_DEBOUNCE_MS, SAVE_MIN_INTERVAL_MS - elapsed);
             saveTimer.current = window.setTimeout(() => {
               if (saveInFlight.current) return;
               saveInFlight.current = true;
               saveQueued.current = false;
               if (abortRef.current) abortRef.current.abort();
               abortRef.current = new AbortController();
+              perfMetrics.autosaveCount += 1;
+              perfMetrics.autosaveLastAt = Date.now();
+              const followupStart = performance.now();
+              lastSaveAtRef.current = Date.now();
               const latestClients = useDataStore.getState().clients;
               const latestTypes = useDataStore.getState().objectTypes;
               saveState(latestClients, latestTypes, { signal: abortRef.current.signal })
@@ -243,12 +278,13 @@ const App = () => {
                 })
                 .catch(() => {})
                 .finally(() => {
+                  perfMetrics.autosaveLastDurationMs = Math.round(performance.now() - followupStart);
                   saveInFlight.current = false;
                 });
-            }, 50);
+            }, delay);
           }
         });
-    }, 650);
+    }, SAVE_DEBOUNCE_MS);
     return () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
     };
@@ -324,7 +360,7 @@ const App = () => {
     return (
       <div className="flex h-screen items-center justify-center bg-mist text-ink">
         <div className="rounded-2xl bg-white px-6 py-4 shadow-card">
-          <p className="text-sm text-slate-600">Caricamento…</p>
+          <p className="text-sm text-slate-600">{t({ it: 'Caricamento…', en: 'Loading…' })}</p>
         </div>
       </div>
     );
@@ -347,13 +383,14 @@ const App = () => {
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         <ToastStack />
+        <PerfOverlay enabled={perfEnabled} />
       </>
     );
   }
 
   return (
     <div className="flex bg-mist text-ink">
-      <SidebarTree />
+      {hideSidebar ? null : <SidebarTree />}
       <main className="flex-1 overflow-hidden">
         <Routes>
           <Route path="/login" element={<Navigate to="/" replace />} />
@@ -371,6 +408,7 @@ const App = () => {
       </main>
       <HelpPanel />
       <ToastStack />
+      <PerfOverlay enabled={perfEnabled} />
     </div>
   );
 };

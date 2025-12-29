@@ -37,12 +37,12 @@ const ViewModal = ({
   useEffect(() => {
     if (!open) return;
     if (isDefault) {
-      if (name !== 'Default') setName('Default');
+      if (name !== 'DEFAULT') setName('DEFAULT');
     }
   }, [isDefault, open]);
 
   const handleSave = () => {
-    const finalName = isDefault ? 'Default' : name.trim();
+    const finalName = isDefault ? 'DEFAULT' : name.trim();
     if (!finalName) return;
     onSubmit({ name: finalName, description: description.trim() || undefined, isDefault });
     onClose();
@@ -113,8 +113,8 @@ const ViewModal = ({
                         const next = e.target.checked;
                         setIsDefault(next);
                         if (next) {
-                          if (name && name !== 'Default') setLastCustomName(name);
-                          setName('Default');
+                          if (name && name !== 'DEFAULT') setLastCustomName(name);
+                          setName('DEFAULT');
                         } else {
                           setName(lastCustomName || '');
                         }

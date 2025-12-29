@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useT } from '../../i18n/useT';
 import { fetchBootstrapStatus, MFARequiredError } from '../../api/auth';
+import { releaseHistory } from '../../version/history';
 
 const LoginView = () => {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ const LoginView = () => {
   const [error, setError] = useState<string | null>(null);
   const [showFirstRunCredentials, setShowFirstRunCredentials] = useState(false);
   const otpRef = useRef<HTMLInputElement | null>(null);
+  const version = releaseHistory[0]?.version || '';
 
   useEffect(() => {
     let cancelled = false;
@@ -59,7 +61,10 @@ const LoginView = () => {
           </div>
           <div>
             <div className="text-sm font-semibold uppercase tracking-wide text-slate-500">Deskly</div>
-            <h1 className="text-2xl font-semibold">{t({ it: 'Login', en: 'Login' })}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-semibold">{t({ it: 'Login', en: 'Login' })}</h1>
+              {version ? <span className="text-xs font-semibold text-slate-400">v{version}</span> : null}
+            </div>
           </div>
         </div>
 

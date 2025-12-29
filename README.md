@@ -72,7 +72,7 @@ New passwords must be **strong**:
 - Superadmin only:
   - logs: login/logout + failed attempts, plus an **audit trail** of important events (optional Extended mode)
   - Nerd Area: packages and versions used by the app
-  - Nerd Area: **Custom Import (Real users)** to configure a per-client WebAPI (Basic Auth) and sync an employee directory
+  - Nerd Area: **Custom Import (Real users)** with a per-client status table, quick actions, and WebAPI/CSV configuration
 
 ### Workspace (Floor plan)
 - Floor plan shown as background; objects rendered on top with an icon and always-visible label
@@ -96,8 +96,8 @@ New passwords must be **strong**:
   - scale per object (slider)
   - delete
 - Real users (optional):
-  - if the directory import is configured, a **Real user** object is available in the palette
-  - dropping it opens a picker with search and “only unassigned” filter
+  - once a client has imported users (WebAPI or CSV), a **Real user** object is available in the palette
+  - dropping it opens a picker **scoped to the active Client** (client name + counts are shown), with search and filters
   - the label shows first name and last name on two lines
 - Pan & zoom:
   - zoom controls (+ / -)
@@ -112,8 +112,11 @@ New passwords must be **strong**:
   - create **rectangle** or **polygon** rooms
   - resize/edit room shape
   - set a per-room color (helps visually separate areas)
+  - adjust room label scale (name + capacity)
+  - rooms cannot overlap
   - objects inside the room are automatically linked
   - room list with assigned objects and quick highlight
+  - placing a user in a full room asks for confirmation
 - Search:
   - search objects (name/description) and rooms (name)
   - highlight/blink the selected item on the map
@@ -125,6 +128,7 @@ New passwords must be **strong**:
 - Revisions (“Time Machine”):
   - save immutable revisions (read-only history)
   - revision numbering **Rev: X.Y** with Major/Minor bump
+  - **Cmd/Ctrl+S** creates a quick minor revision
   - restore revisions, compare revisions, delete a revision, delete all revisions
   - when saving, you can add a note
 - Export:

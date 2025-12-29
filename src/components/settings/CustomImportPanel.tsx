@@ -1,61 +1,77 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ArrowUpDown, ChevronDown, ChevronUp, Download, Info, RefreshCw, Save, TestTube, Trash2, X } from 'lucide-react';
+import { FileDown, Filter, Info, RefreshCw, Search, Settings2, TestTube, Trash2, UploadCloud, Users, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { clearImport, diffImport, getImportConfig, listExternalUsers, saveImportConfig, setExternalUserHidden, syncImport, testImport } from '../../api/customImport';
+import {
+  clearImport,
+  ExternalUserRow,
+  fetchImportSummary,
+  getImportConfig,
+  ImportSummaryRow,
+  importCsv,
+  listExternalUsers,
+  saveImportConfig,
+  setExternalUserHidden,
+  syncImport,
+  testImport
+} from '../../api/customImport';
 import { fetchState } from '../../api/state';
-import { postAuditEvent } from '../../api/audit';
 
 const CustomImportPanel = () => {
   const t = useT();
   const clients = useDataStore((s) => s.clients);
-  const removeRealUserAllocationsBulk = useDataStore((s: any) => s.removeRealUserAllocationsBulk);
-  const addRevision = useDataStore((s: any) => s.addRevision);
   const setServerState = useDataStore((s) => s.setServerState);
   const { push } = useToastStore();
 
-  const [clientId, setClientId] = useState<string>(clients[0]?.id || '');
+  const [summaryRows, setSummaryRows] = useState<ImportSummaryRow[]>([]);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
+  const [configOpen, setConfigOpen] = useState(false);
+  const [usersOpen, setUsersOpen] = useState(false);
+  const [activeClientId, setActiveClientId] = useState<string | null>(null);
+
+  const [configExpanded, setConfigExpanded] = useState(false);
+  const [importMode, setImportMode] = useState<'webapi' | 'csv'>('webapi');
   const [cfg, setCfg] = useState<{ url: string; username: string; hasPassword: boolean; bodyJson: string; updatedAt?: number } | null>(null);
   const [password, setPassword] = useState('');
-  const [showInfo, setShowInfo] = useState(false);
-  const [configCollapsed, setConfigCollapsed] = useState(false);
-  const [loadingCfg, setLoadingCfg] = useState(false);
   const [savingCfg, setSavingCfg] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [diffing, setDiffing] = useState(false);
-  const [clearingAll, setClearingAll] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    ok: boolean;
-    status: number;
-    count?: number;
-    preview?: any[];
-    error?: string;
-    contentType?: string;
-    rawSnippet?: string;
-  } | null>(null);
-  const [syncResult, setSyncResult] = useState<any>(null);
-  const [showRaw, setShowRaw] = useState(false);
-  const [usersQuery, setUsersQuery] = useState('');
-  const [includeHidden, setIncludeHidden] = useState(false);
-  const [includeMissing, setIncludeMissing] = useState(false);
-  const [rows, setRows] = useState<any[]>([]);
-  const [sort, setSort] = useState<{ key: 'externalId' | 'name' | 'dept' | 'alloc'; dir: 'asc' | 'desc' }>({
-    key: 'externalId',
-    dir: 'asc'
-  });
-  const [infoRow, setInfoRow] = useState<any | null>(null);
-  const [selectedMissingIds, setSelectedMissingIds] = useState<Record<string, boolean>>({});
-  const [confirmRemoveMissing, setConfirmRemoveMissing] = useState<{
-    externalIds: string[];
-    label: string;
-  } | null>(null);
-  const [confirmImport, setConfirmImport] = useState<any | null>(null);
-  const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [syncingClientId, setSyncingClientId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; status: number; count?: number; error?: string } | null>(null);
+  const [syncResult, setSyncResult] = useState<any | null>(null);
 
-  const activeClient = useMemo(() => clients.find((c) => c.id === clientId) || null, [clientId, clients]);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersRows, setUsersRows] = useState<ExternalUserRow[]>([]);
+  const [usersQuery, setUsersQuery] = useState('');
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  const [includeMissing, setIncludeMissing] = useState(false);
+  const [includeHidden, setIncludeHidden] = useState(false);
+
+  const [csvFile, setCsvFile] = useState<{ name: string; text: string } | null>(null);
+  const [csvConfirmOpen, setCsvConfirmOpen] = useState(false);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [infoClientId, setInfoClientId] = useState<string | null>(null);
+
+  const summaryById = useMemo(() => new Map(summaryRows.map((r) => [r.clientId, r])), [summaryRows]);
+  const activeClient = useMemo(() => clients.find((c) => c.id === activeClientId) || null, [activeClientId, clients]);
+  const activeSummary = useMemo(() => (activeClientId ? summaryById.get(activeClientId) || null : null), [activeClientId, summaryById]);
+  const infoClient = useMemo(() => (infoClientId ? clients.find((c) => c.id === infoClientId) || null : null), [clients, infoClientId]);
+  const infoSummary = useMemo(() => (infoClientId ? summaryById.get(infoClientId) || null : null), [infoClientId, summaryById]);
+  const infoCounts = useMemo(() => {
+    if (!infoClient) return { sites: 0, plans: 0 };
+    const sites = infoClient.sites?.length || 0;
+    let plans = 0;
+    for (const s of infoClient.sites || []) plans += s.floorPlans?.length || 0;
+    return { sites, plans };
+  }, [infoClient]);
+
   const assignedCounts = useMemo(() => {
     const map = new Map<string, number>();
     if (!activeClient) return map;
@@ -65,6 +81,7 @@ const CustomImportPanel = () => {
           const cid = (o as any).externalClientId;
           const eid = (o as any).externalUserId;
           if (!cid || !eid) continue;
+          if (cid !== activeClient.id) continue;
           const key = `${cid}:${eid}`;
           map.set(key, (map.get(key) || 0) + 1);
         }
@@ -73,66 +90,24 @@ const CustomImportPanel = () => {
     return map;
   }, [activeClient]);
 
-  const allocationsByExternalId = useMemo(() => {
-    const map = new Map<string, { planId: string; siteName: string; planName: string; objectIds: string[] }[]>();
-    if (!activeClient) return map;
-    for (const s of activeClient.sites || []) {
-      for (const p of s.floorPlans || []) {
-        const byId = new Map<string, string[]>();
-        for (const o of p.objects || []) {
-          if (o.type !== 'real_user') continue;
-          const cid = String((o as any).externalClientId || '').trim();
-          const eid = String((o as any).externalUserId || '').trim();
-          if (!cid || !eid) continue;
-          if (cid !== activeClient.id) continue;
-          if (!byId.has(eid)) byId.set(eid, []);
-          byId.get(eid)!.push(o.id);
-        }
-        for (const [eid, objectIds] of byId.entries()) {
-          if (!map.has(eid)) map.set(eid, []);
-          map.get(eid)!.push({ planId: p.id, siteName: s.name, planName: p.name, objectIds });
-        }
-      }
+  const loadSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    try {
+      const res = await fetchImportSummary();
+      setSummaryRows(res.rows || []);
+    } catch {
+      setSummaryRows([]);
+    } finally {
+      setSummaryLoading(false);
     }
-    return map;
-  }, [activeClient]);
+  }, []);
 
-  const sortedRows = useMemo(() => {
-    const arr = Array.isArray(rows) ? [...rows] : [];
-    const dir = sort.dir === 'asc' ? 1 : -1;
-    const norm = (v: any) => String(v || '').toLowerCase().trim();
-    const dept = (r: any) => [r.dept1, r.dept2, r.dept3].filter(Boolean).join(' / ');
-    arr.sort((a, b) => {
-      if (sort.key === 'alloc') {
-        const ca = assignedCounts.get(`${a.clientId}:${a.externalId}`) || 0;
-        const cb = assignedCounts.get(`${b.clientId}:${b.externalId}`) || 0;
-        if (ca !== cb) return (ca - cb) * dir;
-        return norm(a.externalId).localeCompare(norm(b.externalId)) * dir;
-      }
-      if (sort.key === 'dept') {
-        const da = norm(dept(a));
-        const db = norm(dept(b));
-        if (da !== db) return da.localeCompare(db) * dir;
-        return norm(a.externalId).localeCompare(norm(b.externalId)) * dir;
-      }
-      if (sort.key === 'name') {
-        const na = norm(`${a.lastName || ''} ${a.firstName || ''}`);
-        const nb = norm(`${b.lastName || ''} ${b.firstName || ''}`);
-        if (na !== nb) return na.localeCompare(nb) * dir;
-        return norm(a.externalId).localeCompare(norm(b.externalId)) * dir;
-      }
-      return norm(a.externalId).localeCompare(norm(b.externalId)) * dir;
-    });
-    return arr;
-  }, [assignedCounts, rows, sort.dir, sort.key]);
-
-  const toggleSort = (key: 'externalId' | 'name' | 'dept' | 'alloc') => {
-    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
-  };
-
-  const loadCfg = async () => {
+  const loadConfig = useCallback(async (clientId: string) => {
+    setCfg(null);
+    setPassword('');
+    setTestResult(null);
+    setSyncResult(null);
     if (!clientId) return;
-    setLoadingCfg(true);
     try {
       const res = await getImportConfig(clientId);
       setCfg(
@@ -148,848 +123,343 @@ const CustomImportPanel = () => {
       );
     } catch {
       setCfg(null);
-    } finally {
-      setLoadingCfg(false);
     }
-  };
+  }, []);
 
-  const loadUsers = async () => {
-    if (!clientId) return;
+  const loadUsers = useCallback(async (clientId: string) => {
+    if (!clientId) {
+      setUsersRows([]);
+      return;
+    }
+    setUsersLoading(true);
     try {
-      const res = await listExternalUsers({ clientId, q: usersQuery, includeHidden, includeMissing });
-      setRows(res.rows || []);
+      const res = await listExternalUsers({ clientId, includeHidden: true, includeMissing: true });
+      setUsersRows(res.rows || []);
     } catch {
-      setRows([]);
+      setUsersRows([]);
+    } finally {
+      setUsersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSummary();
+  }, [loadSummary]);
+
+  const filteredUsers = useMemo(() => {
+    const query = usersQuery.trim().toLowerCase();
+    let list = usersRows;
+    if (!includeHidden) list = list.filter((r) => !r.hidden);
+    if (!includeMissing) list = list.filter((r) => r.present);
+    if (onlyUnassigned) {
+      list = list.filter((r) => (assignedCounts.get(`${r.clientId}:${r.externalId}`) || 0) === 0);
+    }
+    if (!query) return list;
+    return list.filter((r) => {
+      const hay = `${r.externalId} ${r.firstName} ${r.lastName} ${r.role} ${r.dept1} ${r.dept2} ${r.dept3} ${r.email}`.toLowerCase();
+      return hay.includes(query);
+    });
+  }, [assignedCounts, includeHidden, includeMissing, onlyUnassigned, usersQuery, usersRows]);
+
+  const formatDate = (ts: number | null | undefined) => {
+    if (!ts) return t({ it: 'Mai', en: 'Never' });
+    try {
+      return new Date(ts).toLocaleString();
+    } catch {
+      return t({ it: 'Mai', en: 'Never' });
     }
   };
 
-  useEffect(() => {
-    if (!clientId && clients[0]?.id) setClientId(clients[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clients.length]);
+  const openConfig = async (clientId: string, mode?: 'webapi' | 'csv') => {
+    setActiveClientId(clientId);
+    setConfigOpen(true);
+    setUsersOpen(false);
+    setConfigExpanded(false);
+    setImportMode(mode || 'webapi');
+    setCsvFile(null);
+    await loadConfig(clientId);
+  };
 
-  useEffect(() => {
-    setTestResult(null);
+  const openUsers = async (clientId: string) => {
+    setActiveClientId(clientId);
+    setUsersOpen(true);
+    setConfigOpen(false);
+    setUsersQuery('');
+    setOnlyUnassigned(false);
+    setIncludeMissing(false);
+    setIncludeHidden(false);
+    setCsvFile(null);
+    await loadUsers(clientId);
+  };
+
+  const runSync = async (clientId: string) => {
+    setSyncingClientId(clientId);
     setSyncResult(null);
-    setPassword('');
-    setShowRaw(false);
-    setConfirmImport(null);
-    setConfirmClearAll(false);
-    setSelectedMissingIds({});
-    loadCfg();
-    loadUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId]);
+    try {
+      const res = await syncImport(clientId);
+      setSyncResult(res);
+      if (res.ok) {
+        push(t({ it: 'Import completato', en: 'Import completed' }), 'success');
+        await loadSummary();
+        if (usersOpen && activeClientId === clientId) await loadUsers(clientId);
+      } else {
+        push(t({ it: 'Import fallito', en: 'Import failed' }), 'danger');
+      }
+    } catch {
+      push(t({ it: 'Import fallito', en: 'Import failed' }), 'danger');
+    } finally {
+      setSyncingClientId(null);
+    }
+  };
 
-  useEffect(() => {
-    loadUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usersQuery, includeHidden, includeMissing]);
+  const saveConfig = async () => {
+    if (!activeClientId) return;
+    if (!cfg?.url?.trim() || !cfg?.username?.trim()) {
+      push(t({ it: 'Compila URL e username.', en: 'Please fill URL and username.' }), 'info');
+      return;
+    }
+    setSavingCfg(true);
+    try {
+      const res = await saveImportConfig({
+        clientId: activeClientId,
+        url: cfg.url.trim(),
+        username: cfg.username.trim(),
+        password: password || undefined,
+        bodyJson: cfg.bodyJson
+      });
+      setCfg(
+        res.config
+          ? {
+              url: res.config.url,
+              username: res.config.username,
+              hasPassword: res.config.hasPassword,
+              bodyJson: res.config.bodyJson || '{}',
+              updatedAt: res.config.updatedAt
+            }
+          : null
+      );
+      setPassword('');
+      push(t({ it: 'Configurazione salvata', en: 'Configuration saved' }), 'success');
+      await loadSummary();
+    } catch {
+      push(t({ it: 'Salvataggio fallito', en: 'Save failed' }), 'danger');
+    } finally {
+      setSavingCfg(false);
+    }
+  };
 
-  const downloadText = (filename: string, text: string, mime = 'text/plain;charset=utf-8') => {
-    const blob = new Blob([text], { type: mime });
+  const runTest = async () => {
+    if (!activeClientId) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await testImport(activeClientId);
+      setTestResult({ ok: res.ok, status: res.status, count: res.count });
+      if (res.ok) push(t({ it: 'Test riuscito', en: 'Test successful' }), 'success');
+      else push(t({ it: 'Test fallito', en: 'Test failed' }), 'danger');
+    } catch {
+      setTestResult({ ok: false, status: 0, error: 'Request failed' });
+      push(t({ it: 'Test fallito', en: 'Test failed' }), 'danger');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const clearImportData = async () => {
+    if (!activeClientId) return;
+    setClearing(true);
+    try {
+      const res = await clearImport(activeClientId);
+      push(
+        t({
+          it: `Eliminati ${res.removedUsers} utenti e rimossi ${res.removedObjects} oggetti dalla mappa.`,
+          en: `Deleted ${res.removedUsers} users and removed ${res.removedObjects} map objects.`
+        }),
+        'success'
+      );
+      await loadSummary();
+      await loadUsers(activeClientId);
+      try {
+        const state = await fetchState();
+        if (Array.isArray(state.clients)) setServerState({ clients: state.clients, objectTypes: state.objectTypes });
+      } catch {}
+    } catch {
+      push(t({ it: 'Eliminazione fallita', en: 'Delete failed' }), 'danger');
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const handleCsvFile = (file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : '';
+      setCsvFile({ name: file.name, text });
+      setCsvConfirmOpen(true);
+    };
+    reader.readAsText(file);
+  };
+
+  const downloadCsvTemplate = () => {
+    const template = [
+      'externalId,firstName,lastName,role,dept1,dept2,dept3,email,ext1,ext2,ext3,isExternal',
+      'u-001,Mario,Rossi,HR,People,,,mario.rossi@example.com,101,,,"0"'
+    ].join('\n');
+    const blob = new Blob([template], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename;
+    a.download = 'deskly-users-template.csv';
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const toCsvCell = (value: any) => {
-    const s = String(value ?? '');
-    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
+  const runCsvImport = async (mode: 'append' | 'replace') => {
+    if (!activeClientId || !csvFile) return;
+    setCsvImporting(true);
+    setCsvConfirmOpen(false);
+    try {
+      const res = await importCsv({ clientId: activeClientId, csvText: csvFile.text, mode });
+      push(
+        t({
+          it: `Import CSV completato (${res.summary?.created ?? 0} nuovi, ${res.summary?.updated ?? 0} aggiornati).`,
+          en: `CSV import completed (${res.summary?.created ?? 0} new, ${res.summary?.updated ?? 0} updated).`
+        }),
+        'success'
+      );
+      setCsvFile(null);
+      await loadSummary();
+      if (usersOpen && activeClientId) await loadUsers(activeClientId);
+      if (mode === 'replace') {
+        try {
+          const state = await fetchState();
+          if (Array.isArray(state.clients)) setServerState({ clients: state.clients, objectTypes: state.objectTypes });
+        } catch {}
+      }
+    } catch (err: any) {
+      push(err?.message || t({ it: 'Import CSV fallito', en: 'CSV import failed' }), 'danger');
+    } finally {
+      setCsvImporting(false);
+    }
   };
 
-  const normalizedBodyJson = (raw: string | undefined | null) => (String(raw || '').trim() ? String(raw) : '{}');
-
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold text-ink">{t({ it: 'Custom Import (Utenti reali)', en: 'Custom Import (Real users)' })}</div>
+            <div className="text-sm font-semibold text-ink">{t({ it: 'Import WebAPI / CSV (Utenti reali)', en: 'WebAPI / CSV Import (Real users)' })}</div>
             <div className="mt-1 text-sm text-slate-600">
               {t({
-                it: 'Importa e sincronizza una rubrica dipendenti da una WebAPI per Cliente.',
-                en: 'Import and sync an employee directory from a WebAPI per Client.'
+                it: 'Ogni cliente ha la propria rubrica utenti: scegli la fonte e sincronizza da qui.',
+                en: 'Each client has its own user directory: choose the source and sync from here.'
               })}
             </div>
           </div>
-          <button
-            onClick={() => setShowInfo((v) => !v)}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            title={t({ it: 'Info', en: 'Info' })}
-          >
-            <Info size={16} />
-          </button>
         </div>
-
-        {showInfo ? (
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-            <div className="flex items-start justify-between gap-3">
-              <div className="font-semibold text-ink">{t({ it: 'Come funziona', en: 'How it works' })}</div>
-              <button onClick={() => setShowInfo(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-                <X size={16} />
-              </button>
-            </div>
-            <ul className="ml-5 list-disc space-y-1 pt-2">
-              <li>
-                {t({
-                  it: 'Chiamata WebAPI: POST. Puoi inviare un body JSON opzionale (es. {"Utente":"...","Password":"..."}).',
-                  en: 'WebAPI call: POST. You can optionally send a JSON body (e.g. {"Utente":"...","Password":"..."}).'
-                })}
-              </li>
-              <li>
-                {t({
-                  it: 'Autenticazione: Basic Auth (Username/Password).',
-                  en: 'Authentication: Basic Auth (Username/Password).'
-                })}
-              </li>
-              <li>
-                {t({
-                  it: '“Test” non modifica il DB: mostra un’anteprima della risposta.',
-                  en: '“Test” does not modify the DB: it shows a response preview.'
-                })}
-              </li>
-              <li>
-                {t({
-                  it: '“Importa/Resync” aggiorna il DB locale: nuovi utenti, aggiornamenti e “mancanti”.',
-                  en: '“Import/Resync” updates the local DB: new users, updates and “missing” users.'
-                })}
-              </li>
-              <li>
-                {t({
-                  it: 'In mappa usa “Utente reale”: scegli il dipendente da una lista con ricerca e filtro “Solo non assegnati”.',
-                  en: 'In the workspace use “Real user”: pick an employee from a searchable list with “Only unassigned” filter.'
-                })}
-              </li>
-            </ul>
-          </div>
-        ) : null}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <div>
-            <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Cliente', en: 'Client' })}</div>
-            <select
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-primary"
-            >
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.shortName || c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end justify-end gap-2">
-            <button
-              onClick={async () => {
-                await loadCfg();
-                await loadUsers();
-                push(t({ it: 'Aggiornato', en: 'Refreshed' }), 'info');
-              }}
-              className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-ink hover:bg-slate-50"
-              title={t({ it: 'Ricarica configurazione e lista utenti', en: 'Reload config and user list' })}
-            >
-              <RefreshCw size={16} className="text-slate-600" />
-              {t({ it: 'Ricarica', en: 'Reload' })}
-            </button>
-            <button
-              onClick={() => {
-                const header = [
-                  'ExternalId',
-                  'FirstName',
-                  'LastName',
-                  'Email',
-                  'Role',
-                  'Dept1',
-                  'Dept2',
-                  'Dept3',
-                  'Ext1',
-                  'Ext2',
-                  'Ext3',
-                  'IsExternal',
-                  'Hidden',
-                  'Present',
-                  'Allocations'
-                ];
-                const lines = sortedRows.map((r) => {
-                  const count = assignedCounts.get(`${r.clientId}:${r.externalId}`) || 0;
-                  return [
-                    r.externalId,
-                    r.firstName,
-                    r.lastName,
-                    r.email,
-                    r.role,
-                    r.dept1,
-                    r.dept2,
-                    r.dept3,
-                    r.ext1,
-                    r.ext2,
-                    r.ext3,
-                    r.isExternal ? 1 : 0,
-                    r.hidden ? 1 : 0,
-                    r.present ? 1 : 0,
-                    count
-                  ]
-                    .map(toCsvCell)
-                    .join(',');
-                });
-                downloadText(`deskly-external-users-${clientId}.csv`, [header.join(','), ...lines].join('\n'), 'text/csv;charset=utf-8');
-              }}
-              className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-ink hover:bg-slate-50"
-              title={t({ it: 'Esporta la lista utenti (filtri e ordinamento inclusi)', en: 'Export the user list (includes filters and sorting)' })}
-            >
-              <Download size={16} className="text-slate-600" />
-              {t({ it: 'Esporta CSV', en: 'Export CSV' })}
-            </button>
-          </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold text-ink">{t({ it: 'Importazioni per cliente', en: 'Client imports' })}</div>
+          <button
+            onClick={loadSummary}
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+            title={t({ it: 'Aggiorna elenco', en: 'Refresh list' })}
+          >
+            <RefreshCw size={16} className={summaryLoading ? 'animate-spin text-primary' : 'text-slate-500'} />
+            {t({ it: 'Aggiorna', en: 'Refresh' })}
+          </button>
         </div>
 
         <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-          <button
-            onClick={() => setConfigCollapsed((v) => !v)}
-            className="flex w-full items-center justify-between gap-2 bg-slate-50 px-4 py-3 text-left text-sm font-semibold text-ink hover:bg-slate-100"
-          >
-            <span className="flex items-center gap-2">
-              {t({ it: 'Configurazione WebAPI', en: 'WebAPI configuration' })}
-              {cfg?.hasPassword ? (
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
-                  {t({ it: 'Password salvata', en: 'Password saved' })}
-                </span>
-              ) : null}
-              {cfg?.updatedAt ? (
-                <span className="text-xs font-medium text-slate-500">
-                  {t({
-                    it: `Aggiornata: ${new Date(cfg.updatedAt).toLocaleString()}`,
-                    en: `Updated: ${new Date(cfg.updatedAt).toLocaleString()}`
-                  })}
-                </span>
-              ) : null}
-            </span>
-            {configCollapsed ? <ChevronDown size={18} className="text-slate-600" /> : <ChevronUp size={18} className="text-slate-600" />}
-          </button>
-          {!configCollapsed ? (
-            <div className="p-4">
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                <div className="lg:col-span-2">
-                  <div className="text-xs font-semibold uppercase text-slate-500">URL</div>
-                  <input
-                    value={cfg?.url || ''}
-                    onChange={(e) => setCfg((p) => ({ ...(p || { url: '', username: '', hasPassword: false, bodyJson: '' }), url: e.target.value }))}
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-primary"
-                    placeholder="https://url/miaapi"
-                  />
-                </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:col-span-3">
-                  <div>
-                    <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Username', en: 'Username' })}</div>
-                    <input
-                      value={cfg?.username || ''}
-                      onChange={(e) =>
-                        setCfg((p) => ({ ...(p || { url: '', username: '', hasPassword: false, bodyJson: '' }), username: e.target.value }))
-                      }
-                      className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-primary"
-                      placeholder={t({ it: 'utente API', en: 'API user' })}
-                    />
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs font-semibold uppercase text-slate-500">
-                        {t({ it: 'Password', en: 'Password' })}
-                      </div>
-                      <div className="text-[11px] text-slate-500">{t({ it: 'Lascia vuoto per non cambiarla', en: 'Leave empty to keep current' })}</div>
-                    </div>
-                    <input
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      type="password"
-                      className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-primary"
-                      placeholder={cfg?.hasPassword ? t({ it: '•••••••• (salvata)', en: '•••••••• (saved)' }) : '••••••••'}
-                    />
-                  </div>
-                </div>
-                <div className="lg:col-span-3">
-                  <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Body JSON (opzionale)', en: 'JSON body (optional)' })}</div>
-                  <textarea
-                    value={cfg ? normalizedBodyJson(cfg.bodyJson) : '{}'}
-                    onChange={(e) =>
-                      setCfg((p) => ({ ...(p || { url: '', username: '', hasPassword: false, bodyJson: '{}' }), bodyJson: e.target.value }))
-                    }
-                    className="mt-1 h-16 w-full resize-y rounded-xl border border-slate-200 px-3 py-2 font-mono text-[12px] outline-none focus:border-primary"
-                    placeholder="{}"
-                  />
-                  <div className="mt-1 text-xs text-slate-500">
-                    {t({
-                      it: 'Di default è {}. Deve essere JSON valido.',
-                      en: 'Default is {}. Must be valid JSON.'
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button
-                  disabled={savingCfg || loadingCfg || !clientId || !cfg?.url || !cfg?.username}
-                  onClick={async () => {
-                    if (!cfg) return;
-                    setSavingCfg(true);
-                    try {
-                      const res = await saveImportConfig({
-                        clientId,
-                        url: cfg.url.trim(),
-                        username: cfg.username.trim(),
-                        bodyJson: normalizedBodyJson(cfg.bodyJson),
-                        ...(password ? { password } : {})
-                      });
-                      setCfg({
-                        url: res.config.url,
-                        username: res.config.username,
-                        hasPassword: res.config.hasPassword,
-                        bodyJson: normalizedBodyJson(res.config.bodyJson || ''),
-                        updatedAt: res.config.updatedAt
-                      });
-                      setPassword('');
-                      push(t({ it: 'Configurazione salvata', en: 'Configuration saved' }), 'success');
-                    } catch (e: any) {
-                      const msg = String(e?.message || '');
-                      push(msg.includes('Invalid JSON') ? t({ it: 'Body JSON non valido', en: 'Invalid JSON body' }) : t({ it: 'Errore nel salvataggio', en: 'Save failed' }), 'danger');
-                    } finally {
-                      setSavingCfg(false);
-                    }
-                  }}
-                  className="flex h-10 items-center gap-2 rounded-xl bg-primary px-3 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-50"
-                  title={t({
-                    it: 'Salva URL, username, body e password (se inserita) per le prossime chiamate WebAPI.',
-                    en: 'Save URL, username, body and password (if provided) for future WebAPI calls.'
-                  })}
-                >
-                  <Save size={16} />
-                  {t({ it: 'Salva', en: 'Save' })}
-                </button>
-
-                <button
-                  disabled={testing || !cfg?.url || !cfg?.username || (!cfg?.hasPassword && !password)}
-                  onClick={async () => {
-                    setTesting(true);
-                    setTestResult(null);
-                    setShowRaw(false);
-                    try {
-                      if (password) {
-                        await saveImportConfig({
-                          clientId,
-                          url: cfg!.url.trim(),
-                          username: cfg!.username.trim(),
-                          bodyJson: normalizedBodyJson(cfg!.bodyJson),
-                          password
-                        });
-                        setPassword('');
-                        await loadCfg();
-                      }
-                      const res = await testImport(clientId);
-                      setTestResult(res);
-                      if (res.ok)
-                        push(
-                          t({
-                            it: `Trovati ${res.count || 0} utenti, importazione possibile.`,
-                            en: `Found ${res.count || 0} users, import is possible.`
-                          }),
-                          'success'
-                        );
-                      else push(t({ it: 'Test fallito', en: 'Test failed' }), 'danger');
-                    } catch {
-                      setTestResult({ ok: false, status: 0, error: 'Request failed' });
-                      push(t({ it: 'Test fallito', en: 'Test failed' }), 'danger');
-                    } finally {
-                      setTesting(false);
-                    }
-                  }}
-                  className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-50"
-                  title={t({
-                    it: 'Esegue una chiamata di test alla WebAPI e mostra un’anteprima: non modifica il database.',
-                    en: 'Runs a WebAPI test call and shows a preview: it does not modify the database.'
-                  })}
-                >
-                  <TestTube size={16} className="text-slate-600" />
-                  {t({ it: 'Test', en: 'Test' })}
-                </button>
-
-                <button
-                  disabled={diffing || !cfg?.url || !cfg?.username || (!cfg?.hasPassword && !password)}
-                  onClick={async () => {
-                    setDiffing(true);
-                    setConfirmImport(null);
-                    setShowRaw(false);
-                    try {
-                      if (password) {
-                        await saveImportConfig({
-                          clientId,
-                          url: cfg!.url.trim(),
-                          username: cfg!.username.trim(),
-                          bodyJson: normalizedBodyJson(cfg!.bodyJson),
-                          password
-                        });
-                        setPassword('');
-                        await loadCfg();
-                      }
-                      const diff = await diffImport(clientId);
-                      if (!diff.ok) {
-                        setSyncResult(diff);
-                        push(t({ it: 'Impossibile calcolare differenze', en: 'Unable to compute diff' }), 'danger');
-                        return;
-                      }
-                      if (!diff.newCount && !diff.updatedCount && !diff.missingCount) {
-                        push(t({ it: 'Nessuna variazione rilevata', en: 'No changes detected' }), 'info');
-                        return;
-                      }
-                      setConfirmImport(diff);
-                    } finally {
-                      setDiffing(false);
-                    }
-                  }}
-                  className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-50"
-                  title={t({
-                    it: 'Calcola le differenze con la WebAPI e, se confermi, sincronizza (crea/aggiorna) gli utenti importati.',
-                    en: 'Computes the diff with the WebAPI and, after confirmation, syncs (creates/updates) imported users.'
-                  })}
-                >
-                  <RefreshCw size={16} className="text-slate-600" />
-                  {t({ it: 'Importa', en: 'Import' })}
-                </button>
-
-                <button
-                  disabled={clearingAll || !rows.length}
-                  onClick={() => setConfirmClearAll(true)}
-                  className="flex h-10 items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-                  title={t({
-                    it: 'Elimina tutti gli utenti importati per questo cliente (e rimuove gli oggetti “Utente reale” dalle planimetrie).',
-                    en: 'Deletes all imported users for this client (and removes “Real user” objects from its floor plans).'
-                  })}
-                >
-                  <Trash2 size={16} />
-                  {t({ it: 'Elimina tutto', en: 'Delete all' })}
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {testResult ? (
-          <div
-            className={`mt-4 rounded-xl border p-3 text-sm ${
-              testResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'
-            }`}
-          >
-            <div className="font-semibold">
-              {testResult.ok
-                ? t({ it: `Trovati ${testResult.count || 0} utenti, importazione possibile.`, en: `Found ${testResult.count || 0} users, import is possible.` })
-                : t({
-                    it: `KO (HTTP ${testResult.status}) — ${testResult.error || ''}`,
-                    en: `Failed (HTTP ${testResult.status}) — ${testResult.error || ''}`
-                  })}
-            </div>
-            {!testResult.ok && testResult.rawSnippet ? (
-              <div className="mt-2">
-                <button onClick={() => setShowRaw((v) => !v)} className="text-xs font-semibold underline decoration-dotted">
-                  {showRaw ? t({ it: 'Nascondi risposta', en: 'Hide response' }) : t({ it: 'Mostra risposta ricevuta', en: 'Show received response' })}
-                </button>
-                {showRaw ? (
-                  <pre className="mt-2 max-h-56 overflow-auto rounded-xl border border-rose-200 bg-white p-3 text-[11px] text-slate-800">
-                    {String(testResult.contentType || '').trim()
-                      ? `content-type: ${testResult.contentType}\n\n${testResult.rawSnippet}`
-                      : testResult.rawSnippet}
-                  </pre>
-                ) : null}
-              </div>
-            ) : null}
+          <div className="grid grid-cols-12 gap-2 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
+            <div className="col-span-5">{t({ it: 'Cliente', en: 'Client' })}</div>
+            <div className="col-span-3">{t({ it: 'Ultima importazione', en: 'Last import' })}</div>
+            <div className="col-span-2">{t({ it: 'Utenti importati', en: 'Imported users' })}</div>
+            <div className="col-span-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
           </div>
-        ) : null}
-
-        {syncResult?.ok ? (
-          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <div className="font-semibold text-ink">{t({ it: 'Risultato import', en: 'Import result' })}</div>
-            <div className="mt-1">
-              {t({ it: 'Creati', en: 'Created' })}: <span className="font-semibold">{syncResult.summary?.created ?? 0}</span> ·{' '}
-              {t({ it: 'Aggiornati', en: 'Updated' })}: <span className="font-semibold">{syncResult.summary?.updated ?? 0}</span> ·{' '}
-              {t({ it: 'Mancanti', en: 'Missing' })}: <span className="font-semibold">{syncResult.summary?.missing ?? 0}</span>
-            </div>
-	            {Array.isArray(syncResult.missing) && syncResult.missing.length ? (
-	              <div className="mt-2">
-	                <div className="text-xs font-semibold uppercase text-slate-500">
-	                  {t({ it: 'Utenti non più presenti nella WebAPI', en: 'Users no longer present in the WebAPI' })}
-	                </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={() => {
-                        const next: Record<string, boolean> = {};
-                        for (const m of syncResult.missing || []) next[String(m.externalId)] = true;
-                        setSelectedMissingIds(next);
-                      }}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      title={t({ it: 'Seleziona tutti gli utenti mancanti', en: 'Select all missing users' })}
-                    >
-                      {t({ it: 'Seleziona tutti', en: 'Select all' })}
-                    </button>
-                    <button
-                      onClick={() => setSelectedMissingIds({})}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      title={t({ it: 'Rimuove la selezione corrente', en: 'Clears the current selection' })}
-                    >
-                      {t({ it: 'Deseleziona', en: 'Clear selection' })}
-                    </button>
-                    <button
-                      onClick={() => {
-                        const ids = Object.entries(selectedMissingIds)
-                          .filter(([, v]) => !!v)
-                          .map(([k]) => k);
-                        if (!ids.length) return;
-                        setConfirmRemoveMissing({
-                          externalIds: ids,
-                          label: t({
-                            it: `Rimuovere ${ids.length} utenti dalla mappa?`,
-                            en: `Remove ${ids.length} users from the map?`
-                          })
-                        });
-                      }}
-                      disabled={!Object.values(selectedMissingIds).some(Boolean)}
-                      className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 enabled:hover:bg-rose-100 disabled:opacity-50"
-                      title={t({
-                        it: 'Rimuove dalla mappa gli utenti selezionati (e crea una revisione per ogni planimetria coinvolta).',
-                        en: 'Removes selected users from the map (and creates a revision for each affected floor plan).'
-                      })}
-                    >
-                      {t({ it: 'Rimuovi selezionati', en: 'Remove selected' })}
-                    </button>
-                  </div>
-	                <div className="mt-1 space-y-1">
-	                  {syncResult.missing.slice(0, 8).map((m: any) => (
-	                    <div key={m.externalId} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2">
-	                      <div className="flex min-w-0 items-start gap-2">
-                          <input
-                            type="checkbox"
-                            checked={!!selectedMissingIds[String(m.externalId)]}
-                            onChange={(e) => setSelectedMissingIds((prev) => ({ ...prev, [String(m.externalId)]: e.target.checked }))}
-                          />
-	                        <div className="min-w-0">
-	                          <div className="truncate font-semibold text-ink">
-	                            {m.firstName} {m.lastName}
-	                          </div>
-	                          <div className="text-xs text-slate-500">
-	                            {t({ it: 'ID', en: 'ID' })}: {m.externalId}
-	                          </div>
-                            {(() => {
-                              const locs = allocationsByExternalId.get(String(m.externalId)) || [];
-                              const total = locs.reduce((acc, x) => acc + (x.objectIds?.length || 0), 0);
-                              if (!total) return null;
-                              const preview = locs.slice(0, 2).map((x) => `${x.siteName} → ${x.planName}`).join(' · ');
-                              return (
-                                <div
-                                  className="mt-0.5 text-xs text-slate-600"
-                                  title={locs.map((x) => `${x.siteName} → ${x.planName} (${x.objectIds.length})`).join('\n')}
-                                >
-                                  {t({ it: `Allocazioni: ${total}`, en: `Allocations: ${total}` })}{preview ? ` · ${preview}` : ''}
-                                </div>
-                              );
-                            })()}
-	                        </div>
-                        </div>
-	                      <button
-	                        onClick={() =>
-	                          setConfirmRemoveMissing({
-	                            externalIds: [String(m.externalId)],
-	                            label: t({
-	                              it: `Rimuovere "${m.firstName} ${m.lastName}" dalla mappa?`,
-	                              en: `Remove "${m.firstName} ${m.lastName}" from the map?`
-	                            })
-	                          })
-	                        }
-	                        className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                          title={t({ it: 'Gestisci questo utente mancante', en: 'Handle this missing user' })}
-	                      >
-	                        {t({ it: 'Gestisci', en: 'Handle' })}
-	                      </button>
-	                    </div>
-	                  ))}
-                    {syncResult.missing.length > 8 ? (
-                      <div className="text-xs text-slate-500">
-                        {t({ it: `e altri ${syncResult.missing.length - 8}`, en: `and ${syncResult.missing.length - 8} more` })}
-                      </div>
-                    ) : null}
-	                </div>
-	              </div>
-	            ) : null}
-          </div>
-        ) : syncResult && syncResult.ok === false ? (
-          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
-            <div className="font-semibold">
-              {t({ it: `Import fallito — ${syncResult.error || ''}`, en: `Import failed — ${syncResult.error || ''}` })}
-            </div>
-            {syncResult.rawSnippet ? (
-              <div className="mt-2">
-                <button onClick={() => setShowRaw((v) => !v)} className="text-xs font-semibold underline decoration-dotted">
-                  {showRaw ? t({ it: 'Nascondi risposta', en: 'Hide response' }) : t({ it: 'Mostra risposta ricevuta', en: 'Show received response' })}
-                </button>
-                {showRaw ? (
-                  <pre className="mt-2 max-h-56 overflow-auto rounded-xl border border-rose-200 bg-white p-3 text-[11px] text-slate-800">
-                    {String(syncResult.contentType || '').trim()
-                      ? `content-type: ${syncResult.contentType}\n\n${syncResult.rawSnippet}`
-                      : syncResult.rawSnippet}
-                  </pre>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div className="mt-6">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm font-semibold text-ink">{t({ it: 'Utenti importati', en: 'Imported users' })}</div>
-            <div className="flex flex-wrap items-center gap-2">
-                <input
-                  value={usersQuery}
-                  onChange={(e) => setUsersQuery(e.target.value)}
-                  className="h-10 w-64 rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-primary"
-                  placeholder={t({ it: 'Cerca per nome/reparto/email…', en: 'Search by name/department/email…' })}
-                />
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" checked={includeHidden} onChange={(e) => setIncludeHidden(e.target.checked)} />
-                {t({ it: 'Mostra nascosti', en: 'Show hidden' })}
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" checked={includeMissing} onChange={(e) => setIncludeMissing(e.target.checked)} />
-                {t({ it: 'Includi mancanti', en: 'Include missing' })}
-              </label>
-            </div>
-          </div>
-
-          <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200">
-            <div className="grid grid-cols-12 gap-2 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
-              <button
-                type="button"
-                onClick={() => toggleSort('externalId')}
-                className="col-span-2 flex items-center gap-1 text-left hover:text-ink"
-                title={t({ it: 'Ordina per ID', en: 'Sort by ID' })}
-              >
-                {t({ it: 'ID', en: 'ID' })} <ArrowUpDown size={12} className="opacity-70" />
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleSort('name')}
-                className="col-span-4 flex items-center gap-1 text-left hover:text-ink"
-                title={t({ it: 'Ordina per nome', en: 'Sort by name' })}
-              >
-                {t({ it: 'Nome', en: 'Name' })} <ArrowUpDown size={12} className="opacity-70" />
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleSort('dept')}
-                className="col-span-3 flex items-center gap-1 text-left hover:text-ink"
-                title={t({ it: 'Ordina per reparto', en: 'Sort by department' })}
-              >
-                {t({ it: 'Reparto', en: 'Department' })} <ArrowUpDown size={12} className="opacity-70" />
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleSort('alloc')}
-                className="col-span-1 flex items-center justify-center gap-1 hover:text-ink"
-                title={t({ it: 'Ordina per allocazioni', en: 'Sort by allocations' })}
-              >
-                {t({ it: 'Alloc.', en: 'Alloc.' })} <ArrowUpDown size={12} className="opacity-70" />
-              </button>
-              <div className="col-span-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
-            </div>
-            {sortedRows.map((r) => {
-              const key = `${r.clientId}:${r.externalId}`;
-              const count = assignedCounts.get(key) || 0;
+          <div className="max-h-[420px] overflow-auto">
+            {summaryRows.map((row) => {
+              const lastImport = formatDate(row.lastImportAt);
+              const importStatus = row.lastImportAt ? lastImport : t({ it: 'Import non eseguito', en: 'Import not executed' });
+              const hasImport = !!row.lastImportAt;
               return (
-                <div key={key} className="grid grid-cols-12 gap-2 border-t border-slate-200 px-4 py-3 text-sm hover:bg-slate-50">
-                  <div className="col-span-2 font-mono text-[12px] text-slate-700">{r.externalId}</div>
-                  <div className="col-span-4 min-w-0">
-                    <div className="truncate font-semibold text-ink">
-                      {r.firstName} {r.lastName}
-                      {!r.present ? (
-                        <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">{t({ it: 'Mancante', en: 'Missing' })}</span>
-                      ) : null}
-                      {r.hidden ? (
-                        <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">{t({ it: 'Nascosto', en: 'Hidden' })}</span>
-                      ) : null}
+                <div key={row.clientId} className="grid grid-cols-12 gap-2 border-t border-slate-200 px-4 py-3 text-sm">
+                  <div className="col-span-5 min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="truncate font-semibold text-ink">{row.clientName}</div>
+                      <button
+                        onClick={() => {
+                          setInfoClientId(row.clientId);
+                          setInfoOpen(true);
+                        }}
+                        className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50"
+                        title={t({ it: 'Info cliente', en: 'Client info' })}
+                      >
+                        <Info size={12} />
+                      </button>
                     </div>
-                    <div className="truncate text-xs text-slate-500">{r.email || ''}</div>
+                    <div className="mt-1 text-[11px] font-semibold uppercase text-slate-400">{importStatus}</div>
                   </div>
-                  <div className="col-span-3 min-w-0">
-                    <div className="truncate text-xs text-slate-700">{[r.dept1, r.dept2, r.dept3].filter(Boolean).join(' / ') || '—'}</div>
+                  <div className={`col-span-3 text-xs ${hasImport ? 'font-semibold text-emerald-600' : 'font-semibold text-rose-600'}`}>
+                    {hasImport ? lastImport : 'MAI'}
                   </div>
-                  <div className="col-span-1 text-center text-sm font-semibold text-slate-700">{count}</div>
+                  <div className="col-span-2">
+                    <div className="text-sm font-semibold text-ink">{row.total}</div>
+                    <div className="text-[11px] text-slate-500">
+                      {t({ it: `Attivi ${row.presentCount}`, en: `Active ${row.presentCount}` })}
+                      {row.missingCount ? ` · ${t({ it: `Mancanti ${row.missingCount}`, en: `Missing ${row.missingCount}` })}` : ''}
+                    </div>
+                  </div>
                   <div className="col-span-2 flex items-center justify-end gap-2">
                     <button
-                      onClick={() => setInfoRow(r)}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-white"
-                      title={t({ it: 'Info', en: 'Info' })}
+                      onClick={() => openUsers(row.clientId)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Visualizza utenti importati', en: 'View imported users' })}
                     >
-                      <Info size={14} />
+                      <Users size={14} />
                     </button>
                     <button
-                      onClick={async () => {
-                        try {
-                          await setExternalUserHidden({ clientId, externalId: r.externalId, hidden: !r.hidden });
-                          await loadUsers();
-                          push(t({ it: 'Aggiornato', en: 'Updated' }), 'success');
-                        } catch {
-                          push(t({ it: 'Errore', en: 'Error' }), 'danger');
-                        }
-                      }}
-                      className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-ink hover:bg-white"
-                      title={r.hidden ? t({ it: 'Mostra utente', en: 'Unhide user' }) : t({ it: 'Nascondi utente', en: 'Hide user' })}
+                      onClick={() => openConfig(row.clientId)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Impostazioni importazione per questo cliente', en: 'Import settings for this client' })}
                     >
-                      {r.hidden ? t({ it: 'Mostra', en: 'Show' }) : t({ it: 'Nascondi', en: 'Hide' })}
+                      <Settings2 size={14} />
                     </button>
+                    {row.hasConfig ? (
+                      <button
+                        onClick={() => runSync(row.clientId)}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Aggiorna importazione da WebAPI', en: 'Sync import from WebAPI' })}
+                        disabled={syncingClientId === row.clientId}
+                      >
+                        <RefreshCw size={14} className={syncingClientId === row.clientId ? 'animate-spin' : ''} />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => openConfig(row.clientId, 'csv')}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Carica un CSV per questo cliente', en: 'Upload a CSV for this client' })}
+                      >
+                        <UploadCloud size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
             })}
-            {!rows.length ? <div className="px-4 py-6 text-sm text-slate-600">{t({ it: 'Nessun utente trovato.', en: 'No users found.' })}</div> : null}
+            {!summaryRows.length && !summaryLoading ? (
+              <div className="px-4 py-6 text-sm text-slate-600">{t({ it: 'Nessun cliente disponibile.', en: 'No clients available.' })}</div>
+            ) : null}
+            {summaryLoading ? <div className="px-4 py-6 text-sm text-slate-600">{t({ it: 'Caricamento…', en: 'Loading…' })}</div> : null}
           </div>
         </div>
       </div>
 
-      <ConfirmDialog
-        open={!!confirmImport}
-        title={t({ it: 'Conferma importazione', en: 'Confirm import' })}
-        description={t({
-          it:
-            confirmImport?.newCount && !confirmImport?.missingCount && !confirmImport?.updatedCount
-              ? `Rilevati ${confirmImport.newCount} nuovi utenti, importare?`
-              : `Importare le modifiche? Nuovi: ${confirmImport?.newCount || 0}, Aggiornati: ${confirmImport?.updatedCount || 0}, Mancanti: ${confirmImport?.missingCount || 0}. (WebAPI: ${confirmImport?.remoteCount || 0}, Locali: ${confirmImport?.localCount || 0})`,
-          en:
-            confirmImport?.newCount && !confirmImport?.missingCount && !confirmImport?.updatedCount
-              ? `Detected ${confirmImport.newCount} new users. Import now?`
-              : `Import changes? New: ${confirmImport?.newCount || 0}, Updated: ${confirmImport?.updatedCount || 0}, Missing: ${confirmImport?.missingCount || 0}. (WebAPI: ${confirmImport?.remoteCount || 0}, Local: ${confirmImport?.localCount || 0})`
-        })}
-        confirmLabel={t({ it: 'Importa', en: 'Import' })}
-        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
-        onCancel={() => setConfirmImport(null)}
-        onConfirm={async () => {
-          setConfirmImport(null);
-          setSyncResult(null);
-          try {
-            const res = await syncImport(clientId);
-            setSyncResult(res);
-            if (res.ok) {
-              push(t({ it: 'Import completato', en: 'Import completed' }), 'success');
-              await loadUsers();
-            } else {
-              push(t({ it: 'Import fallito', en: 'Import failed' }), 'danger');
-            }
-          } catch {
-            setSyncResult({ ok: false, error: 'Request failed', contentType: '', rawSnippet: '' });
-            push(t({ it: 'Import fallito', en: 'Import failed' }), 'danger');
-          } finally {
-          }
-        }}
-      />
-
-      <ConfirmDialog
-        open={confirmClearAll}
-        title={t({ it: 'Eliminare tutti gli utenti importati?', en: 'Delete all imported users?' })}
-        description={t({
-          it: 'Procedendo verranno eliminati tutti gli utenti importati per questo cliente e verranno rimossi anche gli oggetti “Utente reale” presenti nelle planimetrie. Operazione non annullabile.',
-          en: 'This will delete all imported users for this client and remove all “Real user” objects from its floor plans. This cannot be undone.'
-        })}
-        confirmLabel={t({ it: 'Elimina tutto', en: 'Delete all' })}
-        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
-        onCancel={() => setConfirmClearAll(false)}
-        onConfirm={async () => {
-          setConfirmClearAll(false);
-          setClearingAll(true);
-          try {
-            const res = await clearImport(clientId);
-            push(
-              t({
-                it: `Eliminati ${res.removedUsers} utenti e rimossi ${res.removedObjects} oggetti dalla mappa.`,
-                en: `Deleted ${res.removedUsers} users and removed ${res.removedObjects} map objects.`
-              }),
-              'success'
-            );
-            await loadUsers();
-            try {
-              const state = await fetchState();
-              if (Array.isArray(state.clients)) setServerState({ clients: state.clients, objectTypes: state.objectTypes });
-            } catch {}
-          } catch {
-            push(t({ it: 'Eliminazione fallita', en: 'Delete failed' }), 'danger');
-          } finally {
-            setClearingAll(false);
-          }
-        }}
-      />
-
-      <ConfirmDialog
-        open={!!confirmRemoveMissing}
-        title={t({ it: 'Utente non più presente nella WebAPI', en: 'User no longer present in the WebAPI' })}
-        description={(() => {
-          const ids = confirmRemoveMissing?.externalIds || [];
-          const locs = ids.flatMap((id) => allocationsByExternalId.get(String(id)) || []);
-          const locSummary = locs
-            .slice(0, 6)
-            .map((x) => `${x.siteName} → ${x.planName} (${x.objectIds.length})`)
-            .join(' · ');
-          return t({
-            it: `${confirmRemoveMissing?.label || ''}\n\nL’operazione rimuove gli oggetti “Utente reale” dalle planimetrie correnti e crea automaticamente una nuova revisione (minor) per ogni planimetria modificata.\n\nDove si trova (anteprima): ${locSummary || '—'}`,
-            en: `${confirmRemoveMissing?.label || ''}\n\nThis will remove “Real user” objects from the current floor plans and automatically create a new (minor) revision for each modified floor plan.\n\nWhere it is (preview): ${locSummary || '—'}`
-          });
-        })()}
-        confirmLabel={t({ it: 'Rimuovi e crea revisioni', en: 'Remove and create revisions' })}
-        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
-        onCancel={() => setConfirmRemoveMissing(null)}
-        onConfirm={async () => {
-          if (!confirmRemoveMissing) return;
-          try {
-            const ids = confirmRemoveMissing.externalIds || [];
-            const { affectedPlans } = removeRealUserAllocationsBulk?.(clientId, ids) || { affectedPlans: [] };
-            let removedObjects = 0;
-            for (const a of affectedPlans) removedObjects += a.removedObjectIds.length;
-            for (const a of affectedPlans) {
-              addRevision?.(a.planId, {
-                bump: 'minor',
-                description: `Removed missing real-user allocations (${ids.join(', ')})`
-              });
-              postAuditEvent({
-                event: 'real_user_missing_removed',
-                scopeType: 'plan',
-                scopeId: a.planId,
-                details: { externalIds: ids, removedObjectIds: a.removedObjectIds }
-              });
-            }
-            push(
-              t({
-                it: `Rimossi ${removedObjects} oggetti e create ${affectedPlans.length} revisioni.`,
-                en: `Removed ${removedObjects} objects and created ${affectedPlans.length} revisions.`
-              }),
-              'success'
-            );
-            await loadUsers();
-            setSyncResult((prev: any) => {
-              if (!prev?.ok || !Array.isArray(prev.missing)) return prev;
-              const keep = prev.missing.filter((m: any) => !ids.includes(String(m.externalId)));
-              const summary = { ...(prev.summary || {}) };
-              summary.missing = keep.length;
-              return { ...prev, missing: keep, summary };
-            });
-          } catch {
-            push(t({ it: 'Errore', en: 'Error' }), 'danger');
-          } finally {
-            setConfirmRemoveMissing(null);
-          }
-        }}
-      />
-
-      <Transition appear show={!!infoRow} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={() => setInfoRow(null)}>
+      <Transition show={configOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setConfigOpen(false)}>
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-150"
@@ -1001,9 +471,8 @@ const CustomImportPanel = () => {
           >
             <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
           </Transition.Child>
-
           <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4 text-center">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
               <Transition.Child
                 as={Fragment}
                 enter="ease-out duration-150"
@@ -1013,49 +482,516 @@ const CustomImportPanel = () => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-lg transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-card transition-all">
-                  <div className="flex items-center justify-between gap-3">
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Dettagli utente', en: 'User details' })}</Dialog.Title>
-                    <button onClick={() => setInfoRow(null)} className="text-slate-400 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <Dialog.Title className="text-lg font-semibold text-ink">
+                        {t({ it: 'Configurazione importazione', en: 'Import configuration' })}
+                      </Dialog.Title>
+                      <div className="mt-1 text-sm text-slate-600">
+                        {activeClient ? activeClient.name : t({ it: 'Nessun cliente selezionato', en: 'No client selected' })}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {importMode === 'webapi' ? (
+                        <button
+                          onClick={() => setConfigExpanded((v) => !v)}
+                          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50"
+                          title={t({ it: 'Mostra/Nascondi impostazioni WebAPI', en: 'Show/Hide WebAPI settings' })}
+                        >
+                          <Settings2 size={16} />
+                        </button>
+                      ) : null}
+                      <button onClick={() => setConfigOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                        <X size={18} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-ink">{t({ it: 'Stato importazione', en: 'Import status' })}</div>
+                      <div className="text-xs text-slate-500">
+                        {activeSummary
+                          ? t({ it: `Ultima importazione: ${formatDate(activeSummary.lastImportAt)}`, en: `Last import: ${formatDate(activeSummary.lastImportAt)}` })
+                          : t({ it: 'Nessuna importazione', en: 'No imports yet' })}
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <div className="text-xs uppercase text-slate-500">{t({ it: 'Utenti importati', en: 'Imported users' })}</div>
+                        <div className="text-base font-semibold text-ink">{activeSummary?.total ?? 0}</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <div className="text-xs uppercase text-slate-500">{t({ it: 'Attivi', en: 'Active' })}</div>
+                        <div className="text-base font-semibold text-ink">{activeSummary?.presentCount ?? 0}</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <div className="text-xs uppercase text-slate-500">{t({ it: 'Mancanti', en: 'Missing' })}</div>
+                        <div className="text-base font-semibold text-ink">{activeSummary?.missingCount ?? 0}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <div className="text-sm font-semibold text-ink">{t({ it: 'Sorgente importazione', en: 'Import source' })}</div>
+                    <button
+                      onClick={() => setImportMode('webapi')}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                        importMode === 'webapi' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      WebAPI
+                    </button>
+                    <button
+                      onClick={() => setImportMode('csv')}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                        importMode === 'csv' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      CSV
+                    </button>
+                  </div>
+
+                  {importMode === 'webapi' ? (
+                    configExpanded ? (
+                      <div className="mt-4 grid gap-4 md:grid-cols-2">
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'WebAPI URL', en: 'WebAPI URL' })}
+                          <input
+                            value={cfg?.url || ''}
+                            onChange={(e) => setCfg((prev) => ({ ...(prev || { url: '', username: '', hasPassword: false, bodyJson: '{}' }), url: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder="https://api.example.com/users"
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Username', en: 'Username' })}
+                          <input
+                            value={cfg?.username || ''}
+                            onChange={(e) => setCfg((prev) => ({ ...(prev || { url: '', username: '', hasPassword: false, bodyJson: '{}' }), username: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder="api-user"
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Password', en: 'Password' })}
+                          <input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder={cfg?.hasPassword ? t({ it: 'Lascia vuoto per non cambiare', en: 'Leave empty to keep' }) : '••••••'}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Body JSON (opzionale)', en: 'Body JSON (optional)' })}
+                          <textarea
+                            value={cfg?.bodyJson || ''}
+                            onChange={(e) => setCfg((prev) => ({ ...(prev || { url: '', username: '', hasPassword: false, bodyJson: '{}' }), bodyJson: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            rows={3}
+                            placeholder='{"User":"...","Password":"..."}'
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                        {t({
+                          it: 'Apri le impostazioni WebAPI con l’icona ingranaggio per configurare URL e credenziali.',
+                          en: 'Open the WebAPI settings via the gear icon to configure URL and credentials.'
+                        })}
+                      </div>
+                    )
+                  ) : (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-ink">{t({ it: 'Import CSV', en: 'CSV import' })}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {t({ it: 'Carica un CSV per questo cliente. Puoi sommare o sostituire gli utenti esistenti.', en: 'Upload a CSV for this client. You can append or replace existing users.' })}
+                          </div>
+                        </div>
+                        <button
+                          onClick={downloadCsvTemplate}
+                          className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                          title={t({ it: 'Scarica modello CSV', en: 'Download CSV template' })}
+                        >
+                          <FileDown size={16} className="text-slate-500" />
+                          {t({ it: 'Modello CSV', en: 'CSV template' })}
+                        </button>
+                      </div>
+                      <div className="mt-4 flex flex-wrap items-center gap-3">
+                        <label className="flex items-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                          <UploadCloud size={16} />
+                          {t({ it: 'Carica CSV', en: 'Upload CSV' })}
+                          <input
+                            type="file"
+                            accept=".csv,text/csv"
+                            className="hidden"
+                            onChange={(e) => handleCsvFile(e.target.files?.[0] || null)}
+                          />
+                        </label>
+                        {csvFile ? <span className="text-xs text-slate-500">{csvFile.name}</span> : null}
+                        {csvImporting ? <span className="text-xs text-slate-500">{t({ it: 'Import in corso…', en: 'Importing…' })}</span> : null}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-5 flex flex-wrap items-center gap-2">
+                    {importMode === 'webapi' ? (
+                      <>
+                        <button
+                          onClick={saveConfig}
+                          disabled={savingCfg || !activeClientId}
+                          className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+                          title={t({ it: 'Salva configurazione WebAPI', en: 'Save WebAPI configuration' })}
+                        >
+                          {savingCfg ? t({ it: 'Salvataggio…', en: 'Saving…' }) : t({ it: 'Salva impostazioni', en: 'Save settings' })}
+                        </button>
+                        <button
+                          onClick={runTest}
+                          disabled={testing || !activeClientId}
+                          className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                          title={t({ it: 'Verifica connessione WebAPI', en: 'Test WebAPI connection' })}
+                        >
+                          <TestTube size={16} /> {testing ? t({ it: 'Test…', en: 'Testing…' }) : t({ it: 'Test WebAPI', en: 'Test WebAPI' })}
+                        </button>
+                        {activeSummary?.hasConfig ? (
+                          <button
+                            onClick={() => activeClientId && runSync(activeClientId)}
+                            disabled={!activeClientId || syncingClientId === activeClientId}
+                            className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                            title={t({ it: 'Aggiorna importazione da WebAPI', en: 'Sync import from WebAPI' })}
+                          >
+                            <RefreshCw size={16} className={syncingClientId === activeClientId ? 'animate-spin' : ''} />
+                            {t({ it: 'Aggiorna importazione', en: 'Sync import' })}
+                          </button>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {activeSummary?.total || syncResult?.ok ? (
+                      <button
+                        onClick={() => activeClientId && openUsers(activeClientId)}
+                        className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Apri utenti importati', en: 'Open imported users' })}
+                      >
+                        <Users size={16} /> {t({ it: 'Utenti importati', en: 'Imported users' })}
+                      </button>
+                    ) : null}
+                    <button
+                      onClick={() => setClearConfirmOpen(true)}
+                      disabled={!activeClientId || clearing}
+                      className="ml-auto flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                      title={t({ it: 'Elimina dati importati', en: 'Clear imported data' })}
+                    >
+                      <Trash2 size={16} /> {clearing ? t({ it: 'Svuotamento…', en: 'Clearing…' }) : t({ it: 'Svuota importazione', en: 'Clear import' })}
+                    </button>
+                  </div>
+
+                  {testResult ? (
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      {testResult.ok
+                        ? t({ it: `Test OK: ${testResult.count ?? 0} utenti trovati.`, en: `Test OK: ${testResult.count ?? 0} users found.` })
+                        : t({ it: 'Test fallito. Controlla URL/credenziali.', en: 'Test failed. Check URL/credentials.' })}
+                    </div>
+                  ) : null}
+                  {syncResult && syncResult.ok ? (
+                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      {t({ it: 'Importazione completata con successo.', en: 'Import completed successfully.' })}
+                    </div>
+                  ) : null}
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={usersOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setUsersOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Utenti importati', en: 'Imported users' })}</Dialog.Title>
+                      <div className="mt-1 text-sm text-slate-600">{activeClient ? activeClient.name : ''}</div>
+                    </div>
+                    <button onClick={() => setUsersOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>
-                  <Dialog.Description className="mt-2 text-sm text-slate-600">
-                    {t({ it: 'Campi rilevati (solo non vuoti):', en: 'Detected fields (non-empty only):' })}
-                  </Dialog.Description>
 
-                  {infoRow ? (
-                    <div className="mt-4 space-y-2 text-sm text-slate-700">
-                      {[
-                        ['ID', infoRow.externalId],
-                        [t({ it: 'Nome', en: 'First name' }), infoRow.firstName],
-                        [t({ it: 'Cognome', en: 'Last name' }), infoRow.lastName],
-                        ['Email', infoRow.email],
-                        [t({ it: 'Ruolo', en: 'Role' }), infoRow.role],
-                        [t({ it: 'Reparto 1', en: 'Department 1' }), infoRow.dept1],
-                        [t({ it: 'Reparto 2', en: 'Department 2' }), infoRow.dept2],
-                        [t({ it: 'Reparto 3', en: 'Department 3' }), infoRow.dept3],
-                        [t({ it: 'Interno 1', en: 'Extension 1' }), infoRow.ext1],
-                        [t({ it: 'Interno 2', en: 'Extension 2' }), infoRow.ext2],
-                        [t({ it: 'Interno 3', en: 'Extension 3' }), infoRow.ext3],
-                        [t({ it: 'Esterno', en: 'External' }), infoRow.isExternal ? '1' : '0'],
-                        [t({ it: 'Nascosto', en: 'Hidden' }), infoRow.hidden ? '1' : '0'],
-                        [t({ it: 'Presente', en: 'Present' }), infoRow.present ? '1' : '0']
-                      ]
-                        .filter(([, v]) => String(v || '').trim())
-                        .map(([k, v]) => (
-                          <div key={String(k)} className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                            <div className="text-xs font-semibold uppercase text-slate-500">{String(k)}</div>
-                            <div className="min-w-0 text-right font-medium text-ink">{String(v)}</div>
-                          </div>
-                        ))}
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <div className="relative flex-1 min-w-[240px]">
+                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        value={usersQuery}
+                        onChange={(e) => setUsersQuery(e.target.value)}
+                        className="h-10 w-full rounded-xl border border-slate-200 pl-9 pr-3 text-sm outline-none focus:border-primary"
+                        placeholder={t({ it: 'Cerca per nome, reparto, email…', en: 'Search by name, dept, email…' })}
+                        autoFocus
+                      />
                     </div>
-                  ) : null}
-
-                  <div className="mt-6 flex justify-end">
                     <button
-                      onClick={() => setInfoRow(null)}
-                      className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                      onClick={() => activeClientId && loadUsers(activeClientId)}
+                      className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Ricarica elenco', en: 'Reload list' })}
+                    >
+                      <RefreshCw size={16} className={usersLoading ? 'animate-spin text-primary' : 'text-slate-500'} />
+                      {t({ it: 'Aggiorna', en: 'Refresh' })}
+                    </button>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <Filter size={16} className="text-slate-500" />
+                      <input type="checkbox" checked={onlyUnassigned} onChange={(e) => setOnlyUnassigned(e.target.checked)} />
+                      {t({ it: 'Solo non assegnati', en: 'Only unassigned' })}
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <input type="checkbox" checked={includeMissing} onChange={(e) => setIncludeMissing(e.target.checked)} />
+                      {t({ it: 'Includi mancanti', en: 'Include missing' })}
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <input type="checkbox" checked={includeHidden} onChange={(e) => setIncludeHidden(e.target.checked)} />
+                      {t({ it: 'Mostra nascosti', en: 'Show hidden' })}
+                    </label>
+                  </div>
+
+                  <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+                    <div className="grid grid-cols-12 gap-2 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
+                      <div className="col-span-4">{t({ it: 'Nome', en: 'Name' })}</div>
+                      <div className="col-span-2">{t({ it: 'ID', en: 'ID' })}</div>
+                      <div className="col-span-4">{t({ it: 'Ruolo / Reparto', en: 'Role / Dept' })}</div>
+                      <div className="col-span-1 text-center">{t({ it: 'Alloc.', en: 'Alloc.' })}</div>
+                      <div className="col-span-1 text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
+                    </div>
+                    <div className="max-h-[380px] overflow-auto">
+                      {usersLoading ? <div className="px-4 py-6 text-sm text-slate-600">{t({ it: 'Caricamento…', en: 'Loading…' })}</div> : null}
+                      {!usersLoading && !filteredUsers.length ? (
+                        <div className="px-4 py-6 text-sm text-slate-600">{t({ it: 'Nessun utente trovato.', en: 'No users found.' })}</div>
+                      ) : null}
+                      {filteredUsers.map((r) => {
+                        const count = assignedCounts.get(`${r.clientId}:${r.externalId}`) || 0;
+                        const displayName = `${String(r.firstName || '').trim()} ${String(r.lastName || '').trim()}`.trim() || r.email || r.externalId;
+                        return (
+                          <div key={r.externalId} className="grid grid-cols-12 gap-2 border-t border-slate-200 px-4 py-3 text-sm">
+                            <div className="col-span-4 min-w-0">
+                              <div className="truncate font-semibold text-ink">
+                                {displayName}
+                                {!r.present ? (
+                                  <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                                    {t({ it: 'Mancante', en: 'Missing' })}
+                                  </span>
+                                ) : null}
+                                {r.hidden ? (
+                                  <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                                    {t({ it: 'Nascosto', en: 'Hidden' })}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="truncate text-xs text-slate-500">{r.email || ''}</div>
+                            </div>
+                            <div className="col-span-2 font-mono text-[12px] text-slate-700">{r.externalId}</div>
+                            <div className="col-span-4 min-w-0">
+                              <div className="truncate text-xs text-slate-700">{r.role || '—'}</div>
+                              <div className="truncate text-[11px] text-slate-500">{[r.dept1, r.dept2, r.dept3].filter(Boolean).join(' / ')}</div>
+                            </div>
+                            <div className="col-span-1 text-center text-sm font-semibold text-slate-700">{count}</div>
+                            <div className="col-span-1 flex items-center justify-end">
+                              <button
+                                onClick={async () => {
+                                  if (!activeClientId) return;
+                                  try {
+                                    await setExternalUserHidden({ clientId: activeClientId, externalId: r.externalId, hidden: !r.hidden });
+                                    await loadUsers(activeClientId);
+                                    push(t({ it: 'Aggiornato', en: 'Updated' }), 'success');
+                                  } catch {
+                                    push(t({ it: 'Errore', en: 'Error' }), 'danger');
+                                  }
+                                }}
+                                className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-ink hover:bg-white"
+                                title={r.hidden ? t({ it: 'Mostra utente', en: 'Unhide user' }) : t({ it: 'Nascondi utente', en: 'Hide user' })}
+                              >
+                                {r.hidden ? t({ it: 'Mostra', en: 'Show' }) : t({ it: 'Nascondi', en: 'Hide' })}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      onClick={() => setUsersOpen(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                    {activeSummary?.hasConfig ? (
+                      <button
+                        onClick={() => activeClientId && runSync(activeClientId)}
+                        disabled={!activeClientId || syncingClientId === activeClientId}
+                        className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        <RefreshCw size={16} className={syncingClientId === activeClientId ? 'animate-spin' : ''} />
+                        {t({ it: 'Aggiorna importazione', en: 'Sync import' })}
+                      </button>
+                    ) : null}
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={csvConfirmOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setCsvConfirmOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Import CSV', en: 'CSV import' })}</Dialog.Title>
+                    <button onClick={() => setCsvConfirmOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-3 text-sm text-slate-600">
+                    {t({
+                      it: 'Come vuoi gestire gli utenti del CSV? Puoi sommarli agli esistenti oppure sostituire tutto (rimuove anche gli utenti reali dalla mappa).',
+                      en: 'How do you want to handle CSV users? You can append to existing users or replace everything (also removes real users from the map).'
+                    })}
+                  </div>
+                  {csvFile ? <div className="mt-3 text-xs text-slate-500">{csvFile.name}</div> : null}
+                  <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      onClick={() => setCsvConfirmOpen(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      onClick={() => runCsvImport('append')}
+                      disabled={csvImporting}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      {t({ it: 'Somma utenti', en: 'Append users' })}
+                    </button>
+                    <button
+                      onClick={() => runCsvImport('replace')}
+                      disabled={csvImporting}
+                      className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:opacity-60"
+                    >
+                      {t({ it: 'Sostituisci tutto', en: 'Replace all' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={infoOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setInfoOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Info cliente', en: 'Client info' })}</Dialog.Title>
+                    <button onClick={() => setInfoOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-3 space-y-3 text-sm text-slate-700">
+                    <div>
+                      <div className="text-xs uppercase text-slate-500">{t({ it: 'Nome', en: 'Name' })}</div>
+                      <div className="font-semibold text-ink">{infoClient?.name || infoClient?.shortName || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-slate-500">ID</div>
+                      <div className="font-mono text-xs text-slate-600">{infoClient?.id || '—'}</div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <div className="text-xs uppercase text-slate-500">{t({ it: 'Sedi', en: 'Sites' })}</div>
+                        <div className="font-semibold text-ink">{infoCounts.sites}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs uppercase text-slate-500">{t({ it: 'Planimetrie', en: 'Floor plans' })}</div>
+                        <div className="font-semibold text-ink">{infoCounts.plans}</div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-slate-500">{t({ it: 'Ultimo import', en: 'Last import' })}</div>
+                      <div className="text-slate-600">{formatDate(infoSummary?.lastImportAt)}</div>
+                    </div>
+                  </div>
+                  <div className="mt-5 flex justify-end">
+                    <button
+                      onClick={() => setInfoOpen(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}
                     </button>
@@ -1066,6 +1002,22 @@ const CustomImportPanel = () => {
           </div>
         </Dialog>
       </Transition>
+
+      <ConfirmDialog
+        open={clearConfirmOpen}
+        title={t({ it: 'Eliminare tutti gli utenti importati?', en: 'Delete all imported users?' })}
+        description={t({
+          it: 'Procedendo verranno eliminati tutti gli utenti importati per questo cliente e rimossi gli oggetti “Utente reale” dalle planimetrie. Operazione non annullabile.',
+          en: 'This will delete all imported users for this client and remove all “Real user” objects from floor plans. This cannot be undone.'
+        })}
+        confirmLabel={t({ it: 'Elimina tutto', en: 'Delete all' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+        onCancel={() => setClearConfirmOpen(false)}
+        onConfirm={async () => {
+          setClearConfirmOpen(false);
+          await clearImportData();
+        }}
+      />
     </div>
   );
 };
