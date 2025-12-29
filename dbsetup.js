@@ -41,5 +41,3 @@ try {
 } catch {
   safeSymlinkDir('/data', '/app/data');
 }
-
-console.log('[deskly] dbsetup complete');

@@ -263,7 +263,7 @@ const SettingsView = () => {
           <UsersPanel />
         ) : (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
-            Non hai i permessi per gestire gli utenti.
+            {t({ it: 'Non hai i permessi per gestire gli utenti.', en: 'You do not have permission to manage users.' })}
           </div>
         )
       ) : null}
@@ -301,7 +301,7 @@ const SettingsView = () => {
             <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
               <div className="flex items-center justify-between">
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
-                  <FolderPlus size={16} /> Clienti
+                  <FolderPlus size={16} /> {t({ it: 'Clienti', en: 'Clients' })}
                 </h2>
                 <button
                   onClick={() => setClientModal({})}

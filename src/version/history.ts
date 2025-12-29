@@ -9,6 +9,40 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.2.25',
+    date: '2025-12-24',
+    type: 'minor',
+    notes: [
+      n(
+        'Stanze: scala personalizzabile per nome e capienza direttamente dalle impostazioni stanza',
+        'Rooms: custom scale for name and capacity in room settings'
+      ),
+      n(
+        'Stanze: blocco sovrapposizione con avviso dedicato',
+        'Rooms: overlap prevention with dedicated warning'
+      ),
+      n(
+        'Revisione rapida: Cmd/Ctrl+S crea un minor automatico con notifica',
+        'Quick revision: Cmd/Ctrl+S creates an automatic minor with notification'
+      )
+    ]
+  },
+  {
+    version: '1.2.20',
+    date: '2025-12-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Utenti reali: selezione chiarita per cliente (nome/ID + contatori) e filtri locali più veloci',
+        'Real users: picker now clarifies the client scope (name/ID + counters) with faster local filters'
+      ),
+      n(
+        'Utenti reali: caricamento lista più stabile (niente loop di ricerca) e stato vuoto più esplicito',
+        'Real users: more stable list loading (no search loop) with clearer empty states'
+      )
+    ]
+  },
+  {
     version: '1.2.19',
     date: '2025-12-24',
     type: 'fix',

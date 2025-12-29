@@ -319,6 +319,18 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'Ctrl+S / Cmd+S: salva un aggiornamento rapido (minor automatico).',
+                          en: 'Ctrl+S / Cmd+S: saves a quick update (automatic minor).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Ctrl+Z / Cmd+Z: annulla l’ultimo inserimento (con conferma).',
+                          en: 'Ctrl+Z / Cmd+Z: undo last placement (with confirmation).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'Canc: elimina l’oggetto (o i multipli oggetti) selezionati dopo conferma.',
                           en: 'Delete: removes the selected object(s) after confirmation.'
                         })}

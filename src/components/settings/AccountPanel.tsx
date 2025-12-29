@@ -38,7 +38,7 @@ const AccountPanel = () => {
         <div className="text-sm font-semibold text-ink">{t({ it: 'Account', en: 'Account' })}</div>
         <div className="mt-2 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           <div className="rounded-xl bg-slate-50 px-3 py-2">
-            <div className="text-xs font-semibold uppercase text-slate-500">Username</div>
+            <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Username', en: 'Username' })}</div>
             <div className="font-semibold text-ink">{user.username}</div>
           </div>
           <div className="rounded-xl bg-slate-50 px-3 py-2">
@@ -52,7 +52,7 @@ const AccountPanel = () => {
             </div>
           </div>
           <div className="rounded-xl bg-slate-50 px-3 py-2">
-            <div className="text-xs font-semibold uppercase text-slate-500">Email</div>
+            <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Email', en: 'Email' })}</div>
             <div className="font-semibold text-ink">{user.email}</div>
           </div>
           {user.phone ? (

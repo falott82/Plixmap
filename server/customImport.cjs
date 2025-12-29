@@ -152,8 +152,9 @@ const upsertImportConfig = (db, authSecret, payload) => {
   return getImportConfigSafe(db, payload.clientId);
 };
 
-const upsertExternalUsers = (db, clientId, employees) => {
+const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   const now = Date.now();
+  const shouldMarkMissing = options.markMissing !== false;
   const existing = db
     .prepare('SELECT externalId, firstName, lastName, role, dept1, dept2, dept3, email, ext1, ext2, ext3, isExternal, hidden, present FROM external_users WHERE clientId = ?')
     .all(clientId);
@@ -169,7 +170,7 @@ const upsertExternalUsers = (db, clientId, employees) => {
      SET firstName=?, lastName=?, role=?, dept1=?, dept2=?, dept3=?, email=?, ext1=?, ext2=?, ext3=?, isExternal=?, present=1, lastSeenAt=?, updatedAt=?
      WHERE clientId=? AND externalId=?`
   );
-  const markMissing = db.prepare(`UPDATE external_users SET present=0, updatedAt=? WHERE clientId=? AND externalId=?`);
+  const markMissingStmt = db.prepare(`UPDATE external_users SET present=0, updatedAt=? WHERE clientId=? AND externalId=?`);
 
   const created = [];
   const updated = [];
@@ -238,11 +239,13 @@ const upsertExternalUsers = (db, clientId, employees) => {
     }
   }
 
-  for (const prev of existing) {
-    const id = String(prev.externalId);
-    if (!incomingIds.has(id) && Number(prev.present || 1) === 1) {
-      markMissing.run(now, clientId, id);
-      missing.push({ externalId: id, firstName: prev.firstName || '', lastName: prev.lastName || '' });
+  if (shouldMarkMissing) {
+    for (const prev of existing) {
+      const id = String(prev.externalId);
+      if (!incomingIds.has(id) && Number(prev.present || 1) === 1) {
+        markMissingStmt.run(now, clientId, id);
+        missing.push({ externalId: id, firstName: prev.firstName || '', lastName: prev.lastName || '' });
+      }
     }
   }
 
@@ -258,20 +261,34 @@ const listExternalUsers = (db, params) => {
   const q = String(params.q || '').trim().toLowerCase();
   const includeHidden = !!params.includeHidden;
   const includeMissing = !!params.includeMissing;
-  const rows = db
-    .prepare(
-      `SELECT clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt
+  const limit = Number.isFinite(Number(params.limit)) ? Math.max(0, Number(params.limit)) : null;
+  const offset = Number.isFinite(Number(params.offset)) ? Math.max(0, Number(params.offset)) : null;
+  const where = ['clientId = ?'];
+  const values = [params.clientId];
+  if (!includeHidden) where.push('hidden = 0');
+  if (!includeMissing) where.push('present = 1');
+  if (q) {
+    const escaped = q.replace(/[%_]/g, '\\$&');
+    const like = `%${escaped}%`;
+    where.push(
+      '(lower(externalId) LIKE ? ESCAPE \'\\\\\' OR lower(firstName) LIKE ? ESCAPE \'\\\\\' OR lower(lastName) LIKE ? ESCAPE \'\\\\\' OR lower(role) LIKE ? ESCAPE \'\\\\\' OR lower(dept1) LIKE ? ESCAPE \'\\\\\' OR lower(dept2) LIKE ? ESCAPE \'\\\\\' OR lower(dept3) LIKE ? ESCAPE \'\\\\\' OR lower(email) LIKE ? ESCAPE \'\\\\\')'
+    );
+    values.push(like, like, like, like, like, like, like, like);
+  }
+  let sql = `SELECT clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt
        FROM external_users
-       WHERE clientId = ?`
-    )
-    .all(params.clientId)
-    .filter((r) => (includeHidden ? true : Number(r.hidden) !== 1))
-    .filter((r) => (includeMissing ? true : Number(r.present) === 1))
-    .filter((r) => {
-      if (!q) return true;
-      const hay = `${r.externalId} ${r.firstName} ${r.lastName} ${r.role} ${r.dept1} ${r.dept2} ${r.dept3} ${r.email}`.toLowerCase();
-      return hay.includes(q);
-    })
+       WHERE ${where.join(' AND ')}`;
+  if (limit !== null) {
+    sql += ' LIMIT ?';
+    values.push(limit);
+    if (offset !== null) {
+      sql += ' OFFSET ?';
+      values.push(offset);
+    }
+  }
+  const rows = db
+    .prepare(sql)
+    .all(...values)
     .map((r) => ({
       clientId: r.clientId,
       externalId: String(r.externalId),
@@ -285,9 +302,9 @@ const listExternalUsers = (db, params) => {
       ext1: r.ext1 || '',
       ext2: r.ext2 || '',
       ext3: r.ext3 || '',
-      isExternal: !!r.isExternal,
-      hidden: !!r.hidden,
-      present: !!r.present,
+      isExternal: Number(r.isExternal) === 1,
+      hidden: Number(r.hidden) === 1,
+      present: Number(r.present) === 1,
       lastSeenAt: r.lastSeenAt || null,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt
@@ -297,6 +314,48 @@ const listExternalUsers = (db, params) => {
 
 const setExternalUserHidden = (db, clientId, externalId, hidden) => {
   db.prepare('UPDATE external_users SET hidden=?, updatedAt=? WHERE clientId=? AND externalId=?').run(hidden ? 1 : 0, Date.now(), clientId, externalId);
+};
+
+const listImportSummary = (db) => {
+  const userRows = db
+    .prepare(
+      `SELECT clientId,
+              COUNT(*) as total,
+              SUM(CASE WHEN present = 1 THEN 1 ELSE 0 END) as presentCount,
+              SUM(CASE WHEN present = 0 THEN 1 ELSE 0 END) as missingCount,
+              SUM(CASE WHEN hidden = 1 THEN 1 ELSE 0 END) as hiddenCount,
+              MAX(updatedAt) as lastImportAt
+       FROM external_users
+       GROUP BY clientId`
+    )
+    .all();
+  const cfgRows = db.prepare('SELECT clientId, updatedAt FROM client_user_import').all();
+  const byClient = new Map();
+  for (const row of userRows) {
+    byClient.set(row.clientId, {
+      clientId: row.clientId,
+      total: Number(row.total || 0),
+      presentCount: Number(row.presentCount || 0),
+      missingCount: Number(row.missingCount || 0),
+      hiddenCount: Number(row.hiddenCount || 0),
+      lastImportAt: row.lastImportAt || null,
+      configUpdatedAt: null
+    });
+  }
+  for (const row of cfgRows) {
+    const entry = byClient.get(row.clientId) || {
+      clientId: row.clientId,
+      total: 0,
+      presentCount: 0,
+      missingCount: 0,
+      hiddenCount: 0,
+      lastImportAt: null,
+      configUpdatedAt: null
+    };
+    entry.configUpdatedAt = row.updatedAt || null;
+    byClient.set(row.clientId, entry);
+  }
+  return Array.from(byClient.values());
 };
 
 module.exports = {
@@ -309,5 +368,6 @@ module.exports = {
   upsertImportConfig,
   upsertExternalUsers,
   listExternalUsers,
-  setExternalUserHidden
+  setExternalUserHidden,
+  listImportSummary
 };
