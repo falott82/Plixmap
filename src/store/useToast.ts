@@ -20,7 +20,7 @@ export const useToastStore = create<ToastState>((set) => ({
   push: (message, tone = 'info') => {
     const id = nanoid();
     set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }));
-    setTimeout(() => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })), 1400);
+    setTimeout(() => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })), 2000);
   },
   remove: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }))
 }));

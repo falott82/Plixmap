@@ -230,6 +230,26 @@ const nextRev = (plan: FloorPlan, bump: 'major' | 'minor') => {
   return { major: latest.major, minor: latest.minor + 1 };
 };
 
+const normalizeViews = (views: FloorPlanView[] | undefined): FloorPlanView[] | undefined => {
+  if (!Array.isArray(views)) return views;
+  if (!views.length) return [];
+  const next = views.map((v) => ({ ...v, pan: { ...v.pan } }));
+  let defaultIndex = next.findIndex((v) => v.isDefault);
+  if (defaultIndex === -1) {
+    defaultIndex = next.findIndex((v) => String(v.name || '').trim().toLowerCase() === 'default');
+  }
+  if (defaultIndex !== -1) {
+    const normalized = next.map((v, idx) => ({
+      ...v,
+      isDefault: idx === defaultIndex,
+      name: idx === defaultIndex ? 'DEFAULT' : v.name
+    }));
+    const [def] = normalized.splice(defaultIndex, 1);
+    return [def, ...normalized];
+  }
+  return next.map((v) => (v.isDefault ? { ...v, isDefault: false } : v));
+};
+
 const snapshotRevision = (
   plan: FloorPlan,
   rev: { major: number; minor: number },
@@ -249,7 +269,7 @@ const snapshotRevision = (
     width: plan.width,
     height: plan.height,
     layers: plan.layers ? plan.layers.map((l) => ({ ...l, name: { ...l.name } })) : undefined,
-    views: plan.views ? plan.views.map((v) => ({ ...v, pan: { ...v.pan } })) : undefined,
+    views: normalizeViews(plan.views),
     rooms: plan.rooms ? plan.rooms.map((r) => ({ ...r })) : undefined,
     links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
     objects: plan.objects.map((o) => ({ ...o }))
@@ -267,7 +287,7 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
   const next = { ...plan } as any;
   if (!next.layers || !next.layers.length) next.layers = defaultLayers();
   if (!Array.isArray(next.links)) next.links = [];
-  if (!Array.isArray(next.views)) next.views = [];
+  next.views = normalizeViews(next.views) || [];
   if (!Array.isArray(next.rooms)) next.rooms = [];
   if (!Array.isArray(next.revisions)) next.revisions = [];
   if (!Array.isArray(next.objects)) next.objects = [];
@@ -738,7 +758,9 @@ export const useDataStore = create<DataState>()(
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => {
             const existing = plan.views || [];
             const nextViews = view.isDefault ? existing.map((v) => ({ ...v, isDefault: false })) : existing;
-            return { ...plan, views: [...nextViews, { id, ...view }] };
+            const nextView = { id, ...view, name: view.isDefault ? 'DEFAULT' : view.name };
+            const merged = view.isDefault ? [nextView, ...nextViews] : [...nextViews, nextView];
+            return { ...plan, views: normalizeViews(merged) || [] };
           }),
           version: state.version + 1
         }));
@@ -748,7 +770,14 @@ export const useDataStore = create<DataState>()(
         set((state) => ({
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
             ...plan,
-            views: (plan.views || []).map((v) => (v.id === viewId ? { ...v, ...changes } : v))
+            views: normalizeViews(
+              (plan.views || []).map((v) => {
+                if (v.id !== viewId) return v;
+                const next = { ...v, ...changes };
+                if (changes?.isDefault) next.name = 'DEFAULT';
+                return next;
+              })
+            ) || []
           })),
           version: state.version + 1
         }));
@@ -757,7 +786,7 @@ export const useDataStore = create<DataState>()(
         set((state) => ({
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
             ...plan,
-            views: (plan.views || []).filter((v) => v.id !== viewId)
+            views: normalizeViews((plan.views || []).filter((v) => v.id !== viewId)) || []
           })),
           version: state.version + 1
         }));
@@ -766,7 +795,13 @@ export const useDataStore = create<DataState>()(
         set((state) => ({
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
             ...plan,
-            views: (plan.views || []).map((v) => ({ ...v, isDefault: v.id === viewId }))
+            views: normalizeViews(
+              (plan.views || []).map((v) => ({
+                ...v,
+                isDefault: v.id === viewId,
+                name: v.id === viewId ? 'DEFAULT' : v.name
+              }))
+            ) || []
           })),
           version: state.version + 1
         }));

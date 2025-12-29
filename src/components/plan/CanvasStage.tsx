@@ -2,10 +2,11 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo,
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
-import { FloorPlan, IconName, MapObjectType } from '../../store/types';
+import { FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
 import { clamp } from '../../utils/geometry';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
+import { perfMetrics } from '../../utils/perfMetrics';
 
 interface Props {
   plan: FloorPlan;
@@ -20,6 +21,7 @@ interface Props {
   highlightUntil?: number;
   highlightRoomId?: string;
   highlightRoomUntil?: number;
+  roomStatsById?: Map<string, { items: MapObject[]; userCount: number; otherCount: number; totalCount: number }>;
   focusTarget?: { x: number; y: number; zoom?: number; nonce: number };
   pendingType?: MapObjectType | null;
   readOnly?: boolean;
@@ -33,18 +35,21 @@ interface Props {
   containerRef: React.RefObject<HTMLDivElement>;
   autoFit?: boolean;
   onGoDefaultView?: () => void;
+  perfEnabled?: boolean;
   onZoomChange: (zoom: number) => void;
   onPanChange: (pan: { x: number; y: number }) => void;
-  onSelect: (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => void;
-  onSelectMany?: (ids: string[]) => void;
-  onMove: (id: string, x: number, y: number) => void;
-  onPlaceNew: (type: MapObjectType, x: number, y: number) => void;
-  onEdit: (id: string) => void;
+	  onSelect: (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => void;
+	  onSelectMany?: (ids: string[]) => void;
+	  onMove: (id: string, x: number, y: number) => void;
+	  onPlaceNew: (type: MapObjectType, x: number, y: number) => void;
+	  onEdit: (id: string) => void;
   onContextMenu: (payload: { id: string; clientX: number; clientY: number }) => void;
   onLinkContextMenu?: (payload: { id: string; clientX: number; clientY: number }) => void;
   onLinkDblClick?: (id: string) => void;
   onMapContextMenu: (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) => void;
-  onSelectRoom?: (roomId?: string) => void;
+  onSelectRoom?: (roomId?: string, options?: { keepContext?: boolean }) => void;
+  onOpenRoomDetails?: (roomId: string) => void;
+  onRoomContextMenu?: (payload: { id: string; clientX: number; clientY: number }) => void;
   onSelectLink?: (id?: string) => void;
   onCreateRoom?: (
     shape:
@@ -94,6 +99,7 @@ const CanvasStageImpl = (
   highlightUntil,
   highlightRoomId,
   highlightRoomUntil,
+  roomStatsById,
   focusTarget,
   pendingType,
   readOnly = false,
@@ -107,27 +113,32 @@ const CanvasStageImpl = (
   containerRef,
   autoFit = true,
   onGoDefaultView,
+  perfEnabled = false,
   onZoomChange,
   onPanChange,
-  onSelect,
-  onSelectMany,
-  onMove,
-  onPlaceNew,
-  onEdit,
+	  onSelect,
+	  onSelectMany,
+	  onMove,
+	  onPlaceNew,
+	  onEdit,
   onContextMenu,
   onLinkContextMenu,
   onLinkDblClick,
   onMapContextMenu,
   onSelectRoom,
+  onOpenRoomDetails,
   onSelectLink,
   onCreateRoom,
   onUpdateRoom,
+  onRoomContextMenu,
   onSetPrintArea
 }: Props,
   ref: React.ForwardedRef<CanvasStageHandle>
 ) => {
   const t = useT();
   const stageRef = useRef<any>(null);
+  const renderStartRef = useRef(0);
+  renderStartRef.current = performance.now();
   const [hoverCard, setHoverCard] = useState<
     | null
     | {
@@ -168,6 +179,36 @@ const CanvasStageImpl = (
   const pendingDraftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftPrintRectRaf = useRef<number | null>(null);
   const pendingDraftPrintRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    if (!perfEnabled) return;
+    perfMetrics.canvasRenders += 1;
+    perfMetrics.canvasLastRenderMs = Math.round(performance.now() - renderStartRef.current);
+  });
+
+  useEffect(() => {
+    if (!perfEnabled) return;
+    const countNodes = (node: any): number => {
+      if (!node || typeof node.getChildren !== 'function') return 1;
+      const children = node.getChildren() || [];
+      if (!children.length) return 1;
+      let total = 1;
+      for (const child of children) total += countNodes(child);
+      return total;
+    };
+    const tick = () => {
+      const stage = stageRef.current;
+      if (!stage || typeof stage.getChildren !== 'function') return;
+      const layers = stage.getChildren() || [];
+      perfMetrics.konvaLayerCount = layers.length;
+      let nodes = 1;
+      for (const layer of layers) nodes += countNodes(layer);
+      perfMetrics.konvaNodeCount = nodes;
+    };
+    tick();
+    const id = window.setInterval(tick, 2000);
+    return () => window.clearInterval(id);
+  }, [perfEnabled]);
 
   useImperativeHandle(
     ref,
@@ -212,6 +253,14 @@ const CanvasStageImpl = (
   const polyVertexRefs = useRef<Record<string, Record<number, any>>>({});
   const objectsLayerRef = useRef<any>(null);
   const objectNodeRefs = useRef<Record<string, any>>({});
+  const roomDragRef = useRef<{
+    roomId: string;
+    kind: 'rect' | 'poly';
+    startX: number;
+    startY: number;
+    node: any;
+    cancelled: boolean;
+  } | null>(null);
   const [iconImages, setIconImages] = useState<Record<string, HTMLImageElement | null>>({});
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(
     null
@@ -272,39 +321,265 @@ const CanvasStageImpl = (
     return lines;
   }, [baseHeight, baseWidth, gridSize, showGrid]);
 
+  const estimateTextWidth = (text: string, fontSize: number) => text.length * fontSize * 0.6;
+
+  const pointInPolygon = (x: number, y: number, points: { x: number; y: number }[]) => {
+    let inside = false;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const xi = points[i].x;
+      const yi = points[i].y;
+      const xj = points[j].x;
+      const yj = points[j].y;
+      const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 0.000001) + xi;
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  };
+
+  const polygonCentroid = (points: { x: number; y: number }[]) => {
+    let area = 0;
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0; i < points.length; i++) {
+      const p0 = points[i];
+      const p1 = points[(i + 1) % points.length];
+      const cross = p0.x * p1.y - p1.x * p0.y;
+      area += cross;
+      cx += (p0.x + p1.x) * cross;
+      cy += (p0.y + p1.y) * cross;
+    }
+    area *= 0.5;
+    if (!Number.isFinite(area) || Math.abs(area) < 0.00001) {
+      const avg = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+      const count = points.length || 1;
+      return { x: avg.x / count, y: avg.y / count };
+    }
+    return { x: cx / (6 * area), y: cy / (6 * area) };
+  };
+
+  const findInteriorPointAtY = (y: number, points: { x: number; y: number }[]) => {
+    const xs: number[] = [];
+    for (let i = 0; i < points.length; i++) {
+      const p1 = points[i];
+      const p2 = points[(i + 1) % points.length];
+      const y1 = p1.y;
+      const y2 = p2.y;
+      if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
+        const x = p1.x + ((y - y1) * (p2.x - p1.x)) / (y2 - y1);
+        xs.push(x);
+      }
+    }
+    if (xs.length < 2) return null;
+    xs.sort((a, b) => a - b);
+    let best: { x: number; y: number } | null = null;
+    let bestLen = -1;
+    for (let i = 0; i < xs.length - 1; i += 2) {
+      const x1 = xs[i];
+      const x2 = xs[i + 1];
+      if (x2 <= x1) continue;
+      const len = x2 - x1;
+      if (len > bestLen) {
+        bestLen = len;
+        best = { x: (x1 + x2) / 2, y };
+      }
+    }
+    return best;
+  };
+
+  const getPolygonBounds = (points: { x: number; y: number }[]) => {
+    if (!points.length) return { x: 0, y: 0, width: 0, height: 0 };
+    let minX = points[0].x;
+    let minY = points[0].y;
+    let maxX = points[0].x;
+    let maxY = points[0].y;
+    for (const p of points) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+    return { x: minX, y: minY, width: Math.max(0, maxX - minX), height: Math.max(0, maxY - minY) };
+  };
+
+  const getPolygonLabelBounds = (points: { x: number; y: number }[]) => {
+    const bounds = getPolygonBounds(points);
+    if (!points.length || !bounds.width || !bounds.height) return bounds;
+    const minDim = Math.min(bounds.width, bounds.height);
+    const step = Math.max(4, minDim / 12);
+    for (let shrink = 0; shrink <= minDim / 2; shrink += step) {
+      const inner = {
+        x: bounds.x + shrink,
+        y: bounds.y + shrink,
+        width: bounds.width - shrink * 2,
+        height: bounds.height - shrink * 2
+      };
+      if (inner.width < 24 || inner.height < 18) break;
+      const corners = [
+        { x: inner.x, y: inner.y },
+        { x: inner.x + inner.width, y: inner.y },
+        { x: inner.x + inner.width, y: inner.y + inner.height },
+        { x: inner.x, y: inner.y + inner.height }
+      ];
+      if (corners.every((p) => pointInPolygon(p.x, p.y, points))) return inner;
+    }
+    const centroid = polygonCentroid(points);
+    const centerY = bounds.y + bounds.height / 2;
+    const candidateYs = [
+      centerY,
+      centroid.y,
+      bounds.y + bounds.height * 0.35,
+      bounds.y + bounds.height * 0.65
+    ].filter((y) => Number.isFinite(y));
+    for (const y of candidateYs) {
+      const p = findInteriorPointAtY(y, points);
+      if (p) {
+        const width = Math.min(bounds.width, 160);
+        const height = Math.min(bounds.height, 48);
+        return {
+          x: clamp(p.x - width / 2, bounds.x, bounds.x + bounds.width - width),
+          y: clamp(p.y - height / 2, bounds.y, bounds.y + bounds.height - height),
+          width,
+          height
+        };
+      }
+    }
+    return bounds;
+  };
+
+  const renderRoomLabels = (options: {
+    bounds: { x: number; y: number; width: number; height: number };
+    name: string;
+    showName: boolean;
+    capacityText?: string | null;
+    overCapacity?: boolean;
+    labelScale?: number;
+  }) => {
+    const { bounds, name, showName, capacityText, overCapacity, labelScale } = options;
+    if (!bounds.width || !bounds.height) return null;
+    const minDim = Math.max(10, Math.min(bounds.width, bounds.height));
+    const padding = Math.max(4, Math.min(8, Math.round(minDim / 8)));
+    const baseNameSize = Math.max(8, Math.min(14, Math.round(minDim / 6)));
+    const baseCapacitySize = Math.max(8, Math.min(12, Math.round(minDim / 8)));
+    const scale = Number(labelScale) > 0 ? Number(labelScale) : 1;
+    const nameFontSize = Math.max(6, Math.round(baseNameSize * scale));
+    const capacityFontSize = Math.max(6, Math.round(baseCapacitySize * scale));
+    const capacityWidth = capacityText ? estimateTextWidth(capacityText, capacityFontSize) + padding : 0;
+    const nameWidth = Math.max(0, bounds.width - padding * 2 - capacityWidth);
+    const nameVisible = showName && !!name && nameWidth > 8;
+    const capacityVisible = !!capacityText && bounds.width > 10 && bounds.height > 10;
+    const y = bounds.y + padding;
+    return (
+      <>
+        {nameVisible ? (
+          <Text
+            x={bounds.x + padding}
+            y={y}
+            width={nameWidth}
+            text={name}
+            fontSize={nameFontSize}
+            fontStyle="bold"
+            fill="#000000"
+            listening={false}
+            ellipsis
+            lineHeight={1.1}
+            stroke="rgba(255,255,255,0.8)"
+            strokeWidth={2}
+          />
+        ) : null}
+        {capacityVisible ? (
+          <Text
+            x={bounds.x + padding}
+            y={y}
+            width={Math.max(0, bounds.width - padding * 2)}
+            align="right"
+            text={capacityText || ''}
+            fontSize={capacityFontSize}
+            fontStyle="bold"
+            fill={overCapacity ? '#dc2626' : '#334155'}
+            listening={false}
+            stroke="rgba(255,255,255,0.8)"
+            strokeWidth={2}
+          />
+        ) : null}
+      </>
+    );
+  };
+
+  const refreshStage = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    stage.getLayers()?.forEach((layer) => layer.batchDraw());
+  }, []);
+
   useEffect(() => {
     const last = { width: -1, height: -1 };
     let raf = 0;
+    const lastCommitAt = { value: 0 };
     const commit = (width: number, height: number) => {
       setDimensions((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
     };
-    const handleResize = () => {
-      const el = containerRef.current;
-      if (!el) return;
-      const width = el.clientWidth;
-      const height = el.clientHeight;
+    const applySize = (width: number, height: number) => {
+      const roundedWidth = Math.round(width);
+      const roundedHeight = Math.round(height);
       // Avoid committing zero sizes during transient layout states (e.g. modal/panel animations),
       // which can cause the Stage to "disappear" and become unresponsive until the next resize.
-      if (width <= 0 || height <= 0) return;
-      if (width === last.width && height === last.height) return;
-      last.width = width;
-      last.height = height;
+      if (roundedWidth <= 0 || roundedHeight <= 0) return;
+      if (roundedWidth === last.width && roundedHeight === last.height) return;
+      const dw = Math.abs(roundedWidth - last.width);
+      const dh = Math.abs(roundedHeight - last.height);
+      perfMetrics.resizeLastWidth = roundedWidth;
+      perfMetrics.resizeLastHeight = roundedHeight;
+      if (!perfMetrics.resizeMinWidth || roundedWidth < perfMetrics.resizeMinWidth) perfMetrics.resizeMinWidth = roundedWidth;
+      if (!perfMetrics.resizeMaxWidth || roundedWidth > perfMetrics.resizeMaxWidth) perfMetrics.resizeMaxWidth = roundedWidth;
+      if (!perfMetrics.resizeMinHeight || roundedHeight < perfMetrics.resizeMinHeight) perfMetrics.resizeMinHeight = roundedHeight;
+      if (!perfMetrics.resizeMaxHeight || roundedHeight > perfMetrics.resizeMaxHeight) perfMetrics.resizeMaxHeight = roundedHeight;
+      perfMetrics.resizeDeltaMax = Math.max(perfMetrics.resizeDeltaMax, dw, dh);
+      if (dw <= 1 && dh <= 1) perfMetrics.resizeSmallJitter += 1;
+      if (dw >= 4 || dh >= 4) perfMetrics.resizeLargeJitter += 1;
+      const now = performance.now();
+      if (now - lastCommitAt.value < 250 && dw < 3 && dh < 3) return;
+      lastCommitAt.value = now;
+      last.width = roundedWidth;
+      last.height = roundedHeight;
+      if (perfEnabled) perfMetrics.resizeObserverCommits += 1;
       if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => commit(width, height));
+      raf = requestAnimationFrame(() => commit(roundedWidth, roundedHeight));
+    };
+    const handleResize = () => {
+      if (perfEnabled) perfMetrics.resizeObserverTicks += 1;
+      const el = containerRef.current;
+      if (!el) return;
+      applySize(el.clientWidth, el.clientHeight);
     };
     handleResize();
-    const obs = new ResizeObserver(handleResize);
+    const obs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target !== containerRef.current) continue;
+        if (perfEnabled) perfMetrics.resizeObserverTicks += 1;
+        const rect = entry.contentRect;
+        applySize(rect.width, rect.height);
+      }
+    });
     if (containerRef.current) obs.observe(containerRef.current);
     const onVis = () => {
-      if (document.visibilityState === 'visible') handleResize();
+      if (document.visibilityState === 'visible') {
+        handleResize();
+        refreshStage();
+      }
+    };
+    const onFocus = () => {
+      handleResize();
+      refreshStage();
     };
     document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
     return () => {
       obs.disconnect();
       if (raf) cancelAnimationFrame(raf);
       document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onFocus);
     };
-  }, [containerRef]);
+  }, [containerRef, perfEnabled, refreshStage]);
 
   useEffect(() => {
     fitApplied.current = null;
@@ -358,18 +633,24 @@ const CanvasStageImpl = (
   useEffect(() => {
     if (!highlightId || !highlightUntil) return;
     if (highlightUntil <= Date.now()) return;
-    const interval = window.setInterval(() => setHighlightNow(Date.now()), 120);
+    const interval = window.setInterval(() => {
+      if (perfEnabled) perfMetrics.highlightTicks += 1;
+      setHighlightNow(Date.now());
+    }, 120);
     const timeout = window.setTimeout(() => window.clearInterval(interval), highlightUntil - Date.now() + 80);
     return () => {
       window.clearInterval(interval);
       window.clearTimeout(timeout);
     };
-  }, [highlightId, highlightUntil]);
+  }, [highlightId, highlightUntil, perfEnabled]);
 
   useEffect(() => {
     if (!highlightRoomId || !highlightRoomUntil) return;
     if (highlightRoomUntil <= Date.now()) return;
-    const interval = window.setInterval(() => setRoomHighlightNow(Date.now()), 120);
+    const interval = window.setInterval(() => {
+      if (perfEnabled) perfMetrics.roomHighlightTicks += 1;
+      setRoomHighlightNow(Date.now());
+    }, 120);
     const timeout = window.setTimeout(
       () => window.clearInterval(interval),
       highlightRoomUntil - Date.now() + 80
@@ -378,20 +659,23 @@ const CanvasStageImpl = (
       window.clearInterval(interval);
       window.clearTimeout(timeout);
     };
-  }, [highlightRoomId, highlightRoomUntil]);
+  }, [highlightRoomId, highlightRoomUntil, perfEnabled]);
 
   useEffect(() => {
     if (roomDrawMode) return;
     draftOrigin.current = null;
+    if (perfEnabled) perfMetrics.draftRectUpdates += 1;
     setDraftRect(null);
     if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
     draftRectRaf.current = null;
     pendingDraftRectRef.current = null;
+    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
     setDraftPolyPoints([]);
+    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
     setDraftPolyPointer(null);
     if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
     draftPolyRaf.current = null;
-  }, [roomDrawMode]);
+  }, [perfEnabled, roomDrawMode]);
 
   useEffect(() => {
     if (!transformerRef.current) return;
@@ -445,10 +729,11 @@ const CanvasStageImpl = (
 
   const commitViewport = useCallback(
     (nextZoom: number, nextPan: { x: number; y: number }) => {
+      if (perfEnabled) perfMetrics.viewportCommits += 1;
       onZoomChange(nextZoom);
       onPanChange(nextPan);
     },
-    [onPanChange, onZoomChange]
+    [onPanChange, onZoomChange, perfEnabled]
   );
 
   const scheduleWheelCommit = useCallback(
@@ -509,6 +794,7 @@ const CanvasStageImpl = (
   // which can make the map "disappear" until a manual refresh.
   useEffect(() => {
     const tick = () => {
+      if (perfEnabled) perfMetrics.watchdogTicks += 1;
       const el = containerRef.current;
       const stage = stageRef.current;
       if (!el || !stage) return;
@@ -538,7 +824,7 @@ const CanvasStageImpl = (
     };
     const id = window.setInterval(tick, 1500);
     return () => window.clearInterval(id);
-  }, [applyStageTransform, clampPan, commitViewport]);
+  }, [applyStageTransform, clampPan, commitViewport, perfEnabled]);
 
   const toStageCoords = (clientX: number, clientY: number) => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -655,6 +941,7 @@ const CanvasStageImpl = (
       const next = pendingSelectionBoxRef.current;
       pendingSelectionBoxRef.current = null;
       if (!next) return;
+      if (perfEnabled) perfMetrics.selectionBoxUpdates += 1;
       setSelectionBox(next);
     });
     return true;
@@ -668,6 +955,7 @@ const CanvasStageImpl = (
     selectionBoxRaf.current = null;
     pendingSelectionBoxRef.current = null;
     lastSelectionBoxRef.current = null;
+    if (perfEnabled) perfMetrics.selectionBoxUpdates += 1;
     setSelectionBox(null);
     if (!rect) return true;
     const wPx = rect.width * Math.max(0.001, viewportRef.current.zoom || 1);
@@ -743,6 +1031,7 @@ const CanvasStageImpl = (
       const next = pendingDraftRectRef.current;
       pendingDraftRectRef.current = null;
       if (!next) return;
+      if (perfEnabled) perfMetrics.draftRectUpdates += 1;
       setDraftRect(next);
     });
     return true;
@@ -771,6 +1060,7 @@ const CanvasStageImpl = (
       const next = pendingDraftPrintRectRef.current;
       pendingDraftPrintRectRef.current = null;
       if (!next) return;
+      if (perfEnabled) perfMetrics.draftPrintRectUpdates += 1;
       setDraftPrintRect(next);
     });
     return true;
@@ -808,6 +1098,7 @@ const CanvasStageImpl = (
     if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
     draftPrintRectRaf.current = null;
     pendingDraftPrintRectRef.current = null;
+    if (perfEnabled) perfMetrics.draftPrintRectUpdates += 1;
     setDraftPrintRect(null);
     if (rect.width < 20 || rect.height < 20) return true;
     onSetPrintArea?.(rect);
@@ -835,11 +1126,13 @@ const CanvasStageImpl = (
     if (roomDrawMode !== 'poly' || readOnly) return false;
     if (draftPolyPoints.length < 3) return true;
     const points = draftPolyPoints.slice();
+    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
     setDraftPolyPoints([]);
+    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
     setDraftPolyPointer(null);
     onCreateRoom?.({ kind: 'poly', points });
     return true;
-  }, [draftPolyPoints, onCreateRoom, readOnly, roomDrawMode]);
+  }, [draftPolyPoints, onCreateRoom, perfEnabled, readOnly, roomDrawMode]);
 
   useEffect(() => {
     if (roomDrawMode !== 'poly') return;
@@ -851,21 +1144,42 @@ const CanvasStageImpl = (
       if (e.key === 'Backspace') {
         if (!draftPolyPoints.length) return;
         e.preventDefault();
+        if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
         setDraftPolyPoints((prev) => prev.slice(0, -1));
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [draftPolyPoints.length, finalizeDraftPoly, roomDrawMode]);
+  }, [draftPolyPoints.length, finalizeDraftPoly, perfEnabled, roomDrawMode]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const active = roomDragRef.current;
+      if (!active) return;
+      e.preventDefault();
+      active.cancelled = true;
+      try {
+        active.node.stopDrag?.();
+        active.node.position({ x: active.startX, y: active.startY });
+        active.node.getLayer()?.batchDraw?.();
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     if (printAreaMode) return;
     printOrigin.current = null;
+    if (perfEnabled) perfMetrics.draftPrintRectUpdates += 1;
     setDraftPrintRect(null);
     if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
     draftPrintRectRaf.current = null;
     pendingDraftPrintRectRef.current = null;
-  }, [printAreaMode]);
+  }, [perfEnabled, printAreaMode]);
 
   const selectedBounds = useMemo(() => {
     const idsArr = selectedIds || (selectedId ? [selectedId] : []);
@@ -888,7 +1202,6 @@ const CanvasStageImpl = (
 
   return (
     <div
-      ref={containerRef}
       className={`relative h-full w-full rounded-2xl border border-slate-200 border-b-4 border-b-slate-200 bg-white shadow-card ${
         (roomDrawMode || printAreaMode) && !readOnly ? 'cursor-crosshair' : ''
       }`}
@@ -988,6 +1301,7 @@ const CanvasStageImpl = (
             const world = pointerToWorld(pos.x, pos.y);
             printOrigin.current = { x: world.x, y: world.y };
             pendingDraftPrintRectRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
+            if (perfEnabled) perfMetrics.draftPrintRectUpdates += 1;
             setDraftPrintRect(pendingDraftPrintRectRef.current);
             return;
           }
@@ -998,6 +1312,7 @@ const CanvasStageImpl = (
             const world = pointerToWorld(pos.x, pos.y);
             draftOrigin.current = { x: world.x, y: world.y };
             pendingDraftRectRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
+            if (perfEnabled) perfMetrics.draftRectUpdates += 1;
             setDraftRect(pendingDraftRectRef.current);
             return;
           }
@@ -1016,6 +1331,7 @@ const CanvasStageImpl = (
                 return;
               }
             }
+            if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
             setDraftPolyPoints((prev) => [...prev, { x: world.x, y: world.y }]);
             return;
           }
@@ -1033,6 +1349,7 @@ const CanvasStageImpl = (
               const world = pointerToWorld(pos.x, pos.y);
               if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
               draftPolyRaf.current = requestAnimationFrame(() => {
+                if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
                 setDraftPolyPointer({ x: world.x, y: world.y });
               });
             }
@@ -1095,6 +1412,13 @@ const CanvasStageImpl = (
             const isSelectedRoom = selectedRoomId === room.id;
             const kind = (room.kind || (room.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
             const baseColor = (room as any).color || '#64748b';
+            const stats = roomStatsById?.get(room.id);
+            const userCount = stats?.userCount || 0;
+            const rawCapacity = Number((room as any).capacity);
+            const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
+            const capacityText = capacity ? `${userCount}/${capacity}` : null;
+            const overCapacity = capacity ? userCount > capacity : false;
+            const showName = (room as any).showName !== false;
             const highlightActive = !!(
               highlightRoomId &&
               highlightRoomUntil &&
@@ -1106,24 +1430,53 @@ const CanvasStageImpl = (
             const strokeWidth = highlightActive ? 2 + 0.8 * pulse : isSelectedRoom ? 2 : 1.1;
             if (kind === 'poly') {
               const pts = room.points || [];
+              const labelBounds = getPolygonLabelBounds(pts);
               const flat = pts.flatMap((p) => [p.x, p.y]);
               return (
                 <Group
                   key={room.id}
                   draggable={!readOnly}
+                  onDragStart={(e) => {
+                    roomDragRef.current = {
+                      roomId: room.id,
+                      kind: 'poly',
+                      startX: e.target.x(),
+                      startY: e.target.y(),
+                      node: e.target,
+                      cancelled: false
+                    };
+                  }}
                   onClick={(e) => {
                     e.cancelBubble = true;
+                    if (e.evt?.button !== 0) return;
                     onSelectRoom?.(room.id);
+                  }}
+                  onDblClick={(e) => {
+                    e.cancelBubble = true;
+                    if (e.evt?.button !== 0) return;
+                    if (readOnly) return;
+                    onSelectRoom?.(room.id);
+                    onOpenRoomDetails?.(room.id);
                   }}
                   onContextMenu={(e) => {
                     e.evt.preventDefault();
                     e.cancelBubble = true;
                     if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
                     if (isBoxSelecting()) return;
-                    onSelectRoom?.(room.id);
+                    onSelectRoom?.(room.id, { keepContext: true });
+                    onRoomContextMenu?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
                   }}
                   onDragEnd={(e) => {
                     if (readOnly) return;
+                    const active = roomDragRef.current;
+                    if (active && active.roomId === room.id) {
+                      roomDragRef.current = null;
+                      if (active.cancelled) {
+                        e.target.position({ x: active.startX, y: active.startY });
+                        e.target.getLayer()?.batchDraw?.();
+                        return;
+                      }
+                    }
                     const node = e.target;
                     const dx = node.x();
                     const dy = node.y();
@@ -1146,6 +1499,27 @@ const CanvasStageImpl = (
                     dash={[5, 4]}
                     lineJoin="round"
                   />
+                  <Group
+                    listening={false}
+                    clipFunc={(ctx) => {
+                      if (!pts.length) return;
+                      ctx.beginPath();
+                      ctx.moveTo(pts[0].x, pts[0].y);
+                      for (let i = 1; i < pts.length; i++) {
+                        ctx.lineTo(pts[i].x, pts[i].y);
+                      }
+                      ctx.closePath();
+                    }}
+                  >
+                    {renderRoomLabels({
+                      bounds: labelBounds,
+                      name: room.name,
+                      showName,
+                      capacityText,
+                      overCapacity,
+                      labelScale: (room as any).labelScale
+                    })}
+                  </Group>
                   {isSelectedRoom && !readOnly
                     ? pts.map((p, idx) => (
                         <Circle
@@ -1188,36 +1562,55 @@ const CanvasStageImpl = (
                 </Group>
               );
             }
+            const bounds = { x: 0, y: 0, width: room.width || 0, height: room.height || 0 };
             return (
-              <Rect
+              <Group
                 key={room.id}
-                ref={(node) => {
-                  if (isSelectedRoom) selectedRoomNodeRef.current = node;
-                }}
                 x={room.x || 0}
                 y={room.y || 0}
-                width={room.width || 0}
-                height={room.height || 0}
-                fill={hexToRgba(baseColor, 0.08)}
-                stroke={stroke}
-                strokeWidth={strokeWidth}
-                dash={[5, 4]}
-                cornerRadius={6}
                 draggable={!readOnly}
+                onDragStart={(e) => {
+                  roomDragRef.current = {
+                    roomId: room.id,
+                    kind: 'rect',
+                    startX: e.target.x(),
+                    startY: e.target.y(),
+                    node: e.target,
+                    cancelled: false
+                  };
+                }}
                 onClick={(e) => {
                   e.cancelBubble = true;
+                  if (e.evt?.button !== 0) return;
                   onSelectRoom?.(room.id);
+                }}
+                onDblClick={(e) => {
+                  e.cancelBubble = true;
+                  if (e.evt?.button !== 0) return;
+                  if (readOnly) return;
+                  onSelectRoom?.(room.id);
+                  onOpenRoomDetails?.(room.id);
                 }}
                 onContextMenu={(e) => {
                   e.evt.preventDefault();
                   e.cancelBubble = true;
                   if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
                   if (isBoxSelecting()) return;
-                  onSelectRoom?.(room.id);
+                  onSelectRoom?.(room.id, { keepContext: true });
+                  onRoomContextMenu?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
                 }}
                 onDragEnd={(e) => {
                   if (readOnly) return;
                   const node = e.target;
+                  const active = roomDragRef.current;
+                  if (active && active.roomId === room.id) {
+                    roomDragRef.current = null;
+                    if (active.cancelled) {
+                      node.position({ x: active.startX, y: active.startY });
+                      node.getLayer()?.batchDraw?.();
+                      return;
+                    }
+                  }
                   onUpdateRoom?.(room.id, {
                     kind: 'rect',
                     x: node.x(),
@@ -1226,22 +1619,49 @@ const CanvasStageImpl = (
                     height: room.height || 0
                   });
                 }}
-                onTransformEnd={(e) => {
-                  if (readOnly) return;
-                  const node = e.target;
-                  const scaleX = node.scaleX();
-                  const scaleY = node.scaleY();
-                  node.scaleX(1);
-                  node.scaleY(1);
-                  onUpdateRoom?.(room.id, {
-                    kind: 'rect',
-                    x: node.x(),
-                    y: node.y(),
-                    width: Math.max(10, node.width() * scaleX),
-                    height: Math.max(10, node.height() * scaleY)
-                  });
-                }}
-              />
+              >
+                <Rect
+                  ref={(node) => {
+                    if (isSelectedRoom) selectedRoomNodeRef.current = node;
+                  }}
+                  x={0}
+                  y={0}
+                  width={room.width || 0}
+                  height={room.height || 0}
+                  fill={hexToRgba(baseColor, 0.08)}
+                  stroke={stroke}
+                  strokeWidth={strokeWidth}
+                  dash={[5, 4]}
+                  cornerRadius={6}
+                  onTransformEnd={(e) => {
+                    if (readOnly) return;
+                    const node = e.target as any;
+                    const group = node.getParent();
+                    const scaleX = node.scaleX();
+                    const scaleY = node.scaleY();
+                    const nextX = (group?.x() || 0) + node.x();
+                    const nextY = (group?.y() || 0) + node.y();
+                    node.scaleX(1);
+                    node.scaleY(1);
+                    node.position({ x: 0, y: 0 });
+                    onUpdateRoom?.(room.id, {
+                      kind: 'rect',
+                      x: nextX,
+                      y: nextY,
+                      width: Math.max(10, node.width() * scaleX),
+                      height: Math.max(10, node.height() * scaleY)
+                    });
+                  }}
+                />
+                {renderRoomLabels({
+                  bounds,
+                  name: room.name,
+                  showName,
+                  capacityText,
+                  overCapacity,
+                  labelScale: (room as any).labelScale
+                })}
+              </Group>
             );
           })}
 
@@ -1503,6 +1923,7 @@ const CanvasStageImpl = (
                 }}
                 onMouseEnter={(e) => {
                   if (obj.type !== 'real_user') return;
+                  if (perfEnabled) perfMetrics.hoverUpdates += 1;
                   setHoverCard({ clientX: e.evt.clientX, clientY: e.evt.clientY, obj });
                 }}
                 onMouseMove={(e) => {
@@ -1511,12 +1932,14 @@ const CanvasStageImpl = (
                   const cx = e.evt.clientX;
                   const cy = e.evt.clientY;
                   hoverRaf.current = requestAnimationFrame(() => {
+                    if (perfEnabled) perfMetrics.hoverUpdates += 1;
                     setHoverCard((prev) => (prev ? { ...prev, clientX: cx, clientY: cy } : { clientX: cx, clientY: cy, obj }));
                   });
                 }}
                 onMouseLeave={() => {
                   if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
                   hoverRaf.current = null;
+                  if (perfEnabled) perfMetrics.hoverUpdates += 1;
                   setHoverCard(null);
                 }}
                 onDragEnd={(e) => {

@@ -28,6 +28,29 @@ export interface ExternalUserRow {
   updatedAt: number;
 }
 
+export interface ExternalUsersResponse {
+  ok: true;
+  clientId: string;
+  clientName?: string | null;
+  total: number;
+  presentCount: number;
+  missingCount: number;
+  hiddenCount: number;
+  rows: ExternalUserRow[];
+}
+
+export interface ImportSummaryRow {
+  clientId: string;
+  clientName: string;
+  lastImportAt: number | null;
+  total: number;
+  presentCount: number;
+  missingCount: number;
+  hiddenCount: number;
+  configUpdatedAt: number | null;
+  hasConfig: boolean;
+}
+
 export const getImportConfig = async (clientId: string): Promise<{ config: ImportConfigSafe | null }> => {
   const qs = new URLSearchParams({ clientId });
   const res = await fetch(`/api/import/config?${qs.toString()}`, { credentials: 'include', cache: 'no-store' });
@@ -111,13 +134,23 @@ export const listExternalUsers = async (params: {
   q?: string;
   includeHidden?: boolean;
   includeMissing?: boolean;
-}): Promise<{ ok: true; rows: ExternalUserRow[] }> => {
+  limit?: number;
+  offset?: number;
+}): Promise<ExternalUsersResponse> => {
   const qs = new URLSearchParams({ clientId: params.clientId });
   if (params.q) qs.set('q', params.q);
   if (params.includeHidden) qs.set('includeHidden', '1');
   if (params.includeMissing) qs.set('includeMissing', '1');
+  if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.offset !== undefined) qs.set('offset', String(params.offset));
   const res = await fetch(`/api/external-users?${qs.toString()}`, { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to load external users (${res.status})`);
+  return res.json();
+};
+
+export const fetchImportSummary = async (): Promise<{ ok: true; rows: ImportSummaryRow[] }> => {
+  const res = await fetch(`/api/import/summary`, { credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to load import summary (${res.status})`);
   return res.json();
 };
 
@@ -166,4 +199,21 @@ export const clearImport = async (clientId: string): Promise<{ ok: boolean; remo
   });
   if (!res.ok) throw new Error(`Failed to clear import (${res.status})`);
   return res.json();
+};
+
+export const importCsv = async (payload: { clientId: string; csvText: string; mode: 'append' | 'replace' }) => {
+  const res = await fetch(`/api/import/csv`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to import CSV (${res.status})`);
+  return body;
+};
+
+export const hasExternalUsers = async (clientId: string): Promise<boolean> => {
+  const res = await listExternalUsers({ clientId, includeHidden: true, includeMissing: true, limit: 1 });
+  return (res.rows || []).length > 0;
 };

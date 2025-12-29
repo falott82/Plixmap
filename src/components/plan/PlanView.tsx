@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
 import {
   ChevronDown,
   ChevronRight,
@@ -23,13 +24,16 @@ import {
   EyeOff,
   CornerDownRight,
   Link2,
-  User
+  User,
+  LocateFixed,
+  Users
 } from 'lucide-react';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
 import SearchBar from './SearchBar';
 import ExportButton from './ExportButton';
 import ObjectModal from './ObjectModal';
+import RoomAllocationModal from './RoomAllocationModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { FloorPlan, FloorPlanView, MapObject, MapObjectType, PlanLink } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
@@ -61,7 +65,9 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
 import { shallow } from 'zustand/shallow';
 import { postAuditEvent } from '../../api/audit';
+import { hasExternalUsers } from '../../api/customImport';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
+import { perfMetrics } from '../../utils/perfMetrics';
 
 interface Props {
   planId: string;
@@ -77,7 +83,6 @@ const PlanView = ({ planId }: Props) => {
     addObject,
     updateObject,
     deleteObject,
-    moveObject,
     updateFloorPlan,
     setFloorPlanContent,
     addView,
@@ -92,15 +97,14 @@ const PlanView = ({ planId }: Props) => {
     restoreRevision,
     deleteRevision,
     clearRevisions,
-	    addLink,
-	    deleteLink,
-      updateLink
-	  } = useDataStore(
+    addLink,
+    deleteLink,
+    updateLink
+  } = useDataStore(
     (s) => ({
       addObject: s.addObject,
       updateObject: s.updateObject,
       deleteObject: s.deleteObject,
-      moveObject: s.moveObject,
       updateFloorPlan: s.updateFloorPlan,
       setFloorPlanContent: s.setFloorPlanContent,
       addView: s.addView,
@@ -184,6 +188,9 @@ const PlanView = ({ planId }: Props) => {
     setShowGrid,
     showPrintAreaByPlan,
     toggleShowPrintArea,
+    roomCapacityStateByPlan,
+    setRoomCapacityState,
+    perfOverlayEnabled,
     setPlanDirty,
     requestSaveAndNavigate,
     pendingSaveNavigateTo,
@@ -220,6 +227,9 @@ const PlanView = ({ planId }: Props) => {
       setShowGrid: (s as any).setShowGrid,
       showPrintAreaByPlan: (s as any).showPrintAreaByPlan,
       toggleShowPrintArea: (s as any).toggleShowPrintArea,
+      roomCapacityStateByPlan: (s as any).roomCapacityStateByPlan,
+      setRoomCapacityState: (s as any).setRoomCapacityState,
+      perfOverlayEnabled: (s as any).perfOverlayEnabled,
       setPlanDirty: (s as any).setPlanDirty,
       requestSaveAndNavigate: (s as any).requestSaveAndNavigate,
       pendingSaveNavigateTo: (s as any).pendingSaveNavigateTo,
@@ -230,6 +240,7 @@ const PlanView = ({ planId }: Props) => {
 
   const push = useToastStore((s) => s.push);
   const saveCustomValues = useCustomFieldsStore((s) => s.saveObjectValues);
+  const dataVersion = useDataStore((s) => s.version);
   const [pendingType, setPendingType] = useState<MapObjectType | null>(null);
   const [linkCreateMode, setLinkCreateMode] = useState<'arrow' | 'cable'>('arrow');
   const [modalState, setModalState] = useState<
@@ -252,15 +263,29 @@ const PlanView = ({ planId }: Props) => {
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [saveRevisionOpen, setSaveRevisionOpen] = useState(false);
   const [realUserPicker, setRealUserPicker] = useState<{ x: number; y: number } | null>(null);
+  const [realUserImportMissing, setRealUserImportMissing] = useState(false);
+  const [capacityConfirm, setCapacityConfirm] = useState<{
+    type: MapObjectType;
+    x: number;
+    y: number;
+    roomName: string;
+    capacity: number;
+  } | null>(null);
+  const [undoConfirm, setUndoConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [overlapNotice, setOverlapNotice] = useState<string | null>(null);
+  const roomOverlapNoticeRef = useRef(0);
+  const overlapNoticeTimeoutRef = useRef<number | null>(null);
   const [allTypesOpen, setAllTypesOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<
     | { kind: 'object'; id: string; x: number; y: number }
     | { kind: 'link'; id: string; x: number; y: number }
+    | { kind: 'room'; id: string; x: number; y: number }
     | { kind: 'map'; x: number; y: number; worldX: number; worldY: number; addOpen: boolean; roomOpen: boolean }
     | null
   >(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const returnToSelectionListRef = useRef(false);
+  const lastInsertedRef = useRef<{ id: string; name: string } | null>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewsMenuOpen, setViewsMenuOpen] = useState(false);
   const [selectedViewId, setSelectedViewId] = useState<string>('__last__');
@@ -275,6 +300,7 @@ const PlanView = ({ planId }: Props) => {
   const [expandedType, setExpandedType] = useState<string | null>(null);
   const [objectListQuery, setObjectListQuery] = useState('');
   const [roomsOpen, setRoomsOpen] = useState(false);
+  const [roomAllocationOpen, setRoomAllocationOpen] = useState(false);
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement | null>(null);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
@@ -291,7 +317,15 @@ const PlanView = ({ planId }: Props) => {
   const [roomModal, setRoomModal] = useState<
     | { mode: 'create'; kind: 'rect'; rect: { x: number; y: number; width: number; height: number } }
     | { mode: 'create'; kind: 'poly'; points: { x: number; y: number }[] }
-    | { mode: 'edit'; roomId: string; initialName: string }
+    | {
+        mode: 'edit';
+        roomId: string;
+        initialName: string;
+        initialCapacity?: number;
+        initialShowName?: boolean;
+        initialSurfaceSqm?: number;
+        initialNotes?: string;
+      }
     | null
   >(null);
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
@@ -302,6 +336,8 @@ const PlanView = ({ planId }: Props) => {
   const selectedLinkIdRef = useRef<string | null>(selectedLinkId);
   const confirmDeleteRef = useRef<string[] | null>(confirmDelete);
   const zoomRef = useRef<number>(zoom);
+  const renderStartRef = useRef(0);
+  renderStartRef.current = performance.now();
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -325,6 +361,20 @@ const PlanView = ({ planId }: Props) => {
   }, [plan, selectedRevisionId]);
 
   const location = useLocation();
+  const navigate = useNavigate();
+  const perfEnabled = (() => {
+    try {
+      return new URLSearchParams(location.search || '').get('perf') === '1' || perfOverlayEnabled;
+    } catch {
+      return perfOverlayEnabled;
+    }
+  })();
+
+  useEffect(() => {
+    if (!perfEnabled) return;
+    perfMetrics.planViewRenders += 1;
+    perfMetrics.planViewLastRenderMs = Math.round(performance.now() - renderStartRef.current);
+  });
 
   useEffect(() => {
     // Always start from the "present" when entering the workspace for a plan.
@@ -340,6 +390,9 @@ const PlanView = ({ planId }: Props) => {
     }
   }, [location.search]);
 
+  // Avoid re-applying viewport on every data change (plan updates clone references).
+  const viewportInitRef = useRef<string | null>(null);
+
   useEffect(() => {
     // Close any open context menus when switching plans.
     setContextMenu(null);
@@ -348,15 +401,13 @@ const PlanView = ({ planId }: Props) => {
 
   useEffect(() => {
     if (!forceDefaultView) return;
+    viewportInitRef.current = null;
     // Clean up the URL (removes dv=1) once we are back in the workspace.
     window.setTimeout(() => {
       navigate(`/plan/${planId}`, { replace: true });
     }, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [forceDefaultView, planId]);
-
-  // Avoid re-applying viewport on every data change (plan updates clone references).
-  const viewportInitRef = useRef<string | null>(null);
+  }, [forceDefaultView, navigate, planId, selectedRevisionId]);
 
   const planAccess = useMemo<'ro' | 'rw'>(() => {
     if (!user) return 'ro';
@@ -399,6 +450,7 @@ const PlanView = ({ planId }: Props) => {
       send({ type: 'join', planId, wantLock: canRequestLock });
     };
     ws.onmessage = (ev) => {
+      if (perfEnabled) perfMetrics.wsMessages += 1;
       let msg: any;
       try {
         msg = JSON.parse(String(ev.data || ''));
@@ -414,6 +466,7 @@ const PlanView = ({ planId }: Props) => {
         setLockState({ lockedBy, mine: false });
       }
       if (msg?.type === 'presence' && msg.planId === planId) {
+        if (perfEnabled) perfMetrics.presenceUpdates += 1;
         setPresenceUsers(Array.isArray(msg.users) ? msg.users : []);
       }
     };
@@ -447,6 +500,9 @@ const PlanView = ({ planId }: Props) => {
   const renderPlan = useMemo<FloorPlan | undefined>(() => {
     if (!plan) return undefined;
     if (!activeRevision) return plan;
+    const revisionViews = (activeRevision as any).views as FloorPlanView[] | undefined;
+    const effectiveViews =
+      Array.isArray(revisionViews) && revisionViews.length ? revisionViews : plan.views || [];
     return {
       ...plan,
       imageUrl: activeRevision.imageUrl,
@@ -456,7 +512,7 @@ const PlanView = ({ planId }: Props) => {
       rooms: activeRevision.rooms,
       links: (activeRevision as any).links || (plan as any).links,
       objects: activeRevision.objects,
-      views: (((activeRevision as any).views as FloorPlanView[] | undefined) || plan.views || []) as any
+      views: effectiveViews as any
     } as FloorPlan;
   }, [activeRevision, plan]);
 
@@ -772,7 +828,6 @@ const PlanView = ({ planId }: Props) => {
     baselineSnapshotRef.current = current;
   }, [plan, samePlanSnapshotIgnoringDims, toSnapshot]);
 
-  const navigate = useNavigate();
   const pendingNavigateRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -921,6 +976,11 @@ const PlanView = ({ planId }: Props) => {
     return links.filter((l) => String(l?.fromId || '') === id || String(l?.toId || '') === id).length;
   }, [contextMenu, renderPlan]);
 
+  const hasDefaultView = useMemo(
+    () => !!(renderPlan?.views || []).find((v) => v.isDefault),
+    [renderPlan?.views]
+  );
+
   const contextIsMulti = useMemo(() => {
     if (!contextMenu || contextMenu.kind !== 'object') return false;
     if (!selectedObjectIds?.length || selectedObjectIds.length < 2) return false;
@@ -950,11 +1010,9 @@ const PlanView = ({ planId }: Props) => {
   useLayoutEffect(() => {
     if (!renderPlan) return;
     const viewportKey = `${planId}:${selectedRevisionId || 'present'}:${location.key || ''}`;
-    if (viewportInitRef.current === viewportKey) return;
-    viewportInitRef.current = viewportKey;
-
     const def = renderPlan?.views?.find((v) => v.isDefault);
-    if (def) {
+    if (def && viewportInitRef.current !== viewportKey && (forceDefaultView || selectedViewId === '__last__')) {
+      viewportInitRef.current = viewportKey;
       setAutoFitEnabled(false);
       setZoom(def.zoom);
       setPan(def.pan);
@@ -963,11 +1021,17 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     if (forceDefaultView) {
-      // Explicit request from Settings → Workspace: do not fall back to last viewport.
+      // Explicit request from Settings → Workspace: fall back to auto-fit only if no default exists.
       setAutoFitEnabled(true);
       setSelectedViewId('__last__');
       return;
     }
+    if (!def && (!renderPlan.views || !renderPlan.views.length)) {
+      // Views not ready yet; wait so default can be applied when available.
+      return;
+    }
+    if (viewportInitRef.current === viewportKey) return;
+    viewportInitRef.current = viewportKey;
     const saved = loadViewport(planId);
     if (saved) {
       setAutoFitEnabled(false);
@@ -1070,18 +1134,13 @@ const PlanView = ({ planId }: Props) => {
   const handleStageMove = useCallback(
     (id: string, x: number, y: number) => {
       if (!isReadOnlyRef.current) markTouched();
-      moveObject(id, x, y);
-      if (isReadOnlyRef.current) return;
       const currentPlan = planRef.current as FloorPlan | undefined;
-      if (!currentPlan) return;
-      const currentObj = currentPlan.objects?.find((o) => o.id === id);
-      const nextRoomId = getRoomIdAt(currentPlan.rooms, x, y);
+      const currentObj = currentPlan?.objects?.find((o) => o.id === id);
+      const nextRoomId = !isReadOnlyRef.current && currentPlan ? getRoomIdAt(currentPlan.rooms, x, y) : undefined;
       const currentRoomId = currentObj?.roomId ?? undefined;
-      if (currentRoomId !== nextRoomId) {
-        updateObject(id, { roomId: nextRoomId });
-      }
+      updateObject(id, { x, y, ...(currentRoomId !== nextRoomId ? { roomId: nextRoomId } : {}) });
     },
-    [markTouched, moveObject, updateObject]
+    [markTouched, updateObject]
   );
 
   const handleObjectContextMenu = useCallback(
@@ -1093,6 +1152,12 @@ const PlanView = ({ planId }: Props) => {
   const handleLinkContextMenu = useCallback(
     ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) =>
       setContextMenu({ kind: 'link', id, x: clientX, y: clientY }),
+    []
+  );
+
+  const handleRoomContextMenu = useCallback(
+    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) =>
+      setContextMenu({ kind: 'room', id, x: clientX, y: clientY }),
     []
   );
 
@@ -1201,6 +1266,112 @@ const PlanView = ({ planId }: Props) => {
     return undefined;
   };
 
+  const getRoomPolygon = (room: any) => {
+    const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+    if (kind === 'poly') {
+      const pts = Array.isArray(room?.points) ? room.points : [];
+      return pts.length >= 3 ? pts : [];
+    }
+    const x = Number(room?.x || 0);
+    const y = Number(room?.y || 0);
+    const w = Number(room?.width || 0);
+    const h = Number(room?.height || 0);
+    if (!w || !h) return [];
+    return [
+      { x, y },
+      { x: x + w, y },
+      { x: x + w, y: y + h },
+      { x, y: y + h }
+    ];
+  };
+
+  const segmentsIntersect = (
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    c: { x: number; y: number },
+    d: { x: number; y: number }
+  ) => {
+    const orient = (p: any, q: any, r: any) => {
+      const v = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+      if (Math.abs(v) < 0.000001) return 0;
+      return v > 0 ? 1 : 2;
+    };
+    const onSegment = (p: any, q: any, r: any) =>
+      Math.min(p.x, r.x) <= q.x + 0.000001 &&
+      q.x <= Math.max(p.x, r.x) + 0.000001 &&
+      Math.min(p.y, r.y) <= q.y + 0.000001 &&
+      q.y <= Math.max(p.y, r.y) + 0.000001;
+    const o1 = orient(a, b, c);
+    const o2 = orient(a, b, d);
+    const o3 = orient(c, d, a);
+    const o4 = orient(c, d, b);
+    if (o1 !== o2 && o3 !== o4) return true;
+    if (o1 === 0 && onSegment(a, c, b)) return true;
+    if (o2 === 0 && onSegment(a, d, b)) return true;
+    if (o3 === 0 && onSegment(c, a, d)) return true;
+    if (o4 === 0 && onSegment(c, b, d)) return true;
+    return false;
+  };
+
+  const polygonsOverlap = (a: { x: number; y: number }[], b: { x: number; y: number }[]) => {
+    if (a.length < 3 || b.length < 3) return false;
+    const bounds = (pts: { x: number; y: number }[]) => {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const p of pts) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+      return { minX, minY, maxX, maxY };
+    };
+    const aBox = bounds(a);
+    const bBox = bounds(b);
+    if (aBox.maxX < bBox.minX || aBox.minX > bBox.maxX || aBox.maxY < bBox.minY || aBox.minY > bBox.maxY) {
+      return false;
+    }
+    for (let i = 0; i < a.length; i += 1) {
+      const a1 = a[i];
+      const a2 = a[(i + 1) % a.length];
+      for (let j = 0; j < b.length; j += 1) {
+        const b1 = b[j];
+        const b2 = b[(j + 1) % b.length];
+        if (segmentsIntersect(a1, a2, b1, b2)) return true;
+      }
+    }
+    if (isPointInPoly(a, b[0].x, b[0].y)) return true;
+    if (isPointInPoly(b, a[0].x, a[0].y)) return true;
+    return false;
+  };
+
+  const hasRoomOverlap = useCallback(
+    (nextRoom: any, excludeId?: string) => {
+      const nextPoly = getRoomPolygon(nextRoom);
+      if (!nextPoly.length) return false;
+      const list = ((plan as FloorPlan)?.rooms || []).filter((r) => r.id !== excludeId);
+      for (const other of list) {
+        const otherPoly = getRoomPolygon(other);
+        if (!otherPoly.length) continue;
+        if (polygonsOverlap(nextPoly, otherPoly)) return true;
+      }
+      return false;
+    },
+    [plan]
+  );
+
+  const notifyRoomOverlap = useCallback(() => {
+    const now = Date.now();
+    if (now - roomOverlapNoticeRef.current < 1200) return;
+    roomOverlapNoticeRef.current = now;
+    const message = t({ it: 'Attenzione: non è possibile sovrapporre due stanze.', en: 'Warning: rooms cannot overlap.' });
+    setOverlapNotice(message);
+    if (overlapNoticeTimeoutRef.current) window.clearTimeout(overlapNoticeTimeoutRef.current);
+    overlapNoticeTimeoutRef.current = window.setTimeout(() => setOverlapNotice(null), 3000);
+  }, [t]);
+
   const computeRoomReassignments = (rooms: any[] | undefined, objects: any[]) => {
     const updates: Record<string, string | undefined> = {};
     for (const obj of objects) {
@@ -1261,6 +1432,60 @@ const PlanView = ({ planId }: Props) => {
 
       if (isTyping) return;
 
+      const isCmdS = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
+      if (isCmdS) {
+        if (!currentPlan || isReadOnlyRef.current) return;
+        e.preventDefault();
+        const revisions: any[] = (currentPlan as FloorPlan).revisions || [];
+        const sorted = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0));
+        const first = sorted[0];
+        const latest =
+          first && typeof first.revMajor === 'number' && typeof first.revMinor === 'number'
+            ? { major: first.revMajor, minor: first.revMinor }
+            : first && typeof first.version === 'number'
+              ? { major: 1, minor: Math.max(0, Number(first.version) - 1) }
+              : { major: 1, minor: 0 };
+        const next = revisions.length ? { major: latest.major, minor: latest.minor + 1 } : { major: 1, minor: 0 };
+        const stamp = new Date().toLocaleString();
+        const quickName = t({ it: 'Aggiornamento rapido', en: 'Quick update' });
+        addRevision((currentPlan as FloorPlan).id, {
+          bump: 'minor',
+          name: quickName,
+          description: t({ it: `Aggiornamento rapido ${stamp}`, en: `Quick update ${stamp}` })
+        });
+        push(
+          t({
+            it: `Aggiornamento rapido Ver: ${next.major}.${next.minor}`,
+            en: `Quick update Ver: ${next.major}.${next.minor}`
+          }),
+          'success'
+        );
+        postAuditEvent({
+          event: 'revision_quick_save',
+          scopeType: 'plan',
+          scopeId: (currentPlan as FloorPlan).id,
+          details: { rev: `${next.major}.${next.minor}`, note: stamp }
+        });
+        resetTouched();
+        entrySnapshotRef.current = toSnapshot(planRef.current || currentPlan);
+        return;
+      }
+
+      const isCmdZ = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z';
+      if (isCmdZ) {
+        if (!currentPlan || isReadOnlyRef.current) return;
+        e.preventDefault();
+        const last = lastInsertedRef.current;
+        if (!last) return;
+        const exists = (currentPlan as FloorPlan).objects?.some((o) => o.id === last.id);
+        if (!exists) {
+          lastInsertedRef.current = null;
+          return;
+        }
+        setUndoConfirm(last);
+        return;
+      }
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         if (!currentPlan) return;
         e.preventDefault();
@@ -1305,12 +1530,9 @@ const PlanView = ({ planId }: Props) => {
           if (!obj) continue;
           const nextX = obj.x + dx;
           const nextY = obj.y + dy;
-          moveObject(id, nextX, nextY);
           const nextRoomId = getRoomIdAt((currentPlan as FloorPlan).rooms, nextX, nextY);
           const currentRoomId = obj.roomId ?? undefined;
-          if (currentRoomId !== nextRoomId) {
-            updateObject(id, { roomId: nextRoomId });
-          }
+          updateObject(id, { x: nextX, y: nextY, ...(currentRoomId !== nextRoomId ? { roomId: nextRoomId } : {}) });
         }
         return;
       }
@@ -1333,7 +1555,22 @@ const PlanView = ({ planId }: Props) => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [deleteObject, push, clearSelection, roomDrawMode, moveObject, updateObject, selectedRoomId, linkFromId, deleteLink, markTouched, setSelection, t]);
+  }, [
+    addRevision,
+    deleteObject,
+    push,
+    clearSelection,
+    roomDrawMode,
+    selectedRoomId,
+    linkFromId,
+    deleteLink,
+    markTouched,
+    resetTouched,
+    setSelection,
+    t,
+    toSnapshot,
+    updateObject
+  ]);
 
   const objectsByType = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -1358,6 +1595,8 @@ const PlanView = ({ planId }: Props) => {
         .filter((t) => t.count > 0),
     [getTypeLabel, objectTypeDefs, objectsByType]
   );
+
+  const isUserObject = useCallback((type: string) => type === 'user' || type === 'real_user' || type === 'generic_user', []);
 
   const rooms = useMemo(() => renderPlan?.rooms || [], [renderPlan?.rooms]);
 
@@ -1426,16 +1665,67 @@ const PlanView = ({ planId }: Props) => {
     return () => window.removeEventListener('mousedown', onDown);
   }, [gridMenuOpen]);
 
-  const objectsByRoomId = useMemo(() => {
-    const map = new Map<string, any[]>();
-    for (const obj of renderPlan?.objects || []) {
-      if (!obj.roomId) continue;
-      const list = map.get(obj.roomId) || [];
-      list.push(obj);
-      map.set(obj.roomId, list);
+  const roomStatsCacheRef = useRef<{
+    key: string;
+    value: Map<string, { items: MapObject[]; userCount: number; otherCount: number; totalCount: number }>;
+  }>({ key: '', value: new Map() });
+  const roomStatsById = useMemo(() => {
+    const objs = renderPlan?.objects || [];
+    let key = `${objs.length}`;
+    for (const obj of objs) {
+      key += `|${obj.id}:${obj.roomId || ''}:${obj.type}`;
     }
+    if (roomStatsCacheRef.current.key === key) return roomStatsCacheRef.current.value;
+    const map = new Map<string, { items: MapObject[]; userCount: number; otherCount: number; totalCount: number }>();
+    for (const obj of objs) {
+      if (!obj.roomId) continue;
+      const entry =
+        map.get(obj.roomId) || { items: [] as MapObject[], userCount: 0, otherCount: 0, totalCount: 0 };
+      entry.items.push(obj);
+      if (isUserObject(String(obj.type))) entry.userCount += 1;
+      else entry.otherCount += 1;
+      entry.totalCount += 1;
+      map.set(obj.roomId, entry);
+    }
+    roomStatsCacheRef.current = { key, value: map };
     return map;
-  }, [renderPlan?.objects]);
+  }, [isUserObject, renderPlan?.objects]);
+
+  useEffect(() => {
+    const prevState = roomCapacityStateByPlan?.[planId];
+    const nextState: Record<string, { userCount: number; capacity?: number }> = {};
+    let nextKey = '';
+    let prevKey = '';
+    for (const room of rooms) {
+      const rawCapacity = Number(room.capacity);
+      const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
+      const userCount = roomStatsById.get(room.id)?.userCount || 0;
+      nextState[room.id] = { userCount, capacity };
+      nextKey += `|${room.id}:${userCount}:${capacity ?? ''}`;
+      if (prevState) {
+        const prev = prevState[room.id];
+        prevKey += `|${room.id}:${prev?.userCount ?? ''}:${prev?.capacity ?? ''}`;
+      }
+      if (!capacity) continue;
+      if (!prevState) continue;
+      const prev = prevState[room.id];
+      const prevCapacity = prev?.capacity ?? Infinity;
+      const prevCount = prev?.userCount ?? userCount;
+      const wasOver = prevCount > prevCapacity;
+      const isOver = userCount > capacity;
+      if (!wasOver && isOver) {
+        push(
+          t({
+            it: `Attenzione la stanza ospita un massimo di ${capacity} postazioni`,
+            en: `Warning: this room hosts a maximum of ${capacity} seats`
+          }),
+          'danger'
+        );
+      }
+    }
+    if (nextKey === prevKey) return;
+    setRoomCapacityState(planId, nextState);
+  }, [planId, push, roomCapacityStateByPlan, roomStatsById, rooms, setRoomCapacityState, t]);
 
   const objectListMatches = useMemo(() => {
     const q = objectListQuery.trim().toLowerCase();
@@ -1484,26 +1774,103 @@ const PlanView = ({ planId }: Props) => {
   const openEditRoom = (roomId: string) => {
     const room = rooms.find((r) => r.id === roomId);
     if (!room || isReadOnly) return;
-    setRoomModal({ mode: 'edit', roomId, initialName: room.name });
+    setRoomModal({
+      mode: 'edit',
+      roomId,
+      initialName: room.name,
+      initialCapacity: room.capacity,
+      initialShowName: room.showName,
+      initialSurfaceSqm: room.surfaceSqm,
+      initialNotes: room.notes
+    });
   };
 
   const handleCreateRoomFromRect = (rect: { x: number; y: number; width: number; height: number }) => {
     if (isReadOnly) return;
+    const testRoom = { id: 'new-room', name: '', kind: 'rect', ...rect };
+    if (hasRoomOverlap(testRoom)) {
+      notifyRoomOverlap();
+      setRoomDrawMode(null);
+      return;
+    }
     setRoomDrawMode(null);
     setRoomModal({ mode: 'create', kind: 'rect', rect });
   };
 
   const handleCreateRoomFromPoly = (points: { x: number; y: number }[]) => {
     if (isReadOnly) return;
+    const testRoom = { id: 'new-room', name: '', kind: 'poly', points };
+    if (hasRoomOverlap(testRoom)) {
+      notifyRoomOverlap();
+      setRoomDrawMode(null);
+      return;
+    }
     setRoomDrawMode(null);
     setRoomModal({ mode: 'create', kind: 'poly', points });
   };
 
+  const openRealUserPickerAt = useCallback(
+    async (x: number, y: number) => {
+      if (isReadOnly) return;
+      setPendingType(null);
+      if (!client?.id) {
+        setRealUserImportMissing(true);
+        return;
+      }
+      try {
+        const hasUsers = await hasExternalUsers(client.id);
+        if (!hasUsers) {
+          setRealUserImportMissing(true);
+          return;
+        }
+        setRealUserPicker({ x, y });
+      } catch {
+        setRealUserImportMissing(true);
+      }
+    },
+    [client?.id, isReadOnly]
+  );
+
+  const proceedPlaceUser = useCallback(
+    (type: MapObjectType, x: number, y: number) => {
+      if (type === 'real_user') {
+        void openRealUserPickerAt(x, y);
+        return;
+      }
+      setModalState({ mode: 'create', type, coords: { x, y } });
+      setPendingType(null);
+    },
+    [openRealUserPickerAt]
+  );
+
+  const shouldConfirmCapacity = useCallback(
+    (type: MapObjectType, x: number, y: number) => {
+      if (type !== 'user' && type !== 'real_user' && type !== 'generic_user') return false;
+      const roomId = getRoomIdAt((plan as FloorPlan)?.rooms, x, y);
+      if (!roomId) return false;
+      const room = (rooms || []).find((r) => r.id === roomId);
+      const rawCapacity = Number(room?.capacity);
+      const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
+      if (!capacity) return false;
+      const userCount = roomStatsById.get(roomId)?.userCount || 0;
+      if (userCount < capacity) return false;
+      setCapacityConfirm({
+        type,
+        x,
+        y,
+        roomName: room?.name || t({ it: 'Stanza', en: 'Room' }),
+        capacity
+      });
+      return true;
+    },
+    [plan, roomStatsById, rooms, t]
+  );
+
   const handlePlaceNew = (type: MapObjectType, x: number, y: number) => {
     if (isReadOnly) return;
-    if (type === 'real_user') {
-      setRealUserPicker({ x, y });
-      setPendingType(null);
+    if (shouldConfirmCapacity(type, x, y)) return;
+    if (type === 'real_user' || type === 'user' || type === 'generic_user') {
+      proceedPlaceUser(type, x, y);
       return;
     }
     setModalState({ mode: 'create', type, coords: { x, y } });
@@ -1524,6 +1891,7 @@ const PlanView = ({ planId }: Props) => {
         lastObjectScale,
         payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(modalState.type)
       );
+      lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
       if (roomId) updateObject(id, { roomId });
       if (payload.customValues && Object.keys(payload.customValues).length) {
@@ -1551,6 +1919,7 @@ const PlanView = ({ planId }: Props) => {
         scale,
         payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(base?.type || 'user')
       );
+      lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
       if (roomId) updateObject(id, { roomId });
       if (payload.customValues && Object.keys(payload.customValues).length) {
@@ -1629,9 +1998,27 @@ const PlanView = ({ planId }: Props) => {
     [renderPlan?.rooms]
   );
 
+  const searchIndexCacheRef = useRef<{
+    key: string;
+    value: { objects: { id: string; search: string }[]; rooms: { id: string; search: string }[] };
+  }>({ key: '', value: { objects: [], rooms: [] } });
   const currentPlanSearchIndex = useMemo(() => {
     if (!renderPlan) return { objects: [] as { id: string; search: string }[], rooms: [] as { id: string; search: string }[] };
-    const objects = (renderPlan.objects || []).map((o) => {
+    const objs = renderPlan.objects || [];
+    const rms = renderPlan.rooms || [];
+    let key = `${objs.length}:${rms.length}`;
+    for (const o of objs) {
+      const extra =
+        o.type === 'real_user'
+          ? `${String((o as any).firstName || '')} ${String((o as any).lastName || '')}`.trim()
+          : '';
+      key += `|${o.id}:${o.name}:${o.description || ''}:${extra}`;
+    }
+    for (const r of rms) {
+      key += `|r:${r.id}:${r.name || ''}`;
+    }
+    if (searchIndexCacheRef.current.key === key) return searchIndexCacheRef.current.value;
+    const objects = objs.map((o) => {
       const extra =
         o.type === 'real_user'
           ? `${String((o as any).firstName || '')} ${String((o as any).lastName || '')}`.trim()
@@ -1639,12 +2026,20 @@ const PlanView = ({ planId }: Props) => {
       const search = `${o.name} ${o.description || ''} ${extra}`.toLowerCase();
       return { id: o.id, search };
     });
-    const rooms = (renderPlan.rooms || []).map((r) => ({ id: r.id, search: String(r.name || '').toLowerCase() }));
-    return { objects, rooms };
+    const rooms = rms.map((r) => ({ id: r.id, search: String(r.name || '').toLowerCase() }));
+    const value = { objects, rooms };
+    searchIndexCacheRef.current = { key, value };
+    return value;
   }, [renderPlan]);
 
-  const clientSearchIndex = useMemo(() => {
+  const clientSearchIndexRef = useRef<{
+    key: string;
+    value: { planId: string; search: string; result: CrossPlanSearchResult }[];
+  }>({ key: '', value: [] });
+  const getClientSearchIndex = useCallback(() => {
     if (!client) return [] as { planId: string; search: string; result: CrossPlanSearchResult }[];
+    const key = `${client.id}:${dataVersion}`;
+    if (clientSearchIndexRef.current.key === key) return clientSearchIndexRef.current.value;
     const out: { planId: string; search: string; result: CrossPlanSearchResult }[] = [];
     for (const s of client.sites || []) {
       for (const p of s.floorPlans || []) {
@@ -1694,8 +2089,9 @@ const PlanView = ({ planId }: Props) => {
         }
       }
     }
+    clientSearchIndexRef.current = { key, value: out };
     return out;
-  }, [client]);
+  }, [client, dataVersion]);
 
   const handleSearchEnter = (term: string) => {
     if (!renderPlan) return;
@@ -1711,7 +2107,7 @@ const PlanView = ({ planId }: Props) => {
       .filter(Boolean) as any[];
 
     const crossResults: CrossPlanSearchResult[] = client
-      ? clientSearchIndex.filter((x) => x.search.includes(normalized)).map((x) => x.result)
+      ? getClientSearchIndex().filter((x) => x.search.includes(normalized)).map((x) => x.result)
       : [
           ...objectMatches.map((o) => {
             const label =
@@ -1840,6 +2236,16 @@ const PlanView = ({ planId }: Props) => {
   }
 
   const basePlan = plan as FloorPlan;
+  const orderedViews = useMemo(() => {
+    const list = basePlan.views || [];
+    if (!list.length) return list;
+    return list.slice().sort((a, b) => {
+      const aDef = a.isDefault ? 1 : 0;
+      const bDef = b.isDefault ? 1 : 0;
+      if (aDef !== bDef) return bDef - aDef;
+      return 0;
+    });
+  }, [basePlan.views]);
   const showPrintArea = !!(showPrintAreaByPlan as any)?.[basePlan.id];
 
   const linksInSelection = useMemo(() => {
@@ -2048,7 +2454,7 @@ const PlanView = ({ planId }: Props) => {
                 {rooms.length} {t({ it: 'stanze', en: 'rooms' })}
               </button>
               {roomsOpen ? (
-                <div className="absolute left-0 z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
+                <div className="absolute left-0 z-50 mt-2 w-96 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
                   <div className="flex items-center justify-between px-2 pb-2">
                     <div className="text-sm font-semibold text-ink">{t({ it: 'Stanze', en: 'Rooms' })}</div>
                     <button onClick={() => setRoomsOpen(false)} className="text-slate-400 hover:text-ink">
@@ -2104,15 +2510,28 @@ const PlanView = ({ planId }: Props) => {
                         </button>
                       </div>
                     ) : null}
+                    <button
+                      onClick={() => setRoomAllocationOpen(true)}
+                      disabled={!rooms.length}
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      <Users size={16} /> {t({ it: 'Trova capienza', en: 'Find capacity' })}
+                    </button>
                   </div>
-                  <div className="max-h-96 space-y-1 overflow-auto px-2 pb-2">
+                  <div className="max-h-96 space-y-2 overflow-auto px-2 pb-2">
                     {rooms.length ? (
                       rooms.map((room) => {
                         const isExpanded = expandedRoomId === room.id;
-                        const assigned = objectsByRoomId.get(room.id) || [];
+                        const stats =
+                          roomStatsById.get(room.id) || ({ items: [], userCount: 0, otherCount: 0, totalCount: 0 } as const);
+                        const assigned = stats.items;
+                        const rawCapacity = Number(room.capacity);
+                        const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
+                        const capacityLabel = capacity ? `${stats.userCount}/${capacity}` : null;
+                        const overCapacity = capacity ? stats.userCount > capacity : false;
                         return (
                           <div key={room.id} className="rounded-xl border border-slate-100">
-                            <div className="flex items-center gap-2 px-2 py-2">
+                            <div className="flex items-center gap-3 px-3 py-2.5">
                               <button
                                 onClick={() => {
                                   setExpandedRoomId(isExpanded ? null : room.id);
@@ -2124,40 +2543,67 @@ const PlanView = ({ planId }: Props) => {
                                   selectedRoomId === room.id ? 'font-semibold text-ink' : 'text-slate-700'
                                 }`}
                               >
-                                <div className="truncate">{room.name}</div>
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="truncate">{room.name}</div>
+                                  {capacityLabel ? (
+                                    <span
+                                      className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                        overCapacity ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-700'
+                                      }`}
+                                    >
+                                      {capacityLabel}
+                                    </span>
+                                  ) : null}
+                                </div>
                                 <div className="text-xs text-slate-500">
-                                  {t({ it: `${assigned.length} oggetti`, en: `${assigned.length} objects` })}
+                                  {t({
+                                    it: `${stats.otherCount} oggetti · ${stats.userCount} utenti (tot ${stats.totalCount})`,
+                                    en: `${stats.otherCount} objects · ${stats.userCount} users (tot ${stats.totalCount})`
+                                  })}
                                 </div>
                               </button>
-                              {!isReadOnly ? (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    title={t({ it: 'Rinomina', en: 'Rename' })}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openEditRoom(room.id);
-                                      setRoomsOpen(false);
-                                    }}
-                                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50"
-                                  >
-                                    <Pencil size={14} />
-                                  </button>
-                                  <button
-                                    title={t({ it: 'Elimina', en: 'Delete' })}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setConfirmDeleteRoomId(room.id);
-                                      setRoomsOpen(false);
-                                    }}
-                                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                                  >
-                                    <Trash size={14} />
-                                  </button>
-                                </div>
-                              ) : null}
+                              <div className="flex items-center gap-1">
+                                <button
+                                  title={t({ it: 'Evidenzia', en: 'Highlight' })}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedRoomId(room.id);
+                                    setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
+                                  }}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50"
+                                >
+                                  <LocateFixed size={14} />
+                                </button>
+                                {!isReadOnly ? (
+                                  <>
+                                    <button
+                                      title={t({ it: 'Rinomina', en: 'Rename' })}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openEditRoom(room.id);
+                                        setRoomsOpen(false);
+                                      }}
+                                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50"
+                                    >
+                                      <Pencil size={14} />
+                                    </button>
+                                    <button
+                                      title={t({ it: 'Elimina', en: 'Delete' })}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setConfirmDeleteRoomId(room.id);
+                                        setRoomsOpen(false);
+                                      }}
+                                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                    >
+                                      <Trash size={14} />
+                                    </button>
+                                  </>
+                                ) : null}
+                              </div>
                             </div>
                             {isExpanded ? (
-                              <div className="border-t border-slate-100 px-2 pb-2 pt-2">
+                              <div className="border-t border-slate-100 px-3 pb-2 pt-2">
                                 {assigned.length ? (
                                   <div className="space-y-1">
                                     {assigned.map((o) => (
@@ -2168,13 +2614,13 @@ const PlanView = ({ planId }: Props) => {
                                           triggerHighlight(o.id);
                                           setRoomsOpen(false);
                                         }}
-	                                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm hover:bg-slate-50"
-	                                      >
-	                                        <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-primary">
-	                                          <Icon name={getTypeIcon(o.type)} />
-	                                        </span>
-	                                        <span className="truncate">{o.name}</span>
-	                                      </button>
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                                      >
+                                        <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-primary">
+                                          <Icon name={getTypeIcon(o.type)} />
+                                        </span>
+                                        <span className="truncate">{o.name}</span>
+                                      </button>
                                     ))}
                                   </div>
                                 ) : (
@@ -2273,13 +2719,6 @@ const PlanView = ({ planId }: Props) => {
                         >
                           <Pencil size={14} />
                         </button>
-                        <button
-                          onClick={() => setConfirmDeleteRoomId(selectedRoomId)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                          title={t({ it: 'Elimina stanza', en: 'Delete room' })}
-                        >
-                          <Trash size={14} />
-                        </button>
                       </>
                     ) : null}
                   </>
@@ -2355,7 +2794,7 @@ const PlanView = ({ planId }: Props) => {
                     <Eye size={16} className="text-slate-500" />
                     {t({ it: 'Ultima posizione', en: 'Last position' })}
                   </button>
-                  {(basePlan.views || []).map((view) => (
+                  {orderedViews.map((view) => (
                     <div key={view.id} className="flex items-start gap-2 rounded-lg border border-slate-100 px-2 py-2 hover:bg-slate-50">
                       <button
                         onClick={() => {
@@ -2494,10 +2933,10 @@ const PlanView = ({ planId }: Props) => {
         </div>
       </div>
 
-      <div className="flex-1">
-        <div className="relative flex h-full gap-4 overflow-hidden">
-	        <div className="flex-1 min-w-0">
-	            <div className="h-full" ref={mapRef}>
+      <div className="flex-1 min-h-0">
+        <div className="relative flex h-full min-h-0 gap-4 overflow-hidden">
+	        <div className="flex-1 min-w-0 min-h-0">
+	            <div className="relative h-full min-h-0 w-full" ref={mapRef}>
 				              <CanvasStage
                         ref={canvasStageRef}
 				                containerRef={mapRef}
@@ -2528,37 +2967,44 @@ const PlanView = ({ planId }: Props) => {
                       showGrid={showGrid}
 				                zoom={zoom}
 				                pan={pan}
-				                autoFit={autoFitEnabled}
+				                autoFit={autoFitEnabled && !hasDefaultView}
+                      perfEnabled={perfEnabled}
 			                onZoomChange={handleZoomChange}
 			                onPanChange={handlePanChange}
-				                onSelect={handleStageSelect}
-                    onSelectLink={(id) => {
-                      setSelectedLinkId(id || null);
-                      setContextMenu(null);
-                      clearSelection();
-                      setSelectedRoomId(undefined);
-                    }}
+					                onSelect={handleStageSelect}
+                      roomStatsById={roomStatsById}
+	                    onSelectLink={(id) => {
+	                      setSelectedLinkId(id || null);
+	                      setContextMenu(null);
+	                      clearSelection();
+	                      setSelectedRoomId(undefined);
+	                    }}
 	                  onSelectMany={(ids) => {
 	                    setSelectedRoomId(undefined);
                       setSelectedLinkId(null);
 	                    setSelection(ids);
 	                    setContextMenu(null);
 	                  }}
-		                onMove={handleStageMove}
-		                onPlaceNew={handlePlaceNew}
+					                onMove={handleStageMove}
+					                onPlaceNew={handlePlaceNew}
 		                onEdit={handleEdit}
 		        onContextMenu={handleObjectContextMenu}
                     onLinkContextMenu={handleLinkContextMenu}
+                    onRoomContextMenu={handleRoomContextMenu}
                     onLinkDblClick={(id) => {
                       if (isReadOnly) return;
                       setLinkEditId(id);
                     }}
 		                onMapContextMenu={handleMapContextMenu}
 	                onGoDefaultView={goToDefaultView}
-                    onSelectRoom={(roomId) => {
+                    onSelectRoom={(roomId, options) => {
                       clearSelection();
                       setSelectedRoomId(roomId);
-                      setContextMenu(null);
+                      if (!options?.keepContext) setContextMenu(null);
+                    }}
+                    onOpenRoomDetails={(roomId) => {
+                      setSelectedRoomId(roomId);
+                      openEditRoom(roomId);
                     }}
                     onCreateRoom={(shape) => {
                       if (shape.kind === 'rect') handleCreateRoomFromRect(shape.rect);
@@ -2566,6 +3012,14 @@ const PlanView = ({ planId }: Props) => {
                     }}
                     onUpdateRoom={(roomId, payload) => {
                       if (isReadOnly) return;
+                      const currentRoom = ((plan as FloorPlan).rooms || []).find((r) => r.id === roomId);
+                      if (currentRoom) {
+                        const nextRoom = { ...currentRoom, ...payload };
+                        if (hasRoomOverlap(nextRoom, roomId)) {
+                          notifyRoomOverlap();
+                          return;
+                        }
+                      }
                       markTouched();
                       const nextRooms = ((plan as FloorPlan).rooms || []).map((r) => (r.id === roomId ? { ...r, ...payload } : r));
                       updateRoom((plan as FloorPlan).id, roomId, payload as any);
@@ -2580,6 +3034,13 @@ const PlanView = ({ planId }: Props) => {
                 <div className="max-w-[720px] rounded-2xl bg-slate-900/90 px-4 py-3 text-white shadow-card backdrop-blur">
                   <div className="text-sm font-semibold">{linkCreateHint.title}</div>
                   <div className="mt-0.5 text-xs text-white/80">{linkCreateHint.subtitle}</div>
+                </div>
+              </div>
+            ) : null}
+            {overlapNotice ? (
+              <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 shadow-card">
+                  {overlapNotice}
                 </div>
               </div>
             ) : null}
@@ -2787,6 +3248,7 @@ const PlanView = ({ planId }: Props) => {
                       })}
                     </button>
                   ) : null}
+                  <div className="my-2 h-px bg-slate-100" />
 		                  <button
 		                    onClick={() => {
 		                      if (isReadOnly) return;
@@ -2809,6 +3271,7 @@ const PlanView = ({ planId }: Props) => {
                       >
                         <CornerDownRight size={14} className="text-slate-500" /> {t({ it: 'Crea collegamento 90°', en: 'Create 90° link' })}
                       </button>
+                      <div className="my-2 h-px bg-slate-100" />
 		                  <button
 		                    onClick={() => {
 		                      openDuplicate(contextMenu.id);
@@ -2840,6 +3303,7 @@ const PlanView = ({ planId }: Props) => {
                       className="mt-1 w-full"
                     />
                   </div>
+                  <div className="my-2 h-px bg-slate-100" />
                 </>
               )}
 
@@ -2890,6 +3354,7 @@ const PlanView = ({ planId }: Props) => {
                   <Pencil size={14} /> {t({ it: 'Modifica rapida oggetti', en: 'Quick edit objects' })}
                 </button>
               ) : null}
+              {contextIsMulti ? <div className="my-2 h-px bg-slate-100" /> : null}
               <button
                 onClick={() => {
                   const ids =
@@ -2902,6 +3367,37 @@ const PlanView = ({ planId }: Props) => {
               >
                 <Trash size={14} /> {t({ it: 'Elimina', en: 'Delete' })}
               </button>
+            </>
+          ) : contextMenu.kind === 'room' ? (
+            <>
+              <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600">
+                {t({ it: 'Stanza selezionata', en: 'Selected room' })}
+                <div className="mt-1 text-[11px] font-normal text-slate-600">
+                  {rooms.find((r) => r.id === contextMenu.id)?.name || t({ it: 'Stanza', en: 'Room' })}
+                </div>
+              </div>
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    openEditRoom(contextMenu.id);
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                >
+                  <Pencil size={14} /> {t({ it: 'Rinomina', en: 'Rename' })}
+                </button>
+              ) : null}
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    setConfirmDeleteRoomId(contextMenu.id);
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
+                >
+                  <Trash size={14} /> {t({ it: 'Elimina stanza', en: 'Delete room' })}
+                </button>
+              ) : null}
             </>
           ) : (
             <>
@@ -2916,6 +3412,7 @@ const PlanView = ({ planId }: Props) => {
                 <BookmarkPlus size={14} className="text-slate-500" /> {t({ it: 'Salva vista', en: 'Save view' })}
               </button>
               ) : null}
+              <div className="my-2 h-px bg-slate-100" />
               {!isReadOnly ? (
                 <button
                   onClick={() => setContextMenu({ ...contextMenu, roomOpen: !contextMenu.roomOpen, addOpen: false })}
@@ -2954,6 +3451,7 @@ const PlanView = ({ planId }: Props) => {
                 <Trash size={14} /> {t({ it: 'Elimina tutti gli oggetti', en: 'Delete all objects' })}
               </button>
               ) : null}
+              <div className="my-2 h-px bg-slate-100" />
               {!isReadOnly ? (
                 <button
                   onClick={() => {
@@ -3022,8 +3520,12 @@ const PlanView = ({ planId }: Props) => {
                   key={def.id}
                   onClick={() => {
                     if ((contextMenu as any).kind !== 'map') return;
-                    if (def.id === 'real_user') {
-                      setRealUserPicker({ x: (contextMenu as any).worldX, y: (contextMenu as any).worldY });
+                    if (def.id === 'real_user' || def.id === 'user' || def.id === 'generic_user') {
+                      const worldX = (contextMenu as any).worldX;
+                      const worldY = (contextMenu as any).worldY;
+                      if (!shouldConfirmCapacity(def.id as MapObjectType, worldX, worldY)) {
+                        proceedPlaceUser(def.id as MapObjectType, worldX, worldY);
+                      }
                       setContextMenu(null);
                       return;
                     }
@@ -3137,6 +3639,7 @@ const PlanView = ({ planId }: Props) => {
       <RealUserPickerModal
         open={!!realUserPicker}
         clientId={client?.id || ''}
+        clientName={client?.name || client?.shortName || ''}
         assignedCounts={assignedCounts}
         onClose={() => setRealUserPicker(null)}
         onSelect={(u) => {
@@ -3170,6 +3673,7 @@ const PlanView = ({ planId }: Props) => {
               externalIsExternal: u.isExternal
             }
           );
+          lastInsertedRef.current = { id, name };
           const roomId = getRoomIdAt((plan as FloorPlan).rooms, realUserPicker.x, realUserPicker.y);
           if (roomId) updateObject(id, { roomId });
           push(t({ it: 'Utente reale inserito', en: 'Real user placed' }), 'success');
@@ -3184,6 +3688,62 @@ const PlanView = ({ planId }: Props) => {
         }}
       />
 
+      <Transition show={realUserImportMissing} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setRealUserImportMissing(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Import utenti richiesto', en: 'User import required' })}</Dialog.Title>
+                    <button
+                      onClick={() => setRealUserImportMissing(false)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-3 text-sm text-slate-600">
+                    {t({
+                      it: 'Non è possibile trascinare un utente reale in quanto non è stato ancora importato nessun utente per questo cliente. Vai su Settings → Custom Import e carica la lista degli utenti reali.',
+                      en: 'You cannot place a real user because no users have been imported for this client yet. Go to Settings → Custom Import and load the real users list.'
+                    })}
+                  </div>
+                  <div className="mt-5 flex justify-end">
+                    <button
+                      onClick={() => setRealUserImportMissing(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Ok', en: 'Ok' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
       <RoomModal
         open={!!roomModal}
         initialName={roomModal?.mode === 'edit' ? roomModal.initialName : ''}
@@ -3192,37 +3752,138 @@ const PlanView = ({ planId }: Props) => {
             ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.color
             : undefined
         }
+        initialCapacity={
+          roomModal?.mode === 'edit'
+            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.capacity
+            : undefined
+        }
+        initialLabelScale={
+          roomModal?.mode === 'edit'
+            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.labelScale
+            : undefined
+        }
+        initialShowName={
+          roomModal?.mode === 'edit'
+            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.showName
+            : undefined
+        }
+        initialSurfaceSqm={
+          roomModal?.mode === 'edit'
+            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.surfaceSqm
+            : undefined
+        }
+        initialNotes={
+          roomModal?.mode === 'edit'
+            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.notes
+            : undefined
+        }
+        objects={roomModal?.mode === 'edit' ? roomStatsById.get(roomModal.roomId)?.items || [] : undefined}
+        getTypeLabel={getTypeLabel}
+        getTypeIcon={getTypeIcon}
+        isUserObject={isUserObject}
+        onDeleteObject={
+          !isReadOnly && roomModal?.mode === 'edit'
+            ? (id) => {
+                setConfirmDelete([id]);
+              }
+            : undefined
+        }
         onClose={() => setRoomModal(null)}
-        onSubmit={({ name, color }) => {
-          if (!roomModal || isReadOnly) return;
+        onSubmit={({ name, color, capacity, labelScale, showName, surfaceSqm, notes }) => {
+          if (!roomModal || isReadOnly) return false;
           if (roomModal.mode === 'edit') {
+            const existing = (basePlan.rooms || []).find((r) => r.id === roomModal.roomId);
+            const nextRoom = { ...(existing || {}), name, color, capacity, labelScale, showName, surfaceSqm, notes };
+            if (hasRoomOverlap(nextRoom, roomModal.roomId)) {
+              notifyRoomOverlap();
+              return false;
+            }
             markTouched();
-            updateRoom(basePlan.id, roomModal.roomId, { name, color });
+            updateRoom(basePlan.id, roomModal.roomId, { name, color, capacity, labelScale, showName, surfaceSqm, notes });
             push(t({ it: 'Stanza aggiornata', en: 'Room updated' }), 'success');
-            postAuditEvent({ event: 'room_update', scopeType: 'plan', scopeId: basePlan.id, details: { id: roomModal.roomId, name, color: color || null } });
+            postAuditEvent({
+              event: 'room_update',
+              scopeType: 'plan',
+              scopeId: basePlan.id,
+              details: {
+                id: roomModal.roomId,
+                name,
+                color: color || null,
+                capacity: capacity ?? null,
+                labelScale: labelScale ?? null,
+                showName,
+                surfaceSqm: surfaceSqm ?? null,
+                notes: notes ?? null
+              }
+            });
             setSelectedRoomId(roomModal.roomId);
             setHighlightRoom({ roomId: roomModal.roomId, until: Date.now() + 2600 });
             setRoomModal(null);
-            return;
+            return true;
+          }
+          const testRoom =
+            roomModal.kind === 'rect'
+              ? {
+                  id: 'new-room',
+                  name,
+                  color,
+                  capacity,
+                  labelScale,
+                  showName,
+                  surfaceSqm,
+                  notes,
+                  kind: 'rect',
+                  ...roomModal.rect
+                }
+              : { id: 'new-room', name, color, capacity, labelScale, showName, surfaceSqm, notes, kind: 'poly', points: roomModal.points };
+          if (hasRoomOverlap(testRoom)) {
+            notifyRoomOverlap();
+            return false;
           }
           markTouched();
           const id =
             roomModal.kind === 'rect'
-              ? addRoom(basePlan.id, { name, color, kind: 'rect', ...roomModal.rect })
-              : addRoom(basePlan.id, { name, color, kind: 'poly', points: roomModal.points });
+              ? addRoom(basePlan.id, {
+                  name,
+                  color,
+                  capacity,
+                  labelScale,
+                  showName,
+                  surfaceSqm,
+                  notes,
+                  kind: 'rect',
+                  ...roomModal.rect
+                })
+              : addRoom(basePlan.id, {
+                  name,
+                  color,
+                  capacity,
+                  labelScale,
+                  showName,
+                  surfaceSqm,
+                  notes,
+                  kind: 'poly',
+                  points: roomModal.points
+                });
           postAuditEvent({
             event: 'room_create',
             scopeType: 'plan',
             scopeId: basePlan.id,
-            details: { id, name, kind: roomModal.kind, color: color || null }
+            details: {
+              id,
+              name,
+              kind: roomModal.kind,
+              color: color || null,
+              capacity: capacity ?? null,
+              labelScale: labelScale ?? null,
+              showName,
+              surfaceSqm: surfaceSqm ?? null,
+              notes: notes ?? null
+            }
           });
-          const testRoom =
-            roomModal.kind === 'rect'
-              ? { id, name, color, kind: 'rect', ...roomModal.rect }
-              : { id, name, color, kind: 'poly', points: roomModal.points };
           const updates: Record<string, string | undefined> = {};
           for (const obj of basePlan.objects) {
-            if (isPointInRoom(testRoom, obj.x, obj.y)) {
+            if (isPointInRoom({ ...testRoom, id }, obj.x, obj.y)) {
               updates[obj.id] = id;
             }
           }
@@ -3231,7 +3892,62 @@ const PlanView = ({ planId }: Props) => {
           setSelectedRoomId(id);
           setHighlightRoom({ roomId: id, until: Date.now() + 3200 });
           setRoomModal(null);
+          return true;
         }}
+      />
+
+      <ConfirmDialog
+        open={!!capacityConfirm}
+        title={t({ it: 'Capienza stanza superata', en: 'Room capacity exceeded' })}
+        description={t({
+          it: `La stanza "${capacityConfirm?.roomName || t({ it: 'Stanza', en: 'Room' })}" ospita un massimo di ${capacityConfirm?.capacity || 0} postazioni. Vuoi continuare comunque?`,
+          en: `Room "${capacityConfirm?.roomName || t({ it: 'Room', en: 'Room' })}" hosts a maximum of ${capacityConfirm?.capacity || 0} seats. Do you want to continue anyway?`
+        })}
+        confirmLabel={t({ it: 'Continua', en: 'Continue' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+        onCancel={() => setCapacityConfirm(null)}
+        onConfirm={() => {
+          if (!capacityConfirm) return;
+          const { type, x, y } = capacityConfirm;
+          setCapacityConfirm(null);
+          proceedPlaceUser(type, x, y);
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!undoConfirm}
+        title={t({ it: 'Annullare inserimento?', en: 'Undo placement?' })}
+        description={
+          undoConfirm
+            ? t({
+                it: `Stai per annullare l’inserimento dell’oggetto "${undoConfirm.name}".`,
+                en: `You are about to undo the insertion of "${undoConfirm.name}".`
+              })
+            : undefined
+        }
+        confirmLabel={t({ it: 'Annulla inserimento', en: 'Undo placement' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+        onCancel={() => setUndoConfirm(null)}
+        onConfirm={() => {
+          if (!undoConfirm) return;
+          markTouched();
+          deleteObject(undoConfirm.id);
+          postAuditEvent({ event: 'object_undo', scopeType: 'plan', scopeId: planId, details: { id: undoConfirm.id } });
+          push(t({ it: 'Inserimento annullato', en: 'Placement undone' }), 'info');
+          lastInsertedRef.current = null;
+          setUndoConfirm(null);
+        }}
+      />
+
+      <RoomAllocationModal
+        open={roomAllocationOpen}
+        rooms={rooms}
+        roomStatsById={roomStatsById}
+        onHighlight={(roomId) => {
+          setSelectedRoomId(roomId);
+          setHighlightRoom({ roomId, until: Date.now() + 3200 });
+        }}
+        onClose={() => setRoomAllocationOpen(false)}
       />
 
       {/* kept for potential future use */}
@@ -3316,6 +4032,9 @@ const PlanView = ({ planId }: Props) => {
           if (!confirmDelete || !confirmDelete.length) return;
           markTouched();
           confirmDelete.forEach((id) => deleteObject(id));
+          if (lastInsertedRef.current && confirmDelete.includes(lastInsertedRef.current.id)) {
+            lastInsertedRef.current = null;
+          }
           push(
             confirmDelete.length === 1
               ? t({ it: 'Oggetto eliminato', en: 'Object deleted' })
@@ -3694,7 +4413,7 @@ const PlanView = ({ planId }: Props) => {
 
       <ChooseDefaultViewModal
         open={!!chooseDefaultModal}
-        views={(basePlan.views || []).filter((v) => v.id !== chooseDefaultModal?.deletingViewId)}
+        views={orderedViews.filter((v) => v.id !== chooseDefaultModal?.deletingViewId)}
         onClose={() => setChooseDefaultModal(null)}
         onConfirm={(newDefaultId) => {
           if (!chooseDefaultModal) return;
