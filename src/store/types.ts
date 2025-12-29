@@ -84,6 +84,11 @@ export interface Room {
   id: string;
   name: string;
   color?: string;
+  capacity?: number;
+  labelScale?: number;
+  showName?: boolean;
+  surfaceSqm?: number;
+  notes?: string;
   kind?: 'rect' | 'poly';
   // rect
   x?: number;

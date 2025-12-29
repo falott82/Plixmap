@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import pkg from '../../../package.json';
 import { Download } from 'lucide-react';
 import { useT } from '../../i18n/useT';
+import { useUIStore } from '../../store/useUIStore';
 
 const purposes: Record<string, string> = {
   react: 'UI framework',
@@ -46,6 +47,9 @@ const NerdAreaPanel = () => {
   const devDeps = (pkg as any).devDependencies || {};
   const t = useT();
   const [pkgQuery, setPkgQuery] = useState('');
+  const { perfOverlayEnabled, togglePerfOverlay } = useUIStore(
+    (s) => ({ perfOverlayEnabled: (s as any).perfOverlayEnabled, togglePerfOverlay: (s as any).togglePerfOverlay })
+  );
 
   const all = [
     ...Object.entries(deps).map(([name, version]) => ({ name, version, scope: 'dependencies' as const })),
@@ -84,6 +88,24 @@ const NerdAreaPanel = () => {
         <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
           {t({ it: 'Runtime consigliato', en: 'Recommended runtime' })}:{' '}
           <span className="font-semibold text-ink">Node.js 18+</span> ({t({ it: 'server API + build tools', en: 'API server + build tools' })}).
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-ink">{t({ it: 'Telemetria', en: 'Telemetry' })}</div>
+            <div className="mt-1 text-xs text-slate-600">
+              {t({
+                it: 'Mostra il pannello prestazioni per analizzare rallentamenti (solo locale).',
+                en: 'Show the performance panel to investigate slowdowns (local only).'
+              })}
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input type="checkbox" checked={!!perfOverlayEnabled} onChange={togglePerfOverlay} />
+            {t({ it: 'Abilita telemetria', en: 'Enable telemetry' })}
+          </label>
         </div>
       </div>
 

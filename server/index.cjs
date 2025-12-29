@@ -36,7 +36,8 @@ const {
   upsertImportConfig,
   upsertExternalUsers,
   listExternalUsers,
-  setExternalUserHidden
+  setExternalUserHidden,
+  listImportSummary
 } = require('./customImport.cjs');
 
 const PORT = Number(process.env.PORT || 8787);
@@ -545,6 +546,140 @@ app.get('/api/settings/audit', requireAuth, (req, res) => {
 });
 
 // --- Custom Import: external "real users" per client (superadmin) ---
+const parseCsvRows = (text) => {
+  const src = String(text || '').replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [];
+  let cur = '';
+  let inQuotes = false;
+  const pushCell = () => {
+    row.push(cur);
+    cur = '';
+  };
+  const pushRow = () => {
+    if (row.length || cur) {
+      pushCell();
+      rows.push(row);
+    }
+    row = [];
+  };
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') {
+          cur += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (ch === ',') {
+      pushCell();
+      continue;
+    }
+    if (ch === '\n') {
+      pushRow();
+      continue;
+    }
+    if (ch === '\r') {
+      if (src[i + 1] === '\n') i += 1;
+      pushRow();
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur || row.length) pushRow();
+  return rows.filter((r) => r.some((cell) => String(cell || '').trim() !== ''));
+};
+
+const parseCsvEmployees = (text) => {
+  const rows = parseCsvRows(String(text || ''));
+  if (!rows.length) return { employees: [], error: 'Empty CSV' };
+  const header = rows.shift().map((h) => String(h || '').trim().toLowerCase());
+  if (!header.length) return { employees: [], error: 'Missing header' };
+  const map = new Map();
+  const mapping = {
+    externalid: 'externalId',
+    firstname: 'firstName',
+    lastname: 'lastName',
+    role: 'role',
+    dept1: 'dept1',
+    dept2: 'dept2',
+    dept3: 'dept3',
+    email: 'email',
+    ext1: 'ext1',
+    ext2: 'ext2',
+    ext3: 'ext3',
+    isexternal: 'isExternal'
+  };
+  header.forEach((key, idx) => {
+    const normalized = mapping[key] || null;
+    if (normalized) map.set(normalized, idx);
+  });
+  if (!map.has('externalId')) return { employees: [], error: 'Missing externalId column' };
+  const employees = [];
+  const parseBool = (value) => {
+    const v = String(value || '').trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes' || v === 'y';
+  };
+  for (const row of rows) {
+    const externalId = String(row[map.get('externalId')] || '').trim();
+    if (!externalId) continue;
+    const get = (key) => {
+      const idx = map.get(key);
+      if (idx === undefined) return '';
+      return String(row[idx] || '').trim();
+    };
+    employees.push({
+      externalId,
+      firstName: get('firstName'),
+      lastName: get('lastName'),
+      role: get('role'),
+      dept1: get('dept1'),
+      dept2: get('dept2'),
+      dept3: get('dept3'),
+      email: get('email'),
+      ext1: get('ext1'),
+      ext2: get('ext2'),
+      ext3: get('ext3'),
+      isExternal: parseBool(get('isExternal'))
+    });
+  }
+  return { employees, error: null };
+};
+
+const clearImportDataForClient = (cid) => {
+  const removedUsers = db.prepare('DELETE FROM external_users WHERE clientId = ?').run(cid).changes || 0;
+  const state = readState();
+  let removedObjects = 0;
+  const nextClients = (state.clients || []).map((c) => {
+    if (c.id !== cid) return c;
+    return {
+      ...c,
+      sites: (c.sites || []).map((s) => ({
+        ...s,
+        floorPlans: (s.floorPlans || []).map((p) => {
+          const prevCount = (p.objects || []).length;
+          const nextObjects = (p.objects || []).filter((o) => !(o.type === 'real_user' && o.externalClientId === cid));
+          removedObjects += prevCount - nextObjects.length;
+          return { ...p, objects: nextObjects };
+        })
+      }))
+    };
+  });
+  const payload = { clients: nextClients, objectTypes: state.objectTypes };
+  const updatedAt = writeState(payload);
+  return { removedUsers, removedObjects, updatedAt };
+};
 app.get('/api/import/config', requireAuth, (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
@@ -556,6 +691,31 @@ app.get('/api/import/config', requireAuth, (req, res) => {
     return;
   }
   res.json({ config: getImportConfigSafe(db, clientId) });
+});
+
+app.get('/api/import/summary', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const state = readState();
+  const summaries = listImportSummary(db);
+  const byId = new Map(summaries.map((s) => [s.clientId, s]));
+  const rows = (state.clients || []).map((c) => {
+    const entry = byId.get(c.id);
+    return {
+      clientId: c.id,
+      clientName: c.name || c.shortName || c.id,
+      lastImportAt: entry?.lastImportAt || null,
+      total: entry?.total || 0,
+      presentCount: entry?.presentCount || 0,
+      missingCount: entry?.missingCount || 0,
+      hiddenCount: entry?.hiddenCount || 0,
+      configUpdatedAt: entry?.configUpdatedAt || null,
+      hasConfig: !!entry?.configUpdatedAt
+    };
+  });
+  res.json({ ok: true, rows });
 });
 
 app.put('/api/import/config', requireAuth, (req, res) => {
@@ -655,6 +815,48 @@ app.post('/api/import/sync', requireAuth, async (req, res) => {
   res.json({ ok: true, ...sync });
 });
 
+app.post('/api/import/csv', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const { clientId, csvText, mode } = req.body || {};
+  const cid = String(clientId || '').trim();
+  const importMode = mode === 'replace' ? 'replace' : 'append';
+  if (!cid) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  if (!csvText || typeof csvText !== 'string') {
+    res.status(400).json({ error: 'Missing csvText' });
+    return;
+  }
+  const parsed = parseCsvEmployees(csvText);
+  if (parsed.error) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  if (!parsed.employees.length) {
+    res.status(400).json({ error: 'No users found in CSV' });
+    return;
+  }
+  let cleanup = null;
+  if (importMode === 'replace') {
+    cleanup = clearImportDataForClient(cid);
+  }
+  const sync = upsertExternalUsers(db, cid, parsed.employees || [], { markMissing: false });
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'import_csv',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: cid,
+    ...requestMeta(req),
+    details: { mode: importMode, count: parsed.employees.length, created: sync.summary?.created, updated: sync.summary?.updated, removedUsers: cleanup?.removedUsers || 0, removedObjects: cleanup?.removedObjects || 0 }
+  });
+  res.json({ ok: true, ...sync, cleanup });
+});
+
 app.post('/api/import/diff', requireAuth, async (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
@@ -742,28 +944,9 @@ app.post('/api/import/clear', requireAuth, (req, res) => {
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
-  const removedUsers = db.prepare('DELETE FROM external_users WHERE clientId = ?').run(cid).changes || 0;
-  const state = readState();
-  let removedObjects = 0;
-  const nextClients = (state.clients || []).map((c) => {
-    if (c.id !== cid) return c;
-    return {
-      ...c,
-      sites: (c.sites || []).map((s) => ({
-        ...s,
-        floorPlans: (s.floorPlans || []).map((p) => {
-          const prevCount = (p.objects || []).length;
-          const nextObjects = (p.objects || []).filter((o) => !(o.type === 'real_user' && o.externalClientId === cid));
-          removedObjects += prevCount - nextObjects.length;
-          return { ...p, objects: nextObjects };
-        })
-      }))
-    };
-  });
-  const payload = { clients: nextClients, objectTypes: state.objectTypes };
-  const updatedAt = writeState(payload);
-  writeAuditLog(db, { level: 'important', event: 'import_clear', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { removedUsers, removedObjects } });
-  res.json({ ok: true, removedUsers, removedObjects, updatedAt });
+  const cleanup = clearImportDataForClient(cid);
+  writeAuditLog(db, { level: 'important', event: 'import_clear', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { removedUsers: cleanup.removedUsers, removedObjects: cleanup.removedObjects } });
+  res.json({ ok: true, removedUsers: cleanup.removedUsers, removedObjects: cleanup.removedObjects, updatedAt: cleanup.updatedAt });
 });
 
 app.get('/api/external-users', requireAuth, (req, res) => {
@@ -772,9 +955,9 @@ app.get('/api/external-users', requireAuth, (req, res) => {
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
+  const serverState = readState();
   if (!req.isAdmin && !req.isSuperAdmin) {
     // Non-admin users can list external users only for clients they can see (ro/rw).
-    const serverState = readState();
     const ctx = getUserWithPermissions(db, req.userId);
     const access = computePlanAccess(serverState.clients, ctx?.permissions || []);
     const filtered = filterStateForUser(serverState.clients, access, false);
@@ -787,8 +970,23 @@ app.get('/api/external-users', requireAuth, (req, res) => {
   const q = String(req.query.q || '').trim();
   const includeHidden = String(req.query.includeHidden || '') === '1';
   const includeMissing = String(req.query.includeMissing || '') === '1';
-  const rows = listExternalUsers(db, { clientId, q, includeHidden, includeMissing });
-  res.json({ ok: true, rows });
+  const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+  const offset = req.query.offset !== undefined ? Number(req.query.offset) : undefined;
+  const rows = listExternalUsers(db, { clientId, q, includeHidden, includeMissing, limit, offset });
+  const client = (serverState.clients || []).find((c) => c.id === clientId);
+  const presentCount = rows.filter((r) => r.present).length;
+  const hiddenCount = rows.filter((r) => r.hidden).length;
+  const missingCount = rows.filter((r) => !r.present).length;
+  res.json({
+    ok: true,
+    clientId,
+    clientName: client?.name || client?.shortName || null,
+    total: rows.length,
+    presentCount,
+    hiddenCount,
+    missingCount,
+    rows
+  });
 });
 
 app.post('/api/external-users/hide', requireAuth, (req, res) => {
@@ -1162,6 +1360,22 @@ app.put('/api/state', requireAuth, (req, res) => {
     const incomingClients = Array.isArray(body.clients) ? body.clients : [];
     const lockedApplied = applyLockedPlans(incomingClients);
     if (!lockedApplied) return;
+    const incomingIds = new Set((lockedApplied || []).map((c) => c.id));
+    const removedClientIds = (serverState.clients || []).map((c) => c.id).filter((id) => id && !incomingIds.has(id));
+    if (removedClientIds.length) {
+      const delUsers = db.prepare('DELETE FROM external_users WHERE clientId = ?');
+      const delCfg = db.prepare('DELETE FROM client_user_import WHERE clientId = ?');
+      const tx = db.transaction((ids) => {
+        for (const cid of ids) {
+          delUsers.run(cid);
+          delCfg.run(cid);
+        }
+      });
+      tx(removedClientIds);
+      for (const cid of removedClientIds) {
+        writeAuditLog(db, { level: 'important', event: 'import_cleanup', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { reason: 'client_deleted' } });
+      }
+    }
     const payload = { clients: lockedApplied, objectTypes: Array.isArray(body.objectTypes) ? body.objectTypes : serverState.objectTypes };
     const updatedAt = writeState(payload);
     res.json({ ok: true, updatedAt, clients: payload.clients, objectTypes: payload.objectTypes });
@@ -1564,5 +1778,5 @@ const heartbeatTimer = setInterval(() => {
 wss.on('close', () => clearInterval(heartbeatTimer));
 
 server.listen(PORT, HOST, () => {
-  console.log(`[deskly] API listening on http://${HOST}:${PORT}`);
 });
+console.log(`[deskly] API listening on http://${HOST}:${PORT}`);

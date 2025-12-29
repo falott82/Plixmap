@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { HighlightState } from './types';
+import { perfMetrics } from '../utils/perfMetrics';
 
 interface UIState {
   selectedPlanId?: string;
@@ -21,6 +22,8 @@ interface UIState {
   gridSize: number;
   showGrid: boolean;
   showPrintAreaByPlan: Record<string, boolean>;
+  roomCapacityStateByPlan: Record<string, Record<string, { userCount: number; capacity?: number }>>;
+  perfOverlayEnabled: boolean;
   setSelectedPlan: (id?: string) => void;
   setSelectedObject: (id?: string) => void;
   setSelection: (ids: string[]) => void;
@@ -45,6 +48,8 @@ interface UIState {
   setGridSize: (size: number) => void;
   setShowGrid: (show: boolean) => void;
   toggleShowPrintArea: (planId: string) => void;
+  setRoomCapacityState: (planId: string, state: Record<string, { userCount: number; capacity?: number }>) => void;
+  togglePerfOverlay: () => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -65,6 +70,8 @@ export const useUIStore = create<UIState>()(
       gridSize: 20,
       showGrid: false,
       showPrintAreaByPlan: {},
+      roomCapacityStateByPlan: {},
+      perfOverlayEnabled: false,
       setSelectedPlan: (id) => set({ selectedPlanId: id, selectedObjectId: undefined, selectedObjectIds: [] }),
       setSelectedObject: (id) =>
         set({
@@ -87,8 +94,14 @@ export const useUIStore = create<UIState>()(
         set((state) => ({
           selectedRevisionByPlan: { ...state.selectedRevisionByPlan, [planId]: revisionId }
         })),
-      setZoom: (zoom) => set({ zoom }),
-      setPan: (pan) => set({ pan }),
+      setZoom: (zoom) => {
+        perfMetrics.zoomUpdates += 1;
+        set({ zoom });
+      },
+      setPan: (pan) => {
+        perfMetrics.panUpdates += 1;
+        set({ pan });
+      },
       setLastObjectScale: (scale) => set({ lastObjectScale: scale }),
       saveViewport: (planId, zoom, pan) =>
         set((state) => ({
@@ -124,7 +137,12 @@ export const useUIStore = create<UIState>()(
       toggleShowPrintArea: (planId) =>
         set((state) => ({
           showPrintAreaByPlan: { ...state.showPrintAreaByPlan, [planId]: !state.showPrintAreaByPlan[planId] }
-        }))
+        })),
+      setRoomCapacityState: (planId, stateByRoom) =>
+        set((state) => ({
+          roomCapacityStateByPlan: { ...state.roomCapacityStateByPlan, [planId]: stateByRoom }
+        })),
+      togglePerfOverlay: () => set((state) => ({ perfOverlayEnabled: !state.perfOverlayEnabled }))
     }),
     {
       name: 'deskly-ui',
@@ -144,7 +162,9 @@ export const useUIStore = create<UIState>()(
         gridSnapEnabled: state.gridSnapEnabled,
         gridSize: state.gridSize,
         showGrid: state.showGrid,
-        showPrintAreaByPlan: state.showPrintAreaByPlan
+        showPrintAreaByPlan: state.showPrintAreaByPlan,
+        roomCapacityStateByPlan: state.roomCapacityStateByPlan,
+        perfOverlayEnabled: state.perfOverlayEnabled
       })
     }
   )
