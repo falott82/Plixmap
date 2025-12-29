@@ -1779,4 +1779,5 @@ wss.on('close', () => clearInterval(heartbeatTimer));
 
 server.listen(PORT, HOST, () => {
 });
-console.log(`[deskly] API listening on http://${HOST}:${PORT}`);
+const hostHint = HOST === '0.0.0.0' ? 'localhost' : HOST;
+console.log(`[deskly] API listening on http://${hostHint}:${PORT}`);

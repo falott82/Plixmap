@@ -12,7 +12,7 @@ COPY package*.json ./
 RUN npm install --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY server ./server
-COPY dbsetup.js ./dbsetup.js
+COPY dbsetup.cjs ./dbsetup.cjs
 RUN mkdir -p /app/data
 EXPOSE 8787
-CMD ["sh", "-c", "node ./dbsetup.js && node server/index.cjs"]
+CMD ["sh", "-c", "node ./dbsetup.cjs && node server/index.cjs"]
