@@ -54,7 +54,7 @@ const LogsPanel = () => {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<AuditLogRow[]>([]);
-  const [limit, setLimit] = useState(200);
+  const [limit, setLimit] = useState(25);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
 

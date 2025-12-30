@@ -40,7 +40,8 @@ interface Props {
   onPanChange: (pan: { x: number; y: number }) => void;
 	  onSelect: (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => void;
 	  onSelectMany?: (ids: string[]) => void;
-	  onMove: (id: string, x: number, y: number) => void;
+	  onMoveStart?: (id: string, x: number, y: number, roomId?: string) => void;
+	  onMove: (id: string, x: number, y: number) => boolean | void;
 	  onPlaceNew: (type: MapObjectType, x: number, y: number) => void;
 	  onEdit: (id: string) => void;
   onContextMenu: (payload: { id: string; clientX: number; clientY: number }) => void;
@@ -118,6 +119,7 @@ const CanvasStageImpl = (
   onPanChange,
 	  onSelect,
 	  onSelectMany,
+	  onMoveStart,
 	  onMove,
 	  onPlaceNew,
 	  onEdit,
@@ -148,6 +150,7 @@ const CanvasStageImpl = (
       }
   >(null);
   const hoverRaf = useRef<number | null>(null);
+  const dragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const [highlightNow, setHighlightNow] = useState(Date.now());
   const [dimensions, setDimensions] = useState({ width: 1200, height: 800 });
   const [bgImage] = useImage(plan.imageUrl, plan.imageUrl.startsWith('http') ? 'anonymous' : undefined);
@@ -1919,6 +1922,8 @@ const CanvasStageImpl = (
                 y={obj.y}
                 draggable={!readOnly}
                 onDragStart={(e) => {
+                  dragStartRef.current.set(obj.id, { x: obj.x, y: obj.y });
+                  onMoveStart?.(obj.id, obj.x, obj.y, obj.roomId);
                   onSelect(obj.id, { multi: !!(e?.evt?.ctrlKey || e?.evt?.metaKey) });
                 }}
                 onMouseEnter={(e) => {
@@ -1948,7 +1953,15 @@ const CanvasStageImpl = (
                   if (!stage) {
                     const nextX = snapEnabled ? snap(e.target.x()) : e.target.x();
                     const nextY = snapEnabled ? snap(e.target.y()) : e.target.y();
-                    onMove(obj.id, nextX, nextY);
+                    const accepted = onMove(obj.id, nextX, nextY);
+                  if (accepted === false) {
+                    const prev = dragStartRef.current.get(obj.id);
+                    if (prev) {
+                      e.target.position({ x: prev.x, y: prev.y });
+                      stage?.batchDraw();
+                    }
+                  }
+                    dragStartRef.current.delete(obj.id);
                     return;
                   }
                   const transform = stage.getAbsoluteTransform().copy();
@@ -1957,7 +1970,15 @@ const CanvasStageImpl = (
                   const world = transform.point(abs);
                   const nextX = snapEnabled ? snap(world.x) : world.x;
                   const nextY = snapEnabled ? snap(world.y) : world.y;
-                  onMove(obj.id, nextX, nextY);
+                  const accepted = onMove(obj.id, nextX, nextY);
+                  if (accepted === false) {
+                    const prev = dragStartRef.current.get(obj.id);
+                    if (prev) {
+                      e.target.position({ x: prev.x, y: prev.y });
+                      stage?.batchDraw();
+                    }
+                  }
+                  dragStartRef.current.delete(obj.id);
                 }}
                 onClick={(e) => {
                   e.cancelBubble = true;

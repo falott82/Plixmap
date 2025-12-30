@@ -1781,3 +1781,6 @@ server.listen(PORT, HOST, () => {
 });
 const hostHint = HOST === '0.0.0.0' ? 'localhost' : HOST;
 console.log(`[deskly] API listening on http://${hostHint}:${PORT}`);
+if (HOST === '0.0.0.0') {
+  console.log(`[deskly] API listening on all interfaces (http://0.0.0.0:${PORT})`);
+}

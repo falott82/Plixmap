@@ -9,6 +9,60 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.3.1',
+    date: '2025-12-29',
+    type: 'fix',
+    notes: [
+      n(
+        'Livelli: toggle “Solo mappa” con icona e separatore visivo dalla palette',
+        'Layers: “Map only” toggle with icon and visual separator from the palette'
+      ),
+      n(
+        'Ricerca: risultati sempre visibili con navigazione da tastiera (frecce + Invio)',
+        'Search: results always visible with keyboard navigation (arrows + Enter)'
+      ),
+      n(
+        'Livelli: ripristino visibilità dopo reload',
+        'Layers: visibility restored after reload'
+      )
+    ]
+  },
+  {
+    version: '1.3.0',
+    date: '2025-12-29',
+    type: 'minor',
+    notes: [
+      n(
+        'Workspace: badge “Salvato/Non salvato” sempre visibile e toast più descrittivi',
+        'Workspace: always-visible “Saved/Unsaved” badge and clearer action toasts'
+      ),
+      n(
+        'Stanze: modale con tab (Info, Utenti, Oggetti, Note) e lista stanze più leggibile',
+        'Rooms: modal with tabs (Info, Users, Objects, Notes) and a more readable rooms list'
+      ),
+      n(
+        'Utenti reali: riga selezionata più evidente, hint tastiera e CTA import quando non ci sono risultati',
+        'Real users: clearer selection highlight, keyboard hint, and import CTA on empty state'
+      ),
+      n(
+        'Settings: contenuti attenuati quando sono aperte modali “pesanti”',
+        'Settings: background content dimmed when heavy modals are open'
+      ),
+      n(
+        'Livelli: pulsante “Solo mappa” per nascondere tutti i livelli (ripristino automatico al reload)',
+        'Layers: “Map only” toggle to hide all layers (restores on reload)'
+      ),
+      n(
+        'Ricerca: navigazione con frecce + Invio nei risultati',
+        'Search: arrow-key navigation + Enter to select results'
+      ),
+      n(
+        'Note cliente: modale sempre a piena altezza disponibile',
+        'Client notes: modal always fills the available height'
+      )
+    ]
+  },
+  {
     version: '1.2.26',
     date: '2025-12-29',
     type: 'fix',
