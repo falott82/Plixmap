@@ -346,10 +346,10 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-7xl overflow-hidden rounded-2xl bg-white shadow-card">
-                  <div className="flex items-stretch">
+                <Dialog.Panel className="w-full max-w-7xl overflow-hidden rounded-2xl bg-white shadow-card h-[calc(100vh-64px)]">
+                  <div className="flex h-full items-stretch">
                     {/* Left notes list */}
-                    <div className="w-80 border-r border-slate-200 bg-slate-50">
+                    <div className="flex w-80 flex-col border-r border-slate-200 bg-slate-50">
                       <div className="flex items-center justify-between gap-2 px-4 py-4">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -392,7 +392,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                         </button>
                       </div>
 
-                      <div className="max-h-[70vh] overflow-auto px-2 pb-4">
+                      <div className="min-h-0 flex-1 overflow-auto px-2 pb-4">
                         {filteredNotes.length ? (
                           filteredNotes.map((n) => {
                             const active = n.id === selectedId;
@@ -464,7 +464,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                     </div>
 
                     {/* Right editor */}
-                    <div className="flex-1 p-6">
+                    <div className="flex flex-1 flex-col p-6 min-h-0">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="min-w-0">
                           <Dialog.Title className="text-lg font-semibold text-ink">
@@ -502,7 +502,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                         </div>
                       </div>
 
-                      <div className="mt-4">
+                      <div className="mt-4 flex-1 overflow-y-auto pr-1">
                         {selected ? (
                           <LexicalNotesEditor
                             ref={editorRef}

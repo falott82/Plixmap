@@ -35,7 +35,7 @@ import ExportButton from './ExportButton';
 import ObjectModal from './ObjectModal';
 import RoomAllocationModal from './RoomAllocationModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { FloorPlan, FloorPlanView, MapObject, MapObjectType, PlanLink } from '../../store/types';
+import { FloorPlan, FloorPlanView, MapObject, MapObjectType, PlanLink, Room } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
@@ -44,7 +44,7 @@ import { updateMyProfile } from '../../api/auth';
 import VersionBadge from '../ui/VersionBadge';
 import UserMenu from '../layout/UserMenu';
 import ViewModal from './ViewModal';
-import SearchResultsModal from './SearchResultsModal';
+import SearchResultsPopover from './SearchResultsPopover';
 import ChooseDefaultViewModal from './ChooseDefaultViewModal';
 import Icon from '../ui/Icon';
 import RevisionsModal from './RevisionsModal';
@@ -191,6 +191,8 @@ const PlanView = ({ planId }: Props) => {
     roomCapacityStateByPlan,
     setRoomCapacityState,
     perfOverlayEnabled,
+    hiddenLayersByPlan,
+    setHideAllLayers,
     setPlanDirty,
     requestSaveAndNavigate,
     pendingSaveNavigateTo,
@@ -230,6 +232,8 @@ const PlanView = ({ planId }: Props) => {
       roomCapacityStateByPlan: (s as any).roomCapacityStateByPlan,
       setRoomCapacityState: (s as any).setRoomCapacityState,
       perfOverlayEnabled: (s as any).perfOverlayEnabled,
+      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
+      setHideAllLayers: (s as any).setHideAllLayers,
       setPlanDirty: (s as any).setPlanDirty,
       requestSaveAndNavigate: (s as any).requestSaveAndNavigate,
       pendingSaveNavigateTo: (s as any).pendingSaveNavigateTo,
@@ -265,16 +269,25 @@ const PlanView = ({ planId }: Props) => {
   const [realUserPicker, setRealUserPicker] = useState<{ x: number; y: number } | null>(null);
   const [realUserImportMissing, setRealUserImportMissing] = useState(false);
   const [capacityConfirm, setCapacityConfirm] = useState<{
+    mode: 'place' | 'move';
     type: MapObjectType;
     x: number;
     y: number;
+    roomId: string;
     roomName: string;
     capacity: number;
+    objectId?: string;
+    prevX?: number;
+    prevY?: number;
+    prevRoomId?: string;
   } | null>(null);
+  const capacityConfirmRef = useRef<typeof capacityConfirm>(null);
+  useEffect(() => {
+    capacityConfirmRef.current = capacityConfirm;
+  }, [capacityConfirm]);
   const [undoConfirm, setUndoConfirm] = useState<{ id: string; name: string } | null>(null);
   const [overlapNotice, setOverlapNotice] = useState<string | null>(null);
   const roomOverlapNoticeRef = useRef(0);
-  const overlapNoticeTimeoutRef = useRef<number | null>(null);
   const [allTypesOpen, setAllTypesOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<
     | { kind: 'object'; id: string; x: number; y: number }
@@ -286,13 +299,14 @@ const PlanView = ({ planId }: Props) => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const returnToSelectionListRef = useRef(false);
   const lastInsertedRef = useRef<{ id: string; name: string } | null>(null);
+  const dragStartRef = useRef<Map<string, { x: number; y: number; roomId?: string }>>(new Map());
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewsMenuOpen, setViewsMenuOpen] = useState(false);
   const [selectedViewId, setSelectedViewId] = useState<string>('__last__');
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
   const [searchResultsTerm, setSearchResultsTerm] = useState('');
-  const [searchResultsIds, setSearchResultsIds] = useState<string[]>([]);
-  const [searchRoomIds, setSearchRoomIds] = useState<string[]>([]);
+  const [searchResultsObjects, setSearchResultsObjects] = useState<MapObject[]>([]);
+  const [searchResultsRooms, setSearchResultsRooms] = useState<Room[]>([]);
   const [crossPlanSearchOpen, setCrossPlanSearchOpen] = useState(false);
   const [crossPlanSearchTerm, setCrossPlanSearchTerm] = useState('');
   const [crossPlanResults, setCrossPlanResults] = useState<CrossPlanSearchResult[]>([]);
@@ -362,6 +376,13 @@ const PlanView = ({ planId }: Props) => {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const searchDebugEnabled = useMemo(() => {
+    try {
+      return new URLSearchParams(location.search || '').get('searchDebug') === '1';
+    } catch {
+      return false;
+    }
+  }, [location.search]);
   const perfEnabled = (() => {
     try {
       return new URLSearchParams(location.search || '').get('perf') === '1' || perfOverlayEnabled;
@@ -521,6 +542,8 @@ const PlanView = ({ planId }: Props) => {
     return [...layers].sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
   }, [renderPlan]);
   const visibleLayerIds = visibleLayerIdsByPlan[planId] || planLayers.map((l: any) => l.id);
+  const hideAllLayers = !!hiddenLayersByPlan[planId];
+  const effectiveVisibleLayerIds = hideAllLayers ? [] : visibleLayerIds;
   useEffect(() => {
     if (!visibleLayerIdsByPlan[planId] && planLayers.length) {
       setVisibleLayerIds(planId, planLayers.map((l: any) => l.id));
@@ -529,7 +552,7 @@ const PlanView = ({ planId }: Props) => {
 
   const canvasPlan = useMemo(() => {
     if (!renderPlan) return renderPlan;
-    const visible = new Set(visibleLayerIds);
+    const visible = new Set(effectiveVisibleLayerIds);
     const normalizedLayerIdsForType = (typeId: string) => {
       if (typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user') return ['users'];
       return ['devices'];
@@ -547,7 +570,7 @@ const PlanView = ({ planId }: Props) => {
         })
       : (renderPlan as any).links;
     return { ...renderPlan, objects, rooms, links };
-  }, [renderPlan, visibleLayerIds]);
+  }, [effectiveVisibleLayerIds, renderPlan]);
 
   const linksModalObjectName = useMemo(() => {
     if (!linksModalObjectId) return '';
@@ -1131,18 +1154,6 @@ const PlanView = ({ planId }: Props) => {
 	    ]
 	  );
 
-  const handleStageMove = useCallback(
-    (id: string, x: number, y: number) => {
-      if (!isReadOnlyRef.current) markTouched();
-      const currentPlan = planRef.current as FloorPlan | undefined;
-      const currentObj = currentPlan?.objects?.find((o) => o.id === id);
-      const nextRoomId = !isReadOnlyRef.current && currentPlan ? getRoomIdAt(currentPlan.rooms, x, y) : undefined;
-      const currentRoomId = currentObj?.roomId ?? undefined;
-      updateObject(id, { x, y, ...(currentRoomId !== nextRoomId ? { roomId: nextRoomId } : {}) });
-    },
-    [markTouched, updateObject]
-  );
-
   const handleObjectContextMenu = useCallback(
     ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) =>
       setContextMenu({ kind: 'object', id, x: clientX, y: clientY }),
@@ -1368,8 +1379,6 @@ const PlanView = ({ planId }: Props) => {
     roomOverlapNoticeRef.current = now;
     const message = t({ it: 'Attenzione: non è possibile sovrapporre due stanze.', en: 'Warning: rooms cannot overlap.' });
     setOverlapNotice(message);
-    if (overlapNoticeTimeoutRef.current) window.clearTimeout(overlapNoticeTimeoutRef.current);
-    overlapNoticeTimeoutRef.current = window.setTimeout(() => setOverlapNotice(null), 3000);
   }, [t]);
 
   const computeRoomReassignments = (rooms: any[] | undefined, objects: any[]) => {
@@ -1430,8 +1439,6 @@ const PlanView = ({ planId }: Props) => {
         }
       }
 
-      if (isTyping) return;
-
       const isCmdS = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
       if (isCmdS) {
         if (!currentPlan || isReadOnlyRef.current) return;
@@ -1470,6 +1477,8 @@ const PlanView = ({ planId }: Props) => {
         entrySnapshotRef.current = toSnapshot(planRef.current || currentPlan);
         return;
       }
+
+      if (isTyping) return;
 
       const isCmdZ = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z';
       if (isCmdZ) {
@@ -1691,6 +1700,54 @@ const PlanView = ({ planId }: Props) => {
     return map;
   }, [isUserObject, renderPlan?.objects]);
 
+  const handleStageMoveStart = useCallback((id: string, x: number, y: number, roomId?: string) => {
+    dragStartRef.current.set(id, { x, y, roomId });
+  }, []);
+
+  const handleStageMove = useCallback(
+    (id: string, x: number, y: number) => {
+      if (!isReadOnlyRef.current) markTouched();
+      const currentPlan = planRef.current as FloorPlan | undefined;
+      const currentObj = currentPlan?.objects?.find((o) => o.id === id);
+      if (!currentObj) return;
+      const prev = dragStartRef.current.get(id) || { x: currentObj.x, y: currentObj.y, roomId: currentObj.roomId ?? undefined };
+      const nextRoomId = !isReadOnlyRef.current && currentPlan ? getRoomIdAt(currentPlan.rooms, x, y) : undefined;
+      const currentRoomId = currentObj.roomId ?? undefined;
+      if (
+        nextRoomId &&
+        nextRoomId !== currentRoomId &&
+        (currentObj.type === 'user' || currentObj.type === 'real_user' || currentObj.type === 'generic_user')
+      ) {
+        const room = (currentPlan?.rooms || []).find((r) => r.id === nextRoomId);
+        const rawCapacity = Number(room?.capacity);
+        const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
+        if (capacity) {
+          const userCount = roomStatsById.get(nextRoomId)?.userCount || 0;
+          if (userCount >= capacity) {
+            setCapacityConfirm({
+              mode: 'move',
+              type: currentObj.type,
+              x,
+              y,
+              roomId: nextRoomId,
+              roomName: room?.name || t({ it: 'Stanza', en: 'Room' }),
+              capacity,
+              objectId: currentObj.id,
+              prevX: prev.x,
+              prevY: prev.y,
+              prevRoomId: prev.roomId
+            });
+            return false;
+          }
+        }
+      }
+      updateObject(id, { x, y, ...(currentRoomId !== nextRoomId ? { roomId: nextRoomId } : {}) });
+      dragStartRef.current.delete(id);
+      return true;
+    },
+    [markTouched, roomStatsById, t, updateObject]
+  );
+
   useEffect(() => {
     const prevState = roomCapacityStateByPlan?.[planId];
     const nextState: Record<string, { userCount: number; capacity?: number }> = {};
@@ -1708,20 +1765,6 @@ const PlanView = ({ planId }: Props) => {
       }
       if (!capacity) continue;
       if (!prevState) continue;
-      const prev = prevState[room.id];
-      const prevCapacity = prev?.capacity ?? Infinity;
-      const prevCount = prev?.userCount ?? userCount;
-      const wasOver = prevCount > prevCapacity;
-      const isOver = userCount > capacity;
-      if (!wasOver && isOver) {
-        push(
-          t({
-            it: `Attenzione la stanza ospita un massimo di ${capacity} postazioni`,
-            en: `Warning: this room hosts a maximum of ${capacity} seats`
-          }),
-          'danger'
-        );
-      }
     }
     if (nextKey === prevKey) return;
     setRoomCapacityState(planId, nextState);
@@ -1855,9 +1898,11 @@ const PlanView = ({ planId }: Props) => {
       const userCount = roomStatsById.get(roomId)?.userCount || 0;
       if (userCount < capacity) return false;
       setCapacityConfirm({
+        mode: 'place',
         type,
         x,
         y,
+        roomId,
         roomName: room?.name || t({ it: 'Stanza', en: 'Room' }),
         capacity
       });
@@ -1897,7 +1942,10 @@ const PlanView = ({ planId }: Props) => {
       if (payload.customValues && Object.keys(payload.customValues).length) {
         saveCustomValues(id, modalState.type, payload.customValues).catch(() => {});
       }
-      push(t({ it: 'Oggetto creato', en: 'Object created' }), 'success');
+      push(
+        t({ it: `Oggetto creato: ${payload.name}`, en: `Object created: ${payload.name}` }),
+        'success'
+      );
       postAuditEvent({
         event: 'object_create',
         scopeType: 'plan',
@@ -1925,7 +1973,10 @@ const PlanView = ({ planId }: Props) => {
       if (payload.customValues && Object.keys(payload.customValues).length) {
         saveCustomValues(id, base?.type || 'user', payload.customValues).catch(() => {});
       }
-      push(t({ it: 'Oggetto duplicato', en: 'Object duplicated' }), 'success');
+      push(
+        t({ it: `Oggetto duplicato: ${payload.name}`, en: `Object duplicated: ${payload.name}` }),
+        'success'
+      );
       postAuditEvent({
         event: 'object_duplicate',
         scopeType: 'plan',
@@ -1961,7 +2012,10 @@ const PlanView = ({ planId }: Props) => {
     if (obj && payload.customValues) {
       saveCustomValues(modalState.objectId, obj.type, payload.customValues).catch(() => {});
     }
-    push(t({ it: 'Oggetto aggiornato', en: 'Object updated' }), 'success');
+    push(
+      t({ it: `Oggetto aggiornato: ${payload.name}`, en: `Object updated: ${payload.name}` }),
+      'success'
+    );
     postAuditEvent({
       event: 'object_update',
       scopeType: 'plan',
@@ -1970,9 +2024,19 @@ const PlanView = ({ planId }: Props) => {
     });
   };
 
-  const handleSearch = (_term: string) => {
-    // live search only highlights on Enter to avoid loops
+  const handleSearch = (term: string) => {
+    // Run search only on Enter. Typing hides any previous results.
+    if (!term.trim()) {
+      setSearchResultsOpen(false);
+      setSearchResultsObjects([]);
+      setSearchResultsRooms([]);
+      return;
+    }
+    setSearchResultsOpen(false);
+    setSearchResultsObjects([]);
+    setSearchResultsRooms([]);
   };
+
 
   const handleZoomChange = useCallback(
     (value: number) => {
@@ -1988,49 +2052,6 @@ const PlanView = ({ planId }: Props) => {
     },
     [setPan]
   );
-
-  const renderObjectById = useMemo(
-    () => new Map<string, any>((renderPlan?.objects || []).map((o) => [o.id, o])),
-    [renderPlan?.objects]
-  );
-  const renderRoomById = useMemo(
-    () => new Map<string, any>((renderPlan?.rooms || []).map((r) => [r.id, r])),
-    [renderPlan?.rooms]
-  );
-
-  const searchIndexCacheRef = useRef<{
-    key: string;
-    value: { objects: { id: string; search: string }[]; rooms: { id: string; search: string }[] };
-  }>({ key: '', value: { objects: [], rooms: [] } });
-  const currentPlanSearchIndex = useMemo(() => {
-    if (!renderPlan) return { objects: [] as { id: string; search: string }[], rooms: [] as { id: string; search: string }[] };
-    const objs = renderPlan.objects || [];
-    const rms = renderPlan.rooms || [];
-    let key = `${objs.length}:${rms.length}`;
-    for (const o of objs) {
-      const extra =
-        o.type === 'real_user'
-          ? `${String((o as any).firstName || '')} ${String((o as any).lastName || '')}`.trim()
-          : '';
-      key += `|${o.id}:${o.name}:${o.description || ''}:${extra}`;
-    }
-    for (const r of rms) {
-      key += `|r:${r.id}:${r.name || ''}`;
-    }
-    if (searchIndexCacheRef.current.key === key) return searchIndexCacheRef.current.value;
-    const objects = objs.map((o) => {
-      const extra =
-        o.type === 'real_user'
-          ? `${String((o as any).firstName || '')} ${String((o as any).lastName || '')}`.trim()
-          : '';
-      const search = `${o.name} ${o.description || ''} ${extra}`.toLowerCase();
-      return { id: o.id, search };
-    });
-    const rooms = rms.map((r) => ({ id: r.id, search: String(r.name || '').toLowerCase() }));
-    const value = { objects, rooms };
-    searchIndexCacheRef.current = { key, value };
-    return value;
-  }, [renderPlan]);
 
   const clientSearchIndexRef = useRef<{
     key: string;
@@ -2095,87 +2116,148 @@ const PlanView = ({ planId }: Props) => {
 
   const handleSearchEnter = (term: string) => {
     if (!renderPlan) return;
-    if (!term.trim()) return;
-    const normalized = term.toLowerCase();
-    const objectMatches = currentPlanSearchIndex.objects
-      .filter((o) => o.search.includes(normalized))
-      .map((o) => renderObjectById.get(o.id))
-      .filter(Boolean) as any[];
-    const roomMatches = currentPlanSearchIndex.rooms
-      .filter((r) => r.search.includes(normalized))
-      .map((r) => renderRoomById.get(r.id))
-      .filter(Boolean) as any[];
-
-    const crossResults: CrossPlanSearchResult[] = client
-      ? getClientSearchIndex().filter((x) => x.search.includes(normalized)).map((x) => x.result)
-      : [
-          ...objectMatches.map((o) => {
-            const label =
-              o.type === 'real_user' &&
-              (((o as any).firstName && String((o as any).firstName).trim()) || ((o as any).lastName && String((o as any).lastName).trim()))
-                ? `${String((o as any).firstName || '').trim()} ${String((o as any).lastName || '').trim()}`.trim()
-                : o.name;
-            return {
-              kind: 'object',
-              clientId: '',
-              clientName: '',
-              siteId: '',
-              siteName: '',
-              planId,
-              planName: renderPlan.name,
-              objectId: o.id,
-              objectType: o.type,
-              objectLabel: label,
-              objectDescription: o.description || ''
-            } as any;
-          }),
-          ...roomMatches.map(
-            (r) =>
-              ({
-                kind: 'room',
-                clientId: '',
-                clientName: '',
-                siteId: '',
-                siteName: '',
-                planId,
-                planName: renderPlan.name,
-                roomId: r.id,
-                roomName: r.name
-              }) as any
-          )
-        ];
-
-    if (!crossResults.length) {
-      push(t({ it: 'Nessun risultato trovato', en: 'No results found' }), 'info');
+    if (!term.trim()) {
+      setSearchResultsOpen(false);
+      setSearchResultsTerm('');
+      setSearchResultsObjects([]);
+      setSearchResultsRooms([]);
+      setCrossPlanSearchOpen(false);
+      setCrossPlanSearchTerm('');
+      clearSelection();
+      setSelectedRoomId(undefined);
+      setHighlightRoom(null);
       return;
     }
+    const normalized = term.trim().toLowerCase();
+    const simpleObjectMatches = (renderPlan.objects || []).filter(
+      (o) =>
+        String(o.name || '').toLowerCase().includes(normalized) ||
+        String(o.description || '').toLowerCase().includes(normalized)
+    );
+    const simpleRoomMatches = (renderPlan.rooms || []).filter((r) =>
+      String(r.name || '').toLowerCase().includes(normalized)
+    );
+    if (searchDebugEnabled) {
+      console.log('[search-debug] simple', {
+        term,
+        normalized,
+        objects: simpleObjectMatches.map((o) => o.name),
+        rooms: simpleRoomMatches.map((r) => r.name)
+      });
+    }
+    if (simpleObjectMatches.length + simpleRoomMatches.length > 1) {
+      setSearchResultsTerm(term);
+      setSearchResultsObjects(simpleObjectMatches);
+      setSearchResultsRooms(simpleRoomMatches);
+      setSearchResultsOpen(true);
+      if (searchDebugEnabled) {
+        console.log('[search-debug] open popover (simple matches)', {
+          total: simpleObjectMatches.length + simpleRoomMatches.length
+        });
+      }
+      return;
+    }
+    const collectMatches = (objects: MapObject[] = [], rooms: Room[] = []) => {
+      const objMatches: MapObject[] = [];
+      const roomMatches: Room[] = [];
+      for (const o of objects) {
+        const first = String((o as any).firstName || '').trim();
+        const last = String((o as any).lastName || '').trim();
+        const email = String((o as any).externalEmail || (o as any).email || '').trim();
+        const role = String((o as any).externalRole || '').trim();
+        const dept = [o.externalDept1, o.externalDept2, o.externalDept3].filter(Boolean).join(' ');
+        const label =
+          o.type === 'real_user' && (first || last)
+            ? `${first} ${last}`.trim()
+            : String(o.name || '').trim();
+        const search = `${label} ${o.name || ''} ${o.description || ''} ${first} ${last} ${email} ${role} ${dept}`.toLowerCase();
+        if (search.includes(normalized)) objMatches.push(o);
+      }
+      for (const r of rooms) {
+        if (String(r.name || '').toLowerCase().includes(normalized)) roomMatches.push(r);
+      }
+      return { objMatches, roomMatches };
+    };
+    const primary = collectMatches(renderPlan.objects || [], renderPlan.rooms || []);
+    const fallback =
+      plan && plan !== renderPlan ? collectMatches(plan.objects || [], plan.rooms || []) : { objMatches: [], roomMatches: [] };
+    const objectMatchesById = new Map<string, MapObject>();
+    const roomMatchesById = new Map<string, Room>();
+    for (const o of [...primary.objMatches, ...fallback.objMatches]) objectMatchesById.set(o.id, o);
+    for (const r of [...primary.roomMatches, ...fallback.roomMatches]) roomMatchesById.set(r.id, r);
+    const objectMatches = Array.from(objectMatchesById.values());
+    const roomMatches = Array.from(roomMatchesById.values());
+    const indexMatches = client
+      ? getClientSearchIndex()
+          .filter((x) => x.planId === renderPlan.id && x.search.includes(normalized))
+          .map((x) => x.result)
+      : [];
+    const indexObjectIds = Array.from(new Set(indexMatches.filter((m) => m.kind === 'object').map((m) => (m as any).objectId).filter(Boolean)));
+    const indexRoomIds = Array.from(new Set(indexMatches.filter((m) => m.kind === 'room').map((m) => (m as any).roomId).filter(Boolean)));
+    const findObjectById = (id: string) =>
+      renderPlan.objects.find((o) => o.id === id) || (plan?.objects || []).find((o) => o.id === id);
+    const findRoomById = (id: string) =>
+      renderPlan.rooms.find((r) => r.id === id) || (plan?.rooms || []).find((r) => r.id === id);
+    const indexObjects = indexObjectIds.map((id) => findObjectById(id)).filter(Boolean) as MapObject[];
+    const indexRooms = indexRoomIds.map((id) => findRoomById(id)).filter(Boolean) as Room[];
+    const mergedObjects = objectMatches.length ? objectMatches : indexObjects;
+    const mergedRooms = roomMatches.length ? roomMatches : indexRooms;
+    const totalMatches = mergedObjects.length + mergedRooms.length;
+    if (searchDebugEnabled) {
+      console.log('[search-debug] merged', {
+        term,
+        objects: mergedObjects.map((o) => o.name),
+        rooms: mergedRooms.map((r) => r.name),
+        total: totalMatches
+      });
+    }
 
-    const uniquePlans = new Set(crossResults.map((r) => r.planId));
-    const needsCrossPlanChooser = crossResults.some((r) => r.planId !== planId) || uniquePlans.size > 1;
-    if (needsCrossPlanChooser) {
+    if (!totalMatches) {
+      const crossResults: CrossPlanSearchResult[] = client
+        ? getClientSearchIndex().filter((x) => x.search.includes(normalized)).map((x) => x.result)
+        : [];
+      if (!crossResults.length) {
+        push(t({ it: 'Nessun risultato trovato', en: 'No results found' }), 'info');
+        return;
+      }
       setCrossPlanSearchTerm(term);
       setCrossPlanResults(crossResults);
       setCrossPlanSearchOpen(true);
       return;
     }
-    if (objectMatches.length + roomMatches.length === 1) {
-      if (objectMatches.length === 1) {
-        const found = objectMatches[0];
-        setSelectedObject(found.id);
-        triggerHighlight(found.id);
+    if (totalMatches === 1) {
+      const onlyObject = mergedObjects.length === 1 ? mergedObjects[0] : null;
+      const onlyRoom = !onlyObject && mergedRooms.length === 1 ? mergedRooms[0] : null;
+      const isExactObjectMatch =
+        !!onlyObject && String(onlyObject.name || '').trim().toLowerCase() === normalized;
+      const isExactRoomMatch =
+        !!onlyRoom && String(onlyRoom.name || '').trim().toLowerCase() === normalized;
+      if (isExactObjectMatch && onlyObject) {
+        setSelectedObject(onlyObject.id);
+        triggerHighlight(onlyObject.id);
+        if (searchDebugEnabled) {
+          console.log('[search-debug] exact object match', onlyObject.name);
+        }
         return;
       }
-      const room = roomMatches[0];
-      clearSelection();
-      setSelectedRoomId(room.id);
-      setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
-      return;
+      if (isExactRoomMatch && onlyRoom) {
+        clearSelection();
+        setSelectedRoomId(onlyRoom.id);
+        setHighlightRoom({ roomId: onlyRoom.id, until: Date.now() + 3200 });
+        if (searchDebugEnabled) {
+          console.log('[search-debug] exact room match', onlyRoom.name);
+        }
+        return;
+      }
     }
     // Multiple matches: let the user pick which one to focus
     setSearchResultsTerm(term);
-    setSearchResultsIds(objectMatches.map((m) => m.id));
-    setSearchRoomIds(roomMatches.map((r) => r.id));
+    setSearchResultsObjects(mergedObjects);
+    setSearchResultsRooms(mergedRooms);
     setSearchResultsOpen(true);
+    if (searchDebugEnabled) {
+      console.log('[search-debug] open popover (merged matches)', { total: totalMatches });
+    }
   };
 
   const modalInitials = useMemo(() => {
@@ -2454,7 +2536,7 @@ const PlanView = ({ planId }: Props) => {
                 {rooms.length} {t({ it: 'stanze', en: 'rooms' })}
               </button>
               {roomsOpen ? (
-                <div className="absolute left-0 z-50 mt-2 w-96 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
+                <div className="absolute left-0 z-50 mt-2 w-[420px] rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
                   <div className="flex items-center justify-between px-2 pb-2">
                     <div className="text-sm font-semibold text-ink">{t({ it: 'Stanze', en: 'Rooms' })}</div>
                     <button onClick={() => setRoomsOpen(false)} className="text-slate-400 hover:text-ink">
@@ -2518,7 +2600,7 @@ const PlanView = ({ planId }: Props) => {
                       <Users size={16} /> {t({ it: 'Trova capienza', en: 'Find capacity' })}
                     </button>
                   </div>
-                  <div className="max-h-96 space-y-2 overflow-auto px-2 pb-2">
+                  <div className="max-h-[28rem] space-y-3 overflow-auto px-3 pb-3">
                     {rooms.length ? (
                       rooms.map((room) => {
                         const isExpanded = expandedRoomId === room.id;
@@ -2531,7 +2613,7 @@ const PlanView = ({ planId }: Props) => {
                         const overCapacity = capacity ? stats.userCount > capacity : false;
                         return (
                           <div key={room.id} className="rounded-xl border border-slate-100">
-                            <div className="flex items-center gap-3 px-3 py-2.5">
+                            <div className="flex items-center gap-3 px-4 py-3">
                               <button
                                 onClick={() => {
                                   setExpandedRoomId(isExpanded ? null : room.id);
@@ -2562,7 +2644,7 @@ const PlanView = ({ planId }: Props) => {
                                   })}
                                 </div>
                               </button>
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center gap-2">
                                 <button
                                   title={t({ it: 'Evidenzia', en: 'Highlight' })}
                                   onClick={(e) => {
@@ -2570,9 +2652,9 @@ const PlanView = ({ planId }: Props) => {
                                     setSelectedRoomId(room.id);
                                     setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
                                   }}
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50"
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                                 >
-                                  <LocateFixed size={14} />
+                                  <LocateFixed size={16} />
                                 </button>
                                 {!isReadOnly ? (
                                   <>
@@ -2583,9 +2665,9 @@ const PlanView = ({ planId }: Props) => {
                                         openEditRoom(room.id);
                                         setRoomsOpen(false);
                                       }}
-                                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50"
+                                      className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                                     >
-                                      <Pencil size={14} />
+                                      <Pencil size={16} />
                                     </button>
                                     <button
                                       title={t({ it: 'Elimina', en: 'Delete' })}
@@ -2594,16 +2676,16 @@ const PlanView = ({ planId }: Props) => {
                                         setConfirmDeleteRoomId(room.id);
                                         setRoomsOpen(false);
                                       }}
-                                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                      className="flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
                                     >
-                                      <Trash size={14} />
+                                      <Trash size={16} />
                                     </button>
                                   </>
                                 ) : null}
                               </div>
                             </div>
                             {isExpanded ? (
-                              <div className="border-t border-slate-100 px-3 pb-2 pt-2">
+                              <div className="border-t border-slate-100 px-4 pb-3 pt-2">
                                 {assigned.length ? (
                                   <div className="space-y-1">
                                     {assigned.map((o) => (
@@ -2639,6 +2721,18 @@ const PlanView = ({ planId }: Props) => {
                           it: 'Nessuna stanza. Crea una stanza per organizzare gli oggetti.',
                           en: 'No rooms. Create a room to organize objects.'
                         })}
+                        {!isReadOnly ? (
+                          <div className="mt-2">
+                            <button
+                              onClick={() => {
+                                setNewRoomMenuOpen(true);
+                              }}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              {t({ it: 'Crea stanza', en: 'Create room' })}
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -2729,8 +2823,43 @@ const PlanView = ({ planId }: Props) => {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <SearchBar onSearch={handleSearch} onEnter={handleSearchEnter} inputRef={searchInputRef} className="w-96" />
+          <div className="flex items-center gap-3">
+            <div className="relative">
+            <SearchBar onSearch={handleSearch} onEnter={handleSearchEnter} inputRef={searchInputRef} className="w-96" />
+            <SearchResultsPopover
+              open={searchResultsOpen}
+              term={searchResultsTerm}
+              objectResults={searchResultsObjects}
+              roomResults={searchResultsRooms}
+              anchorRef={searchInputRef}
+              onClose={() => {
+                setSearchResultsOpen(false);
+                setSearchResultsObjects([]);
+                setSearchResultsRooms([]);
+              }}
+              onSelectObject={(id) => {
+                setSelectedObject(id);
+                triggerHighlight(id);
+              }}
+              onSelectRoom={(id) => {
+                clearSelection();
+                setSelectedRoomId(id);
+                setHighlightRoom({ roomId: id, until: Date.now() + 3200 });
+              }}
+            />
+          </div>
+          <div
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+              hasUnsavedChanges ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'
+            }`}
+            title={
+              hasUnsavedChanges
+                ? t({ it: 'Modifiche non salvate', en: 'Unsaved changes' })
+                : t({ it: 'Tutto salvato', en: 'All changes saved' })
+            }
+          >
+            {hasUnsavedChanges ? t({ it: 'Non salvato', en: 'Unsaved' }) : t({ it: 'Salvato', en: 'Saved' })}
+          </div>
           {!isReadOnly ? (
             <button
               onClick={() => {
@@ -2985,6 +3114,7 @@ const PlanView = ({ planId }: Props) => {
 	                    setSelection(ids);
 	                    setContextMenu(null);
 	                  }}
+                      onMoveStart={handleStageMoveStart}
 					                onMove={handleStageMove}
 					                onPlaceNew={handlePlaceNew}
 		                onEdit={handleEdit}
@@ -3037,13 +3167,6 @@ const PlanView = ({ planId }: Props) => {
                 </div>
               </div>
             ) : null}
-            {overlapNotice ? (
-              <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 shadow-card">
-                  {overlapNotice}
-                </div>
-              </div>
-            ) : null}
 		          {!isReadOnly ? (
 		            <aside className="sticky top-0 h-fit w-28 shrink-0 self-start rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
 		            <div className="flex items-center justify-between text-[11px] font-semibold uppercase text-slate-500">
@@ -3079,15 +3202,31 @@ const PlanView = ({ planId }: Props) => {
 	              </div>
                 {planLayers.length ? (
                   <div className="mt-3">
-                    <div className="text-[10px] font-semibold uppercase text-slate-500">{t({ it: 'Livelli', en: 'Layers' })}</div>
+                    <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
+                      <span>{t({ it: 'Livelli', en: 'Layers' })}</span>
+                      <button
+                        onClick={() => setHideAllLayers(planId, !hideAllLayers)}
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-slate-600 hover:bg-slate-50"
+                        title={
+                          hideAllLayers
+                            ? t({ it: 'Mostra livelli', en: 'Show layers' })
+                            : t({ it: 'Solo mappa', en: 'Map only' })
+                        }
+                      >
+                        {hideAllLayers ? <Eye size={14} /> : <EyeOff size={14} />}
+                      </button>
+                    </div>
                     <div className="mt-2 flex flex-col gap-2">
                       {planLayers.map((l: any) => {
-                        const isOn = visibleLayerIds.includes(l.id);
+                        const isOn = effectiveVisibleLayerIds.includes(l.id);
                         const label = (l?.name?.[lang] as string) || (l?.name?.it as string) || l.id;
                         return (
                           <button
                             key={l.id}
-                            onClick={() => toggleLayerVisibility(planId, l.id)}
+                            onClick={() => {
+                              if (hideAllLayers) setHideAllLayers(planId, false);
+                              toggleLayerVisibility(planId, l.id);
+                            }}
                             className={`flex items-center justify-between rounded-xl border px-2 py-1 text-[11px] font-semibold ${
                               isOn ? 'border-primary bg-primary/5 text-primary' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                             }`}
@@ -3104,7 +3243,9 @@ const PlanView = ({ planId }: Props) => {
                     </div>
                   </div>
                 ) : null}
-			            <div className="mt-3 flex flex-col items-center gap-3">
+                <div className="my-3 h-px w-full bg-slate-200" />
+                <div className="text-[10px] font-semibold uppercase text-slate-500">{t({ it: 'Palette', en: 'Palette' })}</div>
+			            <div className="mt-2 flex flex-col items-center gap-3">
 				              <Toolbar
                       defs={objectTypeDefs || []}
                       order={paletteOrder}
@@ -3800,7 +3941,10 @@ const PlanView = ({ planId }: Props) => {
             }
             markTouched();
             updateRoom(basePlan.id, roomModal.roomId, { name, color, capacity, labelScale, showName, surfaceSqm, notes });
-            push(t({ it: 'Stanza aggiornata', en: 'Room updated' }), 'success');
+            push(
+              t({ it: `Stanza aggiornata: ${name}`, en: `Room updated: ${name}` }),
+              'success'
+            );
             postAuditEvent({
               event: 'room_update',
               scopeType: 'plan',
@@ -3888,7 +4032,10 @@ const PlanView = ({ planId }: Props) => {
             }
           }
           if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
-          push(t({ it: 'Stanza creata', en: 'Room created' }), 'success');
+          push(
+            t({ it: `Stanza creata: ${name}`, en: `Room created: ${name}` }),
+            'success'
+          );
           setSelectedRoomId(id);
           setHighlightRoom({ roomId: id, until: Date.now() + 3200 });
           setRoomModal(null);
@@ -3903,15 +4050,44 @@ const PlanView = ({ planId }: Props) => {
           it: `La stanza "${capacityConfirm?.roomName || t({ it: 'Stanza', en: 'Room' })}" ospita un massimo di ${capacityConfirm?.capacity || 0} postazioni. Vuoi continuare comunque?`,
           en: `Room "${capacityConfirm?.roomName || t({ it: 'Room', en: 'Room' })}" hosts a maximum of ${capacityConfirm?.capacity || 0} seats. Do you want to continue anyway?`
         })}
-        confirmLabel={t({ it: 'Continua', en: 'Continue' })}
-        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
-        onCancel={() => setCapacityConfirm(null)}
+        confirmLabel={t({ it: 'Sì', en: 'Yes' })}
+        cancelLabel={t({ it: 'No', en: 'No' })}
+        onCancel={() => {
+          const current = capacityConfirmRef.current;
+          if (current?.mode === 'move' && current.objectId) {
+            updateObject(current.objectId, {
+              x: current.prevX ?? 0,
+              y: current.prevY ?? 0,
+              roomId: current.prevRoomId
+            });
+            dragStartRef.current.delete(current.objectId);
+          }
+          setCapacityConfirm(null);
+        }}
         onConfirm={() => {
-          if (!capacityConfirm) return;
-          const { type, x, y } = capacityConfirm;
+          const current = capacityConfirmRef.current;
+          if (!current) return;
+          const { mode, type, x, y, objectId, roomId } = current;
+          if (mode === 'move' && objectId) {
+            markTouched();
+            updateObject(objectId, { x, y, roomId });
+            dragStartRef.current.delete(objectId);
+            setCapacityConfirm(null);
+            return;
+          }
           setCapacityConfirm(null);
           proceedPlaceUser(type, x, y);
         }}
+      />
+
+      <ConfirmDialog
+        open={!!overlapNotice}
+        title={t({ it: 'Sovrapposizione non consentita', en: 'Overlap not allowed' })}
+        description={overlapNotice || undefined}
+        confirmLabel={t({ it: 'Ok', en: 'Ok' })}
+        cancelLabel={null}
+        onCancel={() => setOverlapNotice(null)}
+        onConfirm={() => setOverlapNotice(null)}
       />
 
       <ConfirmDialog
@@ -4088,13 +4264,20 @@ const PlanView = ({ planId }: Props) => {
         onConfirm={() => {
           if (!confirmDeleteRoomId) return;
           markTouched();
+          const roomName = rooms.find((r) => r.id === confirmDeleteRoomId)?.name;
           const remainingRooms = rooms.filter((r) => r.id !== confirmDeleteRoomId);
           const updates = computeRoomReassignments(remainingRooms, basePlan.objects);
           deleteRoom(basePlan.id, confirmDeleteRoomId);
           postAuditEvent({ event: 'room_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: confirmDeleteRoomId } });
           if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
           if (selectedRoomId === confirmDeleteRoomId) setSelectedRoomId(undefined);
-          push(t({ it: 'Stanza eliminata', en: 'Room deleted' }), 'info');
+          push(
+            t({
+              it: `Stanza eliminata${roomName ? `: ${roomName}` : ''}`,
+              en: `Room deleted${roomName ? `: ${roomName}` : ''}`
+            }),
+            'info'
+          );
           setConfirmDeleteRoomId(null);
         }}
         confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
@@ -4425,31 +4608,6 @@ const PlanView = ({ planId }: Props) => {
           if (selectedViewId === deletingId) setSelectedViewId(newDefaultId);
           push(t({ it: 'Vista eliminata e default aggiornata', en: 'View deleted and default updated' }), 'success');
           window.setTimeout(() => goToDefaultView(), 0);
-        }}
-      />
-
-      <SearchResultsModal
-        open={searchResultsOpen}
-        term={searchResultsTerm}
-        objectResults={(renderPlan?.objects || []).filter((o) => searchResultsIds.includes(o.id))}
-        roomResults={(renderPlan?.rooms || []).filter((r) => searchRoomIds.includes(r.id))}
-        onClose={() => {
-          setSearchResultsOpen(false);
-          setSearchRoomIds([]);
-          setSearchResultsIds([]);
-        }}
-        onSelectObject={(objectId) => {
-          const obj = renderPlan.objects.find((o) => o.id === objectId);
-          if (!obj) return;
-          setSelectedObject(obj.id);
-          triggerHighlight(obj.id);
-        }}
-        onSelectRoom={(roomId) => {
-          const room = (renderPlan.rooms || []).find((r) => r.id === roomId);
-          if (!room) return;
-          clearSelection();
-          setSelectedRoomId(room.id);
-          setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
         }}
       />
 

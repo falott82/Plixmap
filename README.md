@@ -54,6 +54,7 @@ New passwords must be **strong**:
 - CRUD for **Clients**, **Sites**, **Floor plans**
 - Client details: short name (shown in workspace), full legal name, address, VAT/PEC, phone, email, description
 - Client notes: right-click a client in the sidebar and open **Client notes** to write formatted documentation (text, images, tables) — powered by **Lexical** for Word-like stability; supports **multiple notes per client** (titles, create/delete, search); editable by admins and by users with **read/write** permission on that client; includes **Export PDF** and **PDF attachments management**
+  - Client notes modal uses the full available height for easier reading
 - Client logo upload (auto-resized)
 - Client PDF attachments upload:
   - download
@@ -74,12 +75,14 @@ New passwords must be **strong**:
   - Nerd Area: packages and versions used by the app
   - Nerd Area: **Performance telemetry** toggle (local-only diagnostics panel)
   - Nerd Area: **Custom Import (Real users)** with a per-client status table, quick actions, and WebAPI/CSV configuration
+  - Settings modals dim the background to keep focus on the active form
 
 ### Workspace (Floor plan)
 - Floor plan shown as background; objects rendered on top with an icon and always-visible label
 - Add objects via palette or context menu (type → name required, description optional)
 - The palette can be customized per user (enabled objects + ordering) from **Settings → Objects**
 - The context menu works across the whole workspace area (even outside the visible plan image)
+- Always-visible “Saved/Unsaved” indicator to track local changes
 - Select / multi-select:
   - click to select
   - Ctrl/⌘ to multi-select
@@ -99,6 +102,7 @@ New passwords must be **strong**:
 - Real users (optional):
   - once a client has imported users (WebAPI or CSV), a **Real user** object is available in the palette
   - dropping it opens a picker **scoped to the active Client** (client name + counts are shown), with search and filters
+  - keyboard navigation: arrows to move, Enter to insert
   - the label shows first name and last name on two lines
 - Pan & zoom:
   - zoom controls (+ / -)
@@ -106,6 +110,7 @@ New passwords must be **strong**:
   - viewport is persisted per floor plan (reload-safe)
 - Layers, grid and links:
   - assign objects to one or more **layers** and toggle visibility (work by “layers”)
+  - quick “Map only” toggle hides all layers (restores on reload)
   - optional **grid overlay** and configurable **grid snapping**
   - create **links** (arrows) between objects from the context menu
   - **double-click a link** to edit name/description and style (**color / width / dashed**)
@@ -114,6 +119,7 @@ New passwords must be **strong**:
   - resize/edit room shape
   - set a per-room color (helps visually separate areas)
   - adjust room label scale (name + capacity)
+  - room modal tabs for Info, Users, Objects, Notes
   - rooms cannot overlap
   - objects inside the room are automatically linked
   - room list with assigned objects and quick highlight
@@ -122,6 +128,7 @@ New passwords must be **strong**:
   - search objects (name/description) and rooms (name)
   - highlight/blink the selected item on the map
   - if multiple results exist, you can choose which one to focus
+  - keyboard navigation (arrows + Enter) inside results
 - Views:
   - save the current viewport as a named view (with description)
   - mark one view as default (only one default)

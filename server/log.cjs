@@ -15,6 +15,29 @@ const redact = (obj) => {
   return clone;
 };
 
+const redactHeaderValue = (key, value) => {
+  const lower = String(key || '').toLowerCase();
+  const sensitive =
+    lower.includes('authorization') ||
+    lower.includes('cookie') ||
+    lower.includes('token') ||
+    lower.includes('secret') ||
+    lower.includes('key') ||
+    lower.includes('password');
+  if (sensitive) return '[redacted]';
+  const raw = Array.isArray(value) ? value.join(', ') : value;
+  if (typeof raw !== 'string') return String(raw);
+  return raw.length > 400 ? `${raw.slice(0, 400)}…` : raw;
+};
+
+const safeHeaders = (headers) => {
+  const out = {};
+  for (const [key, value] of Object.entries(headers || {})) {
+    out[key] = redactHeaderValue(key, value);
+  }
+  return out;
+};
+
 const writeAuthLog = (db, payload) => {
   const {
     event,
@@ -53,7 +76,8 @@ const requestMeta = (req) => {
     userAgent: req.headers['user-agent'] || null,
     headers: {
       origin: req.headers.origin,
-      referer: req.headers.referer
+      referer: req.headers.referer,
+      all: safeHeaders(req.headers)
     }
   };
 };

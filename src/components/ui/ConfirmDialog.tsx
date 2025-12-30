@@ -10,7 +10,7 @@ interface Props {
   onCancel: () => void;
   onConfirm: () => void;
   confirmLabel?: string;
-  cancelLabel?: string;
+  cancelLabel?: string | null;
 }
 
 const ConfirmDialog = ({
@@ -24,7 +24,7 @@ const ConfirmDialog = ({
 }: Props) => {
   const t = useT();
   const okLabel = confirmLabel || t({ it: 'Conferma', en: 'Confirm' });
-  const noLabel = cancelLabel || t({ it: 'Annulla', en: 'Cancel' });
+  const noLabel = cancelLabel === undefined ? t({ it: 'Annulla', en: 'Cancel' }) : cancelLabel;
   return (
     <Transition appear show={open} as={Fragment}>
       <Dialog as="div" className="relative z-50" onClose={onCancel}>
@@ -68,12 +68,14 @@ const ConfirmDialog = ({
                 </Dialog.Description>
               ) : null}
               <div className="mt-6 flex justify-end gap-2">
-                <button
-                  onClick={onCancel}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  {noLabel}
-                </button>
+                {cancelLabel === null ? null : (
+                  <button
+                    onClick={onCancel}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    {noLabel}
+                  </button>
+                )}
                 <button
                   onClick={onConfirm}
                   className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
