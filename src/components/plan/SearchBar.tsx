@@ -28,7 +28,7 @@ const SearchBar = ({ onSearch, onEnter, inputRef, className }: Props) => {
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
-            onEnter?.(term);
+            onEnter?.(e.currentTarget.value);
           }
         }}
         placeholder={t({ it: 'Cerca per nome o descrizione', en: 'Search by name or description' })}

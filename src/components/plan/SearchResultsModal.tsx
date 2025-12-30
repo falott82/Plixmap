@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { MapObject, Room } from '../../store/types';
@@ -23,6 +23,51 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
   const byId = useMemo(() => new Map(defs.map((d) => [d.id, d])), [defs]);
   const labelOf = (id: string) => byId.get(id)?.name?.[lang] || byId.get(id)?.name?.it || id;
   const iconOf = (id: string) => byId.get(id)?.icon;
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const items = useMemo(
+    () => [
+      ...roomResults.map((r) => ({ kind: 'room' as const, id: r.id })),
+      ...objectResults.map((o) => ({ kind: 'object' as const, id: o.id }))
+    ],
+    [objectResults, roomResults]
+  );
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  useEffect(() => {
+    if (!open) return;
+    setSelectedIndex(items.length ? 0 : -1);
+  }, [items.length, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!items.length) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex((idx) => Math.min(items.length - 1, Math.max(0, idx + 1)));
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex((idx) => Math.max(0, idx - 1));
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const item = items[selectedIndex];
+        if (!item) return;
+        if (item.kind === 'room') onSelectRoom(item.id);
+        else onSelectObject(item.id);
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [items, onClose, onSelectObject, onSelectRoom, open, selectedIndex]);
+
+  useEffect(() => {
+    if (selectedIndex < 0) return;
+    const el = listRef.current?.querySelector(`[data-result-index="${selectedIndex}"]`) as HTMLElement | null;
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }, [selectedIndex]);
 
   return (
     <Transition show={open} as={Fragment}>
@@ -60,27 +105,40 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
                       it: `Seleziona un risultato per evidenziare “${term}”.`,
                       en: `Select a result to highlight “${term}”.`
                     })}
+                    <span className="ml-2 text-xs font-semibold text-slate-500">
+                      {t({
+                        it: `Trovati ${roomResults.length + objectResults.length} risultati (${roomResults.length} stanze · ${objectResults.length} oggetti).`,
+                        en: `Found ${roomResults.length + objectResults.length} results (${roomResults.length} rooms · ${objectResults.length} objects).`
+                      })}
+                    </span>
                   </Dialog.Description>
                 </div>
                 <button onClick={onClose} className="text-slate-500 hover:text-ink">
                   <X size={18} />
                 </button>
               </div>
-              <div className="mt-4 max-h-[50vh] space-y-2 overflow-y-auto">
+              <div ref={listRef} className="mt-4 max-h-[50vh] space-y-2 overflow-y-auto">
                 {roomResults.length ? (
                   <div className="pb-2">
                     <div className="px-1 pb-2 text-xs font-semibold uppercase text-slate-500">
                       {t({ it: 'Stanze', en: 'Rooms' })}
                     </div>
                     <div className="space-y-2">
-                      {roomResults.map((room) => (
+                      {roomResults.map((room, idx) => {
+                        const index = idx;
+                        const selected = index === selectedIndex;
+                        return (
                         <button
                           key={room.id}
+                          data-result-index={index}
                           onClick={() => {
                             onSelectRoom(room.id);
                             onClose();
                           }}
-                          className="flex w-full items-start gap-3 rounded-xl border border-slate-200 px-3 py-3 text-left hover:bg-slate-50"
+                          className={`flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left hover:bg-slate-50 ${
+                            selected ? 'border-primary bg-primary/10 ring-1 ring-primary/30 shadow-sm' : 'border-slate-200'
+                          }`}
+                          aria-selected={selected}
                         >
                           <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary">
                             <span className="text-sm font-bold">R</span>
@@ -92,7 +150,8 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
                             </div>
                           </div>
                         </button>
-                      ))}
+                      );
+                      })}
                     </div>
                   </div>
                 ) : null}
@@ -103,14 +162,21 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
                       {t({ it: 'Oggetti', en: 'Objects' })}
                     </div>
                     <div className="space-y-2">
-                      {objectResults.map((obj) => (
+                      {objectResults.map((obj, idx) => {
+                        const index = roomResults.length + idx;
+                        const selected = index === selectedIndex;
+                        return (
                         <button
                           key={obj.id}
+                          data-result-index={index}
                           onClick={() => {
                             onSelectObject(obj.id);
                             onClose();
                           }}
-                          className="flex w-full items-start gap-3 rounded-xl border border-slate-200 px-3 py-3 text-left hover:bg-slate-50"
+                          className={`flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left hover:bg-slate-50 ${
+                            selected ? 'border-primary bg-primary/10 ring-1 ring-primary/30 shadow-sm' : 'border-slate-200'
+                          }`}
+                          aria-selected={selected}
                         >
                           <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary">
                             <Icon name={iconOf(obj.type)} size={18} />
@@ -123,7 +189,8 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
                             ) : null}
                           </div>
                         </button>
-                      ))}
+                      );
+                      })}
                     </div>
                   </div>
                 ) : null}
