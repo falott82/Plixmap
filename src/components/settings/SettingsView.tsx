@@ -64,6 +64,7 @@ const SettingsView = () => {
   const isSuperAdmin = !!user?.isSuperAdmin;
   const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'backup' | 'import' | 'nerd'>(isAdmin ? 'data' : 'account');
   const [clientModal, setClientModal] = useState<{ client?: any } | null>(null);
+  const modalActive = !!(clientModal || siteModal || addPlanOpen || replaceModal || confirmDelete);
 
   useEffect(() => {
     const search = new URLSearchParams(location.search);
@@ -151,7 +152,7 @@ const SettingsView = () => {
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className={`mb-4 flex flex-wrap items-center gap-2 ${modalActive ? 'pointer-events-none opacity-30' : ''}`} aria-hidden={modalActive}>
         {isAdmin ? (
           <>
             <button
@@ -254,50 +255,51 @@ const SettingsView = () => {
         </button>
       </div>
 
-      {tab === 'account' ? <AccountPanel /> : null}
+      <div className={modalActive ? 'pointer-events-none opacity-30' : ''} aria-hidden={modalActive}>
+        {tab === 'account' ? <AccountPanel /> : null}
 
-      {tab === 'objects' ? <ObjectTypesPanel /> : null}
+        {tab === 'objects' ? <ObjectTypesPanel /> : null}
 
-      {tab === 'users' ? (
-        isAdmin ? (
-          <UsersPanel />
-        ) : (
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
-            {t({ it: 'Non hai i permessi per gestire gli utenti.', en: 'You do not have permission to manage users.' })}
-          </div>
-        )
-      ) : null}
+        {tab === 'users' ? (
+          isAdmin ? (
+            <UsersPanel />
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
+              {t({ it: 'Non hai i permessi per gestire gli utenti.', en: 'You do not have permission to manage users.' })}
+            </div>
+          )
+        ) : null}
 
-      {tab === 'logs' ? (
-        isSuperAdmin ? (
-          <div className="space-y-8">
-            <LogsPanel />
-            <AuditTrailPanel />
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
-            {t({ it: 'Non hai i permessi per vedere i logs.', en: 'You do not have permission to view logs.' })}
-          </div>
-        )
-      ) : null}
+        {tab === 'logs' ? (
+          isSuperAdmin ? (
+            <div className="space-y-8">
+              <LogsPanel />
+              <AuditTrailPanel />
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
+              {t({ it: 'Non hai i permessi per vedere i logs.', en: 'You do not have permission to view logs.' })}
+            </div>
+          )
+        ) : null}
 
-      {tab === 'backup' ? (isSuperAdmin ? <BackupPanel /> : null) : null}
+        {tab === 'backup' ? (isSuperAdmin ? <BackupPanel /> : null) : null}
 
-      {tab === 'import' ? (isSuperAdmin ? <CustomImportPanel /> : null) : null}
+        {tab === 'import' ? (isSuperAdmin ? <CustomImportPanel /> : null) : null}
 
-      {tab === 'nerd' ? (
-        isSuperAdmin ? (
-          <NerdAreaPanel />
-        ) : (
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
-            {t({ it: 'Non hai i permessi per vedere la Nerd Area.', en: 'You do not have permission to view Nerd Area.' })}
-          </div>
-        )
-      ) : null}
+        {tab === 'nerd' ? (
+          isSuperAdmin ? (
+            <NerdAreaPanel />
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
+              {t({ it: 'Non hai i permessi per vedere la Nerd Area.', en: 'You do not have permission to view Nerd Area.' })}
+            </div>
+          )
+        ) : null}
 
-      {tab === 'data' ? (
-        isAdmin ? (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {tab === 'data' ? (
+          isAdmin ? (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
               <div className="flex items-center justify-between">
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -532,15 +534,16 @@ const SettingsView = () => {
               </div>
             </div>
           </div>
-        ) : (
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
-            {t({
-              it: 'Non hai i permessi per modificare i dati (clienti/sedi/planimetrie).',
-              en: 'You do not have permission to edit data (clients/sites/floor plans).'
-            })}
-          </div>
-        )
-      ) : null}
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
+              {t({
+                it: 'Non hai i permessi per modificare i dati (clienti/sedi/planimetrie).',
+                en: 'You do not have permission to edit data (clients/sites/floor plans).'
+              })}
+            </div>
+          )
+        ) : null}
+      </div>
 
       <AddFloorPlanModal
         open={addPlanOpen}

@@ -58,6 +58,7 @@ const RoomModal = ({
   const [surfaceSqm, setSurfaceSqm] = useState('');
   const [notes, setNotes] = useState('');
   const [labelScale, setLabelScale] = useState(1);
+  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'objects' | 'notes'>('info');
   const nameRef = useRef<HTMLInputElement | null>(null);
   const roomObjects = objects || [];
   const shouldShowContents = typeof objects !== 'undefined';
@@ -74,6 +75,7 @@ const RoomModal = ({
     setShowName(initialShowName !== false);
     setSurfaceSqm(Number.isFinite(initialSurfaceSqm) && (initialSurfaceSqm || 0) > 0 ? String(initialSurfaceSqm) : '');
     setNotes(initialNotes || '');
+    setActiveTab('info');
     window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [initialColor, initialName, initialCapacity, initialShowName, initialSurfaceSqm, initialNotes, open]);
 
@@ -151,7 +153,11 @@ const RoomModal = ({
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className={`w-full rounded-2xl bg-white p-6 shadow-card ${shouldShowContents ? 'max-w-3xl' : 'max-w-md'}`}>
+              <Dialog.Panel
+                className={`flex w-full flex-col rounded-2xl bg-white p-6 shadow-card ${
+                  shouldShowContents ? 'max-w-3xl h-[760px]' : 'max-w-md h-[680px]'
+                }`}
+              >
                 <div className="flex items-center justify-between">
                   <Dialog.Title className="text-lg font-semibold text-ink">
                     {initialName ? t({ it: 'Modifica stanza', en: 'Edit room' }) : t({ it: 'Nuova stanza', en: 'New room' })}
@@ -164,170 +170,194 @@ const RoomModal = ({
                     <X size={18} />
                   </button>
                 </div>
-                <div className={`mt-4 ${shouldShowContents ? 'grid gap-6 md:grid-cols-[1.1fr_0.9fr]' : 'space-y-3'}`}>
-                  <div className="space-y-3">
-                    <label className="block text-sm font-medium text-slate-700">
-                      {t({ it: 'Nome stanza', en: 'Room name' })}
-                      <input
-                        ref={nameRef}
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            submit();
-                          }
-                        }}
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
-                      />
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      {t({ it: 'Capienza postazioni', en: 'Seat capacity' })}
-                      <input
-                        value={capacity}
-                        onChange={(e) => setCapacity(e.target.value)}
-                        inputMode="numeric"
-                        type="number"
-                        min={1}
-                        step={1}
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        placeholder={t({ it: 'Lascia vuoto per illimitata', en: 'Leave empty for unlimited' })}
-                      />
-                      <div className="mt-1 text-xs text-slate-500">
-                        {t({
-                          it: 'La capienza indica il numero massimo di utenti consigliati.',
-                          en: 'Capacity indicates the recommended maximum number of users.'
-                        })}
-                      </div>
-                    </label>
-                    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-                        {t({ it: 'Scala etichette', en: 'Label scale' })}
-                        <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">{labelScale.toFixed(2)}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0.6}
-                        max={2}
-                        step={0.05}
-                        value={labelScale}
-                        onChange={(e) => setLabelScale(Number(e.target.value))}
-                        className="mt-1 w-full"
-                      />
-                    </div>
-                    <label className="block text-sm font-medium text-slate-700">
-                      {t({ it: 'Superficie (mq)', en: 'Surface (sqm)' })}
-                      <input
-                        value={surfaceSqm}
-                        onChange={(e) => setSurfaceSqm(e.target.value)}
-                        inputMode="decimal"
-                        type="number"
-                        min={0.1}
-                        step={0.1}
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        placeholder={t({ it: 'Es. 24.5', en: 'e.g. 24.5' })}
-                      />
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      {t({ it: 'Note', en: 'Notes' })}
-                      <textarea
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        placeholder={t({ it: 'Note interne sulla stanza', en: 'Internal notes about this room' })}
-                        rows={3}
-                      />
-                    </label>
-                    <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={showName}
-                        onChange={(e) => setShowName(e.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
-                      />
-                      <span>
-                        {t({ it: 'Nome visibile in mappa', en: 'Show name on map' })}
-                        <span className="mt-1 block text-xs font-normal text-slate-500">
-                          {t({
-                            it: 'Mostra il nome della stanza direttamente sulla planimetria.',
-                            en: 'Displays the room name directly on the floor plan.'
-                          })}
-                        </span>
-                      </span>
-                    </label>
-
-                    <div>
-                      <div className="text-sm font-medium text-slate-700">{t({ it: 'Colore', en: 'Color' })}</div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {COLORS.map((c) => {
-                          const active = (color || COLORS[0]).toLowerCase() === c.toLowerCase();
-                          return (
-                            <button
-                              key={c}
-                              type="button"
-                              onClick={() => setColor(c)}
-                              className={`h-9 w-9 rounded-xl border ${active ? 'border-ink ring-2 ring-primary/30' : 'border-slate-200'}`}
-                              style={{ background: c }}
-                              title={c}
-                            />
-                          );
-                        })}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {t({
-                          it: 'Il colore viene usato per evidenziare l’area della stanza.',
-                          en: 'The color is used to highlight the room area.'
-                        })}
-                      </div>
-                    </div>
+                <div className={`mt-4 flex-1 pr-1 ${shouldShowContents ? 'overflow-y-auto' : 'overflow-y-visible'}`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[
+                      { id: 'info', label: t({ it: 'Info', en: 'Info' }) },
+                      ...(shouldShowContents
+                        ? [
+                            { id: 'users', label: t({ it: 'Utenti', en: 'Users' }) },
+                            { id: 'objects', label: t({ it: 'Oggetti', en: 'Objects' }) }
+                          ]
+                        : []),
+                      { id: 'notes', label: t({ it: 'Note', en: 'Notes' }) }
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                        className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+                          activeTab === tab.id
+                            ? 'border-primary bg-primary text-white shadow-card'
+                            : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
                   </div>
 
-                  {shouldShowContents ? (
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-semibold text-ink">{t({ it: 'Contenuti stanza', en: 'Room contents' })}</div>
-                        <div className="text-xs font-semibold text-slate-500">
-                          {t({ it: `Totale ${roomObjects.length}`, en: `Total ${roomObjects.length}` })}
+                  {activeTab === 'info' ? (
+                    <div className="mt-4 space-y-3">
+                      <label className="block text-sm font-medium text-slate-700">
+                        {t({ it: 'Nome stanza', en: 'Room name' })}
+                        <input
+                          ref={nameRef}
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              submit();
+                            }
+                          }}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
+                        />
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        {t({ it: 'Capienza postazioni', en: 'Seat capacity' })}
+                        <input
+                          value={capacity}
+                          onChange={(e) => setCapacity(e.target.value)}
+                          inputMode="numeric"
+                          type="number"
+                          min={1}
+                          step={1}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          placeholder={t({ it: 'Lascia vuoto per illimitata', en: 'Leave empty for unlimited' })}
+                        />
+                        <div className="mt-1 text-xs text-slate-500">
+                          {t({
+                            it: 'La capienza indica il numero massimo di utenti consigliati.',
+                            en: 'Capacity indicates the recommended maximum number of users.'
+                          })}
+                        </div>
+                      </label>
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          {t({ it: 'Scala etichette', en: 'Label scale' })}
+                          <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">{labelScale.toFixed(2)}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.6}
+                          max={2}
+                          step={0.05}
+                          value={labelScale}
+                          onChange={(e) => setLabelScale(Number(e.target.value))}
+                          className="mt-1 w-full"
+                        />
+                      </div>
+                      <label className="block text-sm font-medium text-slate-700">
+                        {t({ it: 'Superficie (mq)', en: 'Surface (sqm)' })}
+                        <input
+                          value={surfaceSqm}
+                          onChange={(e) => setSurfaceSqm(e.target.value)}
+                          inputMode="decimal"
+                          type="number"
+                          min={0.1}
+                          step={0.1}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          placeholder={t({ it: 'Es. 24.5', en: 'e.g. 24.5' })}
+                        />
+                      </label>
+                      <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={showName}
+                          onChange={(e) => setShowName(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
+                        />
+                        <span>
+                          {t({ it: 'Nome visibile in mappa', en: 'Show name on map' })}
+                          <span className="mt-1 block text-xs font-normal text-slate-500">
+                            {t({
+                              it: 'Mostra il nome della stanza direttamente sulla planimetria.',
+                              en: 'Displays the room name directly on the floor plan.'
+                            })}
+                          </span>
+                        </span>
+                      </label>
+                      <div>
+                        <div className="text-sm font-medium text-slate-700">{t({ it: 'Colore', en: 'Color' })}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {COLORS.map((c) => {
+                            const active = (color || COLORS[0]).toLowerCase() === c.toLowerCase();
+                            return (
+                              <button
+                                key={c}
+                                type="button"
+                                onClick={() => setColor(c)}
+                                className={`h-9 w-9 rounded-xl border ${active ? 'border-ink ring-2 ring-primary/30' : 'border-slate-200'}`}
+                                style={{ background: c }}
+                                title={c}
+                              />
+                            );
+                          })}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {t({
+                            it: 'Il colore viene usato per evidenziare l’area della stanza.',
+                            en: 'The color is used to highlight the room area.'
+                          })}
                         </div>
                       </div>
-                      <div className="mt-4 space-y-4">
-                        <div>
-                          <div className="flex items-center justify-between text-[11px] font-semibold uppercase text-slate-500">
-                            <span>{t({ it: 'Utenti', en: 'Users' })}</span>
-                            <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                              {users.length}
-                            </span>
-                          </div>
-                          {users.length ? (
-                            <div className="mt-2 space-y-2">
-                              {users.map((obj) => renderObjectRow(obj, true))}
-                            </div>
-                          ) : (
-                            <div className="mt-2 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
-                              {t({ it: 'Nessun utente in questa stanza.', en: 'No users in this room.' })}
-                            </div>
-                          )}
-                        </div>
+                    </div>
+                  ) : null}
 
-                        <div>
-                          <div className="flex items-center justify-between text-[11px] font-semibold uppercase text-slate-500">
-                            <span>{t({ it: 'Oggetti', en: 'Objects' })}</span>
-                            <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                              {otherObjects.length}
-                            </span>
-                          </div>
-                          {otherObjects.length ? (
-                            <div className="mt-2 space-y-2">
-                              {otherObjects.map((obj) => renderObjectRow(obj, true))}
-                            </div>
-                          ) : (
-                            <div className="mt-2 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
-                              {t({ it: 'Nessun oggetto in questa stanza.', en: 'No objects in this room.' })}
-                            </div>
-                          )}
+                  {activeTab === 'notes' ? (
+                    <div className="mt-4">
+                      <label className="block text-sm font-medium text-slate-700">
+                        {t({ it: 'Note', en: 'Notes' })}
+                        <textarea
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          placeholder={t({ it: 'Note interne sulla stanza', en: 'Internal notes about this room' })}
+                          rows={6}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {activeTab === 'users' && shouldShowContents ? (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold text-ink">{t({ it: 'Utenti nella stanza', en: 'Users in room' })}</div>
+                        <div className="text-xs font-semibold text-slate-500">
+                          {t({ it: `Totale ${users.length}`, en: `Total ${users.length}` })}
                         </div>
                       </div>
+                      {users.length ? (
+                        <div className="mt-3 space-y-2">
+                          {users.map((obj) => renderObjectRow(obj, true))}
+                        </div>
+                      ) : (
+                        <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                          {t({ it: 'Nessun utente in questa stanza.', en: 'No users in this room.' })}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {activeTab === 'objects' && shouldShowContents ? (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold text-ink">{t({ it: 'Oggetti nella stanza', en: 'Objects in room' })}</div>
+                        <div className="text-xs font-semibold text-slate-500">
+                          {t({ it: `Totale ${otherObjects.length}`, en: `Total ${otherObjects.length}` })}
+                        </div>
+                      </div>
+                      {otherObjects.length ? (
+                        <div className="mt-3 space-y-2">
+                          {otherObjects.map((obj) => renderObjectRow(obj, true))}
+                        </div>
+                      ) : (
+                        <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                          {t({ it: 'Nessun oggetto in questa stanza.', en: 'No objects in this room.' })}
+                        </div>
+                      )}
                     </div>
                   ) : null}
                 </div>

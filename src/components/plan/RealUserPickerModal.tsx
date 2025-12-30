@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Check, Filter, RefreshCw, Search, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { ExternalUserRow, listExternalUsers } from '../../api/customImport';
 import { useT } from '../../i18n/useT';
 
@@ -28,6 +29,7 @@ const RealUserPickerModal = ({ open, clientId, clientName, assignedCounts, onClo
   const [responseClientName, setResponseClientName] = useState<string | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const tRef = useRef(t);
+  const navigate = useNavigate();
 
   useEffect(() => {
     tRef.current = t;
@@ -236,6 +238,12 @@ const RealUserPickerModal = ({ open, clientId, clientName, assignedCounts, onClo
                     {t({ it: 'Mostra nascosti', en: 'Show hidden' })}
                   </label>
                 </div>
+                <div className="mt-2 text-xs text-slate-500">
+                  {t({
+                    it: 'Suggerimento: usa le frecce per navigare e premi Invio per inserire.',
+                    en: 'Tip: use arrows to navigate and press Enter to insert.'
+                  })}
+                </div>
 
                 <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
                   <div className="grid grid-cols-12 gap-2 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
@@ -257,6 +265,18 @@ const RealUserPickerModal = ({ open, clientId, clientName, assignedCounts, onClo
                           it: 'Nessun utente trovato per questo cliente. Verifica l’import o modifica i filtri.',
                           en: 'No users found for this client. Check the import or adjust filters.'
                         })}
+                        <div className="mt-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              navigate('/settings?tab=import');
+                            }}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            {t({ it: 'Apri Custom Import', en: 'Open Custom Import' })}
+                          </button>
+                        </div>
                       </div>
                     ) : null}
                     {filtered.map((r) => {
@@ -271,8 +291,9 @@ const RealUserPickerModal = ({ open, clientId, clientName, assignedCounts, onClo
                           onClick={() => setSelectedId(r.externalId)}
                           onDoubleClick={() => onSelect(r)}
                           className={`grid w-full grid-cols-12 gap-2 border-t border-slate-200 px-4 py-3 text-left text-sm hover:bg-slate-50 ${
-                            selected ? 'bg-primary/5' : ''
+                            selected ? 'bg-primary/10 ring-1 ring-primary/30 shadow-sm' : ''
                           }`}
+                          aria-selected={selected}
                         >
                           <div className="col-span-5 min-w-0">
                             <div className="truncate font-semibold text-ink">

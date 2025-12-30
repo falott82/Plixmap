@@ -24,6 +24,7 @@ interface UIState {
   showPrintAreaByPlan: Record<string, boolean>;
   roomCapacityStateByPlan: Record<string, Record<string, { userCount: number; capacity?: number }>>;
   perfOverlayEnabled: boolean;
+  hiddenLayersByPlan: Record<string, boolean>;
   setSelectedPlan: (id?: string) => void;
   setSelectedObject: (id?: string) => void;
   setSelection: (ids: string[]) => void;
@@ -50,6 +51,7 @@ interface UIState {
   toggleShowPrintArea: (planId: string) => void;
   setRoomCapacityState: (planId: string, state: Record<string, { userCount: number; capacity?: number }>) => void;
   togglePerfOverlay: () => void;
+  setHideAllLayers: (planId: string, hidden: boolean) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -72,6 +74,7 @@ export const useUIStore = create<UIState>()(
       showPrintAreaByPlan: {},
       roomCapacityStateByPlan: {},
       perfOverlayEnabled: false,
+      hiddenLayersByPlan: {},
       setSelectedPlan: (id) => set({ selectedPlanId: id, selectedObjectId: undefined, selectedObjectIds: [] }),
       setSelectedObject: (id) =>
         set({
@@ -142,7 +145,9 @@ export const useUIStore = create<UIState>()(
         set((state) => ({
           roomCapacityStateByPlan: { ...state.roomCapacityStateByPlan, [planId]: stateByRoom }
         })),
-      togglePerfOverlay: () => set((state) => ({ perfOverlayEnabled: !state.perfOverlayEnabled }))
+      togglePerfOverlay: () => set((state) => ({ perfOverlayEnabled: !state.perfOverlayEnabled })),
+      setHideAllLayers: (planId, hidden) =>
+        set((state) => ({ hiddenLayersByPlan: { ...state.hiddenLayersByPlan, [planId]: !!hidden } }))
     }),
     {
       name: 'deskly-ui',
@@ -159,6 +164,7 @@ export const useUIStore = create<UIState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         lastObjectScale: state.lastObjectScale,
         visibleLayerIdsByPlan: state.visibleLayerIdsByPlan,
+        hiddenLayersByPlan: state.hiddenLayersByPlan,
         gridSnapEnabled: state.gridSnapEnabled,
         gridSize: state.gridSize,
         showGrid: state.showGrid,
