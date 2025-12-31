@@ -25,6 +25,7 @@ On the very first run, Deskly creates **one** default superadmin:
 - **password:** `deskly`
 
 On first login you are **forced to change the password** and choose the UI language (IT/EN). The initial credentials are shown on the login page **only during first-run**; after the password change they are never shown again.
+After the first password change, Deskly shows a confirmation prompt (in the chosen language) and can take you directly to the **Users** tab to create additional accounts.
 
 ### Password policy
 New passwords must be **strong**:
@@ -49,6 +50,7 @@ New passwords must be **strong**:
 - Tree sidebar with fixed hierarchy **Client → Site → Floor plan**
 - Quick search in the sidebar (filters clients/sites/floor plans by name)
 - Per-user client ordering (drag & drop clients); ordering is saved on the user profile
+- The default **ACME** demo client shows a small info badge in the sidebar; you can keep it for testing or remove it safely.
 
 ### Settings (Admin / Superadmin)
 - CRUD for **Clients**, **Sites**, **Floor plans**
@@ -62,6 +64,11 @@ New passwords must be **strong**:
 - Site optional coordinates (`lat, lng`) with **Google Maps** link
 - Floor plan image upload (JPG/PNG only), replace image with automatic archival as a revision
 - Object types management (custom types + icon mapping), updating type/icon updates all objects
+- Object requests:
+  - users can submit a **request** with custom fields and icon
+  - superadmin receives a pending prompt and manages approvals in a dedicated modal
+  - approved requests become immediately available in the object list
+- New objects default to a 0.50 scale on placement
 - Workspace backup:
   - **Export JSON workspace** (optionally embed images/attachments)
   - **Import JSON workspace** (replace workspace on this server)
@@ -75,12 +82,14 @@ New passwords must be **strong**:
   - Nerd Area: packages and versions used by the app
   - Nerd Area: **Performance telemetry** toggle (local-only diagnostics panel)
   - Nerd Area: **Custom Import (Real users)** with a per-client status table, quick actions, and WebAPI/CSV configuration
-  - Settings modals dim the background to keep focus on the active form
+- Settings modals dim the background to keep focus on the active form
+- Settings tabs persist on refresh via the `?tab=` URL parameter
 
 ### Workspace (Floor plan)
 - Floor plan shown as background; objects rendered on top with an icon and always-visible label
 - Add objects via palette or context menu (type → name required, description optional)
 - The palette can be customized per user (enabled objects + ordering) from **Settings → Objects**
+- If a user has an empty palette, a quick CTA is shown to open **Settings → Objects** and add items
 - The context menu works across the whole workspace area (even outside the visible plan image)
 - Always-visible “Saved/Unsaved” indicator to track local changes
 - Select / multi-select:
@@ -269,3 +278,6 @@ Data persistence:
 ```bash
 npm audit --omit=dev
 ```
+- Users: create accounts, import permissions from an existing user, and manage access; superadmin is highlighted and cannot be disabled.
+- Users list shows the account creation timestamp to help auditing and onboarding.
+- Objects: superadmin can create **custom object types** (name + icon). Any user can submit a **creation request** (with custom fields); requests are managed in a dedicated modal where the superadmin can approve/reject with a reason, and the requester sees the status with timestamps.

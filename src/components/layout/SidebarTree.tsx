@@ -13,6 +13,8 @@ import ClientAttachmentsModal from './ClientAttachmentsModal';
 import ClientNotesModal from './ClientNotesModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import CloneFloorPlanModal from './CloneFloorPlanModal';
+import { useToastStore } from '../../store/useToast';
+import { SEED_CLIENT_ID } from '../../store/data';
 
 type TreeClient = {
   id: string;
@@ -109,6 +111,7 @@ const SidebarTree = () => {
     (s) => ({ requestSaveAndNavigate: s.requestSaveAndNavigate, dirtyByPlan: s.dirtyByPlan }),
     shallow
   );
+  const { push } = useToastStore();
   const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
@@ -315,7 +318,28 @@ const SidebarTree = () => {
                   {client.name.trim().slice(0, 1).toUpperCase()}
                 </div>
               )}
-              {client.shortName || client.name}
+              <div className="flex items-center gap-2">
+                <span className="truncate">{client.shortName || client.name}</span>
+                {client.id === SEED_CLIENT_ID ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      push(
+                        t({
+                          it: 'Questo è un cliente dimostrativo. Puoi eliminarlo oppure usarlo come prova.',
+                          en: 'This is a demo client. You can delete it or use it for testing.'
+                        }),
+                        'info'
+                      );
+                    }}
+                    className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 text-[11px] font-bold text-slate-500 hover:bg-slate-50"
+                    title={t({ it: 'Cliente di prova', en: 'Demo client' })}
+                  >
+                    ?
+                  </button>
+                ) : null}
+              </div>
             </div>
             {client.sites.map((site) => (
               <div key={site.id} className="mt-3 space-y-2 rounded-lg bg-white p-2 shadow-inner">

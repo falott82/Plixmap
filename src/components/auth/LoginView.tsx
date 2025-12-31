@@ -53,10 +53,13 @@ const LoginView = () => {
   };
 
   return (
-    <div className="flex h-screen items-center justify-center bg-mist px-4 text-ink">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-card">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-sky-50 via-blue-100 to-indigo-200 px-4 text-ink">
+      <div className="pointer-events-none absolute -left-24 top-10 h-72 w-72 rounded-full bg-sky-200/50 blur-3xl" />
+      <div className="pointer-events-none absolute -right-16 top-24 h-72 w-72 rounded-full bg-indigo-200/50 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-0 left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-blue-200/40 blur-3xl" />
+      <div className="relative w-full max-w-md rounded-[28px] border border-white/50 bg-white/85 p-8 shadow-[0_30px_80px_-30px_rgba(15,23,42,0.55)] backdrop-blur">
         <div className="flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-primary to-accent text-white shadow-card">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-sky-500 via-blue-500 to-indigo-500 text-white shadow-card">
             D
           </div>
           <div>
@@ -76,7 +79,7 @@ const LoginView = () => {
               <input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                className="w-full rounded-xl border border-slate-200 bg-white/90 pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                 placeholder={t({ it: 'Nome utente', en: 'Username' })}
                 autoComplete="username"
                 onKeyDown={(e) => {
@@ -92,7 +95,7 @@ const LoginView = () => {
               <input
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                className="w-full rounded-xl border border-slate-200 bg-white/90 pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                 placeholder="••••••••"
                 type="password"
                 autoComplete="current-password"
@@ -111,7 +114,7 @@ const LoginView = () => {
                   ref={otpRef}
                   value={otp}
                   onChange={(e) => setOtp(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                  className="w-full rounded-xl border border-slate-200 bg-white/90 pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                   placeholder={t({ it: 'Codice a 6 cifre', en: '6-digit code' })}
                   inputMode="numeric"
                   autoComplete="one-time-code"

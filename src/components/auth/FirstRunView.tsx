@@ -43,6 +43,9 @@ const FirstRunView = () => {
       await firstRunSetup({ newPassword, language });
       const me = await fetchMe();
       useAuthStore.setState({ user: me.user, permissions: me.permissions, hydrated: true });
+      try {
+        window.sessionStorage.setItem('deskly_first_run_success', '1');
+      } catch {}
       navigate('/', { replace: true });
     } catch {
       setError(t({ it: 'Impossibile completare la configurazione.', en: 'Failed to complete setup.' }));

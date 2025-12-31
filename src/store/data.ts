@@ -3,7 +3,7 @@ import { Client, ObjectTypeDefinition } from './types';
 export const SEED_CLIENT_ID = 'seed-client-acme';
 export const SEED_SITE_ID = 'seed-site-wall-street-01';
 export const SEED_PLAN_ID = 'seed-plan-floor-0';
-export const SEED_PLAN_IMAGE_URL = '/seed/acme-floor0.svg';
+export const SEED_PLAN_IMAGE_URL = '/seed/new-default-plan.png';
 
 export const defaultData = (): Client[] => {
   return [
@@ -25,15 +25,23 @@ export const defaultData = (): Client[] => {
               siteId: SEED_SITE_ID,
               name: 'Floor 0',
               imageUrl: SEED_PLAN_IMAGE_URL,
-              width: 1536,
-              height: 1117,
+              width: 650,
+              height: 477,
               layers: [
                 { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1 },
                 { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2 },
                 { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 3 },
                 { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 4 }
               ],
-              views: [],
+              views: [
+                {
+                  id: 'seed-view-default',
+                  name: 'DEFAULT',
+                  zoom: 1.6,
+                  pan: { x: 80, y: 20 },
+                  isDefault: true
+                }
+              ],
               rooms: [],
               revisions: [],
               links: [],
