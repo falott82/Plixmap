@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown, DownloadCloud } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown, DownloadCloud, Eye, X, HelpCircle } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -21,6 +22,7 @@ import SiteModal from './SiteModal';
 import ObjectTypesPanel from './ObjectTypesPanel';
 import BackupPanel from './BackupPanel';
 import CustomImportPanel from './CustomImportPanel';
+import VersionBadge from '../ui/VersionBadge';
 
 const SettingsView = () => {
   const {
@@ -56,28 +58,42 @@ const SettingsView = () => {
       }
     | null
   >(null);
+  const planInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [planPreview, setPlanPreview] = useState<{ name: string; imageUrl: string } | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { selectedPlanId } = useUIStore();
+  const { selectedPlanId, openHelp } = useUIStore();
   const { user } = useAuthStore();
   const isAdmin = !!user?.isAdmin;
-  const isSuperAdmin = !!user?.isSuperAdmin;
-  const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'backup' | 'import' | 'nerd'>(isAdmin ? 'data' : 'account');
+  const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
+  const resolveTab = (search: string) => {
+    const next = new URLSearchParams(search).get('tab')?.toLowerCase() || '';
+    if (next === 'account') return 'account';
+    if (next === 'objects') return 'objects';
+    if (next === 'users' && isAdmin) return 'users';
+    if (next === 'logs' && isSuperAdmin) return 'logs';
+    if (next === 'backup' && isSuperAdmin) return 'backup';
+    if (next === 'import' && isSuperAdmin) return 'import';
+    if (next === 'nerd' && isSuperAdmin) return 'nerd';
+    if (next === 'data' && isAdmin) return 'data';
+    return isAdmin ? 'data' : 'account';
+  };
+  const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'backup' | 'import' | 'nerd'>(
+    () => resolveTab(location.search)
+  );
+  const setTabAndUrl = (nextTab: typeof tab) => {
+    setTab(nextTab);
+    const search = new URLSearchParams(location.search);
+    search.set('tab', nextTab);
+    navigate({ pathname: location.pathname, search: search.toString() }, { replace: true });
+  };
   const [clientModal, setClientModal] = useState<{ client?: any } | null>(null);
-  const modalActive = !!(clientModal || siteModal || addPlanOpen || replaceModal || confirmDelete);
+  const modalActive = !!(clientModal || siteModal || addPlanOpen || replaceModal || confirmDelete || planPreview);
 
   useEffect(() => {
-    const search = new URLSearchParams(location.search);
-    const t = (search.get('tab') || '').toLowerCase();
-    if (t === 'account') setTab('account');
-    else if (t === 'objects') setTab('objects');
-    else if (t === 'users' && isAdmin) setTab('users');
-    else if (t === 'logs' && isSuperAdmin) setTab('logs');
-    else if (t === 'backup' && isSuperAdmin) setTab('backup');
-    else if (t === 'import' && isSuperAdmin) setTab('import');
-    else if (t === 'nerd' && isSuperAdmin) setTab('nerd');
-    else if (t === 'data' && isAdmin) setTab('data');
-  }, [isAdmin, isSuperAdmin, location.search]);
+    const next = resolveTab(location.search);
+    if (next !== tab) setTab(next);
+  }, [isAdmin, isSuperAdmin, location.search, tab]);
 
   useEffect(() => {
     if (selectedClient && !clients.some((c) => c.id === selectedClient)) {
@@ -130,6 +146,11 @@ const SettingsView = () => {
     setReplaceModal({ planId, dataUrl, size });
   };
 
+  useEffect(() => {
+    if (!editingPlan) return;
+    window.setTimeout(() => planInputRefs.current[editingPlan]?.focus(), 0);
+  }, [editingPlan]);
+
   return (
     <div className="h-screen overflow-y-auto p-6">
       <div className="mb-4 flex items-center justify-between">
@@ -148,6 +169,14 @@ const SettingsView = () => {
               <ArrowLeftCircle size={16} />
             {t({ it: 'Area di lavoro', en: 'Workspace' })}
           </button>
+          <VersionBadge />
+          <button
+            onClick={openHelp}
+            title={t({ it: 'Aiuto', en: 'Help' })}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary shadow-card hover:bg-slate-50"
+          >
+            <HelpCircle size={18} />
+          </button>
           <UserMenu />
         </div>
       </div>
@@ -156,7 +185,7 @@ const SettingsView = () => {
         {isAdmin ? (
           <>
             <button
-              onClick={() => setTab('data')}
+              onClick={() => setTabAndUrl('data')}
               className={`rounded-full border px-4 py-2 text-sm font-semibold ${
                 tab === 'data'
                   ? 'border-primary bg-primary text-white shadow-card'
@@ -166,7 +195,7 @@ const SettingsView = () => {
               {t({ it: 'Clienti', en: 'Clients' })}
             </button>
             <button
-              onClick={() => setTab('objects')}
+              onClick={() => setTabAndUrl('objects')}
               className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                 tab === 'objects' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
               }`}
@@ -174,32 +203,27 @@ const SettingsView = () => {
               <LayoutGrid size={16} /> {t({ it: 'Oggetti', en: 'Objects' })}
             </button>
             <button
-              onClick={() => setTab('users')}
+              onClick={() => setTabAndUrl('users')}
               className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                 tab === 'users' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
               }`}
             >
               <Users size={16} /> {t({ it: 'Utenti', en: 'Users' })}
             </button>
-            <button
-              onClick={() => {
-                if (!isSuperAdmin) {
-                  push(t({ it: 'Solo i superadmin possono accedere ai logs.', en: 'Only super admins can access logs.' }), 'info');
-                  return;
-                }
-                setTab('logs');
-              }}
-              className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
-                tab === 'logs' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
-              } ${!isSuperAdmin ? 'opacity-70' : ''}`}
-              title={!isSuperAdmin ? t({ it: 'Solo superadmin', en: 'Super admin only' }) : undefined}
-            >
-              {t({ it: 'Logs', en: 'Logs' })}
-            </button>
+            {isSuperAdmin ? (
+              <button
+                onClick={() => setTabAndUrl('logs')}
+                className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+                  tab === 'logs' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+                }`}
+              >
+                {t({ it: 'Logs', en: 'Logs' })}
+              </button>
+            ) : null}
             {isSuperAdmin ? (
               <>
                 <button
-                  onClick={() => setTab('backup')}
+                  onClick={() => setTabAndUrl('backup')}
                   className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                     tab === 'backup' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
                   }`}
@@ -207,7 +231,7 @@ const SettingsView = () => {
                   <Upload size={16} /> {t({ it: 'Backup', en: 'Backup' })}
                 </button>
                 <button
-                  onClick={() => setTab('import')}
+                  onClick={() => setTabAndUrl('import')}
                   className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                     tab === 'import' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
                   }`}
@@ -215,7 +239,7 @@ const SettingsView = () => {
                   <DownloadCloud size={16} /> {t({ it: 'Custom Import', en: 'Custom Import' })}
                 </button>
                 <button
-                  onClick={() => setTab('nerd')}
+                  onClick={() => setTabAndUrl('nerd')}
                   className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                     tab === 'nerd' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
                   }`}
@@ -229,24 +253,17 @@ const SettingsView = () => {
         {!isAdmin ? (
           <>
             <button
-              onClick={() => setTab('objects')}
+              onClick={() => setTabAndUrl('objects')}
               className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                 tab === 'objects' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
               }`}
             >
               <LayoutGrid size={16} /> {t({ it: 'Oggetti', en: 'Objects' })}
             </button>
-            <button
-              onClick={() => push(t({ it: 'Solo i superadmin possono accedere ai logs.', en: 'Only super admins can access logs.' }), 'info')}
-              className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink opacity-70 hover:bg-slate-50"
-              title={t({ it: 'Solo superadmin', en: 'Super admin only' })}
-            >
-              {t({ it: 'Logs', en: 'Logs' })}
-            </button>
           </>
         ) : null}
         <button
-          onClick={() => setTab('account')}
+          onClick={() => setTabAndUrl('account')}
           className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
             tab === 'account' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
           }`}
@@ -463,7 +480,10 @@ const SettingsView = () => {
                     <input
                       value={plan.name}
                       onChange={(e) => updateFloorPlan(plan.id, { name: e.target.value })}
-                      disabled={editingPlan !== plan.id}
+                      readOnly={editingPlan !== plan.id}
+                      ref={(node) => {
+                        planInputRefs.current[plan.id] = node;
+                      }}
                       className="w-2/3 rounded-md border border-transparent px-1 py-0.5 text-sm font-semibold text-ink hover:border-slate-200 focus:border-primary focus:outline-none disabled:opacity-60"
                     />
                     <div className="flex items-center gap-2">
@@ -502,6 +522,22 @@ const SettingsView = () => {
                         className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
                       >
                         <Pencil size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!plan.imageUrl) return;
+                          setPlanPreview({ name: plan.name, imageUrl: plan.imageUrl });
+                        }}
+                        disabled={!plan.imageUrl}
+                        title={
+                          plan.imageUrl
+                            ? t({ it: 'Visualizza planimetria', en: 'View floor plan' })
+                            : t({ it: 'Nessuna immagine', en: 'No image available' })
+                        }
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        <Eye size={14} />
                       </button>
                       <label
                         title={t({ it: 'Aggiorna immagine (archivia la precedente)', en: 'Update image (archives previous)' })}
@@ -544,6 +580,57 @@ const SettingsView = () => {
           )
         ) : null}
       </div>
+
+      <Transition show={!!planPreview} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setPlanPreview(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="text-lg font-semibold text-ink">
+                      {t({ it: 'Planimetria', en: 'Floor plan' })} · {planPreview?.name}
+                    </Dialog.Title>
+                    <button
+                      onClick={() => setPlanPreview(null)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-4 flex max-h-[70vh] items-center justify-center overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    {planPreview?.imageUrl ? (
+                      <img src={planPreview.imageUrl} alt="" className="max-h-[66vh] w-full object-contain" />
+                    ) : (
+                      <div className="text-sm text-slate-500">{t({ it: 'Nessuna immagine disponibile.', en: 'No image available.' })}</div>
+                    )}
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
 
       <AddFloorPlanModal
         open={addPlanOpen}

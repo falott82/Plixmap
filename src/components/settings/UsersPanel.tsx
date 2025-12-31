@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileSpreadsheet, Plus, RefreshCw, Trash, KeyRound, Pencil, Search } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
 import { adminCreateUser, adminDeleteUser, adminFetchUsers, adminUpdateUser, changePassword, AdminUserRow } from '../../api/auth';
@@ -14,7 +15,10 @@ const UsersPanel = () => {
   const { push } = useToastStore();
   const { user } = useAuthStore();
   const t = useT();
-  const isSuperAdmin = !!user?.isSuperAdmin;
+  const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
+  const location = useLocation();
+  const navigate = useNavigate();
+  const createHandledRef = useRef(false);
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [query, setQuery] = useState('');
@@ -39,15 +43,42 @@ const UsersPanel = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const search = new URLSearchParams(location.search);
+    const wantsCreate = search.get('create') === '1';
+    if (wantsCreate && !createHandledRef.current) {
+      createHandledRef.current = true;
+      setModal({ mode: 'create' });
+      navigate('/settings?tab=users', { replace: true });
+    }
+    if (!wantsCreate) {
+      createHandledRef.current = false;
+    }
+  }, [location.search, navigate]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const base = [...users].sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+    const base = [...users].sort((a, b) => {
+      const aSuper = a.isSuperAdmin && a.username === 'superadmin';
+      const bSuper = b.isSuperAdmin && b.username === 'superadmin';
+      if (aSuper !== bSuper) return aSuper ? -1 : 1;
+      return Number(b.createdAt) - Number(a.createdAt);
+    });
     if (!q) return base;
     return base.filter((u) => {
       const hay = `${u.username} ${u.firstName} ${u.lastName} ${u.email} ${u.phone || ''}`.toLowerCase();
       return hay.includes(q);
     });
   }, [query, users]);
+
+  const formatCreatedAt = (value: number) => {
+    if (!value) return '';
+    try {
+      return new Date(Number(value)).toLocaleString(user?.language === 'en' ? 'en-GB' : 'it-IT');
+    } catch {
+      return '';
+    }
+  };
 
   const exportUsersCsv = () => {
     const rows = [...users].sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
@@ -146,32 +177,40 @@ const UsersPanel = () => {
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-card">
-        <div className="grid grid-cols-12 gap-2 border-b border-slate-200 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
-          <div className="col-span-3">{t({ it: 'Utente', en: 'User' })}</div>
-          <div className="col-span-3">{t({ it: 'Anagrafica', en: 'Details' })}</div>
-          <div className="col-span-2">{t({ it: 'Stato', en: 'Status' })}</div>
-          <div className="col-span-1">{t({ it: 'Lingua', en: 'Lang' })}</div>
-          <div className="col-span-1">{t({ it: 'Permessi', en: 'Perms' })}</div>
-          <div className="col-span-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
+        <div className="grid grid-cols-[2.5fr_2.5fr_1.2fr_1.6fr_0.8fr_0.8fr_1.4fr] gap-2 border-b border-slate-200 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
+          <div>{t({ it: 'Utente', en: 'User' })}</div>
+          <div>{t({ it: 'Anagrafica', en: 'Details' })}</div>
+          <div>{t({ it: 'Stato', en: 'Status' })}</div>
+          <div>{t({ it: 'Creato il', en: 'Created' })}</div>
+          <div>{t({ it: 'Lingua', en: 'Lang' })}</div>
+          <div>{t({ it: 'Permessi', en: 'Perms' })}</div>
+          <div className="text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
         </div>
         {filtered.length ? (
-          filtered.map((u) => (
-            <div key={u.id} className="grid grid-cols-12 gap-2 px-4 py-3 text-sm hover:bg-slate-50">
-              <div className="col-span-3">
-                <div className="font-semibold text-ink">{u.username}</div>
+          filtered.map((u) => {
+            const isStrictSuperAdmin = u.isSuperAdmin && u.username === 'superadmin';
+            return (
+            <div
+              key={u.id}
+              className={`grid grid-cols-[2.5fr_2.5fr_1.2fr_1.6fr_0.8fr_0.8fr_1.4fr] items-center gap-2 px-4 py-3 text-sm ${
+                isStrictSuperAdmin ? 'bg-rose-50/70' : ''
+              } hover:bg-slate-50`}
+            >
+              <div>
+                <div className={`font-semibold ${isStrictSuperAdmin ? 'text-rose-600' : 'text-ink'}`}>{u.username}</div>
                 <div className="text-xs text-slate-500">
-                  {u.isSuperAdmin ? 'Superadmin' : u.isAdmin ? 'Admin' : t({ it: 'Utente', en: 'User' })}
+                  {isStrictSuperAdmin ? 'Superadmin' : u.isAdmin ? 'Admin' : t({ it: 'Utente', en: 'User' })}
                   {u.disabled ? ` • ${t({ it: 'Disattivato', en: 'Disabled' })}` : ''}
                 </div>
               </div>
-              <div className="col-span-3 min-w-0">
+              <div className="min-w-0">
                 <div className="truncate font-semibold text-ink">
                   {u.firstName} {u.lastName}
                 </div>
                 <div className="truncate text-xs text-slate-500">{u.email}</div>
                 {u.phone ? <div className="truncate text-xs text-slate-500">{u.phone}</div> : null}
               </div>
-              <div className="col-span-2">
+              <div>
                 <span
                   className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
                     u.disabled ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'
@@ -180,18 +219,19 @@ const UsersPanel = () => {
                   {u.disabled ? t({ it: 'Disattivo', en: 'Disabled' }) : t({ it: 'Attivo', en: 'Active' })}
                 </span>
               </div>
-              <div className="col-span-1">
+              <div className="text-xs text-slate-600">{formatCreatedAt(u.createdAt)}</div>
+              <div>
                 <span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
                   {u.language === 'en' ? 'ENG' : 'ITA'}
                 </span>
               </div>
-              <div className="col-span-1 text-xs text-slate-600">
+              <div className="text-xs text-slate-600">
                 {u.isAdmin ? t({ it: 'Tutti', en: 'All' }) : `${u.permissions?.length || 0}`}
               </div>
-              <div className="col-span-2 flex justify-end gap-2">
+              <div className="flex justify-end gap-2">
                 <button
                   onClick={() => setModal({ mode: 'edit', user: u })}
-                  disabled={!isSuperAdmin && u.isSuperAdmin}
+                  disabled={!isSuperAdmin && isStrictSuperAdmin}
                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   title={t({ it: 'Modifica', en: 'Edit' })}
                 >
@@ -199,7 +239,7 @@ const UsersPanel = () => {
                 </button>
                 <button
                   onClick={() => setPwModal({ user: u })}
-                  disabled={!isSuperAdmin && u.isSuperAdmin}
+                  disabled={!isSuperAdmin && isStrictSuperAdmin}
                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   title={t({ it: 'Reset password', en: 'Reset password' })}
                 >
@@ -207,7 +247,7 @@ const UsersPanel = () => {
                 </button>
                 <button
                   onClick={() => setConfirmDelete(u)}
-                  disabled={!isSuperAdmin && u.isSuperAdmin}
+                  disabled={!isSuperAdmin && isStrictSuperAdmin}
                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50"
                   title={t({ it: 'Elimina', en: 'Delete' })}
                 >
@@ -215,7 +255,8 @@ const UsersPanel = () => {
                 </button>
               </div>
             </div>
-          ))
+          );
+          })
         ) : (
           <div className="px-4 py-6 text-sm text-slate-600">
             {query.trim() ? t({ it: 'Nessun risultato.', en: 'No results.' }) : t({ it: 'Nessun utente.', en: 'No users.' })}
@@ -227,6 +268,7 @@ const UsersPanel = () => {
         open={!!modal}
         mode={modal?.mode === 'edit' ? 'edit' : 'create'}
         clients={clients}
+        templates={users}
         canCreateAdmin={isSuperAdmin}
         initial={modal?.mode === 'edit' ? modal.user : null}
         onClose={() => setModal(null)}
