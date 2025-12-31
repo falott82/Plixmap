@@ -305,7 +305,7 @@ const requireAuth = (req, res, next) => {
     return;
   }
   const userRow = db
-    .prepare('SELECT id, tokenVersion, isAdmin, isSuperAdmin, disabled, mustChangePassword FROM users WHERE id = ?')
+    .prepare('SELECT id, username, tokenVersion, isAdmin, isSuperAdmin, disabled, mustChangePassword FROM users WHERE id = ?')
     .get(session.userId);
   if (!userRow) {
     clearSessionCookie(res);
@@ -332,7 +332,7 @@ const requireAuth = (req, res, next) => {
   }
   req.userId = session.userId;
   req.isAdmin = !!userRow.isAdmin;
-  req.isSuperAdmin = !!userRow.isSuperAdmin;
+  req.isSuperAdmin = !!userRow.isSuperAdmin && userRow.username === 'superadmin';
   next();
 };
 
@@ -1240,6 +1240,50 @@ app.post('/api/custom-fields', requireAuth, (req, res) => {
   res.json({ ok: true, id: result.id });
 });
 
+app.post('/api/custom-fields/bulk', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const typeId = String(req.body?.typeId || '').trim();
+  const fields = Array.isArray(req.body?.fields) ? req.body.fields : [];
+  const nextFields = fields
+    .map((f) => ({
+      label: String(f?.label || '').trim(),
+      valueType: f?.valueType === 'number' ? 'number' : f?.valueType === 'boolean' ? 'boolean' : f?.valueType === 'string' ? 'string' : ''
+    }))
+    .filter((f) => f.label && f.valueType);
+  if (!typeId) {
+    res.status(400).json({ error: 'Missing typeId' });
+    return;
+  }
+  if (!nextFields.length) {
+    res.json({ ok: true, created: 0 });
+    return;
+  }
+  const users = db.prepare('SELECT id FROM users').all();
+  const tx = db.transaction(() => {
+    for (const u of users) {
+      for (const f of nextFields) {
+        createCustomField(db, u.id, { typeId, label: f.label, valueType: f.valueType });
+      }
+    }
+  });
+  try {
+    tx();
+  } catch {
+    // ignore
+  }
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'custom_field_bulk_create',
+    userId: req.userId,
+    ...requestMeta(req),
+    details: { typeId, fields: nextFields.length }
+  });
+  res.json({ ok: true, created: nextFields.length * users.length });
+});
+
 app.put('/api/custom-fields/:id', requireAuth, (req, res) => {
   const result = updateCustomField(db, req.userId, req.params.id, req.body || {});
   if (!result.ok) {
@@ -1396,6 +1440,242 @@ app.put('/api/state', requireAuth, (req, res) => {
   res.json({ ok: true, updatedAt, clients: filtered, objectTypes: payload.objectTypes });
 });
 
+// Object type requests (custom object creation)
+const mapObjectTypeRequest = (row) => {
+  let payload = null;
+  let finalPayload = null;
+  try {
+    payload = JSON.parse(row.payloadJson || '{}');
+  } catch {
+    payload = null;
+  }
+  try {
+    finalPayload = row.finalPayloadJson ? JSON.parse(row.finalPayloadJson) : null;
+  } catch {
+    finalPayload = null;
+  }
+  return {
+    id: row.id,
+    status: row.status,
+    requestedAt: row.requestedAt,
+    requestedBy: { id: row.requestedById, username: row.requestedByUsername },
+    reviewedAt: row.reviewedAt || null,
+    reviewedBy: row.reviewedById ? { id: row.reviewedById, username: row.reviewedByUsername } : null,
+    reason: row.reason || null,
+    payload,
+    finalPayload
+  };
+};
+
+app.get('/api/object-type-requests', requireAuth, (req, res) => {
+  let rows = [];
+  if (req.isSuperAdmin) {
+    rows = db.prepare('SELECT * FROM object_type_requests ORDER BY requestedAt DESC').all();
+  } else {
+    rows = db.prepare('SELECT * FROM object_type_requests WHERE requestedById = ? ORDER BY requestedAt DESC').all(req.userId);
+  }
+  res.json({ requests: rows.map(mapObjectTypeRequest) });
+});
+
+app.post('/api/object-type-requests', requireAuth, (req, res) => {
+  const { typeId, nameIt, nameEn, icon, customFields } = req.body || {};
+  const cleanedId = String(typeId || '').trim();
+  const cleanedIt = String(nameIt || '').trim();
+  const cleanedEn = String(nameEn || '').trim();
+  const cleanedIcon = String(icon || '').trim();
+  if (!cleanedId || !cleanedIt || !cleanedEn || !cleanedIcon) {
+    res.status(400).json({ error: 'Missing fields' });
+    return;
+  }
+  const nextCustomFields = Array.isArray(customFields)
+    ? customFields
+        .map((f) => ({
+          label: String(f?.label || '').trim(),
+          valueType: f?.valueType === 'number' ? 'number' : f?.valueType === 'boolean' ? 'boolean' : f?.valueType === 'string' ? 'string' : ''
+        }))
+        .filter((f) => f.label && f.valueType)
+    : [];
+  const userRow = db.prepare('SELECT username FROM users WHERE id = ?').get(req.userId);
+  if (!userRow?.username) {
+    res.status(400).json({ error: 'Invalid user' });
+    return;
+  }
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const payload = {
+    typeId: cleanedId,
+    nameIt: cleanedIt,
+    nameEn: cleanedEn,
+    icon: cleanedIcon,
+    customFields: nextCustomFields
+  };
+  db.prepare(
+    `INSERT INTO object_type_requests
+      (id, status, payloadJson, requestedAt, requestedById, requestedByUsername)
+      VALUES (?, 'pending', ?, ?, ?, ?)`
+  ).run(id, JSON.stringify(payload), now, req.userId, userRow.username);
+  res.json({ ok: true, id });
+});
+
+app.put('/api/object-type-requests/:id', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const requestId = String(req.params.id || '').trim();
+  if (!requestId) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const row = db.prepare('SELECT id FROM object_type_requests WHERE id = ?').get(requestId);
+  if (!row) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  const { status, reason, finalPayload } = req.body || {};
+  if (!['approved', 'rejected'].includes(String(status))) {
+    res.status(400).json({ error: 'Invalid status' });
+    return;
+  }
+  const now = Date.now();
+  const reviewer = db.prepare('SELECT username FROM users WHERE id = ?').get(req.userId);
+  const nextPayload = finalPayload
+    ? {
+        typeId: String(finalPayload.typeId || '').trim(),
+        nameIt: String(finalPayload.nameIt || '').trim(),
+        nameEn: String(finalPayload.nameEn || '').trim(),
+        icon: String(finalPayload.icon || '').trim(),
+        customFields: Array.isArray(finalPayload.customFields)
+          ? finalPayload.customFields
+              .map((f) => ({
+                label: String(f?.label || '').trim(),
+                valueType: f?.valueType === 'number' ? 'number' : f?.valueType === 'boolean' ? 'boolean' : f?.valueType === 'string' ? 'string' : ''
+              }))
+              .filter((f) => f.label && f.valueType)
+          : []
+      }
+    : null;
+  const finalJson = nextPayload ? JSON.stringify(nextPayload) : null;
+  db.prepare(
+    `UPDATE object_type_requests
+     SET status = ?, reason = ?, reviewedAt = ?, reviewedById = ?, reviewedByUsername = ?, finalPayloadJson = ?
+     WHERE id = ?`
+  ).run(String(status), reason ? String(reason) : null, now, req.userId, reviewer?.username || '', finalJson, requestId);
+  if (status === 'approved' && nextPayload) {
+    const serverState = readState();
+    const existingTypes = Array.isArray(serverState.objectTypes) ? serverState.objectTypes : [];
+    const nextTypes = existingTypes.map((t) => ({ ...t, name: { ...t.name } }));
+    const existing = nextTypes.find((t) => t.id === nextPayload.typeId);
+    if (existing) {
+      existing.name = { it: nextPayload.nameIt, en: nextPayload.nameEn };
+      existing.icon = nextPayload.icon;
+      if (existing.builtin === undefined) existing.builtin = false;
+    } else {
+      nextTypes.push({
+        id: nextPayload.typeId,
+        name: { it: nextPayload.nameIt, en: nextPayload.nameEn },
+        icon: nextPayload.icon,
+        builtin: false
+      });
+    }
+    writeState({ clients: serverState.clients, objectTypes: nextTypes });
+  }
+  if (status === 'approved' && nextPayload && Array.isArray(nextPayload.customFields) && nextPayload.customFields.length) {
+    const users = db.prepare('SELECT id FROM users').all();
+    const tx = db.transaction(() => {
+      for (const u of users) {
+        for (const f of nextPayload.customFields) {
+          createCustomField(db, u.id, { typeId: nextPayload.typeId, label: f.label, valueType: f.valueType });
+        }
+      }
+    });
+    try {
+      tx();
+    } catch {
+      // ignore
+    }
+  }
+  res.json({ ok: true });
+});
+
+app.put('/api/object-type-requests/:id/user', requireAuth, (req, res) => {
+  const requestId = String(req.params.id || '').trim();
+  if (!requestId) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const row = db
+    .prepare('SELECT id, status, requestedById FROM object_type_requests WHERE id = ?')
+    .get(requestId);
+  if (!row) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  if (row.requestedById !== req.userId) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  if (row.status === 'approved') {
+    res.status(400).json({ error: 'Already approved' });
+    return;
+  }
+  const { typeId, nameIt, nameEn, icon, customFields } = req.body || {};
+  const cleanedId = String(typeId || '').trim();
+  const cleanedIt = String(nameIt || '').trim();
+  const cleanedEn = String(nameEn || '').trim();
+  const cleanedIcon = String(icon || '').trim();
+  if (!cleanedId || !cleanedIt || !cleanedEn || !cleanedIcon) {
+    res.status(400).json({ error: 'Missing fields' });
+    return;
+  }
+  const nextCustomFields = Array.isArray(customFields)
+    ? customFields
+        .map((f) => ({
+          label: String(f?.label || '').trim(),
+          valueType: f?.valueType === 'number' ? 'number' : f?.valueType === 'boolean' ? 'boolean' : f?.valueType === 'string' ? 'string' : ''
+        }))
+        .filter((f) => f.label && f.valueType)
+    : [];
+  const payload = {
+    typeId: cleanedId,
+    nameIt: cleanedIt,
+    nameEn: cleanedEn,
+    icon: cleanedIcon,
+    customFields: nextCustomFields
+  };
+  db.prepare(
+    `UPDATE object_type_requests
+     SET status = 'pending', payloadJson = ?, reviewedAt = NULL, reviewedById = NULL, reviewedByUsername = NULL, reason = NULL, finalPayloadJson = NULL
+     WHERE id = ?`
+  ).run(JSON.stringify(payload), requestId);
+  res.json({ ok: true });
+});
+
+app.delete('/api/object-type-requests/:id', requireAuth, (req, res) => {
+  const requestId = String(req.params.id || '').trim();
+  if (!requestId) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const row = db
+    .prepare('SELECT id, status, requestedById FROM object_type_requests WHERE id = ?')
+    .get(requestId);
+  if (!row) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  if (row.requestedById !== req.userId && !req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  if (row.status === 'approved') {
+    res.status(400).json({ error: 'Already approved' });
+    return;
+  }
+  db.prepare('DELETE FROM object_type_requests WHERE id = ?').run(requestId);
+  res.json({ ok: true });
+});
+
 // User management (admin)
 app.get('/api/users', requireAuth, (req, res) => {
   if (!req.isAdmin) {
@@ -1407,7 +1687,12 @@ app.get('/api/users', requireAuth, (req, res) => {
       'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, firstName, lastName, phone, email, createdAt, updatedAt FROM users ORDER BY createdAt DESC'
     )
     .all()
-    .map((u) => ({ ...u, isAdmin: !!u.isAdmin, isSuperAdmin: !!u.isSuperAdmin, disabled: !!u.disabled }));
+    .map((u) => ({
+      ...u,
+      isAdmin: !!u.isAdmin,
+      isSuperAdmin: !!u.isSuperAdmin && u.username === 'superadmin',
+      disabled: !!u.disabled
+    }));
   const perms = db.prepare('SELECT userId, scopeType, scopeId, access FROM permissions').all();
   const permsByUser = new Map();
   for (const p of perms) {
@@ -1512,11 +1797,12 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
     return;
   }
   const now = Date.now();
+  const lockedDisabled = target.isSuperAdmin ? 0 : (disabled ? 1 : 0);
   db.prepare(
     'UPDATE users SET isAdmin = ?, disabled = ?, language = COALESCE(?, language), firstName = ?, lastName = ?, phone = ?, email = ?, updatedAt = ? WHERE id = ?'
   ).run(
     isAdmin ? 1 : 0,
-    disabled ? 1 : 0,
+    lockedDisabled,
     language || null,
     String(firstName || ''),
     String(lastName || ''),

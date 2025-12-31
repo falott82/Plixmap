@@ -135,6 +135,20 @@ const openDb = () => {
       PRIMARY KEY(userId, objectId),
       FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS object_type_requests (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected')),
+      payloadJson TEXT NOT NULL,
+      requestedAt INTEGER NOT NULL,
+      requestedById TEXT NOT NULL,
+      requestedByUsername TEXT NOT NULL,
+      reviewedAt INTEGER,
+      reviewedById TEXT,
+      reviewedByUsername TEXT,
+      reason TEXT,
+      finalPayloadJson TEXT
+    );
   `);
 
   // lightweight migrations for existing DBs
@@ -169,9 +183,10 @@ const openDb = () => {
     // ignore: table created by main schema
   }
 
-  // mark bootstrap users as superadmins if present (legacy)
+  // enforce single superadmin account
   try {
-    db.prepare("UPDATE users SET isSuperAdmin = 1, isAdmin = 1 WHERE username IN ('admin','admin2')").run();
+    db.prepare("UPDATE users SET isSuperAdmin = 0 WHERE username <> 'superadmin'").run();
+    db.prepare("UPDATE users SET isSuperAdmin = 1, isAdmin = 1 WHERE username = 'superadmin'").run();
   } catch {
     // ignore
   }

@@ -1613,6 +1613,7 @@ const PlanView = ({ planId }: Props) => {
   const paletteOrder = useMemo(() => (Array.isArray(paletteFavorites) ? paletteFavorites : []), [paletteFavorites]);
   // User-configured palette: list can be empty (meaning no objects enabled).
   const paletteHasCustom = paletteOrder.length > 0;
+  const paletteIsEmpty = Array.isArray(paletteFavorites) && paletteFavorites.length === 0;
   const paletteHasMore = useMemo(() => {
     const all = (objectTypeDefs || []).map((d) => d.id);
     const fav = new Set(paletteOrder);
@@ -3245,8 +3246,8 @@ const PlanView = ({ planId }: Props) => {
                 ) : null}
                 <div className="my-3 h-px w-full bg-slate-200" />
                 <div className="text-[10px] font-semibold uppercase text-slate-500">{t({ it: 'Palette', en: 'Palette' })}</div>
-			            <div className="mt-2 flex flex-col items-center gap-3">
-				              <Toolbar
+                <div className="mt-2 flex flex-col items-center gap-3">
+			              <Toolbar
                       defs={objectTypeDefs || []}
                       order={paletteOrder}
                       onSelectType={(type) => setPendingType(type)}
@@ -3254,6 +3255,21 @@ const PlanView = ({ planId }: Props) => {
                       activeType={pendingType}
                     />
 			            </div>
+                {paletteIsEmpty ? (
+                  <button
+                    onClick={() => {
+                      if (hasNavigationEdits && !isReadOnly) {
+                        requestSaveAndNavigate('/settings?tab=objects');
+                        return;
+                      }
+                      navigate('/settings?tab=objects');
+                    }}
+                    className="mt-3 w-full rounded-xl border border-slate-200 bg-amber-50 px-2 py-2 text-[11px] font-semibold text-amber-900 hover:bg-amber-100"
+                    title={t({ it: 'Configura la palette', en: 'Configure the palette' })}
+                  >
+                    {t({ it: 'Aggiungi oggetti alla palette', en: 'Add objects to palette' })}
+                  </button>
+                ) : null}
                 {/* Bottom action: show all types when favorites are enabled */}
                 {paletteHasCustom && paletteHasMore ? (
                   <button

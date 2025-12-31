@@ -62,7 +62,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
         <div className="fixed inset-0 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center px-4 py-8">
             <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-              <Dialog.Panel className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-card">
+              <Dialog.Panel className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-card">
                 <div className="flex items-center justify-between">
                   <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Tutti gli oggetti', en: 'All objects' })}</Dialog.Title>
                   <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
@@ -81,7 +81,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                   />
                 </div>
 
-                <div className="mt-4 grid max-h-[420px] grid-cols-2 gap-3 overflow-auto sm:grid-cols-3">
+                <div className="mt-4 grid max-h-[580px] grid-cols-2 gap-3 overflow-auto sm:grid-cols-4">
                   {filtered.map((d) => {
                     const label = (d?.name?.[lang] as string) || (d?.name?.it as string) || d.id;
                     const inPalette = paletteSet.has(d.id);

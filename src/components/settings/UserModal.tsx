@@ -5,12 +5,14 @@ import { AdminUserRow, Permission } from '../../api/auth';
 import { Client } from '../../store/types';
 import PermissionsEditor, { permissionsListToMap, permissionsMapToList } from './PermissionsEditor';
 import { useT } from '../../i18n/useT';
+import { SEED_CLIENT_ID } from '../../store/data';
 
 interface Props {
   open: boolean;
   mode: 'create' | 'edit';
   clients: Client[];
   canCreateAdmin: boolean;
+  templates?: AdminUserRow[];
   initial?: AdminUserRow | null;
   onClose: () => void;
   onSubmit: (payload: {
@@ -27,7 +29,7 @@ interface Props {
   }) => void;
 }
 
-const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSubmit }: Props) => {
+const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, onClose, onSubmit }: Props) => {
   const t = useT();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -40,10 +42,12 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
   const [disabled, setDisabled] = useState(false);
   const [language, setLanguage] = useState<'it' | 'en'>('it');
   const [permMap, setPermMap] = useState<Record<string, '' | 'ro' | 'rw'>>({});
+  const [importFromUserId, setImportFromUserId] = useState('');
   const userRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    const seedClientExists = clients.some((c) => c.id === SEED_CLIENT_ID);
     if (mode === 'create') {
       setUsername('');
       setPassword('');
@@ -55,7 +59,8 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
       setIsAdmin(false);
       setDisabled(false);
       setLanguage('it');
-      setPermMap({});
+      setPermMap(seedClientExists ? { [SEED_CLIENT_ID]: 'rw' } : {});
+      setImportFromUserId('');
     } else {
       setUsername(initial?.username || '');
       setPassword('');
@@ -68,9 +73,60 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
       setDisabled(!!(initial as any)?.disabled);
       setLanguage(((initial as any)?.language === 'en' ? 'en' : 'it') as 'it' | 'en');
       setPermMap(permissionsListToMap(initial?.permissions));
+      setImportFromUserId('');
     }
     window.setTimeout(() => userRef.current?.focus(), 0);
-  }, [initial, mode, open]);
+  }, [clients, initial, mode, open]);
+
+  const templateOptions = useMemo(() => {
+    const list = Array.isArray(templates) ? templates : [];
+    if (!canCreateAdmin) {
+      return list.filter((u) => !u.isAdmin && !u.isSuperAdmin);
+    }
+    return list;
+  }, [canCreateAdmin, templates]);
+
+  const applyTemplate = (templateId: string) => {
+    setImportFromUserId(templateId);
+    if (!templateId) {
+      const seedClientExists = clients.some((c) => c.id === SEED_CLIENT_ID);
+      setIsAdmin(false);
+      setPermMap(seedClientExists ? { [SEED_CLIENT_ID]: 'rw' } : {});
+      return;
+    }
+    const source = templateOptions.find((u) => u.id === templateId);
+    if (!source) return;
+    if (source.isAdmin && canCreateAdmin) {
+      setIsAdmin(true);
+      setPermMap({});
+      return;
+    }
+    setIsAdmin(false);
+    setPermMap(permissionsListToMap(source.permissions));
+  };
+
+  useEffect(() => {
+    if (mode !== 'create') return;
+    if (!isAdmin) return;
+    setImportFromUserId('');
+    setPermMap({});
+  }, [isAdmin, mode]);
+
+  const normalizePhone = (value: string) => {
+    const raw = String(value || '');
+    let out = '';
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (ch >= '0' && ch <= '9') {
+        out += ch;
+        continue;
+      }
+      if (ch === '+' && out.length === 0) {
+        out += '+';
+      }
+    }
+    return out;
+  };
 
   const passwordRules = useMemo(() => {
     const s = password;
@@ -104,6 +160,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
 
   const submit = () => {
     if (!canSubmit) return;
+    const lockedDisabled = initial?.isSuperAdmin ? false : disabled;
     onSubmit({
       ...(mode === 'create' ? { username: username.trim(), password } : {}),
       firstName: firstName.trim(),
@@ -111,7 +168,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
       phone: phone.trim(),
       email: email.trim(),
       isAdmin,
-      disabled,
+      disabled: lockedDisabled,
       language,
       permissions: permissionsMapToList(permMap)
     });
@@ -165,6 +222,8 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
                             required
                             className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                             placeholder=""
+                            autoComplete="new-username"
+                            name="deskly_new_username"
                           />
                         </label>
                         <label className="block text-sm font-medium text-slate-700">
@@ -176,6 +235,8 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
                             className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                             type="password"
                             placeholder=""
+                            autoComplete="new-password"
+                            name="deskly_new_password"
                           />
                         </label>
                         <label className="block text-sm font-medium text-slate-700">
@@ -188,6 +249,8 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
                             className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                             type="password"
                             placeholder="••••••••"
+                            autoComplete="new-password"
+                            name="deskly_new_password_confirm"
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
                                 e.preventDefault();
@@ -261,9 +324,10 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
                       {t({ it: 'Telefono', en: 'Phone' })}
                       <input
                         value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
+                        onChange={(e) => setPhone(normalizePhone(e.target.value))}
                         className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                         placeholder="+39..."
+                        inputMode="tel"
                       />
                     </label>
 
@@ -283,7 +347,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
                       </div>
                     ) : null}
 
-                    {mode === 'edit' ? (
+                    {mode === 'edit' && !initial?.isSuperAdmin ? (
                       <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
                         <input
                           type="checkbox"
@@ -310,6 +374,34 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, initial, onClose, onSu
                   </div>
 
                   <div>
+                    {mode === 'create' && !isAdmin ? (
+                      <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                        <div className="text-xs font-semibold uppercase text-slate-500">
+                          {t({ it: 'Importa permessi', en: 'Import permissions' })}
+                        </div>
+                        <label className="mt-2 block text-sm font-medium text-slate-700">
+                          {t({ it: 'Importa clienti/permessi da', en: 'Import clients/permissions from' })}
+                          <select
+                            value={importFromUserId}
+                            onChange={(e) => applyTemplate(e.target.value)}
+                            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                          >
+                            <option value="">{t({ it: 'Nessun import', en: 'No import' })}</option>
+                            {templateOptions.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.username} {u.isSuperAdmin ? '· superadmin' : u.isAdmin ? '· admin' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="mt-2 text-xs text-slate-500">
+                          {t({
+                            it: 'Puoi copiare rapidamente i permessi da un utente esistente.',
+                            en: 'Quickly copy permissions from an existing user.'
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
                     {isAdmin ? (
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                         {t({

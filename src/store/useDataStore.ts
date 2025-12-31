@@ -521,7 +521,7 @@ export const useDataStore = create<DataState>()(
           version: state.version + 1
         }));
       },
-      addObject: (floorPlanId, type, name, description, x, y, scale = 1, layerIds, extra) => {
+      addObject: (floorPlanId, type, name, description, x, y, scale = 0.5, layerIds, extra) => {
         const id = nanoid();
         set((state) => ({
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
