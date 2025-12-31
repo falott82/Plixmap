@@ -5,7 +5,9 @@ import HelpPanel from './components/layout/HelpPanel';
 import ToastStack from './components/ui/ToastStack';
 import PlanView from './components/plan/PlanView';
 import SettingsView from './components/settings/SettingsView';
+import ConfirmDialog from './components/ui/ConfirmDialog';
 import { useDataStore } from './store/useDataStore';
+import { defaultData } from './store/data';
 import { useUIStore } from './store/useUIStore';
 import { fetchState, saveState } from './api/state';
 import LoginView from './components/auth/LoginView';
@@ -89,7 +91,9 @@ const App = () => {
   })();
   const [hydrated, setHydrated] = useState(false);
   const hydratedForUserId = useRef<string | null>(null);
+  const lastMustChangeRef = useRef<boolean | null>(null);
   const defaultPlanRedirectAppliedForUserId = useRef<string | null>(null);
+  const [firstRunPromptOpen, setFirstRunPromptOpen] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const saveInFlight = useRef(false);
   const saveQueued = useRef(false);
@@ -103,7 +107,6 @@ const App = () => {
   useEffect(() => {
     hydrateAuth();
   }, [hydrateAuth]);
-
 
   useEffect(() => {
     // Keep a cheap ref so we can warn on refresh/close without re-rendering App.
@@ -135,17 +138,23 @@ const App = () => {
     if (!user) {
       setHydrated(true);
       hydratedForUserId.current = null;
+      lastMustChangeRef.current = null;
       return;
     }
-    if (hydratedForUserId.current === user.id) return;
+    if (hydratedForUserId.current === user.id && lastMustChangeRef.current === user.mustChangePassword) return;
     setHydrated(false);
     fetchState()
       .then((state) => {
-        // If server has no state yet, keep local defaults and seed server.
-        if (state.updatedAt === null) {
+        const isAdmin = !!user?.isAdmin;
+        const hasClients = Array.isArray(state.clients) && state.clients.length > 0;
+        // If server has no state yet (or a broken empty state), keep local defaults and seed server.
+        if (state.updatedAt === null || (isAdmin && !hasClients)) {
           const local = useDataStore.getState().clients;
           const localTypes = useDataStore.getState().objectTypes;
-          saveState(local, localTypes)
+          const seedClients = Array.isArray(local) && local.length ? local : defaultData();
+          setServerState({ clients: seedClients, objectTypes: localTypes });
+          setSelectedPlan(seedClients[0]?.sites[0]?.floorPlans[0]?.id);
+          saveState(seedClients, localTypes)
             .then((res) => {
               if (Array.isArray(res.clients)) setServerState({ clients: res.clients, objectTypes: res.objectTypes });
               else markSaved();
@@ -162,9 +171,34 @@ const App = () => {
       })
       .finally(() => {
         hydratedForUserId.current = user.id;
+        lastMustChangeRef.current = user.mustChangePassword;
         setHydrated(true);
       });
   }, [authHydrated, markSaved, setServerState, user]);
+
+  useEffect(() => {
+    if (!authHydrated || !user) return;
+    let shouldShow = false;
+    try {
+      shouldShow = window.sessionStorage.getItem('deskly_first_run_success') === '1';
+    } catch {
+      shouldShow = false;
+    }
+    if (!shouldShow) return;
+    setFirstRunPromptOpen(true);
+    try {
+      window.sessionStorage.removeItem('deskly_first_run_success');
+    } catch {}
+  }, [authHydrated, user]);
+
+  useEffect(() => {
+    if (!hydrated || !user) return;
+    if (clients.length) return;
+    if (version !== 0) return;
+    const seedClients = defaultData();
+    setServerState({ clients: seedClients, objectTypes });
+    setSelectedPlan(seedClients[0]?.sites[0]?.floorPlans[0]?.id);
+  }, [clients.length, hydrated, objectTypes, setSelectedPlan, setServerState, user, version]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -407,6 +441,21 @@ const App = () => {
         </Routes>
       </main>
       <HelpPanel />
+      <ConfirmDialog
+        open={firstRunPromptOpen}
+        title={t({ it: 'Superadmin creato con successo', en: 'Superadmin created successfully' })}
+        description={t({
+          it: 'Questo utente servirà per gestire tutti gli altri utenti del portale. Vuoi procedere alla creazione degli utenti?',
+          en: 'This user will manage all other portal users. Do you want to proceed to user creation?'
+        })}
+        confirmLabel={t({ it: 'Sì, crea utenti', en: 'Yes, create users' })}
+        cancelLabel={t({ it: 'No, più tardi', en: 'No, later' })}
+        onCancel={() => setFirstRunPromptOpen(false)}
+        onConfirm={() => {
+          setFirstRunPromptOpen(false);
+          navigate('/settings?tab=users&create=1');
+        }}
+      />
       <ToastStack />
       <PerfOverlay enabled={perfEnabled} />
     </div>

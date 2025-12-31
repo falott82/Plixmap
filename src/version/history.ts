@@ -9,6 +9,168 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.3.7',
+    date: '2025-12-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Utenti: superadmin unico (solo account superadmin) e ruoli corretti per gli altri utenti',
+        'Users: single superadmin (superadmin account only) and correct roles for other users'
+      ),
+      n(
+        'Utenti: evidenza solo per superadmin con nome in rosso e riga dedicata',
+        'Users: highlight only for superadmin with red username and dedicated row styling'
+      )
+    ]
+  },
+  {
+    version: '1.3.6',
+    date: '2025-12-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Oggetti: richiesta sempre pulita (campi reset) e campi custom con focus stabile',
+        'Objects: request form resets cleanly and custom fields keep stable focus'
+      ),
+      n(
+        'Oggetti: superadmin gestisce solo richieste utenti; approvazione aggiorna subito la lista oggetti',
+        'Objects: superadmin manages user requests only; approvals update the object list immediately'
+      ),
+      n(
+        'Oggetti: approvazione mantiene i campi custom e i nuovi oggetti partono con scala 0.50',
+        'Objects: approvals keep custom fields and new objects default to 0.50 scale'
+      ),
+      n(
+        'Oggetti: pulsante richiesta ripristinato e modale richiesta sempre completa',
+        'Objects: request button restored and request modal always complete'
+      ),
+      n(
+        'Settings: badge changelog e pulsante Aiuto visibili anche in impostazioni',
+        'Settings: changelog badge and Help button are now visible in Settings'
+      ),
+      n(
+        'Oggetti: creazione diretta superadmin con campi custom disponibili',
+        'Objects: superadmin direct creation now supports custom fields'
+      ),
+      n(
+        'Settings: tab persistente su refresh (URL) e prompt per richieste in pending',
+        'Settings: tab persists on refresh (URL) and pending-request prompt added'
+      ),
+      n(
+        'UI: toast più leggibili e modale richieste non si chiude su approvazione',
+        'UI: toasts are more readable and request modal stays open on approval'
+      ),
+      n(
+        'Login: layout più moderno con background sfumato azzurro',
+        'Login: refreshed modern layout with blue gradient background'
+      )
+    ]
+  },
+  {
+    version: '1.3.5',
+    date: '2025-12-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Oggetti: richieste e gestione spostate in una modale dedicata con tab',
+        'Objects: requests and management moved into a dedicated modal with tabs'
+      ),
+      n(
+        'Oggetti: richieste includono campi custom, modificabili e reinviabili prima dell’approvazione',
+        'Objects: requests include custom fields, editable and resubmittable before approval'
+      ),
+      n(
+        'Oggetti: icone suggerite escludono quelle già usate dai tipi di default',
+        'Objects: suggested icons exclude those already used by default types'
+      )
+    ]
+  },
+  {
+    version: '1.3.4',
+    date: '2025-12-31',
+    type: 'minor',
+    notes: [
+      n(
+        'Utenti: tabella riallineata + superadmin sempre in cima',
+        'Users: table realigned + superadmin always pinned first'
+      ),
+      n(
+        'Oggetti: modale “Aggiungi oggetto” più ampia',
+        'Objects: “Add object” modal widened'
+      ),
+      n(
+        'Oggetti: creazione custom per superadmin con scelta icona',
+        'Objects: custom creation for superadmin with icon picker'
+      ),
+      n(
+        'Oggetti: richieste utenti con workflow approva/rifiuta e stati colorati',
+        'Objects: user requests with approve/reject workflow and colored statuses'
+      ),
+      n(
+        'Settings: modifica planimetria via matita con focus immediato',
+        'Settings: floor plan edit via pencil with immediate focus'
+      )
+    ]
+  },
+  {
+    version: '1.3.3',
+    date: '2025-12-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Setup: prompt post-password nella lingua scelta dal superadmin',
+        'Setup: post-password prompt shown in the superadmin language'
+      ),
+      n(
+        'Utenti: superadmin sempre in cima, data/ora creazione visibile, import permessi nascosto per admin',
+        'Users: superadmin pinned first, created-at shown, permission import hidden for admins'
+      ),
+      n(
+        'Utenti: username/password non precompilati dal browser e numero telefono con solo cifre (+ opzionale)',
+        'Users: username/password no browser autofill, phone number digits-only (+ optional)'
+      ),
+      n(
+        'Seed: vista DEFAULT più zoomata e centrata',
+        'Seed: DEFAULT view more zoomed and centered'
+      ),
+      n(
+        'UI: modale “Aggiungi oggetto” più ampia',
+        'UI: “Add object” modal widened'
+      ),
+      n(
+        'Settings: input planimetria editabile tramite matita con focus automatico',
+        'Settings: floor plan name editable via pencil with auto-focus'
+      )
+    ]
+  },
+  {
+    version: '1.3.2',
+    date: '2025-12-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Bootstrap: dopo il cambio password iniziale carica subito i clienti senza bisogno di refresh',
+        'Bootstrap: after first password change, clients load immediately without a refresh'
+      ),
+      n(
+        'Utenti: prompt post-setup per creare utenti + apertura diretta della modale di creazione',
+        'Users: post-setup prompt to create users + direct open of the create modal'
+      ),
+      n(
+        'Utenti: import rapido di clienti/permessi da un altro utente + superadmin evidenziato e non disattivabile',
+        'Users: quick import of clients/permissions from another user + highlighted, non-disableable superadmin'
+      ),
+      n(
+        'Sidebar: badge informativo sul cliente demo ACME',
+        'Sidebar: info badge on the ACME demo client'
+      ),
+      n(
+        'Palette: CTA visibile quando la palette è vuota',
+        'Palette: CTA shown when the palette is empty'
+      )
+    ]
+  },
+  {
     version: '1.3.1',
     date: '2025-12-29',
     type: 'fix',

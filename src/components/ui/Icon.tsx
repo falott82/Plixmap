@@ -1,26 +1,70 @@
 import {
-  User,
-  UserCheck,
+  AirVent,
+  Battery,
+  BatteryCharging,
+  BatteryFull,
+  BatteryLow,
+  Bell,
+  BellRing,
+  Bike,
+  Bus,
+  Cable,
+  Car,
+  Cctv,
+  Cpu,
+  Database,
   DoorClosed,
   DoorOpen,
-  Printer,
-  Server,
-  Wifi,
-  RadioTower,
+  Droplets,
+  Fan,
+  Flame,
+  Gauge,
+  HardDrive,
+  Headphones,
+  KeyRound,
+  Laptop,
+  Lightbulb,
+  Lock,
+  LockKeyhole,
+  Mic,
+  MicOff,
   Monitor,
   MonitorPlay,
-  Laptop,
-  Video,
-  ScanLine,
-  Mic,
-  Router,
-  SwitchCamera,
+  Network,
   Phone,
-  Tablet,
+  Plug,
+  PlugZap,
+  Power,
+  Printer,
+  RadioTower,
+  Router,
+  ScanLine,
+  Server,
   Shield,
-  KeyRound,
-  Database,
-  Cctv
+  ShieldAlert,
+  ShieldCheck,
+  Snowflake,
+  SwitchCamera,
+  Tablet,
+  Thermometer,
+  ThermometerSnowflake,
+  ThermometerSun,
+  TrainFront,
+  Truck,
+  Unlock,
+  User,
+  UserCheck,
+  UserSearch,
+  Users,
+  UsersRound,
+  Video,
+  VideoOff,
+  Volume2,
+  Wifi,
+  WifiOff,
+  Wind,
+  Wrench,
+  Zap
 } from 'lucide-react';
 import { IconName, MapObjectType } from '../../store/types';
 
@@ -102,6 +146,94 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
       return <Database {...common} />;
     case 'cctv':
       return <Cctv {...common} />;
+    case 'lightbulb':
+      return <Lightbulb {...common} />;
+    case 'plug':
+      return <Plug {...common} />;
+    case 'plugZap':
+      return <PlugZap {...common} />;
+    case 'wrench':
+      return <Wrench {...common} />;
+    case 'cpu':
+      return <Cpu {...common} />;
+    case 'hardDrive':
+      return <HardDrive {...common} />;
+    case 'bell':
+      return <Bell {...common} />;
+    case 'lock':
+      return <Lock {...common} />;
+    case 'unlock':
+      return <Unlock {...common} />;
+    case 'thermometer':
+      return <Thermometer {...common} />;
+    case 'fan':
+      return <Fan {...common} />;
+    case 'airVent':
+      return <AirVent {...common} />;
+    case 'wind':
+      return <Wind {...common} />;
+    case 'snowflake':
+      return <Snowflake {...common} />;
+    case 'thermometerSnowflake':
+      return <ThermometerSnowflake {...common} />;
+    case 'thermometerSun':
+      return <ThermometerSun {...common} />;
+    case 'droplets':
+      return <Droplets {...common} />;
+    case 'flame':
+      return <Flame {...common} />;
+    case 'gauge':
+      return <Gauge {...common} />;
+    case 'power':
+      return <Power {...common} />;
+    case 'zap':
+      return <Zap {...common} />;
+    case 'battery':
+      return <Battery {...common} />;
+    case 'batteryCharging':
+      return <BatteryCharging {...common} />;
+    case 'batteryFull':
+      return <BatteryFull {...common} />;
+    case 'batteryLow':
+      return <BatteryLow {...common} />;
+    case 'network':
+      return <Network {...common} />;
+    case 'wifiOff':
+      return <WifiOff {...common} />;
+    case 'cable':
+      return <Cable {...common} />;
+    case 'lockKeyhole':
+      return <LockKeyhole {...common} />;
+    case 'shieldCheck':
+      return <ShieldCheck {...common} />;
+    case 'shieldAlert':
+      return <ShieldAlert {...common} />;
+    case 'bellRing':
+      return <BellRing {...common} />;
+    case 'videoOff':
+      return <VideoOff {...common} />;
+    case 'micOff':
+      return <MicOff {...common} />;
+    case 'volume2':
+      return <Volume2 {...common} />;
+    case 'headphones':
+      return <Headphones {...common} />;
+    case 'users':
+      return <Users {...common} />;
+    case 'usersRound':
+      return <UsersRound {...common} />;
+    case 'userSearch':
+      return <UserSearch {...common} />;
+    case 'car':
+      return <Car {...common} />;
+    case 'truck':
+      return <Truck {...common} />;
+    case 'bike':
+      return <Bike {...common} />;
+    case 'bus':
+      return <Bus {...common} />;
+    case 'train':
+      return <TrainFront {...common} />;
     default:
       return <User {...common} />;
   }

@@ -6,7 +6,7 @@ const getUserWithPermissions = (db, userId) => {
     .get(userId);
   if (!user) return null;
   const isAdmin = !!user.isAdmin;
-  const isSuperAdmin = !!user.isSuperAdmin;
+  const isSuperAdmin = !!user.isSuperAdmin && user.username === 'superadmin';
   const clientOrder = (() => {
     try {
       const arr = JSON.parse(user.clientOrderJson || '[]');

@@ -32,6 +32,20 @@ export const createCustomField = async (payload: {
   return res.json();
 };
 
+export const createCustomFieldsBulk = async (payload: {
+  typeId: string;
+  fields: { label: string; valueType: CustomFieldValueType }[];
+}): Promise<{ ok: boolean; created: number }> => {
+  const res = await fetch('/api/custom-fields/bulk', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error(`Failed to create custom fields (${res.status})`);
+  return res.json();
+};
+
 export const updateCustomField = async (id: string, payload: { label: string }): Promise<void> => {
   const res = await fetch(`/api/custom-fields/${id}`, {
     method: 'PUT',
