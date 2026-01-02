@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
-import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, Room, Site } from './types';
+import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackDefinition, RackItem, RackLink, Room, Site } from './types';
 import { defaultData, defaultObjectTypes } from './data';
 import { useAuthStore } from './useAuthStore';
 
@@ -35,7 +35,8 @@ interface DataState {
   reorderFloorPlans: (siteId: string, movingPlanId: string, targetPlanId: string, before?: boolean) => void;
   setFloorPlanContent: (
     floorPlanId: string,
-    payload: Pick<FloorPlan, 'imageUrl' | 'width' | 'height' | 'objects' | 'rooms' | 'views' | 'links'>
+    payload: Pick<FloorPlan, 'imageUrl' | 'width' | 'height' | 'objects' | 'rooms' | 'views'> &
+      Partial<Pick<FloorPlan, 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'layers' | 'printArea'>>
   ) => void;
   addObject: (
     floorPlanId: string,
@@ -122,6 +123,14 @@ interface DataState {
   ) => string;
   deleteLink: (floorPlanId: string, linkId: string) => void;
   updateLink: (floorPlanId: string, linkId: string, payload: Partial<Pick<PlanLink, 'name' | 'description' | 'color' | 'width' | 'dashed' | 'route'>>) => void;
+  ensureRack: (floorPlanId: string, rackId: string, payload: Pick<RackDefinition, 'name' | 'totalUnits'>) => void;
+  updateRack: (floorPlanId: string, rackId: string, changes: Partial<Pick<RackDefinition, 'name' | 'totalUnits'>>) => void;
+  deleteRack: (floorPlanId: string, rackId: string) => void;
+  addRackItem: (floorPlanId: string, rackItem: Omit<RackItem, 'id' | 'createdAt' | 'updatedAt'>) => string;
+  updateRackItem: (floorPlanId: string, itemId: string, changes: Partial<Omit<RackItem, 'id' | 'rackId'>>) => void;
+  deleteRackItem: (floorPlanId: string, itemId: string) => void;
+  addRackLink: (floorPlanId: string, payload: Omit<RackLink, 'id' | 'createdAt'>) => string;
+  deleteRackLink: (floorPlanId: string, linkId: string) => void;
   cloneFloorPlan: (
     sourcePlanId: string,
     options?: { name?: string; includeRooms?: boolean; includeObjects?: boolean; includeViews?: boolean; includeLayers?: boolean }
@@ -272,6 +281,9 @@ const snapshotRevision = (
     views: normalizeViews(plan.views),
     rooms: plan.rooms ? plan.rooms.map((r) => ({ ...r })) : undefined,
     links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
+    racks: plan.racks ? plan.racks.map((r) => ({ ...r })) : undefined,
+    rackItems: plan.rackItems ? plan.rackItems.map((i) => ({ ...i })) : undefined,
+    rackLinks: plan.rackLinks ? plan.rackLinks.map((l) => ({ ...l })) : undefined,
     objects: plan.objects.map((o) => ({ ...o }))
   };
 };
@@ -280,17 +292,30 @@ const defaultLayers = (): LayerDefinition[] => [
   { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1 },
   { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2 },
   { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 3 },
-  { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 4 }
+  { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 4 },
+  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 5 }
 ];
 
 const normalizePlan = (plan: FloorPlan): FloorPlan => {
   const next = { ...plan } as any;
   if (!next.layers || !next.layers.length) next.layers = defaultLayers();
+  else {
+    const ids = new Set((next.layers || []).map((l: any) => l.id));
+    if (!ids.has('racks')) {
+      next.layers = [
+        ...next.layers,
+        { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: (next.layers.length || 4) + 1 }
+      ];
+    }
+  }
   if (!Array.isArray(next.links)) next.links = [];
   next.views = normalizeViews(next.views) || [];
   if (!Array.isArray(next.rooms)) next.rooms = [];
   if (!Array.isArray(next.revisions)) next.revisions = [];
   if (!Array.isArray(next.objects)) next.objects = [];
+  if (!Array.isArray(next.racks)) next.racks = [];
+  if (!Array.isArray(next.rackItems)) next.rackItems = [];
+  if (!Array.isArray(next.rackLinks)) next.rackLinks = [];
   return next;
 };
 
@@ -316,6 +341,14 @@ export const useDataStore = create<DataState>()(
           const en = userType.name?.en;
           if (it === 'Utente' && en === 'User') {
             byId.set('user', { ...userType, name: { it: 'Utente generico', en: 'Generic user' } });
+          }
+        }
+        const rackType = byId.get('rack');
+        if (rackType && (rackType as any).builtin) {
+          const it = rackType.name?.it;
+          const en = rackType.name?.en;
+          if (it === 'Rack' && en === 'Rack') {
+            byId.set('rack', { ...rackType, name: { it: 'Rack rete', en: 'Network rack' } });
           }
         }
         const mergedTypes = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -454,6 +487,9 @@ export const useDataStore = create<DataState>()(
               height,
               layers: defaultLayers(),
               links: [],
+              racks: [],
+              rackItems: [],
+              rackLinks: [],
               objects: []
             };
             return { ...site, floorPlans: [...existing, newPlan] };
@@ -516,7 +552,10 @@ export const useDataStore = create<DataState>()(
             objects: Array.isArray(payload.objects) ? payload.objects : [],
             rooms: Array.isArray(payload.rooms) ? payload.rooms : [],
             views: Array.isArray(payload.views) ? payload.views : [],
-            links: Array.isArray((payload as any).links) ? (payload as any).links : (plan as any).links
+            links: Array.isArray((payload as any).links) ? (payload as any).links : (plan as any).links,
+            racks: Array.isArray((payload as any).racks) ? (payload as any).racks : (plan as any).racks,
+            rackItems: Array.isArray((payload as any).rackItems) ? (payload as any).rackItems : (plan as any).rackItems,
+            rackLinks: Array.isArray((payload as any).rackLinks) ? (payload as any).rackLinks : (plan as any).rackLinks
           })),
           version: state.version + 1
         }));
@@ -560,7 +599,32 @@ export const useDataStore = create<DataState>()(
       },
       deleteObject: (id) => {
         set((state) => ({
-          clients: updateObjectById(state.clients, id, () => null),
+          clients: state.clients.map((client) => ({
+            ...client,
+            sites: client.sites.map((site) => ({
+              ...site,
+              floorPlans: site.floorPlans.map((plan) => {
+                const obj = plan.objects.find((o) => o.id === id);
+                if (!obj) return plan;
+                const nextObjects = plan.objects.filter((o) => o.id !== id);
+                if (obj.type !== 'rack') {
+                  return { ...plan, objects: nextObjects };
+                }
+                const removedIds = new Set(
+                  ((plan as any).rackItems || []).filter((i: RackItem) => i.rackId === id).map((i: RackItem) => i.id)
+                );
+                return {
+                  ...plan,
+                  objects: nextObjects,
+                  racks: ((plan as any).racks || []).filter((r: RackDefinition) => r.id !== id),
+                  rackItems: ((plan as any).rackItems || []).filter((i: RackItem) => i.rackId !== id),
+                  rackLinks: ((plan as any).rackLinks || []).filter(
+                    (l: RackLink) => !removedIds.has(l.fromItemId) && !removedIds.has(l.toItemId)
+                  )
+                };
+              })
+            }))
+          })),
           version: state.version + 1
         }));
       },
@@ -708,7 +772,10 @@ export const useDataStore = create<DataState>()(
               objects: Array.isArray(rev.objects) ? rev.objects : [],
               rooms: Array.isArray(rev.rooms) ? rev.rooms : [],
               views: Array.isArray(rev.views) ? rev.views : [],
-              links: Array.isArray((rev as any).links) ? (rev as any).links : (plan as any).links
+              links: Array.isArray((rev as any).links) ? (rev as any).links : (plan as any).links,
+              racks: Array.isArray((rev as any).racks) ? (rev as any).racks : (plan as any).racks,
+              rackItems: Array.isArray((rev as any).rackItems) ? (rev as any).rackItems : (plan as any).rackItems,
+              rackLinks: Array.isArray((rev as any).rackLinks) ? (rev as any).rackLinks : (plan as any).rackLinks
             };
           }),
           version: state.version + 1
@@ -850,6 +917,147 @@ export const useDataStore = create<DataState>()(
           version: state.version + 1
         }));
       },
+      ensureRack: (floorPlanId, rackId, payload) => {
+        const now = Date.now();
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => {
+            const racks = Array.isArray((plan as any).racks) ? (plan as any).racks : [];
+            const exists = racks.find((r: RackDefinition) => r.id === rackId);
+            if (exists) return plan;
+            return {
+              ...plan,
+              racks: [...racks, { id: rackId, name: payload.name, totalUnits: payload.totalUnits, createdAt: now }]
+            };
+          }),
+          version: state.version + 1
+        }));
+      },
+      updateRack: (floorPlanId, rackId, changes) => {
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            racks: ((plan as any).racks || []).map((r: RackDefinition) => (r.id === rackId ? { ...r, ...changes } : r))
+          })),
+          version: state.version + 1
+        }));
+      },
+      deleteRack: (floorPlanId, rackId) => {
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            racks: ((plan as any).racks || []).filter((r: RackDefinition) => r.id !== rackId),
+            rackItems: ((plan as any).rackItems || []).filter((i: RackItem) => i.rackId !== rackId),
+            rackLinks: (() => {
+              const removedIds = new Set(
+                ((plan as any).rackItems || []).filter((i: RackItem) => i.rackId === rackId).map((i: RackItem) => i.id)
+              );
+              return ((plan as any).rackLinks || []).filter(
+                (l: RackLink) => !removedIds.has(l.fromItemId) && !removedIds.has(l.toItemId)
+              );
+            })()
+          })),
+          version: state.version + 1
+        }));
+      },
+      addRackItem: (floorPlanId, rackItem) => {
+        const id = nanoid();
+        const now = Date.now();
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            rackItems: [
+              ...((plan as any).rackItems || []),
+              { ...rackItem, id, createdAt: now, updatedAt: now }
+            ]
+          })),
+          version: state.version + 1
+        }));
+        return id;
+      },
+      updateRackItem: (floorPlanId, itemId, changes) => {
+        const now = Date.now();
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            rackItems: ((plan as any).rackItems || []).map((i: RackItem) => {
+              if (i.id !== itemId) return i;
+              const nextItem: RackItem = { ...i, ...changes, updatedAt: now };
+              if (typeof changes.ethPorts === 'number' && Array.isArray(nextItem.ethPortNames)) {
+                nextItem.ethPortNames = nextItem.ethPortNames.slice(0, Math.max(0, changes.ethPorts));
+              }
+              if (typeof changes.ethPorts === 'number' && Array.isArray(nextItem.ethPortNotes)) {
+                nextItem.ethPortNotes = nextItem.ethPortNotes.slice(0, Math.max(0, changes.ethPorts));
+              }
+              if (typeof changes.fiberPorts === 'number' && Array.isArray(nextItem.fiberPortNames)) {
+                nextItem.fiberPortNames = nextItem.fiberPortNames.slice(0, Math.max(0, changes.fiberPorts));
+              }
+              if (typeof changes.fiberPorts === 'number' && Array.isArray(nextItem.fiberPortNotes)) {
+                nextItem.fiberPortNotes = nextItem.fiberPortNotes.slice(0, Math.max(0, changes.fiberPorts));
+              }
+              return nextItem;
+            }),
+            rackLinks: (() => {
+              if (typeof changes.ethPorts !== 'number' && typeof changes.fiberPorts !== 'number') {
+                return (plan as any).rackLinks;
+              }
+              const nextLinks = ((plan as any).rackLinks || []).filter((l: RackLink) => {
+                if (l.fromItemId === itemId) {
+                  if (l.fromPortKind === 'ethernet' && typeof changes.ethPorts === 'number') {
+                    return l.fromPortIndex <= changes.ethPorts;
+                  }
+                  if (l.fromPortKind === 'fiber' && typeof changes.fiberPorts === 'number') {
+                    return l.fromPortIndex <= changes.fiberPorts;
+                  }
+                }
+                if (l.toItemId === itemId) {
+                  if (l.toPortKind === 'ethernet' && typeof changes.ethPorts === 'number') {
+                    return l.toPortIndex <= changes.ethPorts;
+                  }
+                  if (l.toPortKind === 'fiber' && typeof changes.fiberPorts === 'number') {
+                    return l.toPortIndex <= changes.fiberPorts;
+                  }
+                }
+                return true;
+              });
+              return nextLinks;
+            })()
+          })),
+          version: state.version + 1
+        }));
+      },
+      deleteRackItem: (floorPlanId, itemId) => {
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            rackItems: ((plan as any).rackItems || []).filter((i: RackItem) => i.id !== itemId),
+            rackLinks: ((plan as any).rackLinks || []).filter(
+              (l: RackLink) => l.fromItemId !== itemId && l.toItemId !== itemId
+            )
+          })),
+          version: state.version + 1
+        }));
+      },
+      addRackLink: (floorPlanId, payload) => {
+        const id = nanoid();
+        const now = Date.now();
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            rackLinks: [...((plan as any).rackLinks || []), { ...payload, id, createdAt: now }]
+          })),
+          version: state.version + 1
+        }));
+        return id;
+      },
+      deleteRackLink: (floorPlanId, linkId) => {
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            rackLinks: ((plan as any).rackLinks || []).filter((l: RackLink) => l.id !== linkId)
+          })),
+          version: state.version + 1
+        }));
+      },
       cloneFloorPlan: (sourcePlanId, options) => {
         const source = get().findFloorPlan(sourcePlanId);
         if (!source) return null;
@@ -911,6 +1119,42 @@ export const useDataStore = create<DataState>()(
                 .filter(Boolean)
             : [];
 
+          const rackIdMap = new Map<string, string>();
+          const nextRacks = includeObjects
+            ? ((source as any).racks || [])
+                .map((r: RackDefinition) => {
+                  const nextId = objectIdMap.get(r.id);
+                  if (!nextId) return null;
+                  rackIdMap.set(r.id, nextId);
+                  return { ...r, id: nextId };
+                })
+                .filter(Boolean)
+            : [];
+
+          const rackItemIdMap = new Map<string, string>();
+          const nextRackItems = includeObjects
+            ? ((source as any).rackItems || [])
+                .map((i: RackItem) => {
+                  const nextRackId = rackIdMap.get(i.rackId);
+                  if (!nextRackId) return null;
+                  const nextId = nanoid();
+                  rackItemIdMap.set(i.id, nextId);
+                  return { ...i, id: nextId, rackId: nextRackId };
+                })
+                .filter(Boolean)
+            : [];
+
+          const nextRackLinks = includeObjects
+            ? ((source as any).rackLinks || [])
+                .map((l: RackLink) => {
+                  const fromId = rackItemIdMap.get(l.fromItemId);
+                  const toId = rackItemIdMap.get(l.toItemId);
+                  if (!fromId || !toId) return null;
+                  return { ...l, id: nanoid(), fromItemId: fromId, toItemId: toId };
+                })
+                .filter(Boolean)
+            : [];
+
           const nextViews = includeViews
             ? (source.views || []).map((v) => ({ ...v, id: nanoid(), pan: { ...v.pan } }))
             : [];
@@ -934,6 +1178,9 @@ export const useDataStore = create<DataState>()(
             rooms: nextRooms,
             revisions: [],
             links: nextLinks,
+            racks: nextRacks,
+            rackItems: nextRackItems,
+            rackLinks: nextRackLinks,
             objects: nextObjects
           });
 

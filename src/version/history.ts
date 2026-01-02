@@ -9,6 +9,56 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.4.1',
+    date: '2026-01-03',
+    type: 'fix',
+    notes: [
+      n(
+        'Rack: layer dedicato e preferiti palette aggiornati con “Rack rete”',
+        'Rack: dedicated layer and palette favorites updated with “Network rack”'
+      ),
+      n(
+        'Rack: modifica da mappa apre la modale di gestione rack',
+        'Rack: editing from the map opens the rack management modal'
+      ),
+      n(
+        'Rack: eliminazione rack ripulisce apparati e collegamenti associati',
+        'Rack: deleting a rack cleans up associated devices and links'
+      ),
+      n(
+        'Rack: dati inclusi in revisioni e duplicazione planimetrie',
+        'Rack: data included in revisions and plan duplication'
+      )
+    ]
+  },
+  {
+    version: '1.4.0',
+    date: '2026-01-02',
+    type: 'minor',
+    notes: [
+      n(
+        'Rack: modale configurazione apparati con posizione attuale, ricerca per nome/host e selezione stabile',
+        'Rack: device configuration modal with current position, name/host search and stable selection'
+      ),
+      n(
+        'Rack: configurazione porte con collegamenti 1:1 e velocita per rame/fibra',
+        'Rack: port configuration with 1:1 links and speed presets for copper/fiber'
+      ),
+      n(
+        'Rack: conferme eliminazione con lista apparati e uscita drag con conferma',
+        'Rack: delete confirmations with device list and drag-out deletion confirmation'
+      ),
+      n(
+        'Rack: export PDF verticale con titolo/nota e layout più leggibile',
+        'Rack: portrait PDF export with title/notes and improved readability'
+      ),
+      n(
+        'Rack: tasti ESC gestiti per evitare chiusure involontarie della planimetria',
+        'Rack: ESC handling prevents accidental closing of the floor plan'
+      )
+    ]
+  },
+  {
     version: '1.3.7',
     date: '2025-12-31',
     type: 'fix',
@@ -20,6 +70,14 @@ export const releaseHistory: ReleaseNote[] = [
       n(
         'Utenti: evidenza solo per superadmin con nome in rosso e riga dedicata',
         'Users: highlight only for superadmin with red username and dedicated row styling'
+      ),
+      n(
+        'Rack: nuovi apparati (UPS, ciabatta, varie), campi avanzati e note rack',
+        'Rack: new devices (UPS, power strip, misc), advanced fields and rack notes'
+      ),
+      n(
+        'Rack: inserimento guidato con drop, evidenza selezione e spostamento con frecce',
+        'Rack: guided placement with drop, selection highlight and arrow-key moves'
       )
     ]
   },

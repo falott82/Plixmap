@@ -5,6 +5,8 @@ const crypto = require('crypto');
 
 const dbPath = process.env.DESKLY_DB_PATH || path.join(process.cwd(), 'data', 'deskly.sqlite');
 
+const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
+
 const openDb = () => {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
@@ -187,6 +189,13 @@ const openDb = () => {
   try {
     db.prepare("UPDATE users SET isSuperAdmin = 0 WHERE username <> 'superadmin'").run();
     db.prepare("UPDATE users SET isSuperAdmin = 1, isAdmin = 1 WHERE username = 'superadmin'").run();
+  } catch {
+    // ignore
+  }
+  try {
+    db.prepare("UPDATE users SET paletteFavoritesJson = ? WHERE paletteFavoritesJson = '[]'").run(
+      defaultPaletteFavoritesJson
+    );
   } catch {
     // ignore
   }

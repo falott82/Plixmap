@@ -90,17 +90,32 @@ const clearSessionCookie = (res) => {
   res.setHeader('Set-Cookie', `deskly_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 };
 
+const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
+
 const ensureBootstrapAdmins = (db) => {
   const count = db.prepare('SELECT COUNT(*) as n FROM users').get()?.n || 0;
   if (count > 0) return;
   const now = Date.now();
   const insert = db.prepare(
-    `INSERT INTO users (id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, mustChangePassword, firstName, lastName, phone, email, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, 1, 1, 1, 0, 'it', ?, 1, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO users (id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, mustChangePassword, paletteFavoritesJson, firstName, lastName, phone, email, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, 1, 1, 1, 0, 'it', ?, 1, ?, ?, ?, ?, ?, ?, ?)`
   );
   const createSuperAdmin = (username, password, defaultPlanId, firstName, lastName, email) => {
     const { salt, hash } = hashPassword(password);
-    insert.run(crypto.randomUUID(), username, salt, hash, defaultPlanId, firstName, lastName, '', email, now, now);
+    insert.run(
+      crypto.randomUUID(),
+      username,
+      salt,
+      hash,
+      defaultPlanId,
+      defaultPaletteFavoritesJson,
+      firstName,
+      lastName,
+      '',
+      email,
+      now,
+      now
+    );
   };
   createSuperAdmin('superadmin', 'deskly', 'seed-plan-floor-0', 'Super', 'Admin', 'superadmin@deskly.local');
 };

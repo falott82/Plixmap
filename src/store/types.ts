@@ -1,5 +1,66 @@
 export type MapObjectType = string;
 
+export type RackItemType = 'switch' | 'server' | 'patchpanel' | 'optical_drawer' | 'ups' | 'power_strip' | 'misc';
+export type RackPortKind = 'ethernet' | 'fiber';
+
+export interface RackDefinition {
+  id: string;
+  name: string;
+  totalUnits: number;
+  notes?: string;
+  createdAt?: number;
+}
+
+export interface RackItem {
+  id: string;
+  rackId: string;
+  type: RackItemType;
+  name: string;
+  brand?: string;
+  model?: string;
+  ip?: string;
+  hostName?: string;
+  mgmtIp?: string;
+  idracIp?: string;
+  dualPower?: boolean;
+  notes?: string;
+  connectorType?: 'SC' | 'LC' | 'ST' | 'FC';
+  rails?: boolean;
+  outlets?: number;
+  mainSwitch?: boolean;
+  maintenanceDate?: string;
+  batteryChangeDate?: string;
+  unitStart: number;
+  unitSize: number;
+  ethPorts?: number;
+  fiberPorts?: number;
+  ethRangeStart?: number;
+  fiberRangeStart?: number;
+  ethPortNames?: string[];
+  fiberPortNames?: string[];
+  ethPortNotes?: string[];
+  fiberPortNotes?: string[];
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface RackLink {
+  id: string;
+  fromItemId: string;
+  fromPortKind: RackPortKind;
+  fromPortIndex: number;
+  fromSide?: 'female' | 'cable';
+  toItemId: string;
+  toPortKind: RackPortKind;
+  toPortIndex: number;
+  toSide?: 'female' | 'cable';
+  kind: RackPortKind;
+  color: string;
+  speed?: string;
+  name?: string;
+  createdAt?: number;
+}
+
 export type IconName =
   | 'user'
   | 'userCheck'
@@ -157,6 +218,9 @@ export interface FloorPlan {
   revisions?: FloorPlanRevision[];
   rooms?: Room[];
   links?: PlanLink[];
+  racks?: RackDefinition[];
+  rackItems?: RackItem[];
+  rackLinks?: RackLink[];
   objects: MapObject[];
 }
 
@@ -184,6 +248,9 @@ export interface FloorPlanRevision {
   views?: FloorPlanView[];
   rooms?: Room[];
   links?: PlanLink[];
+  racks?: RackDefinition[];
+  rackItems?: RackItem[];
+  rackLinks?: RackLink[];
   objects: MapObject[];
 }
 
