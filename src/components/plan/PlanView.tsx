@@ -50,6 +50,7 @@ import Icon from '../ui/Icon';
 import RevisionsModal from './RevisionsModal';
 import SaveRevisionModal from './SaveRevisionModal';
 import RoomModal from './RoomModal';
+import RackModal from './RackModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
 import BulkEditSelectionModal from './BulkEditSelectionModal';
 import SelectedObjectsModal from './SelectedObjectsModal';
@@ -155,7 +156,15 @@ const PlanView = ({ planId }: Props) => {
     return out;
   }, [getTypeLabel, objectTypeDefs]);
 
-  const inferDefaultLayerIds = useCallback((typeId: string) => (typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user' ? ['users'] : ['devices']), []);
+  const inferDefaultLayerIds = useCallback(
+    (typeId: string) =>
+      typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user'
+        ? ['users']
+        : typeId === 'rack'
+          ? ['racks']
+          : ['devices'],
+    []
+  );
 
   const {
     selectedObjectId,
@@ -302,6 +311,7 @@ const PlanView = ({ planId }: Props) => {
   const dragStartRef = useRef<Map<string, { x: number; y: number; roomId?: string }>>(new Map());
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewsMenuOpen, setViewsMenuOpen] = useState(false);
+  const [rackModal, setRackModal] = useState<{ objectId: string } | null>(null);
   const [selectedViewId, setSelectedViewId] = useState<string>('__last__');
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
   const [searchResultsTerm, setSearchResultsTerm] = useState('');
@@ -649,6 +659,9 @@ const PlanView = ({ planId }: Props) => {
     objects: any[];
     views?: any[];
     rooms?: any[];
+    racks?: any[];
+    rackItems?: any[];
+    rackLinks?: any[];
   } | null>(null);
   const entrySnapshotRef = useRef<{
     imageUrl: string;
@@ -657,6 +670,9 @@ const PlanView = ({ planId }: Props) => {
     objects: any[];
     views?: any[];
     rooms?: any[];
+    racks?: any[];
+    rackItems?: any[];
+    rackLinks?: any[];
   } | null>(null);
   const touchedRef = useRef(false);
   const [touchedTick, setTouchedTick] = useState(0);
@@ -678,7 +694,10 @@ const PlanView = ({ planId }: Props) => {
       height: p?.height,
       objects: Array.isArray(p?.objects) ? p.objects : [],
       views: Array.isArray(p?.views) ? p.views : [],
-      rooms: Array.isArray(p?.rooms) ? p.rooms : []
+      rooms: Array.isArray(p?.rooms) ? p.rooms : [],
+      racks: Array.isArray((p as any)?.racks) ? (p as any).racks : [],
+      rackItems: Array.isArray((p as any)?.rackItems) ? (p as any).rackItems : [],
+      rackLinks: Array.isArray((p as any)?.rackLinks) ? (p as any).rackLinks : []
     };
   }, []);
 
@@ -709,6 +728,9 @@ const PlanView = ({ planId }: Props) => {
       objects: any[];
       views?: any[];
       rooms?: any[];
+      racks?: any[];
+      rackItems?: any[];
+      rackLinks?: any[];
     },
     latest: {
       imageUrl: string;
@@ -717,11 +739,24 @@ const PlanView = ({ planId }: Props) => {
       objects: any[];
       views?: any[];
       rooms?: any[];
+      racks?: any[];
+      rackItems?: any[];
+      rackLinks?: any[];
     }
   ) => {
     if (current.imageUrl !== latest.imageUrl) return false;
     if ((current.width ?? null) !== (latest.width ?? null)) return false;
     if ((current.height ?? null) !== (latest.height ?? null)) return false;
+
+    const sameList = (a?: string[], b?: string[]) => {
+      const aList = a || [];
+      const bList = b || [];
+      if (aList.length !== bList.length) return false;
+      for (let i = 0; i < aList.length; i += 1) {
+        if ((aList[i] || '') !== (bList[i] || '')) return false;
+      }
+      return true;
+    };
 
     const aObjs = current.objects || [];
     const bObjs = latest.objects || [];
@@ -768,6 +803,63 @@ const PlanView = ({ planId }: Props) => {
       if (r.width !== other.width || r.height !== other.height) return false;
     }
 
+    const aRacks = current.racks || [];
+    const bRacks = latest.racks || [];
+    if (aRacks.length !== bRacks.length) return false;
+    const bRacksById = new Map<string, any>();
+    for (const r of bRacks) bRacksById.set(r.id, r);
+    for (const r of aRacks) {
+      const other = bRacksById.get(r.id);
+      if (!other) return false;
+      if (r.name !== other.name) return false;
+      if (Number(r.totalUnits || 0) !== Number(other.totalUnits || 0)) return false;
+    }
+
+    const aItems = current.rackItems || [];
+    const bItems = latest.rackItems || [];
+    if (aItems.length !== bItems.length) return false;
+    const bItemsById = new Map<string, any>();
+    for (const i of bItems) bItemsById.set(i.id, i);
+    for (const i of aItems) {
+      const other = bItemsById.get(i.id);
+      if (!other) return false;
+      if (i.rackId !== other.rackId) return false;
+      if (i.type !== other.type) return false;
+      if (i.name !== other.name) return false;
+      if ((i.brand || '') !== (other.brand || '')) return false;
+      if ((i.model || '') !== (other.model || '')) return false;
+      if ((i.ip || '') !== (other.ip || '')) return false;
+      if (Number(i.unitStart) !== Number(other.unitStart)) return false;
+      if (Number(i.unitSize) !== Number(other.unitSize)) return false;
+      if (Number(i.ethPorts || 0) !== Number(other.ethPorts || 0)) return false;
+      if (Number(i.fiberPorts || 0) !== Number(other.fiberPorts || 0)) return false;
+      if (Number(i.ethRangeStart || 0) !== Number(other.ethRangeStart || 0)) return false;
+      if (Number(i.fiberRangeStart || 0) !== Number(other.fiberRangeStart || 0)) return false;
+      if (!sameList(i.ethPortNames, other.ethPortNames)) return false;
+      if (!sameList(i.fiberPortNames, other.fiberPortNames)) return false;
+      if (!sameList(i.ethPortNotes, other.ethPortNotes)) return false;
+      if (!sameList(i.fiberPortNotes, other.fiberPortNotes)) return false;
+    }
+
+    const aLinks = current.rackLinks || [];
+    const bLinks = latest.rackLinks || [];
+    if (aLinks.length !== bLinks.length) return false;
+    const bLinksById = new Map<string, any>();
+    for (const l of bLinks) bLinksById.set(l.id, l);
+    for (const l of aLinks) {
+      const other = bLinksById.get(l.id);
+      if (!other) return false;
+      if (l.fromItemId !== other.fromItemId) return false;
+      if (l.toItemId !== other.toItemId) return false;
+      if (l.fromPortKind !== other.fromPortKind) return false;
+      if (l.toPortKind !== other.toPortKind) return false;
+      if (Number(l.fromPortIndex) !== Number(other.fromPortIndex)) return false;
+      if (Number(l.toPortIndex) !== Number(other.toPortIndex)) return false;
+      if (l.kind !== other.kind) return false;
+      if (l.color !== other.color) return false;
+      if ((l.name || '') !== (other.name || '')) return false;
+    }
+
     return true;
   };
 
@@ -780,6 +872,9 @@ const PlanView = ({ planId }: Props) => {
         objects: any[];
         views?: any[];
         rooms?: any[];
+        racks?: any[];
+        rackItems?: any[];
+        rackLinks?: any[];
       },
       b: {
         imageUrl: string;
@@ -788,6 +883,9 @@ const PlanView = ({ planId }: Props) => {
         objects: any[];
         views?: any[];
         rooms?: any[];
+        racks?: any[];
+        rackItems?: any[];
+        rackLinks?: any[];
       }
     ) => samePlanSnapshot({ ...a, width: undefined, height: undefined }, { ...b, width: undefined, height: undefined }),
     []
@@ -930,7 +1028,10 @@ const PlanView = ({ planId }: Props) => {
       height: base.height,
       objects: base.objects,
       rooms: base.rooms,
-      views: base.views
+      views: base.views,
+      racks: base.racks,
+      rackItems: base.rackItems,
+      rackLinks: base.rackLinks
     });
   }, [plan, restoreRevision, setFloorPlanContent]);
 
@@ -1660,10 +1761,8 @@ const PlanView = ({ planId }: Props) => {
 
   const mapAddMenuTypes = useMemo(() => {
     const defs = objectTypeDefs || [];
-    if (!paletteHasCustom) return defs;
-    const fav = new Set(paletteOrder);
-    return defs.filter((d) => !fav.has(d.id));
-  }, [objectTypeDefs, paletteHasCustom, paletteOrder]);
+    return defs;
+  }, [objectTypeDefs]);
 
   useEffect(() => {
     if (!gridMenuOpen) return;
@@ -1987,7 +2086,14 @@ const PlanView = ({ planId }: Props) => {
     }
   };
 
-  const handleEdit = (objectId: string) => setModalState({ mode: 'edit', objectId });
+  const handleEdit = (objectId: string) => {
+    const obj = renderPlan?.objects.find((o) => o.id === objectId);
+    if (obj?.type === 'rack') {
+      setRackModal({ objectId });
+      return;
+    }
+    setModalState({ mode: 'edit', objectId });
+  };
   const openEditFromSelectionList = (objectId: string) => {
     returnToSelectionListRef.current = true;
     setSelectedObjectsModalOpen(false);
@@ -3170,37 +3276,6 @@ const PlanView = ({ planId }: Props) => {
             ) : null}
 		          {!isReadOnly ? (
 		            <aside className="sticky top-0 h-fit w-28 shrink-0 self-start rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
-		            <div className="flex items-center justify-between text-[11px] font-semibold uppercase text-slate-500">
-	                <span>{t({ it: 'Palette', en: 'Palette' })}</span>
-	                  <div className="flex items-center gap-1">
-	                    <button
-	                      onClick={() => {
-	                        if (hasNavigationEdits && !isReadOnly) {
-	                          requestSaveAndNavigate('/settings?tab=objects');
-	                          return;
-	                        }
-	                        navigate('/settings?tab=objects');
-	                      }}
-	                      title={t({ it: 'Gestisci palette', en: 'Manage palette' })}
-	                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
-	                    >
-	                      <Star size={14} />
-	                    </button>
-	                    <button
-	                      onClick={() => {
-	                        if (hasNavigationEdits && !isReadOnly) {
-	                          requestSaveAndNavigate('/settings?tab=objects');
-	                          return;
-	                        }
-	                        navigate('/settings?tab=objects');
-	                      }}
-	                      title={t({ it: 'Impostazioni oggetti', en: 'Object settings' })}
-	                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
-	                    >
-	                      <Pencil size={14} />
-	                    </button>
-	                  </div>
-	              </div>
                 {planLayers.length ? (
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
@@ -3245,7 +3320,37 @@ const PlanView = ({ planId }: Props) => {
                   </div>
                 ) : null}
                 <div className="my-3 h-px w-full bg-slate-200" />
-                <div className="text-[10px] font-semibold uppercase text-slate-500">{t({ it: 'Palette', en: 'Palette' })}</div>
+                <div className="flex items-center justify-end text-[10px] font-semibold uppercase text-slate-500">
+                  <span className="sr-only">{t({ it: 'Palette', en: 'Palette' })}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        if (hasNavigationEdits && !isReadOnly) {
+                          requestSaveAndNavigate('/settings?tab=objects');
+                          return;
+                        }
+                        navigate('/settings?tab=objects');
+                      }}
+                      title={t({ it: 'Gestisci palette', en: 'Manage palette' })}
+                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+                    >
+                      <Star size={14} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (hasNavigationEdits && !isReadOnly) {
+                          requestSaveAndNavigate('/settings?tab=objects');
+                          return;
+                        }
+                        navigate('/settings?tab=objects');
+                      }}
+                      title={t({ it: 'Impostazioni oggetti', en: 'Object settings' })}
+                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  </div>
+                </div>
                 <div className="mt-2 flex flex-col items-center gap-3">
 			              <Toolbar
                       defs={objectTypeDefs || []}
@@ -3734,6 +3839,17 @@ const PlanView = ({ planId }: Props) => {
           </div>
         ) : null}
         </>
+      ) : null}
+
+      {rackModal && basePlan ? (
+        <RackModal
+          open={!!rackModal}
+          plan={basePlan}
+          rackObjectId={rackModal.objectId}
+          rackObjectName={renderPlan.objects.find((o) => o.id === rackModal.objectId)?.name || t({ it: 'Rack', en: 'Rack' })}
+          readOnly={isReadOnly}
+          onClose={() => setRackModal(null)}
+        />
       ) : null}
 
       <ObjectModal

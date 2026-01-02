@@ -133,6 +133,15 @@ New passwords must be **strong**:
   - objects inside the room are automatically linked
   - room list with assigned objects and quick highlight
   - placing a user in a full room asks for confirmation
+- Rack management:
+  - open racks from the map to manage **rack units** and devices
+  - drag devices into the rack, choose unit size, move with arrow keys
+  - configure devices with host/IP, ports, power options, and notes
+  - port configuration per device (switch/patch panel/optical drawer) with 1:1 links
+  - link speeds: 100M/1G (copper) and 1G/10G/25G (fiber)
+  - search inside the rack by **host name** or **device type**
+  - delete single devices (with confirmation) or delete all devices
+  - export a **portrait PDF** with rack name and notes
 - Search:
   - search objects (name/description) and rooms (name)
   - highlight/blink the selected item on the map
