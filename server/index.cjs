@@ -1740,10 +1740,11 @@ app.post('/api/users', requireAuth, (req, res) => {
   const now = Date.now();
   const id = crypto.randomUUID();
   const { salt, hash } = hashPassword(String(password));
+  const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
   try {
     db.prepare(
-      `INSERT INTO users (id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, language, firstName, lastName, phone, email, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, 1, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO users (id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, language, paletteFavoritesJson, firstName, lastName, phone, email, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, 1, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
       String(username).trim(),
@@ -1751,6 +1752,7 @@ app.post('/api/users', requireAuth, (req, res) => {
       hash,
       isAdmin ? 1 : 0,
       String(language),
+      defaultPaletteFavoritesJson,
       String(firstName || ''),
       String(lastName || ''),
       String(phone || ''),
