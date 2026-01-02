@@ -31,7 +31,8 @@ export const defaultData = (): Client[] => {
                 { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1 },
                 { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2 },
                 { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 3 },
-                { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 4 }
+                { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 4 },
+                { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 5 }
               ],
               views: [
                 {
@@ -45,6 +46,9 @@ export const defaultData = (): Client[] => {
               rooms: [],
               revisions: [],
               links: [],
+              racks: [],
+              rackItems: [],
+              rackLinks: [],
               objects: []
             }
           ]
@@ -60,7 +64,7 @@ export const defaultObjectTypes: ObjectTypeDefinition[] = [
   { id: 'camera', name: { it: 'Telecamera', en: 'Camera' }, icon: 'camera', builtin: true },
   { id: 'intercom', name: { it: 'Citofono', en: 'Intercom' }, icon: 'intercom', builtin: true },
   { id: 'video_intercom', name: { it: 'Videocitofono', en: 'Video intercom' }, icon: 'videoIntercom', builtin: true },
-  { id: 'rack', name: { it: 'Rack', en: 'Rack' }, icon: 'server', builtin: true },
+  { id: 'rack', name: { it: 'Rack rete', en: 'Network rack' }, icon: 'server', builtin: true },
   { id: 'router', name: { it: 'Router', en: 'Router' }, icon: 'router', builtin: true },
   { id: 'switch', name: { it: 'Switch', en: 'Switch' }, icon: 'switch', builtin: true },
   { id: 'printer', name: { it: 'Stampante', en: 'Printer' }, icon: 'printer', builtin: true },
