@@ -9,6 +9,33 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.4.2',
+    date: '2026-01-04',
+    type: 'minor',
+    notes: [
+      n(
+        'Rack: note per porta con modale dedicata e focus automatico',
+        'Rack: per-port notes with a dedicated modal and automatic focus'
+      ),
+      n(
+        'Rack: collegamenti ripuliti e warning su porte già occupate con sostituzione',
+        'Rack: link cleanup plus warnings and replacement on already-used ports'
+      ),
+      n(
+        'Rack: vista collegamenti con filtri, legenda e percorso ordinato',
+        'Rack: connections view with filters, legend, and ordered paths'
+      ),
+      n(
+        'Rack: percorso collegamenti colorato e icone dedicate vicino alle porte',
+        'Rack: colored connection paths and dedicated icons next to ports'
+      ),
+      n(
+        'Planimetria: collegamenti tra rack con linea tratteggiata rame/fibra e apertura porte al click',
+        'Floor plan: dashed copper/fiber rack links with port list on click'
+      )
+    ]
+  },
+  {
     version: '1.4.1',
     date: '2026-01-03',
     type: 'fix',

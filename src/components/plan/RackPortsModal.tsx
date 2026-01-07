@@ -13,6 +13,8 @@ type Props = {
   rackLinks: RackLink[];
   readOnly?: boolean;
   initialConnectionsOpen?: boolean;
+  initialConnectionsKind?: RackPortKind;
+  closeOnBackdrop?: boolean;
   onClose: () => void;
   onAddLink: (payload: Omit<RackLink, 'id' | 'createdAt'>) => void;
   onDeleteLink: (id: string) => void;
@@ -37,6 +39,14 @@ type RenamePrompt = {
 type NotePrompt = {
   kind: RackPortKind;
   index: number;
+};
+
+type PathPart = {
+  key: string;
+  label: string;
+  deviceType?: RackItemType;
+  deviceId?: string;
+  rackName?: string;
 };
 
 const speedOptions: Record<RackPortKind, { value: string; label: string }[]> = {
@@ -81,6 +91,8 @@ const RackPortsModal = ({
   rackLinks,
   readOnly = false,
   initialConnectionsOpen = false,
+  initialConnectionsKind,
+  closeOnBackdrop = true,
   onClose,
   onAddLink,
   onDeleteLink,
@@ -96,7 +108,11 @@ const RackPortsModal = ({
   const [noteValue, setNoteValue] = useState('');
   const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [connectionsExpanded, setConnectionsExpanded] = useState(false);
+  const [connectionsOnlyActive, setConnectionsOnlyActive] = useState(true);
+  const [connectionsKindFilter, setConnectionsKindFilter] = useState<'all' | 'ethernet' | 'fiber'>('all');
   const [overwritePrompt, setOverwritePrompt] = useState<{ linkId: string } | null>(null);
+  const [portPickerOpen, setPortPickerOpen] = useState(false);
   const [targetRackId, setTargetRackId] = useState('');
   const [targetItemId, setTargetItemId] = useState('');
   const [targetPortIndex, setTargetPortIndex] = useState(0);
@@ -118,15 +134,16 @@ const RackPortsModal = ({
   const getLinkForPort = (deviceId: string, kind: RackPortKind, index: number, side?: PortSide) => {
     const device = rackItems.find((d) => d.id === deviceId);
     const dual = isDualSide(device || null);
+    const matchSide = dual && side;
     return activeRackLinks.find((l) => {
       if (l.fromItemId === deviceId && l.fromPortKind === kind && l.fromPortIndex === index) {
-        if (!side) return true;
-        const fromSide = l.fromSide || (dual ? 'female' : undefined);
+        if (!matchSide) return true;
+        const fromSide = l.fromSide || 'female';
         return fromSide === side;
       }
       if (l.toItemId === deviceId && l.toPortKind === kind && l.toPortIndex === index) {
-        if (!side) return true;
-        const toSide = l.toSide || (dual ? 'female' : undefined);
+        if (!matchSide) return true;
+        const toSide = l.toSide || 'female';
         return toSide === side;
       }
       return false;
@@ -180,7 +197,7 @@ const RackPortsModal = ({
     return 'other';
   };
 
-  const orientPath = (parts: { deviceType?: RackItemType }[]) => {
+  const orientPath = (parts: PathPart[]) => {
     if (parts.length < 2) return parts;
     const available: Record<'server' | 'switch' | 'patch' | 'other', boolean> = {
       server: parts.some((p) => getGroupForType(p.deviceType) === 'server'),
@@ -313,12 +330,33 @@ const RackPortsModal = ({
     return linkableItems.filter((device) => getPortCount(device, linkPrompt.kind) > 0);
   }, [linkPrompt, linkableItems]);
 
+  const targetDevice = useMemo(() => {
+    if (!targetItemId) return null;
+    return rackItems.find((device) => device.id === targetItemId) || null;
+  }, [rackItems, targetItemId]);
+
+  const targetPortLabel = useMemo(() => {
+    if (!linkPrompt || !targetDevice || !targetPortIndex) return '';
+    return getPortDisplayName(targetDevice, linkPrompt.kind, targetPortIndex);
+  }, [linkPrompt, targetDevice, targetPortIndex]);
+
+  const targetPortLink = useMemo(() => {
+    if (!linkPrompt || !targetItemId || !targetPortIndex) return null;
+    return getLinkForPort(targetItemId, linkPrompt.kind, targetPortIndex, targetSide);
+  }, [linkPrompt, targetItemId, targetPortIndex, targetSide]);
+
+  const portPickerPorts = useMemo(() => {
+    if (!linkPrompt || !targetItemId) return [];
+    return getAllPorts(targetItemId, linkPrompt.kind);
+  }, [linkPrompt, targetItemId]);
+
   const openLinkPrompt = (kind: RackPortKind, index: number, side?: PortSide) => {
     if (readOnly) return;
     if (!item) return;
     const existing = getLinkForPort(item.id, kind, index, side);
     const nextPrompt: LinkPrompt = { kind, index, side, existingLinkId: existing?.id };
     setLinkPrompt(nextPrompt);
+    setPortPickerOpen(false);
     if (existing) {
       const other = getOtherSide(existing, item.id);
       const initialRack = rackItems.find((d) => d.id === other.itemId)?.rackId || '';
@@ -368,6 +406,15 @@ const RackPortsModal = ({
   }, [initialConnectionsOpen, itemId, open]);
 
   useEffect(() => {
+    if (!open) return;
+    setConnectionsKindFilter(initialConnectionsKind || 'all');
+  }, [initialConnectionsKind, itemId, open]);
+
+  useEffect(() => {
+    if (!linkPrompt) setPortPickerOpen(false);
+  }, [linkPrompt]);
+
+  useEffect(() => {
     if (open) return;
     setLinkPrompt(null);
     setRenamePrompt(null);
@@ -375,6 +422,7 @@ const RackPortsModal = ({
     setNotePrompt(null);
     setNoteValue('');
     setConnectionsOpen(false);
+    setPortPickerOpen(false);
   }, [open]);
 
   const applySaveLink = (forceOverwrite: boolean) => {
@@ -431,21 +479,33 @@ const RackPortsModal = ({
     closeNotePrompt();
   };
 
-  const buildPathParts = (kind: RackPortKind, index: number, side?: PortSide) => {
+  const handleBackdropClose = () => {
+    if (!closeOnBackdrop) return;
+    onClose();
+  };
+
+  const handleConnectionsClose = () => {
+    if (!closeOnBackdrop) return;
+    setConnectionsOpen(false);
+  };
+
+  const buildPathParts = (kind: RackPortKind, index: number, side?: PortSide): PathPart[] => {
     if (!item) return [];
     const visited = new Set<string>();
-    const parts: { key: string; label: string; deviceType?: RackItemType; deviceId?: string }[] = [];
+    const parts: PathPart[] = [];
     let current = { itemId: item.id, kind, index, side };
     while (current) {
       const key = `${current.itemId}:${current.kind}:${current.index}:${current.side || ''}`;
       if (visited.has(key)) break;
       visited.add(key);
       const device = rackItems.find((d) => d.id === current.itemId) || null;
+      const rackName = device ? getRackName(device.rackId) : '';
       parts.push({
         key,
         label: getPortLabel(current.itemId, current.kind, current.index, current.side),
         deviceType: device?.type,
-        deviceId: device?.id
+        deviceId: device?.id,
+        rackName
       });
       const link = getLinkForPort(current.itemId, current.kind, current.index, current.side);
       if (!link) break;
@@ -456,36 +516,79 @@ const RackPortsModal = ({
 
   const connections = useMemo(() => {
     if (!item) return [];
-    const items: { id: string; label: string; parts: { key: string; label: string; deviceType?: RackItemType }[] }[] = [];
+    const items: {
+      id: string;
+      portName: string;
+      sideLabel?: string;
+      parts: PathPart[];
+      kind: RackPortKind;
+      active: boolean;
+      speed?: string;
+      note?: string;
+    }[] = [];
     (['ethernet', 'fiber'] as RackPortKind[]).forEach((kind) => {
       const count = getPortCount(item, kind);
       for (let index = 1; index <= count; index += 1) {
+        const portName = getPortDisplayName(item, kind, index);
+        const note = getPortNote(item, kind, index);
         if (isDualSide(item)) {
           (['female', 'cable'] as PortSide[]).forEach((side) => {
             const link = getLinkForPort(item.id, kind, index, side);
-            if (!link) return;
-            const portName = getPortDisplayName(item, kind, index);
             const sideLabel = side === 'female' ? t({ it: 'Femmina', en: 'Female' }) : t({ it: 'Cablaggio', en: 'Cabling' });
             const parts = buildPathParts(kind, index, side);
             if (!parts.length) return;
             items.push({
               id: `${kind}-${index}-${side}`,
-              label: `${portName} · ${sideLabel}`,
-              parts
+              portName,
+              sideLabel,
+              parts,
+              kind,
+              active: !!link,
+              speed: link?.speed,
+              note
             });
           });
         } else {
           const link = getLinkForPort(item.id, kind, index);
-          if (!link) return;
-          const portName = getPortDisplayName(item, kind, index);
           const parts = buildPathParts(kind, index);
           if (!parts.length) return;
-          items.push({ id: `${kind}-${index}`, label: portName, parts });
+          items.push({
+            id: `${kind}-${index}`,
+            portName,
+            parts,
+            kind,
+            active: !!link,
+            speed: link?.speed,
+            note
+          });
         }
       }
     });
     return items;
   }, [item, rackItems, activeRackLinks, t]);
+
+  const connectionCollator = useMemo(() => new Intl.Collator('it', { sensitivity: 'base' }), []);
+
+  const visibleConnections = useMemo(() => {
+    const filtered = connections.filter((entry) => {
+      if (connectionsOnlyActive && !entry.active) return false;
+      if (connectionsKindFilter !== 'all' && entry.kind !== connectionsKindFilter) return false;
+      return true;
+    });
+    return [...filtered].sort((a, b) => {
+      const aStart = a.parts[0]?.rackName || '';
+      const bStart = b.parts[0]?.rackName || '';
+      const byStart = connectionCollator.compare(aStart, bStart);
+      if (byStart) return byStart;
+      const aEnd = a.parts[a.parts.length - 1]?.rackName || '';
+      const bEnd = b.parts[b.parts.length - 1]?.rackName || '';
+      const byEnd = connectionCollator.compare(aEnd, bEnd);
+      if (byEnd) return byEnd;
+      const aLabel = `${a.portName} ${a.sideLabel || ''}`.trim();
+      const bLabel = `${b.portName} ${b.sideLabel || ''}`.trim();
+      return connectionCollator.compare(aLabel, bLabel);
+    });
+  }, [connectionCollator, connections, connectionsKindFilter, connectionsOnlyActive]);
 
   const renderDualRow = (kind: RackPortKind, index: number) => {
       if (!item) return null;
@@ -684,7 +787,7 @@ const RackPortsModal = ({
 
   return (
     <>
-      <Dialog open={open} as="div" className="relative z-[90]" onClose={onClose}>
+      <Dialog open={open} as="div" className="relative z-[90]" onClose={handleBackdropClose}>
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" />
         <div className="fixed inset-0 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center px-4 py-6">
@@ -798,19 +901,25 @@ const RackPortsModal = ({
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-sm font-medium text-slate-700">
                       {t({ it: 'Porta', en: 'Port' })}
-                      <select
-                        value={targetPortIndex}
-                        onChange={(e) => setTargetPortIndex(Number(e.target.value) || 0)}
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                      <button
+                        type="button"
+                        onClick={() => setPortPickerOpen(true)}
                         disabled={!targetItemId}
+                        className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-left outline-none ring-primary/30 focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-100"
                       >
-                        <option value={0}>{t({ it: 'Seleziona porta', en: 'Select port' })}</option>
-                        {getAllPorts(targetItemId, linkPrompt.kind).map((p) => (
-                          <option key={p} value={p}>
-                            {getPortDisplayName(rackItems.find((d) => d.id === targetItemId) || null, linkPrompt.kind, p)}
-                          </option>
-                        ))}
-                      </select>
+                        <span className="truncate text-slate-700">
+                          {targetPortIndex ? targetPortLabel : t({ it: 'Seleziona porta', en: 'Select port' })}
+                        </span>
+                        {targetPortIndex ? (
+                          <span
+                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              targetPortLink ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                            }`}
+                          >
+                            {targetPortLink ? t({ it: 'Collegata', en: 'Linked' }) : t({ it: 'Libera', en: 'Free' })}
+                          </span>
+                        ) : null}
+                      </button>
                     </label>
                     {allowSpeed ? (
                       <label className="block text-sm font-medium text-slate-700">
@@ -832,7 +941,6 @@ const RackPortsModal = ({
                     )}
                   </div>
                   {(() => {
-                    const targetDevice = rackItems.find((d) => d.id === targetItemId) || null;
                     if (!isDualSide(targetDevice)) return null;
                     return (
                       <label className="block text-sm font-medium text-slate-700">
@@ -878,6 +986,85 @@ const RackPortsModal = ({
                   >
                     {t({ it: 'Salva collegamento', en: 'Save link' })}
                   </button>
+                </div>
+              </Dialog.Panel>
+            </div>
+          </div>
+        </Dialog>
+      ) : null}
+      {linkPrompt && portPickerOpen ? (
+        <Dialog open={portPickerOpen} as="div" className="relative z-[98]" onClose={() => setPortPickerOpen(false)}>
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" aria-hidden="true" />
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-6">
+              <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-card">
+                <div className="flex items-center justify-between gap-3">
+                  <Dialog.Title className="text-lg font-semibold text-ink">
+                    {t({ it: 'Seleziona porta', en: 'Select port' })}
+                  </Dialog.Title>
+                  <button onClick={() => setPortPickerOpen(false)} className="text-slate-500 hover:text-ink">
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="mt-2 text-sm text-slate-500">{targetDevice ? getDeviceLabel(targetDevice) : ''}</div>
+                {targetDevice ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+                    {getRackName(targetDevice.rackId) ? (
+                      <span className="rounded-full border border-slate-200 px-2 py-0.5 text-sky-600">
+                        {getRackName(targetDevice.rackId)}
+                      </span>
+                    ) : null}
+                    {isDualSide(targetDevice) ? (
+                      <span className="rounded-full border border-slate-200 px-2 py-0.5">
+                        {targetSide === 'cable' ? t({ it: 'Cablaggio', en: 'Cabling' }) : t({ it: 'Femmina', en: 'Female' })}
+                      </span>
+                    ) : null}
+                    <span className="rounded-full border border-slate-200 px-2 py-0.5">
+                      {linkPrompt.kind === 'fiber' ? t({ it: 'Fibra', en: 'Fiber' }) : t({ it: 'Rame', en: 'Copper' })}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="mt-4 space-y-2">
+                  {portPickerPorts.length ? (
+                    portPickerPorts.map((port) => {
+                      const link = getLinkForPort(targetItemId, linkPrompt.kind, port, targetSide);
+                      const isConnected = !!link;
+                      const statusLabel = isConnected ? t({ it: 'Collegata', en: 'Linked' }) : t({ it: 'Libera', en: 'Free' });
+                      const statusColor = isConnected ? 'bg-emerald-500' : 'bg-rose-500';
+                      return (
+                        <button
+                          key={port}
+                          type="button"
+                          onClick={() => {
+                            setTargetPortIndex(port);
+                            setPortPickerOpen(false);
+                          }}
+                          className={`w-full rounded-lg border px-3 py-2 text-left ${
+                            isConnected ? 'border-emerald-200 bg-emerald-50/60' : 'border-rose-200 bg-rose-50/60'
+                          } ${targetPortIndex === port ? 'ring-2 ring-primary/40' : ''}`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <span className={`h-2 w-2 rounded-full ${statusColor}`} />
+                              <span className="text-sm font-semibold text-slate-700">
+                                {getPortDisplayName(targetDevice, linkPrompt.kind, port)}
+                              </span>
+                            </div>
+                            <span className={`text-xs font-semibold ${isConnected ? 'text-emerald-700' : 'text-rose-700'}`}>
+                              {statusLabel}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {isConnected ? getConnectionTitle(link, targetItemId) : t({ it: 'Nessun collegamento', en: 'No link' })}
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                      {t({ it: 'Seleziona un apparato per vedere le porte disponibili.', en: 'Select a device to view available ports.' })}
+                    </div>
+                  )}
                 </div>
               </Dialog.Panel>
             </div>
@@ -987,7 +1174,7 @@ const RackPortsModal = ({
         </Dialog>
       ) : null}
       {connectionsOpen ? (
-        <Dialog open={connectionsOpen} as="div" className="relative z-[110]" onClose={() => setConnectionsOpen(false)}>
+        <Dialog open={connectionsOpen} as="div" className="relative z-[110]" onClose={handleConnectionsClose}>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" aria-hidden="true" />
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center px-4 py-6">
@@ -1002,35 +1189,126 @@ const RackPortsModal = ({
                 </div>
                 <div className="mt-1 text-xs text-slate-500">{getDeviceLabel(item)}</div>
                 {rackName ? <div className="mt-1 text-xs font-semibold text-sky-600">{rackName}</div> : null}
-                {connections.length === 0 ? (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setConnectionsOnlyActive((prev) => !prev)}
+                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                        connectionsOnlyActive ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {t({ it: 'Solo attive', en: 'Active only' })}
+                    </button>
+                    <div className="flex items-center rounded-full border border-slate-200 p-0.5 text-[10px] font-semibold text-slate-600">
+                      {(['all', 'ethernet', 'fiber'] as const).map((kind) => {
+                        const label =
+                          kind === 'all'
+                            ? t({ it: 'Tutte', en: 'All' })
+                            : kind === 'ethernet'
+                              ? t({ it: 'Rame', en: 'Copper' })
+                              : t({ it: 'Fibra', en: 'Fiber' });
+                        const isActive = connectionsKindFilter === kind;
+                        return (
+                          <button
+                            key={kind}
+                            onClick={() => setConnectionsKindFilter(kind)}
+                            className={`rounded-full px-2 py-0.5 ${isActive ? 'bg-slate-900 text-white' : ''}`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => setConnectionsExpanded((prev) => !prev)}
+                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                        connectionsExpanded ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {connectionsExpanded ? t({ it: 'Vista espansa', en: 'Expanded view' }) : t({ it: 'Vista compatta', en: 'Compact view' })}
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-[10px] font-semibold text-slate-500">
+                    {[
+                      { label: t({ it: 'Server', en: 'Server' }), colors: [typeColors.server] },
+                      { label: t({ it: 'Switch', en: 'Switch' }), colors: [typeColors.switch] },
+                      { label: t({ it: 'Patch/ottico', en: 'Patch/Optical' }), colors: [typeColors.patchpanel, typeColors.optical_drawer] }
+                    ].map((entry) => (
+                      <div key={entry.label} className="flex items-center gap-1">
+                        <span className="flex items-center gap-0.5">
+                          {entry.colors.map((color) => (
+                            <span key={color} className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                          ))}
+                        </span>
+                        <span>{entry.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {visibleConnections.length === 0 ? (
                   <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
                     {t({ it: 'Nessun collegamento presente.', en: 'No links available.' })}
                   </div>
                 ) : (
                   <div className="mt-4 space-y-3">
-                    {connections.map((entry) => (
-                      <div key={entry.id} className="rounded-xl border border-slate-200 bg-white px-3 py-3">
-                        <div className="text-xs font-semibold text-slate-600">{entry.label}</div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                          {entry.parts.map((part, idx, arr) => {
-                            const color = part.deviceType ? typeColors[part.deviceType] : '#94a3b8';
-                            const badgeStyle = {
-                              borderColor: color,
-                              backgroundColor: `${color}26`
-                            };
-                            return (
-                              <span key={`${entry.id}-${part.key}`} className="inline-flex items-center gap-2">
-                                <span className="inline-flex items-center gap-2 rounded-full border px-2 py-1" style={badgeStyle}>
-                                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-                                  <span className="font-medium text-slate-700">{part.label}</span>
+                    {visibleConnections.map((entry) => {
+                      const kindLabel =
+                        entry.kind === 'ethernet' ? t({ it: 'Rame', en: 'Copper' }) : t({ it: 'Fibra', en: 'Fiber' });
+                      const portLabel =
+                        connectionsExpanded && entry.sideLabel ? `${entry.portName} · ${entry.sideLabel}` : entry.portName;
+                      const speedLabel = connectionsExpanded && entry.speed ? ` · ${entry.speed}` : '';
+                      const kindColor = kindDefaults[entry.kind];
+                      const kindBadgeStyle = {
+                        borderColor: kindColor,
+                        backgroundColor: connectionsExpanded ? `${kindColor}1a` : `${kindColor}26`,
+                        color: kindColor
+                      };
+                      return (
+                        <div key={entry.id} className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-xs font-semibold text-slate-600">{portLabel}</div>
+                            <div className="flex items-center gap-2 text-[10px] font-semibold">
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
+                                style={kindBadgeStyle}
+                              >
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: kindColor }} />
+                                <span>
+                                  {kindLabel}
+                                  {speedLabel}
                                 </span>
-                                {idx < arr.length - 1 ? <ArrowRight size={12} className="text-slate-400" /> : null}
                               </span>
-                            );
-                          })}
+                              {connectionsExpanded && !entry.active ? (
+                                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-500">
+                                  {t({ it: 'Libera', en: 'Free' })}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                          {connectionsExpanded && entry.note ? (
+                            <div className="mt-2 text-[11px] text-slate-500">{entry.note}</div>
+                          ) : null}
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                            {entry.parts.map((part, idx, arr) => {
+                              const color = part.deviceType ? typeColors[part.deviceType] : '#94a3b8';
+                              const badgeStyle = {
+                                borderColor: color,
+                                backgroundColor: `${color}26`
+                              };
+                              return (
+                                <span key={`${entry.id}-${part.key}`} className="inline-flex items-center gap-2">
+                                  <span className="inline-flex items-center gap-2 rounded-full border px-2 py-1" style={badgeStyle}>
+                                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                                    <span className="font-medium text-slate-700">{part.label}</span>
+                                  </span>
+                                  {idx < arr.length - 1 ? <ArrowRight size={12} className="text-slate-400" /> : null}
+                                </span>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </Dialog.Panel>

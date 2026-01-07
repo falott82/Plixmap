@@ -35,7 +35,7 @@ import ExportButton from './ExportButton';
 import ObjectModal from './ObjectModal';
 import RoomAllocationModal from './RoomAllocationModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { FloorPlan, FloorPlanView, MapObject, MapObjectType, PlanLink, Room } from '../../store/types';
+import { FloorPlan, FloorPlanView, MapObject, MapObjectType, PlanLink, RackItem, RackLink, RackPortKind, Room } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
@@ -51,6 +51,7 @@ import RevisionsModal from './RevisionsModal';
 import SaveRevisionModal from './SaveRevisionModal';
 import RoomModal from './RoomModal';
 import RackModal from './RackModal';
+import RackPortsModal from './RackPortsModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
 import BulkEditSelectionModal from './BulkEditSelectionModal';
 import SelectedObjectsModal from './SelectedObjectsModal';
@@ -73,6 +74,8 @@ import { perfMetrics } from '../../utils/perfMetrics';
 interface Props {
   planId: string;
 }
+
+const isRackLinkId = (id?: string | null) => typeof id === 'string' && id.startsWith('racklink:');
 
 const PlanView = ({ planId }: Props) => {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -100,7 +103,10 @@ const PlanView = ({ planId }: Props) => {
     clearRevisions,
     addLink,
     deleteLink,
-    updateLink
+    updateLink,
+    addRackLink,
+    deleteRackLink,
+    updateRackItem
   } = useDataStore(
     (s) => ({
       addObject: s.addObject,
@@ -120,9 +126,12 @@ const PlanView = ({ planId }: Props) => {
       restoreRevision: (s as any).restoreRevision,
       deleteRevision: s.deleteRevision,
       clearRevisions: s.clearRevisions,
-	      addLink: (s as any).addLink,
-	      deleteLink: (s as any).deleteLink,
-        updateLink: (s as any).updateLink
+      addLink: (s as any).addLink,
+      deleteLink: (s as any).deleteLink,
+      updateLink: (s as any).updateLink,
+      addRackLink: (s as any).addRackLink,
+      deleteRackLink: (s as any).deleteRackLink,
+      updateRackItem: (s as any).updateRackItem
 	    }),
 	    shallow
 	  );
@@ -312,6 +321,11 @@ const PlanView = ({ planId }: Props) => {
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewsMenuOpen, setViewsMenuOpen] = useState(false);
   const [rackModal, setRackModal] = useState<{ objectId: string } | null>(null);
+  const [rackPortsLink, setRackPortsLink] = useState<{
+    itemId: string;
+    kind?: RackPortKind;
+    openConnections?: boolean;
+  } | null>(null);
   const [selectedViewId, setSelectedViewId] = useState<string>('__last__');
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
   const [searchResultsTerm, setSearchResultsTerm] = useState('');
@@ -547,6 +561,70 @@ const PlanView = ({ planId }: Props) => {
     } as FloorPlan;
   }, [activeRevision, plan]);
 
+  const rackOverlayLinks = useMemo(() => {
+    if (!renderPlan) return [] as any[];
+    const rackItems = ((renderPlan as any).rackItems || []) as RackItem[];
+    const rackLinks = ((renderPlan as any).rackLinks || []) as RackLink[];
+    if (!rackItems.length || !rackLinks.length) return [] as any[];
+    const itemsById = new Map(rackItems.map((item) => [item.id, item]));
+    const rackObjectsById = new Map(
+      (renderPlan.objects || []).filter((obj) => obj.type === 'rack').map((obj) => [obj.id, obj])
+    );
+    const grouped = new Map<string, { link: RackLink; fromItem: RackItem; toItem: RackItem }[]>();
+    for (const link of rackLinks) {
+      const fromItem = itemsById.get(link.fromItemId);
+      const toItem = itemsById.get(link.toItemId);
+      if (!fromItem || !toItem) continue;
+      if (fromItem.rackId === toItem.rackId) continue;
+      const fromObj = rackObjectsById.get(fromItem.rackId);
+      const toObj = rackObjectsById.get(toItem.rackId);
+      if (!fromObj || !toObj) continue;
+      const key = [fromItem.rackId, toItem.rackId].sort().join('|');
+      const list = grouped.get(key) || [];
+      list.push({ link, fromItem, toItem });
+      grouped.set(key, list);
+    }
+    const out: any[] = [];
+    const spacing = 10;
+    grouped.forEach((list) => {
+      const sorted = list.slice().sort((a, b) => Number(a.link.createdAt || 0) - Number(b.link.createdAt || 0));
+      const count = sorted.length;
+      const center = (count - 1) / 2;
+      sorted.forEach((entry, index) => {
+        const { link, fromItem, toItem } = entry;
+        const fromObj = rackObjectsById.get(fromItem.rackId);
+        const toObj = rackObjectsById.get(toItem.rackId);
+        if (!fromObj || !toObj) return;
+        const kind = link.kind === 'fiber' ? 'fiber' : 'ethernet';
+        const color = kind === 'fiber' ? '#a855f7' : '#3b82f6';
+        const offset = (index - center) * spacing;
+        out.push({
+          id: `racklink:${link.id}`,
+          fromId: fromObj.id,
+          toId: toObj.id,
+          kind: 'cable',
+          dashed: true,
+          route: 'vh',
+          width: 2,
+          color,
+          offset,
+          rackLinkId: link.id,
+          rackFromItemId: link.fromItemId,
+          rackToItemId: link.toItemId,
+          rackKind: kind,
+          rackFromRackId: fromItem.rackId,
+          rackToRackId: toItem.rackId
+        });
+      });
+    });
+    return out;
+  }, [renderPlan]);
+
+  const rackOverlayById = useMemo(
+    () => new Map(rackOverlayLinks.map((link) => [String(link.id), link])),
+    [rackOverlayLinks]
+  );
+
   const planLayers = useMemo(() => {
     const layers = (renderPlan as any)?.layers || [];
     return [...layers].sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
@@ -573,14 +651,19 @@ const PlanView = ({ planId }: Props) => {
     });
     const rooms = visible.has('rooms') ? renderPlan.rooms : [];
     const visibleObjectIds = new Set(objects.map((o: any) => o.id));
-    const links = Array.isArray((renderPlan as any).links)
+    const baseLinks = Array.isArray((renderPlan as any).links)
       ? ((renderPlan as any).links as any[]).filter((l) => {
           if (!visible.has('cabling')) return false;
           return visibleObjectIds.has(String((l as any).fromId || '')) && visibleObjectIds.has(String((l as any).toId || ''));
         })
-      : (renderPlan as any).links;
+      : [];
+    const showRackLinks = visible.has('cabling') || visible.has('racks');
+    const rackLinks = showRackLinks
+      ? rackOverlayLinks.filter((l) => visibleObjectIds.has(String(l.fromId)) && visibleObjectIds.has(String(l.toId)))
+      : [];
+    const links = [...baseLinks, ...rackLinks];
     return { ...renderPlan, objects, rooms, links };
-  }, [effectiveVisibleLayerIds, renderPlan]);
+  }, [effectiveVisibleLayerIds, rackOverlayLinks, renderPlan]);
 
   const linksModalObjectName = useMemo(() => {
     if (!linksModalObjectId) return '';
@@ -637,6 +720,63 @@ const PlanView = ({ planId }: Props) => {
       })
     };
   }, [isReadOnly, linkCreateMode, linkFromId, renderPlan, t]);
+
+  const rackPortsLinkItem = useMemo(() => {
+    if (!rackPortsLink || !renderPlan) return null;
+    return ((renderPlan as any).rackItems || []).find((item: RackItem) => item.id === rackPortsLink.itemId) || null;
+  }, [rackPortsLink, renderPlan]);
+
+  useEffect(() => {
+    if (!rackPortsLink) return;
+    if (!rackPortsLinkItem) setRackPortsLink(null);
+  }, [rackPortsLink, rackPortsLinkItem]);
+
+  const openRackLinkPorts = useCallback(
+    (id: string) => {
+      const link = rackOverlayById.get(id);
+      if (!link) return;
+      const targetItemId = link.rackFromItemId || link.rackToItemId;
+      if (!targetItemId) return;
+      setRackPortsLink({
+        itemId: String(targetItemId),
+        kind: link.rackKind as RackPortKind,
+        openConnections: true
+      });
+    },
+    [rackOverlayById]
+  );
+
+  const handleRackPortsRename = useCallback(
+    (itemId: string, kind: RackPortKind, index: number, name: string) => {
+      if (isReadOnly || !renderPlan) return;
+      const item = ((renderPlan as any).rackItems || []).find((entry: RackItem) => entry.id === itemId);
+      if (!item) return;
+      const key = kind === 'ethernet' ? 'ethPortNames' : 'fiberPortNames';
+      const current = ((item as any)[key] as string[] | undefined) || [];
+      const next = [...current];
+      const normalized = name.trim();
+      while (next.length < index) next.push('');
+      next[index - 1] = normalized;
+      updateRackItem(planId, itemId, { [key]: next } as Partial<RackItem>);
+    },
+    [isReadOnly, planId, renderPlan, updateRackItem]
+  );
+
+  const handleRackPortsNote = useCallback(
+    (itemId: string, kind: RackPortKind, index: number, note: string) => {
+      if (isReadOnly || !renderPlan) return;
+      const item = ((renderPlan as any).rackItems || []).find((entry: RackItem) => entry.id === itemId);
+      if (!item) return;
+      const key = kind === 'ethernet' ? 'ethPortNotes' : 'fiberPortNotes';
+      const current = ((item as any)[key] as string[] | undefined) || [];
+      const next = [...current];
+      const normalized = note.trim();
+      while (next.length < index) next.push('');
+      next[index - 1] = normalized;
+      updateRackItem(planId, itemId, { [key]: next } as Partial<RackItem>);
+    },
+    [isReadOnly, planId, renderPlan, updateRackItem]
+  );
 
   const latestRev = useMemo(() => {
     const revs: any[] = plan?.revisions || [];
@@ -1111,6 +1251,14 @@ const PlanView = ({ planId }: Props) => {
     return selectedObjectIds.includes(contextMenu.id);
   }, [contextMenu, selectedObjectIds]);
 
+  const contextIsRack = contextObject?.type === 'rack';
+
+  const selectionHasRack = useMemo(() => {
+    if (!renderPlan) return false;
+    if (!selectedObjectIds?.length) return false;
+    return selectedObjectIds.some((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'rack');
+  }, [renderPlan, selectedObjectIds]);
+
   useEffect(() => {
     planRef.current = renderPlan;
   }, [renderPlan]);
@@ -1262,8 +1410,10 @@ const PlanView = ({ planId }: Props) => {
   );
 
   const handleLinkContextMenu = useCallback(
-    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) =>
-      setContextMenu({ kind: 'link', id, x: clientX, y: clientY }),
+    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) => {
+      if (isRackLinkId(id)) return;
+      setContextMenu({ kind: 'link', id, x: clientX, y: clientY });
+    },
     []
   );
 
@@ -1649,6 +1799,7 @@ const PlanView = ({ planId }: Props) => {
       const linkId = selectedLinkIdRef.current;
       if (!currentSelectedIds.length && !selectedRoomId && linkId && (e.key === 'Delete' || e.key === 'Backspace') && currentPlan) {
         e.preventDefault();
+        if (isRackLinkId(linkId)) return;
         if (isReadOnlyRef.current) return;
         markTouched();
         deleteLink((currentPlan as FloorPlan).id, linkId);
@@ -2884,26 +3035,43 @@ const PlanView = ({ planId }: Props) => {
                   </button>
                 </>
               ) : selectedLinkId ? (
-                <>
-                  <span className="text-sm font-semibold text-slate-600">{t({ it: 'Collegamento:', en: 'Link:' })}</span>
-                  <span className="max-w-[320px] truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
-                    {(() => {
-                      const l = ((basePlan as any).links || []).find((x: any) => x.id === selectedLinkId);
-                      const a = l ? getObjectNameById(String(l.fromId)) : '';
-                      const b = l ? getObjectNameById(String(l.toId)) : '';
-                      const label = l ? String(l.name || l.label || t({ it: 'Collegamento', en: 'Link' })) : t({ it: 'Collegamento', en: 'Link' });
-                      return `${label}: ${a} → ${b}`;
-                    })()}
-                  </span>
-                  <button
-                    onClick={() => setLinkEditId(selectedLinkId)}
-                    disabled={isReadOnly}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Modifica', en: 'Edit' })}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                </>
+                isRackLinkId(selectedLinkId) ? (
+                  <>
+                    <span className="text-sm font-semibold text-slate-600">
+                      {t({ it: 'Collegamento rack:', en: 'Rack link:' })}
+                    </span>
+                    <span className="max-w-[320px] truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
+                      {(() => {
+                        const l = rackOverlayById.get(selectedLinkId);
+                        const a = l ? getObjectNameById(String(l.rackFromRackId)) : '';
+                        const b = l ? getObjectNameById(String(l.rackToRackId)) : '';
+                        const kindLabel = l?.rackKind === 'fiber' ? t({ it: 'Fibra', en: 'Fiber' }) : t({ it: 'Rame', en: 'Copper' });
+                        return `${kindLabel}: ${a} → ${b}`;
+                      })()}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm font-semibold text-slate-600">{t({ it: 'Collegamento:', en: 'Link:' })}</span>
+                    <span className="max-w-[320px] truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
+                      {(() => {
+                        const l = ((basePlan as any).links || []).find((x: any) => x.id === selectedLinkId);
+                        const a = l ? getObjectNameById(String(l.fromId)) : '';
+                        const b = l ? getObjectNameById(String(l.toId)) : '';
+                        const label = l ? String(l.name || l.label || t({ it: 'Collegamento', en: 'Link' })) : t({ it: 'Collegamento', en: 'Link' });
+                        return `${label}: ${a} → ${b}`;
+                      })()}
+                    </span>
+                    <button
+                      onClick={() => setLinkEditId(selectedLinkId)}
+                      disabled={isReadOnly}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Modifica', en: 'Edit' })}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  </>
+                )
               ) : (
                 selectedRoomId ? (
                   <>
@@ -3210,6 +3378,18 @@ const PlanView = ({ planId }: Props) => {
 					                onSelect={handleStageSelect}
                       roomStatsById={roomStatsById}
 	                    onSelectLink={(id) => {
+	                      if (!id) {
+	                        setSelectedLinkId(null);
+	                        return;
+	                      }
+	                      if (isRackLinkId(id)) {
+	                        openRackLinkPorts(id);
+	                        setSelectedLinkId(id);
+	                        setContextMenu(null);
+	                        clearSelection();
+	                        setSelectedRoomId(undefined);
+	                        return;
+	                      }
 	                      setSelectedLinkId(id || null);
 	                      setContextMenu(null);
 	                      clearSelection();
@@ -3229,6 +3409,10 @@ const PlanView = ({ planId }: Props) => {
                     onLinkContextMenu={handleLinkContextMenu}
                     onRoomContextMenu={handleRoomContextMenu}
                     onLinkDblClick={(id) => {
+                      if (isRackLinkId(id)) {
+                        openRackLinkPorts(id);
+                        return;
+                      }
                       if (isReadOnly) return;
                       setLinkEditId(id);
                     }}
@@ -3510,7 +3694,9 @@ const PlanView = ({ planId }: Props) => {
                       })}
                     </button>
                   ) : null}
-                  <div className="my-2 h-px bg-slate-100" />
+                  {!contextIsRack ? (
+                    <>
+                      <div className="my-2 h-px bg-slate-100" />
 		                  <button
 		                    onClick={() => {
 		                      if (isReadOnly) return;
@@ -3533,7 +3719,9 @@ const PlanView = ({ planId }: Props) => {
                       >
                         <CornerDownRight size={14} className="text-slate-500" /> {t({ it: 'Crea collegamento 90°', en: 'Create 90° link' })}
                       </button>
-                      <div className="my-2 h-px bg-slate-100" />
+                    </>
+                  ) : null}
+                  <div className="my-2 h-px bg-slate-100" />
 		                  <button
 		                    onClick={() => {
 		                      openDuplicate(contextMenu.id);
@@ -3570,7 +3758,7 @@ const PlanView = ({ planId }: Props) => {
               )}
 
               {contextIsMulti ? (
-                !isReadOnly && selectedObjectIds.length === 2 ? (
+                !isReadOnly && selectedObjectIds.length === 2 && !selectionHasRack ? (
                   <button
                     onClick={() => {
                       const [a, b] = selectedObjectIds;
@@ -3849,6 +4037,25 @@ const PlanView = ({ planId }: Props) => {
           rackObjectName={renderPlan.objects.find((o) => o.id === rackModal.objectId)?.name || t({ it: 'Rack', en: 'Rack' })}
           readOnly={isReadOnly}
           onClose={() => setRackModal(null)}
+        />
+      ) : null}
+
+      {rackPortsLink && rackPortsLinkItem && renderPlan ? (
+        <RackPortsModal
+          open={!!rackPortsLink}
+          item={rackPortsLinkItem}
+          racks={(renderPlan as any).racks || []}
+          rackItems={(renderPlan as any).rackItems || []}
+          rackLinks={(renderPlan as any).rackLinks || []}
+          readOnly={isReadOnly}
+          initialConnectionsOpen={!!rackPortsLink.openConnections}
+          initialConnectionsKind={rackPortsLink.kind}
+          closeOnBackdrop={false}
+          onClose={() => setRackPortsLink(null)}
+          onAddLink={(payload) => addRackLink(planId, payload)}
+          onDeleteLink={(linkId) => deleteRackLink(planId, linkId)}
+          onRenamePort={handleRackPortsRename}
+          onSavePortNote={handleRackPortsNote}
         />
       ) : null}
 
