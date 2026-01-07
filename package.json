@@ -27,7 +27,7 @@
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "html2canvas": "^1.4.1",
-    "jspdf": "^3.0.4",
+    "jspdf": "^4.0.0",
     "konva": "^9.3.6",
     "lexical": "^0.39.0",
     "lucide-react": "^0.308.0",
