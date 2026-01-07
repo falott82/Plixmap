@@ -9,6 +9,37 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.4.3',
+    date: '2026-01-05',
+    type: 'minor',
+    notes: [
+      n(
+        'Planimetria: collegamenti rack visibili anche con layer Cablaggi spento',
+        'Floor plan: rack links visible even with Cabling layer hidden'
+      ),
+      n(
+        'Planimetria: collegamenti multipli tra rack con linee parallele ordinate',
+        'Floor plan: multiple rack links rendered as ordered parallel lines'
+      ),
+      n(
+        'Rack: modale collegamenti persistente (non si chiude su click esterno/ESC)',
+        'Rack: connections modal stays open (no close on backdrop/ESC)'
+      ),
+      n(
+        'Rack: selezione porte con modale stato collegamenti (libera/collegata)',
+        'Rack: port selection modal with link status (free/linked)'
+      ),
+      n(
+        'Rack: stato porte corretto per apparati senza lato (es. switch)',
+        'Rack: port status fixed for devices without sides (e.g., switches)'
+      ),
+      n(
+        'Planimetria: menu collegamenti disabilitato sui rack',
+        'Floor plan: link actions disabled for rack objects'
+      )
+    ]
+  },
+  {
     version: '1.4.2',
     date: '2026-01-04',
     type: 'minor',
