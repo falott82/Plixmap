@@ -1,5 +1,7 @@
 # Deskly — Floor Plan Management (Drag & Drop)
 
+Current version: **1.4.5**
+
 Deskly is a modern web app to manage company floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, saved views, revision history, search/highlight, and PDF exports.
 
 The UI supports **Italian and English**. When you change language from the user menu, the app performs a full refresh to ensure every screen (including tooltips/modals) is consistently translated.
@@ -283,9 +285,17 @@ Data persistence:
 ## Security
 - Dependabot is enabled: `.github/dependabot.yml`
 - GitHub Action runs `npm audit --omit=dev`: `.github/workflows/security-audit.yml`
-- Recommended before releasing:
+- Recommended before releasing (local/npm):
 ```bash
-npm audit --omit=dev
+npm audit --omit=dev --audit-level=high
+```
+- Or via npm script:
+```bash
+npm run audit:prod
+```
+- If running via Docker:
+```bash
+docker compose exec deskly npm audit --omit=dev --audit-level=high
 ```
 - Users: create accounts, import permissions from an existing user, and manage access; superadmin is highlighted and cannot be disabled.
 - Users list shows the account creation timestamp to help auditing and onboarding.

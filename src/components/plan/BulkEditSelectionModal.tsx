@@ -228,6 +228,7 @@ const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onCl
                   <button
                     onClick={onClose}
                     className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Annulla', en: 'Cancel' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -235,6 +236,7 @@ const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onCl
                     onClick={apply}
                     disabled={!canApply}
                     className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                    title={t({ it: 'Applica modifiche', en: 'Apply changes' })}
                   >
                     {t({ it: 'Applica modifiche', en: 'Apply changes' })}
                   </button>

@@ -165,6 +165,7 @@ const CableModal = ({ open, initial, onClose, onSubmit }: Props) => {
                   <button
                     onClick={onClose}
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                    title={t({ it: 'Annulla', en: 'Cancel' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -172,6 +173,7 @@ const CableModal = ({ open, initial, onClose, onSubmit }: Props) => {
                     disabled={!canSubmit}
                     onClick={() => onSubmit({ name: name.trim(), description: description.trim() || undefined, color, width, dashed, route })}
                     className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-50"
+                    title={t({ it: 'Salva', en: 'Save' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}
                   </button>

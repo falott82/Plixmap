@@ -143,12 +143,14 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                           <button
                             onClick={() => toggleAll(true)}
                             className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            title={t({ it: 'Seleziona tutto', en: 'Select all' })}
                           >
                             {t({ it: 'Seleziona tutto', en: 'Select all' })}
                           </button>
                           <button
                             onClick={() => toggleAll(false)}
                             className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            title={t({ it: 'Deseleziona', en: 'Clear' })}
                           >
                             {t({ it: 'Deseleziona', en: 'Clear' })}
                           </button>
@@ -177,6 +179,7 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                             <button
                               onClick={() => setExpandedClients((p) => ({ ...p, [c.clientId]: !cOpen }))}
                               className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm font-semibold text-ink hover:bg-slate-50"
+                              title={cOpen ? t({ it: 'Comprimi cliente', en: 'Collapse client' }) : t({ it: 'Espandi cliente', en: 'Expand client' })}
                             >
                               <span className="flex items-center gap-2">{cOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}{c.clientName}</span>
                             </button>
@@ -190,6 +193,7 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                                       <button
                                         onClick={() => setExpandedSites((p) => ({ ...p, [skey]: !sOpen }))}
                                         className="flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                        title={sOpen ? t({ it: 'Comprimi sito', en: 'Collapse site' }) : t({ it: 'Espandi sito', en: 'Expand site' })}
                                       >
                                         <span className="flex items-center gap-2">{sOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}{s.siteName}</span>
                                       </button>
@@ -286,6 +290,7 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                         onClick={onClose}
                         className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                         disabled={busy}
+                        title={t({ it: 'Annulla', en: 'Cancel' })}
                       >
                         {t({ it: 'Annulla', en: 'Cancel' })}
                       </button>

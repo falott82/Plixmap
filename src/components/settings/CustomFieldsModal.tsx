@@ -140,6 +140,7 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
                         className={`mt-1 inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-white ${
                           busy || !canSubmit ? 'cursor-not-allowed bg-slate-300' : 'bg-primary hover:bg-primary/90'
                         }`}
+                        title={t({ it: 'Aggiungi il campo personalizzato', en: 'Add the custom field' })}
                       >
                         <Plus size={16} /> {t({ it: 'Aggiungi', en: 'Add' })}
                       </button>
@@ -174,6 +175,7 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
                                 }
                               }}
                               className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              title={t({ it: 'Rinomina il campo', en: 'Rename the field' })}
                             >
                               {t({ it: 'Rinomina', en: 'Rename' })}
                             </button>
@@ -213,4 +215,3 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
 };
 
 export default CustomFieldsModal;
-

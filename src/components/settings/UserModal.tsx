@@ -419,6 +419,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                   <button
                     onClick={onClose}
                     className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Chiudi senza salvare l’utente', en: 'Close without saving the user' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -426,6 +427,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                     onClick={submit}
                     disabled={!canSubmit}
                     className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                    title={t({ it: 'Salva l’utente', en: 'Save the user' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}
                   </button>

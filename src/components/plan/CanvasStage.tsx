@@ -511,7 +511,7 @@ const CanvasStageImpl = (
   const refreshStage = useCallback(() => {
     const stage = stageRef.current;
     if (!stage) return;
-    stage.getLayers()?.forEach((layer) => layer.batchDraw());
+    stage.getLayers()?.forEach((layer: { batchDraw: () => void }) => layer.batchDraw());
   }, []);
 
   useEffect(() => {

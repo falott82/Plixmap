@@ -540,6 +540,7 @@ const CustomImportPanel = () => {
                       className={`rounded-full border px-3 py-1 text-xs font-semibold ${
                         importMode === 'webapi' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                       }`}
+                      title={t({ it: 'Usa importazione da WebAPI', en: 'Use WebAPI import' })}
                     >
                       WebAPI
                     </button>
@@ -548,6 +549,7 @@ const CustomImportPanel = () => {
                       className={`rounded-full border px-3 py-1 text-xs font-semibold ${
                         importMode === 'csv' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                       }`}
+                      title={t({ it: 'Usa importazione da CSV', en: 'Use CSV import' })}
                     >
                       CSV
                     </button>
@@ -845,6 +847,7 @@ const CustomImportPanel = () => {
                     <button
                       onClick={() => setUsersOpen(false)}
                       className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Chiudi la lista utenti importati', en: 'Close imported users list' })}
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}
                     </button>
@@ -853,6 +856,7 @@ const CustomImportPanel = () => {
                         onClick={() => activeClientId && runSync(activeClientId)}
                         disabled={!activeClientId || syncingClientId === activeClientId}
                         className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        title={t({ it: 'Aggiorna importazione WebAPI', en: 'Sync WebAPI import' })}
                       >
                         <RefreshCw size={16} className={syncingClientId === activeClientId ? 'animate-spin' : ''} />
                         {t({ it: 'Aggiorna importazione', en: 'Sync import' })}
@@ -908,6 +912,7 @@ const CustomImportPanel = () => {
                     <button
                       onClick={() => setCsvConfirmOpen(false)}
                       className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Annulla import CSV', en: 'Cancel CSV import' })}
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
                     </button>
@@ -915,6 +920,7 @@ const CustomImportPanel = () => {
                       onClick={() => runCsvImport('append')}
                       disabled={csvImporting}
                       className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                      title={t({ it: 'Somma utenti del CSV', en: 'Append CSV users' })}
                     >
                       {t({ it: 'Somma utenti', en: 'Append users' })}
                     </button>
@@ -922,6 +928,7 @@ const CustomImportPanel = () => {
                       onClick={() => runCsvImport('replace')}
                       disabled={csvImporting}
                       className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:opacity-60"
+                      title={t({ it: 'Sostituisci tutti gli utenti con il CSV', en: 'Replace all users with CSV' })}
                     >
                       {t({ it: 'Sostituisci tutto', en: 'Replace all' })}
                     </button>
@@ -992,6 +999,7 @@ const CustomImportPanel = () => {
                     <button
                       onClick={() => setInfoOpen(false)}
                       className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Chiudi le info cliente', en: 'Close client info' })}
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}
                     </button>

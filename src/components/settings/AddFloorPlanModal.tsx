@@ -152,6 +152,7 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
                   <button
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Chiudi senza creare la planimetria', en: 'Close without creating the floor plan' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -163,6 +164,7 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
                       onClose();
                     }}
                     className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-50"
+                    title={t({ it: 'Crea la nuova planimetria', en: 'Create the new floor plan' })}
                   >
                     {t({ it: 'Aggiungi', en: 'Add' })}
                   </button>
