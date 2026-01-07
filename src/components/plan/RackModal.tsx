@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import jsPDF from 'jspdf';
 import { Dialog } from '@headlessui/react';
-import { Cable, Link2, Trash, X } from 'lucide-react';
+import { Cable, Copy, Link2, Trash, X } from 'lucide-react';
 import { useDataStore } from '../../store/useDataStore';
 import { RackItem, RackItemType, FloorPlan, RackPortKind } from '../../store/types';
 import { useT } from '../../i18n/useT';
@@ -45,6 +45,8 @@ const unitHeight = 22;
 
 const typeLabels: Record<RackItemType, { it: string; en: string }> = {
   switch: { it: 'Switch', en: 'Switch' },
+  router: { it: 'Router', en: 'Router' },
+  firewall: { it: 'Firewall', en: 'Firewall' },
   server: { it: 'Server', en: 'Server' },
   patchpanel: { it: 'Patch panel', en: 'Patch panel' },
   optical_drawer: { it: 'Cassetto ottico', en: 'Optical drawer' },
@@ -55,6 +57,8 @@ const typeLabels: Record<RackItemType, { it: string; en: string }> = {
 
 const typeColors: Record<RackItemType, string> = {
   switch: '#3b82f6',
+  router: '#22c55e',
+  firewall: '#ef4444',
   server: '#14b8a6',
   patchpanel: '#f59e0b',
   optical_drawer: '#a855f7',
@@ -88,6 +92,8 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     step: 'units' | 'place';
     unitSize: number;
     preferredY?: number | null;
+    mode?: 'add' | 'clone';
+    sourceId?: string;
   } | null>(null);
   const [editPrompt, setEditPrompt] = useState<{
     itemId: string;
@@ -179,7 +185,11 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     if (!term) return rackItems;
     return rackItems.filter((item) => {
       const label = typeLabels[item.type]?.it || item.type;
-      const hay = `${item.name} ${item.hostName || ''} ${label}`.toLowerCase();
+      const baseName =
+        item.type === 'switch' || item.type === 'router' || item.type === 'firewall' || item.type === 'server'
+          ? item.hostName || ''
+          : item.name || '';
+      const hay = `${baseName} ${label}`.toLowerCase();
       return hay.includes(term);
     });
   }, [rackItems, rackSearch]);
@@ -282,11 +292,13 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     setDraft(toDraft(selectedItem));
   }, [selectedItem]);
 
-  const hasEth = (type: RackItemType) => type === 'switch' || type === 'patchpanel';
-  const hasFiber = (type: RackItemType) => type === 'switch' || type === 'optical_drawer';
+  const hasEth = (type: RackItemType) =>
+    type === 'switch' || type === 'router' || type === 'firewall' || type === 'server' || type === 'patchpanel';
+  const hasFiber = (type: RackItemType) =>
+    type === 'switch' || type === 'router' || type === 'firewall' || type === 'server' || type === 'optical_drawer';
   const hasPorts = (item: RackItem | null) => {
     if (!item) return false;
-    return item.type === 'switch' || item.type === 'patchpanel' || item.type === 'optical_drawer';
+    return hasEth(item.type) || hasFiber(item.type);
   };
 
   const rangesOverlap = (aStart: number, aSize: number, bStart: number, bSize: number) => {
@@ -387,7 +399,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     if (readOnly) return;
     setAddUnitSize(1);
     setAddDetails(buildDefaultDetails(type));
-    setAddPrompt({ type, step: 'units', unitSize: 1, preferredY: preferredY ?? null });
+    setAddPrompt({ type, step: 'units', unitSize: 1, preferredY: preferredY ?? null, mode: 'add' });
   };
 
   const handleAddItem = (type: RackItemType) => {
@@ -400,6 +412,25 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     setEditUnitSize(item.unitSize || 1);
     setEditDetails(toEditDetails(item));
     setEditPrompt({ itemId: item.id, type: item.type });
+  };
+
+  const openClonePrompt = (item: RackItem) => {
+    if (readOnly) return;
+    const size = Math.max(1, item.unitSize || 1);
+    if (!findFirstSlot(size)) {
+      push(t({ it: 'Nessuno slot disponibile per clonare questo apparato.', en: 'No available slot to clone this device.' }), 'info');
+      return;
+    }
+    setAddUnitSize(item.unitSize || 1);
+    setAddDetails(toEditDetails(item));
+    setAddPrompt({
+      type: item.type,
+      step: 'units',
+      unitSize: item.unitSize || 1,
+      preferredY: null,
+      mode: 'clone',
+      sourceId: item.id
+    });
   };
 
   const handleDrop = (evt: React.DragEvent<HTMLDivElement>) => {
@@ -501,11 +532,9 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
         ];
         pdf.setFillColor(r, g, b);
         pdf.rect(rackX + 6, top + 2, 4, height - 4, 'F');
-        const hostSuffix =
-          (item.type === 'switch' || item.type === 'server') && item.hostName ? ` · ${item.hostName}` : '';
-        const label = `${item.name}${hostSuffix} · ${item.unitSize}U · ${typeLabels[item.type]?.it || item.type}`;
+        const label = `${getRackItemLabel(item)} · ${item.unitSize}U · ${typeLabels[item.type]?.it || item.type}`;
         const ip =
-          item.type === 'switch' && item.mgmtIp
+          (item.type === 'switch' || item.type === 'router' || item.type === 'firewall') && item.mgmtIp
             ? item.mgmtIp
             : item.type === 'server' && item.ip
               ? item.ip
@@ -527,13 +556,14 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
       pdf.save(`${title.replace(/\s+/g, '_')}.pdf`);
       push(t({ it: 'PDF rack creato', en: 'Rack PDF generated' }), 'success');
     } catch (error) {
-      push(t({ it: 'Errore durante l’export PDF', en: 'PDF export failed' }), 'error');
+      push(t({ it: 'Errore durante l’export PDF', en: 'PDF export failed' }), 'danger');
     }
   };
 
   const handleSaveItem = () => {
     if (readOnly || !selectedItem || !draft) return;
-    if (!draft.name.trim()) return;
+    const mainLabel = hasHostName(selectedItem.type) ? draft.hostName.trim() : draft.name.trim();
+    if (!mainLabel) return;
     if (!isSlotFree(draft.unitStart, draft.unitSize, selectedItem.id)) {
       push(t({ it: 'La posizione è occupata.', en: 'Selected slot is occupied.' }), 'info');
       return;
@@ -543,11 +573,11 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     const nextEthStart = 1;
     const nextFiberStart = Math.max(1, nextEthStart + nextEthPorts);
     updateRackItem(plan.id, selectedItem.id, {
-      name: draft.name.trim(),
+      name: hasHostName(selectedItem.type) ? (draft.hostName.trim() || draft.name.trim()) : draft.name.trim(),
       brand: draft.brand.trim(),
       model: draft.model.trim(),
       ip: draft.ip.trim(),
-      hostName: draft.hostName.trim(),
+      hostName: hasHostName(selectedItem.type) ? draft.hostName.trim() : '',
       mgmtIp: draft.mgmtIp.trim(),
       idracIp: draft.idracIp.trim(),
       dualPower: draft.dualPower,
@@ -594,18 +624,19 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     const nextFiberPorts = hasFiber(item.type) ? Math.max(0, editDetails.fiberPorts || 0) : 0;
     const nextEthStart = 1;
     const nextFiberStart = Math.max(1, nextEthStart + nextEthPorts);
+    const hostName = editDetails.hostName.trim();
     updateRackItem(plan.id, item.id, {
-      name:
-        (item.type === 'switch' || item.type === 'server') && editDetails.name.trim()
-          ? editDetails.name.trim()
-          : item.name,
+      name: hasHostName(item.type) && hostName ? hostName : item.name,
       brand: editDetails.brand.trim(),
       model: editDetails.model.trim(),
       ip: item.type === 'server' ? editDetails.ip.trim() : '',
-      hostName: item.type === 'switch' || item.type === 'server' ? editDetails.hostName.trim() : '',
-      mgmtIp: item.type === 'switch' ? editDetails.mgmtIp.trim() : '',
+      hostName: hasHostName(item.type) ? hostName : '',
+      mgmtIp: item.type === 'switch' || item.type === 'router' || item.type === 'firewall' ? editDetails.mgmtIp.trim() : '',
       idracIp: item.type === 'server' ? editDetails.idracIp.trim() : '',
-      dualPower: item.type === 'switch' || item.type === 'server' ? editDetails.dualPower : false,
+      dualPower:
+        item.type === 'switch' || item.type === 'router' || item.type === 'firewall' || item.type === 'server'
+          ? editDetails.dualPower
+          : false,
       connectorType: item.type === 'optical_drawer' ? editDetails.connectorType : undefined,
       rails: item.type === 'server' ? editDetails.rails : false,
       outlets: item.type === 'power_strip' ? Math.max(0, editDetails.outlets || 0) : 0,
@@ -645,11 +676,35 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
   };
 
   const rackHeight = Math.max(10, totalUnits) * unitHeight;
+  const hasHostName = (type: RackItemType) =>
+    type === 'switch' || type === 'router' || type === 'firewall' || type === 'server';
   const normalizeIp = (value: string) => value.trim().replace(/^https?:\/\//i, '');
+  const normalizeName = (value: string) => value.trim().toLowerCase();
   const toUrl = (value: string, protocol: 'http' | 'https' = 'http') => {
     const trimmed = value.trim();
     if (!trimmed) return '';
     return `${protocol}://${normalizeIp(trimmed)}`;
+  };
+  const getPrimaryIp = (entry: RackItem) => {
+    if (entry.type === 'server') return normalizeIp(entry.ip || '');
+    if (entry.type === 'switch' || entry.type === 'router' || entry.type === 'firewall') return normalizeIp(entry.mgmtIp || '');
+    return '';
+  };
+  const getItemIdentityName = (entry: RackItem) =>
+    normalizeName(hasHostName(entry.type) ? entry.hostName || '' : entry.name || '');
+  const getDraftIdentityName = (type: RackItemType) =>
+    normalizeName(hasHostName(type) ? addDetails.hostName || '' : addDetails.name || '');
+  const getDraftPrimaryIp = (type: RackItemType) => {
+    if (type === 'server') return normalizeIp(addDetails.ip);
+    if (type === 'switch' || type === 'router' || type === 'firewall') return normalizeIp(addDetails.mgmtIp);
+    return '';
+  };
+  const getRackItemLabel = (entry: RackItem) => {
+    if (hasHostName(entry.type)) {
+      const host = entry.hostName?.trim();
+      return host || t({ it: 'Senza hostname', en: 'No hostname' });
+    }
+    return entry.name?.trim() || typeLabels[entry.type]?.it || entry.type;
   };
   const handleRenamePort = (itemId: string, kind: RackPortKind, index: number, name: string) => {
     if (readOnly) return;
@@ -683,24 +738,55 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     }
     const nameBase = typeLabels[type]?.it || 'Item';
     const sameTypeCount = rackItems.filter((i) => i.type === type).length + 1;
-    const ethPorts = hasEth(type)
-      ? Math.max(0, type === 'switch' || type === 'patchpanel' ? addDetails.ethPorts : 0)
-      : 0;
-    const fiberPorts = hasFiber(type)
-      ? Math.max(0, type === 'switch' || type === 'optical_drawer' ? addDetails.fiberPorts : 0)
-      : 0;
+    const ethPorts = hasEth(type) ? Math.max(0, addDetails.ethPorts) : 0;
+    const fiberPorts = hasFiber(type) ? Math.max(0, addDetails.fiberPorts) : 0;
     const ethRangeStart = 1;
     const fiberRangeStart = Math.max(1, ethRangeStart + ethPorts);
-    const finalName =
-      (type === 'switch' || type === 'server') && addDetails.name.trim()
-        ? addDetails.name.trim()
-        : `${nameBase} ${sameTypeCount}`;
     const finalHostName = addDetails.hostName.trim();
+    const finalName =
+      hasHostName(type) && finalHostName ? finalHostName : addDetails.name.trim() ? addDetails.name.trim() : `${nameBase} ${sameTypeCount}`;
     const finalMgmtIp = addDetails.mgmtIp.trim();
     const finalIdracIp = addDetails.idracIp.trim();
     const finalIp = addDetails.ip.trim();
+    if (addPrompt?.mode === 'clone') {
+      const normalizedName = getDraftIdentityName(type);
+      if (normalizedName && rackItems.some((entry) => getItemIdentityName(entry) === normalizedName)) {
+        push(
+          hasHostName(type)
+            ? t({
+                it: 'Hostname già presente nel rack. Modificalo per continuare.',
+                en: 'Hostname already used in this rack. Change it to continue.'
+              })
+            : t({
+                it: 'Nome già presente nel rack. Modificalo per continuare.',
+                en: 'Name already used in this rack. Change it to continue.'
+              }),
+          'danger'
+        );
+        return false;
+      }
+      const normalizedIp = getDraftPrimaryIp(type);
+      if (normalizedIp && rackItems.some((entry) => getPrimaryIp(entry) === normalizedIp)) {
+        push(
+          t({
+            it: 'IP già presente nel rack. Modificalo per continuare.',
+            en: 'IP already used in this rack. Change it to continue.'
+          }),
+          'danger'
+        );
+        return false;
+      }
+    }
+    const cloneSource =
+      addPrompt?.mode === 'clone' && addPrompt.sourceId ? rackItems.find((entry) => entry.id === addPrompt.sourceId) : null;
+    const trimPorts = (list: string[] | undefined, count: number) => {
+      if (!list || !count) return undefined;
+      return list.slice(0, count);
+    };
     const useBrandModel =
       type === 'switch' ||
+      type === 'router' ||
+      type === 'firewall' ||
       type === 'server' ||
       type === 'patchpanel' ||
       type === 'optical_drawer' ||
@@ -715,10 +801,11 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
       brand: useBrandModel ? addDetails.brand.trim() : '',
       model: useBrandModel ? addDetails.model.trim() : '',
       ip: type === 'server' ? finalIp : '',
-      hostName: type === 'switch' || type === 'server' ? finalHostName : '',
-      mgmtIp: type === 'switch' ? finalMgmtIp : '',
+      hostName: hasHostName(type) ? finalHostName : '',
+      mgmtIp: type === 'switch' || type === 'router' || type === 'firewall' ? finalMgmtIp : '',
       idracIp: type === 'server' ? finalIdracIp : '',
-      dualPower: type === 'switch' || type === 'server' ? addDetails.dualPower : false,
+      dualPower:
+        type === 'switch' || type === 'router' || type === 'firewall' || type === 'server' ? addDetails.dualPower : false,
       connectorType: type === 'optical_drawer' ? addDetails.connectorType : undefined,
       rails: type === 'server' ? addDetails.rails : false,
       outlets: type === 'power_strip' ? Math.max(0, addDetails.outlets) : 0,
@@ -729,7 +816,11 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
       ethPorts,
       fiberPorts,
       ethRangeStart,
-      fiberRangeStart
+      fiberRangeStart,
+      ethPortNames: cloneSource ? trimPorts(cloneSource.ethPortNames, ethPorts) : undefined,
+      fiberPortNames: cloneSource ? trimPorts(cloneSource.fiberPortNames, fiberPorts) : undefined,
+      ethPortNotes: cloneSource ? trimPorts(cloneSource.ethPortNotes, ethPorts) : undefined,
+      fiberPortNotes: cloneSource ? trimPorts(cloneSource.fiberPortNotes, fiberPorts) : undefined
     });
     setSelectedItemId(id);
     setFlashItemId(id);
@@ -743,6 +834,41 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
   const handleConfirmAdd = () => {
     if (!addPrompt) return;
     const size = Math.max(1, Math.min(totalUnits, addUnitSize || 1));
+    if (addPrompt.mode === 'clone') {
+      const nameBase = typeLabels[addPrompt.type]?.it || 'Item';
+      const sameTypeCount = rackItems.filter((entry) => entry.type === addPrompt.type).length + 1;
+      const finalName =
+        hasHostName(addPrompt.type) && addDetails.hostName.trim()
+          ? addDetails.hostName.trim()
+          : addDetails.name.trim() || `${nameBase} ${sameTypeCount}`;
+      const normalizedName = getDraftIdentityName(addPrompt.type) || normalizeName(finalName);
+      if (normalizedName && rackItems.some((entry) => getItemIdentityName(entry) === normalizedName)) {
+        push(
+          hasHostName(addPrompt.type)
+            ? t({
+                it: 'Hostname già presente nel rack. Modificalo per continuare.',
+                en: 'Hostname already used in this rack. Change it to continue.'
+              })
+            : t({
+                it: 'Nome già presente nel rack. Modificalo per continuare.',
+                en: 'Name already used in this rack. Change it to continue.'
+              }),
+          'danger'
+        );
+        return;
+      }
+      const normalizedIp = getDraftPrimaryIp(addPrompt.type);
+      if (normalizedIp && rackItems.some((entry) => getPrimaryIp(entry) === normalizedIp)) {
+        push(
+          t({
+            it: 'IP già presente nel rack. Modificalo per continuare.',
+            en: 'IP already used in this rack. Change it to continue.'
+          }),
+          'danger'
+        );
+        return;
+      }
+    }
     if (size > maxContiguousFree()) {
       push(
         t({
@@ -777,10 +903,9 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     const color = typeColors[item.type] || '#94a3b8';
     const singleLine = item.unitSize === 1;
     const showPorts = hasPorts(item);
-    const hostSuffix =
-      (item.type === 'switch' || item.type === 'server') && item.hostName ? ` · ${item.hostName}` : '';
+    const mainLabel = getRackItemLabel(item);
     const ipSuffix =
-      item.type === 'switch' && item.mgmtIp
+      (item.type === 'switch' || item.type === 'router' || item.type === 'firewall') && item.mgmtIp
         ? item.mgmtIp
         : item.type === 'server' && item.ip
           ? item.ip
@@ -826,8 +951,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
         {singleLine ? (
           <div className="flex items-center justify-between gap-2">
             <span className="truncate">
-              {item.name}
-              {hostSuffix} · {item.unitSize}U · {typeLabels[item.type]?.it}
+              {mainLabel} · {item.unitSize}U · {typeLabels[item.type]?.it}
             </span>
             <div className="flex items-center gap-2">
               {showPorts ? (
@@ -864,10 +988,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
         ) : (
           <>
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate">
-                {item.name}
-                {hostSuffix}
-              </span>
+              <span className="truncate">{mainLabel}</span>
               <div className="flex items-center gap-2">
                 {showPorts ? (
                   <>
@@ -911,6 +1032,9 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     if (addPrompt || editPrompt || deletePrompt || portsModalItemId) return;
     onClose();
   };
+
+  const addActionLabel =
+    addPrompt?.mode === 'clone' ? t({ it: 'Clona', en: 'Clone' }) : t({ it: 'Aggiungi', en: 'Add' });
 
   return (
     <>
@@ -975,12 +1099,14 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                         onClick={handleSaveRack}
                         disabled={readOnly}
                         className={`mt-3 w-full rounded-lg px-3 py-2 text-sm font-semibold text-white ${readOnly ? 'bg-slate-300' : 'bg-primary hover:bg-primary/90'}`}
+                        title={t({ it: 'Salva rack', en: 'Save rack' })}
                       >
                         {t({ it: 'Salva rack', en: 'Save rack' })}
                       </button>
                       <button
                         onClick={handleExportRackPdf}
                         className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Esporta PDF rack', en: 'Export rack PDF' })}
                       >
                         {t({ it: 'Esporta PDF rack', en: 'Export rack PDF' })}
                       </button>
@@ -992,6 +1118,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                             ? 'bg-slate-100 text-slate-400'
                             : 'border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
                         }`}
+                        title={t({ it: 'Elimina tutti gli apparati', en: 'Delete all devices' })}
                       >
                         {t({ it: 'Elimina tutti gli apparati', en: 'Delete all devices' })}
                       </button>
@@ -1012,6 +1139,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                             }}
                             className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                             style={{ borderLeftColor: typeColors[type] || '#cbd5f5', borderLeftWidth: 4 }}
+                            title={t({ it: `Aggiungi ${typeLabels[type].it}`, en: `Add ${typeLabels[type].en}` })}
                           >
                             <span>{typeLabels[type].it}</span>
                           </button>
@@ -1032,6 +1160,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                             <button
                               onClick={() => setAddPrompt(null)}
                               className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-100"
+                              title={t({ it: 'Annulla', en: 'Cancel' })}
                             >
                               {t({ it: 'Annulla', en: 'Cancel' })}
                             </button>
@@ -1112,8 +1241,20 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                                 setContextMenu(null);
                               }}
                               className="flex w-full items-center gap-2 rounded-md px-2 py-1 hover:bg-slate-50"
+                              title={t({ it: 'Configura', en: 'Configure' })}
                             >
                               {t({ it: 'Configura', en: 'Configure' })}
+                            </button>
+                            <button
+                              onClick={() => {
+                                const item = rackItems.find((entry) => entry.id === contextMenu.itemId);
+                                if (item) openClonePrompt(item);
+                                setContextMenu(null);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 hover:bg-slate-50"
+                              title={t({ it: 'Clona', en: 'Clone' })}
+                            >
+                              {t({ it: 'Clona', en: 'Clone' })}
                             </button>
                             {(() => {
                               const item = rackItems.find((entry) => entry.id === contextMenu.itemId);
@@ -1126,6 +1267,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                                     window.setTimeout(() => setContextMenu(null), 0);
                                   }}
                                   className="flex w-full items-center gap-2 rounded-md px-2 py-1 hover:bg-slate-50"
+                                  title={t({ it: 'Porte', en: 'Ports' })}
                                 >
                                   {t({ it: 'Porte', en: 'Ports' })}
                                 </button>
@@ -1138,13 +1280,14 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                                 setDeletePrompt({ mode: 'single', itemId: contextMenu.itemId });
                               }}
                               className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-rose-600 hover:bg-rose-50"
+                              title={t({ it: 'Elimina', en: 'Delete' })}
                             >
                               {t({ it: 'Elimina', en: 'Delete' })}
                             </button>
                             {(() => {
                               const item = rackItems.find((entry) => entry.id === contextMenu.itemId);
                                   const ip =
-                                    item?.type === 'switch'
+                                    item?.type === 'switch' || item?.type === 'router' || item?.type === 'firewall'
                                       ? item?.mgmtIp || ''
                                       : item?.type === 'server'
                                         ? item?.ip || ''
@@ -1189,15 +1332,17 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       ) : null}
                       {selectedItem && draft ? (
                         <div className="mt-2 space-y-2">
-                          <label className="block text-sm font-medium text-slate-700">
-                            {t({ it: 'Nome', en: 'Name' })}
-                            <input
-                              ref={selectedNameRef}
-                              value={draft.name}
-                              onChange={(e) => setDraft((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
-                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            />
-                          </label>
+                          {!hasHostName(selectedItem.type) ? (
+                            <label className="block text-sm font-medium text-slate-700">
+                              {t({ it: 'Nome', en: 'Name' })}
+                              <input
+                                ref={selectedNameRef}
+                                value={draft.name}
+                                onChange={(e) => setDraft((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              />
+                            </label>
+                          ) : null}
                           {selectedItem.type !== 'misc' ? (
                             <div className="grid grid-cols-2 gap-2">
                               <label className="block text-sm font-medium text-slate-700">
@@ -1218,7 +1363,10 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                               </label>
                             </div>
                           ) : null}
-                          {(selectedItem.type === 'switch' || selectedItem.type === 'server') ? (
+                          {(selectedItem.type === 'switch' ||
+                            selectedItem.type === 'router' ||
+                            selectedItem.type === 'firewall' ||
+                            selectedItem.type === 'server') ? (
                             <label className="block text-sm font-medium text-slate-700">
                               {t({ it: 'Nome host', en: 'Host name' })}
                               <input
@@ -1228,7 +1376,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                               />
                             </label>
                           ) : null}
-                          {selectedItem.type === 'switch' ? (
+                          {selectedItem.type === 'switch' || selectedItem.type === 'router' || selectedItem.type === 'firewall' ? (
                             <label className="block text-sm font-medium text-slate-700">
                               {t({ it: 'IP gestione', en: 'Management IP' })}
                               <input
@@ -1288,7 +1436,10 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                               ) : null}
                             </label>
                           ) : null}
-                          {(selectedItem.type === 'switch' || selectedItem.type === 'server') ? (
+                          {(selectedItem.type === 'switch' ||
+                            selectedItem.type === 'router' ||
+                            selectedItem.type === 'firewall' ||
+                            selectedItem.type === 'server') ? (
                             <>
                               <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                                 <input
@@ -1392,7 +1543,10 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                           </div>
                           {hasEth(selectedItem.type) ? (
                             <label className="block text-sm font-medium text-slate-700">
-                              {selectedItem.type === 'switch'
+                              {selectedItem.type === 'switch' ||
+                              selectedItem.type === 'router' ||
+                              selectedItem.type === 'firewall' ||
+                              selectedItem.type === 'server'
                                 ? t({ it: 'Porte rame', en: 'Ethernet ports' })
                                 : t({ it: 'Numero porte', en: 'Ports count' })}
                               <input
@@ -1412,7 +1566,10 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                           ) : null}
                           {hasFiber(selectedItem.type) ? (
                             <label className="block text-sm font-medium text-slate-700">
-                              {selectedItem.type === 'switch'
+                              {selectedItem.type === 'switch' ||
+                              selectedItem.type === 'router' ||
+                              selectedItem.type === 'firewall' ||
+                              selectedItem.type === 'server'
                                 ? t({ it: 'Porte fibra', en: 'Fiber ports' })
                                 : t({ it: 'Numero porte', en: 'Ports count' })}
                               <input
@@ -1431,6 +1588,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                                 setPortsModalShowConnections(false);
                               }}
                               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                              title={t({ it: 'Configurazione porte', en: 'Port configuration' })}
                             >
                               {t({ it: 'Configurazione porte', en: 'Port configuration' })}
                             </button>
@@ -1440,8 +1598,20 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                               onClick={handleSaveItem}
                               disabled={readOnly}
                               className={`rounded-lg px-3 py-2 text-sm font-semibold text-white ${readOnly ? 'bg-slate-300' : 'bg-primary hover:bg-primary/90'}`}
+                              title={t({ it: 'Salva apparato', en: 'Save device' })}
                             >
                               {t({ it: 'Salva apparato', en: 'Save device' })}
+                            </button>
+                            <button
+                              onClick={() => selectedItem && openClonePrompt(selectedItem)}
+                              disabled={readOnly}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                              title={t({ it: 'Clona apparato', en: 'Clone device' })}
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <Copy size={14} />
+                                {t({ it: 'Clona', en: 'Clone' })}
+                              </span>
                             </button>
                             <button
                               onClick={() => {
@@ -1450,6 +1620,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                                 setSelectedItemId(null);
                               }}
                               className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                              title={t({ it: 'Elimina apparato', en: 'Delete device' })}
                             >
                               <Trash size={14} />
                             </button>
@@ -1509,7 +1680,25 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                           />
                         </label>
                       </div>
-                      {addPrompt?.type === 'switch' ? (
+                      {addPrompt?.mode === 'clone' ? (
+                        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                          {t({
+                            it: 'Modifica hostname e IP prima di salvare il clone.',
+                            en: 'Change hostname and IP before saving the clone.'
+                          })}
+                        </div>
+                      ) : null}
+                      {addPrompt?.mode === 'clone' && !hasHostName(addPrompt.type) ? (
+                        <label className="mt-3 block text-sm font-medium text-slate-700">
+                          {t({ it: 'Nome apparato', en: 'Device name' })}
+                          <input
+                            value={addDetails.name}
+                            onChange={(e) => setAddDetails((prev) => ({ ...prev, name: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          />
+                        </label>
+                      ) : null}
+                      {addPrompt?.type === 'switch' || addPrompt?.type === 'router' || addPrompt?.type === 'firewall' ? (
                         <div className="mt-4 space-y-2">
                           <label className="block text-sm font-medium text-slate-700">
                             {t({ it: 'Nome host', en: 'Host name' })}
@@ -1594,14 +1783,6 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       {addPrompt?.type === 'server' ? (
                         <div className="mt-4 space-y-2">
                           <label className="block text-sm font-medium text-slate-700">
-                            {t({ it: 'Nome server', en: 'Server name' })}
-                            <input
-                              value={addDetails.name}
-                              onChange={(e) => setAddDetails((prev) => ({ ...prev, name: e.target.value }))}
-                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            />
-                          </label>
-                          <label className="block text-sm font-medium text-slate-700">
                             {t({ it: 'Nome host', en: 'Host name' })}
                             <input
                               value={addDetails.hostName}
@@ -1643,6 +1824,32 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                             />
                           </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="block text-sm font-medium text-slate-700">
+                              {t({ it: 'Porte rame', en: 'Ethernet ports' })}
+                              <input
+                                type="number"
+                                min={0}
+                                value={addDetails.ethPorts}
+                                onChange={(e) =>
+                                  setAddDetails((prev) => ({ ...prev, ethPorts: Math.max(0, Number(e.target.value) || 0) }))
+                                }
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              {t({ it: 'Porte fibra', en: 'Fiber ports' })}
+                              <input
+                                type="number"
+                                min={0}
+                                value={addDetails.fiberPorts}
+                                onChange={(e) =>
+                                  setAddDetails((prev) => ({ ...prev, fiberPorts: Math.max(0, Number(e.target.value) || 0) }))
+                                }
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              />
+                            </label>
+                          </div>
                           <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input
                               type="checkbox"
@@ -1895,14 +2102,16 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                         <button
                           onClick={() => setAddPrompt(null)}
                           className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                          title={t({ it: 'Annulla', en: 'Cancel' })}
                         >
                           {t({ it: 'Annulla', en: 'Cancel' })}
                         </button>
                         <button
                           onClick={handleConfirmAdd}
                           className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                          title={addActionLabel}
                         >
-                          {t({ it: 'Aggiungi', en: 'Add' })}
+                          {addActionLabel}
                         </button>
                       </div>
                     </div>
@@ -1957,7 +2166,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                           />
                         </label>
                       </div>
-                      {editPrompt.type === 'switch' ? (
+                      {editPrompt.type === 'switch' || editPrompt.type === 'router' || editPrompt.type === 'firewall' ? (
                         <div className="mt-4 space-y-2">
                           <label className="block text-sm font-medium text-slate-700">
                             {t({ it: 'Nome host', en: 'Host name' })}
@@ -2042,14 +2251,6 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       {editPrompt.type === 'server' ? (
                         <div className="mt-4 space-y-2">
                           <label className="block text-sm font-medium text-slate-700">
-                            {t({ it: 'Nome server', en: 'Server name' })}
-                            <input
-                              value={editDetails.name}
-                              onChange={(e) => setEditDetails((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
-                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            />
-                          </label>
-                          <label className="block text-sm font-medium text-slate-700">
                             {t({ it: 'Nome host', en: 'Host name' })}
                             <input
                               value={editDetails.hostName}
@@ -2091,6 +2292,32 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                             />
                           </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="block text-sm font-medium text-slate-700">
+                              {t({ it: 'Porte rame', en: 'Ethernet ports' })}
+                              <input
+                                type="number"
+                                min={0}
+                                value={editDetails.ethPorts}
+                                onChange={(e) =>
+                                  setEditDetails((prev) => (prev ? { ...prev, ethPorts: Math.max(0, Number(e.target.value) || 0) } : prev))
+                                }
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              {t({ it: 'Porte fibra', en: 'Fiber ports' })}
+                              <input
+                                type="number"
+                                min={0}
+                                value={editDetails.fiberPorts}
+                                onChange={(e) =>
+                                  setEditDetails((prev) => (prev ? { ...prev, fiberPorts: Math.max(0, Number(e.target.value) || 0) } : prev))
+                                }
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              />
+                            </label>
+                          </div>
                           <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                             <input
                               type="checkbox"
@@ -2353,6 +2580,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                                 window.setTimeout(() => setEditPrompt(null), 0);
                               }}
                               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                              title={t({ it: 'Configurazione porte', en: 'Port configuration' })}
                             >
                               {t({ it: 'Configurazione porte', en: 'Port configuration' })}
                             </button>
@@ -2362,12 +2590,14 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                           <button
                             onClick={() => setEditPrompt(null)}
                             className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            title={t({ it: 'Annulla', en: 'Cancel' })}
                           >
                             {t({ it: 'Annulla', en: 'Cancel' })}
                           </button>
                           <button
                             onClick={handleConfirmEdit}
                             className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                            title={t({ it: 'Salva', en: 'Save' })}
                           >
                             {t({ it: 'Salva', en: 'Save' })}
                           </button>
@@ -2431,12 +2661,14 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                         <button
                           onClick={() => setDeletePrompt(null)}
                           className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                          title={t({ it: 'Annulla', en: 'Cancel' })}
                         >
                           {t({ it: 'Annulla', en: 'Cancel' })}
                         </button>
                         <button
                           onClick={handleConfirmDelete}
                           className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700"
+                          title={t({ it: 'Elimina', en: 'Delete' })}
                         >
                           {t({ it: 'Elimina', en: 'Delete' })}
                         </button>

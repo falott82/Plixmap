@@ -86,6 +86,7 @@ const PlanView = ({ planId }: Props) => {
   const {
     addObject,
     updateObject,
+    moveObject,
     deleteObject,
     updateFloorPlan,
     setFloorPlanContent,
@@ -111,6 +112,7 @@ const PlanView = ({ planId }: Props) => {
     (s) => ({
       addObject: s.addObject,
       updateObject: s.updateObject,
+      moveObject: s.moveObject,
       deleteObject: s.deleteObject,
       updateFloorPlan: s.updateFloorPlan,
       setFloorPlanContent: s.setFloorPlanContent,
@@ -1792,7 +1794,10 @@ const PlanView = ({ planId }: Props) => {
           const nextY = obj.y + dy;
           const nextRoomId = getRoomIdAt((currentPlan as FloorPlan).rooms, nextX, nextY);
           const currentRoomId = obj.roomId ?? undefined;
-          updateObject(id, { x: nextX, y: nextY, ...(currentRoomId !== nextRoomId ? { roomId: nextRoomId } : {}) });
+          moveObject(id, nextX, nextY);
+          if (currentRoomId !== nextRoomId) {
+            updateObject(id, { roomId: nextRoomId });
+          }
         }
         return;
       }
@@ -1830,6 +1835,7 @@ const PlanView = ({ planId }: Props) => {
     setSelection,
     t,
     toSnapshot,
+    moveObject,
     updateObject
   ]);
 
@@ -1992,11 +1998,14 @@ const PlanView = ({ planId }: Props) => {
           }
         }
       }
-      updateObject(id, { x, y, ...(currentRoomId !== nextRoomId ? { roomId: nextRoomId } : {}) });
+      moveObject(id, x, y);
+      if (currentRoomId !== nextRoomId) {
+        updateObject(id, { roomId: nextRoomId });
+      }
       dragStartRef.current.delete(id);
       return true;
     },
-    [markTouched, roomStatsById, t, updateObject]
+    [markTouched, moveObject, roomStatsById, t, updateObject]
   );
 
   useEffect(() => {
@@ -2455,7 +2464,7 @@ const PlanView = ({ planId }: Props) => {
     const findObjectById = (id: string) =>
       renderPlan.objects.find((o) => o.id === id) || (plan?.objects || []).find((o) => o.id === id);
     const findRoomById = (id: string) =>
-      renderPlan.rooms.find((r) => r.id === id) || (plan?.rooms || []).find((r) => r.id === id);
+      (renderPlan.rooms || []).find((r) => r.id === id) || (plan?.rooms || []).find((r) => r.id === id);
     const indexObjects = indexObjectIds.map((id) => findObjectById(id)).filter(Boolean) as MapObject[];
     const indexRooms = indexRoomIds.map((id) => findRoomById(id)).filter(Boolean) as Room[];
     const mergedObjects = objectMatches.length ? objectMatches : indexObjects;
@@ -2692,7 +2701,7 @@ const PlanView = ({ planId }: Props) => {
 	                    <div className="text-sm font-semibold text-ink">
                         {t({ it: 'Dettaglio oggetti', en: 'Objects' })}
                       </div>
-	                    <button onClick={() => setCountsOpen(false)} className="text-slate-400 hover:text-ink">
+	                    <button onClick={() => setCountsOpen(false)} className="text-slate-400 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
 	                      <X size={14} />
 	                    </button>
 	                  </div>
@@ -2711,15 +2720,16 @@ const PlanView = ({ planId }: Props) => {
 		                          const label = getTypeLabel(o.type);
                               const icon = getTypeIcon(o.type);
 		                          return (
-		                            <button
-		                              key={o.id}
-	                              onClick={() => {
-	                                setSelectedObject(o.id);
-	                                triggerHighlight(o.id);
-	                                setCountsOpen(false);
-	                              }}
-	                              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50"
-		                            >
+			                            <button
+			                              key={o.id}
+		                              onClick={() => {
+		                                setSelectedObject(o.id);
+		                                triggerHighlight(o.id);
+		                                setCountsOpen(false);
+		                              }}
+		                              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50"
+		                              title={o.name}
+			                            >
 		                              <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary shadow-sm">
 		                                <Icon name={icon} />
 		                              </span>
@@ -2740,10 +2750,11 @@ const PlanView = ({ planId }: Props) => {
 	                      <>
 		                        {counts.map((t) => (
 		                          <div key={t.id} className="rounded-lg border border-slate-100">
-		                            <button
-		                              onClick={() => setExpandedType(expandedType === t.id ? null : t.id)}
-		                              className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50"
-		                            >
+			                            <button
+			                              onClick={() => setExpandedType(expandedType === t.id ? null : t.id)}
+			                              className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50"
+			                              title={t.label}
+			                            >
 		                              <span className="flex items-center gap-2 font-semibold text-ink">
 		                                <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-primary">
 		                                  <Icon name={t.icon} />
@@ -2755,15 +2766,16 @@ const PlanView = ({ planId }: Props) => {
 		                            {expandedType === t.id ? (
 		                              <div className="px-2 pb-2 text-sm text-slate-700">
 		                                {(objectsByType.get(t.id) || []).map((o) => (
-		                                  <button
-		                                    key={o.id}
-		                                    onClick={() => {
-	                                      setSelectedObject(o.id);
-	                                      triggerHighlight(o.id);
-	                                      setCountsOpen(false);
-	                                    }}
-		                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-slate-50"
-		                                  >
+			                                  <button
+			                                    key={o.id}
+			                                    onClick={() => {
+		                                      setSelectedObject(o.id);
+		                                      triggerHighlight(o.id);
+		                                      setCountsOpen(false);
+		                                    }}
+			                                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-slate-50"
+			                                    title={o.name}
+			                                  >
 		                                    <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-primary">
 		                                      <Icon name={getTypeIcon(o.type)} />
 		                                    </span>
@@ -2797,38 +2809,41 @@ const PlanView = ({ planId }: Props) => {
                 <div className="absolute left-0 z-50 mt-2 w-[420px] rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
                   <div className="flex items-center justify-between px-2 pb-2">
                     <div className="text-sm font-semibold text-ink">{t({ it: 'Stanze', en: 'Rooms' })}</div>
-                    <button onClick={() => setRoomsOpen(false)} className="text-slate-400 hover:text-ink">
-                      <X size={14} />
-                    </button>
+	                    <button onClick={() => setRoomsOpen(false)} className="text-slate-400 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+	                      <X size={14} />
+	                    </button>
                   </div>
                   <div className="px-2 pb-2">
                     {!isReadOnly ? (
                       <div className="relative">
-                        <button
-                          onClick={() => setNewRoomMenuOpen((v) => !v)}
-                          className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-                        >
+	                        <button
+	                          onClick={() => setNewRoomMenuOpen((v) => !v)}
+	                          className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+	                          title={t({ it: 'Nuova stanza', en: 'New room' })}
+	                        >
                           <Square size={16} /> {t({ it: 'Nuova stanza', en: 'New room' })}
                           <ChevronDown size={16} className="text-white/90" />
                         </button>
                         {newRoomMenuOpen ? (
                           <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
-                            <button
-                              onClick={() => {
-                                setNewRoomMenuOpen(false);
-                                beginRoomDraw();
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                            >
+	                            <button
+	                              onClick={() => {
+	                                setNewRoomMenuOpen(false);
+	                                beginRoomDraw();
+	                              }}
+	                              className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+	                              title={t({ it: 'Rettangolo', en: 'Rectangle' })}
+	                            >
                               <Square size={16} className="text-slate-500" /> {t({ it: 'Rettangolo', en: 'Rectangle' })}
                             </button>
-                            <button
-                              onClick={() => {
-                                setNewRoomMenuOpen(false);
-                                beginRoomPolyDraw();
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                            >
+	                            <button
+	                              onClick={() => {
+	                                setNewRoomMenuOpen(false);
+	                                beginRoomPolyDraw();
+	                              }}
+	                              className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+	                              title={t({ it: 'Poligono', en: 'Polygon' })}
+	                            >
                               <Square size={16} className="text-slate-500" /> {t({ it: 'Poligono', en: 'Polygon' })}
                             </button>
                           </div>
@@ -2842,19 +2857,21 @@ const PlanView = ({ planId }: Props) => {
                     {roomDrawMode && !isReadOnly ? (
                       <div className="mt-2 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
                         <span>{t({ it: 'Modalità disegno attiva', en: 'Drawing mode active' })}</span>
-                        <button
-                          onClick={() => setRoomDrawMode(null)}
-                          className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-                        >
-                          Esc
-                        </button>
+	                        <button
+	                          onClick={() => setRoomDrawMode(null)}
+	                          className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+	                          title={t({ it: 'Annulla disegno', en: 'Cancel drawing' })}
+	                        >
+	                          Esc
+	                        </button>
                       </div>
                     ) : null}
-                    <button
-                      onClick={() => setRoomAllocationOpen(true)}
-                      disabled={!rooms.length}
-                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-60"
-                    >
+	                    <button
+	                      onClick={() => setRoomAllocationOpen(true)}
+	                      disabled={!rooms.length}
+	                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-60"
+	                      title={t({ it: 'Trova capienza', en: 'Find capacity' })}
+	                    >
                       <Users size={16} /> {t({ it: 'Trova capienza', en: 'Find capacity' })}
                     </button>
                   </div>
@@ -2872,17 +2889,18 @@ const PlanView = ({ planId }: Props) => {
                         return (
                           <div key={room.id} className="rounded-xl border border-slate-100">
                             <div className="flex items-center gap-3 px-4 py-3">
-                              <button
-                                onClick={() => {
-                                  setExpandedRoomId(isExpanded ? null : room.id);
-                                  clearSelection();
-                                  setSelectedRoomId(room.id);
-                                  setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
-                                }}
-                                className={`min-w-0 flex-1 text-left text-sm ${
-                                  selectedRoomId === room.id ? 'font-semibold text-ink' : 'text-slate-700'
-                                }`}
-                              >
+	                              <button
+	                                onClick={() => {
+	                                  setExpandedRoomId(isExpanded ? null : room.id);
+	                                  clearSelection();
+	                                  setSelectedRoomId(room.id);
+	                                  setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
+	                                }}
+	                                className={`min-w-0 flex-1 text-left text-sm ${
+	                                  selectedRoomId === room.id ? 'font-semibold text-ink' : 'text-slate-700'
+	                                }`}
+	                                title={room.name}
+	                              >
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="truncate">{room.name}</div>
                                   {capacityLabel ? (
@@ -2947,15 +2965,16 @@ const PlanView = ({ planId }: Props) => {
                                 {assigned.length ? (
                                   <div className="space-y-1">
                                     {assigned.map((o) => (
-                                      <button
-                                        key={o.id}
-                                        onClick={() => {
-                                          setSelectedObject(o.id);
-                                          triggerHighlight(o.id);
-                                          setRoomsOpen(false);
-                                        }}
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm hover:bg-slate-50"
-                                      >
+	                                      <button
+	                                        key={o.id}
+	                                        onClick={() => {
+	                                          setSelectedObject(o.id);
+	                                          triggerHighlight(o.id);
+	                                          setRoomsOpen(false);
+	                                        }}
+	                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+	                                        title={o.name}
+	                                      >
                                         <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-primary">
                                           <Icon name={getTypeIcon(o.type)} />
                                         </span>
@@ -2981,12 +3000,13 @@ const PlanView = ({ planId }: Props) => {
                         })}
                         {!isReadOnly ? (
                           <div className="mt-2">
-                            <button
-                              onClick={() => {
-                                setNewRoomMenuOpen(true);
-                              }}
-                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                            >
+	                            <button
+	                              onClick={() => {
+	                                setNewRoomMenuOpen(true);
+	                              }}
+	                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+	                              title={t({ it: 'Crea stanza', en: 'Create room' })}
+	                            >
                               {t({ it: 'Crea stanza', en: 'Create room' })}
                             </button>
                           </div>
@@ -3185,30 +3205,32 @@ const PlanView = ({ planId }: Props) => {
                   </button>
                 </div>
                 <div className="space-y-1">
-                  <button
-                    onClick={() => {
-                      setSelectedViewId('__last__');
-                      setViewsMenuOpen(false);
-                      push(t({ it: 'Vista: ultima posizione', en: 'View: last position' }), 'info');
-                    }}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50 ${
-                      selectedViewId === '__last__' ? 'bg-slate-100 font-semibold' : ''
-                    }`}
-                  >
+	                  <button
+	                    onClick={() => {
+	                      setSelectedViewId('__last__');
+	                      setViewsMenuOpen(false);
+	                      push(t({ it: 'Vista: ultima posizione', en: 'View: last position' }), 'info');
+	                    }}
+	                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50 ${
+	                      selectedViewId === '__last__' ? 'bg-slate-100 font-semibold' : ''
+	                    }`}
+	                    title={t({ it: 'Ultima posizione', en: 'Last position' })}
+	                  >
                     <Eye size={16} className="text-slate-500" />
                     {t({ it: 'Ultima posizione', en: 'Last position' })}
                   </button>
                   {orderedViews.map((view) => (
-                    <div key={view.id} className="flex items-start gap-2 rounded-lg border border-slate-100 px-2 py-2 hover:bg-slate-50">
-                      <button
-                        onClick={() => {
-                          applyView(view);
-                          setViewsMenuOpen(false);
-                        }}
-                        className={`flex min-w-0 flex-1 items-start gap-2 text-left text-sm ${
-                          selectedViewId === view.id ? 'font-semibold' : ''
-                        }`}
-                      >
+	                    <div key={view.id} className="flex items-start gap-2 rounded-lg border border-slate-100 px-2 py-2 hover:bg-slate-50">
+	                      <button
+	                        onClick={() => {
+	                          applyView(view);
+	                          setViewsMenuOpen(false);
+	                        }}
+	                        className={`flex min-w-0 flex-1 items-start gap-2 text-left text-sm ${
+	                          selectedViewId === view.id ? 'font-semibold' : ''
+	                        }`}
+	                        title={view.name}
+	                      >
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-ink">{view.name}</div>
                           {view.description ? (
@@ -3246,13 +3268,14 @@ const PlanView = ({ planId }: Props) => {
                   ))}
                 </div>
                 <div className="mt-2 border-t border-slate-100 pt-2">
-                  <button
-                    onClick={() => {
-                      setViewsMenuOpen(false);
-                      setViewModalOpen(true);
-                    }}
-                    className="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-                  >
+	                  <button
+	                    onClick={() => {
+	                      setViewsMenuOpen(false);
+	                      setViewModalOpen(true);
+	                    }}
+	                    className="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+	                    title={t({ it: 'Salva nuova vista', en: 'Save new view' })}
+	                  >
                     {t({ it: 'Salva nuova vista', en: 'Save new view' })}
                   </button>
                 </div>
@@ -3607,44 +3630,47 @@ const PlanView = ({ planId }: Props) => {
                   ) : null}
                 </div>
                 {!isReadOnly ? (
-                  <button
-                    onClick={() => {
-                      if (contextMenu.kind !== 'link') return;
-                      setLinkEditId(contextMenu.id);
-                      setContextMenu(null);
-                    }}
-                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                  >
+	                  <button
+	                    onClick={() => {
+	                      if (contextMenu.kind !== 'link') return;
+	                      setLinkEditId(contextMenu.id);
+	                      setContextMenu(null);
+	                    }}
+	                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                    title={t({ it: 'Modifica descrizione', en: 'Edit description' })}
+	                  >
                     <Pencil size={14} /> {t({ it: 'Modifica descrizione', en: 'Edit description' })}
                   </button>
                 ) : null}
 	                {!isReadOnly ? (
                     (contextLink as any)?.kind === 'cable' ? (
-                      <button
-                        onClick={() => {
-                          if (contextMenu.kind !== 'link') return;
-                          setCableModal({ mode: 'edit', linkId: contextMenu.id });
-                          setContextMenu(null);
-                        }}
-                        className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                      >
+	                      <button
+	                        onClick={() => {
+	                          if (contextMenu.kind !== 'link') return;
+	                          setCableModal({ mode: 'edit', linkId: contextMenu.id });
+	                          setContextMenu(null);
+	                        }}
+	                        className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                        title={t({ it: 'Modifica stile', en: 'Edit style' })}
+	                      >
                         <Pencil size={14} /> {t({ it: 'Modifica stile', en: 'Edit style' })}
                       </button>
                     ) : null
                   ) : null}
                   {!isReadOnly ? (
-	                  <button
-	                    onClick={() => {
-	                      if (contextMenu.kind !== 'link') return;
-	                      markTouched();
-	                      deleteLink(basePlan.id, contextMenu.id);
-                      postAuditEvent({ event: 'link_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: contextMenu.id } });
-                      push(t({ it: 'Collegamento eliminato', en: 'Link deleted' }), 'info');
-                      setContextMenu(null);
-                      setSelectedLinkId(null);
-                    }}
-                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
-                  >
+		                  <button
+		                    onClick={() => {
+		                      if (contextMenu.kind !== 'link') return;
+		                      markTouched();
+		                      deleteLink(basePlan.id, contextMenu.id);
+	                      postAuditEvent({ event: 'link_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: contextMenu.id } });
+	                      push(t({ it: 'Collegamento eliminato', en: 'Link deleted' }), 'info');
+	                      setContextMenu(null);
+	                      setSelectedLinkId(null);
+	                    }}
+	                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
+	                    title={t({ it: 'Elimina collegamento', en: 'Delete link' })}
+	                  >
                     <Trash size={14} /> {t({ it: 'Elimina collegamento', en: 'Delete link' })}
                   </button>
                 ) : null}
@@ -3657,13 +3683,14 @@ const PlanView = ({ planId }: Props) => {
                 </div>
               ) : (
 	                <>
-                  <button
-                    onClick={() => {
-                      handleEdit(contextMenu.id);
-                      setContextMenu(null);
-                    }}
-                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                  >
+	                  <button
+	                    onClick={() => {
+	                      handleEdit(contextMenu.id);
+	                      setContextMenu(null);
+	                    }}
+	                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                    title={t({ it: 'Modifica', en: 'Edit' })}
+	                  >
                     <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
                   </button>
                   {contextObject?.type === 'real_user' ? (
@@ -3697,38 +3724,41 @@ const PlanView = ({ planId }: Props) => {
                   {!contextIsRack ? (
                     <>
                       <div className="my-2 h-px bg-slate-100" />
-		                  <button
-		                    onClick={() => {
-		                      if (isReadOnly) return;
-                          setLinkCreateMode('arrow');
-		                      setLinkFromId(contextMenu.id);
-		                      setContextMenu(null);
-	                    }}
-		                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-		                  >
+			                  <button
+			                    onClick={() => {
+			                      if (isReadOnly) return;
+	                          setLinkCreateMode('arrow');
+			                      setLinkFromId(contextMenu.id);
+			                      setContextMenu(null);
+		                    }}
+			                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+			                    title={t({ it: 'Crea collegamento', en: 'Create link' })}
+			                  >
 		                    <MoveDiagonal size={14} className="text-slate-500" /> {t({ it: 'Crea collegamento', en: 'Create link' })}
 		                  </button>
-                      <button
-                        onClick={() => {
-                          if (isReadOnly) return;
-                          setLinkCreateMode('cable');
-                          setLinkFromId(contextMenu.id);
-                          setContextMenu(null);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                      >
+	                      <button
+	                        onClick={() => {
+	                          if (isReadOnly) return;
+	                          setLinkCreateMode('cable');
+	                          setLinkFromId(contextMenu.id);
+	                          setContextMenu(null);
+	                        }}
+	                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                        title={t({ it: 'Crea collegamento 90°', en: 'Create 90° link' })}
+	                      >
                         <CornerDownRight size={14} className="text-slate-500" /> {t({ it: 'Crea collegamento 90°', en: 'Create 90° link' })}
                       </button>
                     </>
                   ) : null}
                   <div className="my-2 h-px bg-slate-100" />
-		                  <button
-		                    onClick={() => {
-		                      openDuplicate(contextMenu.id);
-		                      setContextMenu(null);
-		                    }}
-	                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                  >
+			                  <button
+			                    onClick={() => {
+			                      openDuplicate(contextMenu.id);
+			                      setContextMenu(null);
+			                    }}
+		                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+		                    title={t({ it: 'Duplica', en: 'Duplicate' })}
+		                  >
 	                    <Copy size={14} /> {t({ it: 'Duplica', en: 'Duplicate' })}
 	                  </button>
                   <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
@@ -3794,27 +3824,29 @@ const PlanView = ({ planId }: Props) => {
               ) : null}
 
               {contextIsMulti ? (
-                <button
-                  onClick={() => {
-                    setBulkEditSelectionOpen(true);
-                    setContextMenu(null);
-                  }}
-                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                >
+	                <button
+	                  onClick={() => {
+	                    setBulkEditSelectionOpen(true);
+	                    setContextMenu(null);
+	                  }}
+	                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                  title={t({ it: 'Modifica rapida oggetti', en: 'Quick edit objects' })}
+	                >
                   <Pencil size={14} /> {t({ it: 'Modifica rapida oggetti', en: 'Quick edit objects' })}
                 </button>
               ) : null}
               {contextIsMulti ? <div className="my-2 h-px bg-slate-100" /> : null}
-              <button
-                onClick={() => {
-                  const ids =
-                    selectedObjectIds.includes(contextMenu.id) && selectedObjectIds.length > 1
-                      ? [...selectedObjectIds]
-                      : [contextMenu.id];
-                  setConfirmDelete(ids);
-                }}
-                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
-              >
+	              <button
+	                onClick={() => {
+	                  const ids =
+	                    selectedObjectIds.includes(contextMenu.id) && selectedObjectIds.length > 1
+	                      ? [...selectedObjectIds]
+	                      : [contextMenu.id];
+	                  setConfirmDelete(ids);
+	                }}
+	                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
+	                title={t({ it: 'Elimina', en: 'Delete' })}
+	              >
                 <Trash size={14} /> {t({ it: 'Elimina', en: 'Delete' })}
               </button>
             </>
@@ -3827,24 +3859,26 @@ const PlanView = ({ planId }: Props) => {
                 </div>
               </div>
               {!isReadOnly ? (
-                <button
-                  onClick={() => {
-                    openEditRoom(contextMenu.id);
-                    setContextMenu(null);
-                  }}
-                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                >
+	                <button
+	                  onClick={() => {
+	                    openEditRoom(contextMenu.id);
+	                    setContextMenu(null);
+	                  }}
+	                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                  title={t({ it: 'Rinomina', en: 'Rename' })}
+	                >
                   <Pencil size={14} /> {t({ it: 'Rinomina', en: 'Rename' })}
                 </button>
               ) : null}
               {!isReadOnly ? (
-                <button
-                  onClick={() => {
-                    setConfirmDeleteRoomId(contextMenu.id);
-                    setContextMenu(null);
-                  }}
-                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
-                >
+	                <button
+	                  onClick={() => {
+	                    setConfirmDeleteRoomId(contextMenu.id);
+	                    setContextMenu(null);
+	                  }}
+	                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
+	                  title={t({ it: 'Elimina stanza', en: 'Delete room' })}
+	                >
                   <Trash size={14} /> {t({ it: 'Elimina stanza', en: 'Delete room' })}
                 </button>
               ) : null}
@@ -3852,77 +3886,83 @@ const PlanView = ({ planId }: Props) => {
           ) : (
             <>
               {!isReadOnly ? (
-                <button
-                onClick={() => {
-                  setViewModalOpen(true);
-                  setContextMenu(null);
-                }}
-                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-              >
+	                <button
+	                onClick={() => {
+	                  setViewModalOpen(true);
+	                  setContextMenu(null);
+	                }}
+	                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                title={t({ it: 'Salva vista', en: 'Save view' })}
+	              >
                 <BookmarkPlus size={14} className="text-slate-500" /> {t({ it: 'Salva vista', en: 'Save view' })}
               </button>
               ) : null}
               <div className="my-2 h-px bg-slate-100" />
               {!isReadOnly ? (
-                <button
-                  onClick={() => setContextMenu({ ...contextMenu, roomOpen: !contextMenu.roomOpen, addOpen: false })}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                >
+	                <button
+	                  onClick={() => setContextMenu({ ...contextMenu, roomOpen: !contextMenu.roomOpen, addOpen: false })}
+	                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                  title={t({ it: 'Nuova stanza', en: 'New room' })}
+	                >
                   <Square size={14} className="text-slate-500" /> {t({ it: 'Nuova stanza', en: 'New room' })}
                   <ChevronRight size={14} className="ml-auto text-slate-400" />
                 </button>
               ) : null}
-              <button
-                onClick={() => {
-                  goToDefaultView();
-                  setContextMenu(null);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-              >
+	              <button
+	                onClick={() => {
+	                  goToDefaultView();
+	                  setContextMenu(null);
+	                }}
+	                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                title={t({ it: 'Vai a default', en: 'Go to default' })}
+	              >
                 <Home size={14} className="text-slate-500" /> {t({ it: 'Vai a default', en: 'Go to default' })}
               </button>
               {!isReadOnly ? (
-                <button
-                onClick={() => setContextMenu({ ...contextMenu, addOpen: !contextMenu.addOpen })}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-              >
+	                <button
+	                onClick={() => setContextMenu({ ...contextMenu, addOpen: !contextMenu.addOpen })}
+	                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                title={t({ it: 'Aggiungi oggetto', en: 'Add object' })}
+	              >
                 <Plus size={14} className="text-slate-500" /> {t({ it: 'Aggiungi oggetto', en: 'Add object' })}
                 <ChevronRight size={14} className="ml-auto text-slate-400" />
               </button>
               ) : null}
               {!isReadOnly ? (
-                <button
-                onClick={() => {
-                  setConfirmClearObjects(true);
-                  setContextMenu(null);
-                }}
-                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
-              >
+	                <button
+	                onClick={() => {
+	                  setConfirmClearObjects(true);
+	                  setContextMenu(null);
+	                }}
+	                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
+	                title={t({ it: 'Elimina tutti gli oggetti', en: 'Delete all objects' })}
+	              >
                 <Trash size={14} /> {t({ it: 'Elimina tutti gli oggetti', en: 'Delete all objects' })}
               </button>
               ) : null}
               <div className="my-2 h-px bg-slate-100" />
               {!isReadOnly ? (
-                <button
-                  onClick={() => {
-                    if ((basePlan as any)?.printArea) {
-                      updateFloorPlan(basePlan.id, { printArea: undefined });
-                      setContextMenu(null);
-                      push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
-                      return;
-                    }
-                    setPrintAreaMode(true);
-                    setContextMenu(null);
-                    push(
-                      t({
-                        it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
-                        en: 'Draw a rectangle on the map to set the print area.'
-                      }),
-                      'info'
-                    );
-                  }}
-                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                >
+	                <button
+	                  onClick={() => {
+	                    if ((basePlan as any)?.printArea) {
+	                      updateFloorPlan(basePlan.id, { printArea: undefined });
+	                      setContextMenu(null);
+	                      push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
+	                      return;
+	                    }
+	                    setPrintAreaMode(true);
+	                    setContextMenu(null);
+	                    push(
+	                      t({
+	                        it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
+	                        en: 'Draw a rectangle on the map to set the print area.'
+	                      }),
+	                      'info'
+	                    );
+	                  }}
+	                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                  title={(basePlan as any)?.printArea ? t({ it: 'Rimuovi area di stampa', en: 'Clear print area' }) : t({ it: 'Imposta area di stampa', en: 'Set print area' })}
+	                >
                   <Crop size={14} className="text-slate-500" />{' '}
                   {(basePlan as any)?.printArea
                     ? t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })
@@ -3944,13 +3984,14 @@ const PlanView = ({ planId }: Props) => {
                     : t({ it: 'Mostra area di stampa', en: 'Show print area' })}
                 </button>
               ) : null}
-              <button
-                onClick={() => {
-                  setExportModalOpen(true);
-                  setContextMenu(null);
-                }}
-                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-              >
+	              <button
+	                onClick={() => {
+	                  setExportModalOpen(true);
+	                  setContextMenu(null);
+	                }}
+	                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                title={t({ it: 'Esporta PDF', en: 'Export PDF' })}
+	              >
                 <FileDown size={14} className="text-slate-500" /> {t({ it: 'Esporta PDF', en: 'Export PDF' })}
               </button>
             </>
@@ -4006,22 +4047,24 @@ const PlanView = ({ planId }: Props) => {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">{t({ it: 'Nuova stanza', en: 'New room' })}</div>
-            <button
-              onClick={() => {
-                beginRoomDraw();
-                setContextMenu(null);
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
+	            <button
+	              onClick={() => {
+	                beginRoomDraw();
+	                setContextMenu(null);
+	              }}
+	              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+	              title={t({ it: 'Rettangolo', en: 'Rectangle' })}
+	            >
               <Square size={14} className="text-slate-500" /> {t({ it: 'Rettangolo', en: 'Rectangle' })}
             </button>
-            <button
-              onClick={() => {
-                beginRoomPolyDraw();
-                setContextMenu(null);
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
+	            <button
+	              onClick={() => {
+	                beginRoomPolyDraw();
+	                setContextMenu(null);
+	              }}
+	              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+	              title={t({ it: 'Poligono', en: 'Polygon' })}
+	            >
               <Square size={14} className="text-slate-500" /> {t({ it: 'Poligono', en: 'Polygon' })}
             </button>
           </div>
@@ -4210,10 +4253,11 @@ const PlanView = ({ planId }: Props) => {
                     })}
                   </div>
                   <div className="mt-5 flex justify-end">
-                    <button
-                      onClick={() => setRealUserImportMissing(false)}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    >
+	                    <button
+	                      onClick={() => setRealUserImportMissing(false)}
+	                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+	                      title={t({ it: 'Ok', en: 'Ok' })}
+	                    >
                       {t({ it: 'Ok', en: 'Ok' })}
                     </button>
                   </div>
@@ -4394,11 +4438,8 @@ const PlanView = ({ planId }: Props) => {
         onCancel={() => {
           const current = capacityConfirmRef.current;
           if (current?.mode === 'move' && current.objectId) {
-            updateObject(current.objectId, {
-              x: current.prevX ?? 0,
-              y: current.prevY ?? 0,
-              roomId: current.prevRoomId
-            });
+            moveObject(current.objectId, current.prevX ?? 0, current.prevY ?? 0);
+            updateObject(current.objectId, { roomId: current.prevRoomId });
             dragStartRef.current.delete(current.objectId);
           }
           setCapacityConfirm(null);
@@ -4409,7 +4450,8 @@ const PlanView = ({ planId }: Props) => {
           const { mode, type, x, y, objectId, roomId } = current;
           if (mode === 'move' && objectId) {
             markTouched();
-            updateObject(objectId, { x, y, roomId });
+            moveObject(objectId, x, y);
+            updateObject(objectId, { roomId });
             dragStartRef.current.delete(objectId);
             setCapacityConfirm(null);
             return;

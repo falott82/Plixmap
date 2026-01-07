@@ -200,6 +200,7 @@ const LogsPanel = () => {
             load();
           }}
           className="rounded-2xl border border-primary bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-primary/90"
+          title={t({ it: 'Applica filtri e aggiorna la lista', en: 'Apply filters and refresh the list' })}
         >
           {t({ it: 'Cerca', en: 'Search' })}
         </button>
@@ -243,6 +244,7 @@ const LogsPanel = () => {
           disabled={offset <= 0 || loading}
           onClick={() => setOffset((o) => Math.max(0, o - limit))}
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-50"
+          title={t({ it: 'Vai alla pagina precedente', en: 'Go to previous page' })}
         >
           {t({ it: 'Precedente', en: 'Previous' })}
         </button>
@@ -250,6 +252,7 @@ const LogsPanel = () => {
           disabled={offset + rows.length >= total || loading}
           onClick={() => setOffset((o) => o + limit)}
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-50"
+          title={t({ it: 'Vai alla pagina successiva', en: 'Go to next page' })}
         >
           {t({ it: 'Successiva', en: 'Next' })}
         </button>

@@ -111,6 +111,7 @@ const RoomAllocationModal = ({ open, rooms, roomStatsById, onHighlight, onClose 
                             key={room.id}
                             onClick={() => onHighlight(room.id)}
                             className="flex w-full flex-col gap-1 rounded-xl border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                            title={t({ it: 'Evidenzia stanza', en: 'Highlight room' })}
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="truncate font-semibold text-ink">{room.name}</div>
@@ -136,6 +137,7 @@ const RoomAllocationModal = ({ open, rooms, roomStatsById, onHighlight, onClose 
                   <button
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Chiudi', en: 'Close' })}
                   >
                     {t({ it: 'Chiudi', en: 'Close' })}
                   </button>

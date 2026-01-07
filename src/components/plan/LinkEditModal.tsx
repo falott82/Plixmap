@@ -138,12 +138,14 @@ const LinkEditModal = ({ open, initial, onClose, onSubmit }: Props) => {
                   <button
                     onClick={onClose}
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                    title={t({ it: 'Annulla', en: 'Cancel' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     onClick={submit}
                     className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    title={t({ it: 'Salva', en: 'Save' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}
                   </button>

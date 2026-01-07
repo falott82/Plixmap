@@ -273,6 +273,7 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                           <button
                             onClick={() => setLogoUrl(undefined)}
                             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            title={t({ it: 'Rimuovi il logo del cliente', en: 'Remove the client logo' })}
                           >
                             {t({ it: 'Rimuovi', en: 'Remove' })}
                           </button>
@@ -365,6 +366,7 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                   <button
                     onClick={onClose}
                     className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Chiudi senza salvare le modifiche', en: 'Close without saving changes' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -372,6 +374,7 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                     onClick={submit}
                     disabled={!canSubmit}
                     className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                    title={t({ it: 'Salva le modifiche del cliente', en: 'Save client changes' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}
                   </button>

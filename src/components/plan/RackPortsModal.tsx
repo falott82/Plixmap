@@ -1,6 +1,6 @@
 import { Dialog } from '@headlessui/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Link2, X } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ArrowRight, Link2, Search, X } from 'lucide-react';
 import { RackDefinition, RackItem, RackItemType, RackLink, RackPortKind } from '../../store/types';
 import { useT } from '../../i18n/useT';
 import { useToastStore } from '../../store/useToast';
@@ -75,6 +75,8 @@ const kindDefaults: Record<RackPortKind, string> = {
 
 const typeColors: Record<RackItemType, string> = {
   switch: '#3b82f6',
+  router: '#22c55e',
+  firewall: '#ef4444',
   server: '#14b8a6',
   patchpanel: '#f59e0b',
   optical_drawer: '#a855f7',
@@ -107,10 +109,15 @@ const RackPortsModal = ({
   const [notePrompt, setNotePrompt] = useState<NotePrompt | null>(null);
   const [noteValue, setNoteValue] = useState('');
   const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const noteTitleId = useId();
+  const noteDescriptionId = useId();
+  const noteModalRef = useRef<HTMLDivElement | null>(null);
+  const notePrevFocusRef = useRef<HTMLElement | null>(null);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [connectionsExpanded, setConnectionsExpanded] = useState(false);
   const [connectionsOnlyActive, setConnectionsOnlyActive] = useState(true);
   const [connectionsKindFilter, setConnectionsKindFilter] = useState<'all' | 'ethernet' | 'fiber'>('all');
+  const [connectionsQuery, setConnectionsQuery] = useState('');
   const [overwritePrompt, setOverwritePrompt] = useState<{ linkId: string } | null>(null);
   const [portPickerOpen, setPortPickerOpen] = useState(false);
   const [targetRackId, setTargetRackId] = useState('');
@@ -159,8 +166,12 @@ const RackPortsModal = ({
 
   const getDeviceLabel = (device: RackItem | null) => {
     if (!device) return '';
-    const host = device.hostName ? ` - ${device.hostName}` : '';
-    return `${device.name}${host}`;
+    const hasHost =
+      device.type === 'switch' || device.type === 'router' || device.type === 'firewall' || device.type === 'server';
+    if (hasHost) {
+      return device.hostName?.trim() || t({ it: 'Senza hostname', en: 'No hostname' });
+    }
+    return device.name;
   };
 
   const getRackName = (rackId: string) => racks.find((r) => r.id === rackId)?.name || '';
@@ -192,7 +203,7 @@ const RackPortsModal = ({
 
   const getGroupForType = (type?: RackItemType) => {
     if (type === 'server') return 'server';
-    if (type === 'switch') return 'switch';
+    if (type === 'switch' || type === 'router' || type === 'firewall') return 'switch';
     if (type === 'patchpanel' || type === 'optical_drawer') return 'patch';
     return 'other';
   };
@@ -286,7 +297,7 @@ const RackPortsModal = ({
     const device = rackItems.find((d) => d.id === deviceId);
     const rack = device ? getRackName(device.rackId) : '';
     const portLabel = getPortDisplayName(device || null, kind, index);
-    const deviceLabel = getDeviceLabel(device);
+    const deviceLabel = getDeviceLabel(device || null);
     const sideLabel = side ? ` · ${side === 'female' ? 'Femmina' : 'Cablaggio'}` : '';
     return `${rack ? `${rack} / ` : ''}${deviceLabel} · ${portLabel}${sideLabel}`;
   };
@@ -388,8 +399,16 @@ const RackPortsModal = ({
 
   useEffect(() => {
     if (!notePrompt) return;
+    notePrevFocusRef.current = document.activeElement as HTMLElement | null;
     const id = requestAnimationFrame(() => noteInputRef.current?.focus());
-    return () => cancelAnimationFrame(id);
+    return () => {
+      cancelAnimationFrame(id);
+      const previous = notePrevFocusRef.current;
+      notePrevFocusRef.current = null;
+      if (previous && document.contains(previous)) {
+        requestAnimationFrame(() => previous.focus());
+      }
+    };
   }, [notePrompt]);
 
   useEffect(() => {
@@ -409,6 +428,11 @@ const RackPortsModal = ({
     if (!open) return;
     setConnectionsKindFilter(initialConnectionsKind || 'all');
   }, [initialConnectionsKind, itemId, open]);
+
+  useEffect(() => {
+    if (!connectionsOpen) return;
+    setConnectionsQuery('');
+  }, [connectionsOpen, itemId]);
 
   useEffect(() => {
     if (!linkPrompt) setPortPickerOpen(false);
@@ -570,9 +594,22 @@ const RackPortsModal = ({
   const connectionCollator = useMemo(() => new Intl.Collator('it', { sensitivity: 'base' }), []);
 
   const visibleConnections = useMemo(() => {
+    const normalizedQuery = connectionsQuery.trim().toLowerCase();
     const filtered = connections.filter((entry) => {
       if (connectionsOnlyActive && !entry.active) return false;
       if (connectionsKindFilter !== 'all' && entry.kind !== connectionsKindFilter) return false;
+      if (normalizedQuery) {
+        const labels = [
+          entry.portName,
+          entry.sideLabel || '',
+          entry.note || '',
+          entry.speed || '',
+          ...entry.parts.map((part) => part.label)
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (!labels.includes(normalizedQuery)) return false;
+      }
       return true;
     });
     return [...filtered].sort((a, b) => {
@@ -588,7 +625,7 @@ const RackPortsModal = ({
       const bLabel = `${b.portName} ${b.sideLabel || ''}`.trim();
       return connectionCollator.compare(aLabel, bLabel);
     });
-  }, [connectionCollator, connections, connectionsKindFilter, connectionsOnlyActive]);
+  }, [connectionCollator, connections, connectionsKindFilter, connectionsOnlyActive, connectionsQuery]);
 
   const renderDualRow = (kind: RackPortKind, index: number) => {
       if (!item) return null;
@@ -644,6 +681,7 @@ const RackPortsModal = ({
                     onClick={() => openLinkPrompt(kind, index, 'female')}
                     disabled={readOnly}
                     className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                    title={t({ it: 'Collega femmina', en: 'Link female' })}
                   >
                     {t({ it: 'Femmina', en: 'Female' })}
                   </button>
@@ -653,6 +691,7 @@ const RackPortsModal = ({
                     onClick={() => openLinkPrompt(kind, index, 'cable')}
                     disabled={readOnly}
                     className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                    title={t({ it: 'Collega cablaggio', en: 'Link cabling' })}
                   >
                     {t({ it: 'Cablaggio', en: 'Cabling' })}
                   </button>
@@ -662,6 +701,7 @@ const RackPortsModal = ({
                     onClick={() => openNotePrompt(kind, index)}
                     disabled={readOnly}
                     className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                    title={t({ it: 'Aggiungi nota', en: 'Add note' })}
                   >
                     {t({ it: 'Nota', en: 'Note' })}
                   </button>
@@ -713,6 +753,7 @@ const RackPortsModal = ({
                 onClick={() => openLinkPrompt(kind, index)}
                 disabled={readOnly}
                 className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                title={t({ it: 'Modifica collegamento', en: 'Edit link' })}
               >
                 {t({ it: 'Modifica', en: 'Edit' })}
               </button>
@@ -721,6 +762,7 @@ const RackPortsModal = ({
                 onClick={() => openLinkPrompt(kind, index)}
                 disabled={readOnly}
                 className="rounded-md bg-primary px-2 py-1 text-[11px] font-semibold text-white hover:bg-primary/90"
+                title={t({ it: 'Collega porta', en: 'Link port' })}
               >
                 {t({ it: 'Collega', en: 'Link' })}
               </button>
@@ -729,6 +771,7 @@ const RackPortsModal = ({
               onClick={() => openNotePrompt(kind, index)}
               disabled={readOnly}
               className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+              title={t({ it: 'Aggiungi nota', en: 'Add note' })}
             >
               {t({ it: 'Nota', en: 'Note' })}
             </button>
@@ -781,9 +824,20 @@ const RackPortsModal = ({
     );
   };
 
+  const getNoteFocusable = () => {
+    if (!noteModalRef.current) return [] as HTMLElement[];
+    const focusables = Array.from(
+      noteModalRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      )
+    );
+    return focusables.filter((el) => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true');
+  };
+
   if (!item) return null;
   const ethCount = getPortCount(item, 'ethernet');
   const fiberCount = getPortCount(item, 'fiber');
+  const hasConnectionsQuery = connectionsQuery.trim().length > 0;
 
   return (
     <>
@@ -829,6 +883,102 @@ const RackPortsModal = ({
                   {renderPorts('fiber')}
                 </div>
               )}
+              {notePrompt ? (
+                <div className="fixed inset-0 z-[120]">
+                  <div
+                    className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+                    aria-hidden="true"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeNotePrompt();
+                    }}
+                  />
+                  <div className="absolute inset-0 overflow-y-auto">
+                    <div className="flex min-h-full items-center justify-center px-4 py-6">
+                      <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby={noteTitleId}
+                        aria-describedby={noteDescriptionId}
+                        className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card"
+                        ref={noteModalRef}
+                        tabIndex={-1}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                          if (event.key === 'Escape') {
+                            closeNotePrompt();
+                          }
+                          if (event.key !== 'Tab') return;
+                          const focusables = getNoteFocusable();
+                          if (!focusables.length) return;
+                          const first = focusables[0];
+                          const last = focusables[focusables.length - 1];
+                          const active = document.activeElement as HTMLElement | null;
+                          if (event.shiftKey) {
+                            if (!active || active === first || !noteModalRef.current?.contains(active)) {
+                              event.preventDefault();
+                              last.focus();
+                            }
+                            return;
+                          }
+                          if (active === last) {
+                            event.preventDefault();
+                            first.focus();
+                          }
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 id={noteTitleId} className="text-lg font-semibold text-ink">
+                            {t({ it: 'Nota porta', en: 'Port note' })}
+                          </h3>
+                          <button
+                            onClick={closeNotePrompt}
+                            className="text-slate-500 hover:text-ink"
+                            title={t({ it: 'Chiudi', en: 'Close' })}
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+                        <div id={noteDescriptionId} className="mt-2 text-xs text-slate-500">
+                          {t({ it: 'Porta', en: 'Port' })}:{' '}
+                          {getPortDisplayName(item, notePrompt.kind, notePrompt.index)}
+                        </div>
+                        <label className="mt-3 block text-sm font-medium text-slate-700">
+                          {t({ it: 'Nota', en: 'Note' })}
+                          <textarea
+                            autoFocus
+                            rows={4}
+                            value={noteValue}
+                            onChange={(e) => setNoteValue(e.target.value)}
+                            readOnly={readOnly}
+                            aria-readonly={readOnly}
+                            ref={noteInputRef}
+                            className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          />
+                        </label>
+                        <div className="mt-4 flex justify-end gap-2">
+                          <button
+                            onClick={closeNotePrompt}
+                            className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            title={t({ it: 'Annulla', en: 'Cancel' })}
+                          >
+                            {t({ it: 'Annulla', en: 'Cancel' })}
+                          </button>
+                          <button
+                            onClick={handleNoteSave}
+                            disabled={readOnly}
+                            className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+                            title={t({ it: 'Salva', en: 'Save' })}
+                          >
+                            {t({ it: 'Salva', en: 'Save' })}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </Dialog.Panel>
           </div>
         </div>
@@ -844,7 +994,7 @@ const RackPortsModal = ({
                   <Dialog.Title className="text-lg font-semibold text-ink">
                     {t({ it: 'Collega porta', en: 'Link port' })}
                   </Dialog.Title>
-                  <button onClick={() => setLinkPrompt(null)} className="text-slate-500 hover:text-ink">
+                  <button onClick={() => setLinkPrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -906,6 +1056,7 @@ const RackPortsModal = ({
                         onClick={() => setPortPickerOpen(true)}
                         disabled={!targetItemId}
                         className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-left outline-none ring-primary/30 focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-100"
+                        title={t({ it: 'Seleziona porta', en: 'Select port' })}
                       >
                         <span className="truncate text-slate-700">
                           {targetPortIndex ? targetPortLabel : t({ it: 'Seleziona porta', en: 'Select port' })}
@@ -966,6 +1117,7 @@ const RackPortsModal = ({
                   <button
                     onClick={() => setLinkPrompt(null)}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Annulla', en: 'Cancel' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -976,6 +1128,7 @@ const RackPortsModal = ({
                         setLinkPrompt(null);
                       }}
                       className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50"
+                      title={t({ it: 'Scollega', en: 'Unlink' })}
                     >
                       {t({ it: 'Scollega', en: 'Unlink' })}
                     </button>
@@ -983,6 +1136,7 @@ const RackPortsModal = ({
                   <button
                     onClick={handleSaveLink}
                     className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    title={t({ it: 'Salva collegamento', en: 'Save link' })}
                   >
                     {t({ it: 'Salva collegamento', en: 'Save link' })}
                   </button>
@@ -1002,7 +1156,7 @@ const RackPortsModal = ({
                   <Dialog.Title className="text-lg font-semibold text-ink">
                     {t({ it: 'Seleziona porta', en: 'Select port' })}
                   </Dialog.Title>
-                  <button onClick={() => setPortPickerOpen(false)} className="text-slate-500 hover:text-ink">
+                  <button onClick={() => setPortPickerOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -1042,6 +1196,7 @@ const RackPortsModal = ({
                           className={`w-full rounded-lg border px-3 py-2 text-left ${
                             isConnected ? 'border-emerald-200 bg-emerald-50/60' : 'border-rose-200 bg-rose-50/60'
                           } ${targetPortIndex === port ? 'ring-2 ring-primary/40' : ''}`}
+                          title={getPortDisplayName(targetDevice, linkPrompt.kind, port)}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
@@ -1081,7 +1236,7 @@ const RackPortsModal = ({
                   <Dialog.Title className="text-lg font-semibold text-ink">
                     {t({ it: 'Rinomina porta', en: 'Rename port' })}
                   </Dialog.Title>
-                  <button onClick={() => setRenamePrompt(null)} className="text-slate-500 hover:text-ink">
+                  <button onClick={() => setRenamePrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -1102,68 +1257,14 @@ const RackPortsModal = ({
                   <button
                     onClick={() => setRenamePrompt(null)}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Annulla', en: 'Cancel' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     onClick={handleRenameSave}
                     className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-                  >
-                    {t({ it: 'Salva', en: 'Save' })}
-                  </button>
-                </div>
-              </Dialog.Panel>
-            </div>
-          </div>
-        </Dialog>
-      ) : null}
-      {notePrompt ? (
-        <Dialog
-          open={!!notePrompt}
-          as="div"
-          className="relative z-[105]"
-          onClose={closeNotePrompt}
-          initialFocus={noteInputRef}
-        >
-          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" />
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-6">
-              <Dialog.Panel className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card">
-                <div className="flex items-center justify-between gap-3">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({ it: 'Nota porta', en: 'Port note' })}
-                  </Dialog.Title>
-                  <button onClick={closeNotePrompt} className="text-slate-500 hover:text-ink">
-                    <X size={18} />
-                  </button>
-                </div>
-                <div className="mt-2 text-xs text-slate-500">
-                  {t({ it: 'Porta', en: 'Port' })}:{' '}
-                  {getPortDisplayName(item, notePrompt.kind, notePrompt.index)}
-                </div>
-                <label className="mt-3 block text-sm font-medium text-slate-700">
-                  {t({ it: 'Nota', en: 'Note' })}
-                  <textarea
-                    autoFocus
-                    rows={4}
-                    value={noteValue}
-                    onChange={(e) => setNoteValue(e.target.value)}
-                    disabled={readOnly}
-                    ref={noteInputRef}
-                    className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                  />
-                </label>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    onClick={closeNotePrompt}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    {t({ it: 'Annulla', en: 'Cancel' })}
-                  </button>
-                  <button
-                    onClick={handleNoteSave}
-                    disabled={readOnly}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+                    title={t({ it: 'Salva', en: 'Save' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}
                   </button>
@@ -1183,7 +1284,7 @@ const RackPortsModal = ({
                   <Dialog.Title className="text-lg font-semibold text-ink">
                     {t({ it: 'Collegamenti apparati', en: 'Device links' })}
                   </Dialog.Title>
-                  <button onClick={() => setConnectionsOpen(false)} className="text-slate-500 hover:text-ink">
+                  <button onClick={() => setConnectionsOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -1191,11 +1292,23 @@ const RackPortsModal = ({
                 {rackName ? <div className="mt-1 text-xs font-semibold text-sky-600">{rackName}</div> : null}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
+                      <Search size={12} className="text-slate-400" />
+                      <input
+                        value={connectionsQuery}
+                        onChange={(e) => setConnectionsQuery(e.target.value)}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        placeholder={t({ it: 'Cerca porta, rack, nota...', en: 'Search port, rack, note...' })}
+                        className="w-44 bg-transparent text-[11px] text-slate-600 placeholder:text-slate-400 focus:outline-none"
+                        title={t({ it: 'Cerca nei collegamenti', en: 'Search links' })}
+                      />
+                    </div>
                     <button
                       onClick={() => setConnectionsOnlyActive((prev) => !prev)}
                       className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
                         connectionsOnlyActive ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600'
                       }`}
+                      title={t({ it: 'Mostra solo attive', en: 'Show active only' })}
                     >
                       {t({ it: 'Solo attive', en: 'Active only' })}
                     </button>
@@ -1213,6 +1326,7 @@ const RackPortsModal = ({
                             key={kind}
                             onClick={() => setConnectionsKindFilter(kind)}
                             className={`rounded-full px-2 py-0.5 ${isActive ? 'bg-slate-900 text-white' : ''}`}
+                            title={label}
                           >
                             {label}
                           </button>
@@ -1224,6 +1338,7 @@ const RackPortsModal = ({
                       className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
                         connectionsExpanded ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'
                       }`}
+                      title={connectionsExpanded ? t({ it: 'Vista espansa', en: 'Expanded view' }) : t({ it: 'Vista compatta', en: 'Compact view' })}
                     >
                       {connectionsExpanded ? t({ it: 'Vista espansa', en: 'Expanded view' }) : t({ it: 'Vista compatta', en: 'Compact view' })}
                     </button>
@@ -1232,6 +1347,7 @@ const RackPortsModal = ({
                     {[
                       { label: t({ it: 'Server', en: 'Server' }), colors: [typeColors.server] },
                       { label: t({ it: 'Switch', en: 'Switch' }), colors: [typeColors.switch] },
+                      { label: t({ it: 'Router/Firewall', en: 'Router/Firewall' }), colors: [typeColors.router, typeColors.firewall] },
                       { label: t({ it: 'Patch/ottico', en: 'Patch/Optical' }), colors: [typeColors.patchpanel, typeColors.optical_drawer] }
                     ].map((entry) => (
                       <div key={entry.label} className="flex items-center gap-1">
@@ -1247,7 +1363,9 @@ const RackPortsModal = ({
                 </div>
                 {visibleConnections.length === 0 ? (
                   <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                    {t({ it: 'Nessun collegamento presente.', en: 'No links available.' })}
+                    {hasConnectionsQuery
+                      ? t({ it: 'Nessun collegamento trovato con questa ricerca.', en: 'No links match this search.' })
+                      : t({ it: 'Nessun collegamento presente.', en: 'No links available.' })}
                   </div>
                 ) : (
                   <div className="mt-4 space-y-3">
@@ -1326,7 +1444,7 @@ const RackPortsModal = ({
                   <Dialog.Title className="text-lg font-semibold text-ink">
                     {t({ it: 'Porta già collegata', en: 'Port already linked' })}
                   </Dialog.Title>
-                  <button onClick={() => setOverwritePrompt(null)} className="text-slate-500 hover:text-ink">
+                  <button onClick={() => setOverwritePrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -1340,6 +1458,7 @@ const RackPortsModal = ({
                   <button
                     onClick={() => setOverwritePrompt(null)}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Annulla', en: 'Cancel' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -1349,6 +1468,7 @@ const RackPortsModal = ({
                       applySaveLink(true);
                     }}
                     className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700"
+                    title={t({ it: 'Sovrascrivi', en: 'Overwrite' })}
                   >
                     {t({ it: 'Sovrascrivi', en: 'Overwrite' })}
                   </button>

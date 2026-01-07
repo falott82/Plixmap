@@ -166,6 +166,7 @@ const SearchResultsPopover = ({
                       selected ? 'border-primary bg-primary/10 ring-1 ring-primary/30 shadow-sm' : 'border-slate-200'
                     }`}
                     aria-selected={selected}
+                    title={room.name}
                   >
                     <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary">
                       <span className="text-xs font-bold">R</span>
@@ -202,6 +203,7 @@ const SearchResultsPopover = ({
                       selected ? 'border-primary bg-primary/10 ring-1 ring-primary/30 shadow-sm' : 'border-slate-200'
                     }`}
                     aria-selected={selected}
+                    title={obj.name}
                   >
                     <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary">
                       <Icon name={iconOf(obj.type)} size={16} />

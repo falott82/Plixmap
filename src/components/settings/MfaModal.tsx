@@ -173,13 +173,24 @@ export default function MfaModal({
                 </div>
 
                 <div className="mt-6 flex justify-end gap-2">
-                  <button onClick={onClose} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50">
+                  <button
+                    onClick={onClose}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                    title={t({ it: 'Chiudi senza modificare MFA', en: 'Close without changing MFA' })}
+                  >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
                   <button
                     onClick={submit}
                     disabled={loading || !canSubmit}
                     className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90 disabled:opacity-60"
+                    title={
+                      enabled
+                        ? t({ it: 'Disattiva MFA', en: 'Disable MFA' })
+                        : !setupSecret
+                          ? t({ it: 'Genera QR per MFA', en: 'Generate MFA QR' })
+                          : t({ it: 'Attiva MFA', en: 'Enable MFA' })
+                    }
                   >
                     {enabled
                       ? loading

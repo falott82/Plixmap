@@ -153,6 +153,7 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
                   <button
                     onClick={onClose}
                     className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Chiudi senza cambiare password', en: 'Close without changing password' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -160,6 +161,7 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
                     onClick={submit}
                     disabled={!isStrong || newPassword !== confirm || (requireOld && !oldPassword)}
                     className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                    title={t({ it: 'Salva la nuova password', en: 'Save the new password' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}
                   </button>

@@ -67,6 +67,7 @@ const AccountPanel = () => {
           <button
             onClick={() => setPwOpen(true)}
             className="flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+            title={t({ it: 'Apri cambio password', en: 'Open password change' })}
           >
             <KeyRound size={16} />
             {t({ it: 'Cambia password', en: 'Change password' })}

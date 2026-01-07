@@ -171,7 +171,7 @@ const App = () => {
       })
       .finally(() => {
         hydratedForUserId.current = user.id;
-        lastMustChangeRef.current = user.mustChangePassword;
+        lastMustChangeRef.current = user.mustChangePassword ?? null;
         setHydrated(true);
       });
   }, [authHydrated, markSaved, setServerState, user]);

@@ -199,6 +199,7 @@ const SettingsView = () => {
               className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                 tab === 'objects' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
               }`}
+              title={t({ it: 'Apri tab Oggetti', en: 'Open Objects tab' })}
             >
               <LayoutGrid size={16} /> {t({ it: 'Oggetti', en: 'Objects' })}
             </button>
@@ -207,6 +208,7 @@ const SettingsView = () => {
               className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                 tab === 'users' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
               }`}
+              title={t({ it: 'Apri tab Utenti', en: 'Open Users tab' })}
             >
               <Users size={16} /> {t({ it: 'Utenti', en: 'Users' })}
             </button>
@@ -216,6 +218,7 @@ const SettingsView = () => {
                 className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                   tab === 'logs' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
                 }`}
+                title={t({ it: 'Apri tab Logs', en: 'Open Logs tab' })}
               >
                 {t({ it: 'Logs', en: 'Logs' })}
               </button>
@@ -227,6 +230,7 @@ const SettingsView = () => {
                   className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                     tab === 'backup' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
                   }`}
+                  title={t({ it: 'Apri tab Backup', en: 'Open Backup tab' })}
                 >
                   <Upload size={16} /> {t({ it: 'Backup', en: 'Backup' })}
                 </button>
@@ -235,6 +239,7 @@ const SettingsView = () => {
                   className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                     tab === 'import' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
                   }`}
+                  title={t({ it: 'Apri tab Custom Import', en: 'Open Custom Import tab' })}
                 >
                   <DownloadCloud size={16} /> {t({ it: 'Custom Import', en: 'Custom Import' })}
                 </button>
@@ -243,6 +248,7 @@ const SettingsView = () => {
                   className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                     tab === 'nerd' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
                   }`}
+                  title={t({ it: 'Apri tab Nerd Area', en: 'Open Nerd Area tab' })}
                 >
                   {t({ it: 'Nerd Area', en: 'Nerd Area' })}
                 </button>
@@ -257,6 +263,7 @@ const SettingsView = () => {
               className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                 tab === 'objects' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
               }`}
+              title={t({ it: 'Apri tab Oggetti', en: 'Open Objects tab' })}
             >
               <LayoutGrid size={16} /> {t({ it: 'Oggetti', en: 'Objects' })}
             </button>
@@ -267,6 +274,7 @@ const SettingsView = () => {
           className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
             tab === 'account' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
           }`}
+          title={t({ it: 'Apri tab Account', en: 'Open Account tab' })}
         >
           <UserCircle2 size={16} /> {t({ it: 'Account', en: 'Account' })}
         </button>

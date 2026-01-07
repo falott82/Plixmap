@@ -9,6 +9,36 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.4.5',
+    date: '2026-01-07',
+    type: 'minor',
+    notes: [
+      n(
+        'Planimetria: tooltips aggiunti per menu contestuali, viste e azioni rapide',
+        'Floor plan: tooltips added for context menus, views, and quick actions'
+      ),
+      n(
+        'Rack: tooltips completi su porte, collegamenti e modali di configurazione',
+        'Rack: comprehensive tooltips across ports, links, and configuration modals'
+      )
+    ]
+  },
+  {
+    version: '1.4.4',
+    date: '2026-01-05',
+    type: 'minor',
+    notes: [
+      n(
+        'Nerd Area: pulsante check sicurezza con npm audit e riepilogo vulnerabilita',
+        'Nerd Area: security check button with npm audit and vulnerability summary'
+      ),
+      n(
+        'Server: endpoint protetto per eseguire npm audit dal pannello admin',
+        'Server: protected endpoint to run npm audit from the admin panel'
+      )
+    ]
+  },
+  {
     version: '1.4.3',
     date: '2026-01-05',
     type: 'minor',
