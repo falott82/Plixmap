@@ -191,7 +191,7 @@ const RevisionsModal = ({
                     <History size={18} className="text-primary" />
                     {t({ it: 'Time machine', en: 'Time machine' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -210,6 +210,7 @@ const RevisionsModal = ({
                       onClose();
                     }}
                     className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Torna al presente', en: 'Back to present' })}
                   >
                     {t({ it: 'Torna al presente', en: 'Back to present' })}
                   </button>
@@ -255,6 +256,7 @@ const RevisionsModal = ({
                                 onClose();
                               }}
                               className="w-full text-left"
+                              title={`${t({ it: 'Apri revisione', en: 'Open revision' })}: ${formatRev(r)} · ${r.name}`}
                             >
                               <div className="truncate text-sm font-semibold text-ink">
                                 {t({ it: 'Rev', en: 'Rev' })}: {formatRev(r)} · {r.name}
@@ -462,7 +464,11 @@ const RevisionsModal = ({
                                 <Diff size={18} className="text-primary" />
                                 {t({ it: 'Confronta revisioni', en: 'Compare revisions' })}
                               </Dialog.Title>
-                              <button onClick={() => setComparePickOpen(false)} className="text-slate-500 hover:text-ink">
+                              <button
+                                onClick={() => setComparePickOpen(false)}
+                                className="text-slate-500 hover:text-ink"
+                                title={t({ it: 'Chiudi', en: 'Close' })}
+                              >
                                 <X size={18} />
                               </button>
                             </div>
@@ -486,6 +492,7 @@ const RevisionsModal = ({
                                     className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm transition hover:bg-slate-50 ${
                                       checked ? 'border-primary bg-primary/5' : 'border-slate-200 bg-white'
                                     }`}
+                                    title={`${t({ it: 'Rev', en: 'Rev' })}: ${formatRev(r)} · ${r.name}`}
                                   >
                                     <div
                                       className={`flex h-5 w-5 items-center justify-center rounded-md border ${
@@ -512,6 +519,7 @@ const RevisionsModal = ({
                               <button
                                 onClick={() => setCompareIds([])}
                                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                title={t({ it: 'Pulisci', en: 'Clear' })}
                               >
                                 {t({ it: 'Pulisci', en: 'Clear' })}
                               </button>
@@ -523,6 +531,7 @@ const RevisionsModal = ({
                                   setCompareOpen(true);
                                 }}
                                 className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                                title={t({ it: 'Confronta', en: 'Compare' })}
                               >
                                 {t({ it: 'Confronta', en: 'Compare' })}
                               </button>
@@ -565,7 +574,11 @@ const RevisionsModal = ({
                                   <Diff size={18} className="text-primary" />
                                   {t({ it: 'Confronto revisioni', en: 'Revision compare' })}
                                 </Dialog.Title>
-                                <button onClick={() => setCompareOpen(false)} className="text-slate-500 hover:text-ink">
+                                <button
+                                  onClick={() => setCompareOpen(false)}
+                                  className="text-slate-500 hover:text-ink"
+                                  title={t({ it: 'Chiudi', en: 'Close' })}
+                                >
                                   <X size={18} />
                                 </button>
                               </div>

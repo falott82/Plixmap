@@ -1,6 +1,16 @@
 export type MapObjectType = string;
 
-export type RackItemType = 'switch' | 'server' | 'patchpanel' | 'optical_drawer' | 'ups' | 'power_strip' | 'misc';
+export type RackItemType =
+  | 'switch'
+  | 'router'
+  | 'firewall'
+  | 'server'
+  | 'patchpanel'
+  | 'optical_drawer'
+  | 'passacavo'
+  | 'ups'
+  | 'power_strip'
+  | 'misc';
 export type RackPortKind = 'ethernet' | 'fiber';
 
 export interface RackDefinition {

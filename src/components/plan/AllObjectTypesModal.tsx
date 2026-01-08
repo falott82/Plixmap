@@ -135,6 +135,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                         setContext(null);
                         onClose();
                       }}
+                      title={t({ it: 'Posiziona sulla mappa', en: 'Place on map' })}
                     >
                       <span>{t({ it: 'Posiziona sulla mappa', en: 'Place on map' })}</span>
                       <span className="text-xs text-slate-400">↵</span>
@@ -147,6 +148,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                           onAddToPalette(context.typeId);
                           setContext(null);
                         }}
+                        title={t({ it: 'Aggiungi a barra laterale', en: 'Add to sidebar' })}
                       >
                         <span>{t({ it: 'Aggiungi a barra laterale', en: 'Add to sidebar' })}</span>
                         <span className="text-xs text-slate-400">+</span>

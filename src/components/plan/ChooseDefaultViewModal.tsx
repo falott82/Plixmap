@@ -51,7 +51,7 @@ const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
                   <Dialog.Title className="text-lg font-semibold text-ink">
                     {t({ it: 'Scegli la nuova vista predefinita', en: 'Choose the new default view' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -98,6 +98,7 @@ const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
                   <button
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Annulla', en: 'Cancel' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -108,6 +109,7 @@ const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
                       onConfirm(selectedId);
                     }}
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-50"
+                    title={t({ it: 'Imposta predefinita', en: 'Set default' })}
                   >
                     <Star size={16} className="text-amber-300" />
                     {t({ it: 'Imposta predefinita', en: 'Set default' })}

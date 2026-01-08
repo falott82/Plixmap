@@ -3,6 +3,7 @@ const path = require('path');
 const http = require('http');
 const express = require('express');
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret } = require('./db.cjs');
 const {
@@ -543,6 +544,66 @@ app.get('/api/settings/audit', requireAuth, (req, res) => {
     return;
   }
   res.json({ auditVerbose: getAuditVerboseEnabled(db) });
+});
+
+app.post('/api/settings/npm-audit', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const startedAt = Date.now();
+  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  execFile(
+    npmCmd,
+    ['audit', '--omit=dev', '--audit-level=high', '--json'],
+    { cwd: process.cwd(), timeout: 120000, maxBuffer: 10 * 1024 * 1024 },
+    (err, stdout, stderr) => {
+      let parsed = null;
+      let summary = null;
+      if (stdout) {
+        try {
+          parsed = JSON.parse(stdout);
+        } catch {}
+      }
+      if (parsed && parsed.metadata && parsed.metadata.vulnerabilities) {
+        const raw = parsed.metadata.vulnerabilities;
+        const levels = ['info', 'low', 'moderate', 'high', 'critical'];
+        let total = 0;
+        summary = {};
+        for (const level of levels) {
+          const count = Number(raw[level] || 0);
+          summary[level] = count;
+          total += count;
+        }
+        summary.total = total;
+      }
+      const durationMs = Date.now() - startedAt;
+      const exitCode = err && typeof err.code === 'number' ? err.code : 0;
+      const trim = (text) => {
+        const src = String(text || '');
+        if (src.length <= 20000) return src;
+        return `${src.slice(0, 20000)}\n... (truncated)`;
+      };
+      const ok = !!parsed;
+      if (ok) {
+        writeAuditLog(db, {
+          level: 'important',
+          event: 'npm_audit_run',
+          userId: req.userId,
+          ...requestMeta(req),
+          details: { summary, exitCode, durationMs }
+        });
+      }
+      res.json({
+        ok,
+        summary,
+        durationMs,
+        exitCode,
+        error: !ok ? (err?.message || 'Failed to run npm audit') : undefined,
+        stderr: trim(stderr)
+      });
+    }
+  );
 });
 
 // --- Custom Import: external "real users" per client (superadmin) ---

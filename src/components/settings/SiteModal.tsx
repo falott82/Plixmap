@@ -133,6 +133,7 @@ const SiteModal = ({ open, initialName = '', initialCoords = '', title, onClose,
                   <button
                     onClick={onClose}
                     className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Chiudi senza salvare le modifiche', en: 'Close without saving changes' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -140,6 +141,7 @@ const SiteModal = ({ open, initialName = '', initialCoords = '', title, onClose,
                     onClick={submit}
                     disabled={!canSubmit}
                     className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                    title={t({ it: 'Salva la sede', en: 'Save the site' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}
                   </button>

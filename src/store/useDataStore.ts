@@ -124,7 +124,7 @@ interface DataState {
   deleteLink: (floorPlanId: string, linkId: string) => void;
   updateLink: (floorPlanId: string, linkId: string, payload: Partial<Pick<PlanLink, 'name' | 'description' | 'color' | 'width' | 'dashed' | 'route'>>) => void;
   ensureRack: (floorPlanId: string, rackId: string, payload: Pick<RackDefinition, 'name' | 'totalUnits'>) => void;
-  updateRack: (floorPlanId: string, rackId: string, changes: Partial<Pick<RackDefinition, 'name' | 'totalUnits'>>) => void;
+  updateRack: (floorPlanId: string, rackId: string, changes: Partial<Pick<RackDefinition, 'name' | 'totalUnits' | 'notes'>>) => void;
   deleteRack: (floorPlanId: string, rackId: string) => void;
   addRackItem: (floorPlanId: string, rackItem: Omit<RackItem, 'id' | 'createdAt' | 'updatedAt'>) => string;
   updateRackItem: (floorPlanId: string, itemId: string, changes: Partial<Omit<RackItem, 'id' | 'rackId'>>) => void;

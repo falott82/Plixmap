@@ -9,6 +9,161 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.4.10',
+    date: '2026-01-08',
+    type: 'fix',
+    notes: [
+      n(
+        'CI: run-name del workflow audit semplificato per evitare errori API',
+        'CI: audit workflow run-name simplified to avoid API errors'
+      )
+    ]
+  },
+  {
+    version: '1.4.9',
+    date: '2026-01-08',
+    type: 'fix',
+    notes: [
+      n(
+        'CI: fix rename workflow run con chiamata GitHub API compatibile',
+        'CI: fixed workflow run rename with a compatible GitHub API call'
+      )
+    ]
+  },
+  {
+    version: '1.4.8',
+    date: '2026-01-08',
+    type: 'fix',
+    notes: [
+      n(
+        'CI: fix lettura versione app nel workflow security-audit',
+        'CI: fixed app version reading in the security-audit workflow'
+      )
+    ]
+  },
+  {
+    version: '1.4.7',
+    date: '2026-01-08',
+    type: 'minor',
+    notes: [
+      n(
+        'Rack: nomi apparati tradotti correttamente in inglese',
+        'Rack: device labels now properly translated in English'
+      )
+    ]
+  },
+  {
+    version: '1.4.6',
+    date: '2026-01-08',
+    type: 'minor',
+    notes: [
+      n(
+        'Rack: selezione apparati resa stabile con click e menu contestuale',
+        'Rack: device selection stabilized for click and context menu'
+      ),
+      n(
+        'Rack: drag & drop ora consente lo scambio di apparati con la stessa U',
+        'Rack: drag & drop now swaps devices with the same U size'
+      ),
+      n(
+        'Rack: aggiunto apparato passivo Passacavo e nome per oggetti Varie',
+        'Rack: added passive Passacavo device and name field for Misc items'
+      ),
+      n(
+        'Rack: modale note porta ora riceve sempre il focus',
+        'Rack: port note modal now always receives focus'
+      )
+    ]
+  },
+  {
+    version: '1.4.5',
+    date: '2026-01-07',
+    type: 'minor',
+    notes: [
+      n(
+        'Planimetria: tooltips aggiunti per menu contestuali, viste e azioni rapide',
+        'Floor plan: tooltips added for context menus, views, and quick actions'
+      ),
+      n(
+        'Rack: tooltips completi su porte, collegamenti e modali di configurazione',
+        'Rack: comprehensive tooltips across ports, links, and configuration modals'
+      )
+    ]
+  },
+  {
+    version: '1.4.4',
+    date: '2026-01-05',
+    type: 'minor',
+    notes: [
+      n(
+        'Nerd Area: pulsante check sicurezza con npm audit e riepilogo vulnerabilita',
+        'Nerd Area: security check button with npm audit and vulnerability summary'
+      ),
+      n(
+        'Server: endpoint protetto per eseguire npm audit dal pannello admin',
+        'Server: protected endpoint to run npm audit from the admin panel'
+      )
+    ]
+  },
+  {
+    version: '1.4.3',
+    date: '2026-01-05',
+    type: 'minor',
+    notes: [
+      n(
+        'Planimetria: collegamenti rack visibili anche con layer Cablaggi spento',
+        'Floor plan: rack links visible even with Cabling layer hidden'
+      ),
+      n(
+        'Planimetria: collegamenti multipli tra rack con linee parallele ordinate',
+        'Floor plan: multiple rack links rendered as ordered parallel lines'
+      ),
+      n(
+        'Rack: modale collegamenti persistente (non si chiude su click esterno/ESC)',
+        'Rack: connections modal stays open (no close on backdrop/ESC)'
+      ),
+      n(
+        'Rack: selezione porte con modale stato collegamenti (libera/collegata)',
+        'Rack: port selection modal with link status (free/linked)'
+      ),
+      n(
+        'Rack: stato porte corretto per apparati senza lato (es. switch)',
+        'Rack: port status fixed for devices without sides (e.g., switches)'
+      ),
+      n(
+        'Planimetria: menu collegamenti disabilitato sui rack',
+        'Floor plan: link actions disabled for rack objects'
+      )
+    ]
+  },
+  {
+    version: '1.4.2',
+    date: '2026-01-04',
+    type: 'minor',
+    notes: [
+      n(
+        'Rack: note per porta con modale dedicata e focus automatico',
+        'Rack: per-port notes with a dedicated modal and automatic focus'
+      ),
+      n(
+        'Rack: collegamenti ripuliti e warning su porte già occupate con sostituzione',
+        'Rack: link cleanup plus warnings and replacement on already-used ports'
+      ),
+      n(
+        'Rack: vista collegamenti con filtri, legenda e percorso ordinato',
+        'Rack: connections view with filters, legend, and ordered paths'
+      ),
+      n(
+        'Rack: percorso collegamenti colorato e icone dedicate vicino alle porte',
+        'Rack: colored connection paths and dedicated icons next to ports'
+      ),
+      n(
+        'Planimetria: collegamenti tra rack con linea tratteggiata rame/fibra e apertura porte al click',
+        'Floor plan: dashed copper/fiber rack links with port list on click'
+      )
+    ]
+  },
+  {
     version: '1.4.1',
     date: '2026-01-03',
     type: 'fix',

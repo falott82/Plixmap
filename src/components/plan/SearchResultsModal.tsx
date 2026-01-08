@@ -113,7 +113,7 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
                     </span>
                   </Dialog.Description>
                 </div>
-                <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                   <X size={18} />
                 </button>
               </div>
@@ -139,6 +139,7 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
                             selected ? 'border-primary bg-primary/10 ring-1 ring-primary/30 shadow-sm' : 'border-slate-200'
                           }`}
                           aria-selected={selected}
+                          title={room.name}
                         >
                           <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary">
                             <span className="text-sm font-bold">R</span>
@@ -177,6 +178,7 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
                             selected ? 'border-primary bg-primary/10 ring-1 ring-primary/30 shadow-sm' : 'border-slate-200'
                           }`}
                           aria-selected={selected}
+                          title={obj.name}
                         >
                           <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary">
                             <Icon name={iconOf(obj.type)} size={18} />
