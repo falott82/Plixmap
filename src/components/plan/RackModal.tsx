@@ -49,7 +49,8 @@ const typeLabels: Record<RackItemType, { it: string; en: string }> = {
   firewall: { it: 'Firewall', en: 'Firewall' },
   server: { it: 'Server', en: 'Server' },
   patchpanel: { it: 'Patch panel', en: 'Patch panel' },
-  optical_drawer: { it: 'Cassetto ottico', en: 'Optical drawer' },
+  optical_drawer: { it: 'Cassetto ottico', en: 'Fiber Patch Panel' },
+  passacavo: { it: 'Passacavo', en: 'Cable Management Panel' },
   ups: { it: 'UPS', en: 'UPS' },
   power_strip: { it: 'Ciabatta elettrica', en: 'Power strip' },
   misc: { it: 'Varie', en: 'Misc' }
@@ -62,6 +63,7 @@ const typeColors: Record<RackItemType, string> = {
   server: '#14b8a6',
   patchpanel: '#f59e0b',
   optical_drawer: '#a855f7',
+  passacavo: '#94a3b8',
   ups: '#f97316',
   power_strip: '#0ea5e9',
   misc: '#64748b'
@@ -69,6 +71,10 @@ const typeColors: Record<RackItemType, string> = {
 
 const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false, onClose }: Props) => {
   const t = useT();
+  const getTypeLabel = (type: RackItemType) => {
+    const label = typeLabels[type];
+    return label ? t(label) : type;
+  };
   const { push } = useToastStore();
   const {
     ensureRack,
@@ -167,6 +173,8 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
   const rackDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const addPromptFocusRef = useRef<HTMLInputElement | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
+  const selectionRef = useRef<{ id: string; ts: number } | null>(null);
+  const lastRackIdRef = useRef<string | null>(null);
   const dragItemIdRef = useRef<string | null>(null);
   const dropAcceptedRef = useRef(false);
   const rackRef = useRef<HTMLDivElement | null>(null);
@@ -184,42 +192,53 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     const term = rackSearch.trim().toLowerCase();
     if (!term) return rackItems;
     return rackItems.filter((item) => {
-      const label = typeLabels[item.type]?.it || item.type;
+      const typeLabel = typeLabels[item.type];
+      const labelIt = typeLabel?.it || item.type;
+      const labelEn = typeLabel?.en || item.type;
       const baseName =
         item.type === 'switch' || item.type === 'router' || item.type === 'firewall' || item.type === 'server'
           ? item.hostName || ''
           : item.name || '';
-      const hay = `${baseName} ${label}`.toLowerCase();
+      const hay = `${baseName} ${labelIt} ${labelEn}`.toLowerCase();
       return hay.includes(term);
     });
   }, [rackItems, rackSearch]);
 
   useEffect(() => {
     if (!open) {
+      lastRackIdRef.current = null;
       rackInitRef.current = null;
       rackNotesDirtyRef.current = false;
+      setSelectedItemId(null);
       return;
     }
+    if (lastRackIdRef.current !== rackObjectId) {
+      lastRackIdRef.current = rackObjectId;
+      setSelectedItemId(null);
+    }
     if (!rack) {
-      ensureRack(plan.id, rackObjectId, { name: rackObjectName || t({ it: 'Rack', en: 'Rack' }), totalUnits: 42 });
-      setName(rackObjectName || t({ it: 'Rack', en: 'Rack' }));
+      if (rackInitRef.current === rackObjectId) return;
+      const fallbackName = rackObjectName || t({ it: 'Rack', en: 'Rack' });
+      ensureRack(plan.id, rackObjectId, { name: fallbackName, totalUnits: 42 });
+      setName(fallbackName);
       setTotalUnits(42);
       setRackNotes('');
       rackInitRef.current = rackObjectId;
       rackNotesDirtyRef.current = false;
-    } else {
-      const isNewRack = rackInitRef.current !== rackObjectId;
-      if (isNewRack) {
-        setName(rack.name || rackObjectName);
-        setTotalUnits(rack.totalUnits || 42);
-        setRackNotes(rack.notes || '');
-        rackInitRef.current = rackObjectId;
-        rackNotesDirtyRef.current = false;
-      } else if (!rackNotesDirtyRef.current) {
-        setRackNotes(rack.notes || '');
-      }
+      return;
     }
-    setSelectedItemId(null);
+    const isNewRack = rackInitRef.current !== rackObjectId;
+    if (isNewRack) {
+      setName(rack.name || rackObjectName);
+      setTotalUnits(rack.totalUnits || 42);
+      setRackNotes(rack.notes || '');
+      rackInitRef.current = rackObjectId;
+      rackNotesDirtyRef.current = false;
+      return;
+    }
+    if (!rackNotesDirtyRef.current) {
+      setRackNotes(rack.notes || '');
+    }
   }, [ensureRack, open, plan.id, rack, rackObjectId, rackObjectName, t]);
 
   useEffect(() => {
@@ -254,9 +273,12 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
 
   useEffect(() => {
     if (!open) return;
-    if (!selectedItem) return;
-    setSelectedItemId(selectedItem.id);
-  }, [open, selectedItem]);
+    const recent = selectionRef.current && Date.now() - selectionRef.current.ts < 400;
+    if (recent) return;
+    if (!selectedItemId && rackItems.length === 1) {
+      setSelectedItemId(rackItems[0]?.id || null);
+    }
+  }, [open, rackItems, selectedItemId]);
 
   const toDraft = (item: RackItem): RackItemDraft => ({
     name: item.name || '',
@@ -455,6 +477,26 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     const item = rackItems.find((i) => i.id === itemId);
     const container = rackRef.current;
     if (!item || !container) return;
+    const targetEl = (evt.target as HTMLElement | null)?.closest?.('[data-rack-item-id]') as HTMLElement | null;
+    const targetId = targetEl?.getAttribute('data-rack-item-id') || '';
+    if (targetId && targetId !== itemId) {
+      const targetItem = rackItems.find((entry) => entry.id === targetId);
+      if (!targetItem) return;
+      if (targetItem.unitSize !== item.unitSize) {
+        push(
+          t({
+            it: 'Scambio possibile solo con apparati della stessa dimensione (U).',
+            en: 'Swap is only possible with devices of the same unit size.'
+          }),
+          'info'
+        );
+        return;
+      }
+      updateRackItem(plan.id, item.id, { unitStart: targetItem.unitStart });
+      updateRackItem(plan.id, targetItem.id, { unitStart: item.unitStart });
+      setSelectedItemId(item.id);
+      return;
+    }
     const rect = container.getBoundingClientRect();
     const y = evt.clientY - rect.top;
     const fromTop = Math.max(0, Math.min(totalUnits - 1, Math.floor(y / unitHeight)));
@@ -532,7 +574,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
         ];
         pdf.setFillColor(r, g, b);
         pdf.rect(rackX + 6, top + 2, 4, height - 4, 'F');
-        const label = `${getRackItemLabel(item)} · ${item.unitSize}U · ${typeLabels[item.type]?.it || item.type}`;
+        const label = `${getRackItemLabel(item)} · ${item.unitSize}U · ${getTypeLabel(item.type)}`;
         const ip =
           (item.type === 'switch' || item.type === 'router' || item.type === 'firewall') && item.mgmtIp
             ? item.mgmtIp
@@ -625,8 +667,9 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     const nextEthStart = 1;
     const nextFiberStart = Math.max(1, nextEthStart + nextEthPorts);
     const hostName = editDetails.hostName.trim();
+    const nextName = hasHostName(item.type) ? (hostName || item.name) : editDetails.name.trim() || item.name;
     updateRackItem(plan.id, item.id, {
-      name: hasHostName(item.type) && hostName ? hostName : item.name,
+      name: nextName,
       brand: editDetails.brand.trim(),
       model: editDetails.model.trim(),
       ip: item.type === 'server' ? editDetails.ip.trim() : '',
@@ -655,7 +698,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
 
   const formatItemLabel = (item: RackItem) => {
     const host = item.hostName ? ` - ${item.hostName}` : '';
-    return `${typeLabels[item.type]?.it || item.type}${host}`;
+    return `${getTypeLabel(item.type)}${host}`;
   };
 
   const handleConfirmDelete = () => {
@@ -704,7 +747,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
       const host = entry.hostName?.trim();
       return host || t({ it: 'Senza hostname', en: 'No hostname' });
     }
-    return entry.name?.trim() || typeLabels[entry.type]?.it || entry.type;
+    return entry.name?.trim() || getTypeLabel(entry.type);
   };
   const handleRenamePort = (itemId: string, kind: RackPortKind, index: number, name: string) => {
     if (readOnly) return;
@@ -736,7 +779,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
       push(t({ it: 'Nessuno slot disponibile vicino.', en: 'No available slot nearby.' }), 'info');
       return false;
     }
-    const nameBase = typeLabels[type]?.it || 'Item';
+    const nameBase = getTypeLabel(type) || 'Item';
     const sameTypeCount = rackItems.filter((i) => i.type === type).length + 1;
     const ethPorts = hasEth(type) ? Math.max(0, addDetails.ethPorts) : 0;
     const fiberPorts = hasFiber(type) ? Math.max(0, addDetails.fiberPorts) : 0;
@@ -835,7 +878,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     if (!addPrompt) return;
     const size = Math.max(1, Math.min(totalUnits, addUnitSize || 1));
     if (addPrompt.mode === 'clone') {
-      const nameBase = typeLabels[addPrompt.type]?.it || 'Item';
+      const nameBase = getTypeLabel(addPrompt.type) || 'Item';
       const sameTypeCount = rackItems.filter((entry) => entry.type === addPrompt.type).length + 1;
       const finalName =
         hasHostName(addPrompt.type) && addDetails.hostName.trim()
@@ -910,10 +953,21 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
         : item.type === 'server' && item.ip
           ? item.ip
           : '';
+    const selectItem = (event?: React.MouseEvent | React.PointerEvent) => {
+      if (event && 'button' in event && (event.button === 2 || event.ctrlKey)) return;
+      selectionRef.current = { id: item.id, ts: Date.now() };
+      setSelectedItemId(item.id);
+      rackRef.current?.focus();
+    };
     return (
       <div
         key={item.id}
+        data-rack-item-id={item.id}
         draggable={!readOnly}
+        title={t({
+          it: 'Trascina per spostare. Trascina su un altro apparato con stessa U per scambiare.',
+          en: 'Drag to move. Drop on another device with same U to swap.'
+        })}
         onDragStart={() => {
           dragItemIdRef.current = item.id;
           dropAcceptedRef.current = false;
@@ -924,34 +978,41 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
             setDeletePrompt({ mode: 'single', itemId: item.id });
           }
         }}
-        onMouseDown={(e) => {
-          if (e.button === 2 || e.ctrlKey) return;
+        onPointerDown={(e) => {
           e.stopPropagation();
-          setSelectedItemId(item.id);
-          rackRef.current?.focus();
+          selectItem(e);
+        }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          selectItem(e);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setSelectedItemId(item.id);
+          selectItem(e);
           setContextMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
         }}
         onDoubleClick={(e) => {
           e.stopPropagation();
-          setSelectedItemId(item.id);
+          selectItem(e);
           setContextMenu(null);
           openEditPrompt(item);
         }}
-        onClick={() => setSelectedItemId(item.id)}
+        onClick={(e) => {
+          e.stopPropagation();
+          selectItem(e);
+        }}
         className={`absolute left-1 right-1 flex flex-col justify-center rounded-lg border px-2 text-[11px] font-semibold transition ${
-          isSelected ? 'border-primary bg-white text-ink shadow-md ring-2 ring-primary/30' : 'border-slate-200 bg-white text-slate-700'
+          isSelected
+            ? 'border-primary bg-primary/5 text-ink shadow-md ring-2 ring-primary/40'
+            : 'border-slate-200 bg-white text-slate-700'
         } ${isFlash ? 'animate-pulse ring-2 ring-primary/40' : ''}`}
         style={{ top, height, borderLeftColor: color, borderLeftWidth: 6 }}
       >
         {singleLine ? (
           <div className="flex items-center justify-between gap-2">
             <span className="truncate">
-              {mainLabel} · {item.unitSize}U · {typeLabels[item.type]?.it}
+              {mainLabel} · {item.unitSize}U · {getTypeLabel(item.type)}
             </span>
             <div className="flex items-center gap-2">
               {showPorts ? (
@@ -1021,7 +1082,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                 {ipSuffix ? <span className="shrink-0 text-[10px] text-slate-500">{ipSuffix}</span> : null}
               </div>
             </div>
-            <div className="text-[10px] text-slate-500">{item.unitSize}U · {typeLabels[item.type]?.it}</div>
+            <div className="text-[10px] text-slate-500">{item.unitSize}U · {getTypeLabel(item.type)}</div>
           </>
         )}
       </div>
@@ -1141,7 +1202,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                             style={{ borderLeftColor: typeColors[type] || '#cbd5f5', borderLeftWidth: 4 }}
                             title={t({ it: `Aggiungi ${typeLabels[type].it}`, en: `Add ${typeLabels[type].en}` })}
                           >
-                            <span>{typeLabels[type].it}</span>
+                            <span>{getTypeLabel(type)}</span>
                           </button>
                         ))}
                       </div>
@@ -1187,13 +1248,48 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                           </div>
                         ))}
                       </div>
-                      <div
-                        ref={rackRef}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={handleDrop}
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (!selectedItem) return;
+      <div
+        ref={rackRef}
+        onPointerDownCapture={(e) => {
+          if (e.button !== 0 || e.ctrlKey) return;
+          if (addPrompt?.step === 'place') return;
+          const target = e.target as HTMLElement | null;
+          const holder = target?.closest?.('[data-rack-item-id]') as HTMLElement | null;
+          const id = holder?.getAttribute('data-rack-item-id');
+          if (id) {
+            selectionRef.current = { id, ts: Date.now() };
+            setSelectedItemId(id);
+          }
+        }}
+        onMouseDown={(e) => {
+          if (e.button !== 0 || e.ctrlKey) return;
+          if (addPrompt?.step === 'place') return;
+          const target = e.target as HTMLElement | null;
+          const holder = target?.closest?.('[data-rack-item-id]') as HTMLElement | null;
+          const id = holder?.getAttribute('data-rack-item-id');
+          if (id) {
+            selectionRef.current = { id, ts: Date.now() };
+            setSelectedItemId(id);
+            return;
+          }
+        }}
+        onContextMenu={(e) => {
+          if (e.ctrlKey) return;
+          const target = e.target as HTMLElement | null;
+          const holder = target?.closest?.('[data-rack-item-id]') as HTMLElement | null;
+          const id = holder?.getAttribute('data-rack-item-id');
+          if (!id) return;
+          e.preventDefault();
+          e.stopPropagation();
+          selectionRef.current = { id, ts: Date.now() };
+          setSelectedItemId(id);
+          setContextMenu({ x: e.clientX, y: e.clientY, itemId: id });
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleDrop}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (!selectedItem) return;
                           if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
                           e.preventDefault();
                           const delta = e.key === 'ArrowUp' ? 1 : -1;
@@ -1204,12 +1300,14 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                         }}
                         className="relative rounded-xl border border-dashed border-slate-300 bg-slate-100"
                         style={{ height: rackHeight }}
-                        onClick={(e) => {
-                          if (!addPrompt || addPrompt.step !== 'place') return;
-                          const container = rackRef.current;
-                          if (!container) return;
-                          const rect = container.getBoundingClientRect();
-                          const y = e.clientY - rect.top;
+        onClick={(e) => {
+          if (!addPrompt || addPrompt.step !== 'place') return;
+          const target = e.target as HTMLElement | null;
+          if (target?.closest?.('[data-rack-item-id]')) return;
+          const container = rackRef.current;
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+          const y = e.clientY - rect.top;
                           const fromTop = Math.max(0, Math.min(totalUnits - 1, Math.floor(y / unitHeight)));
                           const start = totalUnits - fromTop - addPrompt.unitSize + 1;
                           const clamped = Math.max(1, Math.min(totalUnits - addPrompt.unitSize + 1, start));
@@ -1234,6 +1332,17 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                             onClick={(e) => e.stopPropagation()}
                             onMouseDown={(e) => e.stopPropagation()}
                           >
+                            <button
+                              onClick={() => {
+                                if (readOnly) return;
+                                setSelectedItemId(contextMenu.itemId);
+                                setContextMenu(null);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 hover:bg-slate-50"
+                              title={t({ it: 'Seleziona', en: 'Select' })}
+                            >
+                              {t({ it: 'Seleziona', en: 'Select' })}
+                            </button>
                             <button
                               onClick={() => {
                                 const item = rackItems.find((entry) => entry.id === contextMenu.itemId);
@@ -1343,7 +1452,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                               />
                             </label>
                           ) : null}
-                          {selectedItem.type !== 'misc' ? (
+                          {selectedItem.type !== 'misc' && selectedItem.type !== 'passacavo' ? (
                             <div className="grid grid-cols-2 gap-2">
                               <label className="block text-sm font-medium text-slate-700">
                                 {t({ it: 'Marca', en: 'Brand' })}
@@ -1659,7 +1768,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       </div>
                       {addPrompt ? (
                         <div className="mt-1 text-xs font-semibold text-slate-500">
-                          {typeLabels[addPrompt.type]?.it || addPrompt.type}
+                          {getTypeLabel(addPrompt.type)}
                         </div>
                       ) : null}
                       <div className="mt-2 text-sm text-slate-600">
@@ -2085,8 +2194,16 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                           </label>
                         </div>
                       ) : null}
-                      {addPrompt?.type === 'misc' ? (
+                      {addPrompt?.type === 'misc' || addPrompt?.type === 'passacavo' ? (
                         <div className="mt-4 space-y-2">
+                          <label className="block text-sm font-medium text-slate-700">
+                            {t({ it: 'Nome', en: 'Name' })}
+                            <input
+                              value={addDetails.name}
+                              onChange={(e) => setAddDetails((prev) => ({ ...prev, name: e.target.value }))}
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            />
+                          </label>
                           <label className="block text-sm font-medium text-slate-700">
                             {t({ it: 'Note', en: 'Notes' })}
                             <textarea
@@ -2555,8 +2672,16 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                           </label>
                         </div>
                       ) : null}
-                      {editPrompt.type === 'misc' ? (
+                      {editPrompt.type === 'misc' || editPrompt.type === 'passacavo' ? (
                         <div className="mt-4 space-y-2">
+                          <label className="block text-sm font-medium text-slate-700">
+                            {t({ it: 'Nome', en: 'Name' })}
+                            <input
+                              value={editDetails.name}
+                              onChange={(e) => setEditDetails((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            />
+                          </label>
                           <label className="block text-sm font-medium text-slate-700">
                             {t({ it: 'Note', en: 'Notes' })}
                             <textarea
