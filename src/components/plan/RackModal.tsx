@@ -2801,27 +2801,28 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                     </div>
                   </div>
                 ) : null}
+                <RackPortsModal
+                  open={!!portsModalItemId}
+                  item={portsModalItem}
+                  racks={plan.racks || []}
+                  rackItems={allRackItems}
+                  rackLinks={plan.rackLinks || []}
+                  readOnly={readOnly}
+                  initialConnectionsOpen={portsModalShowConnections}
+                  useDialog={false}
+                  onClose={() => {
+                    setPortsModalItemId(null);
+                    setPortsModalShowConnections(false);
+                  }}
+                  onAddLink={(payload) => addRackLink(plan.id, payload)}
+                  onDeleteLink={(linkId) => deleteRackLink(plan.id, linkId)}
+                  onRenamePort={handleRenamePort}
+                  onSavePortNote={handleSavePortNote}
+                />
               </Dialog.Panel>
           </div>
         </div>
       </Dialog>
-      <RackPortsModal
-        open={!!portsModalItemId}
-        item={portsModalItem}
-        racks={plan.racks || []}
-        rackItems={allRackItems}
-        rackLinks={plan.rackLinks || []}
-        readOnly={readOnly}
-        initialConnectionsOpen={portsModalShowConnections}
-        onClose={() => {
-          setPortsModalItemId(null);
-          setPortsModalShowConnections(false);
-        }}
-        onAddLink={(payload) => addRackLink(plan.id, payload)}
-        onDeleteLink={(linkId) => deleteRackLink(plan.id, linkId)}
-        onRenamePort={handleRenamePort}
-        onSavePortNote={handleSavePortNote}
-      />
     </>
   );
 };

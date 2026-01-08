@@ -1,5 +1,5 @@
 import { Dialog } from '@headlessui/react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Link2, Search, X } from 'lucide-react';
 import { RackDefinition, RackItem, RackItemType, RackLink, RackPortKind } from '../../store/types';
 import { useT } from '../../i18n/useT';
@@ -15,6 +15,7 @@ type Props = {
   initialConnectionsOpen?: boolean;
   initialConnectionsKind?: RackPortKind;
   closeOnBackdrop?: boolean;
+  useDialog?: boolean;
   onClose: () => void;
   onAddLink: (payload: Omit<RackLink, 'id' | 'createdAt'>) => void;
   onDeleteLink: (id: string) => void;
@@ -96,6 +97,7 @@ const RackPortsModal = ({
   initialConnectionsOpen = false,
   initialConnectionsKind,
   closeOnBackdrop = true,
+  useDialog = true,
   onClose,
   onAddLink,
   onDeleteLink,
@@ -109,9 +111,6 @@ const RackPortsModal = ({
   const [renameValue, setRenameValue] = useState('');
   const [notePrompt, setNotePrompt] = useState<NotePrompt | null>(null);
   const [noteValue, setNoteValue] = useState('');
-  const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const noteTitleId = useId();
-  const noteDescriptionId = useId();
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [connectionsExpanded, setConnectionsExpanded] = useState(false);
   const [connectionsOnlyActive, setConnectionsOnlyActive] = useState(true);
@@ -405,12 +404,6 @@ const RackPortsModal = ({
   }, [activeRackLinks, onDeleteLink, open, rackLinks, readOnly]);
 
   useEffect(() => {
-    if (!notePrompt) return;
-    const id = window.setTimeout(() => noteInputRef.current?.focus(), 0);
-    return () => window.clearTimeout(id);
-  }, [notePrompt]);
-
-  useEffect(() => {
     if (!open) return;
     setConnectionsOpen(initialConnectionsOpen);
   }, [initialConnectionsOpen, itemId, open]);
@@ -419,6 +412,12 @@ const RackPortsModal = ({
     if (!open) return;
     setConnectionsKindFilter(initialConnectionsKind || 'all');
   }, [initialConnectionsKind, itemId, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setNotePrompt(null);
+    setNoteValue('');
+  }, [itemId, open]);
 
   useEffect(() => {
     if (!connectionsOpen) return;
@@ -620,90 +619,124 @@ const RackPortsModal = ({
   }, [connectionCollator, connections, connectionsKindFilter, connectionsOnlyActive, connectionsQuery]);
 
   const renderDualRow = (kind: RackPortKind, index: number) => {
-      if (!item) return null;
-      const portName = getPortDisplayName(item, kind, index);
-      const portNote = getPortNote(item, kind, index);
-      const femaleLink = getLinkForPort(item.id, kind, index, 'female');
-      const cableLink = getLinkForPort(item.id, kind, index, 'cable');
-      const femaleTitle = femaleLink ? getConnectionTitle(femaleLink, item.id) : '';
-      const cableTitle = cableLink ? getConnectionTitle(cableLink, item.id) : '';
-      const statusLabel = (linked: boolean) => (linked ? t({ it: 'Attiva', en: 'Active' }) : t({ it: 'Libera', en: 'Free' }));
-      return (
-        <div
-          key={`${kind}-${index}`}
-          className="rounded-lg border border-slate-200 px-2 py-2"
-          onContextMenu={(event) => {
-            if (!canRename) return;
-            event.preventDefault();
-            setRenamePrompt({ kind, index });
-            setRenameValue(portName);
-          }}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div>
-                <div className="text-xs font-semibold text-slate-700">{portName}</div>
-                {portNote ? <div className="mt-1 text-[11px] text-slate-500">{portNote}</div> : null}
-                <div className="mt-1 flex flex-col gap-1 text-[11px] text-slate-500">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: femaleLink ? '#16a34a' : '#cbd5f5' }}
-                      title={femaleTitle}
-                    />
-                    <span className="w-16 text-[10px] font-semibold uppercase text-slate-400">{t({ it: 'Femmina', en: 'Female' })}</span>
-                    <span>{statusLabel(!!femaleLink)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: cableLink ? '#16a34a' : '#cbd5f5' }}
-                      title={cableTitle}
-                    />
-                    <span className="w-16 text-[10px] font-semibold uppercase text-slate-400">{t({ it: 'Cablaggio', en: 'Cabling' })}</span>
-                    <span>{statusLabel(!!cableLink)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex flex-col gap-2">
+    if (!item) return null;
+    const portName = getPortDisplayName(item, kind, index);
+    const portNote = getPortNote(item, kind, index);
+    const femaleLink = getLinkForPort(item.id, kind, index, 'female');
+    const cableLink = getLinkForPort(item.id, kind, index, 'cable');
+    const femaleTitle = femaleLink ? getConnectionTitle(femaleLink, item.id) : '';
+    const cableTitle = cableLink ? getConnectionTitle(cableLink, item.id) : '';
+    const isNoteOpen = notePrompt?.kind === kind && notePrompt.index === index;
+    const statusLabel = (linked: boolean) => (linked ? t({ it: 'Attiva', en: 'Active' }) : t({ it: 'Libera', en: 'Free' }));
+    return (
+      <div
+        key={`${kind}-${index}`}
+        className="rounded-lg border border-slate-200 px-2 py-2"
+        onContextMenu={(event) => {
+          if (!canRename) return;
+          event.preventDefault();
+          setRenamePrompt({ kind, index });
+          setRenameValue(portName);
+        }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div>
+              <div className="text-xs font-semibold text-slate-700">{portName}</div>
+              {portNote ? <div className="mt-1 text-[11px] text-slate-500">{portNote}</div> : null}
+              <div className="mt-1 flex flex-col gap-1 text-[11px] text-slate-500">
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openLinkPrompt(kind, index, 'female')}
-                    disabled={readOnly}
-                    className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
-                    title={t({ it: 'Collega femmina', en: 'Link female' })}
-                  >
-                    {t({ it: 'Femmina', en: 'Female' })}
-                  </button>
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: femaleLink ? '#16a34a' : '#cbd5f5' }}
+                    title={femaleTitle}
+                  />
+                  <span className="w-16 text-[10px] font-semibold uppercase text-slate-400">{t({ it: 'Femmina', en: 'Female' })}</span>
+                  <span>{statusLabel(!!femaleLink)}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openLinkPrompt(kind, index, 'cable')}
-                    disabled={readOnly}
-                    className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
-                    title={t({ it: 'Collega cablaggio', en: 'Link cabling' })}
-                  >
-                    {t({ it: 'Cablaggio', en: 'Cabling' })}
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openNotePrompt(kind, index)}
-                    disabled={readOnly}
-                    className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
-                    title={t({ it: 'Aggiungi nota', en: 'Add note' })}
-                  >
-                    {t({ it: 'Nota', en: 'Note' })}
-                  </button>
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: cableLink ? '#16a34a' : '#cbd5f5' }}
+                    title={cableTitle}
+                  />
+                  <span className="w-16 text-[10px] font-semibold uppercase text-slate-400">{t({ it: 'Cablaggio', en: 'Cabling' })}</span>
+                  <span>{statusLabel(!!cableLink)}</span>
                 </div>
               </div>
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openLinkPrompt(kind, index, 'female')}
+                  disabled={readOnly}
+                  className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                  title={t({ it: 'Collega femmina', en: 'Link female' })}
+                >
+                  {t({ it: 'Femmina', en: 'Female' })}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openLinkPrompt(kind, index, 'cable')}
+                  disabled={readOnly}
+                  className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                  title={t({ it: 'Collega cablaggio', en: 'Link cabling' })}
+                >
+                  {t({ it: 'Cablaggio', en: 'Cabling' })}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openNotePrompt(kind, index)}
+                  disabled={readOnly}
+                  className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                  title={t({ it: 'Aggiungi nota', en: 'Add note' })}
+                >
+                  {t({ it: 'Nota', en: 'Note' })}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      );
-    };
+        {isNoteOpen ? (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <label className="block text-[11px] font-semibold text-slate-600">
+              {t({ it: 'Nota', en: 'Note' })}
+              <textarea
+                rows={3}
+                autoFocus={!readOnly}
+                value={noteValue}
+                onChange={(e) => setNoteValue(e.target.value)}
+                readOnly={readOnly}
+                aria-readonly={readOnly}
+                className="mt-1 w-full resize-none rounded-md border border-slate-200 bg-white px-2 py-1 text-xs outline-none ring-primary/30 focus:ring-2"
+              />
+            </label>
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                onClick={closeNotePrompt}
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                title={t({ it: 'Annulla', en: 'Cancel' })}
+              >
+                {t({ it: 'Annulla', en: 'Cancel' })}
+              </button>
+              <button
+                onClick={handleNoteSave}
+                disabled={readOnly}
+                className="rounded-md bg-primary px-2 py-1 text-xs font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+                title={t({ it: 'Salva', en: 'Save' })}
+              >
+                {t({ it: 'Salva', en: 'Save' })}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderSingleRow = (kind: RackPortKind, index: number) => {
     if (!item) return null;
@@ -712,6 +745,7 @@ const RackPortsModal = ({
     const infoTitle = link ? getConnectionTitle(link, item.id) : '';
     const portName = getPortDisplayName(item, kind, index);
     const portNote = getPortNote(item, kind, index);
+    const isNoteOpen = notePrompt?.kind === kind && notePrompt.index === index;
     return (
       <div
         key={`${kind}-${index}`}
@@ -769,6 +803,39 @@ const RackPortsModal = ({
             </button>
           </div>
         </div>
+        {isNoteOpen ? (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <label className="block text-[11px] font-semibold text-slate-600">
+              {t({ it: 'Nota', en: 'Note' })}
+              <textarea
+                rows={3}
+                autoFocus={!readOnly}
+                value={noteValue}
+                onChange={(e) => setNoteValue(e.target.value)}
+                readOnly={readOnly}
+                aria-readonly={readOnly}
+                className="mt-1 w-full resize-none rounded-md border border-slate-200 bg-white px-2 py-1 text-xs outline-none ring-primary/30 focus:ring-2"
+              />
+            </label>
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                onClick={closeNotePrompt}
+                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                title={t({ it: 'Annulla', en: 'Cancel' })}
+              >
+                {t({ it: 'Annulla', en: 'Cancel' })}
+              </button>
+              <button
+                onClick={handleNoteSave}
+                disabled={readOnly}
+                className="rounded-md bg-primary px-2 py-1 text-xs font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+                title={t({ it: 'Salva', en: 'Save' })}
+              >
+                {t({ it: 'Salva', en: 'Save' })}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -820,106 +887,82 @@ const RackPortsModal = ({
   const ethCount = getPortCount(item, 'ethernet');
   const fiberCount = getPortCount(item, 'fiber');
   const hasConnectionsQuery = connectionsQuery.trim().length > 0;
+  const renderPortsPanel = (useDialogTitle: boolean) => (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          {useDialogTitle ? (
+            <Dialog.Title className="text-lg font-semibold text-ink">
+              {t({ it: 'Configurazione porte', en: 'Port configuration' })}
+            </Dialog.Title>
+          ) : (
+            <div className="text-lg font-semibold text-ink">{t({ it: 'Configurazione porte', en: 'Port configuration' })}</div>
+          )}
+          <div className="text-xs text-slate-500">
+            {getDeviceLabel(item)}
+            {rackName ? <span className="ml-2 font-semibold text-sky-600">{rackName}</span> : null}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setConnectionsOpen(true)}
+            className="rounded-full border border-slate-200 p-1 text-slate-500 hover:text-primary"
+            title={t({ it: 'Mostra collegamenti', en: 'Show links' })}
+          >
+            <Link2 size={16} />
+          </button>
+          <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+            <X size={18} />
+          </button>
+        </div>
+      </div>
+
+      {ethCount === 0 && fiberCount === 0 ? (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          {t({
+            it: 'Nessuna porta configurata. Imposta il numero di porte nel dettaglio apparato.',
+            en: 'No ports configured. Set the port count in device details.'
+          })}
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          {renderPorts('ethernet')}
+          {renderPorts('fiber')}
+        </div>
+      )}
+    </>
+  );
 
   return (
     <>
-      <Dialog open={open} as="div" className="relative z-[90]" onClose={handleBackdropClose}>
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" />
-        <div className="fixed inset-0 overflow-y-auto">
-          <div className="flex min-h-full items-center justify-center px-4 py-6">
-            <Dialog.Panel className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({ it: 'Configurazione porte', en: 'Port configuration' })}
-                  </Dialog.Title>
-                  <div className="text-xs text-slate-500">
-                    {getDeviceLabel(item)}
-                    {rackName ? <span className="ml-2 font-semibold text-sky-600">{rackName}</span> : null}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setConnectionsOpen(true)}
-                    className="rounded-full border border-slate-200 p-1 text-slate-500 hover:text-primary"
-                    title={t({ it: 'Mostra collegamenti', en: 'Show links' })}
-                  >
-                    <Link2 size={16} />
-                  </button>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-                    <X size={18} />
-                  </button>
-                </div>
-              </div>
-
-              {ethCount === 0 && fiberCount === 0 ? (
-                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                  {t({
-                    it: 'Nessuna porta configurata. Imposta il numero di porte nel dettaglio apparato.',
-                    en: 'No ports configured. Set the port count in device details.'
-                  })}
-                </div>
-              ) : (
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  {renderPorts('ethernet')}
-                  {renderPorts('fiber')}
-                </div>
-              )}
-            </Dialog.Panel>
-          </div>
-        </div>
-        {notePrompt ? (
-          <Dialog open={!!notePrompt} as="div" className="relative z-[120]" onClose={closeNotePrompt} initialFocus={noteInputRef}>
+      {open ? (
+        useDialog ? (
+          <Dialog open={open} as="div" className="relative z-[90]" onClose={handleBackdropClose}>
             <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" />
             <div className="fixed inset-0 overflow-y-auto">
               <div className="flex min-h-full items-center justify-center px-4 py-6">
-                <Dialog.Panel className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card">
-                  <div className="flex items-center justify-between gap-3">
-                    <Dialog.Title id={noteTitleId} className="text-lg font-semibold text-ink">
-                      {t({ it: 'Nota porta', en: 'Port note' })}
-                    </Dialog.Title>
-                    <button onClick={closeNotePrompt} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-                      <X size={18} />
-                    </button>
-                  </div>
-                  <Dialog.Description id={noteDescriptionId} className="mt-2 text-xs text-slate-500">
-                    {t({ it: 'Porta', en: 'Port' })}: {getPortDisplayName(item, notePrompt.kind, notePrompt.index)}
-                  </Dialog.Description>
-                  <label className="mt-3 block text-sm font-medium text-slate-700">
-                    {t({ it: 'Nota', en: 'Note' })}
-                    <textarea
-                      rows={4}
-                      value={noteValue}
-                      onChange={(e) => setNoteValue(e.target.value)}
-                      readOnly={readOnly}
-                      aria-readonly={readOnly}
-                      ref={noteInputRef}
-                      className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                    />
-                  </label>
-                  <div className="mt-4 flex justify-end gap-2">
-                    <button
-                      onClick={closeNotePrompt}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                      title={t({ it: 'Annulla', en: 'Cancel' })}
-                    >
-                      {t({ it: 'Annulla', en: 'Cancel' })}
-                    </button>
-                    <button
-                      onClick={handleNoteSave}
-                      disabled={readOnly}
-                      className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
-                      title={t({ it: 'Salva', en: 'Save' })}
-                    >
-                      {t({ it: 'Salva', en: 'Save' })}
-                    </button>
-                  </div>
+                <Dialog.Panel className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">
+                  {renderPortsPanel(true)}
                 </Dialog.Panel>
               </div>
             </div>
           </Dialog>
-        ) : null}
-      </Dialog>
+        ) : (
+          <div
+            className="fixed inset-0 z-[90]"
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              event.stopPropagation();
+              handleBackdropClose();
+            }}
+          >
+            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" onMouseDown={handleBackdropClose} />
+            <div className="relative flex min-h-full items-center justify-center px-4 py-6" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">{renderPortsPanel(false)}</div>
+            </div>
+          </div>
+        )
+      ) : null}
 
       {linkPrompt ? (
         <Dialog open={!!linkPrompt} as="div" className="relative z-[95]" onClose={() => setLinkPrompt(null)}>
