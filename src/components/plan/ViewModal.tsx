@@ -12,6 +12,8 @@ interface Props {
   initialDefault?: boolean;
 }
 
+const DEFAULT_VIEW_NAME = 'DEFAULT';
+
 const ViewModal = ({
   open,
   onClose,
@@ -37,13 +39,16 @@ const ViewModal = ({
   useEffect(() => {
     if (!open) return;
     if (isDefault) {
-      if (name !== 'DEFAULT') setName('DEFAULT');
+      if (name !== DEFAULT_VIEW_NAME) setName(DEFAULT_VIEW_NAME);
     }
   }, [isDefault, open]);
 
+  const trimmedName = name.trim();
+  const isNameValid = isDefault || trimmedName.length > 0;
+
   const handleSave = () => {
-    const finalName = isDefault ? 'DEFAULT' : name.trim();
-    if (!finalName) return;
+    if (!isNameValid) return;
+    const finalName = isDefault ? DEFAULT_VIEW_NAME : trimmedName;
     onSubmit({ name: finalName, description: description.trim() || undefined, isDefault });
     onClose();
   };
@@ -113,8 +118,8 @@ const ViewModal = ({
                         const next = e.target.checked;
                         setIsDefault(next);
                         if (next) {
-                          if (name && name !== 'DEFAULT') setLastCustomName(name);
-                          setName('DEFAULT');
+                          if (name && name !== DEFAULT_VIEW_NAME) setLastCustomName(name);
+                          setName(DEFAULT_VIEW_NAME);
                         } else {
                           setName(lastCustomName || '');
                         }
@@ -140,7 +145,8 @@ const ViewModal = ({
                   </button>
                   <button
                     onClick={handleSave}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    disabled={!isNameValid}
+                    className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                     title={t({ it: 'Salva', en: 'Save' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}
