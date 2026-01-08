@@ -9,6 +9,40 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.4.7',
+    date: '2026-01-08',
+    type: 'minor',
+    notes: [
+      n(
+        'Rack: nomi apparati tradotti correttamente in inglese',
+        'Rack: device labels now properly translated in English'
+      )
+    ]
+  },
+  {
+    version: '1.4.6',
+    date: '2026-01-08',
+    type: 'minor',
+    notes: [
+      n(
+        'Rack: selezione apparati resa stabile con click e menu contestuale',
+        'Rack: device selection stabilized for click and context menu'
+      ),
+      n(
+        'Rack: drag & drop ora consente lo scambio di apparati con la stessa U',
+        'Rack: drag & drop now swaps devices with the same U size'
+      ),
+      n(
+        'Rack: aggiunto apparato passivo Passacavo e nome per oggetti Varie',
+        'Rack: added passive Passacavo device and name field for Misc items'
+      ),
+      n(
+        'Rack: modale note porta ora riceve sempre il focus',
+        'Rack: port note modal now always receives focus'
+      )
+    ]
+  },
+  {
     version: '1.4.5',
     date: '2026-01-07',
     type: 'minor',

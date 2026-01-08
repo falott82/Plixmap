@@ -7,6 +7,7 @@ export type RackItemType =
   | 'server'
   | 'patchpanel'
   | 'optical_drawer'
+  | 'passacavo'
   | 'ups'
   | 'power_strip'
   | 'misc';
