@@ -9,6 +9,17 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.4.9',
+    date: '2026-01-08',
+    type: 'fix',
+    notes: [
+      n(
+        'CI: fix rename workflow run con chiamata GitHub API compatibile',
+        'CI: fixed workflow run rename with a compatible GitHub API call'
+      )
+    ]
+  },
+  {
     version: '1.4.8',
     date: '2026-01-08',
     type: 'fix',
