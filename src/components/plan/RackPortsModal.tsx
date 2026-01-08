@@ -405,6 +405,12 @@ const RackPortsModal = ({
   }, [activeRackLinks, onDeleteLink, open, rackLinks, readOnly]);
 
   useEffect(() => {
+    if (!notePrompt) return;
+    const id = window.setTimeout(() => noteInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(id);
+  }, [notePrompt]);
+
+  useEffect(() => {
     if (!open) return;
     setConnectionsOpen(initialConnectionsOpen);
   }, [initialConnectionsOpen, itemId, open]);
@@ -862,59 +868,58 @@ const RackPortsModal = ({
             </Dialog.Panel>
           </div>
         </div>
-      </Dialog>
-
-      {notePrompt ? (
-        <Dialog open={!!notePrompt} as="div" className="relative z-[120]" onClose={closeNotePrompt} initialFocus={noteInputRef}>
-          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" />
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-6">
-              <Dialog.Panel className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card">
-                <div className="flex items-center justify-between gap-3">
-                  <Dialog.Title id={noteTitleId} className="text-lg font-semibold text-ink">
-                    {t({ it: 'Nota porta', en: 'Port note' })}
-                  </Dialog.Title>
-                  <button onClick={closeNotePrompt} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-                    <X size={18} />
-                  </button>
-                </div>
-                <Dialog.Description id={noteDescriptionId} className="mt-2 text-xs text-slate-500">
-                  {t({ it: 'Porta', en: 'Port' })}: {getPortDisplayName(item, notePrompt.kind, notePrompt.index)}
-                </Dialog.Description>
-                <label className="mt-3 block text-sm font-medium text-slate-700">
-                  {t({ it: 'Nota', en: 'Note' })}
-                  <textarea
-                    rows={4}
-                    value={noteValue}
-                    onChange={(e) => setNoteValue(e.target.value)}
-                    readOnly={readOnly}
-                    aria-readonly={readOnly}
-                    ref={noteInputRef}
-                    className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                  />
-                </label>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    onClick={closeNotePrompt}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Annulla', en: 'Cancel' })}
-                  >
-                    {t({ it: 'Annulla', en: 'Cancel' })}
-                  </button>
-                  <button
-                    onClick={handleNoteSave}
-                    disabled={readOnly}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
-                    title={t({ it: 'Salva', en: 'Save' })}
-                  >
-                    {t({ it: 'Salva', en: 'Save' })}
-                  </button>
-                </div>
-              </Dialog.Panel>
+        {notePrompt ? (
+          <Dialog open={!!notePrompt} as="div" className="relative z-[120]" onClose={closeNotePrompt} initialFocus={noteInputRef}>
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" />
+            <div className="fixed inset-0 overflow-y-auto">
+              <div className="flex min-h-full items-center justify-center px-4 py-6">
+                <Dialog.Panel className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card">
+                  <div className="flex items-center justify-between gap-3">
+                    <Dialog.Title id={noteTitleId} className="text-lg font-semibold text-ink">
+                      {t({ it: 'Nota porta', en: 'Port note' })}
+                    </Dialog.Title>
+                    <button onClick={closeNotePrompt} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description id={noteDescriptionId} className="mt-2 text-xs text-slate-500">
+                    {t({ it: 'Porta', en: 'Port' })}: {getPortDisplayName(item, notePrompt.kind, notePrompt.index)}
+                  </Dialog.Description>
+                  <label className="mt-3 block text-sm font-medium text-slate-700">
+                    {t({ it: 'Nota', en: 'Note' })}
+                    <textarea
+                      rows={4}
+                      value={noteValue}
+                      onChange={(e) => setNoteValue(e.target.value)}
+                      readOnly={readOnly}
+                      aria-readonly={readOnly}
+                      ref={noteInputRef}
+                      className="mt-1 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                    />
+                  </label>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      onClick={closeNotePrompt}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Annulla', en: 'Cancel' })}
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      onClick={handleNoteSave}
+                      disabled={readOnly}
+                      className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+                      title={t({ it: 'Salva', en: 'Save' })}
+                    >
+                      {t({ it: 'Salva', en: 'Save' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </div>
             </div>
-          </div>
-        </Dialog>
-      ) : null}
+          </Dialog>
+        ) : null}
+      </Dialog>
 
       {linkPrompt ? (
         <Dialog open={!!linkPrompt} as="div" className="relative z-[95]" onClose={() => setLinkPrompt(null)}>
