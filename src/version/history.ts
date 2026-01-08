@@ -9,6 +9,17 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.4.10',
+    date: '2026-01-08',
+    type: 'fix',
+    notes: [
+      n(
+        'CI: run-name del workflow audit semplificato per evitare errori API',
+        'CI: audit workflow run-name simplified to avoid API errors'
+      )
+    ]
+  },
+  {
     version: '1.4.9',
     date: '2026-01-08',
     type: 'fix',
