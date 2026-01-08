@@ -9,6 +9,17 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.4.11',
+    date: '2026-01-08',
+    type: 'fix',
+    notes: [
+      n(
+        'Rack: modale nota porta resa interattiva anche in produzione (focus e overlay corretti)',
+        'Rack: port note modal is interactive again in production (focus + overlay fixed)'
+      )
+    ]
+  },
+  {
     version: '1.4.10',
     date: '2026-01-08',
     type: 'fix',
