@@ -143,6 +143,7 @@ const CrossPlanSearchModal = ({ open, currentPlanId, term, results, objectTypeIc
                                     type="button"
                                     onClick={() => onPick(r)}
                                     className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left hover:bg-slate-50"
+                                    title={t({ it: 'Apri e lampeggia', en: 'Open & blink' })}
                                   >
                                     <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700">
                                       {r.kind === 'object' ? (
@@ -187,7 +188,11 @@ const CrossPlanSearchModal = ({ open, currentPlanId, term, results, objectTypeIc
                 </div>
 
                 <div className="mt-6 flex justify-end">
-                  <button onClick={onClose} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                  <button
+                    onClick={onClose}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Chiudi', en: 'Close' })}
+                  >
                     {t({ it: 'Chiudi', en: 'Close' })}
                   </button>
                 </div>
@@ -201,4 +206,3 @@ const CrossPlanSearchModal = ({ open, currentPlanId, term, results, objectTypeIc
 };
 
 export default CrossPlanSearchModal;
-

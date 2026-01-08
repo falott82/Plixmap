@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import pkg from '../../../package.json';
-import { Download } from 'lucide-react';
+import { Download, ShieldCheck } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { useUIStore } from '../../store/useUIStore';
+import { runNpmAudit, NpmAuditResult } from '../../api/nerd';
+import { useToastStore } from '../../store/useToast';
 
 const purposes: Record<string, string> = {
   react: 'UI framework',
@@ -47,6 +49,11 @@ const NerdAreaPanel = () => {
   const devDeps = (pkg as any).devDependencies || {};
   const t = useT();
   const [pkgQuery, setPkgQuery] = useState('');
+  const [auditRunning, setAuditRunning] = useState(false);
+  const [auditResult, setAuditResult] = useState<NpmAuditResult | null>(null);
+  const [auditRunAt, setAuditRunAt] = useState<number | null>(null);
+  const [auditDetailsOpen, setAuditDetailsOpen] = useState(false);
+  const { push } = useToastStore();
   const { perfOverlayEnabled, togglePerfOverlay } = useUIStore(
     (s) => ({ perfOverlayEnabled: (s as any).perfOverlayEnabled, togglePerfOverlay: (s as any).togglePerfOverlay })
   );
@@ -74,6 +81,36 @@ const NerdAreaPanel = () => {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const handleRunAudit = async () => {
+    if (auditRunning) return;
+    setAuditRunning(true);
+    setAuditDetailsOpen(false);
+    try {
+      const res = await runNpmAudit();
+      setAuditResult(res);
+      setAuditRunAt(Date.now());
+      if (res.ok) {
+        const total = res.summary?.total || 0;
+        push(
+          total
+            ? t({ it: 'Audit completato: vulnerabilita trovate.', en: 'Audit completed: vulnerabilities found.' })
+            : t({ it: 'Audit completato: nessuna vulnerabilita high/critical.', en: 'Audit completed: no high/critical vulnerabilities.' }),
+          total ? 'info' : 'success'
+        );
+      } else {
+        push(t({ it: 'Audit fallito. Controlla il log.', en: 'Audit failed. Check the log.' }), 'danger');
+      }
+    } catch (err: any) {
+      setAuditResult({ ok: false, error: err?.message || 'Audit failed' });
+      push(t({ it: 'Audit fallito. Controlla il server.', en: 'Audit failed. Check the server.' }), 'danger');
+    } finally {
+      setAuditRunning(false);
+    }
+  };
+
+  const auditSummary = auditResult?.summary;
+  const auditStamp = auditRunAt ? new Date(auditRunAt).toLocaleString() : '';
 
   return (
     <div className="space-y-4">
@@ -107,6 +144,90 @@ const NerdAreaPanel = () => {
             {t({ it: 'Abilita telemetria', en: 'Enable telemetry' })}
           </label>
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <ShieldCheck size={16} className="text-emerald-500" />
+              {t({ it: 'Check sicurezza', en: 'Security check' })}
+            </div>
+            <div className="mt-1 text-xs text-slate-600">
+              {t({
+                it: 'Esegue npm audit --omit=dev --audit-level=high sul server.',
+                en: 'Runs npm audit --omit=dev --audit-level=high on the server.'
+              })}
+            </div>
+          </div>
+          <button
+            onClick={handleRunAudit}
+            disabled={auditRunning}
+            className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            title={t({ it: 'Esegui il check sicurezza delle dipendenze sul server', en: 'Run the dependency security check on the server' })}
+          >
+            {auditRunning ? t({ it: 'In corso...', en: 'Running...' }) : t({ it: 'Esegui check', en: 'Run check' })}
+          </button>
+        </div>
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <div className="font-semibold text-slate-700">{t({ it: 'Comandi rapidi', en: 'Quick commands' })}</div>
+          <div className="mt-1">
+            {t({ it: 'Locale (npm):', en: 'Local (npm):' })}{' '}
+            <code className="font-mono text-[11px] text-slate-800">npm run audit:prod</code>
+          </div>
+          <div className="mt-1">
+            {t({ it: 'Docker:', en: 'Docker:' })}{' '}
+            <code className="font-mono text-[11px] text-slate-800">docker compose exec deskly npm run audit:prod</code>
+          </div>
+          <div className="mt-1 text-[11px] text-slate-500">
+            {t({
+              it: 'Se trovi vulnerabilita high/critical, aggiorna le dipendenze e ripubblica.',
+              en: 'If high/critical vulnerabilities are found, update dependencies and republish.'
+            })}
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+          {auditSummary ? (
+            <>
+              <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
+                {t({ it: 'Totale', en: 'Total' })}: {auditSummary.total}
+              </span>
+              <span className="rounded-full bg-rose-100 px-2 py-1 text-rose-700">Critical: {auditSummary.critical}</span>
+              <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700">High: {auditSummary.high}</span>
+              <span className="rounded-full bg-orange-100 px-2 py-1 text-orange-700">Moderate: {auditSummary.moderate}</span>
+              <span className="rounded-full bg-yellow-100 px-2 py-1 text-yellow-700">Low: {auditSummary.low}</span>
+              <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">Info: {auditSummary.info}</span>
+            </>
+          ) : (
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
+              {t({ it: 'Nessun controllo eseguito', en: 'No checks run yet' })}
+            </span>
+          )}
+          {auditStamp ? <span className="text-[11px] text-slate-400">{auditStamp}</span> : null}
+        </div>
+        {auditResult?.error ? (
+          <div className="mt-2 text-xs font-semibold text-rose-600">{auditResult.error}</div>
+        ) : null}
+        {auditResult?.stderr ? (
+          <div className="mt-2">
+            <button
+              onClick={() => setAuditDetailsOpen((prev) => !prev)}
+              className="text-xs font-semibold text-slate-600 hover:text-ink"
+              title={
+                auditDetailsOpen
+                  ? t({ it: 'Nasconde i dettagli del check', en: 'Hide audit details' })
+                  : t({ it: 'Mostra i dettagli del check', en: 'Show audit details' })
+              }
+            >
+              {auditDetailsOpen ? t({ it: 'Nascondi dettagli', en: 'Hide details' }) : t({ it: 'Mostra dettagli', en: 'Show details' })}
+            </button>
+            {auditDetailsOpen ? (
+              <pre className="mt-2 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700">
+                {auditResult.stderr}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">

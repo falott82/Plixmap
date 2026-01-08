@@ -511,7 +511,7 @@ const CanvasStageImpl = (
   const refreshStage = useCallback(() => {
     const stage = stageRef.current;
     if (!stage) return;
-    stage.getLayers()?.forEach((layer) => layer.batchDraw());
+    stage.getLayers()?.forEach((layer: { batchDraw: () => void }) => layer.batchDraw());
   }, []);
 
   useEffect(() => {
@@ -1769,10 +1769,30 @@ const CanvasStageImpl = (
             const route = ((link as any).route || 'vh') as 'vh' | 'hv';
 
             if (kind === 'cable') {
+              const offset = Number((link as any).offset || 0);
+              let fromX = from.x;
+              let fromY = from.y;
+              let toX = to.x;
+              let toY = to.y;
+              if (offset) {
+                const dx = to.x - from.x;
+                const dy = to.y - from.y;
+                const len = Math.hypot(dx, dy);
+                if (len) {
+                  const nx = -dy / len;
+                  const ny = dx / len;
+                  const shiftX = nx * offset;
+                  const shiftY = ny * offset;
+                  fromX += shiftX;
+                  fromY += shiftY;
+                  toX += shiftX;
+                  toY += shiftY;
+                }
+              }
               const points =
                 route === 'hv'
-                  ? [from.x, from.y, to.x, from.y, to.x, to.y]
-                  : [from.x, from.y, from.x, to.y, to.x, to.y];
+                  ? [fromX, fromY, toX, fromY, toX, toY]
+                  : [fromX, fromY, fromX, toY, toX, toY];
 
               const label = String((link as any).name || (link as any).label || '').trim();
               const mid = (() => {
@@ -1793,7 +1813,7 @@ const CanvasStageImpl = (
                   }
                   acc += seg;
                 }
-                return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+                return { x: (fromX + toX) / 2, y: (fromY + toY) / 2 };
               })();
 
               return (

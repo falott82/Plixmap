@@ -111,6 +111,7 @@ const Toolbar = ({ defs, order, onSelectType, onRemoveFromPalette, activeType }:
               setContext(null);
               onRemoveFromPalette?.(type);
             }}
+            title={t({ it: 'Rimuovi da palette', en: 'Remove from palette' })}
           >
             <Trash2 size={16} className="text-slate-500" />
             {t({ it: 'Rimuovi da palette', en: 'Remove from palette' })}

@@ -1,6 +1,6 @@
 {
   "name": "deskly",
-  "version": "1.4.1",
+  "version": "1.4.10",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
     "start": "node server/index.cjs"
   },
   "dependencies": {
@@ -27,7 +28,7 @@
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "html2canvas": "^1.4.1",
-    "jspdf": "^3.0.4",
+    "jspdf": "^4.0.0",
     "konva": "^9.3.6",
     "lexical": "^0.39.0",
     "lucide-react": "^0.308.0",

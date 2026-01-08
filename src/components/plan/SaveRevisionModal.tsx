@@ -74,7 +74,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                   <Dialog.Title className="text-lg font-semibold text-ink">
                     {t({ it: 'Salva revisione', en: 'Save revision' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink">
+                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -131,6 +131,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                             type="button"
                             onClick={() => setHelpOpen(false)}
                             className="mt-3 text-xs font-semibold text-primary hover:underline"
+                            title={t({ it: 'Chiudi', en: 'Close' })}
                           >
                             {t({ it: 'Chiudi', en: 'Close' })}
                           </button>
@@ -146,6 +147,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                           ? 'border-primary bg-primary/10 text-primary'
                           : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                       }`}
+                      title={t({ it: 'Minor (x.1)', en: 'Minor (x.1)' })}
                     >
                       {t({ it: 'Minor (x.1)', en: 'Minor (x.1)' })}
                     </button>
@@ -156,6 +158,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                           ? 'border-primary bg-primary/10 text-primary'
                           : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                       }`}
+                      title={t({ it: 'Major (1.x)', en: 'Major (1.x)' })}
                     >
                       {t({ it: 'Major (1.x)', en: 'Major (1.x)' })}
                     </button>
@@ -177,6 +180,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                     <button
                       onClick={onDiscard}
                       className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                      title={t({ it: 'Cambia senza salvare', en: 'Switch without saving' })}
                     >
                       {t({ it: 'Cambia senza salvare', en: 'Switch without saving' })}
                     </button>
@@ -184,6 +188,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                   <button
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Annulla', en: 'Cancel' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -193,6 +198,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                       onClose();
                     }}
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    title={t({ it: 'Salva', en: 'Save' })}
                   >
                     <Check size={16} />
                     {t({ it: 'Salva', en: 'Save' })}

@@ -30,10 +30,8 @@ const ObjectTypesPanel = () => {
   const customFields = useCustomFieldsStore((s) => s.fields);
   const refreshCustomFields = useCustomFieldsStore((s) => s.refresh);
   const isSuperAdmin = !!user?.isSuperAdmin;
-  const isAdmin = !!user?.isAdmin;
   const canManageRequests = !!user?.isSuperAdmin && user?.username === 'superadmin';
   const canRequestObjects = !canManageRequests;
-  const canCreateObjects = canManageRequests;
 
   const [customOpen, setCustomOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
@@ -530,6 +528,7 @@ const ObjectTypesPanel = () => {
                     <button
                       onClick={() => setPendingPromptOpen(false)}
                       className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Chiudi la finestra di avviso', en: 'Close the notice dialog' })}
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}
                     </button>
@@ -541,6 +540,7 @@ const ObjectTypesPanel = () => {
                         if (!requestsLoading) reloadRequests();
                       }}
                       className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                      title={t({ it: 'Apri la gestione delle richieste', en: 'Open requests management' })}
                     >
                       {t({ it: 'Apri gestione', en: 'Open management' })}
                     </button>
@@ -734,6 +734,7 @@ const ObjectTypesPanel = () => {
               setContext(null);
             }}
             className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+            title={t({ it: 'Configura campi personalizzati', en: 'Configure custom fields' })}
           >
             <Settings2 size={14} className="text-slate-500" /> {t({ it: 'Aggiungi campi custom…', en: 'Add custom fields…' })}
           </button>
@@ -747,6 +748,11 @@ const ObjectTypesPanel = () => {
               setContext(null);
             }}
             className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-slate-700 hover:bg-slate-50"
+            title={t(
+              enabled.includes(context.typeId)
+                ? { it: 'Nascondi questo oggetto dalla palette', en: 'Hide this object from the palette' }
+                : { it: 'Mostra questo oggetto nella palette', en: 'Show this object in the palette' }
+            )}
           >
             {enabled.includes(context.typeId) ? (
               <>
@@ -800,6 +806,7 @@ const ObjectTypesPanel = () => {
                           className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${
                             requestsTab === 'new' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink'
                           }`}
+                          title={t({ it: 'Apri la nuova richiesta oggetto', en: 'Open new object request' })}
                         >
                           {t({ it: 'Nuova richiesta', en: 'New request' })}
                         </button>
@@ -808,6 +815,7 @@ const ObjectTypesPanel = () => {
                           className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${
                             requestsTab === 'mine' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink'
                           }`}
+                          title={t({ it: 'Mostra le tue richieste', en: 'Show your requests' })}
                         >
                           {t({ it: 'Le mie richieste', en: 'My requests' })}
                         </button>
@@ -819,6 +827,7 @@ const ObjectTypesPanel = () => {
                         className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${
                           requestsTab === 'manage' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink'
                         }`}
+                        title={t({ it: 'Gestisci le richieste utenti', en: 'Manage user requests' })}
                       >
                         {t({ it: 'Richieste utenti', en: 'User requests' })}
                       </button>
@@ -890,6 +899,7 @@ const ObjectTypesPanel = () => {
                           <button
                             onClick={addDraftField}
                             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            title={t({ it: 'Aggiungi un nuovo campo custom', en: 'Add a new custom field' })}
                           >
                             <Plus size={14} /> {t({ it: 'Aggiungi campo', en: 'Add field' })}
                           </button>
@@ -938,12 +948,14 @@ const ObjectTypesPanel = () => {
                       <button
                         onClick={() => setRequestsOpen(false)}
                         className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Chiudi senza inviare la richiesta', en: 'Close without sending the request' })}
                       >
                         {t({ it: 'Annulla', en: 'Cancel' })}
                       </button>
                       <button
                         onClick={submitRequest}
                         className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                        title={t({ it: 'Invia o aggiorna la richiesta', en: 'Send or update the request' })}
                       >
                         {editRequestId ? t({ it: 'Aggiorna richiesta', en: 'Update request' }) : t({ it: 'Invia richiesta', en: 'Send request' })}
                       </button>
@@ -997,6 +1009,7 @@ const ObjectTypesPanel = () => {
                                       setDraftFields(toDraftFields(r.payload?.customFields || []));
                                     }}
                                     className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                    title={t({ it: 'Modifica la richiesta', en: 'Edit the request' })}
                                   >
                                     <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
                                   </button>
@@ -1013,6 +1026,7 @@ const ObjectTypesPanel = () => {
                                       }
                                     }}
                                     className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                    title={t({ it: 'Elimina la richiesta', en: 'Delete the request' })}
                                   >
                                     <Trash2 size={14} /> {t({ it: 'Elimina', en: 'Delete' })}
                                   </button>
@@ -1033,6 +1047,7 @@ const ObjectTypesPanel = () => {
                           <button
                             onClick={reloadRequests}
                             className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            title={t({ it: 'Aggiorna la lista richieste', en: 'Refresh the requests list' })}
                           >
                             <RefreshCw size={12} /> {t({ it: 'Aggiorna', en: 'Refresh' })}
                           </button>
@@ -1057,6 +1072,7 @@ const ObjectTypesPanel = () => {
                                 className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${
                                   selectedRequestId === r.id ? 'border-primary bg-primary/5' : 'border-slate-200 bg-white'
                                 }`}
+                                title={t({ it: 'Apri dettagli richiesta', en: 'Open request details' })}
                               >
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="font-semibold text-ink">{r.payload?.nameIt || r.payload?.typeId}</div>
@@ -1131,6 +1147,7 @@ const ObjectTypesPanel = () => {
                                   <button
                                     onClick={addDraftField}
                                     className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                    title={t({ it: 'Aggiungi un nuovo campo custom', en: 'Add a new custom field' })}
                                   >
                                     <Plus size={14} /> {t({ it: 'Aggiungi campo', en: 'Add field' })}
                                   </button>
@@ -1185,12 +1202,14 @@ const ObjectTypesPanel = () => {
                                 <button
                                   onClick={() => resolveRequest('rejected')}
                                   className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                                  title={t({ it: 'Rifiuta la richiesta selezionata', en: 'Reject the selected request' })}
                                 >
                                   <XCircle size={16} /> {t({ it: 'Rifiuta', en: 'Reject' })}
                                 </button>
                                 <button
                                   onClick={() => resolveRequest('approved')}
                                   className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                                  title={t({ it: 'Approva la richiesta selezionata', en: 'Approve the selected request' })}
                                 >
                                   <CheckCircle2 size={16} /> {t({ it: 'Approva', en: 'Approve' })}
                                 </button>
@@ -1283,6 +1302,7 @@ const ObjectTypesPanel = () => {
                       <button
                         onClick={addDraftField}
                         className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Aggiungi un nuovo campo custom', en: 'Add a new custom field' })}
                       >
                         <Plus size={14} /> {t({ it: 'Aggiungi campo', en: 'Add field' })}
                       </button>
@@ -1327,12 +1347,14 @@ const ObjectTypesPanel = () => {
                     <button
                       onClick={() => setCustomOpen(false)}
                       className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Chiudi senza creare l’oggetto', en: 'Close without creating the object' })}
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
                     </button>
                     <button
                       onClick={submitCustomObject}
                       className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                      title={t({ it: 'Crea il nuovo oggetto', en: 'Create the new object' })}
                     >
                       {t({ it: 'Crea', en: 'Create' })}
                     </button>

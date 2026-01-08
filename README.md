@@ -1,5 +1,7 @@
 # Deskly — Floor Plan Management (Drag & Drop)
 
+Current version: **1.4.10**
+
 Deskly is a modern web app to manage company floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, saved views, revision history, search/highlight, and PDF exports.
 
 The UI supports **Italian and English**. When you change language from the user menu, the app performs a full refresh to ensure every screen (including tooltips/modals) is consistently translated.
@@ -136,7 +138,9 @@ New passwords must be **strong**:
 - Rack management:
   - open racks from the map to manage **rack units** and devices
   - drag devices into the rack, choose unit size, move with arrow keys
+  - drag a device onto another device with the same U size to swap positions
   - configure devices with host/IP, ports, power options, and notes
+  - passive devices include **Passacavo**; Misc devices can be given a custom name
   - port configuration per device (switch/patch panel/optical drawer) with 1:1 links
   - link speeds: 100M/1G (copper) and 1G/10G/25G (fiber)
   - search inside the rack by **host name** or **device type**
@@ -283,9 +287,17 @@ Data persistence:
 ## Security
 - Dependabot is enabled: `.github/dependabot.yml`
 - GitHub Action runs `npm audit --omit=dev`: `.github/workflows/security-audit.yml`
-- Recommended before releasing:
+- Recommended before releasing (local/npm):
 ```bash
-npm audit --omit=dev
+npm audit --omit=dev --audit-level=high
+```
+- Or via npm script:
+```bash
+npm run audit:prod
+```
+- If running via Docker:
+```bash
+docker compose exec deskly npm audit --omit=dev --audit-level=high
 ```
 - Users: create accounts, import permissions from an existing user, and manage access; superadmin is highlighted and cannot be disabled.
 - Users list shows the account creation timestamp to help auditing and onboarding.

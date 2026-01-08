@@ -103,6 +103,7 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
                   <button
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Chiudi senza cambiare immagine', en: 'Close without changing image' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
                   </button>
@@ -112,6 +113,7 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
                       onClose();
                     }}
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    title={t({ it: 'Conferma sostituzione planimetria', en: 'Confirm floor plan replacement' })}
                   >
                     <Check size={16} />
                     {t({ it: 'Conferma', en: 'Confirm' })}

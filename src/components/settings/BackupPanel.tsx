@@ -480,12 +480,14 @@ const BackupPanel = () => {
             <button
               onClick={() => toggleAll(true)}
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+              title={t({ it: 'Seleziona tutte le planimetrie', en: 'Select all floor plans' })}
             >
               {t({ it: 'Tutte', en: 'All' })}
             </button>
             <button
               onClick={() => toggleAll(false)}
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+              title={t({ it: 'Deseleziona tutte le planimetrie', en: 'Deselect all floor plans' })}
             >
               {t({ it: 'Nessuna', en: 'None' })}
             </button>
@@ -503,6 +505,11 @@ const BackupPanel = () => {
                   <button
                     onClick={() => setExpandedClients((p) => ({ ...p, [c.id]: !cOpen }))}
                     className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold text-ink hover:bg-slate-50"
+                    title={
+                      cOpen
+                        ? t({ it: 'Comprimi cliente', en: 'Collapse client' })
+                        : t({ it: 'Espandi cliente', en: 'Expand client' })
+                    }
                   >
                     <span className="flex items-center gap-2">
                       {cOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -532,6 +539,11 @@ const BackupPanel = () => {
                             <button
                               onClick={() => setExpandedSites((p) => ({ ...p, [skey]: !sOpen }))}
                               className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                              title={
+                                sOpen
+                                  ? t({ it: 'Comprimi sede', en: 'Collapse site' })
+                                  : t({ it: 'Espandi sede', en: 'Expand site' })
+                              }
                             >
                               <span className="flex items-center gap-2">
                                 {sOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -603,6 +615,7 @@ const BackupPanel = () => {
             onClick={exportJson}
             disabled={busy}
             className="mt-4 inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90 disabled:opacity-50"
+            title={t({ it: 'Esporta le planimetrie selezionate in JSON', en: 'Export selected floor plans to JSON' })}
           >
             <Download size={16} /> {t({ it: 'Esporta JSON', en: 'Export JSON' })}
           </button>
@@ -641,6 +654,7 @@ const BackupPanel = () => {
           onClick={exportExcel}
           disabled={busy}
           className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-50"
+          title={t({ it: 'Esporta le tabelle in formato Excel', en: 'Export tables in Excel format' })}
         >
           <FileSpreadsheet size={16} /> {t({ it: 'Esporta Excel', en: 'Export Excel' })}
         </button>

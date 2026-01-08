@@ -1,10 +1,14 @@
 name: security-audit
+run-name: security-audit • ${{ github.ref_name }}
 
 on:
   pull_request:
   push:
     branches: [ "main" ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   npm-audit:

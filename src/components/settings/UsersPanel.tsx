@@ -160,6 +160,7 @@ const UsersPanel = () => {
           <button
             onClick={() => setModal({ mode: 'create' })}
             className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90"
+            title={t({ it: 'Crea un nuovo utente', en: 'Create a new user' })}
           >
             <Plus size={16} /> {t({ it: 'Nuovo utente', en: 'New user' })}
           </button>
