@@ -264,13 +264,26 @@ All users on the LAN will see the **same data**, because the backend persists st
 ## Docker
 Deskly ships with a Dockerfile and a docker-compose configuration.
 
-Build and run:
+Quick install (Docker Compose):
+```bash
+mkdir -p ~/apps
+cd ~/apps
+git clone https://github.com/falott82/Deskly
+cd Deskly
+docker compose up -d --build
+```
+
+Build and run (manual):
 ```bash
 docker compose up --build
 ```
 Open:
 - `http://localhost:8787`
 - or from LAN: `http://<HOST_IP>:8787`
+
+First login:
+- username: `superadmin`
+- password: `deskly` (you will be prompted to change it)
 
 Data persistence:
 - SQLite DB and uploaded assets are stored under `./data` (mapped as a volume in Docker Compose).
