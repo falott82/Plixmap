@@ -1,5 +1,6 @@
 import { Dialog } from '@headlessui/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowRight, Link2, Search, X } from 'lucide-react';
 import { RackDefinition, RackItem, RackItemType, RackLink, RackPortKind } from '../../store/types';
 import { useT } from '../../i18n/useT';
@@ -48,6 +49,40 @@ type PathPart = {
   deviceType?: RackItemType;
   deviceId?: string;
   rackName?: string;
+};
+
+type SimpleModalProps = {
+  open: boolean;
+  onClose: () => void;
+  panelClassName: string;
+  zIndexClassName: string;
+  backdropClassName?: string;
+  children: ReactNode;
+};
+
+const SimpleModal = ({ open, onClose, panelClassName, zIndexClassName, backdropClassName, children }: SimpleModalProps) => {
+  if (!open) return null;
+  const content = (
+    <div
+      className={`fixed inset-0 overflow-y-auto ${zIndexClassName}`}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <div
+        className={`absolute inset-0 ${backdropClassName || 'bg-black/40 backdrop-blur-sm'}`}
+        aria-hidden="true"
+        onMouseDown={onClose}
+      />
+      <div className="relative flex min-h-full items-center justify-center px-4 py-6" onMouseDown={(event) => event.stopPropagation()}>
+        <div className={`w-full ${panelClassName} rounded-2xl bg-white shadow-card`}>{children}</div>
+      </div>
+    </div>
+  );
+  if (typeof document === 'undefined') return content;
+  return createPortal(content, document.body);
 };
 
 const speedOptions: Record<RackPortKind, { value: string; label: string }[]> = {
@@ -117,7 +152,6 @@ const RackPortsModal = ({
   const [connectionsKindFilter, setConnectionsKindFilter] = useState<'all' | 'ethernet' | 'fiber'>('all');
   const [connectionsQuery, setConnectionsQuery] = useState('');
   const [overwritePrompt, setOverwritePrompt] = useState<{ linkId: string } | null>(null);
-  const [portPickerOpen, setPortPickerOpen] = useState(false);
   const [targetRackId, setTargetRackId] = useState('');
   const [targetItemId, setTargetItemId] = useState('');
   const [targetPortIndex, setTargetPortIndex] = useState(0);
@@ -344,15 +378,12 @@ const RackPortsModal = ({
     return rackItems.find((device) => device.id === targetItemId) || null;
   }, [rackItems, targetItemId]);
 
-  const targetPortLabel = useMemo(() => {
-    if (!linkPrompt || !targetDevice || !targetPortIndex) return '';
-    return getPortDisplayName(targetDevice, linkPrompt.kind, targetPortIndex);
-  }, [linkPrompt, targetDevice, targetPortIndex]);
-
   const targetPortLink = useMemo(() => {
     if (!linkPrompt || !targetItemId || !targetPortIndex) return null;
     return getLinkForPort(targetItemId, linkPrompt.kind, targetPortIndex, targetSide);
   }, [linkPrompt, targetItemId, targetPortIndex, targetSide]);
+
+  const canSaveLink = !!targetItemId && !!targetPortIndex;
 
   const portPickerPorts = useMemo(() => {
     if (!linkPrompt || !targetItemId) return [];
@@ -365,7 +396,6 @@ const RackPortsModal = ({
     const existing = getLinkForPort(item.id, kind, index, side);
     const nextPrompt: LinkPrompt = { kind, index, side, existingLinkId: existing?.id };
     setLinkPrompt(nextPrompt);
-    setPortPickerOpen(false);
     if (existing) {
       const other = getOtherSide(existing, item.id);
       const initialRack = rackItems.find((d) => d.id === other.itemId)?.rackId || '';
@@ -425,10 +455,6 @@ const RackPortsModal = ({
   }, [connectionsOpen, itemId]);
 
   useEffect(() => {
-    if (!linkPrompt) setPortPickerOpen(false);
-  }, [linkPrompt]);
-
-  useEffect(() => {
     if (open) return;
     setLinkPrompt(null);
     setRenamePrompt(null);
@@ -436,13 +462,12 @@ const RackPortsModal = ({
     setNotePrompt(null);
     setNoteValue('');
     setConnectionsOpen(false);
-    setPortPickerOpen(false);
   }, [open]);
 
   const applySaveLink = (forceOverwrite: boolean) => {
     if (!item || !linkPrompt) return;
-    if (!targetRackId || !targetItemId || !targetPortIndex) {
-      push(t({ it: 'Seleziona rack, apparato e porta.', en: 'Select rack, device, and port.' }), 'info');
+    if (!targetItemId || !targetPortIndex) {
+      push(t({ it: 'Seleziona apparato e porta.', en: 'Select device and port.' }), 'info');
       return;
     }
     const availablePorts = findFreePorts(targetItemId, linkPrompt.kind, linkPrompt.existingLinkId, targetSide);
@@ -476,6 +501,7 @@ const RackPortsModal = ({
       color,
       speed: allowSpeed ? speed : undefined
     });
+    push(t({ it: 'Collegamento salvato.', en: 'Link saved.' }), 'success');
     setLinkPrompt(null);
   };
 
@@ -497,11 +523,6 @@ const RackPortsModal = ({
     if (!closeOnBackdrop) return;
     if (notePrompt || linkPrompt) return;
     onClose();
-  };
-
-  const handleConnectionsClose = () => {
-    if (!closeOnBackdrop) return;
-    setConnectionsOpen(false);
   };
 
   const buildPathParts = (kind: RackPortKind, index: number, side?: PortSide): PathPart[] => {
@@ -964,500 +985,395 @@ const RackPortsModal = ({
         )
       ) : null}
 
-      {linkPrompt ? (
-        <Dialog open={!!linkPrompt} as="div" className="relative z-[95]" onClose={() => setLinkPrompt(null)}>
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" aria-hidden="true" />
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-6">
-              <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-card">
-                <div className="flex items-center justify-between gap-3">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({ it: 'Collega porta', en: 'Link port' })}
-                  </Dialog.Title>
-                  <button onClick={() => setLinkPrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-                    <X size={18} />
-                  </button>
-                </div>
-                <div className="mt-2 text-sm text-slate-500">
-                  {t({ it: 'Porta', en: 'Port' })}: {getPortDisplayName(item, linkPrompt.kind, linkPrompt.index)}
-                </div>
+      <SimpleModal open={!!linkPrompt} onClose={() => setLinkPrompt(null)} zIndexClassName="z-[95]" panelClassName="max-w-lg p-5">
+        {linkPrompt ? (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-lg font-semibold text-ink">{t({ it: 'Collega porta', en: 'Link port' })}</div>
+              <button onClick={() => setLinkPrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-2 text-sm text-slate-500">
+              {t({ it: 'Porta', en: 'Port' })}: {getPortDisplayName(item, linkPrompt.kind, linkPrompt.index)}
+            </div>
 
-                <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-3">
+              <label className="block text-sm font-medium text-slate-700">
+                {t({ it: 'Rack di destinazione', en: 'Target rack' })}
+                <select
+                  value={targetRackId}
+                  onChange={(e) => {
+                    const nextRackId = e.target.value;
+                    setTargetRackId(nextRackId);
+                    setTargetItemId('');
+                    setTargetPortIndex(0);
+                    setTargetSide('female');
+                  }}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                >
+                  <option value="">{t({ it: 'Seleziona rack', en: 'Select rack' })}</option>
+                  {racks.map((rack) => (
+                    <option key={rack.id} value={rack.id}>
+                      {rack.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                {t({ it: 'Apparato', en: 'Device' })}
+                <select
+                  value={targetItemId}
+                  onChange={(e) => {
+                    const nextItemId = e.target.value;
+                    setTargetItemId(nextItemId);
+                    const nextDevice = rackItems.find((d) => d.id === nextItemId) || null;
+                    if (nextDevice?.rackId) setTargetRackId(nextDevice.rackId);
+                    const nextSide = isDualSide(nextDevice) ? linkPrompt?.side || 'female' : 'female';
+                    setTargetSide(nextSide);
+                    setTargetPortIndex(0);
+                  }}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                >
+                  <option value="">{t({ it: 'Seleziona apparato', en: 'Select device' })}</option>
+                  {availableTargets
+                    .filter((d) => (targetRackId ? d.rackId === targetRackId : true))
+                    .map((device) => (
+                      <option key={device.id} value={device.id}>
+                        {getDeviceLabel(device)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-sm font-medium text-slate-700">
+                  {t({ it: 'Porta', en: 'Port' })}
+                  <select
+                    value={targetPortIndex || 0}
+                    onChange={(e) => setTargetPortIndex(Number(e.target.value) || 0)}
+                    disabled={!targetItemId}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  >
+                    <option value={0}>{t({ it: 'Seleziona porta', en: 'Select port' })}</option>
+                    {portPickerPorts.map((port) => {
+                      const link = getLinkForPort(targetItemId, linkPrompt.kind, port, targetSide);
+                      const status = link ? t({ it: 'Collegata', en: 'Linked' }) : t({ it: 'Libera', en: 'Free' });
+                      return (
+                        <option key={port} value={port}>
+                          {getPortDisplayName(targetDevice, linkPrompt.kind, port)} · {status}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {targetPortIndex ? (
+                    <div
+                      className={`mt-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        targetPortLink ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                      }`}
+                    >
+                      {targetPortLink ? t({ it: 'Collegata', en: 'Linked' }) : t({ it: 'Libera', en: 'Free' })}
+                    </div>
+                  ) : null}
+                </label>
+                {allowSpeed ? (
                   <label className="block text-sm font-medium text-slate-700">
-                    {t({ it: 'Rack di destinazione', en: 'Target rack' })}
+                    {t({ it: 'Velocità', en: 'Speed' })}
                     <select
-                      value={targetRackId}
-                      onChange={(e) => {
-                        const nextRackId = e.target.value;
-                        setTargetRackId(nextRackId);
-                        setTargetItemId('');
-                        setTargetPortIndex(0);
-                        setTargetSide('female');
-                      }}
+                      value={speed}
+                      onChange={(e) => setSpeed(e.target.value)}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                     >
-                      <option value="">{t({ it: 'Seleziona rack', en: 'Select rack' })}</option>
-                      {racks.map((rack) => (
-                        <option key={rack.id} value={rack.id}>
-                          {rack.name}
+                      {speedOptions[linkPrompt.kind].map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
                         </option>
                       ))}
                     </select>
                   </label>
+                ) : (
+                  <div />
+                )}
+              </div>
+              {(() => {
+                if (!isDualSide(targetDevice)) return null;
+                return (
                   <label className="block text-sm font-medium text-slate-700">
-                    {t({ it: 'Apparato', en: 'Device' })}
+                    {t({ it: 'Lato', en: 'Side' })}
                     <select
-                      value={targetItemId}
+                      value={targetSide}
                       onChange={(e) => {
-                        const nextItemId = e.target.value;
-                        setTargetItemId(nextItemId);
-                        const nextDevice = rackItems.find((d) => d.id === nextItemId) || null;
-                        const nextSide = isDualSide(nextDevice) ? linkPrompt?.side || 'female' : 'female';
-                        setTargetSide(nextSide);
+                        const next = e.target.value as PortSide;
+                        setTargetSide(next);
                         setTargetPortIndex(0);
                       }}
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                     >
-                      <option value="">{t({ it: 'Seleziona apparato', en: 'Select device' })}</option>
-                      {availableTargets
-                        .filter((d) => (targetRackId ? d.rackId === targetRackId : false))
-                        .map((device) => (
-                          <option key={device.id} value={device.id}>
-                            {getDeviceLabel(device)}
-                          </option>
-                        ))}
+                      <option value="female">{t({ it: 'Femmina', en: 'Female' })}</option>
+                      <option value="cable">{t({ it: 'Cablaggio', en: 'Cabling' })}</option>
                     </select>
                   </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="block text-sm font-medium text-slate-700">
-                      {t({ it: 'Porta', en: 'Port' })}
-                      <button
-                        type="button"
-                        onClick={() => setPortPickerOpen(true)}
-                        disabled={!targetItemId}
-                        className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-left outline-none ring-primary/30 focus:ring-2 disabled:cursor-not-allowed disabled:bg-slate-100"
-                        title={t({ it: 'Seleziona porta', en: 'Select port' })}
-                      >
-                        <span className="truncate text-slate-700">
-                          {targetPortIndex ? targetPortLabel : t({ it: 'Seleziona porta', en: 'Select port' })}
-                        </span>
-                        {targetPortIndex ? (
-                          <span
-                            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                              targetPortLink ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
-                            }`}
-                          >
-                            {targetPortLink ? t({ it: 'Collegata', en: 'Linked' }) : t({ it: 'Libera', en: 'Free' })}
-                          </span>
-                        ) : null}
-                      </button>
-                    </label>
-                    {allowSpeed ? (
-                      <label className="block text-sm font-medium text-slate-700">
-                        {t({ it: 'Velocità', en: 'Speed' })}
-                        <select
-                          value={speed}
-                          onChange={(e) => setSpeed(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        >
-                          {speedOptions[linkPrompt.kind].map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : (
-                      <div />
-                    )}
-                  </div>
-                  {(() => {
-                    if (!isDualSide(targetDevice)) return null;
-                    return (
-                      <label className="block text-sm font-medium text-slate-700">
-                        {t({ it: 'Lato', en: 'Side' })}
-                        <select
-                          value={targetSide}
-                          onChange={(e) => {
-                            const next = e.target.value as PortSide;
-                            setTargetSide(next);
-                            setTargetPortIndex(0);
-                          }}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        >
-                          <option value="female">{t({ it: 'Femmina', en: 'Female' })}</option>
-                          <option value="cable">{t({ it: 'Cablaggio', en: 'Cabling' })}</option>
-                        </select>
-                      </label>
-                    );
-                  })()}
-                </div>
+                );
+              })()}
+            </div>
 
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    onClick={() => setLinkPrompt(null)}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Annulla', en: 'Cancel' })}
-                  >
-                    {t({ it: 'Annulla', en: 'Cancel' })}
-                  </button>
-                  {linkPrompt.existingLinkId ? (
-                    <button
-                      onClick={() => {
-                        onDeleteLink(linkPrompt.existingLinkId || '');
-                        setLinkPrompt(null);
-                      }}
-                      className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50"
-                      title={t({ it: 'Scollega', en: 'Unlink' })}
-                    >
-                      {t({ it: 'Scollega', en: 'Unlink' })}
-                    </button>
-                  ) : null}
-                  <button
-                    onClick={handleSaveLink}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-                    title={t({ it: 'Salva collegamento', en: 'Save link' })}
-                  >
-                    {t({ it: 'Salva collegamento', en: 'Save link' })}
-                  </button>
-                </div>
-              </Dialog.Panel>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setLinkPrompt(null)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                title={t({ it: 'Annulla', en: 'Cancel' })}
+              >
+                {t({ it: 'Annulla', en: 'Cancel' })}
+              </button>
+              {linkPrompt.existingLinkId ? (
+                <button
+                  onClick={() => {
+                    onDeleteLink(linkPrompt.existingLinkId || '');
+                    setLinkPrompt(null);
+                  }}
+                  className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50"
+                  title={t({ it: 'Scollega', en: 'Unlink' })}
+                >
+                  {t({ it: 'Scollega', en: 'Unlink' })}
+                </button>
+              ) : null}
+              <button
+                onClick={handleSaveLink}
+                disabled={!canSaveLink}
+                className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+                title={t({ it: 'Salva collegamento', en: 'Save link' })}
+              >
+                {t({ it: 'Salva collegamento', en: 'Save link' })}
+              </button>
             </div>
-          </div>
-        </Dialog>
-      ) : null}
-      {linkPrompt && portPickerOpen ? (
-        <Dialog open={portPickerOpen} as="div" className="relative z-[98]" onClose={() => setPortPickerOpen(false)}>
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" aria-hidden="true" />
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-6">
-              <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-card">
-                <div className="flex items-center justify-between gap-3">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({ it: 'Seleziona porta', en: 'Select port' })}
-                  </Dialog.Title>
-                  <button onClick={() => setPortPickerOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-                    <X size={18} />
-                  </button>
-                </div>
-                <div className="mt-2 text-sm text-slate-500">{targetDevice ? getDeviceLabel(targetDevice) : ''}</div>
-                {targetDevice ? (
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
-                    {getRackName(targetDevice.rackId) ? (
-                      <span className="rounded-full border border-slate-200 px-2 py-0.5 text-sky-600">
-                        {getRackName(targetDevice.rackId)}
-                      </span>
-                    ) : null}
-                    {isDualSide(targetDevice) ? (
-                      <span className="rounded-full border border-slate-200 px-2 py-0.5">
-                        {targetSide === 'cable' ? t({ it: 'Cablaggio', en: 'Cabling' }) : t({ it: 'Femmina', en: 'Female' })}
-                      </span>
-                    ) : null}
-                    <span className="rounded-full border border-slate-200 px-2 py-0.5">
-                      {linkPrompt.kind === 'fiber' ? t({ it: 'Fibra', en: 'Fiber' }) : t({ it: 'Rame', en: 'Copper' })}
-                    </span>
-                  </div>
-                ) : null}
-                <div className="mt-4 space-y-2">
-                  {portPickerPorts.length ? (
-                    portPickerPorts.map((port) => {
-                      const link = getLinkForPort(targetItemId, linkPrompt.kind, port, targetSide);
-                      const isConnected = !!link;
-                      const statusLabel = isConnected ? t({ it: 'Collegata', en: 'Linked' }) : t({ it: 'Libera', en: 'Free' });
-                      const statusColor = isConnected ? 'bg-emerald-500' : 'bg-rose-500';
-                      return (
-                        <button
-                          key={port}
-                          type="button"
-                          onClick={() => {
-                            setTargetPortIndex(port);
-                            setPortPickerOpen(false);
-                          }}
-                          className={`w-full rounded-lg border px-3 py-2 text-left ${
-                            isConnected ? 'border-emerald-200 bg-emerald-50/60' : 'border-rose-200 bg-rose-50/60'
-                          } ${targetPortIndex === port ? 'ring-2 ring-primary/40' : ''}`}
-                          title={getPortDisplayName(targetDevice, linkPrompt.kind, port)}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2">
-                              <span className={`h-2 w-2 rounded-full ${statusColor}`} />
-                              <span className="text-sm font-semibold text-slate-700">
-                                {getPortDisplayName(targetDevice, linkPrompt.kind, port)}
-                              </span>
-                            </div>
-                            <span className={`text-xs font-semibold ${isConnected ? 'text-emerald-700' : 'text-rose-700'}`}>
-                              {statusLabel}
-                            </span>
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {isConnected ? getConnectionTitle(link, targetItemId) : t({ it: 'Nessun collegamento', en: 'No link' })}
-                          </div>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-                      {t({ it: 'Seleziona un apparato per vedere le porte disponibili.', en: 'Select a device to view available ports.' })}
-                    </div>
-                  )}
-                </div>
-              </Dialog.Panel>
+          </>
+        ) : null}
+      </SimpleModal>
+      <SimpleModal
+        open={!!renamePrompt}
+        onClose={() => setRenamePrompt(null)}
+        zIndexClassName="z-[100]"
+        panelClassName="max-w-sm p-5"
+        backdropClassName="bg-black/30 backdrop-blur-sm"
+      >
+        {renamePrompt ? (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-lg font-semibold text-ink">{t({ it: 'Rinomina porta', en: 'Rename port' })}</div>
+              <button onClick={() => setRenamePrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                <X size={18} />
+              </button>
             </div>
-          </div>
-        </Dialog>
-      ) : null}
-      {renamePrompt ? (
-        <Dialog open={!!renamePrompt} as="div" className="relative z-[100]" onClose={() => setRenamePrompt(null)}>
-          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" />
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-6">
-              <Dialog.Panel className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-card">
-                <div className="flex items-center justify-between gap-3">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({ it: 'Rinomina porta', en: 'Rename port' })}
-                  </Dialog.Title>
-                  <button onClick={() => setRenamePrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-                    <X size={18} />
-                  </button>
-                </div>
-                <div className="mt-2 text-xs text-slate-500">
-                  {t({ it: 'Nome di default', en: 'Default name' })}:{' '}
-                  {getDefaultPortName(item, renamePrompt.kind, renamePrompt.index)}
-                </div>
-                <label className="mt-3 block text-sm font-medium text-slate-700">
-                  {t({ it: 'Nome porta', en: 'Port name' })}
-                  <input
-                    autoFocus
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                  />
-                </label>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    onClick={() => setRenamePrompt(null)}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Annulla', en: 'Cancel' })}
-                  >
-                    {t({ it: 'Annulla', en: 'Cancel' })}
-                  </button>
-                  <button
-                    onClick={handleRenameSave}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-                    title={t({ it: 'Salva', en: 'Save' })}
-                  >
-                    {t({ it: 'Salva', en: 'Save' })}
-                  </button>
-                </div>
-              </Dialog.Panel>
+            <div className="mt-2 text-xs text-slate-500">
+              {t({ it: 'Nome di default', en: 'Default name' })}:{' '}
+              {getDefaultPortName(item, renamePrompt.kind, renamePrompt.index)}
             </div>
-          </div>
-        </Dialog>
-      ) : null}
-      {connectionsOpen ? (
-        <Dialog open={connectionsOpen} as="div" className="relative z-[110]" onClose={handleConnectionsClose}>
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" aria-hidden="true" />
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-6">
-              <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between gap-3">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({ it: 'Collegamenti apparati', en: 'Device links' })}
-                  </Dialog.Title>
-                  <button onClick={() => setConnectionsOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-                    <X size={18} />
+            <label className="mt-3 block text-sm font-medium text-slate-700">
+              {t({ it: 'Nome porta', en: 'Port name' })}
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+              />
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setRenamePrompt(null)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                title={t({ it: 'Annulla', en: 'Cancel' })}
+              >
+                {t({ it: 'Annulla', en: 'Cancel' })}
+              </button>
+              <button
+                onClick={handleRenameSave}
+                className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                title={t({ it: 'Salva', en: 'Save' })}
+              >
+                {t({ it: 'Salva', en: 'Save' })}
+              </button>
+            </div>
+          </>
+        ) : null}
+      </SimpleModal>
+      <SimpleModal open={connectionsOpen} onClose={() => setConnectionsOpen(false)} zIndexClassName="z-[110]" panelClassName="max-w-3xl p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-lg font-semibold text-ink">{t({ it: 'Collegamenti apparati', en: 'Device links' })}</div>
+          <button onClick={() => setConnectionsOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+            <X size={18} />
+          </button>
+        </div>
+        <div className="mt-1 text-xs text-slate-500">{getDeviceLabel(item)}</div>
+        {rackName ? <div className="mt-1 text-xs font-semibold text-sky-600">{rackName}</div> : null}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
+              <Search size={12} className="text-slate-400" />
+              <input
+                value={connectionsQuery}
+                onChange={(e) => setConnectionsQuery(e.target.value)}
+                onKeyDown={(event) => event.stopPropagation()}
+                placeholder={t({ it: 'Cerca porta, rack, nota...', en: 'Search port, rack, note...' })}
+                className="w-44 bg-transparent text-[11px] text-slate-600 placeholder:text-slate-400 focus:outline-none"
+                title={t({ it: 'Cerca nei collegamenti', en: 'Search links' })}
+              />
+            </div>
+            <button
+              onClick={() => setConnectionsOnlyActive((prev) => !prev)}
+              className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                connectionsOnlyActive ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600'
+              }`}
+              title={t({ it: 'Mostra solo attive', en: 'Show active only' })}
+            >
+              {t({ it: 'Solo attive', en: 'Active only' })}
+            </button>
+            <div className="flex items-center rounded-full border border-slate-200 p-0.5 text-[10px] font-semibold text-slate-600">
+              {(['all', 'ethernet', 'fiber'] as const).map((kind) => {
+                const label =
+                  kind === 'all'
+                    ? t({ it: 'Tutte', en: 'All' })
+                    : kind === 'ethernet'
+                      ? t({ it: 'Rame', en: 'Copper' })
+                      : t({ it: 'Fibra', en: 'Fiber' });
+                const isActive = connectionsKindFilter === kind;
+                return (
+                  <button
+                    key={kind}
+                    onClick={() => setConnectionsKindFilter(kind)}
+                    className={`rounded-full px-2 py-0.5 ${isActive ? 'bg-slate-900 text-white' : ''}`}
+                    title={label}
+                  >
+                    {label}
                   </button>
-                </div>
-                <div className="mt-1 text-xs text-slate-500">{getDeviceLabel(item)}</div>
-                {rackName ? <div className="mt-1 text-xs font-semibold text-sky-600">{rackName}</div> : null}
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
-                      <Search size={12} className="text-slate-400" />
-                      <input
-                        value={connectionsQuery}
-                        onChange={(e) => setConnectionsQuery(e.target.value)}
-                        onKeyDown={(event) => event.stopPropagation()}
-                        placeholder={t({ it: 'Cerca porta, rack, nota...', en: 'Search port, rack, note...' })}
-                        className="w-44 bg-transparent text-[11px] text-slate-600 placeholder:text-slate-400 focus:outline-none"
-                        title={t({ it: 'Cerca nei collegamenti', en: 'Search links' })}
-                      />
-                    </div>
-                    <button
-                      onClick={() => setConnectionsOnlyActive((prev) => !prev)}
-                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
-                        connectionsOnlyActive ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600'
-                      }`}
-                      title={t({ it: 'Mostra solo attive', en: 'Show active only' })}
-                    >
-                      {t({ it: 'Solo attive', en: 'Active only' })}
-                    </button>
-                    <div className="flex items-center rounded-full border border-slate-200 p-0.5 text-[10px] font-semibold text-slate-600">
-                      {(['all', 'ethernet', 'fiber'] as const).map((kind) => {
-                        const label =
-                          kind === 'all'
-                            ? t({ it: 'Tutte', en: 'All' })
-                            : kind === 'ethernet'
-                              ? t({ it: 'Rame', en: 'Copper' })
-                              : t({ it: 'Fibra', en: 'Fiber' });
-                        const isActive = connectionsKindFilter === kind;
-                        return (
-                          <button
-                            key={kind}
-                            onClick={() => setConnectionsKindFilter(kind)}
-                            className={`rounded-full px-2 py-0.5 ${isActive ? 'bg-slate-900 text-white' : ''}`}
-                            title={label}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <button
-                      onClick={() => setConnectionsExpanded((prev) => !prev)}
-                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
-                        connectionsExpanded ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'
-                      }`}
-                      title={connectionsExpanded ? t({ it: 'Vista espansa', en: 'Expanded view' }) : t({ it: 'Vista compatta', en: 'Compact view' })}
-                    >
-                      {connectionsExpanded ? t({ it: 'Vista espansa', en: 'Expanded view' }) : t({ it: 'Vista compatta', en: 'Compact view' })}
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 text-[10px] font-semibold text-slate-500">
-                    {[
-                      { label: t({ it: 'Server', en: 'Server' }), colors: [typeColors.server] },
-                      { label: t({ it: 'Switch', en: 'Switch' }), colors: [typeColors.switch] },
-                      { label: t({ it: 'Router/Firewall', en: 'Router/Firewall' }), colors: [typeColors.router, typeColors.firewall] },
-                      { label: t({ it: 'Patch/ottico', en: 'Patch/Optical' }), colors: [typeColors.patchpanel, typeColors.optical_drawer] }
-                    ].map((entry) => (
-                      <div key={entry.label} className="flex items-center gap-1">
-                        <span className="flex items-center gap-0.5">
-                          {entry.colors.map((color) => (
-                            <span key={color} className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-                          ))}
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setConnectionsExpanded((prev) => !prev)}
+              className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                connectionsExpanded ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'
+              }`}
+              title={connectionsExpanded ? t({ it: 'Vista espansa', en: 'Expanded view' }) : t({ it: 'Vista compatta', en: 'Compact view' })}
+            >
+              {connectionsExpanded ? t({ it: 'Vista espansa', en: 'Expanded view' }) : t({ it: 'Vista compatta', en: 'Compact view' })}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-[10px] font-semibold text-slate-500">
+            {[
+              { label: t({ it: 'Server', en: 'Server' }), colors: [typeColors.server] },
+              { label: t({ it: 'Switch', en: 'Switch' }), colors: [typeColors.switch] },
+              { label: t({ it: 'Router/Firewall', en: 'Router/Firewall' }), colors: [typeColors.router, typeColors.firewall] },
+              { label: t({ it: 'Patch/ottico', en: 'Patch/Optical' }), colors: [typeColors.patchpanel, typeColors.optical_drawer] }
+            ].map((entry) => (
+              <div key={entry.label} className="flex items-center gap-1">
+                <span className="flex items-center gap-0.5">
+                  {entry.colors.map((color) => (
+                    <span key={color} className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                  ))}
+                </span>
+                <span>{entry.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {visibleConnections.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+            {hasConnectionsQuery
+              ? t({ it: 'Nessun collegamento trovato con questa ricerca.', en: 'No links match this search.' })
+              : t({ it: 'Nessun collegamento presente.', en: 'No links available.' })}
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {visibleConnections.map((entry) => {
+              const kindLabel = entry.kind === 'ethernet' ? t({ it: 'Rame', en: 'Copper' }) : t({ it: 'Fibra', en: 'Fiber' });
+              const portLabel = connectionsExpanded && entry.sideLabel ? `${entry.portName} · ${entry.sideLabel}` : entry.portName;
+              const speedLabel = connectionsExpanded && entry.speed ? ` · ${entry.speed}` : '';
+              const kindColor = kindDefaults[entry.kind];
+              const kindBadgeStyle = {
+                borderColor: kindColor,
+                backgroundColor: connectionsExpanded ? `${kindColor}1a` : `${kindColor}26`,
+                color: kindColor
+              };
+              return (
+                <div key={entry.id} className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-slate-600">{portLabel}</div>
+                    <div className="flex items-center gap-2 text-[10px] font-semibold">
+                      <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5" style={kindBadgeStyle}>
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: kindColor }} />
+                        <span>
+                          {kindLabel}
+                          {speedLabel}
                         </span>
-                        <span>{entry.label}</span>
-                      </div>
-                    ))}
+                      </span>
+                      {connectionsExpanded && !entry.active ? (
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-500">
+                          {t({ it: 'Libera', en: 'Free' })}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-                {visibleConnections.length === 0 ? (
-                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                    {hasConnectionsQuery
-                      ? t({ it: 'Nessun collegamento trovato con questa ricerca.', en: 'No links match this search.' })
-                      : t({ it: 'Nessun collegamento presente.', en: 'No links available.' })}
-                  </div>
-                ) : (
-                  <div className="mt-4 space-y-3">
-                    {visibleConnections.map((entry) => {
-                      const kindLabel =
-                        entry.kind === 'ethernet' ? t({ it: 'Rame', en: 'Copper' }) : t({ it: 'Fibra', en: 'Fiber' });
-                      const portLabel =
-                        connectionsExpanded && entry.sideLabel ? `${entry.portName} · ${entry.sideLabel}` : entry.portName;
-                      const speedLabel = connectionsExpanded && entry.speed ? ` · ${entry.speed}` : '';
-                      const kindColor = kindDefaults[entry.kind];
-                      const kindBadgeStyle = {
-                        borderColor: kindColor,
-                        backgroundColor: connectionsExpanded ? `${kindColor}1a` : `${kindColor}26`,
-                        color: kindColor
+                  {connectionsExpanded && entry.note ? <div className="mt-2 text-[11px] text-slate-500">{entry.note}</div> : null}
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    {entry.parts.map((part, idx, arr) => {
+                      const color = part.deviceType ? typeColors[part.deviceType] : '#94a3b8';
+                      const badgeStyle = {
+                        borderColor: color,
+                        backgroundColor: `${color}26`
                       };
                       return (
-                        <div key={entry.id} className="rounded-xl border border-slate-200 bg-white px-3 py-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-xs font-semibold text-slate-600">{portLabel}</div>
-                            <div className="flex items-center gap-2 text-[10px] font-semibold">
-                              <span
-                                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
-                                style={kindBadgeStyle}
-                              >
-                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: kindColor }} />
-                                <span>
-                                  {kindLabel}
-                                  {speedLabel}
-                                </span>
-                              </span>
-                              {connectionsExpanded && !entry.active ? (
-                                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-500">
-                                  {t({ it: 'Libera', en: 'Free' })}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                          {connectionsExpanded && entry.note ? (
-                            <div className="mt-2 text-[11px] text-slate-500">{entry.note}</div>
-                          ) : null}
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                            {entry.parts.map((part, idx, arr) => {
-                              const color = part.deviceType ? typeColors[part.deviceType] : '#94a3b8';
-                              const badgeStyle = {
-                                borderColor: color,
-                                backgroundColor: `${color}26`
-                              };
-                              return (
-                                <span key={`${entry.id}-${part.key}`} className="inline-flex items-center gap-2">
-                                  <span className="inline-flex items-center gap-2 rounded-full border px-2 py-1" style={badgeStyle}>
-                                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-                                    <span className="font-medium text-slate-700">{part.label}</span>
-                                  </span>
-                                  {idx < arr.length - 1 ? <ArrowRight size={12} className="text-slate-400" /> : null}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </div>
+                        <span key={`${entry.id}-${part.key}`} className="inline-flex items-center gap-2">
+                          <span className="inline-flex items-center gap-2 rounded-full border px-2 py-1" style={badgeStyle}>
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                            <span className="font-medium text-slate-700">{part.label}</span>
+                          </span>
+                          {idx < arr.length - 1 ? <ArrowRight size={12} className="text-slate-400" /> : null}
+                        </span>
                       );
                     })}
                   </div>
-                )}
-              </Dialog.Panel>
-            </div>
+                </div>
+              );
+            })}
           </div>
-        </Dialog>
-      ) : null}
-      {overwritePrompt ? (
-        <Dialog open={!!overwritePrompt} as="div" className="relative z-[120]" onClose={() => setOverwritePrompt(null)}>
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" aria-hidden="true" />
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-6">
-              <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-5 shadow-card">
-                <div className="flex items-center justify-between gap-3">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({ it: 'Porta già collegata', en: 'Port already linked' })}
-                  </Dialog.Title>
-                  <button onClick={() => setOverwritePrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-                    <X size={18} />
-                  </button>
-                </div>
-                <div className="mt-2 text-sm text-slate-500">
-                  {t({
-                    it: 'La porta selezionata è già collegata. Vuoi sovrascrivere il collegamento?',
-                    en: 'The selected port is already linked. Do you want to overwrite it?'
-                  })}
-                </div>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    onClick={() => setOverwritePrompt(null)}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Annulla', en: 'Cancel' })}
-                  >
-                    {t({ it: 'Annulla', en: 'Cancel' })}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setOverwritePrompt(null);
-                      applySaveLink(true);
-                    }}
-                    className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700"
-                    title={t({ it: 'Sovrascrivi', en: 'Overwrite' })}
-                  >
-                    {t({ it: 'Sovrascrivi', en: 'Overwrite' })}
-                  </button>
-                </div>
-              </Dialog.Panel>
+        )}
+      </SimpleModal>
+      <SimpleModal open={!!overwritePrompt} onClose={() => setOverwritePrompt(null)} zIndexClassName="z-[120]" panelClassName="max-w-md p-5">
+        {overwritePrompt ? (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-lg font-semibold text-ink">{t({ it: 'Porta già collegata', en: 'Port already linked' })}</div>
+              <button onClick={() => setOverwritePrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                <X size={18} />
+              </button>
             </div>
-          </div>
-        </Dialog>
-      ) : null}
+            <div className="mt-2 text-sm text-slate-500">
+              {t({
+                it: 'La porta selezionata è già collegata. Vuoi sovrascrivere il collegamento?',
+                en: 'The selected port is already linked. Do you want to overwrite it?'
+              })}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setOverwritePrompt(null)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                title={t({ it: 'Annulla', en: 'Cancel' })}
+              >
+                {t({ it: 'Annulla', en: 'Cancel' })}
+              </button>
+              <button
+                onClick={() => {
+                  setOverwritePrompt(null);
+                  applySaveLink(true);
+                }}
+                className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700"
+                title={t({ it: 'Sovrascrivi', en: 'Overwrite' })}
+              >
+                {t({ it: 'Sovrascrivi', en: 'Overwrite' })}
+              </button>
+            </div>
+          </>
+        ) : null}
+      </SimpleModal>
     </>
   );
 };

@@ -9,6 +9,25 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.5.6',
+    date: '2026-01-08',
+    type: 'fix',
+    notes: [
+      n(
+        'Rack: salvataggio collegamenti porte corretto anche per utenti non admin',
+        'Rack: port link save works for non-admin users'
+      ),
+      n(
+        'Rack: modali collegamenti/rename senza focus trap e click fuori sempre gestito',
+        'Rack: link/rename modals without focus trap and consistent outside click handling'
+      ),
+      n(
+        'Toast: visibili sopra le modali rack',
+        'Toasts: visible above rack modals'
+      )
+    ]
+  },
+  {
     version: '1.5.5',
     date: '2026-01-08',
     type: 'fix',
