@@ -1,6 +1,6 @@
 # Deskly — Floor Plan Management (Drag & Drop)
 
-Current version: **1.4.12**
+Current version: **1.5.3**
 
 Deskly is a modern web app to manage company floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, saved views, revision history, search/highlight, and PDF exports.
 
@@ -15,7 +15,7 @@ The UI supports **Italian and English**. When you change language from the user 
 - `Client { id, shortName, name, address?, phone?, email?, vatId?, pecEmail?, description?, logoUrl?, attachments?[], sites[] }`
 - `Site { id, clientId, name, coords?, floorPlans[] }` where `coords` is an optional `lat, lng` string
 - `FloorPlan { id, siteId, name, imageUrl, width?, height?, printArea?, objects[], rooms?, views?, revisions? }`
-- `MapObject { id, type, name, description?, x, y, scale?, roomId? }`
+- `MapObject { id, type, name, description?, x, y, scale?, roomId?, layerIds?, opacity?, rotation? }`
 - `Room { id, name, color?, kind: 'rect'|'poly', ... }` (rectangles and polygons supported)
 - `FloorPlanView { id, name, description?, zoom, pan, isDefault? }`
 - `FloorPlanRevision { id, createdAt, revMajor, revMinor, name, description?, imageUrl, objects, rooms?, views? }`
@@ -92,6 +92,7 @@ New passwords must be **strong**:
 - Add objects via palette or context menu (type → name required, description optional)
 - The palette can be customized per user (enabled objects + ordering) from **Settings → Objects**
 - If a user has an empty palette, a quick CTA is shown to open **Settings → Objects** and add items
+- Desks: dedicated palette section + layer with multiple shapes (round, square, rectangular, double, long bench, trapezoid, L, reverse L), stretch/resize + rotate (Ctrl/⌘ + ←/→), opacity + line color/weight; not linkable/searchable; optional in PDF export
 - The context menu works across the whole workspace area (even outside the visible plan image)
 - Always-visible “Saved/Unsaved” indicator to track local changes
 - Select / multi-select:

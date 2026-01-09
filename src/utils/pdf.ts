@@ -6,6 +6,7 @@ import { FloorPlan, IconName, MapObject } from '../store/types';
 import { ReleaseNote } from '../version/history';
 import Icon from '../components/ui/Icon';
 import { sanitizeHtmlBasic } from './sanitizeHtml';
+import { isDeskType } from '../components/plan/deskTypes';
 
 export type PdfOrientation = 'auto' | 'portrait' | 'landscape';
 
@@ -89,6 +90,7 @@ export const renderFloorPlanToJpegDataUrl = async (
     targetLongPx: number;
     jpegQuality: number;
     includeObjects?: boolean;
+    includeDesks?: boolean;
     includeLinks?: boolean;
     includeRooms?: boolean;
     objectTypeIcons?: Record<string, IconName | undefined>;
@@ -269,6 +271,7 @@ export const renderFloorPlanToJpegDataUrl = async (
   }
 
   if (opts.includeObjects) {
+    const includeDesks = opts.includeDesks ?? true;
     const iconCache = new Map<string, HTMLImageElement>();
     const getIconImg = async (typeId: string) => {
       const iconName = opts.objectTypeIcons?.[typeId];
@@ -284,7 +287,7 @@ export const renderFloorPlanToJpegDataUrl = async (
       }
     };
 
-    const objects = (plan.objects || []) as any[];
+    const objects = (plan.objects || []).filter((o: any) => (includeDesks ? true : !isDeskType(o.type))) as any[];
     for (const obj of objects) {
       const cx = (Number(obj.x) - ax) * worldToPxX;
       const cy = (Number(obj.y) - ay) * worldToPxY;
@@ -292,9 +295,11 @@ export const renderFloorPlanToJpegDataUrl = async (
       if (cx < -200 || cy < -200 || cx > outW + 200 || cy > outH + 200) continue;
 
       const oScale = Number(obj.scale ?? 1) || 1;
+      const objectOpacity = typeof obj.opacity === 'number' ? Math.max(0.2, Math.min(1, obj.opacity)) : 1;
       const markerSize = 36 * worldToPx * oScale;
       const iconSize = 18 * worldToPx * oScale;
       const corner = 12 * worldToPx * oScale;
+      const isDesk = isDeskType(String(obj.type || ''));
 
       // label (same logic as CanvasStage)
       const labelText =
@@ -322,31 +327,142 @@ export const renderFloorPlanToJpegDataUrl = async (
       }
       ctx.restore();
 
-      // marker background
-      const half = markerSize / 2;
-      ctx.save();
-      drawRoundRect(ctx, cx - half, cy - half, markerSize, markerSize, corner);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-      ctx.strokeStyle = '#cbd5e1';
-      ctx.lineWidth = Math.max(1, 2 * worldToPx);
-      ctx.stroke();
-      ctx.restore();
+      if (isDesk) {
+        const deskScaleX = Number(obj.scaleX ?? 1) || 1;
+        const deskScaleY = Number(obj.scaleY ?? 1) || 1;
+        const baseDeskSize = 38 * worldToPx * oScale;
+        const deskSizeX = baseDeskSize * deskScaleX;
+        const deskSizeY = baseDeskSize * deskScaleY;
+        const deskHalfX = deskSizeX / 2;
+        const deskHalfY = deskSizeY / 2;
+        const deskThicknessX = 12 * worldToPx * oScale * deskScaleX;
+        const deskThicknessY = 12 * worldToPx * oScale * deskScaleY;
+        const deskRectW = baseDeskSize * 1.45 * deskScaleX;
+        const deskRectH = baseDeskSize * 0.75 * deskScaleY;
+        const deskLongW = baseDeskSize * 1.85 * deskScaleX;
+        const deskLongH = baseDeskSize * 0.6 * deskScaleY;
+        const deskDoubleW = baseDeskSize * 0.7 * deskScaleX;
+        const deskDoubleH = baseDeskSize * 0.95 * deskScaleY;
+        const deskDoubleGap = 4 * worldToPx * oScale * deskScaleX;
+        const deskTrapTop = baseDeskSize * 0.75 * deskScaleX;
+        const deskTrapBottom = baseDeskSize * 1.15 * deskScaleX;
+        const deskTrapHeight = baseDeskSize * 0.75 * deskScaleY;
+        const deskStrokeWidth = clamp(Number(obj.strokeWidth ?? 2) || 2, 0.5, 6) * worldToPx;
+        const deskStrokeColor =
+          typeof obj.strokeColor === 'string' && String(obj.strokeColor).trim()
+            ? String(obj.strokeColor).trim()
+            : '#cbd5e1';
+        const rotation = (Number(obj.rotation || 0) * Math.PI) / 180;
 
-      // icon
-      const icon = await getIconImg(String(obj.type || ''));
-      if (icon) {
-        const ih = iconSize;
-        const iw = iconSize;
-        ctx.drawImage(icon, cx - iw / 2, cy - ih / 2, iw, ih);
-      } else {
         ctx.save();
-        ctx.fillStyle = '#2563eb';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = `bold ${Math.max(10, Math.round(15 * worldToPx * oScale))}px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif`;
-        ctx.fillText('?', cx, cy);
+        ctx.translate(cx, cy);
+        ctx.rotate(rotation);
+        ctx.globalAlpha = objectOpacity;
+        ctx.fillStyle = '#f8fafc';
+        ctx.strokeStyle = deskStrokeColor;
+        ctx.lineWidth = Math.max(0.5, deskStrokeWidth);
+
+        if (obj.type === 'desk_round') {
+          ctx.beginPath();
+          ctx.ellipse(0, 0, deskHalfX, deskHalfY, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else if (obj.type === 'desk_square') {
+          drawRoundRect(ctx, -deskHalfX, -deskHalfY, deskSizeX, deskSizeY, 6 * worldToPx * oScale * Math.min(deskScaleX, deskScaleY));
+          ctx.fill();
+          ctx.stroke();
+        } else if (obj.type === 'desk_rect') {
+          drawRoundRect(ctx, -deskRectW / 2, -deskRectH / 2, deskRectW, deskRectH, 6 * worldToPx * oScale * Math.min(deskScaleX, deskScaleY));
+          ctx.fill();
+          ctx.stroke();
+        } else if (obj.type === 'desk_double') {
+          drawRoundRect(
+            ctx,
+            -(deskDoubleW + deskDoubleGap / 2),
+            -deskDoubleH / 2,
+            deskDoubleW,
+            deskDoubleH,
+            6 * worldToPx * oScale * Math.min(deskScaleX, deskScaleY)
+          );
+          ctx.fill();
+          ctx.stroke();
+          drawRoundRect(
+            ctx,
+            deskDoubleGap / 2,
+            -deskDoubleH / 2,
+            deskDoubleW,
+            deskDoubleH,
+            6 * worldToPx * oScale * Math.min(deskScaleX, deskScaleY)
+          );
+          ctx.fill();
+          ctx.stroke();
+        } else if (obj.type === 'desk_long') {
+          drawRoundRect(
+            ctx,
+            -deskLongW / 2,
+            -deskLongH / 2,
+            deskLongW,
+            deskLongH,
+            6 * worldToPx * oScale * Math.min(deskScaleX, deskScaleY)
+          );
+          ctx.fill();
+          ctx.stroke();
+        } else if (obj.type === 'desk_trap') {
+          ctx.beginPath();
+          ctx.moveTo(-deskTrapTop / 2, -deskTrapHeight / 2);
+          ctx.lineTo(deskTrapTop / 2, -deskTrapHeight / 2);
+          ctx.lineTo(deskTrapBottom / 2, deskTrapHeight / 2);
+          ctx.lineTo(-deskTrapBottom / 2, deskTrapHeight / 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        } else if (obj.type === 'desk_l') {
+          ctx.beginPath();
+          ctx.rect(-deskHalfX, deskHalfY - deskThicknessY, deskSizeX, deskThicknessY);
+          ctx.rect(-deskHalfX, -deskHalfY, deskThicknessX, deskSizeY);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.rect(-deskHalfX, deskHalfY - deskThicknessY, deskSizeX, deskThicknessY);
+          ctx.rect(deskHalfX - deskThicknessX, -deskHalfY, deskThicknessX, deskSizeY);
+          ctx.fill();
+          ctx.stroke();
+        }
+
         ctx.restore();
+      } else {
+        // marker background
+        const half = markerSize / 2;
+        ctx.save();
+        ctx.globalAlpha = objectOpacity;
+        drawRoundRect(ctx, cx - half, cy - half, markerSize, markerSize, corner);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = Math.max(1, 2 * worldToPx);
+        ctx.stroke();
+        ctx.restore();
+
+        // icon
+        const icon = await getIconImg(String(obj.type || ''));
+        if (icon) {
+          const ih = iconSize;
+          const iw = iconSize;
+          ctx.save();
+          ctx.globalAlpha = objectOpacity;
+          ctx.drawImage(icon, cx - iw / 2, cy - ih / 2, iw, ih);
+          ctx.restore();
+        } else {
+          ctx.save();
+          ctx.globalAlpha = objectOpacity;
+          ctx.fillStyle = '#2563eb';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = `bold ${Math.max(10, Math.round(15 * worldToPx * oScale))}px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif`;
+          ctx.fillText('?', cx, cy);
+          ctx.restore();
+        }
       }
     }
   }
@@ -360,6 +476,7 @@ export const exportPlansToPdf = async (
   options: {
     includeIndex?: boolean;
     includeObjects?: boolean;
+    includeDesks?: boolean;
     includeLinks?: boolean;
     includeRooms?: boolean;
     objectTypeIcons?: Record<string, IconName | undefined>;
@@ -421,6 +538,7 @@ export const exportPlansToPdf = async (
       targetLongPx: options.targetLongPx || 2600,
       jpegQuality: options.jpegQuality || 0.9,
       includeObjects: options.includeObjects ?? true,
+      includeDesks: options.includeDesks ?? true,
       includeLinks: options.includeLinks ?? true,
       includeRooms: options.includeRooms ?? true,
       objectTypeIcons: options.objectTypeIcons
@@ -524,8 +642,11 @@ export const exportPlansToPdf = async (
         pdf.text('PDF Export', margin + 14 + (desklyLogo ? logoSize + 10 : 0), margin + 56);
 
         const generatedOn = new Date().toISOString().slice(0, 10);
+        const includeObjects = options.includeObjects ?? true;
+        const includeDesks = options.includeDesks ?? true;
         const optsLine = [
-          options.includeObjects ?? true ? 'Objects' : null,
+          includeObjects ? 'Objects' : null,
+          includeObjects && includeDesks ? 'Desks' : null,
           options.includeLinks ?? true ? 'Links' : null,
           options.includeRooms ?? true ? 'Rooms' : null
         ]

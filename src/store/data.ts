@@ -30,9 +30,10 @@ export const defaultData = (): Client[] => {
               layers: [
                 { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1 },
                 { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2 },
-                { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 3 },
-                { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 4 },
-                { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 5 }
+                { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 3 },
+                { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 4 },
+                { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 5 },
+                { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 6 }
               ],
               views: [
                 {
@@ -73,6 +74,14 @@ export const defaultObjectTypes: ObjectTypeDefinition[] = [
   { id: 'tv', name: { it: 'Televisore', en: 'TV' }, icon: 'tv', builtin: true },
   { id: 'microphone', name: { it: 'Microfono', en: 'Microphone' }, icon: 'mic', builtin: true },
   { id: 'phone', name: { it: 'Telefono', en: 'Phone' }, icon: 'phone', builtin: true },
+  { id: 'desk_round', name: { it: 'Scrivania tonda', en: 'Round desk' }, icon: 'deskRound', builtin: true },
+  { id: 'desk_square', name: { it: 'Scrivania quadrata', en: 'Square desk' }, icon: 'deskSquare', builtin: true },
+  { id: 'desk_rect', name: { it: 'Scrivania rettangolare', en: 'Rectangular desk' }, icon: 'deskRect', builtin: true },
+  { id: 'desk_double', name: { it: 'Scrivania doppia', en: 'Double desk' }, icon: 'deskDouble', builtin: true },
+  { id: 'desk_long', name: { it: 'Banco lungo', en: 'Long bench' }, icon: 'deskLong', builtin: true },
+  { id: 'desk_trap', name: { it: 'Scrivania trapezoidale', en: 'Trapezoid desk' }, icon: 'deskTrapezoid', builtin: true },
+  { id: 'desk_l', name: { it: 'Scrivania a L', en: 'L-shaped desk' }, icon: 'deskL', builtin: true },
+  { id: 'desk_l_rev', name: { it: 'Scrivania a L rovesciata', en: 'Reverse L desk' }, icon: 'deskLReverse', builtin: true },
   // Keep legacy/common types for backward compatibility with existing workspaces
   { id: 'wifi', name: { it: 'Antenna Wi‑Fi', en: 'Wi‑Fi antenna' }, icon: 'wifi', builtin: true },
   { id: 'desktop', name: { it: 'PC fisso', en: 'Desktop PC' }, icon: 'desktop', builtin: true },

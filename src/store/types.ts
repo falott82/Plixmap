@@ -137,7 +137,15 @@ export type IconName =
   | 'truck'
   | 'bike'
   | 'bus'
-  | 'train';
+  | 'train'
+  | 'deskRound'
+  | 'deskSquare'
+  | 'deskRect'
+  | 'deskDouble'
+  | 'deskLong'
+  | 'deskTrapezoid'
+  | 'deskL'
+  | 'deskLReverse';
 
 export interface ObjectTypeDefinition {
   id: string; // stable key used in MapObject.type
@@ -169,6 +177,12 @@ export interface MapObject {
   x: number;
   y: number;
   scale?: number;
+  scaleX?: number;
+  scaleY?: number;
+  opacity?: number;
+  rotation?: number;
+  strokeWidth?: number;
+  strokeColor?: string;
   roomId?: string;
   layerIds?: string[];
 }

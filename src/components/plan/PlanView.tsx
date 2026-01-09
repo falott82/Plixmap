@@ -49,6 +49,7 @@ import ChooseDefaultViewModal from './ChooseDefaultViewModal';
 import Icon from '../ui/Icon';
 import RevisionsModal from './RevisionsModal';
 import SaveRevisionModal from './SaveRevisionModal';
+import { DESK_TYPE_IDS, isDeskType } from './deskTypes';
 import RoomModal from './RoomModal';
 import RackModal from './RackModal';
 import RackPortsModal from './RackPortsModal';
@@ -173,7 +174,9 @@ const PlanView = ({ planId }: Props) => {
         ? ['users']
         : typeId === 'rack'
           ? ['racks']
-          : ['devices'],
+          : isDeskType(typeId)
+            ? ['desks']
+            : ['devices'],
     []
   );
 
@@ -635,8 +638,16 @@ const PlanView = ({ planId }: Props) => {
   const hideAllLayers = !!hiddenLayersByPlan[planId];
   const effectiveVisibleLayerIds = hideAllLayers ? [] : visibleLayerIds;
   useEffect(() => {
-    if (!visibleLayerIdsByPlan[planId] && planLayers.length) {
-      setVisibleLayerIds(planId, planLayers.map((l: any) => l.id));
+    if (!planLayers.length) return;
+    const layerIds = planLayers.map((l: any) => l.id);
+    const current = visibleLayerIdsByPlan[planId];
+    if (!current || !current.length) {
+      setVisibleLayerIds(planId, layerIds);
+      return;
+    }
+    const missing = layerIds.filter((id) => !current.includes(id));
+    if (missing.length) {
+      setVisibleLayerIds(planId, [...current, ...missing]);
     }
   }, [planId, planLayers, setVisibleLayerIds, visibleLayerIdsByPlan]);
 
@@ -645,6 +656,8 @@ const PlanView = ({ planId }: Props) => {
     const visible = new Set(effectiveVisibleLayerIds);
     const normalizedLayerIdsForType = (typeId: string) => {
       if (typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user') return ['users'];
+      if (typeId === 'rack') return ['racks'];
+      if (isDeskType(typeId)) return ['desks'];
       return ['devices'];
     };
     const objects = renderPlan.objects.filter((o: any) => {
@@ -862,7 +875,7 @@ const PlanView = ({ planId }: Props) => {
     if (!baselineSnapshotRef.current || !touchedRef.current) baselineSnapshotRef.current = snap;
   }, [plan, toSnapshot]);
 
-  const samePlanSnapshot = (
+  const samePlanSnapshot = useCallback((
     current: {
       imageUrl: string;
       width?: number;
@@ -1003,7 +1016,7 @@ const PlanView = ({ planId }: Props) => {
     }
 
     return true;
-  };
+  }, []);
 
   const samePlanSnapshotIgnoringDims = useCallback(
     (
@@ -1030,7 +1043,7 @@ const PlanView = ({ planId }: Props) => {
         rackLinks?: any[];
       }
     ) => samePlanSnapshot({ ...a, width: undefined, height: undefined }, { ...b, width: undefined, height: undefined }),
-    []
+    [samePlanSnapshot]
   );
 
   // Track plan state when the user enters it. Used for the navigation prompt.
@@ -1040,24 +1053,40 @@ const PlanView = ({ planId }: Props) => {
     if (!entrySnapshotRef.current || !touchedRef.current) entrySnapshotRef.current = snap;
   }, [plan, toSnapshot]);
 
-  const hasUnsavedChanges = useMemo(() => {
-    if (!plan) return false;
-    const revisions = plan.revisions || [];
-    if (!revisions.length) {
-      const base = baselineSnapshotRef.current;
-      if (!base) return false;
-      return !samePlanSnapshot(toSnapshot(plan), base);
-    }
-    const latest: any = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))[0];
-    return !samePlanSnapshot(toSnapshot(plan), {
-      imageUrl: latest.imageUrl,
-      width: latest.width,
-      height: latest.height,
-      objects: latest.objects,
-      views: latest.views,
-      rooms: latest.rooms
-    });
-  }, [plan, toSnapshot]);
+  const getPlanUnsavedChanges = useCallback(
+    (targetPlan?: FloorPlan | null) => {
+      if (!targetPlan) return false;
+      const revisions = targetPlan.revisions || [];
+      const current = toSnapshot(targetPlan);
+      if (!revisions.length) {
+        const base = baselineSnapshotRef.current;
+        if (!base) return false;
+        return !samePlanSnapshot(current, base);
+      }
+      const latest: any = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))[0];
+      const latestSnapshot = {
+        imageUrl: latest.imageUrl,
+        width: latest.width,
+        height: latest.height,
+        objects: latest.objects,
+        views: latest.views,
+        rooms: latest.rooms,
+        racks: latest.racks,
+        rackItems: latest.rackItems,
+        rackLinks: latest.rackLinks
+      };
+      const normalizedCurrent = {
+        ...current,
+        racks: latestSnapshot.racks === undefined ? undefined : current.racks,
+        rackItems: latestSnapshot.rackItems === undefined ? undefined : current.rackItems,
+        rackLinks: latestSnapshot.rackLinks === undefined ? undefined : current.rackLinks
+      };
+      return !samePlanSnapshot(normalizedCurrent, latestSnapshot);
+    },
+    [samePlanSnapshot, toSnapshot]
+  );
+
+  const hasUnsavedChanges = useMemo(() => getPlanUnsavedChanges(plan), [getPlanUnsavedChanges, plan]);
 
   const hasLocalEdits = useMemo(() => {
     if (!plan) return false;
@@ -1254,11 +1283,20 @@ const PlanView = ({ planId }: Props) => {
   }, [contextMenu, selectedObjectIds]);
 
   const contextIsRack = contextObject?.type === 'rack';
+  const contextIsDesk = contextObject ? isDeskType(contextObject.type) : false;
 
   const selectionHasRack = useMemo(() => {
     if (!renderPlan) return false;
     if (!selectedObjectIds?.length) return false;
     return selectedObjectIds.some((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'rack');
+  }, [renderPlan, selectedObjectIds]);
+  const selectionHasDesk = useMemo(() => {
+    if (!renderPlan) return false;
+    if (!selectedObjectIds?.length) return false;
+    return selectedObjectIds.some((id) => {
+      const obj = renderPlan.objects.find((o) => o.id === id);
+      return !!obj && isDeskType(obj.type);
+    });
   }, [renderPlan, selectedObjectIds]);
 
   useEffect(() => {
@@ -1357,6 +1395,13 @@ const PlanView = ({ planId }: Props) => {
 	      }
 	      if (linkFromId && id && planRef.current && !isReadOnlyRef.current) {
 	        if (id !== linkFromId) {
+            const fromObj = (planRef.current as any).objects?.find((o: any) => o.id === linkFromId);
+            const toObj = (planRef.current as any).objects?.find((o: any) => o.id === id);
+            if ((fromObj && isDeskType(fromObj.type)) || (toObj && isDeskType(toObj.type))) {
+              push(t({ it: 'Le scrivanie non possono essere collegate', en: 'Desks cannot be linked' }), 'info');
+              setLinkFromId(null);
+              return;
+            }
 	          markTouched();
             if (linkCreateMode === 'cable') {
               setCableModal({ mode: 'create', fromId: linkFromId, toId: id });
@@ -1464,6 +1509,39 @@ const PlanView = ({ planId }: Props) => {
     const obj = renderPlan?.objects.find((o) => o.id === objectId);
     if (!renderPlan || !obj || isReadOnly) return;
     const offset = 44 * (obj.scale ?? 1);
+    if (isDeskType(obj.type)) {
+      markTouched();
+      const label = String(obj.name || getTypeLabel(obj.type)).trim() || getTypeLabel(obj.type);
+      const id = addObject(
+        renderPlan.id,
+        obj.type,
+        '',
+        obj.description,
+        obj.x + offset,
+        obj.y + offset * 0.4,
+        obj.scale ?? 1,
+        obj.layerIds || inferDefaultLayerIds(obj.type),
+        {
+          opacity: obj.opacity,
+          rotation: obj.rotation,
+          strokeWidth: obj.strokeWidth,
+          strokeColor: obj.strokeColor,
+          scaleX: obj.scaleX,
+          scaleY: obj.scaleY
+        }
+      );
+      lastInsertedRef.current = { id, name: label };
+      const roomId = getRoomIdAt((renderPlan as FloorPlan).rooms, obj.x + offset, obj.y + offset * 0.4);
+      if (roomId) updateObject(id, { roomId });
+      push(t({ it: `Oggetto duplicato: ${label}`, en: `Object duplicated: ${label}` }), 'success');
+      postAuditEvent({
+        event: 'object_duplicate',
+        scopeType: 'plan',
+        scopeId: renderPlan.id,
+        details: { fromId: obj.id, id, type: obj.type, name: label, roomId: roomId || null }
+      });
+      return;
+    }
     setModalState({ mode: 'duplicate', objectId, coords: { x: obj.x + offset, y: obj.y + offset * 0.4 } });
   };
 
@@ -1695,6 +1773,11 @@ const PlanView = ({ planId }: Props) => {
       const isCmdS = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
       if (isCmdS) {
         if (!currentPlan || isReadOnlyRef.current) return;
+        if (!getPlanUnsavedChanges(currentPlan as FloorPlan)) {
+          e.preventDefault();
+          push(t({ it: 'Nessuna modifica da salvare', en: 'No changes to save' }), 'info');
+          return;
+        }
         e.preventDefault();
         const revisions: any[] = (currentPlan as FloorPlan).revisions || [];
         const sorted = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0));
@@ -1728,6 +1811,28 @@ const PlanView = ({ planId }: Props) => {
         });
         resetTouched();
         entrySnapshotRef.current = toSnapshot(planRef.current || currentPlan);
+        return;
+      }
+
+      const isArrowLeft = e.key === 'ArrowLeft' || e.code === 'ArrowLeft';
+      const isArrowRight = e.key === 'ArrowRight' || e.code === 'ArrowRight';
+      const isArrowUp = e.key === 'ArrowUp' || e.code === 'ArrowUp';
+      const isArrowDown = e.key === 'ArrowDown' || e.code === 'ArrowDown';
+      const isRotateShortcut = (e.ctrlKey || e.metaKey) && (isArrowLeft || isArrowRight);
+      if (isRotateShortcut) {
+        if (!currentSelectedIds.length || !currentPlan) return;
+        if (isReadOnlyRef.current) return;
+        const desks = currentSelectedIds
+          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
+          .filter((obj): obj is MapObject => !!obj && isDeskType(obj.type));
+        if (!desks.length) return;
+        e.preventDefault();
+        markTouched();
+        const delta = isArrowLeft ? -90 : 90;
+        for (const obj of desks) {
+          const current = Number(obj.rotation || 0);
+          updateObject(obj.id, { rotation: (current + delta + 360) % 360 });
+        }
         return;
       }
 
@@ -1777,16 +1882,15 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
-      const isArrow =
-        e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      const isArrow = isArrowUp || isArrowDown || isArrowLeft || isArrowRight;
       if (isArrow) {
         if (!currentSelectedIds.length || !currentPlan) return;
         if (isReadOnlyRef.current) return;
         e.preventDefault();
         const z = zoomRef.current || 1;
         const step = (e.shiftKey ? 10 : 1) / Math.max(0.2, z);
-        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
-        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        const dx = isArrowLeft ? -step : isArrowRight ? step : 0;
+        const dy = isArrowUp ? -step : isArrowDown ? step : 0;
         for (const id of currentSelectedIds) {
           const obj = (currentPlan as FloorPlan).objects?.find((o) => o.id === id);
           if (!obj) continue;
@@ -1819,8 +1923,8 @@ const PlanView = ({ planId }: Props) => {
         setConfirmDelete([...currentSelectedIds]);
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
   }, [
     addRevision,
     deleteObject,
@@ -1836,7 +1940,8 @@ const PlanView = ({ planId }: Props) => {
     t,
     toSnapshot,
     moveObject,
-    updateObject
+    updateObject,
+    getPlanUnsavedChanges
   ]);
 
   const objectsByType = useMemo(() => {
@@ -1877,6 +1982,30 @@ const PlanView = ({ planId }: Props) => {
     const fav = new Set(paletteOrder);
     return all.some((id) => !fav.has(id));
   }, [objectTypeDefs, paletteOrder]);
+  const deskTypeSet = useMemo(() => new Set(DESK_TYPE_IDS as readonly string[]), []);
+  const deskPaletteDefs = useMemo(() => {
+    const defs = objectTypeDefs || [];
+    return defs.filter((d) => deskTypeSet.has(d.id));
+  }, [deskTypeSet, objectTypeDefs]);
+  const deskPaletteOrder = useMemo(() => {
+    const filtered = paletteOrder.filter((id) => deskTypeSet.has(id));
+    return filtered.length ? filtered : undefined;
+  }, [deskTypeSet, paletteOrder]);
+  const otherPaletteDefs = useMemo(() => {
+    const defs = objectTypeDefs || [];
+    return defs.filter((d) => !deskTypeSet.has(d.id));
+  }, [deskTypeSet, objectTypeDefs]);
+  const [paletteSection, setPaletteSection] = useState<'desks' | 'objects'>('objects');
+  const [layersOpen, setLayersOpen] = useState(true);
+
+  useEffect(() => {
+    if (paletteSection === 'desks' && !deskPaletteDefs.length) {
+      setPaletteSection('objects');
+    } else if (paletteSection === 'objects' && !otherPaletteDefs.length && deskPaletteDefs.length) {
+      setPaletteSection('desks');
+    }
+  }, [deskPaletteDefs.length, otherPaletteDefs.length, paletteSection]);
+  const paletteSettingsSection = paletteSection === 'desks' ? 'desks' : 'objects';
 
   const addTypeToPalette = useCallback(
     async (typeId: string) => {
@@ -2034,7 +2163,9 @@ const PlanView = ({ planId }: Props) => {
     const q = objectListQuery.trim().toLowerCase();
     if (!q) return [];
     return (renderPlan?.objects || []).filter(
-      (o) => o.name.toLowerCase().includes(q) || (o.description || '').toLowerCase().includes(q)
+      (o) =>
+        !isDeskType(o.type) &&
+        (o.name.toLowerCase().includes(q) || (o.description || '').toLowerCase().includes(q))
     );
   }, [objectListQuery, renderPlan?.objects]);
 
@@ -2178,6 +2309,35 @@ const PlanView = ({ planId }: Props) => {
       proceedPlaceUser(type, x, y);
       return;
     }
+    if (isDeskType(type)) {
+      if (!plan) return;
+      markTouched();
+      const label = getTypeLabel(type);
+      const name = '';
+      const id = addObject(
+        plan.id,
+        type,
+        name,
+        undefined,
+        x,
+        y,
+        lastObjectScale,
+        ['desks'],
+        { opacity: 1, rotation: 0, strokeWidth: 2, strokeColor: '#cbd5e1', scaleX: 1, scaleY: 1 }
+      );
+      lastInsertedRef.current = { id, name: label };
+      const roomId = getRoomIdAt((plan as FloorPlan).rooms, x, y);
+      if (roomId) updateObject(id, { roomId });
+      push(t({ it: `Oggetto creato: ${label}`, en: `Object created: ${label}` }), 'success');
+      postAuditEvent({
+        event: 'object_create',
+        scopeType: 'plan',
+        scopeId: plan.id,
+        details: { id, type, name: label, roomId: roomId || null }
+      });
+      setPendingType(null);
+      return;
+    }
     setModalState({ mode: 'create', type, coords: { x, y } });
     setPendingType(null);
   };
@@ -2252,11 +2412,14 @@ const PlanView = ({ planId }: Props) => {
       setRackModal({ objectId });
       return;
     }
+    if (obj && isDeskType(obj.type)) return;
     setModalState({ mode: 'edit', objectId });
   };
   const openEditFromSelectionList = (objectId: string) => {
     returnToSelectionListRef.current = true;
     setSelectedObjectsModalOpen(false);
+    const obj = renderPlan?.objects.find((o) => o.id === objectId);
+    if (obj && isDeskType(obj.type)) return;
     setModalState({ mode: 'edit', objectId });
   };
   const openLinkEditFromSelectionList = (linkId: string) => {
@@ -2332,6 +2495,7 @@ const PlanView = ({ planId }: Props) => {
     for (const s of client.sites || []) {
       for (const p of s.floorPlans || []) {
         for (const o of p.objects || []) {
+          if (isDeskType(o.type)) continue;
           const label =
             o.type === 'real_user' &&
             (((o as any).firstName && String((o as any).firstName).trim()) || ((o as any).lastName && String((o as any).lastName).trim()))
@@ -2398,8 +2562,9 @@ const PlanView = ({ planId }: Props) => {
     const normalized = term.trim().toLowerCase();
     const simpleObjectMatches = (renderPlan.objects || []).filter(
       (o) =>
-        String(o.name || '').toLowerCase().includes(normalized) ||
-        String(o.description || '').toLowerCase().includes(normalized)
+        !isDeskType(o.type) &&
+        (String(o.name || '').toLowerCase().includes(normalized) ||
+          String(o.description || '').toLowerCase().includes(normalized))
     );
     const simpleRoomMatches = (renderPlan.rooms || []).filter((r) =>
       String(r.name || '').toLowerCase().includes(normalized)
@@ -2428,6 +2593,7 @@ const PlanView = ({ planId }: Props) => {
       const objMatches: MapObject[] = [];
       const roomMatches: Room[] = [];
       for (const o of objects) {
+        if (isDeskType(o.type)) continue;
         const first = String((o as any).firstName || '').trim();
         const last = String((o as any).lastName || '').trim();
         const email = String((o as any).externalEmail || (o as any).email || '').trim();
@@ -2465,7 +2631,9 @@ const PlanView = ({ planId }: Props) => {
       renderPlan.objects.find((o) => o.id === id) || (plan?.objects || []).find((o) => o.id === id);
     const findRoomById = (id: string) =>
       (renderPlan.rooms || []).find((r) => r.id === id) || (plan?.rooms || []).find((r) => r.id === id);
-    const indexObjects = indexObjectIds.map((id) => findObjectById(id)).filter(Boolean) as MapObject[];
+    const indexObjects = indexObjectIds
+      .map((id) => findObjectById(id))
+      .filter((obj): obj is MapObject => !!obj && !isDeskType(obj.type));
     const indexRooms = indexRoomIds.map((id) => findRoomById(id)).filter(Boolean) as Room[];
     const mergedObjects = objectMatches.length ? objectMatches : indexObjects;
     const mergedRooms = roomMatches.length ? roomMatches : indexRooms;
@@ -3470,6 +3638,11 @@ const PlanView = ({ planId }: Props) => {
                       const updates = computeRoomReassignments(nextRooms, (plan as FloorPlan).objects);
                       if (Object.keys(updates).length) setObjectRoomIds((plan as FloorPlan).id, updates);
                     }}
+                    onUpdateObject={(id, changes) => {
+                      if (isReadOnly) return;
+                      markTouched();
+                      updateObject(id, changes);
+                    }}
 	              />
 	            </div>
 	          </div>
@@ -3486,7 +3659,16 @@ const PlanView = ({ planId }: Props) => {
                 {planLayers.length ? (
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
-                      <span>{t({ it: 'Livelli', en: 'Layers' })}</span>
+                      <button
+                        onClick={() => setLayersOpen((prev) => !prev)}
+                        className="flex items-center gap-1 rounded-md px-1 py-0.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                        title={
+                          layersOpen ? t({ it: 'Nascondi livelli', en: 'Collapse layers' }) : t({ it: 'Mostra livelli', en: 'Expand layers' })
+                        }
+                      >
+                        {layersOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span>{t({ it: 'Livelli', en: 'Layers' })}</span>
+                      </button>
                       <button
                         onClick={() => setHideAllLayers(planId, !hideAllLayers)}
                         className="flex h-6 w-6 items-center justify-center rounded-md text-slate-600 hover:bg-slate-50"
@@ -3499,74 +3681,105 @@ const PlanView = ({ planId }: Props) => {
                         {hideAllLayers ? <Eye size={14} /> : <EyeOff size={14} />}
                       </button>
                     </div>
-                    <div className="mt-2 flex flex-col gap-2">
-                      {planLayers.map((l: any) => {
-                        const isOn = effectiveVisibleLayerIds.includes(l.id);
-                        const label = (l?.name?.[lang] as string) || (l?.name?.it as string) || l.id;
-                        return (
-                          <button
-                            key={l.id}
-                            onClick={() => {
-                              if (hideAllLayers) setHideAllLayers(planId, false);
-                              toggleLayerVisibility(planId, l.id);
-                            }}
-                            className={`flex items-center justify-between rounded-xl border px-2 py-1 text-[11px] font-semibold ${
-                              isOn ? 'border-primary bg-primary/5 text-primary' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                            }`}
-                            title={label}
-                          >
-                            <span className="truncate">{label}</span>
-                            <span
-                              className="ml-2 h-2 w-2 shrink-0 rounded-full"
-                              style={{ background: l.color || (isOn ? '#2563eb' : '#cbd5e1') }}
-                            />
-                          </button>
-                        );
-                      })}
-                    </div>
+                    {layersOpen ? (
+                      <div className="mt-2 flex flex-col gap-2">
+                        {planLayers.map((l: any) => {
+                          const isOn = effectiveVisibleLayerIds.includes(l.id);
+                          const label = (l?.name?.[lang] as string) || (l?.name?.it as string) || l.id;
+                          return (
+                            <button
+                              key={l.id}
+                              onClick={() => {
+                                if (hideAllLayers) setHideAllLayers(planId, false);
+                                toggleLayerVisibility(planId, l.id);
+                              }}
+                              className={`flex items-center justify-between rounded-xl border px-2 py-1 text-[11px] font-semibold ${
+                                isOn ? 'border-primary bg-primary/5 text-primary' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                              }`}
+                              title={label}
+                            >
+                              <span className="truncate">{label}</span>
+                              <span
+                                className="ml-2 h-2 w-2 shrink-0 rounded-full"
+                                style={{ background: l.color || (isOn ? '#2563eb' : '#cbd5e1') }}
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
                 <div className="my-3 h-px w-full bg-slate-200" />
-                <div className="flex items-center justify-end text-[10px] font-semibold uppercase text-slate-500">
+                <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
                   <span className="sr-only">{t({ it: 'Palette', en: 'Palette' })}</span>
                   <div className="flex items-center gap-1">
+                    <span>{paletteSection === 'desks' ? t({ it: 'Scrivanie', en: 'Desks' }) : t({ it: 'Oggetti', en: 'Objects' })}</span>
                     <button
                       onClick={() => {
+                        const url = `/settings?tab=objects&section=${paletteSettingsSection}`;
                         if (hasNavigationEdits && !isReadOnly) {
-                          requestSaveAndNavigate('/settings?tab=objects');
+                          requestSaveAndNavigate(url);
                           return;
                         }
-                        navigate('/settings?tab=objects');
+                        navigate(url);
                       }}
-                      title={t({ it: 'Gestisci palette', en: 'Manage palette' })}
-                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
-                    >
-                      <Star size={14} />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (hasNavigationEdits && !isReadOnly) {
-                          requestSaveAndNavigate('/settings?tab=objects');
-                          return;
-                        }
-                        navigate('/settings?tab=objects');
-                      }}
-                      title={t({ it: 'Impostazioni oggetti', en: 'Object settings' })}
+                      title={t({ it: 'Impostazioni', en: 'Settings' })}
                       className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
                     >
                       <Pencil size={14} />
                     </button>
                   </div>
                 </div>
-                <div className="mt-2 flex flex-col items-center gap-3">
-			              <Toolbar
-                      defs={objectTypeDefs || []}
-                      order={paletteOrder}
-                      onSelectType={(type) => setPendingType(type)}
-                      onRemoveFromPalette={(type) => removeTypeFromPalette(type)}
-                      activeType={pendingType}
-                    />
-			            </div>
+                <div className="mt-2 w-full">
+                  <div className="flex w-full flex-col gap-2">
+                    <button
+                      onClick={() => setPaletteSection('desks')}
+                      disabled={!deskPaletteDefs.length}
+                      className={`w-full min-w-0 rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                        paletteSection === 'desks'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title={t({ it: 'Scrivanie', en: 'Desks' })}
+                    >
+                      {t({ it: 'Scrivanie', en: 'Desks' })}
+                    </button>
+                    <button
+                      onClick={() => setPaletteSection('objects')}
+                      disabled={!otherPaletteDefs.length}
+                      className={`w-full min-w-0 rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                        paletteSection === 'objects'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title={t({ it: 'Oggetti', en: 'Objects' })}
+                    >
+                      {t({ it: 'Oggetti', en: 'Objects' })}
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-col items-center gap-3">
+                    {paletteSection === 'desks' && deskPaletteDefs.length ? (
+                      <Toolbar
+                        defs={deskPaletteDefs}
+                        order={deskPaletteOrder}
+                        onSelectType={(type) => setPendingType(type)}
+                        onRemoveFromPalette={(type) => removeTypeFromPalette(type)}
+                        activeType={pendingType}
+                        allowRemove
+                      />
+                    ) : null}
+                    {paletteSection === 'objects' && otherPaletteDefs.length ? (
+                      <Toolbar
+                        defs={otherPaletteDefs}
+                        order={paletteOrder}
+                        onSelectType={(type) => setPendingType(type)}
+                        onRemoveFromPalette={(type) => removeTypeFromPalette(type)}
+                        activeType={pendingType}
+                      />
+                    ) : null}
+                  </div>
+                </div>
                 {paletteIsEmpty ? (
                   <button
                     onClick={() => {
@@ -3682,17 +3895,19 @@ const PlanView = ({ planId }: Props) => {
                   {t({ it: `${selectedObjectIds.length} oggetti selezionati`, en: `${selectedObjectIds.length} objects selected` })}
                 </div>
               ) : (
-	                <>
-	                  <button
-	                    onClick={() => {
-	                      handleEdit(contextMenu.id);
-	                      setContextMenu(null);
-	                    }}
-	                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                    title={t({ it: 'Modifica', en: 'Edit' })}
-	                  >
-                    <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
-                  </button>
+                <>
+                  {!contextIsDesk ? (
+                    <button
+                      onClick={() => {
+                        handleEdit(contextMenu.id);
+                        setContextMenu(null);
+                      }}
+                      className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                      title={t({ it: 'Modifica', en: 'Edit' })}
+                    >
+                      <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
+                    </button>
+                  ) : null}
                   {contextObject?.type === 'real_user' ? (
                     <button
                       onClick={() => {
@@ -3721,7 +3936,7 @@ const PlanView = ({ planId }: Props) => {
                       })}
                     </button>
                   ) : null}
-                  {!contextIsRack ? (
+                  {!contextIsRack && !contextIsDesk ? (
                     <>
                       <div className="my-2 h-px bg-slate-100" />
 			                  <button
@@ -3783,12 +3998,93 @@ const PlanView = ({ planId }: Props) => {
                       className="mt-1 w-full"
                     />
                   </div>
+                  <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                      <Eye size={14} /> {t({ it: 'Opacità', en: 'Opacity' })}
+                      <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
+                        {Math.round(((contextObject?.opacity ?? 1) || 1) * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      key={`${contextMenu.id}-opacity`}
+                      type="range"
+                      min={0.2}
+                      max={1}
+                      step={0.05}
+                      value={contextObject?.opacity ?? 1}
+                      onChange={(e) => {
+                        const next = Number(e.target.value);
+                        updateObject(contextMenu.id, { opacity: next });
+                      }}
+                      className="mt-1 w-full"
+                    />
+                  </div>
+                  {contextIsDesk ? (
+                    <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                        <Pencil size={14} /> {t({ it: 'Linee scrivania', en: 'Desk lines' })}
+                        <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
+                          {(contextObject?.strokeWidth ?? 2).toFixed(1)}
+                        </span>
+                      </div>
+                      <input
+                        key={`${contextMenu.id}-stroke`}
+                        type="range"
+                        min={0.5}
+                        max={6}
+                        step={0.5}
+                        value={contextObject?.strokeWidth ?? 2}
+                        onChange={(e) => {
+                          const next = Number(e.target.value);
+                          updateObject(contextMenu.id, { strokeWidth: next });
+                        }}
+                        className="mt-1 w-full"
+                      />
+                      <div className="mt-2 flex items-center justify-between gap-2 text-xs font-semibold text-slate-600">
+                        <span>{t({ it: 'Colore linee', en: 'Line color' })}</span>
+                        <input
+                          type="color"
+                          value={contextObject?.strokeColor || '#cbd5e1'}
+                          onChange={(e) => updateObject(contextMenu.id, { strokeColor: e.target.value })}
+                          className="h-7 w-9 rounded border border-slate-200 bg-white"
+                          title={t({ it: 'Colore linee', en: 'Line color' })}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                  {contextIsDesk ? (
+                    <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
+                      <div className="text-xs font-semibold text-slate-600">{t({ it: 'Rotazione', en: 'Rotation' })}</div>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => {
+                            const current = Number(contextObject?.rotation || 0);
+                            updateObject(contextMenu.id, { rotation: (current - 90 + 360) % 360 });
+                          }}
+                          className="flex items-center justify-center gap-2 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                          title={t({ it: 'Ruota 90° a sinistra', en: 'Rotate 90° left' })}
+                        >
+                          {t({ it: 'Sinistra', en: 'Left' })}
+                        </button>
+                        <button
+                          onClick={() => {
+                            const current = Number(contextObject?.rotation || 0);
+                            updateObject(contextMenu.id, { rotation: (current + 90) % 360 });
+                          }}
+                          className="flex items-center justify-center gap-2 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                          title={t({ it: 'Ruota 90° a destra', en: 'Rotate 90° right' })}
+                        >
+                          {t({ it: 'Destra', en: 'Right' })}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="my-2 h-px bg-slate-100" />
                 </>
               )}
 
               {contextIsMulti ? (
-                !isReadOnly && selectedObjectIds.length === 2 && !selectionHasRack ? (
+                !isReadOnly && selectedObjectIds.length === 2 && !selectionHasRack && !selectionHasDesk ? (
                   <button
                     onClick={() => {
                       const [a, b] = selectedObjectIds;
@@ -4510,21 +4806,28 @@ const PlanView = ({ planId }: Props) => {
       {/* kept for potential future use */}
       <BulkEditDescriptionModal
         open={bulkEditOpen}
-        count={selectedObjectIds.length}
+        count={selectedObjectIds.filter((id) => {
+          const obj = renderPlan?.objects?.find((o) => o.id === id);
+          return !!obj && !isDeskType(obj.type);
+        }).length}
         onClose={() => setBulkEditOpen(false)}
         onSubmit={({ description }) => {
           if (isReadOnly) return;
-          if (selectedObjectIds.length) markTouched();
-          for (const id of selectedObjectIds) {
+          const targetIds = selectedObjectIds.filter((id) => {
+            const obj = renderPlan?.objects?.find((o) => o.id === id);
+            return !!obj && !isDeskType(obj.type);
+          });
+          if (targetIds.length) markTouched();
+          for (const id of targetIds) {
             updateObject(id, { description });
           }
           push(t({ it: 'Descrizione aggiornata', en: 'Description updated' }), 'success');
-          if (selectedObjectIds.length) {
+          if (targetIds.length) {
             postAuditEvent({
               event: 'objects_bulk_update',
               scopeType: 'plan',
               scopeId: planId,
-              details: { ids: selectedObjectIds, changes: { description } }
+              details: { ids: targetIds, changes: { description } }
             });
           }
         }}
@@ -4864,6 +5167,7 @@ const PlanView = ({ planId }: Props) => {
           setPendingType(typeId);
           push(t({ it: 'Seleziona un punto sulla mappa per inserire l’oggetto', en: 'Click on the map to place the object' }), 'info');
         }}
+        defaultTab={paletteSettingsSection}
         paletteTypeIds={paletteOrder}
         onAddToPalette={addTypeToPalette}
       />
