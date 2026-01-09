@@ -12,7 +12,7 @@ const ToastStack = () => {
   if (!toasts.length) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-[90] flex max-w-[360px] flex-col gap-2">
+    <div className="fixed bottom-6 right-6 z-[200] flex max-w-[360px] flex-col gap-2">
       {toasts.map((toast) => (
         <div
           key={toast.id}

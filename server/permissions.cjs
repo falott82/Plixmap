@@ -108,11 +108,15 @@ const mergeWritablePlanContent = (serverClients, incomingClients, writablePlanId
         if (!incoming) return plan;
         return {
           ...plan,
+          printArea: incoming.printArea ?? plan.printArea,
           objects: Array.isArray(incoming.objects) ? incoming.objects : plan.objects,
           rooms: Array.isArray(incoming.rooms) ? incoming.rooms : plan.rooms,
           views: Array.isArray(incoming.views) ? incoming.views : plan.views,
           layers: Array.isArray(incoming.layers) ? incoming.layers : plan.layers,
           links: Array.isArray(incoming.links) ? incoming.links : plan.links,
+          racks: Array.isArray(incoming.racks) ? incoming.racks : plan.racks,
+          rackItems: Array.isArray(incoming.rackItems) ? incoming.rackItems : plan.rackItems,
+          rackLinks: Array.isArray(incoming.rackLinks) ? incoming.rackLinks : plan.rackLinks,
           revisions: Array.isArray(incoming.revisions) ? incoming.revisions : plan.revisions
         };
       })
