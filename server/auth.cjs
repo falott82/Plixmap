@@ -94,7 +94,28 @@ const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'deskto
 
 const ensureBootstrapAdmins = (db) => {
   const count = db.prepare('SELECT COUNT(*) as n FROM users').get()?.n || 0;
-  if (count > 0) return;
+  if (count > 0) {
+    try {
+      const row = db
+        .prepare('SELECT id, passwordSalt, passwordHash, mustChangePassword FROM users WHERE username = ?')
+        .get('superadmin');
+      if (row && Number(row.mustChangePassword) === 1) {
+        const isDefault = verifyPassword('deskly', row.passwordSalt, row.passwordHash);
+        if (!isDefault) {
+          const { salt, hash } = hashPassword('deskly');
+          db.prepare('UPDATE users SET passwordSalt = ?, passwordHash = ?, updatedAt = ? WHERE id = ?').run(
+            salt,
+            hash,
+            Date.now(),
+            row.id
+          );
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return;
+  }
   const now = Date.now();
   const insert = db.prepare(
     `INSERT INTO users (id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, mustChangePassword, paletteFavoritesJson, firstName, lastName, phone, email, createdAt, updatedAt)
