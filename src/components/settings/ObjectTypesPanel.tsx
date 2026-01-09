@@ -20,6 +20,8 @@ import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { createCustomFieldsBulk } from '../../api/customFields';
 import { useLang, useT } from '../../i18n/useT';
 import { IconName } from '../../store/types';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { isDeskType } from '../plan/deskTypes';
 
 const ObjectTypesPanel = () => {
   const t = useT();
@@ -32,6 +34,14 @@ const ObjectTypesPanel = () => {
   const isSuperAdmin = !!user?.isSuperAdmin;
   const canManageRequests = !!user?.isSuperAdmin && user?.username === 'superadmin';
   const canRequestObjects = !canManageRequests;
+  const location = useLocation();
+  const navigate = useNavigate();
+  const resolveSection = (search: string) => {
+    const section = new URLSearchParams(search).get('section')?.toLowerCase();
+    return section === 'desks' ? 'desks' : 'objects';
+  };
+  const [section, setSection] = useState<'objects' | 'desks'>(() => resolveSection(location.search));
+  const isDesksSection = section === 'desks';
 
   const [customOpen, setCustomOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
@@ -56,6 +66,18 @@ const ObjectTypesPanel = () => {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [reviewReason, setReviewReason] = useState('');
 
+  useEffect(() => {
+    const next = resolveSection(location.search);
+    if (next !== section) setSection(next);
+  }, [location.search, section]);
+
+  const setSectionAndUrl = (nextSection: 'objects' | 'desks') => {
+    setSection(nextSection);
+    const params = new URLSearchParams(location.search);
+    params.set('section', nextSection);
+    navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
+  };
+
   const enabled = useMemo(() => {
     const arr = (user as any)?.paletteFavorites;
     return Array.isArray(arr) ? (arr as string[]) : [];
@@ -73,6 +95,7 @@ const ObjectTypesPanel = () => {
     for (const id of enabled) {
       const d = defById.get(id);
       if (!d) continue;
+      if (isDesksSection ? !isDeskType(d.id) : isDeskType(d.id)) continue;
       if (
         term &&
         !`${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term)
@@ -81,16 +104,19 @@ const ObjectTypesPanel = () => {
       out.push(d);
     }
     return out;
-  }, [defById, enabled, q]);
+  }, [defById, enabled, isDesksSection, q]);
 
   const availableDefs = useMemo(() => {
     const used = new Set(enabled);
-    const list = (objectTypes || []).filter((d) => !used.has(d.id));
+    const list = (objectTypes || []).filter((d) => {
+      if (used.has(d.id)) return false;
+      return isDesksSection ? isDeskType(d.id) : !isDeskType(d.id);
+    });
     const term = q.trim().toLowerCase();
     const sorted = list.slice().sort((a, b) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
     if (!term) return sorted;
     return sorted.filter((d) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term));
-  }, [enabled, lang, objectTypes, q]);
+  }, [enabled, isDesksSection, lang, objectTypes, q]);
 
   const paletteDefs = useMemo(() => {
     const enabledIds = new Set(enabled);
@@ -163,7 +189,15 @@ const ObjectTypesPanel = () => {
     'truck',
     'bike',
     'bus',
-    'train'
+    'train',
+    'deskRound',
+    'deskSquare',
+    'deskRect',
+    'deskDouble',
+    'deskLong',
+    'deskTrapezoid',
+    'deskL',
+    'deskLReverse'
   ];
   const iconOptions = useMemo(() => {
     const builtinIcons = new Set(
@@ -341,6 +375,8 @@ const ObjectTypesPanel = () => {
       .replace(/-+/g, '-')
       .replace(/^-+|-+$/g, '');
 
+  const isDeskId = (id: string) => id.startsWith('desk');
+
   const hasTypeId = (id: string) => objectTypes.some((t) => t.id === id);
 
   const makeFieldId = () => {
@@ -369,6 +405,16 @@ const ObjectTypesPanel = () => {
       push(t({ it: 'Compila tutti i campi obbligatori.', en: 'Fill all required fields.' }), 'info');
       return;
     }
+    if (isDeskId(nextId)) {
+      push(
+        t({
+          it: 'Le scrivanie sono predefinite e non possono essere create.',
+          en: 'Desks are built-in and cannot be created.'
+        }),
+        'info'
+      );
+      return;
+    }
     if (hasTypeId(nextId)) {
       push(t({ it: 'Esiste già un oggetto con questo ID.', en: 'An object with this ID already exists.' }), 'danger');
       return;
@@ -389,6 +435,16 @@ const ObjectTypesPanel = () => {
     const nextId = normalizeTypeId(draftTypeId);
     if (!nextId || !draftNameIt.trim() || !draftNameEn.trim()) {
       push(t({ it: 'Compila tutti i campi obbligatori.', en: 'Fill all required fields.' }), 'info');
+      return;
+    }
+    if (isDeskId(nextId)) {
+      push(
+        t({
+          it: 'Le scrivanie sono predefinite e non possono essere richieste.',
+          en: 'Desks are built-in and cannot be requested.'
+        }),
+        'info'
+      );
       return;
     }
     if (hasTypeId(nextId)) {
@@ -552,70 +608,111 @@ const ObjectTypesPanel = () => {
         </Dialog>
       </Transition>
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+      <div className="mb-3 flex items-center gap-2">
+        <button
+          onClick={() => setSectionAndUrl('objects')}
+          className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+            section === 'objects'
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          }`}
+        >
+          {t({ it: 'Oggetti', en: 'Objects' })}
+        </button>
+        <button
+          onClick={() => setSectionAndUrl('desks')}
+          className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+            section === 'desks'
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          }`}
+        >
+          {t({ it: 'Scrivanie', en: 'Desks' })}
+        </button>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <div className="text-sm font-semibold text-ink">{t({ it: 'Oggetti (palette)', en: 'Objects (palette)' })}</div>
+            <div className="text-sm font-semibold text-ink">
+              {isDesksSection ? t({ it: 'Scrivanie (palette)', en: 'Desks (palette)' }) : t({ it: 'Oggetti (palette)', en: 'Objects (palette)' })}
+            </div>
             <span
               className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700"
               title={t({
-                it: 'Qui puoi mostrare o nascondere gli oggetti nella palette con l’icona occhio. Tasto destro o ingranaggio per i campi personalizzati.',
-                en: 'Show or hide objects in the palette with the eye icon. Right-click or the cog for custom fields.'
+                it: isDesksSection
+                  ? 'Le scrivanie sono predefinite e non possono essere create o richieste. Puoi decidere quali mostrare nella palette con l’icona occhio.'
+                  : 'Qui puoi mostrare o nascondere gli oggetti nella palette con l’icona occhio. Le scrivanie hanno una sezione dedicata in planimetria. Tasto destro o ingranaggio per i campi personalizzati.',
+                en: isDesksSection
+                  ? 'Desks are built-in and cannot be created or requested. You can choose which ones appear in the palette with the eye icon.'
+                  : 'Show or hide objects in the palette with the eye icon. Desks have a dedicated section in the floor plan. Right-click or the cog for custom fields.'
               })}
             >
               <Info size={16} />
             </span>
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            {t({
-              it: 'La palette è per-utente: ogni utente può avere la propria lista e il proprio ordine.',
-              en: 'The palette is per-user: each user can have their own list and ordering.'
-            })}
+            {isDesksSection
+              ? t({
+                  it: 'La palette è per-utente: puoi nascondere o mostrare le scrivanie nella sezione dedicata.',
+                  en: 'The palette is per-user: you can hide or show desks in the dedicated section.'
+                })
+              : t({
+                  it: 'La palette è per-utente: ogni utente può avere la propria lista e il proprio ordine. Le scrivanie compaiono nella sezione dedicata a destra.',
+                  en: 'The palette is per-user: each user can have their own list and ordering. Desks appear in the dedicated section on the right.'
+                })}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {canRequestObjects ? (
-            <button
-              onClick={() => {
-                setRequestsOpen(true);
-                setRequestsTab('new');
-                if (!requestsLoading) reloadRequests();
-              }}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              title={t({ it: 'Richiedi oggetto', en: 'Request object' })}
-            >
-              <Plus size={16} />
-              {t({ it: 'Richiedi oggetto', en: 'Request object' })}
-            </button>
+          {isDesksSection ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              {t({ it: 'Scrivanie predefinite: nessuna creazione o richiesta.', en: 'Built-in desks: no creation or requests.' })}
+            </div>
           ) : (
-            <button
-              onClick={() => setCustomOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              title={t({ it: 'Crea oggetto', en: 'Create object' })}
-            >
-              <Plus size={16} />
-              {t({ it: 'Crea oggetto', en: 'Create object' })}
-            </button>
+            <>
+              {canRequestObjects ? (
+                <button
+                  onClick={() => {
+                    setRequestsOpen(true);
+                    setRequestsTab('new');
+                    if (!requestsLoading) reloadRequests();
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Richiedi oggetto', en: 'Request object' })}
+                >
+                  <Plus size={16} />
+                  {t({ it: 'Richiedi oggetto', en: 'Request object' })}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setCustomOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Crea oggetto', en: 'Create object' })}
+                >
+                  <Plus size={16} />
+                  {t({ it: 'Crea oggetto', en: 'Create object' })}
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setRequestsOpen(true);
+                  setRequestsTab(canManageRequests ? 'manage' : 'mine');
+                  if (!requestsLoading) reloadRequests();
+                }}
+                className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
+                  pendingCount ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-600'
+                }`}
+                title={t(
+                  canManageRequests
+                    ? { it: 'Gestione richieste utenti', en: 'Manage user requests' }
+                    : { it: 'Richieste', en: 'Requests' }
+                )}
+              >
+                <Inbox size={16} />
+                {t(canManageRequests ? { it: 'Richieste utenti', en: 'User requests' } : { it: 'Richieste', en: 'Requests' })}
+                <span className="rounded-full bg-white/70 px-2 py-0.5 text-xs font-bold">{pendingCount}</span>
+              </button>
+            </>
           )}
-          <button
-            onClick={() => {
-              setRequestsOpen(true);
-              setRequestsTab(canManageRequests ? 'manage' : 'mine');
-              if (!requestsLoading) reloadRequests();
-            }}
-            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
-              pendingCount ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-600'
-            }`}
-            title={t(
-              canManageRequests
-                ? { it: 'Gestione richieste utenti', en: 'Manage user requests' }
-                : { it: 'Richieste', en: 'Requests' }
-            )}
-          >
-            <Inbox size={16} />
-            {t(canManageRequests ? { it: 'Richieste utenti', en: 'User requests' } : { it: 'Richieste', en: 'Requests' })}
-            <span className="rounded-full bg-white/70 px-2 py-0.5 text-xs font-bold">{pendingCount}</span>
-          </button>
         </div>
       </div>
 
@@ -626,7 +723,11 @@ const ObjectTypesPanel = () => {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="w-full bg-transparent text-sm outline-none"
-            placeholder={t({ it: 'Cerca oggetti…', en: 'Search objects…' })}
+            placeholder={
+              isDesksSection
+                ? t({ it: 'Cerca scrivanie…', en: 'Search desks…' })
+                : t({ it: 'Cerca oggetti…', en: 'Search objects…' })
+            }
           />
         </div>
         <div className="grid grid-cols-12 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">

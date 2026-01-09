@@ -27,6 +27,7 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
   const [selectedPlanIds, setSelectedPlanIds] = useState<Record<string, boolean>>({});
   const [includeIndex, setIncludeIndex] = useState(true);
   const [includeObjects, setIncludeObjects] = useState(true);
+  const [includeDesks, setIncludeDesks] = useState(true);
   const [includeLinks, setIncludeLinks] = useState(true);
   const [includeRooms, setIncludeRooms] = useState(true);
   const [quality, setQuality] = useState(78); // 40..95
@@ -240,6 +241,15 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                         <input type="checkbox" checked={includeObjects} onChange={(e) => setIncludeObjects(e.target.checked)} />
                       </label>
                       <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Includi scrivanie', en: 'Include desks' })}</span>
+                        <input
+                          type="checkbox"
+                          checked={includeDesks}
+                          disabled={!includeObjects}
+                          onChange={(e) => setIncludeDesks(e.target.checked)}
+                        />
+                      </label>
+                      <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
                         <span>{t({ it: 'Includi collegamenti', en: 'Include links' })}</span>
                         <input type="checkbox" checked={includeLinks} onChange={(e) => setIncludeLinks(e.target.checked)} />
                       </label>
@@ -309,6 +319,7 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                               {
                                 includeIndex,
                                 includeObjects,
+                                includeDesks,
                                 includeLinks,
                                 includeRooms,
                                 objectTypeIcons,

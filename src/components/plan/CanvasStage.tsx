@@ -7,6 +7,7 @@ import { clamp } from '../../utils/geometry';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
 import { perfMetrics } from '../../utils/perfMetrics';
+import { isDeskType } from './deskTypes';
 
 interface Props {
   plan: FloorPlan;
@@ -68,6 +69,7 @@ interface Props {
       points?: { x: number; y: number }[];
     }
   ) => void;
+  onUpdateObject?: (id: string, changes: Partial<Pick<MapObject, 'scaleX' | 'scaleY'>>) => void;
   onSetPrintArea?: (rect: { x: number; y: number; width: number; height: number }) => void;
 }
 
@@ -132,6 +134,7 @@ const CanvasStageImpl = (
   onSelectLink,
   onCreateRoom,
   onUpdateRoom,
+  onUpdateObject,
   onRoomContextMenu,
   onSetPrintArea
 }: Props,
@@ -251,6 +254,7 @@ const CanvasStageImpl = (
     [dimensions.height, dimensions.width]
   );
   const transformerRef = useRef<any>(null);
+  const deskTransformerRef = useRef<any>(null);
   const selectedRoomNodeRef = useRef<any>(null);
   const polyLineRefs = useRef<Record<string, any>>({});
   const polyVertexRefs = useRef<Record<string, Record<number, any>>>({});
@@ -692,6 +696,35 @@ const CanvasStageImpl = (
     transformerRef.current.nodes([selectedRoomNodeRef.current]);
     transformerRef.current.getLayer()?.batchDraw?.();
   }, [selectedRoomId, plan.rooms]);
+
+  useEffect(() => {
+    if (!deskTransformerRef.current) return;
+    if (readOnly) {
+      deskTransformerRef.current.nodes([]);
+      deskTransformerRef.current.getLayer()?.batchDraw?.();
+      return;
+    }
+    const ids = selectedIds?.length ? selectedIds : selectedId ? [selectedId] : [];
+    if (ids.length !== 1) {
+      deskTransformerRef.current.nodes([]);
+      deskTransformerRef.current.getLayer()?.batchDraw?.();
+      return;
+    }
+    const obj = plan.objects.find((o) => o.id === ids[0]);
+    if (!obj || !isDeskType(obj.type)) {
+      deskTransformerRef.current.nodes([]);
+      deskTransformerRef.current.getLayer()?.batchDraw?.();
+      return;
+    }
+    const node = objectNodeRefs.current[obj.id];
+    if (!node) {
+      deskTransformerRef.current.nodes([]);
+      deskTransformerRef.current.getLayer()?.batchDraw?.();
+      return;
+    }
+    deskTransformerRef.current.nodes([node]);
+    deskTransformerRef.current.getLayer()?.batchDraw?.();
+  }, [plan.objects, readOnly, selectedId, selectedIds]);
 
   useEffect(() => {
     return () => {
@@ -1920,6 +1953,10 @@ const CanvasStageImpl = (
             const highlightActive = !!(highlightId && highlightUntil && highlightId === obj.id && highlightUntil > highlightNow);
             const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(highlightNow / 80) : 0;
             const scale = obj.scale ?? 1;
+            const isDesk = isDeskType(obj.type);
+            const deskScaleX = isDesk ? clamp(Number(obj.scaleX ?? 1) || 1, 0.4, 4) : 1;
+            const deskScaleY = isDesk ? clamp(Number(obj.scaleY ?? 1) || 1, 0.4, 4) : 1;
+            const objectOpacity = typeof obj.opacity === 'number' ? Math.max(0.2, Math.min(1, obj.opacity)) : 1;
             const iconImg = iconImages[obj.type];
             const labelText =
               obj.type === 'real_user' && (((obj as any).firstName && String((obj as any).firstName).trim()) || ((obj as any).lastName && String((obj as any).lastName).trim()))
@@ -1931,6 +1968,29 @@ const CanvasStageImpl = (
             const labelHeight = labelLines * labelFontSize * labelLineHeight;
             const labelGap = 6;
             const labelY = -(18 * scale) - labelGap - labelHeight;
+            const outline = highlightActive ? '#22d3ee' : isSelected ? '#2563eb' : '#cbd5e1';
+            const outlineWidth = highlightActive ? 3 + 2 * pulse : isSelected ? 3 : 2;
+            const deskStrokeColor =
+              typeof (obj as any).strokeColor === 'string' && String((obj as any).strokeColor).trim()
+                ? String((obj as any).strokeColor).trim()
+                : '#cbd5e1';
+            const baseDeskStrokeWidth = clamp(Number((obj as any).strokeWidth ?? 2) || 2, 0.5, 6);
+            const deskStroke = highlightActive ? '#22d3ee' : isSelected ? '#2563eb' : deskStrokeColor;
+            const deskStrokeWidth = highlightActive ? baseDeskStrokeWidth + 1 + 2 * pulse : isSelected ? baseDeskStrokeWidth + 1 : baseDeskStrokeWidth;
+            const deskSize = 38 * scale;
+            const deskHalf = deskSize / 2;
+            const deskThickness = 12 * scale;
+            const deskRotation = isDesk ? Number(obj.rotation || 0) : 0;
+            const deskRectW = deskSize * 1.45;
+            const deskRectH = deskSize * 0.75;
+            const deskLongW = deskSize * 1.85;
+            const deskLongH = deskSize * 0.6;
+            const deskDoubleW = deskSize * 0.7;
+            const deskDoubleH = deskSize * 0.95;
+            const deskDoubleGap = 4 * scale;
+            const deskTrapTop = deskSize * 0.75;
+            const deskTrapBottom = deskSize * 1.15;
+            const deskTrapHeight = deskSize * 0.75;
             return (
               <Group
                 key={obj.id}
@@ -1940,6 +2000,8 @@ const CanvasStageImpl = (
                 }}
                 x={obj.x}
                 y={obj.y}
+                scaleX={isDesk ? deskScaleX : 1}
+                scaleY={isDesk ? deskScaleY : 1}
                 draggable={!readOnly}
                 onDragStart={(e) => {
                   dragStartRef.current.set(obj.id, { x: obj.x, y: obj.y });
@@ -2000,6 +2062,15 @@ const CanvasStageImpl = (
                   }
                   dragStartRef.current.delete(obj.id);
                 }}
+                onTransformEnd={(e) => {
+                  if (readOnly || !isDesk || !onUpdateObject) return;
+                  const node = e.target as any;
+                  const nextScaleX = clamp(node.scaleX(), 0.4, 4);
+                  const nextScaleY = clamp(node.scaleY(), 0.4, 4);
+                  node.scaleX(1);
+                  node.scaleY(1);
+                  onUpdateObject(obj.id, { scaleX: nextScaleX, scaleY: nextScaleY });
+                }}
                 onClick={(e) => {
                   e.cancelBubble = true;
                   if (e.evt?.button !== 0) return;
@@ -2041,43 +2112,222 @@ const CanvasStageImpl = (
                   shadowColor="transparent"
                   listening={false}
                 />
-                <Rect
-                  x={-(18 * scale)}
-                  y={-(18 * scale)}
-                  width={36 * scale}
-                  height={36 * scale}
-                  cornerRadius={12 * scale}
-                  fill="#ffffff"
-                  stroke={highlightActive ? '#22d3ee' : isSelected ? '#2563eb' : '#cbd5e1'}
-                  strokeWidth={highlightActive ? 3 + 2 * pulse : isSelected ? 3 : 2}
-                  shadowBlur={0}
-                  shadowColor="transparent"
-                />
-                {iconImg ? (
-                  <KonvaImage
-                    image={iconImg}
-                    x={-9 * scale}
-                    y={-9 * scale}
-                    width={18 * scale}
-                    height={18 * scale}
-                    listening={false}
-                  />
+                {isDesk ? (
+                  <Group rotation={deskRotation} opacity={objectOpacity}>
+                    {obj.type === 'desk_round' ? (
+                      <Circle
+                        x={0}
+                        y={0}
+                        radius={deskHalf}
+                        fill="#f8fafc"
+                        stroke={deskStroke}
+                        strokeWidth={deskStrokeWidth}
+                        strokeScaleEnabled={false}
+                        shadowBlur={0}
+                        shadowColor="transparent"
+                      />
+                    ) : obj.type === 'desk_square' ? (
+                      <Rect
+                        x={-deskHalf}
+                        y={-deskHalf}
+                        width={deskSize}
+                        height={deskSize}
+                        cornerRadius={6 * scale}
+                        fill="#f8fafc"
+                        stroke={deskStroke}
+                        strokeWidth={deskStrokeWidth}
+                        strokeScaleEnabled={false}
+                        shadowBlur={0}
+                        shadowColor="transparent"
+                      />
+                    ) : obj.type === 'desk_rect' ? (
+                      <Rect
+                        x={-deskRectW / 2}
+                        y={-deskRectH / 2}
+                        width={deskRectW}
+                        height={deskRectH}
+                        cornerRadius={6 * scale}
+                        fill="#f8fafc"
+                        stroke={deskStroke}
+                        strokeWidth={deskStrokeWidth}
+                        strokeScaleEnabled={false}
+                        shadowBlur={0}
+                        shadowColor="transparent"
+                      />
+                    ) : obj.type === 'desk_double' ? (
+                      <>
+                        <Rect
+                          x={-(deskDoubleW + deskDoubleGap / 2)}
+                          y={-deskDoubleH / 2}
+                          width={deskDoubleW}
+                          height={deskDoubleH}
+                          cornerRadius={6 * scale}
+                          fill="#f8fafc"
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                        <Rect
+                          x={deskDoubleGap / 2}
+                          y={-deskDoubleH / 2}
+                          width={deskDoubleW}
+                          height={deskDoubleH}
+                          cornerRadius={6 * scale}
+                          fill="#f8fafc"
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                      </>
+                    ) : obj.type === 'desk_long' ? (
+                      <Rect
+                        x={-deskLongW / 2}
+                        y={-deskLongH / 2}
+                        width={deskLongW}
+                        height={deskLongH}
+                        cornerRadius={6 * scale}
+                        fill="#f8fafc"
+                        stroke={deskStroke}
+                        strokeWidth={deskStrokeWidth}
+                        strokeScaleEnabled={false}
+                        shadowBlur={0}
+                        shadowColor="transparent"
+                      />
+                    ) : obj.type === 'desk_trap' ? (
+                      <Line
+                        points={[
+                          -deskTrapTop / 2,
+                          -deskTrapHeight / 2,
+                          deskTrapTop / 2,
+                          -deskTrapHeight / 2,
+                          deskTrapBottom / 2,
+                          deskTrapHeight / 2,
+                          -deskTrapBottom / 2,
+                          deskTrapHeight / 2
+                        ]}
+                        closed
+                        fill="#f8fafc"
+                        stroke={deskStroke}
+                        strokeWidth={deskStrokeWidth}
+                        strokeScaleEnabled={false}
+                        shadowBlur={0}
+                        shadowColor="transparent"
+                      />
+                    ) : obj.type === 'desk_l' ? (
+                      <>
+                        <Rect
+                          x={-deskHalf}
+                          y={deskHalf - deskThickness}
+                          width={deskSize}
+                          height={deskThickness}
+                          fill="#f8fafc"
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                        <Rect
+                          x={-deskHalf}
+                          y={-deskHalf}
+                          width={deskThickness}
+                          height={deskSize}
+                          fill="#f8fafc"
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Rect
+                          x={-deskHalf}
+                          y={deskHalf - deskThickness}
+                          width={deskSize}
+                          height={deskThickness}
+                          fill="#f8fafc"
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                        <Rect
+                          x={deskHalf - deskThickness}
+                          y={-deskHalf}
+                          width={deskThickness}
+                          height={deskSize}
+                          fill="#f8fafc"
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                      </>
+                    )}
+                  </Group>
                 ) : (
-                  <Text
-                    text={'?'}
-                    x={-(18 * scale)}
-                    y={-(18 * scale) / 1.2}
-                    width={36 * scale}
-                    align="center"
-                    fontSize={15 * scale}
-                    fontStyle="bold"
-                    fill={'#2563eb'}
-                    listening={false}
-                  />
+                  <>
+                    <Rect
+                      x={-(18 * scale)}
+                      y={-(18 * scale)}
+                      width={36 * scale}
+                      height={36 * scale}
+                      cornerRadius={12 * scale}
+                      fill="#ffffff"
+                      stroke={outline}
+                      strokeWidth={outlineWidth}
+                      opacity={objectOpacity}
+                      shadowBlur={0}
+                      shadowColor="transparent"
+                    />
+                    {iconImg ? (
+                      <KonvaImage
+                        image={iconImg}
+                        x={-9 * scale}
+                        y={-9 * scale}
+                        width={18 * scale}
+                        height={18 * scale}
+                        opacity={objectOpacity}
+                        listening={false}
+                      />
+                    ) : (
+                      <Text
+                        text={'?'}
+                        x={-(18 * scale)}
+                        y={-(18 * scale) / 1.2}
+                        width={36 * scale}
+                        align="center"
+                        fontSize={15 * scale}
+                        fontStyle="bold"
+                        fill={'#2563eb'}
+                        opacity={objectOpacity}
+                        listening={false}
+                      />
+                    )}
+                  </>
                 )}
               </Group>
             );
           })}
+          {!readOnly ? (
+            <Transformer
+              ref={deskTransformerRef}
+              rotateEnabled={false}
+              keepRatio={false}
+              boundBoxFunc={(oldBox: any, newBox: any) => {
+                if (newBox.width < 20 || newBox.height < 20) return oldBox;
+                return newBox;
+              }}
+            />
+          ) : null}
         </Layer>
 
         {/* Selection box + multi-drag overlay */}
