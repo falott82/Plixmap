@@ -1187,10 +1187,6 @@ export const releaseHistory: ReleaseNote[] = [
         'Auth: ridotto rumore di 401 su /api/auth/me a freddo (session hint locale)',
         'Auth: reduced noisy 401s on /api/auth/me on cold start (local session hint)'
       ),
-      n(
-        'Cleanup: rimossa configurazione Fly.io',
-        'Cleanup: removed Fly.io configuration'
-      )
     ]
   },
   {
