@@ -7,6 +7,67 @@ const dbPath = process.env.DESKLY_DB_PATH || path.join(process.cwd(), 'data', 'd
 
 const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
 
+const getSchemaVersion = (db) => {
+  try {
+    const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('schemaVersion');
+    const parsed = row?.value ? Number(row.value) : 0;
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const setSchemaVersion = (db, version) => {
+  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(
+    'schemaVersion',
+    String(version)
+  );
+};
+
+const migrations = [
+  {
+    version: 1,
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info('users')").all().map((c) => c.name);
+      if (!cols.includes('isSuperAdmin')) db.exec('ALTER TABLE users ADD COLUMN isSuperAdmin INTEGER NOT NULL DEFAULT 0');
+      if (!cols.includes('disabled')) db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
+      if (!cols.includes('language')) db.exec("ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'it'");
+      if (!cols.includes('defaultPlanId')) db.exec("ALTER TABLE users ADD COLUMN defaultPlanId TEXT");
+      if (!cols.includes('clientOrderJson')) db.exec("ALTER TABLE users ADD COLUMN clientOrderJson TEXT NOT NULL DEFAULT '[]'");
+      if (!cols.includes('paletteFavoritesJson')) db.exec("ALTER TABLE users ADD COLUMN paletteFavoritesJson TEXT NOT NULL DEFAULT '[]'");
+      if (!cols.includes('mustChangePassword')) db.exec('ALTER TABLE users ADD COLUMN mustChangePassword INTEGER NOT NULL DEFAULT 0');
+      if (!cols.includes('mfaEnabled')) db.exec('ALTER TABLE users ADD COLUMN mfaEnabled INTEGER NOT NULL DEFAULT 0');
+      if (!cols.includes('mfaSecretEnc')) db.exec('ALTER TABLE users ADD COLUMN mfaSecretEnc TEXT');
+
+      const importCols = db.prepare("PRAGMA table_info('client_user_import')").all().map((c) => c.name);
+      if (importCols.length && !importCols.includes('bodyJson')) {
+        db.exec('ALTER TABLE client_user_import ADD COLUMN bodyJson TEXT');
+      }
+
+      try {
+        db.prepare("SELECT 1 FROM user_custom_fields LIMIT 1").get();
+      } catch {
+        // ignore: table created by main schema
+      }
+      try {
+        db.prepare("SELECT 1 FROM user_object_custom_values LIMIT 1").get();
+      } catch {
+        // ignore: table created by main schema
+      }
+    }
+  }
+];
+
+const runMigrations = (db) => {
+  let current = getSchemaVersion(db);
+  for (const migration of migrations) {
+    if (migration.version <= current) continue;
+    db.transaction(() => migration.up(db))();
+    setSchemaVersion(db, migration.version);
+    current = migration.version;
+  }
+};
+
 const openDb = () => {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
@@ -153,37 +214,7 @@ const openDb = () => {
     );
   `);
 
-  // lightweight migrations for existing DBs
-  const cols = db.prepare("PRAGMA table_info('users')").all().map((c) => c.name);
-  if (!cols.includes('isSuperAdmin')) db.exec('ALTER TABLE users ADD COLUMN isSuperAdmin INTEGER NOT NULL DEFAULT 0');
-  if (!cols.includes('disabled')) db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
-  if (!cols.includes('language')) db.exec("ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'it'");
-  if (!cols.includes('defaultPlanId')) db.exec("ALTER TABLE users ADD COLUMN defaultPlanId TEXT");
-  if (!cols.includes('clientOrderJson')) db.exec("ALTER TABLE users ADD COLUMN clientOrderJson TEXT NOT NULL DEFAULT '[]'");
-  if (!cols.includes('paletteFavoritesJson')) db.exec("ALTER TABLE users ADD COLUMN paletteFavoritesJson TEXT NOT NULL DEFAULT '[]'");
-  if (!cols.includes('mustChangePassword')) db.exec('ALTER TABLE users ADD COLUMN mustChangePassword INTEGER NOT NULL DEFAULT 0');
-  if (!cols.includes('mfaEnabled')) db.exec('ALTER TABLE users ADD COLUMN mfaEnabled INTEGER NOT NULL DEFAULT 0');
-  if (!cols.includes('mfaSecretEnc')) db.exec('ALTER TABLE users ADD COLUMN mfaSecretEnc TEXT');
-
-  // Custom Import migrations (if table exists already)
-  try {
-    const importCols = db.prepare("PRAGMA table_info('client_user_import')").all().map((c) => c.name);
-    if (importCols.length && !importCols.includes('bodyJson')) db.exec('ALTER TABLE client_user_import ADD COLUMN bodyJson TEXT');
-  } catch {
-    // ignore
-  }
-
-  // Custom fields migrations (for older DBs created before tables existed)
-  try {
-    db.prepare("SELECT 1 FROM user_custom_fields LIMIT 1").get();
-  } catch {
-    // ignore: table created by main schema
-  }
-  try {
-    db.prepare("SELECT 1 FROM user_object_custom_values LIMIT 1").get();
-  } catch {
-    // ignore: table created by main schema
-  }
+  runMigrations(db);
 
   // enforce single superadmin account
   try {
