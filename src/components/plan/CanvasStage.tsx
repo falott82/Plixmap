@@ -2,6 +2,7 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo,
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
+import { Hand } from 'lucide-react';
 import { FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
 import { clamp } from '../../utils/geometry';
 import Icon from '../ui/Icon';
@@ -26,6 +27,8 @@ interface Props {
   focusTarget?: { x: number; y: number; zoom?: number; nonce: number };
   pendingType?: MapObjectType | null;
   readOnly?: boolean;
+  panToolActive?: boolean;
+  onTogglePanTool?: () => void;
   roomDrawMode?: 'rect' | 'poly' | null;
   printArea?: { x: number; y: number; width: number; height: number } | null;
   printAreaMode?: boolean;
@@ -106,6 +109,8 @@ const CanvasStageImpl = (
   focusTarget,
   pendingType,
   readOnly = false,
+  panToolActive = false,
+  onTogglePanTool,
   roomDrawMode = null,
   printArea = null,
   printAreaMode = false,
@@ -881,8 +886,20 @@ const CanvasStageImpl = (
 
   const handleWheel = (event: any) => {
     event.evt.preventDefault();
-    // Smooth, multiplicative zoom
-    const scaleBy = Math.exp(-event.evt.deltaY * 0.001);
+    const evt = event.evt as WheelEvent;
+    const wantsZoom = !!evt.ctrlKey || !!evt.metaKey || evt.deltaMode !== 0;
+    if (!wantsZoom) {
+      const nextPan = clampPan(viewportRef.current.zoom, {
+        x: viewportRef.current.pan.x - evt.deltaX,
+        y: viewportRef.current.pan.y - evt.deltaY
+      });
+      viewportRef.current = { zoom: viewportRef.current.zoom, pan: nextPan };
+      applyStageTransform(viewportRef.current.zoom, nextPan);
+      scheduleWheelCommit(viewportRef.current.zoom, nextPan);
+      return;
+    }
+    // Smooth, multiplicative zoom (pinch/ctrl+wheel)
+    const scaleBy = Math.exp(-evt.deltaY * 0.001);
     const newZoom = clamp(viewportRef.current.zoom * scaleBy, 0.2, 3);
     const pointer = stageRef.current?.getPointerPosition();
     if (!pointer || !containerRef.current) {
@@ -951,7 +968,14 @@ const CanvasStageImpl = (
 
   const isContextClick = (evt: any) => evt?.button === 2 || (evt?.button === 0 && !!evt?.ctrlKey);
   // Pan: middle mouse OR Cmd+right (macOS) / Alt+right (Windows/Linux).
-  const isPanGesture = (evt: any) => evt?.button === 1 || (evt?.button === 2 && (!!evt?.metaKey || !!evt?.altKey));
+  const isPanGesture = (evt: any) =>
+    evt?.button === 1 ||
+    (evt?.button === 2 && (!!evt?.metaKey || !!evt?.altKey)) ||
+    (panToolActive &&
+      evt?.button === 0 &&
+      !pendingType &&
+      (!roomDrawMode || readOnly) &&
+      (!printAreaMode || readOnly));
   // Box select: left-drag on empty area (desktop-like).
   const isBoxSelectGesture = (evt: any) => evt?.button === 0;
 
@@ -1471,7 +1495,7 @@ const CanvasStageImpl = (
               return (
                 <Group
                   key={room.id}
-                  draggable={!readOnly}
+                  draggable={!readOnly && !panToolActive}
                   onDragStart={(e) => {
                     roomDragRef.current = {
                       roomId: room.id,
@@ -1571,7 +1595,7 @@ const CanvasStageImpl = (
                           fill="#ffffff"
                           stroke="#2563eb"
                           strokeWidth={1.2}
-                          draggable
+                          draggable={!panToolActive}
                           onDragMove={() => {
                             const line = polyLineRefs.current[room.id];
                             const verts = polyVertexRefs.current[room.id];
@@ -1604,7 +1628,7 @@ const CanvasStageImpl = (
                 key={room.id}
                 x={room.x || 0}
                 y={room.y || 0}
-                draggable={!readOnly}
+                draggable={!readOnly && !panToolActive}
                 onDragStart={(e) => {
                   roomDragRef.current = {
                     roomId: room.id,
@@ -2002,7 +2026,7 @@ const CanvasStageImpl = (
                 y={obj.y}
                 scaleX={isDesk ? deskScaleX : 1}
                 scaleY={isDesk ? deskScaleY : 1}
-                draggable={!readOnly}
+                draggable={!readOnly && !panToolActive}
                 onDragStart={(e) => {
                   dragStartRef.current.set(obj.id, { x: obj.x, y: obj.y });
                   onMoveStart?.(obj.id, obj.x, obj.y, obj.roomId);
@@ -2351,7 +2375,7 @@ const CanvasStageImpl = (
             <Group
               x={selectedBounds.minX}
               y={selectedBounds.minY}
-              draggable
+              draggable={!panToolActive}
               onContextMenu={(e) => {
                 e.evt.preventDefault();
                 e.cancelBubble = true;
@@ -2414,6 +2438,16 @@ const CanvasStageImpl = (
         </Layer>
       </Stage>
       <div className="absolute right-4 top-4 flex flex-col gap-2 rounded-xl bg-white/90 p-2 shadow-card backdrop-blur">
+        <button
+          title={t({ it: 'Modalità pan', en: 'Pan tool' })}
+          aria-pressed={panToolActive}
+          onClick={() => onTogglePanTool?.()}
+          className={`flex h-8 w-8 items-center justify-center rounded-lg border text-ink hover:bg-slate-50 ${
+            panToolActive ? 'border-primary text-primary' : 'border-slate-200'
+          }`}
+        >
+          <Hand size={16} />
+        </button>
 	        <button
 	          title={t({ it: 'Aumenta zoom', en: 'Zoom in' })}
 	          onClick={() => {
