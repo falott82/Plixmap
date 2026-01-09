@@ -9,6 +9,17 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.5.4',
+    date: '2026-01-08',
+    type: 'fix',
+    notes: [
+      n(
+        'Bootstrap login: superadmin/deskly sempre valido al primo avvio',
+        'Bootstrap login: superadmin/deskly always valid on first run'
+      )
+    ]
+  },
+  {
     version: '1.5.3',
     date: '2026-01-08',
     type: 'minor',
