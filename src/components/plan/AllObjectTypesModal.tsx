@@ -4,6 +4,7 @@ import { Search, X } from 'lucide-react';
 import { ObjectTypeDefinition } from '../../store/types';
 import Icon from '../ui/Icon';
 import { useLang, useT } from '../../i18n/useT';
+import { isDeskType } from './deskTypes';
 
 interface Props {
   open: boolean;
@@ -12,12 +13,14 @@ interface Props {
   onPick: (typeId: string) => void;
   paletteTypeIds?: string[];
   onAddToPalette?: (typeId: string) => void;
+  defaultTab?: 'objects' | 'desks';
 }
 
-const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAddToPalette }: Props) => {
+const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAddToPalette, defaultTab = 'objects' }: Props) => {
   const t = useT();
   const lang = useLang();
   const [q, setQ] = useState('');
+  const [tab, setTab] = useState<'objects' | 'desks'>(defaultTab);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [context, setContext] = useState<{ x: number; y: number; typeId: string } | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
@@ -28,8 +31,9 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
     if (!open) return;
     setQ('');
     setContext(null);
+    setTab(defaultTab);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [open]);
+  }, [defaultTab, open]);
 
   useEffect(() => {
     if (!context) return;
@@ -52,6 +56,10 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
       return label.includes(query) || d.id.toLowerCase().includes(query);
     });
   }, [defs, lang, q]);
+
+  const deskDefs = useMemo(() => filtered.filter((d) => isDeskType(d.id)), [filtered]);
+  const otherDefs = useMemo(() => filtered.filter((d) => !isDeskType(d.id)), [filtered]);
+  const activeDefs = tab === 'desks' ? deskDefs : otherDefs;
 
   return (
     <Transition show={open} as={Fragment}>
@@ -81,41 +89,74 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                   />
                 </div>
 
+                <div className="mt-4 flex items-center gap-2">
+                  <button
+                    onClick={() => setTab('desks')}
+                    disabled={!deskDefs.length}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      tab === 'desks'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    title={t({ it: 'Scrivanie', en: 'Desks' })}
+                  >
+                    {t({ it: 'Scrivanie', en: 'Desks' })}
+                  </button>
+                  <button
+                    onClick={() => setTab('objects')}
+                    disabled={!otherDefs.length}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      tab === 'objects'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    title={t({ it: 'Oggetti', en: 'Objects' })}
+                  >
+                    {t({ it: 'Oggetti', en: 'Objects' })}
+                  </button>
+                </div>
+
                 <div className="mt-4 grid max-h-[580px] grid-cols-2 gap-3 overflow-auto sm:grid-cols-4">
-                  {filtered.map((d) => {
-                    const label = (d?.name?.[lang] as string) || (d?.name?.it as string) || d.id;
-                    const inPalette = paletteSet.has(d.id);
-                    return (
-                      <button
-                        key={d.id}
-                        onClick={() => {
-                          onPick(d.id);
-                          onClose();
-                        }}
-                        onContextMenu={(e) => {
-                          if (!onAddToPalette) return;
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setContext({ x: e.clientX, y: e.clientY, typeId: d.id });
-                        }}
-                        className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-left hover:bg-slate-50"
-                        title={label}
-                      >
-                        <div className="grid h-11 w-11 place-items-center rounded-2xl border border-slate-200 bg-white text-primary">
-                          <Icon name={d.icon} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-ink">{label}</div>
-                          <div className="truncate text-xs text-slate-500">{d.id}</div>
-                        </div>
-                        {onAddToPalette ? (
-                          <div className="ml-auto text-[10px] font-semibold uppercase text-slate-400">
-                            {inPalette ? t({ it: 'In palette', en: 'In palette' }) : t({ it: 'Extra', en: 'Extra' })}
+                  {activeDefs.length ? (
+                    activeDefs.map((d) => {
+                      const label = (d?.name?.[lang] as string) || (d?.name?.it as string) || d.id;
+                      const inPalette = paletteSet.has(d.id);
+                      return (
+                        <button
+                          key={d.id}
+                          onClick={() => {
+                            onPick(d.id);
+                            onClose();
+                          }}
+                          onContextMenu={(e) => {
+                            if (!onAddToPalette) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setContext({ x: e.clientX, y: e.clientY, typeId: d.id });
+                          }}
+                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-left hover:bg-slate-50"
+                          title={label}
+                        >
+                          <div className="grid h-11 w-11 place-items-center rounded-2xl border border-slate-200 bg-white text-primary">
+                            <Icon name={d.icon} />
                           </div>
-                        ) : null}
-                      </button>
-                    );
-                  })}
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-ink">{label}</div>
+                            <div className="truncate text-xs text-slate-500">{d.id}</div>
+                          </div>
+                          {onAddToPalette ? (
+                            <div className="ml-auto text-[10px] font-semibold uppercase text-slate-400">
+                              {inPalette ? t({ it: 'In palette', en: 'In palette' }) : t({ it: 'Extra', en: 'Extra' })}
+                            </div>
+                          ) : null}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="col-span-full rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
+                      {t({ it: 'Nessun elemento trovato.', en: 'No items found.' })}
+                    </div>
+                  )}
                 </div>
 
                 {context ? (

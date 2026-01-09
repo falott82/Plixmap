@@ -9,6 +9,78 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.5.3',
+    date: '2026-01-08',
+    type: 'minor',
+    notes: [
+      n(
+        'Sidebar: palette con tab Oggetti/Scrivanie, livelli comprimibili e “Mostra tutti” separato',
+        'Sidebar: palette with Objects/Desks tabs, collapsible layers, and split “Show all”'
+      ),
+      n(
+        'Impostazioni oggetti: tab Oggetti/Scrivanie, scrivanie predefinite (niente creazione/richieste)',
+        'Object settings: Objects/Desks tabs, desks are built-in (no creation/requests)'
+      ),
+      n(
+        'Scrivanie: rotazione Ctrl/⌘ + frecce più stabile',
+        'Desks: more reliable Ctrl/⌘ + arrow rotation'
+      )
+    ]
+  },
+  {
+    version: '1.5.2',
+    date: '2026-01-08',
+    type: 'minor',
+    notes: [
+      n(
+        'Scrivanie: linee configurabili (spessore/colore) + ridimensionamento libero con maniglie',
+        'Desks: configurable lines (weight/color) + free resize with handles'
+      ),
+      n(
+        'Scrivanie: rotazione rapida con Ctrl/⌘ + freccia sinistra/destra',
+        'Desks: quick rotation with Ctrl/⌘ + left/right arrow'
+      ),
+      n(
+        'Palette: pulsanti Scrivanie/Oggetti adattati alla sidebar',
+        'Palette: Desks/Objects buttons fit better in the sidebar'
+      )
+    ]
+  },
+  {
+    version: '1.5.1',
+    date: '2026-01-08',
+    type: 'minor',
+    notes: [
+      n(
+        'Scrivanie: nuove forme (rettangolare, doppia, banco lungo, trapezoidale) e rotazione a 90°',
+        'Desks: new shapes (rectangular, double, long bench, trapezoid) and 90° rotation'
+      ),
+      n(
+        'Scrivanie: inserimento diretto nel layer dedicato, senza nome/descrizione; niente ricerca o collegamenti',
+        'Desks: direct placement in the dedicated layer, no name/description; not searchable or linkable'
+      ),
+      n(
+        'PDF: opzione per includere/escludere le scrivanie (default attivo)',
+        'PDF: option to include/exclude desks (default on)'
+      )
+    ]
+  },
+  {
+    version: '1.5.0',
+    date: '2026-01-08',
+    type: 'minor',
+    notes: [
+      n(
+        'Palette: aggiunta sezione Scrivanie con forme dedicate (tonda, quadrata, a L e a L rovesciata)',
+        'Palette: added Desks section with dedicated shapes (round, square, L, reverse L)'
+      ),
+      n(
+        'Oggetti: layer Scrivanie dedicato + controllo opacità per gli oggetti',
+        'Objects: dedicated Desks layer + opacity control for objects'
+      )
+    ]
+  },
+  {
     version: '1.4.11',
     date: '2026-01-08',
     type: 'fix',
