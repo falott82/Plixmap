@@ -352,8 +352,12 @@ const getWsAuthContext = (req) => {
 // Public: used by the login UI to decide whether to show first-run credentials.
 app.get('/api/auth/bootstrap-status', (_req, res) => {
   try {
-    const row = db.prepare("SELECT mustChangePassword FROM users WHERE username = 'superadmin'").get();
-    res.json({ showFirstRunCredentials: !!row && Number(row.mustChangePassword) === 1 });
+    const row = db
+      .prepare("SELECT mustChangePassword, passwordSalt, passwordHash FROM users WHERE username = 'superadmin'")
+      .get();
+    const isDefault =
+      !!row && Number(row.mustChangePassword) === 1 && verifyPassword('deskly', row.passwordSalt, row.passwordHash);
+    res.json({ showFirstRunCredentials: isDefault });
   } catch {
     res.json({ showFirstRunCredentials: false });
   }
