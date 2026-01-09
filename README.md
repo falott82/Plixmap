@@ -6,6 +6,16 @@ Deskly is a modern web app to manage company floor plans using a fixed hierarchy
 
 The UI supports **Italian and English**. When you change language from the user menu, the app performs a full refresh to ensure every screen (including tooltips/modals) is consistently translated.
 
+## Screenshots
+### Rack editor
+![Rack editor](docs/screenshots/rack-editor.png)
+
+### Plan view
+![Plan view](docs/screenshots/plan-view.png)
+
+### Customer configurations
+![Customer configurations](docs/screenshots/customer-configurations.png)
+
 ## Tech Stack
 - **Frontend:** React + TypeScript (Vite), TailwindCSS, Zustand, react-konva, lucide-react
 - **Export:** jsPDF + html2canvas
