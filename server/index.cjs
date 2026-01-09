@@ -382,6 +382,20 @@ const allowLoginAttempt = (ip) => {
   return true;
 };
 
+const shouldUseSecureCookie = (req) => {
+  const override = process.env.DESKLY_COOKIE_SECURE;
+  if (typeof override === 'string' && override.trim() !== '') {
+    return ['1', 'true', 'yes', 'on'].includes(override.trim().toLowerCase());
+  }
+  const forwarded = req.headers['x-forwarded-proto'];
+  if (forwarded) {
+    const proto = String(forwarded).split(',')[0].trim().toLowerCase();
+    if (proto === 'https') return true;
+    if (proto === 'http') return false;
+  }
+  return req.secure === true || req.protocol === 'https';
+};
+
 app.post('/api/auth/login', (req, res) => {
   const { username, password, otp } = req.body || {};
   if (!username || !password) {
@@ -470,7 +484,7 @@ app.post('/api/auth/login', (req, res) => {
     sid: serverInstanceId,
     iat: Date.now()
   });
-  setSessionCookie(res, token);
+  setSessionCookie(res, token, undefined, { secure: shouldUseSecureCookie(req) });
   writeAuthLog(db, { event: 'login', success: true, userId: row.id, username: row.username, ...meta });
   res.json({ ok: true });
 });
@@ -1241,7 +1255,7 @@ app.post('/api/auth/first-run', requireAuth, (req, res) => {
     sid: serverInstanceId,
     iat: Date.now()
   });
-  setSessionCookie(res, token);
+  setSessionCookie(res, token, undefined, { secure: shouldUseSecureCookie(req) });
   res.json({ ok: true });
 });
 
