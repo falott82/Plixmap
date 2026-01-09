@@ -79,6 +79,17 @@ interface Props {
 
 const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) => {
   const common = { size, className, color, strokeWidth };
+  const svgProps = {
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: color || 'currentColor',
+    strokeWidth: strokeWidth ?? 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    className
+  };
   const resolved: IconName | undefined =
     name ||
     (type === 'user'
@@ -234,6 +245,67 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
       return <Bus {...common} />;
     case 'train':
       return <TrainFront {...common} />;
+    case 'deskRound':
+      return (
+        <svg {...svgProps}>
+          <circle cx="12" cy="8.5" r="5.5" />
+          <path d="M12 14v6" />
+          <path d="M9.5 20h5" />
+        </svg>
+      );
+    case 'deskSquare':
+      return (
+        <svg {...svgProps}>
+          <rect x="4" y="4" width="16" height="10" rx="2" />
+          <path d="M12 14v6" />
+          <path d="M9.5 20h5" />
+        </svg>
+      );
+    case 'deskRect':
+      return (
+        <svg {...svgProps}>
+          <rect x="3" y="6" width="18" height="8" rx="2" />
+          <path d="M12 14v6" />
+          <path d="M9 20h6" />
+        </svg>
+      );
+    case 'deskDouble':
+      return (
+        <svg {...svgProps}>
+          <rect x="3" y="5" width="8" height="10" rx="2" />
+          <rect x="13" y="5" width="8" height="10" rx="2" />
+          <path d="M12 15v5" />
+        </svg>
+      );
+    case 'deskLong':
+      return (
+        <svg {...svgProps}>
+          <rect x="2.5" y="7" width="19" height="6" rx="2" />
+          <path d="M6 13v6" />
+          <path d="M18 13v6" />
+        </svg>
+      );
+    case 'deskTrapezoid':
+      return (
+        <svg {...svgProps}>
+          <path d="M6 6h12l3 10H3z" />
+          <path d="M12 16v4" />
+        </svg>
+      );
+    case 'deskL':
+      return (
+        <svg {...svgProps}>
+          <rect x="4" y="16" width="16" height="4" rx="1" />
+          <rect x="4" y="4" width="4" height="16" rx="1" />
+        </svg>
+      );
+    case 'deskLReverse':
+      return (
+        <svg {...svgProps}>
+          <rect x="4" y="16" width="16" height="4" rx="1" />
+          <rect x="16" y="4" width="4" height="16" rx="1" />
+        </svg>
+      );
     default:
       return <User {...common} />;
   }

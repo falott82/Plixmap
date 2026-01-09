@@ -5,6 +5,7 @@ import { IconName, MapObject } from '../../store/types';
 import { useT } from '../../i18n/useT';
 import Icon from '../ui/Icon';
 import { useUIStore } from '../../store/useUIStore';
+import { isDeskType } from './deskTypes';
 
 type Row = {
   id: string;
@@ -13,6 +14,7 @@ type Row = {
   description?: string;
   scale?: number;
   isRealUser?: boolean;
+  isDesk?: boolean;
 };
 
 interface Props {
@@ -41,7 +43,8 @@ const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onCl
         name: o.name,
         description: o.description,
         scale: o.scale ?? 1,
-        isRealUser: !!o.externalUserId
+        isRealUser: !!o.externalUserId,
+        isDesk: isDeskType(o.type)
       };
     });
     initialRef.current = init;
@@ -49,7 +52,10 @@ const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onCl
     setScaleAll(Number((objects?.[0]?.scale ?? 1) as any) || 1);
   }, [open, objects]);
 
-  const canApply = useMemo(() => rows.some((r) => r.name.trim().length > 0), [rows]);
+  const canApply = useMemo(
+    () => rows.every((r) => r.isDesk || r.isRealUser || r.name.trim().length > 0),
+    [rows]
+  );
 
   const apply = () => {
     if (!canApply) return;
@@ -62,7 +68,7 @@ const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onCl
       const nextScale = Number.isFinite(r.scale as any) ? Number(r.scale) : 1;
       const patch: any = {};
       // Real users: name/description are managed by directory import, so do not allow edits here.
-      if (!r.isRealUser) {
+      if (!r.isRealUser && !r.isDesk) {
         if (nextName && nextName !== prev.name) patch.name = nextName;
         if (nextDesc !== (prev.description || undefined)) patch.description = nextDesc;
       }
@@ -170,37 +176,44 @@ const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onCl
                           </div>
                         </div>
                         <div className="col-span-4">
-                          <input
-                            value={r.name}
-                            disabled={!!r.isRealUser}
-                            onChange={(e) =>
-                              setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, name: e.target.value } : x)))
-                            }
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 disabled:bg-slate-50 disabled:text-slate-500"
-                            placeholder={t({ it: 'Nome (obbligatorio)', en: 'Name (required)' })}
-                          />
-                          {r.isRealUser ? (
-                            <div className="mt-1 text-[11px] text-slate-500">
-                              {t({
-                                it: 'Utente reale: il nome è gestito dalla rubrica importata.',
-                                en: 'Real user: the name is managed by the imported directory.'
-                              })}
-                            </div>
-                          ) : null}
+                      <input
+                        value={r.name}
+                        disabled={!!r.isRealUser || !!r.isDesk}
+                        onChange={(e) =>
+                          setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, name: e.target.value } : x)))
+                        }
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 disabled:bg-slate-50 disabled:text-slate-500"
+                        placeholder={t({ it: 'Nome (obbligatorio)', en: 'Name (required)' })}
+                      />
+                      {r.isRealUser ? (
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          {t({
+                            it: 'Utente reale: il nome è gestito dalla rubrica importata.',
+                            en: 'Real user: the name is managed by the imported directory.'
+                          })}
                         </div>
-                        <div className="col-span-3">
-                          <input
-                            value={r.description || ''}
-                            disabled={!!r.isRealUser}
-                            onChange={(e) =>
-                              setRows((prev) =>
-                                prev.map((x) => (x.id === r.id ? { ...x, description: e.target.value } : x))
-                              )
-                            }
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 disabled:bg-slate-50 disabled:text-slate-500"
-                            placeholder={t({ it: 'Descrizione (opzionale)', en: 'Description (optional)' })}
-                          />
+                      ) : r.isDesk ? (
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          {t({
+                            it: 'Scrivania: nome non modificabile.',
+                            en: 'Desk: name cannot be edited.'
+                          })}
                         </div>
+                      ) : null}
+                    </div>
+                    <div className="col-span-3">
+                      <input
+                        value={r.description || ''}
+                        disabled={!!r.isRealUser || !!r.isDesk}
+                        onChange={(e) =>
+                          setRows((prev) =>
+                            prev.map((x) => (x.id === r.id ? { ...x, description: e.target.value } : x))
+                          )
+                        }
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 disabled:bg-slate-50 disabled:text-slate-500"
+                        placeholder={t({ it: 'Descrizione (opzionale)', en: 'Description (optional)' })}
+                      />
+                    </div>
                         <div className="col-span-2 flex items-center justify-end gap-2">
 	                          <input
 	                            type="range"

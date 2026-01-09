@@ -10,14 +10,16 @@ interface Props {
   onSelectType: (type: MapObjectType) => void;
   onRemoveFromPalette?: (type: MapObjectType) => void;
   activeType?: MapObjectType | null;
+  allowRemove?: boolean;
 }
 
-const Toolbar = ({ defs, order, onSelectType, onRemoveFromPalette, activeType }: Props) => {
+const Toolbar = ({ defs, order, onSelectType, onRemoveFromPalette, activeType, allowRemove }: Props) => {
   const lang = useLang();
   const t = useT();
   const [context, setContext] = useState<{ x: number; y: number; type: MapObjectType } | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
   const isUserConfigured = order !== undefined && order !== null;
+  const canOpenContext = !!onRemoveFromPalette && (allowRemove || isUserConfigured);
   const contextStyle = useMemo(() => {
     if (!context) return undefined;
     const menuW = 220;
@@ -76,8 +78,7 @@ const Toolbar = ({ defs, order, onSelectType, onRemoveFromPalette, activeType }:
               }}
               onClick={() => onSelectType(def.id)}
               onContextMenu={(e) => {
-                if (!isUserConfigured) return;
-                if (!onRemoveFromPalette) return;
+                if (!canOpenContext) return;
                 e.preventDefault();
                 e.stopPropagation();
                 setContext({ x: e.clientX, y: e.clientY, type: def.id });

@@ -157,6 +157,12 @@ const HelpPanel = () => {
                       </li>
                       <li>{t({ it: 'Alla creazione inserisci nome (obbligatorio) e descrizione (opzionale).', en: 'On creation, enter a name (required) and a description (optional).' })}</li>
                       <li>{t({ it: 'Tasto destro su un oggetto: modifica/duplica/scala/elimina.', en: 'Right-click an object: edit/duplicate/scale/delete.' })}</li>
+                      <li>
+                        {t({
+                          it: 'Scrivanie: selezionale per allungare/allargare con i punti del riquadro.',
+                          en: 'Desks: select them and use the handles to stretch/resize.'
+                        })}
+                      </li>
                       <li>{t({ it: 'Ctrl/⌘ click: selezione multipla. Del/Backspace: elimina con conferma.', en: 'Ctrl/⌘ click: multi-select. Del/Backspace: delete with confirmation.' })}</li>
                       <li>{t({ it: 'Shift + tasto destro (trascina): seleziona un’area e prende tutti gli oggetti dentro.', en: 'Shift + right mouse (drag): box-select an area and pick all objects inside.' })}</li>
                       <li>{t({ it: 'Con più oggetti selezionati: trascina il riquadro tratteggiato per spostarli “a blocco”.', en: 'With multiple objects selected: drag the dashed frame to move them as a group.' })}</li>
@@ -165,6 +171,12 @@ const HelpPanel = () => {
                         {t({
                           it: 'Frecce tastiera: sposta lentamente gli oggetti selezionati (Shift per passi più grandi).',
                           en: 'Arrow keys: nudge selected objects (Shift for larger steps).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Ctrl/⌘ + freccia sinistra/destra: ruota le scrivanie selezionate di 90°.',
+                          en: 'Ctrl/⌘ + left/right arrow: rotate selected desks by 90°.'
                         })}
                       </li>
                     </ul>
