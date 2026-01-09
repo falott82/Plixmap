@@ -325,6 +325,12 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'Touchpad: due dita per spostare la mappa, pinch per zoom. In alternativa usa l’icona mano per trascinare con il tasto sinistro.',
+                          en: 'Touchpad: two fingers to pan, pinch to zoom. Alternatively use the hand icon to drag with left click.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'Frecce: spostamento fine degli oggetti selezionati (Shift = passo maggiore).',
                           en: 'Arrow keys: fine movement for selected objects (Shift = larger step).'
                         })}

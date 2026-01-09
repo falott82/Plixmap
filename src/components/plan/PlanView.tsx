@@ -346,6 +346,7 @@ const PlanView = ({ planId }: Props) => {
   const [roomAllocationOpen, setRoomAllocationOpen] = useState(false);
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement | null>(null);
+  const [panToolActive, setPanToolActive] = useState(false);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
@@ -3531,7 +3532,7 @@ const PlanView = ({ planId }: Props) => {
       <div className="flex-1 min-h-0">
         <div className="relative flex h-full min-h-0 gap-4 overflow-hidden">
 	        <div className="flex-1 min-w-0 min-h-0">
-	            <div className="relative h-full min-h-0 w-full" ref={mapRef}>
+	            <div className={`relative h-full min-h-0 w-full ${panToolActive ? 'cursor-grab active:cursor-grabbing' : ''}`} ref={mapRef}>
 				              <CanvasStage
                         ref={canvasStageRef}
 				                containerRef={mapRef}
@@ -3546,6 +3547,8 @@ const PlanView = ({ planId }: Props) => {
 	                    highlightRoomUntil={highlightRoom?.until}
 				                pendingType={pendingType}
 				                readOnly={isReadOnly}
+                        panToolActive={panToolActive}
+                        onTogglePanTool={() => setPanToolActive((v) => !v)}
 	                    roomDrawMode={roomDrawMode}
                       printArea={(basePlan as any)?.printArea || null}
                       printAreaMode={printAreaMode}
@@ -3655,7 +3658,7 @@ const PlanView = ({ planId }: Props) => {
               </div>
             ) : null}
 		          {!isReadOnly ? (
-		            <aside className="sticky top-0 h-fit w-28 shrink-0 self-start rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-28 shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
                 {planLayers.length ? (
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
