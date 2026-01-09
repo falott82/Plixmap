@@ -74,7 +74,7 @@ const verifySession = (secret, token) => {
   }
 };
 
-const setSessionCookie = (res, token, maxAgeSeconds = 60 * 60 * 24 * 30) => {
+const setSessionCookie = (res, token, maxAgeSeconds = 60 * 60 * 24 * 30, options = {}) => {
   const parts = [
     `deskly_session=${encodeURIComponent(token)}`,
     `Path=/`,
@@ -82,7 +82,10 @@ const setSessionCookie = (res, token, maxAgeSeconds = 60 * 60 * 24 * 30) => {
     `SameSite=Lax`,
     `Max-Age=${maxAgeSeconds}`
   ];
-  if (process.env.NODE_ENV === 'production') parts.push('Secure');
+  const secure = Object.prototype.hasOwnProperty.call(options, 'secure')
+    ? !!options.secure
+    : process.env.NODE_ENV === 'production';
+  if (secure) parts.push('Secure');
   res.setHeader('Set-Cookie', parts.join('; '));
 };
 

@@ -9,6 +9,17 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.5.5',
+    date: '2026-01-08',
+    type: 'fix',
+    notes: [
+      n(
+        'Login: cookie sicuro solo su HTTPS (accesso HTTP in LAN ok)',
+        'Login: secure cookie only on HTTPS (HTTP LAN access works)'
+      )
+    ]
+  },
+  {
     version: '1.5.4',
     date: '2026-01-08',
     type: 'fix',
