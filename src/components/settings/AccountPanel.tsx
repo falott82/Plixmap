@@ -100,6 +100,27 @@ const AccountPanel = () => {
         </div>
       </div>
 
+      {user.isSuperAdmin && user.username === 'superadmin' ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+          <div className="text-sm font-semibold text-ink">{t({ it: 'Recupero superadmin (offline)', en: 'Superadmin recovery (offline)' })}</div>
+          <p className="mt-2 text-sm text-slate-600">
+            {t({
+              it: 'Se perdi la password, esegui questo comando sul server (o dentro il container) per impostarne una nuova.',
+              en: 'If you lose the password, run this command on the server (or inside the container) to set a new one.'
+            })}
+          </p>
+          <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs font-mono text-slate-700">
+            docker compose exec deskly node server/reset-superadmin.cjs
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            {t({
+              it: 'Il reset invalida le sessioni attive. Ti verra richiesta una password forte.',
+              en: 'The reset invalidates active sessions. You will be asked for a strong password.'
+            })}
+          </p>
+        </div>
+      ) : null}
+
       <PasswordModal
         open={pwOpen}
         title={t({ it: 'Cambia password', en: 'Change password' })}

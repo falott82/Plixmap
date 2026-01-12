@@ -1,6 +1,6 @@
 # Deskly — Floor Plan Management (Drag & Drop)
 
-Current version: **1.6.2**
+Current version: **1.6.4**
 
 Deskly is a modern web app for planning offices and infrastructure on floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, rack management with ports and 1:1 links, saved views, revision history, search/highlight, and PDF exports.
 
@@ -58,6 +58,13 @@ New passwords must be **strong**:
 - at least 1 lowercase letter
 - at least 1 number
 - at least 1 symbol
+
+### Superadmin recovery (offline)
+If the superadmin password is lost, reset it on the server (or inside the container):
+```
+docker compose exec deskly node server/reset-superadmin.cjs
+```
+You can also use `DESKLY_NEW_PASSWORD` (env) or `--password` (arg). The reset invalidates active sessions.
 
 ### Roles
 - **Superadmin:** full access + can create admin users + can view audit logs (login/logout attempts)
