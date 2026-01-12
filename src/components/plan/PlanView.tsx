@@ -647,13 +647,13 @@ const PlanView = ({ planId }: Props) => {
     return [...layers].sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
   }, [renderPlan]);
   const prevLayerIdsByPlanRef = useRef<Record<string, string[]>>({});
-  const visibleLayerIds = visibleLayerIdsByPlan[planId] || planLayers.map((l: any) => l.id);
+  const visibleLayerIds = (visibleLayerIdsByPlan[planId] as string[] | undefined) || planLayers.map((l: any) => String(l.id));
   const hideAllLayers = !!hiddenLayersByPlan[planId];
   const effectiveVisibleLayerIds = hideAllLayers ? [] : visibleLayerIds;
   useEffect(() => {
     if (!planLayers.length) return;
-    const layerIds = planLayers.map((l: any) => l.id);
-    const current = visibleLayerIdsByPlan[planId];
+    const layerIds = planLayers.map((l: any) => String(l.id));
+    const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
     const prev = prevLayerIdsByPlanRef.current[planId] || [];
     if (!current) {
       setVisibleLayerIds(planId, layerIds);
