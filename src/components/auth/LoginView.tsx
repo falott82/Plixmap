@@ -40,6 +40,17 @@ const LoginView = () => {
       await login(username.trim(), password, otpRequired ? otp.trim() : undefined);
       navigate('/', { replace: true });
     } catch (e: any) {
+      if (e?.lockedUntil) {
+        const remainingMs = Math.max(0, Number(e.lockedUntil) - Date.now());
+        const minutes = Math.ceil(remainingMs / 60000);
+        setError(
+          t({
+            it: `Account bloccato temporaneamente. Riprova tra ${minutes} minuti.`,
+            en: `Account temporarily locked. Try again in ${minutes} minutes.`
+          })
+        );
+        return;
+      }
       if (e instanceof MFARequiredError || e?.name === 'MFARequiredError') {
         setOtpRequired(true);
         setOtp('');
