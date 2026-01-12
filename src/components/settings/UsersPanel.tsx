@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileSpreadsheet, Plus, RefreshCw, Trash, KeyRound, Pencil, Search, ShieldOff } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
+import { FileSpreadsheet, Plus, RefreshCw, Trash, KeyRound, Pencil, Search, ShieldOff, Unlock, Info, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
-import { adminCreateUser, adminDeleteUser, adminFetchUsers, adminUpdateUser, changePassword, resetUserMfa, AdminUserRow } from '../../api/auth';
+import { adminCreateUser, adminDeleteUser, adminFetchUsers, adminUpdateUser, changePassword, resetUserMfa, unlockUser, AdminUserRow } from '../../api/auth';
 import { useAuthStore } from '../../store/useAuthStore';
 import UserModal from './UserModal';
 import PasswordModal from './PasswordModal';
@@ -26,6 +27,8 @@ const UsersPanel = () => {
   const [pwModal, setPwModal] = useState<{ user: AdminUserRow } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<AdminUserRow | null>(null);
   const [confirmMfaReset, setConfirmMfaReset] = useState<AdminUserRow | null>(null);
+  const [confirmUnlock, setConfirmUnlock] = useState<AdminUserRow | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const reload = async () => {
     setLoading(true);
@@ -159,6 +162,13 @@ const UsersPanel = () => {
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
           <button
+            onClick={() => setHelpOpen(true)}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            title={t({ it: 'Guida pulsanti', en: 'Buttons guide' })}
+          >
+            <Info size={16} />
+          </button>
+          <button
             onClick={() => setModal({ mode: 'create' })}
             className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90"
             title={t({ it: 'Crea un nuovo utente', en: 'Create a new user' })}
@@ -191,6 +201,9 @@ const UsersPanel = () => {
         {filtered.length ? (
           filtered.map((u) => {
             const isStrictSuperAdmin = u.isSuperAdmin && u.username === 'superadmin';
+            const lockedUntil = u.lockedUntil ? Number(u.lockedUntil) : 0;
+            const locked = !!lockedUntil && lockedUntil > Date.now();
+            const remainingMinutes = locked ? Math.max(1, Math.ceil((lockedUntil - Date.now()) / 60000)) : 0;
             return (
             <div
               key={u.id}
@@ -215,10 +228,26 @@ const UsersPanel = () => {
               <div>
                 <span
                   className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
-                    u.disabled ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'
+                    u.disabled
+                      ? 'bg-rose-50 text-rose-700'
+                      : locked
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-emerald-50 text-emerald-700'
                   }`}
+                  title={
+                    locked
+                      ? t({
+                          it: `Bloccato per altri ${remainingMinutes} min`,
+                          en: `Locked for ${remainingMinutes} more min`
+                        })
+                      : undefined
+                  }
                 >
-                  {u.disabled ? t({ it: 'Disattivo', en: 'Disabled' }) : t({ it: 'Attivo', en: 'Active' })}
+                  {u.disabled
+                    ? t({ it: 'Disattivo', en: 'Disabled' })
+                    : locked
+                      ? t({ it: `Bloccato (${remainingMinutes}m)`, en: `Locked (${remainingMinutes}m)` })
+                      : t({ it: 'Attivo', en: 'Active' })}
                 </span>
               </div>
               <div className="text-xs text-slate-600">{formatCreatedAt(u.createdAt)}</div>
@@ -256,6 +285,14 @@ const UsersPanel = () => {
                   <ShieldOff size={14} />
                 </button>
                 <button
+                  onClick={() => setConfirmUnlock(u)}
+                  disabled={!locked || (!isSuperAdmin && isStrictSuperAdmin)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  title={t({ it: 'Sblocca accesso', en: 'Unlock access' })}
+                >
+                  <Unlock size={14} />
+                </button>
+                <button
                   onClick={() => setConfirmDelete(u)}
                   disabled={!isSuperAdmin && isStrictSuperAdmin}
                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50"
@@ -273,6 +310,108 @@ const UsersPanel = () => {
           </div>
         )}
       </div>
+
+      <Transition show={helpOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setHelpOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="text-lg font-semibold text-ink">
+                      {t({ it: 'Guida pulsanti', en: 'Buttons guide' })}
+                    </Dialog.Title>
+                    <button
+                      onClick={() => setHelpOpen(false)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                    {t({
+                      it: 'Queste azioni possono richiedere permessi admin o superadmin.',
+                      en: 'These actions may require admin or superadmin permissions.'
+                    })}
+                  </Dialog.Description>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t({ it: 'Azioni rapide', en: 'Quick actions' })}
+                      </div>
+                      <div className="flex items-start gap-2 text-sm text-slate-700">
+                        <FileSpreadsheet size={16} className="mt-0.5 text-slate-500" />
+                        <div>{t({ it: 'Esporta Excel/CSV degli utenti.', en: 'Export users as Excel/CSV.' })}</div>
+                      </div>
+                      <div className="flex items-start gap-2 text-sm text-slate-700">
+                        <RefreshCw size={16} className="mt-0.5 text-slate-500" />
+                        <div>{t({ it: 'Ricarica la lista utenti dal server.', en: 'Reload users list from the server.' })}</div>
+                      </div>
+                      <div className="flex items-start gap-2 text-sm text-slate-700">
+                        <Plus size={16} className="mt-0.5 text-slate-500" />
+                        <div>{t({ it: 'Crea un nuovo utente con permessi.', en: 'Create a new user with permissions.' })}</div>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t({ it: 'Azioni per utente', en: 'Per-user actions' })}
+                      </div>
+                      <div className="flex items-start gap-2 text-sm text-slate-700">
+                        <Pencil size={16} className="mt-0.5 text-slate-500" />
+                        <div>{t({ it: 'Modifica profilo e permessi utente.', en: 'Edit user profile and permissions.' })}</div>
+                      </div>
+                      <div className="flex items-start gap-2 text-sm text-slate-700">
+                        <KeyRound size={16} className="mt-0.5 text-slate-500" />
+                        <div>{t({ it: 'Reset password: imposta una nuova password.', en: 'Reset password: set a new password.' })}</div>
+                      </div>
+                      <div className="flex items-start gap-2 text-sm text-slate-700">
+                        <ShieldOff size={16} className="mt-0.5 text-slate-500" />
+                        <div>{t({ it: 'Reset MFA: disattiva l’autenticatore.', en: 'Reset MFA: disable the authenticator.' })}</div>
+                      </div>
+                      <div className="flex items-start gap-2 text-sm text-slate-700">
+                        <Unlock size={16} className="mt-0.5 text-slate-500" />
+                        <div>{t({ it: 'Sblocca accesso dopo troppi tentativi falliti.', en: 'Unlock access after too many failed attempts.' })}</div>
+                      </div>
+                      <div className="flex items-start gap-2 text-sm text-slate-700">
+                        <Trash size={16} className="mt-0.5 text-slate-500" />
+                        <div>{t({ it: 'Elimina l’utente (irreversibile).', en: 'Delete the user (irreversible).' })}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-6 flex justify-end">
+                    <button
+                      onClick={() => setHelpOpen(false)}
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
 
       <UserModal
         open={!!modal}
@@ -386,6 +525,33 @@ const UsersPanel = () => {
           }
         }}
         confirmLabel={t({ it: 'Reset', en: 'Reset' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+      />
+
+      <ConfirmDialog
+        open={!!confirmUnlock}
+        title={t({ it: 'Sbloccare accesso?', en: 'Unlock access?' })}
+        description={
+          confirmUnlock
+            ? t({
+                it: `Sbloccare l’account "${confirmUnlock.username}"?`,
+                en: `Unlock account "${confirmUnlock.username}"?`
+              })
+            : undefined
+        }
+        onCancel={() => setConfirmUnlock(null)}
+        onConfirm={async () => {
+          if (!confirmUnlock) return;
+          try {
+            await unlockUser(confirmUnlock.id);
+            push(t({ it: 'Account sbloccato', en: 'Account unlocked' }), 'success');
+            setConfirmUnlock(null);
+            await reload();
+          } catch {
+            push(t({ it: 'Errore sblocco account', en: 'Failed to unlock account' }), 'danger');
+          }
+        }}
+        confirmLabel={t({ it: 'Sblocca', en: 'Unlock' })}
         cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
       />
     </div>

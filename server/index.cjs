@@ -796,7 +796,7 @@ app.post('/api/auth/login', (req, res) => {
   const lockedUntil = getUserLock(username);
   if (lockedUntil) {
     writeAuthLog(db, { event: 'login', success: false, username: String(username), ...meta, details: { reason: 'locked', lockedUntil } });
-    res.status(429).json({ error: 'Account temporarily locked' });
+    res.status(429).json({ error: 'Account temporarily locked', lockedUntil });
     return;
   }
   let row = db
@@ -860,6 +860,9 @@ app.post('/api/auth/login', (req, res) => {
     const lock = registerUserLoginFailure(row.username);
     if (lock.lockedNow) {
       writeAuditLog(db, { level: 'important', event: 'login_lockout', userId: row.id, username: row.username, ...meta, details: { lockedUntil: lock.lockedUntil } });
+      writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'bad_password' } });
+      res.status(429).json({ error: 'Account temporarily locked', lockedUntil: lock.lockedUntil });
+      return;
     }
     writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'bad_password' } });
     res.status(401).json({ error: 'Invalid credentials' });
@@ -876,6 +879,9 @@ app.post('/api/auth/login', (req, res) => {
       const lock = registerUserLoginFailure(row.username);
       if (lock.lockedNow) {
         writeAuditLog(db, { level: 'important', event: 'login_lockout', userId: row.id, username: row.username, ...meta, details: { lockedUntil: lock.lockedUntil } });
+        writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'bad_mfa' } });
+        res.status(429).json({ error: 'Account temporarily locked', lockedUntil: lock.lockedUntil });
+        return;
       }
       writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'bad_mfa' } });
       res.status(401).json({ error: 'Invalid credentials' });
@@ -2451,7 +2457,11 @@ app.get('/api/users', requireAuth, (req, res) => {
     permsByUser.set(p.userId, list);
   }
   res.json({
-    users: users.map((u) => ({ ...u, permissions: permsByUser.get(u.id) || [] }))
+    users: users.map((u) => ({
+      ...u,
+      lockedUntil: getUserLock(u.username),
+      permissions: permsByUser.get(u.id) || []
+    }))
   });
 });
 
@@ -2687,6 +2697,35 @@ app.post('/api/users/:id/mfa-reset', requireAuth, rateByUser('users_mfa_reset', 
   writeAuditLog(db, {
     level: 'important',
     event: 'user_mfa_reset',
+    userId: req.userId,
+    username: req.username,
+    scopeType: 'user',
+    scopeId: targetId,
+    ...requestMeta(req),
+    details: { targetUsername: target.username }
+  });
+  res.json({ ok: true });
+});
+
+app.post('/api/users/:id/unlock', requireAuth, rateByUser('users_unlock', 10 * 60 * 1000, 60), (req, res) => {
+  if (!req.isAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const targetId = req.params.id;
+  const target = db.prepare('SELECT id, username, isSuperAdmin FROM users WHERE id = ?').get(targetId);
+  if (!target) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  if (target.isSuperAdmin && !req.isSuperAdmin) {
+    res.status(403).json({ error: 'Only superadmin can unlock superadmin' });
+    return;
+  }
+  clearUserLoginFailures(target.username);
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'user_unlocked',
     userId: req.userId,
     username: req.username,
     scopeType: 'user',

@@ -42,6 +42,16 @@ export const login = async (username: string, password: string, otp?: string): P
     body: JSON.stringify({ username, password, ...(otp ? { otp } : {}) })
   });
   if (!res.ok) {
+    if (res.status === 429) {
+      try {
+        const body = await res.json();
+        const err: any = new Error(body?.error || 'Account temporarily locked');
+        if (body?.lockedUntil) err.lockedUntil = body.lockedUntil;
+        throw err;
+      } catch (e) {
+        if (e instanceof Error) throw e;
+      }
+    }
     if (res.status === 401) {
       try {
         const body = await res.json();
@@ -96,6 +106,7 @@ export interface AdminUserRow {
   isAdmin: boolean;
   isSuperAdmin: boolean;
   disabled: boolean;
+  lockedUntil?: number | null;
   language: 'it' | 'en';
   firstName: string;
   lastName: string;
@@ -168,6 +179,11 @@ export const changePassword = async (id: string, payload: { oldPassword?: string
 export const resetUserMfa = async (id: string): Promise<void> => {
   const res = await apiFetch(`/api/users/${id}/mfa-reset`, { method: 'POST', credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to reset MFA (${res.status})`);
+};
+
+export const unlockUser = async (id: string): Promise<void> => {
+  const res = await apiFetch(`/api/users/${id}/unlock`, { method: 'POST', credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to unlock user (${res.status})`);
 };
 
 export const adminDeleteUser = async (id: string) => {
