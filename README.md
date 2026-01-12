@@ -1,6 +1,6 @@
 # Deskly — Floor Plan Management (Drag & Drop)
 
-Current version: **1.6.5**
+Current version: **1.7.0**
 
 Deskly is a modern web app for planning offices and infrastructure on floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, rack management with ports and 1:1 links, saved views, revision history, search/highlight, and PDF exports.
 
@@ -9,6 +9,7 @@ The UI supports **Italian and English**. When you change language from the user 
 ## Quick features
 - Drag & drop floor plan editor with rooms, objects, and layers
 - Desks palette with multiple shapes, resize/rotate, and optional PDF export
+- CCTV cameras with adjustable view cones (angle, range, rotation)
 - Rack management with devices, ports, notes, and 1:1 links
 - Search, saved views, and revision history
 - PDF exports (plan-only, print area, and rack PDF)
@@ -37,7 +38,7 @@ PayPal: https://paypal.me/falott82
 - `Client { id, shortName, name, address?, phone?, email?, vatId?, pecEmail?, description?, logoUrl?, attachments?[], sites[] }`
 - `Site { id, clientId, name, coords?, floorPlans[] }` where `coords` is an optional `lat, lng` string
 - `FloorPlan { id, siteId, name, imageUrl, width?, height?, printArea?, objects[], rooms?, views?, revisions? }`
-- `MapObject { id, type, name, description?, x, y, scale?, roomId?, layerIds?, opacity?, rotation? }`
+- `MapObject { id, type, name, description?, x, y, scale?, roomId?, layerIds?, opacity?, rotation?, cctvAngle?, cctvRange?, cctvOpacity? }`
 - `Room { id, name, color?, kind: 'rect'|'poly', ... }` (rectangles and polygons supported)
 - `FloorPlanView { id, name, description?, zoom, pan, isDefault? }`
 - `FloorPlanRevision { id, createdAt, revMajor, revMinor, name, description?, imageUrl, objects, rooms?, views? }`
@@ -102,6 +103,7 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
 - Quick search in the sidebar (filters clients/sites/floor plans by name)
 - Per-user client ordering (drag & drop clients); ordering is saved on the user profile
 - The default **ACME** demo client shows a small info badge in the sidebar; you can keep it for testing or remove it safely.
+- If a user has no default floor plan, the first available one opens automatically; if none are assigned, a notice explains that an admin must grant access.
 
 ### Settings (Admin / Superadmin)
 - CRUD for **Clients**, **Sites**, **Floor plans**
@@ -139,6 +141,7 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
 ### Workspace (Floor plan)
 - Floor plan shown as background; objects rendered on top with an icon and always-visible label
 - Add objects via palette or context menu (type → name required, description optional)
+- Object placement shows a live preview that follows the cursor; click to place.
 - The palette can be customized per user (enabled objects + ordering) from **Settings → Objects**
 - If a user has an empty palette, a quick CTA is shown to open **Settings → Objects** and add items
 - Desks: dedicated palette section + layer with multiple shapes (round, square, rectangular, double, long bench, trapezoid, L, reverse L), stretch/resize + rotate (Ctrl/⌘ + ←/→), opacity + line color/weight; not linkable/searchable; optional in PDF export
@@ -171,6 +174,7 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
   - viewport is persisted per floor plan (reload-safe)
 - Layers, grid and links:
   - assign objects to one or more **layers** and toggle visibility (work by “layers”)
+  - CCTV layer shows camera view cones; adjust angle/range/rotation from the object context menu
   - quick “Map only” toggle hides all layers (restores on reload)
   - optional **grid overlay** and configurable **grid snapping**
   - create **links** (arrows) between objects from the context menu

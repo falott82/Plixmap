@@ -185,6 +185,9 @@ export interface MapObject {
   strokeColor?: string;
   roomId?: string;
   layerIds?: string[];
+  cctvAngle?: number;
+  cctvRange?: number;
+  cctvOpacity?: number;
 }
 
 export interface LayerDefinition {

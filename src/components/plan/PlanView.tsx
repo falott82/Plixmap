@@ -168,6 +168,8 @@ const PlanView = ({ planId }: Props) => {
     return out;
   }, [getTypeLabel, objectTypeDefs]);
 
+  const isCameraType = useCallback((typeId: string) => typeId === 'camera', []);
+
   const inferDefaultLayerIds = useCallback(
     (typeId: string) =>
       typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user'
@@ -176,8 +178,10 @@ const PlanView = ({ planId }: Props) => {
           ? ['racks']
           : isDeskType(typeId)
             ? ['desks']
-            : ['devices'],
-    []
+            : isCameraType(typeId)
+              ? ['cctv']
+              : ['devices'],
+    [isCameraType]
   );
 
   const {
@@ -676,6 +680,7 @@ const PlanView = ({ planId }: Props) => {
       if (typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user') return ['users'];
       if (typeId === 'rack') return ['racks'];
       if (isDeskType(typeId)) return ['desks'];
+      if (isCameraType(typeId)) return ['cctv'];
       return ['devices'];
     };
     const objects = renderPlan.objects.filter((o: any) => {
@@ -696,7 +701,7 @@ const PlanView = ({ planId }: Props) => {
       : [];
     const links = [...baseLinks, ...rackLinks];
     return { ...renderPlan, objects, rooms, links };
-  }, [effectiveVisibleLayerIds, rackOverlayLinks, renderPlan]);
+  }, [effectiveVisibleLayerIds, isCameraType, rackOverlayLinks, renderPlan]);
 
   const linksModalObjectName = useMemo(() => {
     if (!linksModalObjectId) return '';
@@ -1302,6 +1307,7 @@ const PlanView = ({ planId }: Props) => {
 
   const contextIsRack = contextObject?.type === 'rack';
   const contextIsDesk = contextObject ? isDeskType(contextObject.type) : false;
+  const contextIsCamera = contextObject?.type === 'camera';
 
   const selectionHasRack = useMemo(() => {
     if (!renderPlan) return false;
@@ -1840,14 +1846,14 @@ const PlanView = ({ planId }: Props) => {
       if (isRotateShortcut) {
         if (!currentSelectedIds.length || !currentPlan) return;
         if (isReadOnlyRef.current) return;
-        const desks = currentSelectedIds
+        const rotatable = currentSelectedIds
           .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
-          .filter((obj): obj is MapObject => !!obj && isDeskType(obj.type));
-        if (!desks.length) return;
+          .filter((obj): obj is MapObject => !!obj && (isDeskType(obj.type) || isCameraType(obj.type)));
+        if (!rotatable.length) return;
         e.preventDefault();
         markTouched();
         const delta = isArrowLeft ? -90 : 90;
-        for (const obj of desks) {
+        for (const obj of rotatable) {
           const current = Number(obj.rotation || 0);
           updateObject(obj.id, { rotation: (current + delta + 360) % 360 });
         }
@@ -2378,10 +2384,21 @@ const PlanView = ({ planId }: Props) => {
     setPendingType(null);
   };
 
+  const getCameraDefaults = useCallback(
+    () => ({
+      rotation: 0,
+      cctvRange: 160,
+      cctvAngle: 70,
+      cctvOpacity: 0.6
+    }),
+    []
+  );
+
   const handleCreate = (payload: { name: string; description?: string; layerIds?: string[]; customValues?: Record<string, any> }) => {
     if (!plan || !modalState || isReadOnly) return;
     if (modalState.mode === 'create') {
       markTouched();
+      const extra = isCameraType(modalState.type) ? getCameraDefaults() : undefined;
       const id = addObject(
         plan.id,
         modalState.type,
@@ -2390,7 +2407,8 @@ const PlanView = ({ planId }: Props) => {
         modalState.coords.x,
         modalState.coords.y,
         lastObjectScale,
-        payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(modalState.type)
+        payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(modalState.type),
+        extra
       );
       lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
@@ -2413,6 +2431,15 @@ const PlanView = ({ planId }: Props) => {
       markTouched();
       const base = plan.objects.find((o) => o.id === modalState.objectId);
       const scale = base?.scale ?? 1;
+      const extra =
+        base && isCameraType(base.type)
+          ? {
+              rotation: base.rotation ?? 0,
+              cctvRange: (base as any).cctvRange ?? 160,
+              cctvAngle: (base as any).cctvAngle ?? 70,
+              cctvOpacity: (base as any).cctvOpacity ?? 0.6
+            }
+          : undefined;
       const id = addObject(
         plan.id,
         base?.type || 'user',
@@ -2421,7 +2448,8 @@ const PlanView = ({ planId }: Props) => {
         modalState.coords.x,
         modalState.coords.y,
         scale,
-        payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(base?.type || 'user')
+        payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(base?.type || 'user'),
+        extra
       );
       lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
@@ -4119,6 +4147,83 @@ const PlanView = ({ planId }: Props) => {
                       className="mt-1 w-full"
                     />
                   </div>
+                  {contextIsCamera ? (
+                    <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
+                      <div className="text-xs font-semibold text-slate-600">{t({ it: 'CCTV', en: 'CCTV' })}</div>
+                      <div className="mt-2">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <span>{t({ it: 'Apertura', en: 'Angle' })}</span>
+                          <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
+                            {Math.round(Number(contextObject?.cctvAngle ?? 70))}°
+                          </span>
+                        </div>
+                        <input
+                          key={`${contextMenu.id}-cctv-angle`}
+                          type="range"
+                          min={20}
+                          max={160}
+                          step={5}
+                          value={contextObject?.cctvAngle ?? 70}
+                          onChange={(e) => updateObject(contextMenu.id, { cctvAngle: Number(e.target.value) })}
+                          className="mt-1 w-full"
+                        />
+                      </div>
+                      <div className="mt-2">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <span>{t({ it: 'Raggio', en: 'Range' })}</span>
+                          <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
+                            {Math.round(Number(contextObject?.cctvRange ?? 160))}
+                          </span>
+                        </div>
+                        <input
+                          key={`${contextMenu.id}-cctv-range`}
+                          type="range"
+                          min={60}
+                          max={600}
+                          step={10}
+                          value={contextObject?.cctvRange ?? 160}
+                          onChange={(e) => updateObject(contextMenu.id, { cctvRange: Number(e.target.value) })}
+                          className="mt-1 w-full"
+                        />
+                      </div>
+                      <div className="mt-2">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <span>{t({ it: 'Rotazione', en: 'Rotation' })}</span>
+                          <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
+                            {Math.round(Number(contextObject?.rotation ?? 0))}°
+                          </span>
+                        </div>
+                        <input
+                          key={`${contextMenu.id}-cctv-rotation`}
+                          type="range"
+                          min={0}
+                          max={360}
+                          step={5}
+                          value={contextObject?.rotation ?? 0}
+                          onChange={(e) => updateObject(contextMenu.id, { rotation: Number(e.target.value) })}
+                          className="mt-1 w-full"
+                        />
+                      </div>
+                      <div className="mt-2">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <span>{t({ it: 'Intensità', en: 'Intensity' })}</span>
+                          <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
+                            {Math.round(((contextObject?.cctvOpacity ?? 0.6) || 0.6) * 100)}%
+                          </span>
+                        </div>
+                        <input
+                          key={`${contextMenu.id}-cctv-opacity`}
+                          type="range"
+                          min={0.1}
+                          max={0.9}
+                          step={0.05}
+                          value={contextObject?.cctvOpacity ?? 0.6}
+                          onChange={(e) => updateObject(contextMenu.id, { cctvOpacity: Number(e.target.value) })}
+                          className="mt-1 w-full"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                   {contextIsDesk ? (
                     <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
                       <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">

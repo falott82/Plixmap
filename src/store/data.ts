@@ -30,10 +30,11 @@ export const defaultData = (): Client[] => {
               layers: [
                 { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1 },
                 { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2 },
-                { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 3 },
-                { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 4 },
-                { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 5 },
-                { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 6 }
+                { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 3 },
+                { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 4 },
+                { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 5 },
+                { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 6 },
+                { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 7 }
               ],
               views: [
                 {

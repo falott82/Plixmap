@@ -9,6 +9,29 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.7.0',
+    date: '2026-01-13',
+    type: 'minor',
+    notes: [
+      n(
+        'Workspace: nuovo layer CCTV con telecamere e cono di visione regolabile (angolo/raggio/rotazione)',
+        'Workspace: new CCTV layer with cameras and adjustable view cone (angle/range/rotation)'
+      ),
+      n(
+        'Inserimento oggetti: anteprima che segue il mouse e click per piazzare anche fuori griglia',
+        'Object placement: live preview follows the mouse and click places even outside the grid'
+      ),
+      n(
+        'Accesso: se non c’è una planimetria predefinita si apre la prima disponibile; se non ce ne sono appare un messaggio per l’utente',
+        'Access: if no default plan is set, the first available opens; if none, a user-facing notice is shown'
+      ),
+      n(
+        'Users: guida azioni rapida + sblocco account bloccati da admin',
+        'Users: quick actions guide + admin unlock for locked accounts'
+      )
+    ]
+  },
+  {
     version: '1.6.5',
     date: '2026-01-12',
     type: 'fix',
