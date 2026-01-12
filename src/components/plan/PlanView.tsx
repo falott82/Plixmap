@@ -646,6 +646,7 @@ const PlanView = ({ planId }: Props) => {
     const layers = (renderPlan as any)?.layers || [];
     return [...layers].sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
   }, [renderPlan]);
+  const prevLayerIdsByPlanRef = useRef<Record<string, string[]>>({});
   const visibleLayerIds = visibleLayerIdsByPlan[planId] || planLayers.map((l: any) => l.id);
   const hideAllLayers = !!hiddenLayersByPlan[planId];
   const effectiveVisibleLayerIds = hideAllLayers ? [] : visibleLayerIds;
@@ -653,14 +654,18 @@ const PlanView = ({ planId }: Props) => {
     if (!planLayers.length) return;
     const layerIds = planLayers.map((l: any) => l.id);
     const current = visibleLayerIdsByPlan[planId];
-    if (!current || !current.length) {
+    const prev = prevLayerIdsByPlanRef.current[planId] || [];
+    if (!current) {
       setVisibleLayerIds(planId, layerIds);
+      prevLayerIdsByPlanRef.current[planId] = layerIds;
       return;
     }
-    const missing = layerIds.filter((id) => !current.includes(id));
-    if (missing.length) {
-      setVisibleLayerIds(planId, [...current, ...missing]);
+    const filteredCurrent = current.filter((id) => layerIds.includes(id));
+    const newIds = layerIds.filter((id) => !prev.includes(id));
+    if (newIds.length || filteredCurrent.length !== current.length) {
+      setVisibleLayerIds(planId, [...filteredCurrent, ...newIds]);
     }
+    prevLayerIdsByPlanRef.current[planId] = layerIds;
   }, [planId, planLayers, setVisibleLayerIds, visibleLayerIdsByPlan]);
 
   const canvasPlan = useMemo(() => {
