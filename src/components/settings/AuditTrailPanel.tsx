@@ -3,13 +3,20 @@ import { Download, Info, RefreshCw, Shield, ToggleLeft, ToggleRight, Trash2 } fr
 import { AuditRow, clearAuditTrail, fetchAuditTrail, getAuditSettings, setAuditSettings } from '../../api/audit';
 import { useToastStore } from '../../store/useToast';
 import { useT } from '../../i18n/useT';
+import ConfirmDialog from '../ui/ConfirmDialog';
+import { LogsClearMeta } from '../../api/logs';
 
 const formatTs = (ts: number) => {
   const d = new Date(ts);
   return `${d.toISOString().slice(0, 10)} ${d.toTimeString().slice(0, 8)}`;
 };
 
-const AuditTrailPanel = () => {
+type Props = {
+  clearInfo?: LogsClearMeta;
+  onCleared?: () => void;
+};
+
+const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
   const t = useT();
   const push = useToastStore((s) => s.push);
   const [query, setQuery] = useState('');
@@ -21,6 +28,7 @@ const AuditTrailPanel = () => {
   const [loading, setLoading] = useState(false);
   const [auditVerbose, setAuditVerbose] = useState(false);
   const [auditVerboseLoading, setAuditVerboseLoading] = useState(false);
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
   const loadSettings = async () => {
     try {
@@ -113,6 +121,13 @@ const AuditTrailPanel = () => {
     [rows]
   );
 
+  const clearedLabel = useMemo(() => {
+    if (!clearInfo?.clearedAt) return '';
+    const ts = formatTs(clearInfo.clearedAt);
+    const who = clearInfo.username || (clearInfo.userId ? t({ it: 'utente sconosciuto', en: 'unknown user' }) : '');
+    return who ? `${ts} • ${who}` : ts;
+  }, [clearInfo?.clearedAt, clearInfo?.userId, clearInfo?.username, t]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -139,25 +154,7 @@ const AuditTrailPanel = () => {
             <Download size={16} />
           </button>
           <button
-            onClick={async () => {
-              if (
-                !window.confirm(
-                  t({
-                    it: 'Svuotare tutto l’audit trail? Operazione irreversibile.',
-                    en: 'Clear the entire audit trail? This cannot be undone.'
-                  })
-                )
-              )
-                return;
-              try {
-                await clearAuditTrail();
-                setOffset(0);
-                await load();
-                push(t({ it: 'Audit trail svuotato', en: 'Audit trail cleared' }), 'success');
-              } catch {
-                push(t({ it: 'Impossibile svuotare audit trail', en: 'Failed to clear audit trail' }), 'danger');
-              }
-            }}
+            onClick={() => setConfirmClearOpen(true)}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
             title={t({ it: 'Svuota audit trail', en: 'Clear audit trail' })}
           >
@@ -215,6 +212,11 @@ const AuditTrailPanel = () => {
             <div className="mt-2 text-xs text-slate-500">
               {t({ it: `Righe: ${Math.min(total, offset + 1)}-${Math.min(total, offset + rows.length)} / ${total}`, en: `Rows: ${Math.min(total, offset + 1)}-${Math.min(total, offset + rows.length)} / ${total}` })}
             </div>
+            {clearedLabel ? (
+              <div className="mt-2 text-xs font-semibold text-sky-600">
+                {t({ it: 'Ultimo svuotamento', en: 'Last cleared' })}: {clearedLabel}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -322,6 +324,29 @@ const AuditTrailPanel = () => {
           {t({ it: 'Successiva', en: 'Next' })}
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmClearOpen}
+        title={t({ it: 'Svuotare l’audit trail?', en: 'Clear audit trail?' })}
+        description={t({
+          it: 'Svuota tutti gli eventi. Operazione irreversibile. L’azione verrà registrata con il tuo utente.',
+          en: 'Clear all events. This cannot be undone. The action will be recorded with your user.'
+        })}
+        onCancel={() => setConfirmClearOpen(false)}
+        onConfirm={async () => {
+          setConfirmClearOpen(false);
+          try {
+            await clearAuditTrail();
+            setOffset(0);
+            await load();
+            onCleared?.();
+            push(t({ it: 'Audit trail svuotato', en: 'Audit trail cleared' }), 'success');
+          } catch {
+            push(t({ it: 'Impossibile svuotare audit trail', en: 'Failed to clear audit trail' }), 'danger');
+          }
+        }}
+        confirmLabel={t({ it: 'Svuota', en: 'Clear' })}
+      />
     </div>
   );
 };

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, Info, RefreshCw, Trash2 } from 'lucide-react';
-import { AuditLogRow, clearAuthLogs, fetchAuditLogs } from '../../api/auth';
+import { RefreshCw, Trash2 } from 'lucide-react';
 import { useToastStore } from '../../store/useToast';
 import { useT } from '../../i18n/useT';
+import { EmailLogRow, clearEmailLogs, fetchEmailLogs } from '../../api/email';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { LogsClearMeta } from '../../api/logs';
 
@@ -11,56 +11,17 @@ const formatTs = (ts: number) => {
   return `${d.toISOString().slice(0, 10)} ${d.toTimeString().slice(0, 8)}`;
 };
 
-const downloadBlob = (blob: Blob, filename: string) => {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-};
-
-const toCsv = (rows: AuditLogRow[]) => {
-  const esc = (v: any) => {
-    const s = String(v ?? '');
-    if (!/[,"\n]/.test(s)) return s;
-    return `"${s.replace(/"/g, '""')}"`;
-  };
-  const header = ['ts', 'event', 'success', 'username', 'ip', 'method', 'path', 'userAgent', 'details'];
-  const out = [header.join(',')];
-  for (const r of rows) {
-    out.push(
-      [
-        formatTs(r.ts),
-        r.event,
-        r.success ? 'true' : 'false',
-        r.username || '',
-        r.ip || '',
-        r.method || '',
-        r.path || '',
-        r.userAgent || '',
-        r.details || ''
-      ]
-        .map(esc)
-        .join(',')
-    );
-  }
-  return out.join('\n');
-};
-
 type Props = {
   clearInfo?: LogsClearMeta;
   onCleared?: () => void;
 };
 
-const LogsPanel = ({ clearInfo, onCleared }: Props) => {
+const EmailLogsPanel = ({ clearInfo, onCleared }: Props) => {
   const { push } = useToastStore();
   const t = useT();
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState<AuditLogRow[]>([]);
+  const [rows, setRows] = useState<EmailLogRow[]>([]);
   const [limit, setLimit] = useState(25);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
@@ -69,11 +30,11 @@ const LogsPanel = ({ clearInfo, onCleared }: Props) => {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetchAuditLogs({ q: query.trim() || undefined, limit, offset });
-      setRows(res.rows);
+      const res = await fetchEmailLogs({ q: query.trim() || undefined, limit, offset });
+      setRows(res.rows || []);
       setTotal(res.total || 0);
     } catch {
-      push(t({ it: 'Errore caricamento log', en: 'Failed to load logs' }), 'danger');
+      push(t({ it: 'Errore caricamento log email', en: 'Failed to load email logs' }), 'danger');
     } finally {
       setLoading(false);
     }
@@ -102,24 +63,14 @@ const LogsPanel = ({ clearInfo, onCleared }: Props) => {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-semibold text-ink">{t({ it: 'Log accessi (superadmin)', en: 'Authentication logs (superadmin)' })}</div>
+          <div className="text-sm font-semibold text-ink">{t({ it: 'Log email (superadmin)', en: 'Email logs (superadmin)' })}</div>
           <div className="text-xs text-slate-500">{t({ it: `Righe: ${rangeLabel}`, en: `Rows: ${rangeLabel}` })}</div>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => {
-              const csv = toCsv(rows);
-              downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `deskly-auth-logs-${new Date().toISOString().slice(0, 10)}.csv`);
-            }}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            title={t({ it: 'Esporta CSV', en: 'Export CSV' })}
-          >
-            <Download size={16} />
-          </button>
-          <button
             onClick={() => setConfirmClearOpen(true)}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-            title={t({ it: 'Svuota log', en: 'Clear logs' })}
+            title={t({ it: 'Svuota log email', en: 'Clear email logs' })}
           >
             <Trash2 size={16} />
           </button>
@@ -136,43 +87,12 @@ const LogsPanel = ({ clearInfo, onCleared }: Props) => {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-card">
-        <div className="flex items-start gap-2">
-          <div className="mt-0.5 text-slate-500">
-            <Info size={16} />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-ink">{t({ it: 'Cosa sono i logs', en: 'What logs are' })}</div>
-            <div className="mt-1 text-sm text-slate-700">
-              {t({
-                it: 'Qui trovi solo eventi di autenticazione: login (anche falliti) e logout. Per gli eventi di sistema e le azioni importanti usa la tab “Audit trail”.',
-                en: 'This section includes authentication events only: login attempts (including failures) and logout. For system events and important actions, use the “Audit trail” tab.'
-              })}
-            </div>
-            <div className="mt-2 text-xs text-slate-600">
-              <span className="font-semibold">login</span>:{' '}
-              {t({
-                it: 'tentativo di accesso (success/fail). In details.reason puoi trovare bad_password / user_not_found / disabled.',
-                en: 'login attempt (success/fail). In details.reason you may see bad_password / user_not_found / disabled.'
-              })}
-              <span className="mx-2">•</span>
-              <span className="font-semibold">logout</span>: {t({ it: 'uscita dell’utente.', en: 'user signed out.' })}
-            </div>
-            {clearedLabel ? (
-              <div className="mt-2 text-xs font-semibold text-sky-600">
-                {t({ it: 'Ultimo svuotamento', en: 'Last cleared' })}: {clearedLabel}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="flex-1">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={t({ it: 'Cerca per username, IP, path o evento…', en: 'Search by username, IP, path or event…' })}
+            placeholder={t({ it: 'Cerca per destinatario, oggetto o utente…', en: 'Search by recipient, subject or user…' })}
             className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none ring-primary/30 focus:ring-2"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -208,30 +128,44 @@ const LogsPanel = ({ clearInfo, onCleared }: Props) => {
         </button>
       </div>
 
+      {clearedLabel ? (
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-sky-600 shadow-card">
+          {t({ it: 'Ultimo svuotamento', en: 'Last cleared' })}: {clearedLabel}
+        </div>
+      ) : null}
+
       <div className="rounded-2xl border border-slate-200 bg-white shadow-card">
         <div className="grid grid-cols-12 gap-2 border-b border-slate-200 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
           <div className="col-span-2">{t({ it: 'Quando', en: 'When' })}</div>
-          <div className="col-span-2">{t({ it: 'Evento', en: 'Event' })}</div>
+          <div className="col-span-3">{t({ it: 'Destinatario', en: 'Recipient' })}</div>
+          <div className="col-span-3">{t({ it: 'Oggetto', en: 'Subject' })}</div>
           <div className="col-span-2">{t({ it: 'Utente', en: 'User' })}</div>
-          <div className="col-span-2">IP</div>
-          <div className="col-span-2">HTTP</div>
-          <div className="col-span-2">{t({ it: 'Dettagli', en: 'Details' })}</div>
+          <div className="col-span-2">{t({ it: 'Esito', en: 'Result' })}</div>
         </div>
         {rows.length ? (
           rows.map((r) => (
             <div key={r.id} className="grid grid-cols-12 gap-2 px-4 py-3 text-xs hover:bg-slate-50">
               <div className="col-span-2 text-slate-600">{formatTs(r.ts)}</div>
-              <div className="col-span-2">
-                <span className={`rounded-full px-2 py-1 font-semibold ${r.success ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                  {r.event}
-                </span>
+              <div className="col-span-3 truncate text-slate-700" title={r.recipient || ''}>
+                {r.recipient || '-'}
+              </div>
+              <div className="col-span-3 truncate text-slate-700" title={r.subject || ''}>
+                {r.subject || '-'}
               </div>
               <div className="col-span-2 truncate text-slate-700">{r.username || '-'}</div>
-              <div className="col-span-2 truncate text-slate-700">{r.ip || '-'}</div>
-              <div className="col-span-2 truncate text-slate-700">{r.method ? `${r.method} ${r.path || ''}` : r.path || '-'}</div>
-              <div className="col-span-2 truncate text-slate-600" title={r.details ? String(r.details) : ''}>
-                {r.details ? String(r.details).slice(0, 60) : '-'}
+              <div className="col-span-2">
+                <span
+                  className={`rounded-full px-2 py-1 font-semibold ${
+                    r.success ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                  }`}
+                  title={r.error || ''}
+                >
+                  {r.success ? t({ it: 'Inviata', en: 'Sent' }) : t({ it: 'Errore', en: 'Failed' })}
+                </span>
               </div>
+              {!r.success && r.error ? (
+                <div className="col-span-12 text-[11px] text-rose-600">{r.error}</div>
+              ) : null}
             </div>
           ))
         ) : (
@@ -262,22 +196,22 @@ const LogsPanel = ({ clearInfo, onCleared }: Props) => {
 
       <ConfirmDialog
         open={confirmClearOpen}
-        title={t({ it: 'Svuotare i log accessi?', en: 'Clear authentication logs?' })}
+        title={t({ it: 'Svuotare i log email?', en: 'Clear email logs?' })}
         description={t({
-          it: 'Svuota tutti i log accessi. Operazione irreversibile. L’azione verrà registrata con il tuo utente.',
-          en: 'Clear all auth logs. This cannot be undone. The action will be recorded with your user.'
+          it: 'Svuota tutti i log email. Operazione irreversibile. L’azione verrà registrata con il tuo utente.',
+          en: 'Clear all email logs. This cannot be undone. The action will be recorded with your user.'
         })}
         onCancel={() => setConfirmClearOpen(false)}
         onConfirm={async () => {
           setConfirmClearOpen(false);
           try {
-            await clearAuthLogs();
+            await clearEmailLogs();
             setOffset(0);
             await load();
             onCleared?.();
-            push(t({ it: 'Log svuotati', en: 'Logs cleared' }), 'success');
+            push(t({ it: 'Log email svuotati', en: 'Email logs cleared' }), 'success');
           } catch {
-            push(t({ it: 'Impossibile svuotare i log', en: 'Failed to clear logs' }), 'danger');
+            push(t({ it: 'Impossibile svuotare i log email', en: 'Failed to clear email logs' }), 'danger');
           }
         }}
         confirmLabel={t({ it: 'Svuota', en: 'Clear' })}
@@ -286,4 +220,4 @@ const LogsPanel = ({ clearInfo, onCleared }: Props) => {
   );
 };
 
-export default LogsPanel;
+export default EmailLogsPanel;

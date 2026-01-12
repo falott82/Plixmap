@@ -5,6 +5,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { WebSocketServer } = require('ws');
+const nodemailer = require('nodemailer');
 const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret } = require('./db.cjs');
 const {
   parseCookies,
@@ -40,6 +41,7 @@ const {
   setExternalUserHidden,
   listImportSummary
 } = require('./customImport.cjs');
+const { getEmailConfigSafe, getEmailConfig, upsertEmailConfig, logEmailAttempt, listEmailLogs } = require('./email.cjs');
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -71,6 +73,57 @@ const authSecret = getOrCreateAuthSecret(db);
 const dataSecret = getOrCreateDataSecret(db);
 // Invalidate sessions on each server restart (forces login after reboot/redeploy).
 const serverInstanceId = crypto.randomBytes(16).toString('hex');
+
+const readLogsMeta = () => {
+  try {
+    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('logsMeta');
+    if (!row?.value) return {};
+    return JSON.parse(row.value) || {};
+  } catch {
+    return {};
+  }
+};
+
+const resolveUsername = (userId) => {
+  if (!userId) return null;
+  try {
+    return db.prepare('SELECT username FROM users WHERE id = ?').get(userId)?.username || null;
+  } catch {
+    return null;
+  }
+};
+
+const setAppSetting = (key, value) => {
+  const now = Date.now();
+  try {
+    db.prepare(
+      `INSERT INTO app_settings (key, value, updatedAt) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value=excluded.value, updatedAt=excluded.updatedAt`
+    ).run(key, String(value), now);
+  } catch {
+    // ignore
+  }
+};
+
+const getAppSetting = (key) => {
+  try {
+    return db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key)?.value || null;
+  } catch {
+    return null;
+  }
+};
+
+const writeLogsMeta = (next) => {
+  setAppSetting('logsMeta', JSON.stringify(next));
+};
+
+const markLogsCleared = (kind, userId, username) => {
+  const meta = readLogsMeta();
+  const resolved = username || resolveUsername(userId);
+  meta[kind] = { clearedAt: Date.now(), userId: userId || null, username: resolved || null };
+  writeLogsMeta(meta);
+  return meta;
+};
 
 // --- Realtime (WebSocket): plan presence + plan locking (exclusive editor) ---
 const wsPlanMembers = new Map(); // planId -> Set<ws>
@@ -332,6 +385,7 @@ const requireAuth = (req, res, next) => {
     }
   }
   req.userId = session.userId;
+  req.username = userRow.username;
   req.isAdmin = !!userRow.isAdmin;
   req.isSuperAdmin = !!userRow.isSuperAdmin && userRow.username === 'superadmin';
   next();
@@ -607,12 +661,39 @@ app.get('/api/settings/audit', requireAuth, (req, res) => {
   res.json({ auditVerbose: getAuditVerboseEnabled(db) });
 });
 
+app.get('/api/settings/npm-audit', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const raw = getAppSetting('npmAuditLastCheck');
+  let lastCheckAt = null;
+  let lastCheckBy = null;
+  let lastCheckUserId = null;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        lastCheckAt = Number(parsed.ts || parsed.lastCheckAt || 0) || null;
+        lastCheckUserId = parsed.userId || null;
+        lastCheckBy = parsed.username || resolveUsername(parsed.userId) || null;
+      } else {
+        lastCheckAt = Number(raw) || null;
+      }
+    } catch {
+      lastCheckAt = Number(raw) || null;
+    }
+  }
+  res.json({ lastCheckAt, lastCheckBy, lastCheckUserId });
+});
+
 app.post('/api/settings/npm-audit', requireAuth, (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
   const startedAt = Date.now();
+  const checkStartedAt = Date.now();
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   execFile(
     npmCmd,
@@ -655,11 +736,21 @@ app.post('/api/settings/npm-audit', requireAuth, (req, res) => {
           details: { summary, exitCode, durationMs }
         });
       }
+      setAppSetting(
+        'npmAuditLastCheck',
+        JSON.stringify({
+          ts: checkStartedAt,
+          userId: req.userId || null,
+          username: req.username || resolveUsername(req.userId) || null
+        })
+      );
       res.json({
         ok,
         summary,
         durationMs,
         exitCode,
+        lastCheckAt: checkStartedAt,
+        lastCheckBy: req.username || resolveUsername(req.userId) || null,
         error: !ok ? (err?.message || 'Failed to run npm audit') : undefined,
         stderr: trim(stderr)
       });
@@ -1139,6 +1230,168 @@ app.put('/api/settings/audit', requireAuth, (req, res) => {
   res.json({ ok: true, auditVerbose: enabled });
 });
 
+app.get('/api/settings/email', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  res.json({ config: getEmailConfigSafe(db) });
+});
+
+app.put('/api/settings/email', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const payload = req.body || {};
+  const updated = upsertEmailConfig(db, dataSecret, {
+    host: payload.host,
+    port: payload.port,
+    secure: payload.secure,
+    securityMode: payload.securityMode,
+    username: payload.username,
+    password: payload.password,
+    fromName: payload.fromName,
+    fromEmail: payload.fromEmail
+  });
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'email_settings_update',
+    userId: req.userId,
+    username: req.username,
+    ...requestMeta(req),
+    details: { host: updated?.host || null, port: updated?.port || null, securityMode: updated?.securityMode || null }
+  });
+  res.json({ ok: true, config: updated });
+});
+
+app.post('/api/settings/email/test', requireAuth, async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const recipient = String(req.body?.recipient || '').trim();
+  const subjectInput = String(req.body?.subject || '').trim();
+  if (!recipient) {
+    res.status(400).json({ error: 'Missing recipient' });
+    return;
+  }
+  const config = getEmailConfig(db, dataSecret);
+  if (!config || !config.host) {
+    res.status(400).json({ error: 'Missing SMTP host' });
+    return;
+  }
+  if (config.username && !config.password) {
+    res.status(400).json({ error: 'Missing SMTP password' });
+    return;
+  }
+  const fromEmail = config.fromEmail || config.username;
+  if (!fromEmail) {
+    res.status(400).json({ error: 'Missing from email' });
+    return;
+  }
+  const subject = subjectInput || 'Test Email';
+  const fromLabel = config.fromName ? `"${config.fromName.replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
+  const securityMode = config.securityMode || (config.secure ? 'ssl' : 'starttls');
+  const transport = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: securityMode === 'ssl',
+    requireTLS: securityMode === 'starttls',
+    ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
+  });
+  try {
+    const info = await transport.sendMail({
+      from: fromLabel,
+      to: recipient,
+      subject,
+      text: 'This is a test email from Deskly.'
+    });
+    logEmailAttempt(db, {
+      userId: req.userId,
+      username: req.username,
+      recipient,
+      subject,
+      success: true,
+      details: {
+        host: config.host,
+        port: config.port,
+        secure: !!config.secure,
+        fromEmail,
+        messageId: info?.messageId || null
+      }
+    });
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'email_test_sent',
+      userId: req.userId,
+      username: req.username,
+      ...requestMeta(req),
+      details: { recipient, messageId: info?.messageId || null }
+    });
+    res.json({ ok: true, messageId: info?.messageId || null });
+  } catch (err) {
+    logEmailAttempt(db, {
+      userId: req.userId,
+      username: req.username,
+      recipient,
+      subject,
+      success: false,
+      error: err?.message || 'Failed to send',
+      details: {
+        host: config.host,
+        port: config.port,
+        secure: !!config.secure,
+        fromEmail
+      }
+    });
+    res.status(500).json({ error: 'Failed to send test email', detail: err?.message || null });
+  }
+});
+
+app.get('/api/settings/email/logs', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const result = listEmailLogs(db, { q: req.query.q, limit: req.query.limit, offset: req.query.offset });
+  res.json(result);
+});
+
+app.post('/api/settings/email/logs/clear', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const total = Number(db.prepare('SELECT COUNT(1) as c FROM email_log').get()?.c || 0);
+  db.prepare('DELETE FROM email_log').run();
+  markLogsCleared('mail', req.userId, req.username);
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'email_log_cleared',
+    userId: req.userId,
+    username: req.username,
+    ...requestMeta(req),
+    details: { count: total }
+  });
+  res.json({ ok: true, deleted: total });
+});
+
+app.get('/api/settings/logs-meta', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const meta = readLogsMeta();
+  const normalized = {};
+  Object.entries(meta || {}).forEach(([kind, info]) => {
+    if (!info || typeof info !== 'object') return;
+    const username = info.username || resolveUsername(info.userId);
+    normalized[kind] = { ...info, username: username || null };
+  });
+  res.json({ meta: normalized });
+});
+
 app.post('/api/audit', requireAuth, (req, res) => {
   const { event, level, scopeType, scopeId, details } = req.body || {};
   if (!event || typeof event !== 'string') {
@@ -1217,6 +1470,7 @@ app.post('/api/audit/clear', requireAuth, (req, res) => {
     return;
   }
   db.prepare('DELETE FROM audit_log').run();
+  markLogsCleared('audit', req.userId, req.username);
   writeAuditLog(db, { level: 'important', event: 'audit_log_cleared', userId: req.userId, username: req.username, ...requestMeta(req) });
   res.json({ ok: true });
 });
@@ -2048,6 +2302,7 @@ app.post('/api/admin/logs/clear', requireAuth, (req, res) => {
     return;
   }
   db.prepare('DELETE FROM auth_log').run();
+  markLogsCleared('auth', req.userId, req.username);
   writeAuditLog(db, { level: 'important', event: 'auth_log_cleared', userId: req.userId, username: req.username, ...requestMeta(req) });
   res.json({ ok: true });
 });

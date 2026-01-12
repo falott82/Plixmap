@@ -1,13 +1,85 @@
-import { Fragment } from 'react';
+import { Fragment, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Layers, History, Keyboard } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
 import { shallow } from 'zustand/shallow';
 import { useT } from '../../i18n/useT';
+import { releaseHistory } from '../../version/history';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 const HelpPanel = () => {
   const { helpOpen, closeHelp } = useUIStore((s) => ({ helpOpen: s.helpOpen, closeHelp: s.closeHelp }), shallow);
   const t = useT();
+  const latestVersion = releaseHistory[0]?.version || '0.0.0';
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const sections = useMemo(
+    () => [
+      { id: 'help-login', label: t({ it: 'Login & permessi', en: 'Login & permissions' }) },
+      { id: 'help-navigation', label: t({ it: 'Navigazione & upload', en: 'Navigation & upload' }) },
+      { id: 'help-objects', label: t({ it: 'Oggetti sulla mappa', en: 'Objects on the map' }) },
+      { id: 'help-rooms', label: t({ it: 'Stanze logiche', en: 'Logical rooms' }) },
+      { id: 'help-layers', label: t({ it: 'Livelli, griglia e collegamenti', en: 'Layers, grid and links' }) },
+      { id: 'help-search', label: t({ it: 'Ricerca e highlight', en: 'Search & highlight' }) },
+      { id: 'help-shortcuts', label: t({ it: 'Scorciatoie da tastiera', en: 'Keyboard shortcuts' }) },
+      { id: 'help-views', label: t({ it: 'Viste & revisioni', en: 'Views & revisions' }) },
+      { id: 'help-export', label: t({ it: 'Export PDF', en: 'PDF export' }) }
+    ],
+    [t]
+  );
+
+  const handleJump = (id: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    try {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch {
+      el.scrollIntoView();
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (exporting) return;
+    const node = contentRef.current;
+    if (!node) return;
+    setExporting(true);
+    try {
+      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4', compress: true });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 24;
+      const maxWidth = pageWidth - margin * 2;
+      let cursorY = margin;
+      const blocks = Array.from(node.querySelectorAll('[data-help-block]'));
+
+      for (const block of blocks) {
+        const canvas = await html2canvas(block as HTMLElement, { backgroundColor: '#ffffff', scale: 2 });
+        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+        const imgWidth = maxWidth;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        const availableHeight = pageHeight - margin * 2;
+        const scale = imgHeight > availableHeight ? availableHeight / imgHeight : 1;
+        const renderWidth = imgWidth * scale;
+        const renderHeight = imgHeight * scale;
+        const x = margin + (maxWidth - renderWidth) / 2;
+
+        if (cursorY + renderHeight > pageHeight - margin) {
+          pdf.addPage();
+          cursorY = margin;
+        }
+        pdf.addImage(imgData, 'JPEG', x, cursorY, renderWidth, renderHeight);
+        cursorY += renderHeight + 12;
+      }
+
+      pdf.save(`deskly_quick_help_v${latestVersion}.pdf`);
+    } catch {
+      // ignore
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <Transition show={helpOpen} as={Fragment}>
@@ -35,16 +107,44 @@ const HelpPanel = () => {
               leaveTo="opacity-0 translate-y-4"
             >
               <Dialog.Panel className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-start justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({ it: 'Aiuto rapido', en: 'Quick help' })}
-                  </Dialog.Title>
-                  <button onClick={closeHelp} className="text-slate-500 hover:text-ink">
-                    <X size={18} />
-                  </button>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <Dialog.Title className="text-lg font-semibold text-ink">
+                      {t({ it: 'Aiuto rapido', en: 'Quick help' })}
+                    </Dialog.Title>
+                    <div className="text-xs font-semibold text-slate-500">v{latestVersion}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleExportPdf}
+                      disabled={exporting}
+                      className="flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      title={t({ it: 'Scarica quick help in PDF', en: 'Download quick help as PDF' })}
+                    >
+                      <FileDown size={14} />
+                      PDF
+                    </button>
+                    <button onClick={closeHelp} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
                 </div>
-                <div className="mt-4 space-y-4 text-sm text-slate-700">
-                  <div className="rounded-xl bg-mist p-3">
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {sections.map((section) => (
+                    <button
+                      key={section.id}
+                      onClick={() => handleJump(section.id)}
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </div>
+                <div ref={contentRef} className="mt-4 space-y-4 text-sm text-slate-700">
+                  <div data-help-block className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500">
+                    {t({ it: 'Quick help — versione', en: 'Quick help — version' })} v{latestVersion}
+                  </div>
+                  <div data-help-block id="help-login" className="rounded-xl bg-mist p-3">
                     <div className="flex items-center gap-2 font-semibold text-ink">
                       <KeyRound size={16} /> {t({ it: 'Login & permessi', en: 'Login & permissions' })}
                     </div>
@@ -76,7 +176,7 @@ const HelpPanel = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl bg-mist p-3">
+                  <div data-help-block id="help-navigation" className="rounded-xl bg-mist p-3">
                     <div className="flex items-center gap-2 font-semibold text-ink">
                       <UploadCloud size={16} /> {t({ it: 'Navigazione & upload', en: 'Navigation & upload' })}
                     </div>
@@ -138,7 +238,7 @@ const HelpPanel = () => {
                       <li>{t({ it: 'Il file caricato diventa lo sfondo della mappa.', en: 'The uploaded file becomes the map background.' })}</li>
                     </ul>
                   </div>
-                  <div className="rounded-xl bg-mist p-3">
+                  <div data-help-block id="help-objects" className="rounded-xl bg-mist p-3">
                     <div className="flex items-center gap-2 font-semibold text-ink">
                       <MousePointerClick size={16} /> {t({ it: 'Oggetti sulla mappa', en: 'Objects on the map' })}
                     </div>
@@ -181,7 +281,7 @@ const HelpPanel = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl bg-mist p-3">
+                  <div data-help-block id="help-rooms" className="rounded-xl bg-mist p-3">
                     <div className="flex items-center gap-2 font-semibold text-ink">
                       <Layers size={16} /> {t({ it: 'Stanze logiche', en: 'Logical rooms' })}
                     </div>
@@ -219,7 +319,7 @@ const HelpPanel = () => {
                     </ul>
                   </div>
 
-                  <div className="rounded-xl bg-mist p-3">
+                  <div data-help-block id="help-layers" className="rounded-xl bg-mist p-3">
                     <div className="flex items-center gap-2 font-semibold text-ink">
                       <Layers size={16} /> {t({ it: 'Livelli, griglia e collegamenti', en: 'Layers, grid and links' })}
                     </div>
@@ -262,7 +362,7 @@ const HelpPanel = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl bg-mist p-3">
+                  <div data-help-block id="help-search" className="rounded-xl bg-mist p-3">
                     <div className="flex items-center gap-2 font-semibold text-ink">
                       <Search size={16} /> {t({ it: 'Ricerca e highlight', en: 'Search & highlight' })}
                     </div>
@@ -288,7 +388,7 @@ const HelpPanel = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl bg-mist p-3">
+                  <div data-help-block id="help-shortcuts" className="rounded-xl bg-mist p-3">
                     <div className="flex items-center gap-2 font-semibold text-ink">
                       <Keyboard size={16} /> {t({ it: 'Scorciatoie da tastiera', en: 'Keyboard shortcuts' })}
                     </div>
@@ -373,7 +473,7 @@ const HelpPanel = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl bg-mist p-3">
+                  <div data-help-block id="help-views" className="rounded-xl bg-mist p-3">
                     <div className="flex items-center gap-2 font-semibold text-ink">
                       <History size={16} /> {t({ it: 'Viste & revisioni', en: 'Views & revisions' })}
                     </div>
@@ -404,7 +504,7 @@ const HelpPanel = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl bg-mist p-3">
+                  <div data-help-block id="help-export" className="rounded-xl bg-mist p-3">
                     <div className="flex items-center gap-2 font-semibold text-ink">
                       <FileDown size={16} /> {t({ it: 'Export PDF', en: 'PDF export' })}
                     </div>

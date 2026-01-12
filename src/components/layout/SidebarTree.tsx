@@ -126,6 +126,7 @@ const SidebarTree = () => {
   const [clientNotesId, setClientNotesId] = useState<string | null>(null);
   const [clientAttachmentsId, setClientAttachmentsId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ kind: 'client' | 'plan'; id: string; label: string } | null>(null);
+  const [missingPlansNotice, setMissingPlansNotice] = useState<{ clientName: string } | null>(null);
   const [clonePlan, setClonePlan] = useState<{ planId: string; name: string } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ siteId: string; planId: string } | null>(null);
@@ -272,6 +273,12 @@ const SidebarTree = () => {
           <div key={client.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
             <div
               className="flex items-center gap-2 text-sm font-semibold text-ink"
+              onClick={() => {
+                const hasPlans = client.sites.some((site) => site.floorPlans.length > 0);
+                if (!hasPlans) {
+                  setMissingPlansNotice({ clientName: client.shortName || client.name });
+                }
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setClientMenu({ clientId: client.id, x: e.clientX, y: e.clientY });
@@ -666,6 +673,22 @@ const SidebarTree = () => {
           setClonePlan(null);
           if (newId) navigate(`/plan/${newId}`);
         }}
+      />
+
+      <ConfirmDialog
+        open={!!missingPlansNotice}
+        title={t({ it: 'Planimetrie mancanti', en: 'Missing floor plans' })}
+        description={t({
+          it: 'Occorre andare su impostazioni e definire sites e planimetrie prima di poter modificare il cliente.',
+          en: 'You need to go to settings and define sites and floor plans before you can edit this client.'
+        })}
+        onCancel={() => setMissingPlansNotice(null)}
+        onConfirm={() => {
+          setMissingPlansNotice(null);
+          navigate('/settings?tab=data');
+        }}
+        confirmLabel={t({ it: 'Vai alle impostazioni', en: 'Go to settings' })}
+        cancelLabel={t({ it: 'Chiudi', en: 'Close' })}
       />
 
       <ConfirmDialog

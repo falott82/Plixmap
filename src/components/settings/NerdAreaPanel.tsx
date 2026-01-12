@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import pkg from '../../../package.json';
 import { Download, ShieldCheck } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { useUIStore } from '../../store/useUIStore';
-import { runNpmAudit, NpmAuditResult } from '../../api/nerd';
+import { fetchNpmAuditStatus, runNpmAudit, NpmAuditResult } from '../../api/nerd';
 import { useToastStore } from '../../store/useToast';
 
 const purposes: Record<string, string> = {
@@ -52,6 +52,8 @@ const NerdAreaPanel = () => {
   const [auditRunning, setAuditRunning] = useState(false);
   const [auditResult, setAuditResult] = useState<NpmAuditResult | null>(null);
   const [auditRunAt, setAuditRunAt] = useState<number | null>(null);
+  const [auditLastCheckAt, setAuditLastCheckAt] = useState<number | null>(null);
+  const [auditLastCheckBy, setAuditLastCheckBy] = useState<string | null>(null);
   const [auditDetailsOpen, setAuditDetailsOpen] = useState(false);
   const { push } = useToastStore();
   const { perfOverlayEnabled, togglePerfOverlay } = useUIStore(
@@ -82,6 +84,15 @@ const NerdAreaPanel = () => {
     URL.revokeObjectURL(url);
   };
 
+  useEffect(() => {
+    fetchNpmAuditStatus()
+      .then((res) => {
+        setAuditLastCheckAt(res.lastCheckAt || null);
+        setAuditLastCheckBy(res.lastCheckBy || null);
+      })
+      .catch(() => {});
+  }, []);
+
   const handleRunAudit = async () => {
     if (auditRunning) return;
     setAuditRunning(true);
@@ -90,6 +101,8 @@ const NerdAreaPanel = () => {
       const res = await runNpmAudit();
       setAuditResult(res);
       setAuditRunAt(Date.now());
+      if (typeof res.lastCheckAt === 'number') setAuditLastCheckAt(res.lastCheckAt);
+      if (res.lastCheckBy !== undefined) setAuditLastCheckBy(res.lastCheckBy || null);
       if (res.ok) {
         const total = res.summary?.total || 0;
         push(
@@ -111,6 +124,8 @@ const NerdAreaPanel = () => {
 
   const auditSummary = auditResult?.summary;
   const auditStamp = auditRunAt ? new Date(auditRunAt).toLocaleString() : '';
+  const auditLastStamp = auditLastCheckAt ? new Date(auditLastCheckAt).toLocaleString() : '';
+  const auditLastLabel = auditLastStamp ? (auditLastCheckBy ? `${auditLastStamp} • ${auditLastCheckBy}` : auditLastStamp) : '';
 
   return (
     <div className="space-y-4">
@@ -139,10 +154,25 @@ const NerdAreaPanel = () => {
               })}
             </div>
           </div>
-          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-            <input type="checkbox" checked={!!perfOverlayEnabled} onChange={togglePerfOverlay} />
-            {t({ it: 'Abilita telemetria', en: 'Enable telemetry' })}
-          </label>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-slate-700">{t({ it: 'On/Off', en: 'On/Off' })}</span>
+            <button
+              type="button"
+              onClick={togglePerfOverlay}
+              role="switch"
+              aria-checked={!!perfOverlayEnabled}
+              className={`relative inline-flex h-7 w-12 items-center rounded-full border transition ${
+                perfOverlayEnabled ? 'border-primary bg-primary/80' : 'border-slate-200 bg-slate-200'
+              }`}
+              title={t({ it: 'Abilita telemetria', en: 'Enable telemetry' })}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                  perfOverlayEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -159,6 +189,11 @@ const NerdAreaPanel = () => {
                 en: 'Runs npm audit --omit=dev --audit-level=high on the server.'
               })}
             </div>
+            {auditLastLabel ? (
+              <div className="mt-1 text-xs font-semibold text-sky-600">
+                {t({ it: 'Ultimo check salvato', en: 'Last check saved' })}: {auditLastLabel}
+              </div>
+            ) : null}
           </div>
           <button
             onClick={handleRunAudit}
