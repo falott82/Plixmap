@@ -9,6 +9,29 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.6.2',
+    date: '2026-01-11',
+    type: 'fix',
+    notes: [
+      n(
+        'Sicurezza: permessi verificati per lock/presenza realtime delle planimetrie',
+        'Security: permissions enforced for realtime plan locks/presence'
+      ),
+      n(
+        'Sicurezza: asset /uploads accessibili solo con sessione valida',
+        'Security: /uploads assets now require an authenticated session'
+      ),
+      n(
+        'Sicurezza: import esterno con validazione URL e limite dimensione risposta',
+        'Security: external import URL validation with response size limits'
+      ),
+      n(
+        'Affidabilità: rate limit login con cleanup e IP proxy configurabile',
+        'Reliability: login rate-limit cleanup with configurable proxy IPs'
+      )
+    ]
+  },
+  {
     version: '1.6.1',
     date: '2026-01-10',
     type: 'minor',

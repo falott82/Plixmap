@@ -409,6 +409,7 @@ const PlanView = ({ planId }: Props) => {
   const location = useLocation();
   const navigate = useNavigate();
   const searchDebugEnabled = useMemo(() => {
+    if (!import.meta.env.DEV) return false;
     try {
       return new URLSearchParams(location.search || '').get('searchDebug') === '1';
     } catch {

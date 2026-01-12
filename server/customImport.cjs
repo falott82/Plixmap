@@ -1,4 +1,138 @@
 const crypto = require('crypto');
+const dns = require('dns').promises;
+const net = require('net');
+
+const MAX_IMPORT_RESPONSE_BYTES = (() => {
+  const raw = Number(process.env.DESKLY_IMPORT_MAX_BYTES || '');
+  return Number.isFinite(raw) && raw > 0 ? raw : 2 * 1024 * 1024;
+})();
+const ALLOW_PRIVATE_IMPORT = (() => {
+  const raw = String(process.env.DESKLY_IMPORT_ALLOW_PRIVATE || '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(raw);
+})();
+
+const isPrivateIpv4 = (ip) => {
+  const parts = ip.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 0) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+};
+
+const isPrivateIpv6 = (ip) => {
+  const val = ip.toLowerCase();
+  if (val === '::1') return true;
+  if (val.startsWith('fe80:') || val.startsWith('fe80::')) return true;
+  if (val.startsWith('fc') || val.startsWith('fd')) return true;
+  return false;
+};
+
+const isPrivateIp = (ip) => {
+  const type = net.isIP(ip);
+  if (type === 4) return isPrivateIpv4(ip);
+  if (type === 6) return isPrivateIpv6(ip);
+  return false;
+};
+
+const isLoopbackHost = (hostname) => {
+  const h = String(hostname || '').trim().toLowerCase();
+  return h === 'localhost' || h.endsWith('.localhost');
+};
+
+const resolveHost = async (hostname) => {
+  const timeoutMs = 2000;
+  let timeout = null;
+  try {
+    const result = await Promise.race([
+      dns.lookup(hostname, { all: true }),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('DNS lookup timeout')), timeoutMs);
+      })
+    ]);
+    return result;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+};
+
+const validateImportUrl = async (rawUrl) => {
+  let parsed;
+  try {
+    parsed = new URL(String(rawUrl || '').trim());
+  } catch {
+    return { ok: false, error: 'Invalid URL' };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, error: 'Invalid URL protocol' };
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, error: 'URL must not include credentials' };
+  }
+  if (!parsed.hostname) {
+    return { ok: false, error: 'Invalid URL host' };
+  }
+  if (!ALLOW_PRIVATE_IMPORT && isLoopbackHost(parsed.hostname)) {
+    return { ok: false, error: 'Host not allowed' };
+  }
+  const ipType = net.isIP(parsed.hostname);
+  if (ipType) {
+    if (!ALLOW_PRIVATE_IMPORT && isPrivateIp(parsed.hostname)) {
+      return { ok: false, error: 'Host not allowed' };
+    }
+    return { ok: true, url: parsed.toString() };
+  }
+  let records;
+  try {
+    records = await resolveHost(parsed.hostname);
+  } catch {
+    return { ok: false, error: 'Unable to resolve host' };
+  }
+  if (!Array.isArray(records) || !records.length) {
+    return { ok: false, error: 'Unable to resolve host' };
+  }
+  if (!ALLOW_PRIVATE_IMPORT) {
+    for (const record of records) {
+      if (isPrivateIp(record.address)) {
+        return { ok: false, error: 'Host not allowed' };
+      }
+    }
+  }
+  return { ok: true, url: parsed.toString() };
+};
+
+const readResponseText = async (res, limitBytes) => {
+  const contentLength = Number(res.headers.get('content-length') || 0);
+  if (contentLength && contentLength > limitBytes) {
+    return { ok: false, error: 'Response too large' };
+  }
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    const text = await res.text();
+    if (text.length > limitBytes) return { ok: false, error: 'Response too large' };
+    return { ok: true, text };
+  }
+  const reader = res.body.getReader();
+  let received = 0;
+  const chunks = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    received += value.length;
+    if (received > limitBytes) {
+      try {
+        await reader.cancel();
+      } catch {}
+      return { ok: false, error: 'Response too large' };
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return { ok: true, text: Buffer.concat(chunks).toString('utf8') };
+};
 
 const encryptString = (secretB64, plaintext) => {
   if (!plaintext) return null;
@@ -68,10 +202,14 @@ const fetchEmployeesFromApi = async (config) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
   try {
+    const urlCheck = await validateImportUrl(config.url);
+    if (!urlCheck.ok) {
+      return { ok: false, status: 0, error: urlCheck.error || 'Invalid URL' };
+    }
     const auth = Buffer.from(`${config.username}:${config.password}`, 'utf8').toString('base64');
     const bodyJson = typeof config.bodyJson === 'string' ? config.bodyJson.trim() : '';
     const useBody = !!bodyJson;
-    const res = await fetch(config.url, {
+    const res = await fetch(urlCheck.url, {
       method: 'POST',
       headers: {
         Authorization: `Basic ${auth}`,
@@ -81,7 +219,11 @@ const fetchEmployeesFromApi = async (config) => {
       ...(useBody ? { body: bodyJson } : {}),
       signal: controller.signal
     });
-    const text = await res.text();
+    const readResult = await readResponseText(res, MAX_IMPORT_RESPONSE_BYTES);
+    if (!readResult.ok) {
+      return { ok: false, status: res.status, error: readResult.error || 'Response too large', rawSnippet: '', contentType: res.headers.get('content-type') || '' };
+    }
+    const text = readResult.text;
     if (!res.ok) {
       return { ok: false, status: res.status, error: text.slice(0, 500), rawSnippet: text.slice(0, 2000), contentType: res.headers.get('content-type') || '' };
     }
