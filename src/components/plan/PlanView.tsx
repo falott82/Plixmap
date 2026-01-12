@@ -2013,9 +2013,9 @@ const PlanView = ({ planId }: Props) => {
     return defs.filter((d) => !deskTypeSet.has(d.id));
   }, [deskTypeSet, objectTypeDefs]);
   const [paletteSection, setPaletteSection] = useState<'desks' | 'objects'>('objects');
-  const [layersOpen, setLayersOpen] = useState(true);
-  const [desksOpen, setDesksOpen] = useState(true);
-  const [objectsOpen, setObjectsOpen] = useState(true);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [desksOpen, setDesksOpen] = useState(false);
+  const [objectsOpen, setObjectsOpen] = useState(false);
 
   useEffect(() => {
     if (paletteSection === 'desks' && !deskPaletteDefs.length) {
@@ -3727,7 +3727,7 @@ const PlanView = ({ planId }: Props) => {
 		          {!isReadOnly ? (
 		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-28 shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
                 {planLayers.length ? (
-                  <div className="mt-3">
+                  <div className="mt-3 rounded-xl bg-sky-50/80 p-2">
                     <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
                       <button
                         onClick={() => setLayersOpen((prev) => !prev)}
@@ -3782,7 +3782,7 @@ const PlanView = ({ planId }: Props) => {
                 ) : null}
                 <div className="my-3 h-px w-full bg-slate-200" />
                 <div className="space-y-3">
-                  <div>
+                  <div className="rounded-xl bg-amber-50/70 p-2">
                     <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
                       <button
                         onClick={() => {
@@ -3831,7 +3831,7 @@ const PlanView = ({ planId }: Props) => {
                     ) : null}
                   </div>
                   <div className="h-px w-full bg-slate-200" />
-                  <div>
+                  <div className="rounded-xl bg-emerald-50/70 p-2">
                     <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
                       <button
                         onClick={() => {
