@@ -2,7 +2,7 @@
 
 Current version: **1.6.2**
 
-Deskly is a modern web app to manage company floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, saved views, revision history, search/highlight, and PDF exports.
+Deskly is a modern web app for planning offices and infrastructure on floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, rack management with ports and 1:1 links, saved views, revision history, search/highlight, and PDF exports.
 
 The UI supports **Italian and English**. When you change language from the user menu, the app performs a full refresh to ensure every screen (including tooltips/modals) is consistently translated.
 
@@ -13,6 +13,10 @@ The UI supports **Italian and English**. When you change language from the user 
 - Search, saved views, and revision history
 - PDF exports (plan-only, print area, and rack PDF)
 - Multi-user access with roles and per-plan permissions
+
+## Donations
+If Deskly helps your team, thank you for considering a donation. Every contribution supports maintenance and new features.
+PayPal: https://paypal.me/falott82
 
 ## Screenshots
 ### Rack editor
