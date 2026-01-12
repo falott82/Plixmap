@@ -48,6 +48,17 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 const app = express();
 app.use(express.json({ limit: '80mb' }));
+const trustProxyValue = process.env.DESKLY_TRUST_PROXY;
+if (typeof trustProxyValue === 'string' && trustProxyValue.trim() !== '') {
+  const normalized = trustProxyValue.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    app.set('trust proxy', true);
+  } else if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    app.set('trust proxy', false);
+  } else {
+    app.set('trust proxy', trustProxyValue);
+  }
+}
 // Prevent browser/proxy caching for API responses (avoids stale auth state and UI inconsistencies after restarts).
 app.use('/api', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -59,13 +70,6 @@ const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
 try {
   fs.mkdirSync(uploadsDir, { recursive: true });
 } catch {}
-app.use(
-  '/uploads',
-  express.static(uploadsDir, {
-    maxAge: '365d',
-    immutable: true
-  })
-);
 
 const db = openDb();
 ensureBootstrapAdmins(db);
@@ -332,6 +336,28 @@ const readState = () => {
   }
 };
 
+const hasPlanIdInClients = (clients, planId) => {
+  for (const client of clients || []) {
+    for (const site of client?.sites || []) {
+      for (const plan of site?.floorPlans || []) {
+        if (plan?.id === planId) return true;
+      }
+    }
+  }
+  return false;
+};
+
+const getPlanAccessForUser = (userId, planId) => {
+  if (!userId || !planId) return null;
+  const state = readState();
+  if (!hasPlanIdInClients(state.clients, planId)) return null;
+  const ctx = getUserWithPermissions(db, userId);
+  if (!ctx) return null;
+  if (ctx.user.isAdmin) return 'rw';
+  const access = computePlanAccess(state.clients, ctx.permissions || []);
+  return access.get(planId) || null;
+};
+
 const writeState = (payload) => {
   const now = Date.now();
   // Store large binary blobs (plan images, client logos, pdf attachments) as files instead of inline data URLs.
@@ -391,6 +417,15 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
+app.use(
+  '/uploads',
+  requireAuth,
+  express.static(uploadsDir, {
+    maxAge: '365d',
+    immutable: true
+  })
+);
+
 const getWsAuthContext = (req) => {
   const cookies = parseCookies(req.headers.cookie);
   const token = cookies.deskly_session;
@@ -423,9 +458,18 @@ app.get('/api/auth/bootstrap-status', (_req, res) => {
 });
 
 const loginAttemptBucket = new Map(); // ip -> { count, resetAt }
+let lastLoginAttemptCleanup = 0;
+const cleanupLoginAttemptBucket = (now) => {
+  if (now - lastLoginAttemptCleanup < 60_000) return;
+  lastLoginAttemptCleanup = now;
+  for (const [key, entry] of loginAttemptBucket.entries()) {
+    if (now > entry.resetAt) loginAttemptBucket.delete(key);
+  }
+};
 const allowLoginAttempt = (ip) => {
   const key = ip || 'unknown';
   const now = Date.now();
+  cleanupLoginAttemptBucket(now);
   const row = loginAttemptBucket.get(key);
   if (!row || now > row.resetAt) {
     loginAttemptBucket.set(key, { count: 1, resetAt: now + 5 * 60 * 1000 });
@@ -2341,6 +2385,11 @@ wss.on('connection', (ws, req) => {
     if (msg?.type === 'join') {
       const planId = String(msg.planId || '').trim();
       if (!planId) return;
+      const access = getPlanAccessForUser(info.userId, planId);
+      if (!access) {
+        jsonSend(ws, { type: 'access_denied', planId });
+        return;
+      }
       if (!wsPlanMembers.has(planId)) wsPlanMembers.set(planId, new Set());
       wsPlanMembers.get(planId).add(ws);
       info.plans.add(planId);
@@ -2350,6 +2399,11 @@ wss.on('connection', (ws, req) => {
       jsonSend(ws, { type: 'presence', planId, users: computePresence(planId) });
 
       if (!!msg.wantLock) {
+        if (access !== 'rw') {
+          jsonSend(ws, { type: 'lock_denied', planId, lockedBy: null });
+          emitPresence(planId);
+          return;
+        }
         const existing = planLocks.get(planId);
         if (!existing || existing.userId === info.userId) {
           planLocks.set(planId, { userId: info.userId, username: info.username, ts: Date.now() });

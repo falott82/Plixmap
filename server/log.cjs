@@ -68,7 +68,7 @@ const writeAuthLog = (db, payload) => {
 };
 
 const requestMeta = (req) => {
-  const ip = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.ip || req.connection?.remoteAddress || null;
+  const ip = req.ip || req.connection?.remoteAddress || null;
   return {
     ip,
     method: req.method,
