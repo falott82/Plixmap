@@ -9,6 +9,25 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.6.4',
+    date: '2026-01-12',
+    type: 'fix',
+    notes: [
+      n(
+        'Account: recovery superadmin offline con comando CLI dedicato',
+        'Account: offline superadmin recovery with a dedicated CLI command'
+      ),
+      n(
+        'Settings: pagina Donazioni con link PayPal',
+        'Settings: Donations page with PayPal link'
+      ),
+      n(
+        'Footer: aggiunto link PayPal',
+        'Footer: added PayPal link'
+      )
+    ]
+  },
+  {
     version: '1.6.2',
     date: '2026-01-11',
     type: 'fix',
