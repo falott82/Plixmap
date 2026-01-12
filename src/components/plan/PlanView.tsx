@@ -3725,7 +3725,7 @@ const PlanView = ({ planId }: Props) => {
               </div>
             ) : null}
 		          {!isReadOnly ? (
-		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-28 shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-[9rem] shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
                 {planLayers.length ? (
                   <div className="mt-3 rounded-xl bg-sky-50/80 p-2">
                     <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
