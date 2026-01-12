@@ -112,6 +112,15 @@ const AccountPanel = () => {
           <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs font-mono text-slate-700">
             docker compose exec deskly node server/reset-superadmin.cjs
           </div>
+          <p className="mt-3 text-sm text-slate-600">
+            {t({
+              it: 'Per resettare l’MFA del superadmin (se hai perso l’app Authenticator):',
+              en: 'To reset superadmin MFA (if you lost the Authenticator app):'
+            })}
+          </p>
+          <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-mono text-slate-700">
+            docker compose exec deskly node server/reset-superadmin-mfa.cjs
+          </div>
           <p className="mt-2 text-xs text-slate-500">
             {t({
               it: 'Il reset invalida le sessioni attive. Ti verra richiesta una password forte.',

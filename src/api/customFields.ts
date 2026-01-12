@@ -11,7 +11,7 @@ export interface CustomField {
 }
 
 export const fetchCustomFields = async (): Promise<{ fields: CustomField[] }> => {
-  const res = await fetch('/api/custom-fields', { credentials: 'include', cache: 'no-store' });
+  const res = await apiFetch('/api/custom-fields', { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch custom fields (${res.status})`);
   return res.json();
 };
@@ -22,7 +22,7 @@ export const createCustomField = async (payload: {
   label: string;
   valueType: CustomFieldValueType;
 }): Promise<{ ok: boolean; id: string }> => {
-  const res = await fetch('/api/custom-fields', {
+  const res = await apiFetch('/api/custom-fields', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -36,7 +36,7 @@ export const createCustomFieldsBulk = async (payload: {
   typeId: string;
   fields: { label: string; valueType: CustomFieldValueType }[];
 }): Promise<{ ok: boolean; created: number }> => {
-  const res = await fetch('/api/custom-fields/bulk', {
+  const res = await apiFetch('/api/custom-fields/bulk', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -47,7 +47,7 @@ export const createCustomFieldsBulk = async (payload: {
 };
 
 export const updateCustomField = async (id: string, payload: { label: string }): Promise<void> => {
-  const res = await fetch(`/api/custom-fields/${id}`, {
+  const res = await apiFetch(`/api/custom-fields/${id}`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -57,18 +57,18 @@ export const updateCustomField = async (id: string, payload: { label: string }):
 };
 
 export const deleteCustomField = async (id: string): Promise<void> => {
-  const res = await fetch(`/api/custom-fields/${id}`, { method: 'DELETE', credentials: 'include' });
+  const res = await apiFetch(`/api/custom-fields/${id}`, { method: 'DELETE', credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to delete custom field (${res.status})`);
 };
 
 export const fetchObjectCustomValues = async (objectId: string): Promise<{ values: Record<string, any> }> => {
-  const res = await fetch(`/api/object-custom/${objectId}`, { credentials: 'include', cache: 'no-store' });
+  const res = await apiFetch(`/api/object-custom/${objectId}`, { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch object custom values (${res.status})`);
   return res.json();
 };
 
 export const saveObjectCustomValues = async (objectId: string, payload: { typeId: string; values: Record<string, any> }): Promise<void> => {
-  const res = await fetch(`/api/object-custom/${objectId}`, {
+  const res = await apiFetch(`/api/object-custom/${objectId}`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -76,3 +76,4 @@ export const saveObjectCustomValues = async (objectId: string, payload: { typeId
   });
   if (!res.ok) throw new Error(`Failed to save object custom values (${res.status})`);
 };
+import { apiFetch } from './client';

@@ -7,7 +7,7 @@ export interface ServerState {
 }
 
 export const fetchState = async (): Promise<ServerState> => {
-  const res = await fetch('/api/state', { credentials: 'include' });
+  const res = await apiFetch('/api/state', { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch state (${res.status})`);
   return res.json();
 };
@@ -17,7 +17,7 @@ export const saveState = async (
   objectTypes?: ObjectTypeDefinition[],
   options?: { signal?: AbortSignal }
 ): Promise<{ ok: boolean; updatedAt: number; clients?: Client[]; objectTypes?: ObjectTypeDefinition[] }> => {
-  const res = await fetch('/api/state', {
+  const res = await apiFetch('/api/state', {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -27,3 +27,4 @@ export const saveState = async (
   if (!res.ok) throw new Error(`Failed to save state (${res.status})`);
   return res.json();
 };
+import { apiFetch } from './client';

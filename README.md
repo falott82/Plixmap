@@ -1,6 +1,6 @@
 # Deskly — Floor Plan Management (Drag & Drop)
 
-Current version: **1.6.4**
+Current version: **1.6.5**
 
 Deskly is a modern web app for planning offices and infrastructure on floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, rack management with ports and 1:1 links, saved views, revision history, search/highlight, and PDF exports.
 
@@ -65,6 +65,26 @@ If the superadmin password is lost, reset it on the server (or inside the contai
 docker compose exec deskly node server/reset-superadmin.cjs
 ```
 You can also use `DESKLY_NEW_PASSWORD` (env) or `--password` (arg). The reset invalidates active sessions.
+
+If the superadmin loses the Authenticator app, reset MFA offline:
+```
+docker compose exec deskly node server/reset-superadmin-mfa.cjs
+```
+
+### MFA recovery (users)
+Admins can reset MFA for any user from **Settings → Users → Reset MFA**. The user will need to set up their Authenticator again.
+
+### Login lockout
+Too many failed login attempts temporarily lock the account. This protects against brute‑force attacks.
+
+### Upload limits (safe formats)
+To reduce risk, uploads are limited to safe formats and sizes:
+- Floor plan images: JPG/PNG/WEBP (max 12MB)
+- Client logos: JPG/PNG/WEBP (max 2MB)
+- Note images: JPG/PNG/WEBP (max 5MB)
+- PDF attachments: PDF only (max 20MB)
+
+Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
 
 ### Roles
 - **Superadmin:** full access + can create admin users + can view audit logs (login/logout attempts)

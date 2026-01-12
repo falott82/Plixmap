@@ -26,13 +26,13 @@ export interface ObjectTypeRequest {
 }
 
 export const fetchObjectTypeRequests = async (): Promise<{ requests: ObjectTypeRequest[] }> => {
-  const res = await fetch('/api/object-type-requests', { credentials: 'include' });
+  const res = await apiFetch('/api/object-type-requests', { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch object type requests (${res.status})`);
   return res.json();
 };
 
 export const createObjectTypeRequest = async (payload: ObjectTypeRequestPayload): Promise<{ ok: boolean; id: string }> => {
-  const res = await fetch('/api/object-type-requests', {
+  const res = await apiFetch('/api/object-type-requests', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -46,7 +46,7 @@ export const resolveObjectTypeRequest = async (
   id: string,
   payload: { status: 'approved' | 'rejected'; reason?: string; finalPayload?: ObjectTypeRequestPayload }
 ): Promise<{ ok: boolean }> => {
-  const res = await fetch(`/api/object-type-requests/${id}`, {
+  const res = await apiFetch(`/api/object-type-requests/${id}`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -60,7 +60,7 @@ export const updateObjectTypeRequest = async (
   id: string,
   payload: ObjectTypeRequestPayload
 ): Promise<{ ok: boolean }> => {
-  const res = await fetch(`/api/object-type-requests/${id}/user`, {
+  const res = await apiFetch(`/api/object-type-requests/${id}/user`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -71,10 +71,11 @@ export const updateObjectTypeRequest = async (
 };
 
 export const deleteObjectTypeRequest = async (id: string): Promise<{ ok: boolean }> => {
-  const res = await fetch(`/api/object-type-requests/${id}`, {
+  const res = await apiFetch(`/api/object-type-requests/${id}`, {
     method: 'DELETE',
     credentials: 'include'
   });
   if (!res.ok) throw new Error(`Failed to delete request (${res.status})`);
   return res.json();
 };
+import { apiFetch } from './client';

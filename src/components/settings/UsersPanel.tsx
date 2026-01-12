@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileSpreadsheet, Plus, RefreshCw, Trash, KeyRound, Pencil, Search } from 'lucide-react';
+import { FileSpreadsheet, Plus, RefreshCw, Trash, KeyRound, Pencil, Search, ShieldOff } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
-import { adminCreateUser, adminDeleteUser, adminFetchUsers, adminUpdateUser, changePassword, AdminUserRow } from '../../api/auth';
+import { adminCreateUser, adminDeleteUser, adminFetchUsers, adminUpdateUser, changePassword, resetUserMfa, AdminUserRow } from '../../api/auth';
 import { useAuthStore } from '../../store/useAuthStore';
 import UserModal from './UserModal';
 import PasswordModal from './PasswordModal';
@@ -25,6 +25,7 @@ const UsersPanel = () => {
   const [modal, setModal] = useState<{ mode: 'create' } | { mode: 'edit'; user: AdminUserRow } | null>(null);
   const [pwModal, setPwModal] = useState<{ user: AdminUserRow } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<AdminUserRow | null>(null);
+  const [confirmMfaReset, setConfirmMfaReset] = useState<AdminUserRow | null>(null);
 
   const reload = async () => {
     setLoading(true);
@@ -247,6 +248,14 @@ const UsersPanel = () => {
                   <KeyRound size={14} />
                 </button>
                 <button
+                  onClick={() => setConfirmMfaReset(u)}
+                  disabled={!isSuperAdmin && isStrictSuperAdmin}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  title={t({ it: 'Reset MFA', en: 'Reset MFA' })}
+                >
+                  <ShieldOff size={14} />
+                </button>
+                <button
                   onClick={() => setConfirmDelete(u)}
                   disabled={!isSuperAdmin && isStrictSuperAdmin}
                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50"
@@ -350,6 +359,33 @@ const UsersPanel = () => {
           }
         }}
         confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+      />
+
+      <ConfirmDialog
+        open={!!confirmMfaReset}
+        title={t({ it: 'Reset MFA?', en: 'Reset MFA?' })}
+        description={
+          confirmMfaReset
+            ? t({
+                it: `Disattivare MFA per "${confirmMfaReset.username}"? L’utente dovrà riconfigurare l’app di autenticazione.`,
+                en: `Disable MFA for "${confirmMfaReset.username}"? The user will need to set up the authenticator again.`
+              })
+            : undefined
+        }
+        onCancel={() => setConfirmMfaReset(null)}
+        onConfirm={async () => {
+          if (!confirmMfaReset) return;
+          try {
+            await resetUserMfa(confirmMfaReset.id);
+            push(t({ it: 'MFA resettata', en: 'MFA reset' }), 'success');
+            setConfirmMfaReset(null);
+            await reload();
+          } catch {
+            push(t({ it: 'Errore reset MFA', en: 'Failed to reset MFA' }), 'danger');
+          }
+        }}
+        confirmLabel={t({ it: 'Reset', en: 'Reset' })}
         cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
       />
     </div>

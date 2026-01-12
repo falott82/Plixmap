@@ -53,7 +53,7 @@ export interface ImportSummaryRow {
 
 export const getImportConfig = async (clientId: string): Promise<{ config: ImportConfigSafe | null }> => {
   const qs = new URLSearchParams({ clientId });
-  const res = await fetch(`/api/import/config?${qs.toString()}`, { credentials: 'include', cache: 'no-store' });
+  const res = await apiFetch(`/api/import/config?${qs.toString()}`, { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to load import config (${res.status})`);
   return res.json();
 };
@@ -65,7 +65,7 @@ export const saveImportConfig = async (payload: {
   password?: string;
   bodyJson?: string;
 }): Promise<{ ok: boolean; config: ImportConfigSafe }> => {
-  const res = await fetch(`/api/import/config`, {
+  const res = await apiFetch(`/api/import/config`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -78,7 +78,7 @@ export const saveImportConfig = async (payload: {
 export const testImport = async (
   clientId: string
 ): Promise<{ ok: boolean; status: number; count?: number; preview?: any[]; error?: string; contentType?: string; rawSnippet?: string }> => {
-  const res = await fetch(`/api/import/test`, {
+  const res = await apiFetch(`/api/import/test`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -108,7 +108,7 @@ export const syncImport = async (
   contentType?: string;
   rawSnippet?: string;
 }> => {
-  const res = await fetch(`/api/import/sync`, {
+  const res = await apiFetch(`/api/import/sync`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -143,19 +143,19 @@ export const listExternalUsers = async (params: {
   if (params.includeMissing) qs.set('includeMissing', '1');
   if (params.limit !== undefined) qs.set('limit', String(params.limit));
   if (params.offset !== undefined) qs.set('offset', String(params.offset));
-  const res = await fetch(`/api/external-users?${qs.toString()}`, { credentials: 'include', cache: 'no-store' });
+  const res = await apiFetch(`/api/external-users?${qs.toString()}`, { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to load external users (${res.status})`);
   return res.json();
 };
 
 export const fetchImportSummary = async (): Promise<{ ok: true; rows: ImportSummaryRow[] }> => {
-  const res = await fetch(`/api/import/summary`, { credentials: 'include', cache: 'no-store' });
+  const res = await apiFetch(`/api/import/summary`, { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to load import summary (${res.status})`);
   return res.json();
 };
 
 export const setExternalUserHidden = async (payload: { clientId: string; externalId: string; hidden: boolean }): Promise<void> => {
-  const res = await fetch(`/api/external-users/hide`, {
+  const res = await apiFetch(`/api/external-users/hide`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -177,7 +177,7 @@ export const diffImport = async (clientId: string): Promise<{
   contentType?: string;
   rawSnippet?: string;
 }> => {
-  const res = await fetch(`/api/import/diff`, {
+  const res = await apiFetch(`/api/import/diff`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -191,7 +191,7 @@ export const diffImport = async (clientId: string): Promise<{
 };
 
 export const clearImport = async (clientId: string): Promise<{ ok: boolean; removedUsers: number; removedObjects: number }> => {
-  const res = await fetch(`/api/import/clear`, {
+  const res = await apiFetch(`/api/import/clear`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -202,7 +202,7 @@ export const clearImport = async (clientId: string): Promise<{ ok: boolean; remo
 };
 
 export const importCsv = async (payload: { clientId: string; csvText: string; mode: 'append' | 'replace' }) => {
-  const res = await fetch(`/api/import/csv`, {
+  const res = await apiFetch(`/api/import/csv`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -217,3 +217,4 @@ export const hasExternalUsers = async (clientId: string): Promise<boolean> => {
   const res = await listExternalUsers({ clientId, includeHidden: true, includeMissing: true, limit: 1 });
   return (res.rows || []).length > 0;
 };
+import { apiFetch } from './client';

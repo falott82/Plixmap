@@ -23,7 +23,7 @@ export interface EmailLogRow {
 }
 
 export const fetchEmailSettings = async (): Promise<EmailSettings | null> => {
-  const res = await fetch('/api/settings/email', { credentials: 'include' });
+  const res = await apiFetch('/api/settings/email', { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch email settings (${res.status})`);
   const body = await res.json();
   return body?.config || null;
@@ -39,7 +39,7 @@ export const updateEmailSettings = async (payload: {
   fromName?: string;
   fromEmail?: string;
 }): Promise<EmailSettings | null> => {
-  const res = await fetch('/api/settings/email', {
+  const res = await apiFetch('/api/settings/email', {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -54,7 +54,7 @@ export const sendTestEmail = async (
   recipient: string,
   subject?: string
 ): Promise<{ ok: boolean; messageId?: string | null }> => {
-  const res = await fetch('/api/settings/email/test', {
+  const res = await apiFetch('/api/settings/email/test', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -82,13 +82,14 @@ export const fetchEmailLogs = async (params?: {
   if (params?.q) qs.set('q', params.q);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.offset) qs.set('offset', String(params.offset));
-  const res = await fetch(`/api/settings/email/logs?${qs.toString()}`, { credentials: 'include' });
+  const res = await apiFetch(`/api/settings/email/logs?${qs.toString()}`, { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch email logs (${res.status})`);
   return res.json();
 };
 
 export const clearEmailLogs = async (): Promise<{ ok: boolean; deleted?: number }> => {
-  const res = await fetch('/api/settings/email/logs/clear', { method: 'POST', credentials: 'include' });
+  const res = await apiFetch('/api/settings/email/logs/clear', { method: 'POST', credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to clear email logs (${res.status})`);
   return res.json();
 };
+import { apiFetch } from './client';

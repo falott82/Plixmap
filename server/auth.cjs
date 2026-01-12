@@ -74,6 +74,20 @@ const verifySession = (secret, token) => {
   }
 };
 
+const appendSetCookie = (res, value) => {
+  if (typeof res.append === 'function') {
+    res.append('Set-Cookie', value);
+    return;
+  }
+  const prev = res.getHeader('Set-Cookie');
+  if (!prev) {
+    res.setHeader('Set-Cookie', value);
+    return;
+  }
+  const next = Array.isArray(prev) ? [...prev, value] : [prev, value];
+  res.setHeader('Set-Cookie', next);
+};
+
 const setSessionCookie = (res, token, maxAgeSeconds = 60 * 60 * 24 * 30, options = {}) => {
   const parts = [
     `deskly_session=${encodeURIComponent(token)}`,
@@ -86,11 +100,11 @@ const setSessionCookie = (res, token, maxAgeSeconds = 60 * 60 * 24 * 30, options
     ? !!options.secure
     : process.env.NODE_ENV === 'production';
   if (secure) parts.push('Secure');
-  res.setHeader('Set-Cookie', parts.join('; '));
+  appendSetCookie(res, parts.join('; '));
 };
 
 const clearSessionCookie = (res) => {
-  res.setHeader('Set-Cookie', `deskly_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  appendSetCookie(res, `deskly_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 };
 
 const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);

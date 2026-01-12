@@ -7,9 +7,10 @@ import { useLang, useT } from '../../i18n/useT';
 import { sanitizeHtmlBasic } from '../../utils/sanitizeHtml';
 import { exportClientNotesToPdf } from '../../utils/pdf';
 import { useAuthStore } from '../../store/useAuthStore';
-import { readFileAsDataUrl } from '../../utils/files';
+import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import LexicalNotesEditor, { type LexicalNotesEditorHandle } from '../ui/notes/LexicalNotesEditor';
 import { useDataStore } from '../../store/useDataStore';
+import { useToastStore } from '../../store/useToast';
 
 interface Props {
   open: boolean;
@@ -48,6 +49,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
   const t = useT();
   const lang = useLang();
   const user = useAuthStore((s) => s.user);
+  const push = useToastStore((s) => s.push);
   const clientList = useDataStore((s) =>
     s.clients.map((c) => ({ id: c.id, label: c.shortName || c.name || c.id }))
   );
@@ -540,6 +542,22 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                                 if (!files.length) return;
                                 const next: { id: string; name: string; dataUrl: string }[] = [];
                                 for (const f of files) {
+                                  const validation = validateFile(f, {
+                                    allowedTypes: uploadMimes.pdf,
+                                    maxBytes: uploadLimits.pdfBytes
+                                  });
+                                  if (!validation.ok) {
+                                    push(
+                                      validation.reason === 'size'
+                                        ? t({
+                                            it: `PDF troppo grande (max ${formatBytes(uploadLimits.pdfBytes)}).`,
+                                            en: `PDF too large (max ${formatBytes(uploadLimits.pdfBytes)}).`
+                                          })
+                                        : t({ it: 'Formato non supportato. Usa PDF.', en: 'Unsupported format. Use PDF.' }),
+                                      'danger'
+                                    );
+                                    continue;
+                                  }
                                   const dataUrl = await readFileAsDataUrl(f);
                                   next.push({ id: nanoid(), name: f.name, dataUrl });
                                 }
@@ -596,6 +614,12 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                               {t({ it: 'Nessun allegato.', en: 'No attachments.' })}
                             </div>
                           )}
+                        </div>
+                        <div className="mt-3 text-xs text-slate-500">
+                          {t({
+                            it: `Formati accettati: PDF (max ${formatBytes(uploadLimits.pdfBytes)}).`,
+                            en: `Accepted formats: PDF (max ${formatBytes(uploadLimits.pdfBytes)}).`
+                          })}
                         </div>
                         <div className="mt-3 flex items-center justify-end gap-2">
                           <button

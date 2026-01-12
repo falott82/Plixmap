@@ -9,6 +9,29 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.6.5',
+    date: '2026-01-12',
+    type: 'fix',
+    notes: [
+      n(
+        'Security: lockout temporaneo dopo troppi tentativi di login falliti',
+        'Security: temporary lockout after too many failed login attempts'
+      ),
+      n(
+        'Security: validazione formati/limiti per immagini e PDF (upload sicuri)',
+        'Security: format/size validation for images and PDFs (safe uploads)'
+      ),
+      n(
+        'MFA: reset MFA da Settings → Users (admin) + script CLI per superadmin',
+        'MFA: reset MFA from Settings → Users (admin) + CLI script for superadmin'
+      ),
+      n(
+        'Security: header CSP e CSRF token per le richieste mutanti',
+        'Security: CSP headers and CSRF tokens for mutating requests'
+      )
+    ]
+  },
+  {
     version: '1.6.4',
     date: '2026-01-12',
     type: 'fix',

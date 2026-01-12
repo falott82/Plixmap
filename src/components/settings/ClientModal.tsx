@@ -3,7 +3,8 @@ import { Dialog, Transition } from '@headlessui/react';
 import { Eye, FileDown, Trash2, Upload, X } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { Client } from '../../store/types';
-import { readFileAsDataUrl } from '../../utils/files';
+import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
+import { useToastStore } from '../../store/useToast';
 import { useT } from '../../i18n/useT';
 
 interface Props {
@@ -46,6 +47,7 @@ const resizeLogo = async (dataUrl: string, size = 256): Promise<string> => {
 
 const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
   const t = useT();
+  const push = useToastStore((s) => s.push);
   const [name, setName] = useState(''); // ragione sociale estesa
   const [shortName, setShortName] = useState(''); // nome breve (workspace)
   const [address, setAddress] = useState('');
@@ -258,14 +260,35 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                           {t({ it: 'Carica', en: 'Upload' })}
                           <input
                             type="file"
-                            accept="image/*"
+                            accept="image/png,image/jpeg,image/webp"
                             className="hidden"
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (!file) return;
+                              const validation = validateFile(file, {
+                                allowedTypes: uploadMimes.images,
+                                maxBytes: uploadLimits.logoImageBytes
+                              });
+                              if (!validation.ok) {
+                                push(
+                                  validation.reason === 'size'
+                                    ? t({
+                                        it: `File troppo grande (max ${formatBytes(uploadLimits.logoImageBytes)}).`,
+                                        en: `File too large (max ${formatBytes(uploadLimits.logoImageBytes)}).`
+                                      })
+                                    : t({
+                                        it: 'Formato non supportato. Usa JPG, PNG o WEBP.',
+                                        en: 'Unsupported format. Use JPG, PNG, or WEBP.'
+                                      }),
+                                  'danger'
+                                );
+                                e.currentTarget.value = '';
+                                return;
+                              }
                               const dataUrl = await readFileAsDataUrl(file);
                               const resized = await resizeLogo(dataUrl, 256);
                               setLogoUrl(resized);
+                              e.currentTarget.value = '';
                             }}
                           />
                         </label>
@@ -280,7 +303,13 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                         ) : null}
                       </div>
                       <div className="mt-2 text-xs text-slate-500">
-                        {t({ it: 'Il logo viene ridimensionato automaticamente.', en: 'The logo is resized automatically.' })}
+                        {t({ it: 'Formati accettati: JPG, PNG, WEBP.', en: 'Accepted formats: JPG, PNG, WEBP.' })}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {t({
+                          it: `Max ${formatBytes(uploadLimits.logoImageBytes)}. Il logo viene ridimensionato automaticamente.`,
+                          en: `Max ${formatBytes(uploadLimits.logoImageBytes)}. The logo is resized automatically.`
+                        })}
                       </div>
                     </div>
 
@@ -305,10 +334,27 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                               if (!files.length) return;
                               const next: { id: string; name: string; dataUrl: string }[] = [];
                               for (const f of files) {
+                                const validation = validateFile(f, {
+                                  allowedTypes: uploadMimes.pdf,
+                                  maxBytes: uploadLimits.pdfBytes
+                                });
+                                if (!validation.ok) {
+                                  push(
+                                    validation.reason === 'size'
+                                      ? t({
+                                          it: `PDF troppo grande (max ${formatBytes(uploadLimits.pdfBytes)}).`,
+                                          en: `PDF too large (max ${formatBytes(uploadLimits.pdfBytes)}).`
+                                        })
+                                      : t({ it: 'Formato non supportato. Usa PDF.', en: 'Unsupported format. Use PDF.' }),
+                                    'danger'
+                                  );
+                                  continue;
+                                }
                                 const dataUrl = await readFileAsDataUrl(f);
                                 next.push({ id: nanoid(), name: f.name, dataUrl });
                               }
-                              setAttachments((prev) => [...prev, ...next]);
+                              if (next.length) setAttachments((prev) => [...prev, ...next]);
+                              e.currentTarget.value = '';
                             }}
                           />
                         </label>
@@ -353,6 +399,12 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                         )}
                       </div>
                       <div className="mt-2 text-xs text-slate-500">
+                        {t({
+                          it: `Formati accettati: PDF (max ${formatBytes(uploadLimits.pdfBytes)}).`,
+                          en: `Accepted formats: PDF (max ${formatBytes(uploadLimits.pdfBytes)}).`
+                        })}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
                         {t({
                           it: 'Nota: i PDF vengono salvati sul server e referenziati nello stato.',
                           en: 'Note: PDFs are stored on the server and referenced from state.'
