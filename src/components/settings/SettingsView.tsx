@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown, DownloadCloud, Eye, X, HelpCircle, Mail } from 'lucide-react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown, DownloadCloud, Eye, X, HelpCircle, Mail, Heart } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -23,6 +23,7 @@ import BackupPanel from './BackupPanel';
 import CustomImportPanel from './CustomImportPanel';
 import VersionBadge from '../ui/VersionBadge';
 import EmailSettingsPanel from './EmailSettingsPanel';
+import DonationsPanel from './DonationsPanel';
 
 const SettingsView = () => {
   const {
@@ -76,10 +77,11 @@ const SettingsView = () => {
     if (next === 'backup' && isSuperAdmin) return 'backup';
     if (next === 'import' && isSuperAdmin) return 'import';
     if (next === 'nerd' && isSuperAdmin) return 'nerd';
+    if (next === 'donations') return 'donations';
     if (next === 'data' && isAdmin) return 'data';
     return isAdmin ? 'data' : 'account';
   };
-  const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd'>(
+  const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd' | 'donations'>(
     () => resolveTab(location.search)
   );
   const setTabAndUrl = (nextTab: typeof tab) => {
@@ -301,12 +303,23 @@ const SettingsView = () => {
             {t({ it: 'Logs', en: 'Logs' })}
           </button>
         ) : null}
+        <button
+          onClick={() => setTabAndUrl('donations')}
+          className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+            tab === 'donations' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          }`}
+          title={t({ it: 'Apri tab Donazioni', en: 'Open Donations tab' })}
+        >
+          <Heart size={16} /> {t({ it: 'Donazioni', en: 'Donations' })}
+        </button>
       </div>
 
       <div className={modalActive ? 'pointer-events-none opacity-30' : ''} aria-hidden={modalActive}>
         {tab === 'account' ? <AccountPanel /> : null}
 
         {tab === 'objects' ? <ObjectTypesPanel /> : null}
+
+        {tab === 'donations' ? <DonationsPanel /> : null}
 
         {tab === 'users' ? (
           isAdmin ? (
