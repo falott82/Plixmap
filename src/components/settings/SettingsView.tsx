@@ -7,7 +7,7 @@ import { useUIStore } from '../../store/useUIStore';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { useToastStore } from '../../store/useToast';
 import AddFloorPlanModal from './AddFloorPlanModal';
-import { readFileAsDataUrl } from '../../utils/files';
+import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import ReplacePlanImageModal from './ReplacePlanImageModal';
 import { useAuthStore } from '../../store/useAuthStore';
 import UsersPanel from './UsersPanel';
@@ -146,7 +146,27 @@ const SettingsView = () => {
 
   const handleReplacePlanImage = async (planId: string, fileList: FileList | null) => {
     if (!fileList || !fileList[0]) return;
-    const dataUrl = await readFileAsDataUrl(fileList[0]);
+    const file = fileList[0];
+    const validation = validateFile(file, {
+      allowedTypes: uploadMimes.images,
+      maxBytes: uploadLimits.planImageBytes
+    });
+    if (!validation.ok) {
+      push(
+        validation.reason === 'size'
+          ? t({
+              it: `File troppo grande (max ${formatBytes(uploadLimits.planImageBytes)}).`,
+              en: `File too large (max ${formatBytes(uploadLimits.planImageBytes)}).`
+            })
+          : t({
+              it: 'Formato non supportato. Usa JPG, PNG o WEBP.',
+              en: 'Unsupported format. Use JPG, PNG, or WEBP.'
+            }),
+        'danger'
+      );
+      return;
+    }
+    const dataUrl = await readFileAsDataUrl(file);
     let size: { width: number; height: number } | undefined;
     try {
       const img = new Image();
@@ -591,14 +611,17 @@ const SettingsView = () => {
                         <Eye size={14} />
                       </button>
                       <label
-                        title={t({ it: 'Aggiorna immagine (archivia la precedente)', en: 'Update image (archives previous)' })}
+                        title={t({
+                          it: `Aggiorna immagine (JPG/PNG/WEBP, max ${formatBytes(uploadLimits.planImageBytes)})`,
+                          en: `Update image (JPG/PNG/WEBP, max ${formatBytes(uploadLimits.planImageBytes)})`
+                        })}
                         className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <Upload size={14} />
                         <input
                           type="file"
-                          accept="image/png,image/jpeg"
+                          accept="image/png,image/jpeg,image/webp"
                           className="hidden"
                           onChange={(e) => handleReplacePlanImage(plan.id, e.target.files)}
                         />

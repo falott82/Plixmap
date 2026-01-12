@@ -164,6 +164,18 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'Se perdi l’app Authenticator, un admin può resettare l’MFA da Settings → Users.',
+                          en: 'If you lose the Authenticator app, an admin can reset MFA from Settings → Users.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Troppi tentativi di accesso errati bloccano temporaneamente l’account.',
+                          en: 'Too many failed login attempts temporarily lock the account.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'I permessi possono essere assegnati per Cliente/Sede/Planimetria in sola lettura o lettura+scrittura.',
                           en: 'Permissions can be assigned per Client/Site/Floor plan in read-only or read+write.'
                         })}
@@ -197,6 +209,12 @@ const HelpPanel = () => {
                         {t({
                           it: 'Tasto destro su un cliente: puoi aprire Info cliente e Note cliente (note formattate con testo, immagini e tabelle).',
                           en: 'Right-click a client: you can open Client info and Client notes (formatted notes with text, images and tables).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Upload sicuri: immagini JPG/PNG/WEBP e PDF con limiti di dimensione.',
+                          en: 'Safe uploads: JPG/PNG/WEBP images and PDFs with size limits.'
                         })}
                       </li>
                       <li>

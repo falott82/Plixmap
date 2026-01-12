@@ -24,7 +24,7 @@ export const postAuditEvent = async (payload: {
   details?: any;
 }): Promise<void> => {
   try {
-    await fetch('/api/audit', {
+    await apiFetch('/api/audit', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -36,13 +36,13 @@ export const postAuditEvent = async (payload: {
 };
 
 export const getAuditSettings = async (): Promise<{ auditVerbose: boolean }> => {
-  const res = await fetch('/api/settings/audit', { credentials: 'include' });
+  const res = await apiFetch('/api/settings/audit', { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch audit settings (${res.status})`);
   return res.json();
 };
 
 export const setAuditSettings = async (payload: { auditVerbose: boolean }): Promise<{ ok: boolean; auditVerbose: boolean }> => {
-  const res = await fetch('/api/settings/audit', {
+  const res = await apiFetch('/api/settings/audit', {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -63,12 +63,13 @@ export const fetchAuditTrail = async (params?: {
   if (params?.level) qs.set('level', params.level);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.offset) qs.set('offset', String(params.offset));
-  const res = await fetch(`/api/audit?${qs.toString()}`, { credentials: 'include' });
+  const res = await apiFetch(`/api/audit?${qs.toString()}`, { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch audit trail (${res.status})`);
   return res.json();
 };
 
 export const clearAuditTrail = async (): Promise<void> => {
-  const res = await fetch('/api/audit/clear', { method: 'POST', credentials: 'include' });
+  const res = await apiFetch('/api/audit/clear', { method: 'POST', credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to clear audit trail (${res.status})`);
 };
+import { apiFetch } from './client';

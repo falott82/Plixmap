@@ -11,8 +11,9 @@ export type LogsMeta = {
 };
 
 export const fetchLogsMeta = async (): Promise<LogsMeta> => {
-  const res = await fetch('/api/settings/logs-meta', { credentials: 'include' });
+  const res = await apiFetch('/api/settings/logs-meta', { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch logs meta (${res.status})`);
   const body = await res.json();
   return body?.meta || {};
 };
+import { apiFetch } from './client';

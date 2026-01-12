@@ -20,13 +20,13 @@ export type NpmAuditResult = {
 };
 
 export const fetchNpmAuditStatus = async (): Promise<{ lastCheckAt: number | null; lastCheckBy?: string | null; lastCheckUserId?: string | null }> => {
-  const res = await fetch('/api/settings/npm-audit', { credentials: 'include' });
+  const res = await apiFetch('/api/settings/npm-audit', { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch npm audit status (${res.status})`);
   return res.json();
 };
 
 export const runNpmAudit = async (): Promise<NpmAuditResult> => {
-  const res = await fetch('/api/settings/npm-audit', {
+  const res = await apiFetch('/api/settings/npm-audit', {
     method: 'POST',
     credentials: 'include'
   });
@@ -35,3 +35,4 @@ export const runNpmAudit = async (): Promise<NpmAuditResult> => {
   }
   return res.json();
 };
+import { apiFetch } from './client';

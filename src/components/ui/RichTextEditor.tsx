@@ -17,6 +17,8 @@ import {
   Eraser
 } from 'lucide-react';
 import { useT } from '../../i18n/useT';
+import { formatBytes, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
+import { useToastStore } from '../../store/useToast';
 
 interface Props {
   value: string;
@@ -30,6 +32,7 @@ type ImageOverlay = { visible: boolean; x: number; y: number; w: number; h: numb
 
 const RichTextEditor = ({ value, onChange, readOnly = false, className }: Props) => {
   const t = useT();
+  const push = useToastStore((s) => s.push);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -648,6 +651,25 @@ const RichTextEditor = ({ value, onChange, readOnly = false, className }: Props)
 
   const onPickImage = async (file: File) => {
     if (readOnly) return;
+    const validation = validateFile(file, {
+      allowedTypes: uploadMimes.images,
+      maxBytes: uploadLimits.noteImageBytes
+    });
+    if (!validation.ok) {
+      push(
+        validation.reason === 'size'
+          ? t({
+              it: `Immagine troppo grande (max ${formatBytes(uploadLimits.noteImageBytes)}).`,
+              en: `Image too large (max ${formatBytes(uploadLimits.noteImageBytes)}).`
+            })
+          : t({
+              it: 'Formato non supportato. Usa JPG, PNG o WEBP.',
+              en: 'Unsupported format. Use JPG, PNG, or WEBP.'
+            }),
+        'danger'
+      );
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const url = String(reader.result || '');
@@ -836,7 +858,10 @@ const RichTextEditor = ({ value, onChange, readOnly = false, className }: Props)
           type="button"
           disabled={readOnly}
           onClick={() => fileRef.current?.click()}
-          title={t({ it: 'Inserisci immagine', en: 'Insert image' })}
+          title={t({
+            it: `Inserisci immagine (JPG/PNG/WEBP, max ${formatBytes(uploadLimits.noteImageBytes)})`,
+            en: `Insert image (JPG/PNG/WEBP, max ${formatBytes(uploadLimits.noteImageBytes)})`
+          })}
           className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ImageIcon size={16} />
@@ -844,7 +869,7 @@ const RichTextEditor = ({ value, onChange, readOnly = false, className }: Props)
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept="image/png,image/jpeg,image/webp"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];

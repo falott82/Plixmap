@@ -20,7 +20,7 @@ const downloadBlob = (blob: Blob, filename: string) => {
 };
 
 const fetchAsDataUrl = async (url: string) => {
-  const res = await fetch(url);
+  const res = await fetch(url, { credentials: 'include' });
   const blob = await res.blob();
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();

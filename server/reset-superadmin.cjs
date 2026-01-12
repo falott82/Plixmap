@@ -1,6 +1,7 @@
 const readline = require('readline');
 const crypto = require('crypto');
 const { openDb } = require('./db.cjs');
+const { writeAuditLog } = require('./audit.cjs');
 const { hashPassword, isStrongPassword } = require('./auth.cjs');
 
 const getArgValue = (flag) => {
@@ -91,6 +92,14 @@ const run = async () => {
       now,
       now
     );
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'superadmin_created_cli',
+      username: 'system',
+      scopeType: 'user',
+      scopeId: id,
+      details: { targetUsername: 'superadmin', source: 'cli' }
+    });
     console.log('Superadmin user created and password set.');
   } else {
     db.prepare('UPDATE users SET passwordSalt = ?, passwordHash = ?, tokenVersion = ?, mustChangePassword = 0, updatedAt = ? WHERE id = ?').run(
@@ -100,6 +109,14 @@ const run = async () => {
       now,
       row.id
     );
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'superadmin_password_reset_cli',
+      username: 'system',
+      scopeType: 'user',
+      scopeId: row.id,
+      details: { targetUsername: 'superadmin', source: 'cli' }
+    });
     console.log('Superadmin password reset. Active sessions were invalidated.');
   }
   db.close();

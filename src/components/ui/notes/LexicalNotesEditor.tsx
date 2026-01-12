@@ -38,6 +38,8 @@ import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { AlignCenter, AlignLeft, AlignRight, Bold, ChevronDown, Eraser, Image as ImageIcon, Link as LinkIcon, List, ListOrdered, ListX, Plus, Table2, Underline, Italic, Undo2, Redo2, Minus } from 'lucide-react';
 import { useT } from '../../../i18n/useT';
+import { formatBytes, uploadLimits, uploadMimes, validateFile } from '../../../utils/files';
+import { useToastStore } from '../../../store/useToast';
 import { lexicalTheme } from './lexicalTheme';
 import { ImageNode, INSERT_IMAGE_COMMAND, registerImageInsertCommand } from './nodes/ImageNode';
 import { HeadingNode, QuoteNode } from '@lexical/rich-text';
@@ -775,6 +777,10 @@ const InsertMenu = ({
           <button
             type="button"
             className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-slate-50"
+            title={t({
+              it: `Inserisci immagine (JPG/PNG/WEBP, max ${formatBytes(uploadLimits.noteImageBytes)})`,
+              en: `Insert image (JPG/PNG/WEBP, max ${formatBytes(uploadLimits.noteImageBytes)})`
+            })}
             onClick={() => {
               onInsertImage();
               setOpen(false);
@@ -814,6 +820,7 @@ const InsertMenu = ({
 const EditorInner = forwardRef<LexicalNotesEditorHandle, Props>(
   ({ initialStateJson, readOnly = false, onDirtyChange, onRequestFocus }, ref) => {
     const t = useT();
+    const push = useToastStore((s) => s.push);
     const [editor] = useLexicalComposerContext();
     const [stateJson, setStateJson] = useState<string>(initialStateJson || '');
     const baselineRef = useRef<string>(initialStateJson || '');
@@ -966,11 +973,31 @@ const EditorInner = forwardRef<LexicalNotesEditorHandle, Props>(
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/png,image/jpeg,image/webp"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (!f) return;
+          const validation = validateFile(f, {
+            allowedTypes: uploadMimes.images,
+            maxBytes: uploadLimits.noteImageBytes
+          });
+          if (!validation.ok) {
+            push(
+              validation.reason === 'size'
+                ? t({
+                    it: `Immagine troppo grande (max ${formatBytes(uploadLimits.noteImageBytes)}).`,
+                    en: `Image too large (max ${formatBytes(uploadLimits.noteImageBytes)}).`
+                  })
+                : t({
+                    it: 'Formato non supportato. Usa JPG, PNG o WEBP.',
+                    en: 'Unsupported format. Use JPG, PNG, or WEBP.'
+                  }),
+              'danger'
+            );
+            e.currentTarget.value = '';
+            return;
+          }
           const reader = new FileReader();
           reader.onload = () => {
             const src = String(reader.result || '');

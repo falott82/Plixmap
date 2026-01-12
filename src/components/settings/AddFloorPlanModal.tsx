@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Upload, X } from 'lucide-react';
-import { readFileAsDataUrl } from '../../utils/files';
+import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import { useT } from '../../i18n/useT';
 
 interface Payload {
@@ -27,6 +27,7 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
   const [imageUrl, setImageUrl] = useState<string>('');
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [error, setError] = useState<string>('');
+  const [fileError, setFileError] = useState<string>('');
 
   useEffect(() => {
     if (!open) return;
@@ -34,11 +35,34 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
     setImageUrl('');
     setSize(null);
     setError('');
+    setFileError('');
   }, [open]);
 
   const onPickFile = async (fileList: FileList | null) => {
     if (!fileList || !fileList[0]) return;
-    const dataUrl = await readFileAsDataUrl(fileList[0]);
+    const file = fileList[0];
+    const validation = validateFile(file, {
+      allowedTypes: uploadMimes.images,
+      maxBytes: uploadLimits.planImageBytes
+    });
+    if (!validation.ok) {
+      setFileError(
+        validation.reason === 'size'
+          ? t({
+              it: `File troppo grande (max ${formatBytes(uploadLimits.planImageBytes)}).`,
+              en: `File too large (max ${formatBytes(uploadLimits.planImageBytes)}).`
+            })
+          : t({
+              it: 'Formato non supportato. Usa JPG, PNG o WEBP.',
+              en: 'Unsupported format. Use JPG, PNG, or WEBP.'
+            })
+      );
+      setImageUrl('');
+      setSize(null);
+      return;
+    }
+    setFileError('');
+    const dataUrl = await readFileAsDataUrl(file);
     setImageUrl(dataUrl);
     setSize(null);
     try {
@@ -51,7 +75,7 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
     }
   };
 
-  const canSubmit = !!name.trim() && !!imageUrl && !error;
+  const canSubmit = !!name.trim() && !!imageUrl && !error && !fileError;
 
   useEffect(() => {
     if (!open) return;
@@ -126,7 +150,7 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
                     </div>
                     <input
                       type="file"
-                      accept="image/png,image/jpeg"
+                      accept="image/png,image/jpeg,image/webp"
                       className="hidden"
                       onChange={(e) => onPickFile(e.target.files)}
                     />
@@ -136,10 +160,11 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
                   </label>
                   <div className="text-xs text-slate-500">
                     {t({
-                      it: 'Formati accettati: JPG, PNG.',
-                      en: 'Accepted formats: JPG, PNG.'
+                      it: `Formati accettati: JPG, PNG, WEBP (max ${formatBytes(uploadLimits.planImageBytes)}).`,
+                      en: `Accepted formats: JPG, PNG, WEBP (max ${formatBytes(uploadLimits.planImageBytes)}).`
                     })}
                   </div>
+                  {fileError ? <div className="text-sm font-semibold text-rose-600">{fileError}</div> : null}
 
                   {imageUrl ? (
                     <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">

@@ -22,7 +22,7 @@ export interface AuthUser {
 }
 
 export const fetchMe = async (): Promise<{ user: AuthUser; permissions: Permission[] }> => {
-  const res = await fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' });
+  const res = await apiFetch('/api/auth/me', { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch me (${res.status})`);
   return res.json();
 };
@@ -35,7 +35,7 @@ export class MFARequiredError extends Error {
 }
 
 export const login = async (username: string, password: string, otp?: string): Promise<void> => {
-  const res = await fetch('/api/auth/login', {
+  const res = await apiFetch('/api/auth/login', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -55,18 +55,18 @@ export const login = async (username: string, password: string, otp?: string): P
 };
 
 export const logout = async (): Promise<void> => {
-  const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+  const res = await apiFetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
   if (!res.ok) throw new Error(`Logout failed (${res.status})`);
 };
 
 export const fetchBootstrapStatus = async (): Promise<{ showFirstRunCredentials: boolean }> => {
-  const res = await fetch('/api/auth/bootstrap-status', { credentials: 'include' });
+  const res = await apiFetch('/api/auth/bootstrap-status', { credentials: 'include' });
   if (!res.ok) return { showFirstRunCredentials: false };
   return res.json();
 };
 
 export const firstRunSetup = async (payload: { newPassword: string; language: 'it' | 'en' }): Promise<void> => {
-  const res = await fetch('/api/auth/first-run', {
+  const res = await apiFetch('/api/auth/first-run', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -81,7 +81,7 @@ export const updateMyProfile = async (payload: {
   clientOrder?: string[];
   paletteFavorites?: string[];
 }): Promise<void> => {
-  const res = await fetch('/api/auth/me', {
+  const res = await apiFetch('/api/auth/me', {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -107,7 +107,7 @@ export interface AdminUserRow {
 }
 
 export const adminFetchUsers = async (): Promise<{ users: AdminUserRow[] }> => {
-  const res = await fetch('/api/users', { credentials: 'include' });
+  const res = await apiFetch('/api/users', { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch users (${res.status})`);
   return res.json();
 };
@@ -123,7 +123,7 @@ export const adminCreateUser = async (payload: {
   isAdmin: boolean;
   permissions: Permission[];
 }): Promise<{ ok: boolean; id: string }> => {
-  const res = await fetch('/api/users', {
+  const res = await apiFetch('/api/users', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -146,7 +146,7 @@ export const adminUpdateUser = async (
     permissions: Permission[];
   }
 ): Promise<void> => {
-  const res = await fetch(`/api/users/${id}`, {
+  const res = await apiFetch(`/api/users/${id}`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -156,7 +156,7 @@ export const adminUpdateUser = async (
 };
 
 export const changePassword = async (id: string, payload: { oldPassword?: string; newPassword: string }) => {
-  const res = await fetch(`/api/users/${id}/password`, {
+  const res = await apiFetch(`/api/users/${id}/password`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -165,8 +165,13 @@ export const changePassword = async (id: string, payload: { oldPassword?: string
   if (!res.ok) throw new Error(`Failed to change password (${res.status})`);
 };
 
+export const resetUserMfa = async (id: string): Promise<void> => {
+  const res = await apiFetch(`/api/users/${id}/mfa-reset`, { method: 'POST', credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to reset MFA (${res.status})`);
+};
+
 export const adminDeleteUser = async (id: string) => {
-  const res = await fetch(`/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
+  const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE', credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to delete user (${res.status})`);
 };
 
@@ -193,12 +198,13 @@ export const fetchAuditLogs = async (params?: {
   if (params?.q) qs.set('q', params.q);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.offset) qs.set('offset', String(params.offset));
-  const res = await fetch(`/api/admin/logs?${qs.toString()}`, { credentials: 'include' });
+  const res = await apiFetch(`/api/admin/logs?${qs.toString()}`, { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch logs (${res.status})`);
   return res.json();
 };
 
 export const clearAuthLogs = async (): Promise<void> => {
-  const res = await fetch('/api/admin/logs/clear', { method: 'POST', credentials: 'include' });
+  const res = await apiFetch('/api/admin/logs/clear', { method: 'POST', credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to clear logs (${res.status})`);
 };
+import { apiFetch } from './client';

@@ -59,10 +59,109 @@ if (typeof trustProxyValue === 'string' && trustProxyValue.trim() !== '') {
     app.set('trust proxy', trustProxyValue);
   }
 }
+const resolveSecureCookie = (req) => {
+  const override = process.env.DESKLY_COOKIE_SECURE;
+  if (typeof override === 'string' && override.trim() !== '') {
+    return ['1', 'true', 'yes', 'on'].includes(override.trim().toLowerCase());
+  }
+  const forwarded = req.headers['x-forwarded-proto'];
+  if (forwarded) {
+    const proto = String(forwarded).split(',')[0].trim().toLowerCase();
+    if (proto === 'https') return true;
+    if (proto === 'http') return false;
+  }
+  return req.secure === true || req.protocol === 'https';
+};
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; connect-src 'self' ws: wss:; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:; frame-ancestors 'none'"
+  );
+  if (resolveSecureCookie(req)) {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  }
+  next();
+});
 // Prevent browser/proxy caching for API responses (avoids stale auth state and UI inconsistencies after restarts).
 app.use('/api', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Pragma', 'no-cache');
+  next();
+});
+
+const CSRF_COOKIE = 'deskly_csrf';
+const CSRF_HEADER = 'x-csrf-token';
+const CSRF_MAX_AGE = 60 * 60 * 24 * 30;
+const csrfExemptPaths = new Set(['/auth/login', '/auth/bootstrap-status']);
+
+const appendSetCookie = (res, value) => {
+  if (typeof res.append === 'function') {
+    res.append('Set-Cookie', value);
+    return;
+  }
+  const prev = res.getHeader('Set-Cookie');
+  if (!prev) {
+    res.setHeader('Set-Cookie', value);
+    return;
+  }
+  const next = Array.isArray(prev) ? [...prev, value] : [prev, value];
+  res.setHeader('Set-Cookie', next);
+};
+
+const setCsrfCookie = (res, token, secure) => {
+  const parts = [
+    `${CSRF_COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'SameSite=Lax',
+    `Max-Age=${CSRF_MAX_AGE}`
+  ];
+  if (secure) parts.push('Secure');
+  appendSetCookie(res, parts.join('; '));
+};
+
+const clearCsrfCookie = (res) => {
+  appendSetCookie(res, `${CSRF_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0`);
+};
+
+const ensureCsrfCookie = (req, res) => {
+  const cookies = parseCookies(req.headers.cookie);
+  const existing = cookies[CSRF_COOKIE];
+  if (existing) return existing;
+  const token = crypto.randomBytes(32).toString('base64');
+  setCsrfCookie(res, token, resolveSecureCookie(req));
+  return token;
+};
+
+app.use('/api', (req, res, next) => {
+  const method = String(req.method || '').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+  if (csrfExemptPaths.has(req.path)) return next();
+  const cookies = parseCookies(req.headers.cookie);
+  const cookieToken = cookies[CSRF_COOKIE];
+  const headerToken = req.headers[CSRF_HEADER];
+  if (!cookieToken || !headerToken || String(headerToken) !== String(cookieToken)) {
+    res.status(403).json({ error: 'CSRF validation failed' });
+    return;
+  }
+  const origin = req.headers.origin;
+  const referer = req.headers.referer;
+  const host = req.headers.host;
+  if (host) {
+    const expected = `${req.protocol}://${host}`;
+    if (origin && origin !== expected) {
+      res.status(403).json({ error: 'CSRF origin mismatch' });
+      return;
+    }
+    if (!origin && referer && !String(referer).startsWith(expected)) {
+      res.status(403).json({ error: 'CSRF referer mismatch' });
+      return;
+    }
+  }
   next();
 });
 
@@ -225,9 +324,128 @@ const extForMime = (mime) => {
   return null;
 };
 
+const MAX_IMAGE_BYTES = (() => {
+  const raw = Number(process.env.DESKLY_UPLOAD_MAX_IMAGE_MB || '');
+  return Number.isFinite(raw) && raw > 0 ? raw * 1024 * 1024 : 12 * 1024 * 1024;
+})();
+const MAX_PDF_BYTES = (() => {
+  const raw = Number(process.env.DESKLY_UPLOAD_MAX_PDF_MB || '');
+  return Number.isFinite(raw) && raw > 0 ? raw * 1024 * 1024 : 20 * 1024 * 1024;
+})();
+const allowedDataMimes = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'application/pdf']);
+
+const base64SizeBytes = (base64) => {
+  const len = base64.length;
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((len * 3) / 4) - padding);
+};
+
+const validateDataUrl = (dataUrl) => {
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed) return { ok: false, reason: 'invalid' };
+  const mime = String(parsed.mime || '').toLowerCase();
+  if (!allowedDataMimes.has(mime)) return { ok: false, reason: 'mime', mime };
+  const maxBytes = mime === 'application/pdf' ? MAX_PDF_BYTES : MAX_IMAGE_BYTES;
+  const sizeBytes = base64SizeBytes(parsed.base64 || '');
+  if (sizeBytes > maxBytes) return { ok: false, reason: 'size', mime, maxBytes, sizeBytes };
+  return { ok: true, mime, sizeBytes };
+};
+
+const validateImagesInHtml = (html) => {
+  if (typeof html !== 'string' || !html.includes('data:image/')) return { ok: true };
+  const re = /<img\b[^>]*?\bsrc\s*=\s*"(data:image\/[^;"]+;base64,[^"]+)"[^>]*?>/gi;
+  let match;
+  while ((match = re.exec(html))) {
+    const res = validateDataUrl(match[1]);
+    if (!res.ok) return { ok: false, reason: res.reason, mime: res.mime, maxBytes: res.maxBytes, sizeBytes: res.sizeBytes };
+  }
+  return { ok: true };
+};
+
+const validateImagesInLexicalState = (stateJson) => {
+  if (typeof stateJson !== 'string' || !stateJson.includes('data:image/')) return { ok: true };
+  try {
+    const obj = JSON.parse(stateJson);
+    let invalid = null;
+    const walk = (node) => {
+      if (!node || typeof node !== 'object' || invalid) return;
+      if (node.type === 'image' && typeof node.src === 'string' && node.src.startsWith('data:')) {
+        const res = validateDataUrl(node.src);
+        if (!res.ok) invalid = res;
+        return;
+      }
+      for (const k of Object.keys(node)) {
+        const v = node[k];
+        if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === 'object') walk(v);
+      }
+    };
+    walk(obj);
+    if (invalid) return { ok: false, reason: invalid.reason, mime: invalid.mime, maxBytes: invalid.maxBytes, sizeBytes: invalid.sizeBytes };
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'invalid' };
+  }
+};
+
+const validateAssetsInClients = (clients) => {
+  if (!Array.isArray(clients)) return { ok: true };
+  for (const client of clients) {
+    if (client?.logoUrl && typeof client.logoUrl === 'string' && client.logoUrl.startsWith('data:')) {
+      const res = validateDataUrl(client.logoUrl);
+      if (!res.ok) return { ok: false, field: 'client.logoUrl', ...res };
+    }
+    if (Array.isArray(client?.attachments)) {
+      for (const a of client.attachments) {
+        if (a?.dataUrl && typeof a.dataUrl === 'string' && a.dataUrl.startsWith('data:')) {
+          const res = validateDataUrl(a.dataUrl);
+          if (!res.ok) return { ok: false, field: 'client.attachments', ...res };
+        }
+      }
+    }
+    if (client?.notesHtml && typeof client.notesHtml === 'string' && client.notesHtml.includes('data:image/')) {
+      const res = validateImagesInHtml(client.notesHtml);
+      if (!res.ok) return { ok: false, field: 'client.notesHtml', ...res };
+    }
+    if (client?.notesLexical && typeof client.notesLexical === 'string' && client.notesLexical.includes('data:image/')) {
+      const res = validateImagesInLexicalState(client.notesLexical);
+      if (!res.ok) return { ok: false, field: 'client.notesLexical', ...res };
+    }
+    if (Array.isArray(client?.notes)) {
+      for (const note of client.notes) {
+        if (note?.notesHtml && typeof note.notesHtml === 'string' && note.notesHtml.includes('data:image/')) {
+          const res = validateImagesInHtml(note.notesHtml);
+          if (!res.ok) return { ok: false, field: 'client.notes[].notesHtml', ...res };
+        }
+        if (note?.notesLexical && typeof note.notesLexical === 'string' && note.notesLexical.includes('data:image/')) {
+          const res = validateImagesInLexicalState(note.notesLexical);
+          if (!res.ok) return { ok: false, field: 'client.notes[].notesLexical', ...res };
+        }
+      }
+    }
+    for (const site of client?.sites || []) {
+      for (const plan of site?.floorPlans || []) {
+        if (plan?.imageUrl && typeof plan.imageUrl === 'string' && plan.imageUrl.startsWith('data:')) {
+          const res = validateDataUrl(plan.imageUrl);
+          if (!res.ok) return { ok: false, field: 'plan.imageUrl', ...res };
+        }
+        for (const rev of plan?.revisions || []) {
+          if (rev?.imageUrl && typeof rev.imageUrl === 'string' && rev.imageUrl.startsWith('data:')) {
+            const res = validateDataUrl(rev.imageUrl);
+            if (!res.ok) return { ok: false, field: 'plan.revisions[].imageUrl', ...res };
+          }
+        }
+      }
+    }
+  }
+  return { ok: true };
+};
+
 const externalizeDataUrl = (dataUrl) => {
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) return null;
+  const validation = validateDataUrl(dataUrl);
+  if (!validation.ok) return null;
   const ext = extForMime(parsed.mime);
   if (!ext) return null;
   const id = crypto.randomUUID();
@@ -414,6 +632,7 @@ const requireAuth = (req, res, next) => {
   req.username = userRow.username;
   req.isAdmin = !!userRow.isAdmin;
   req.isSuperAdmin = !!userRow.isSuperAdmin && userRow.username === 'superadmin';
+  ensureCsrfCookie(req, res);
   next();
 };
 
@@ -480,19 +699,88 @@ const allowLoginAttempt = (ip) => {
   return true;
 };
 
-const shouldUseSecureCookie = (req) => {
-  const override = process.env.DESKLY_COOKIE_SECURE;
-  if (typeof override === 'string' && override.trim() !== '') {
-    return ['1', 'true', 'yes', 'on'].includes(override.trim().toLowerCase());
+const loginUserBucket = new Map(); // username -> { count, resetAt, lockedUntil }
+let lastLoginUserCleanup = 0;
+const LOGIN_USER_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_USER_MAX_ATTEMPTS = 8;
+const LOGIN_USER_LOCK_MS = 15 * 60 * 1000;
+const cleanupLoginUserBucket = (now) => {
+  if (now - lastLoginUserCleanup < 60_000) return;
+  lastLoginUserCleanup = now;
+  for (const [key, entry] of loginUserBucket.entries()) {
+    if (now > entry.resetAt && now > entry.lockedUntil) loginUserBucket.delete(key);
   }
-  const forwarded = req.headers['x-forwarded-proto'];
-  if (forwarded) {
-    const proto = String(forwarded).split(',')[0].trim().toLowerCase();
-    if (proto === 'https') return true;
-    if (proto === 'http') return false;
-  }
-  return req.secure === true || req.protocol === 'https';
 };
+const normalizeLoginKey = (value) => String(value || '').trim().toLowerCase();
+const getUserLock = (username) => {
+  const key = normalizeLoginKey(username);
+  if (!key) return null;
+  const now = Date.now();
+  cleanupLoginUserBucket(now);
+  const entry = loginUserBucket.get(key);
+  if (!entry) return null;
+  if (entry.lockedUntil && now < entry.lockedUntil) return entry.lockedUntil;
+  return null;
+};
+const registerUserLoginFailure = (username) => {
+  const key = normalizeLoginKey(username);
+  if (!key) return { lockedNow: false };
+  const now = Date.now();
+  cleanupLoginUserBucket(now);
+  let entry = loginUserBucket.get(key);
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + LOGIN_USER_WINDOW_MS, lockedUntil: 0 };
+    loginUserBucket.set(key, entry);
+  }
+  entry.count += 1;
+  if (entry.count >= LOGIN_USER_MAX_ATTEMPTS) {
+    entry.lockedUntil = now + LOGIN_USER_LOCK_MS;
+    return { lockedNow: true, lockedUntil: entry.lockedUntil };
+  }
+  return { lockedNow: false };
+};
+const clearUserLoginFailures = (username) => {
+  const key = normalizeLoginKey(username);
+  if (key) loginUserBucket.delete(key);
+};
+
+const rateBuckets = new Map(); // key -> { count, resetAt }
+let lastRateCleanup = 0;
+const cleanupRateBuckets = (now) => {
+  if (now - lastRateCleanup < 60_000) return;
+  lastRateCleanup = now;
+  for (const [key, entry] of rateBuckets.entries()) {
+    if (now > entry.resetAt) rateBuckets.delete(key);
+  }
+};
+const rateLimit =
+  ({ name, windowMs, max, key }) =>
+  (req, res, next) => {
+    const now = Date.now();
+    cleanupRateBuckets(now);
+    const bucketKey = `${name}:${key(req) || 'unknown'}`;
+    const entry = rateBuckets.get(bucketKey);
+    if (!entry || now > entry.resetAt) {
+      rateBuckets.set(bucketKey, { count: 1, resetAt: now + windowMs });
+      next();
+      return;
+    }
+    entry.count += 1;
+    if (entry.count > max) {
+      res.status(429).json({ error: 'Too many requests' });
+      return;
+    }
+    next();
+  };
+const rateByUser = (name, windowMs, max) =>
+  rateLimit({
+    name,
+    windowMs,
+    max,
+    key: (req) => req.userId || req.ip
+  });
+
+const shouldUseSecureCookie = (req) => resolveSecureCookie(req);
 
 app.post('/api/auth/login', (req, res) => {
   const { username, password, otp } = req.body || {};
@@ -503,6 +791,12 @@ app.post('/api/auth/login', (req, res) => {
   const meta = requestMeta(req);
   if (!allowLoginAttempt(meta.ip)) {
     res.status(429).json({ error: 'Too many attempts' });
+    return;
+  }
+  const lockedUntil = getUserLock(username);
+  if (lockedUntil) {
+    writeAuthLog(db, { event: 'login', success: false, username: String(username), ...meta, details: { reason: 'locked', lockedUntil } });
+    res.status(429).json({ error: 'Account temporarily locked' });
     return;
   }
   let row = db
@@ -528,6 +822,10 @@ app.post('/api/auth/login', (req, res) => {
       }
     }
     if (!row) {
+      const lock = registerUserLoginFailure(username);
+      if (lock.lockedNow) {
+        writeAuditLog(db, { level: 'important', event: 'login_lockout', username: String(username), ...meta, details: { lockedUntil: lock.lockedUntil } });
+      }
       writeAuthLog(db, { event: 'login', success: false, username: String(username), ...meta, details: { reason: 'user_not_found' } });
       res.status(401).json({ error: 'Invalid credentials' });
       return;
@@ -559,6 +857,10 @@ app.post('/api/auth/login', (req, res) => {
     }
   }
   if (!passwordOk) {
+    const lock = registerUserLoginFailure(row.username);
+    if (lock.lockedNow) {
+      writeAuditLog(db, { level: 'important', event: 'login_lockout', userId: row.id, username: row.username, ...meta, details: { lockedUntil: lock.lockedUntil } });
+    }
     writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'bad_password' } });
     res.status(401).json({ error: 'Invalid credentials' });
     return;
@@ -571,6 +873,10 @@ app.post('/api/auth/login', (req, res) => {
     }
     const secret = decryptSecret(authSecret, row.mfaSecretEnc);
     if (!secret || !verifyTotp(secret, otp)) {
+      const lock = registerUserLoginFailure(row.username);
+      if (lock.lockedNow) {
+        writeAuditLog(db, { level: 'important', event: 'login_lockout', userId: row.id, username: row.username, ...meta, details: { lockedUntil: lock.lockedUntil } });
+      }
       writeAuthLog(db, { event: 'login', success: false, userId: row.id, username: row.username, ...meta, details: { reason: 'bad_mfa' } });
       res.status(401).json({ error: 'Invalid credentials' });
       return;
@@ -583,6 +889,8 @@ app.post('/api/auth/login', (req, res) => {
     iat: Date.now()
   });
   setSessionCookie(res, token, undefined, { secure: shouldUseSecureCookie(req) });
+  ensureCsrfCookie(req, res);
+  clearUserLoginFailures(row.username);
   writeAuthLog(db, { event: 'login', success: true, userId: row.id, username: row.username, ...meta });
   res.json({ ok: true });
 });
@@ -591,6 +899,7 @@ app.post('/api/auth/logout', (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
   const session = verifySession(authSecret, cookies.deskly_session);
   clearSessionCookie(res);
+  clearCsrfCookie(res);
   if (session?.userId) {
     const row = db.prepare('SELECT username FROM users WHERE id = ?').get(session.userId);
     writeAuthLog(db, { event: 'logout', success: true, userId: session.userId, username: row?.username, ...requestMeta(req) });
@@ -731,7 +1040,7 @@ app.get('/api/settings/npm-audit', requireAuth, (req, res) => {
   res.json({ lastCheckAt, lastCheckBy, lastCheckUserId });
 });
 
-app.post('/api/settings/npm-audit', requireAuth, (req, res) => {
+app.post('/api/settings/npm-audit', requireAuth, rateByUser('npm_audit', 10 * 60 * 1000, 2), (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -975,7 +1284,7 @@ app.get('/api/import/summary', requireAuth, (req, res) => {
   res.json({ ok: true, rows });
 });
 
-app.put('/api/import/config', requireAuth, (req, res) => {
+app.put('/api/import/config', requireAuth, rateByUser('import_config', 60 * 1000, 10), (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -1009,7 +1318,7 @@ app.put('/api/import/config', requireAuth, (req, res) => {
   res.json({ ok: true, config: cfg });
 });
 
-app.post('/api/import/test', requireAuth, async (req, res) => {
+app.post('/api/import/test', requireAuth, rateByUser('import_test', 60 * 1000, 10), async (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -1040,7 +1349,7 @@ app.post('/api/import/test', requireAuth, async (req, res) => {
   res.json({ ok: true, status: result.status, count: (result.employees || []).length, preview });
 });
 
-app.post('/api/import/sync', requireAuth, async (req, res) => {
+app.post('/api/import/sync', requireAuth, rateByUser('import_sync', 60 * 1000, 10), async (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -1072,7 +1381,7 @@ app.post('/api/import/sync', requireAuth, async (req, res) => {
   res.json({ ok: true, ...sync });
 });
 
-app.post('/api/import/csv', requireAuth, (req, res) => {
+app.post('/api/import/csv', requireAuth, rateByUser('import_csv', 60 * 1000, 10), (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -1114,7 +1423,7 @@ app.post('/api/import/csv', requireAuth, (req, res) => {
   res.json({ ok: true, ...sync, cleanup });
 });
 
-app.post('/api/import/diff', requireAuth, async (req, res) => {
+app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 10), async (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -1191,7 +1500,7 @@ app.post('/api/import/diff', requireAuth, async (req, res) => {
   });
 });
 
-app.post('/api/import/clear', requireAuth, (req, res) => {
+app.post('/api/import/clear', requireAuth, rateByUser('import_clear', 60 * 1000, 10), (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -1309,7 +1618,7 @@ app.put('/api/settings/email', requireAuth, (req, res) => {
   res.json({ ok: true, config: updated });
 });
 
-app.post('/api/settings/email/test', requireAuth, async (req, res) => {
+app.post('/api/settings/email/test', requireAuth, rateByUser('email_test', 5 * 60 * 1000, 5), async (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -1554,6 +1863,14 @@ app.post('/api/auth/first-run', requireAuth, (req, res) => {
     iat: Date.now()
   });
   setSessionCookie(res, token, undefined, { secure: shouldUseSecureCookie(req) });
+  ensureCsrfCookie(req, res);
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'first_run_completed',
+    userId: req.userId,
+    username: req.username,
+    ...requestMeta(req)
+  });
   res.json({ ok: true });
 });
 
@@ -1759,10 +2076,23 @@ app.get('/api/state', requireAuth, (req, res) => {
   res.json({ clients: filtered, objectTypes: state.objectTypes, updatedAt: state.updatedAt });
 });
 
-app.put('/api/state', requireAuth, (req, res) => {
+app.put('/api/state', requireAuth, rateByUser('state_save', 60 * 1000, 240), (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object' || !('clients' in body)) {
     res.status(400).json({ error: 'Invalid payload (expected {clients})' });
+    return;
+  }
+  const assetValidation = validateAssetsInClients(body.clients);
+  if (!assetValidation.ok) {
+    res.status(400).json({
+      error: 'Invalid upload',
+      details: {
+        field: assetValidation.field,
+        reason: assetValidation.reason,
+        mime: assetValidation.mime,
+        maxBytes: assetValidation.maxBytes
+      }
+    });
     return;
   }
   const serverState = readState();
@@ -2125,7 +2455,7 @@ app.get('/api/users', requireAuth, (req, res) => {
   });
 });
 
-app.post('/api/users', requireAuth, (req, res) => {
+app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 30), (req, res) => {
   if (!req.isAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -2191,16 +2521,28 @@ app.post('/api/users', requireAuth, (req, res) => {
     if (!p?.scopeType || !p?.scopeId || !p?.access) continue;
     insertPerm.run(id, p.scopeType, p.scopeId, p.access);
   }
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'user_created',
+    userId: req.userId,
+    username: req.username,
+    scopeType: 'user',
+    scopeId: id,
+    ...requestMeta(req),
+    details: { username: String(username).trim(), isAdmin: !!isAdmin, permissions: Array.isArray(permissions) ? permissions.length : 0 }
+  });
   res.json({ ok: true, id });
 });
 
-app.put('/api/users/:id', requireAuth, (req, res) => {
+app.put('/api/users/:id', requireAuth, rateByUser('users_update', 10 * 60 * 1000, 60), (req, res) => {
   if (!req.isAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
   const userId = req.params.id;
-  const target = db.prepare('SELECT id, username, isAdmin, isSuperAdmin FROM users WHERE id = ?').get(userId);
+  const target = db
+    .prepare('SELECT id, username, isAdmin, isSuperAdmin, disabled, language, firstName, lastName, phone, email FROM users WHERE id = ?')
+    .get(userId);
   if (!target) {
     res.status(404).json({ error: 'Not found' });
     return;
@@ -2243,10 +2585,33 @@ app.put('/api/users/:id', requireAuth, (req, res) => {
       insertPerm.run(userId, p.scopeType, p.scopeId, p.access);
     }
   }
+  const changes = [];
+  if (typeof isAdmin === 'boolean' && Number(target.isAdmin) !== (isAdmin ? 1 : 0)) changes.push('isAdmin');
+  if (typeof disabled === 'boolean' && Number(target.disabled) !== (disabled ? 1 : 0)) changes.push('disabled');
+  if (language && String(language) !== String(target.language)) changes.push('language');
+  const profileChanged =
+    (firstName !== undefined && String(firstName || '') !== String(target.firstName || '')) ||
+    (lastName !== undefined && String(lastName || '') !== String(target.lastName || '')) ||
+    (phone !== undefined && String(phone || '') !== String(target.phone || '')) ||
+    (email !== undefined && String(email || '') !== String(target.email || ''));
+  if (profileChanged) changes.push('profile');
+  if (Array.isArray(permissions)) changes.push('permissions');
+  if (changes.length) {
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'user_updated',
+      userId: req.userId,
+      username: req.username,
+      scopeType: 'user',
+      scopeId: target.id,
+      ...requestMeta(req),
+      details: { targetUsername: target.username, changes }
+    });
+  }
   res.json({ ok: true });
 });
 
-app.post('/api/users/:id/password', requireAuth, (req, res) => {
+app.post('/api/users/:id/password', requireAuth, rateByUser('users_password', 10 * 60 * 1000, 30), (req, res) => {
   const targetId = req.params.id;
   const { oldPassword, newPassword } = req.body || {};
   if (!isStrongPassword(String(newPassword || ''))) {
@@ -2286,10 +2651,53 @@ app.post('/api/users/:id/password', requireAuth, (req, res) => {
     Date.now(),
     targetId
   );
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'user_password_changed',
+    userId: req.userId,
+    username: req.username,
+    scopeType: 'user',
+    scopeId: targetId,
+    ...requestMeta(req),
+    details: { self: isSelf, byAdmin: !!req.isAdmin }
+  });
   res.json({ ok: true });
 });
 
-app.delete('/api/users/:id', requireAuth, (req, res) => {
+app.post('/api/users/:id/mfa-reset', requireAuth, rateByUser('users_mfa_reset', 10 * 60 * 1000, 30), (req, res) => {
+  if (!req.isAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const targetId = req.params.id;
+  const target = db.prepare('SELECT id, username, isSuperAdmin, tokenVersion FROM users WHERE id = ?').get(targetId);
+  if (!target) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  if (target.isSuperAdmin && !req.isSuperAdmin) {
+    res.status(403).json({ error: 'Only superadmin can reset superadmin MFA' });
+    return;
+  }
+  db.prepare('UPDATE users SET mfaEnabled = 0, mfaSecretEnc = NULL, tokenVersion = ?, updatedAt = ? WHERE id = ?').run(
+    Number(target.tokenVersion || 1) + 1,
+    Date.now(),
+    targetId
+  );
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'user_mfa_reset',
+    userId: req.userId,
+    username: req.username,
+    scopeType: 'user',
+    scopeId: targetId,
+    ...requestMeta(req),
+    details: { targetUsername: target.username }
+  });
+  res.json({ ok: true });
+});
+
+app.delete('/api/users/:id', requireAuth, rateByUser('users_delete', 10 * 60 * 1000, 30), (req, res) => {
   if (!req.isAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
@@ -2299,13 +2707,23 @@ app.delete('/api/users/:id', requireAuth, (req, res) => {
     res.status(400).json({ error: 'Cannot delete self' });
     return;
   }
-  const target = db.prepare('SELECT isSuperAdmin FROM users WHERE id = ?').get(targetId);
+  const target = db.prepare('SELECT username, isSuperAdmin FROM users WHERE id = ?').get(targetId);
   if (target?.isSuperAdmin && !req.isSuperAdmin) {
     res.status(403).json({ error: 'Cannot delete superadmin' });
     return;
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
   db.prepare('DELETE FROM permissions WHERE userId = ?').run(targetId);
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'user_deleted',
+    userId: req.userId,
+    username: req.username,
+    scopeType: 'user',
+    scopeId: targetId,
+    ...requestMeta(req),
+    details: { targetUsername: target?.username || null }
+  });
   res.json({ ok: true });
 });
 
