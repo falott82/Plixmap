@@ -22,6 +22,8 @@ import { perfMetrics } from './utils/perfMetrics';
 const PlanRoute = () => {
   const { planId } = useParams();
   if (!planId) return <Navigate to="/" replace />;
+  const planExists = useDataStore((s) => !!s.findFloorPlan(planId));
+  if (!planExists) return <Navigate to="/" replace />;
   return <PlanView planId={planId} />;
 };
 
@@ -48,10 +50,11 @@ const HomeRoute = () => {
     return null;
   };
 
-  const planId = findDefaultPlanId() || selectedPlanId || findFirstPlanId();
+  const defaultPlanId = findDefaultPlanId();
+  const planId = defaultPlanId || selectedPlanId || findFirstPlanId();
   if (planId) {
     if (!selectedPlanId) setSelectedPlan(planId);
-    return <Navigate to={`/plan/${planId}`} replace />;
+    return <Navigate to={`/plan/${planId}${defaultPlanId ? '?dv=1' : ''}`} replace />;
   }
   return <EmptyWorkspace />;
 };
@@ -386,7 +389,7 @@ const App = () => {
     }
 
     setSelectedPlan(defaultPlanId);
-    navigate(`/plan/${defaultPlanId}`, { replace: true });
+    navigate(`/plan/${defaultPlanId}?dv=1`, { replace: true });
     defaultPlanRedirectAppliedForUserId.current = user.id;
   }, [clients, hydrated, location.pathname, navigate, setSelectedPlan, user]);
 

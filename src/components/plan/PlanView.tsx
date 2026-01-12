@@ -340,12 +340,14 @@ const PlanView = ({ planId }: Props) => {
   const [crossPlanSearchTerm, setCrossPlanSearchTerm] = useState('');
   const [crossPlanResults, setCrossPlanResults] = useState<CrossPlanSearchResult[]>([]);
   const [countsOpen, setCountsOpen] = useState(false);
+  const [presenceOpen, setPresenceOpen] = useState(false);
   const [expandedType, setExpandedType] = useState<string | null>(null);
   const [objectListQuery, setObjectListQuery] = useState('');
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [roomAllocationOpen, setRoomAllocationOpen] = useState(false);
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement | null>(null);
+  const presenceRef = useRef<HTMLDivElement | null>(null);
   const [panToolActive, setPanToolActive] = useState(false);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
@@ -475,11 +477,20 @@ const PlanView = ({ planId }: Props) => {
     }
     return 'ro';
   }, [client?.id, permissions, planId, site?.id, user]);
+  const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
 
   const [lockState, setLockState] = useState<{ lockedBy: { userId: string; username: string } | null; mine: boolean }>(
     { lockedBy: null, mine: false }
   );
   const [presenceUsers, setPresenceUsers] = useState<{ userId: string; username: string }[]>([]);
+  const presenceList = useMemo(() => {
+    const byId = new Map<string, string>();
+    presenceUsers.forEach((u) => {
+      if (!u?.userId) return;
+      if (!byId.has(u.userId)) byId.set(u.userId, u.username || 'user');
+    });
+    return Array.from(byId.values());
+  }, [presenceUsers]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -1998,6 +2009,8 @@ const PlanView = ({ planId }: Props) => {
   }, [deskTypeSet, objectTypeDefs]);
   const [paletteSection, setPaletteSection] = useState<'desks' | 'objects'>('objects');
   const [layersOpen, setLayersOpen] = useState(true);
+  const [desksOpen, setDesksOpen] = useState(true);
+  const [objectsOpen, setObjectsOpen] = useState(true);
 
   useEffect(() => {
     if (paletteSection === 'desks' && !deskPaletteDefs.length) {
@@ -2006,6 +2019,11 @@ const PlanView = ({ planId }: Props) => {
       setPaletteSection('desks');
     }
   }, [deskPaletteDefs.length, otherPaletteDefs.length, paletteSection]);
+
+  useEffect(() => {
+    if (!deskPaletteDefs.length) setDesksOpen(false);
+    if (!otherPaletteDefs.length) setObjectsOpen(false);
+  }, [deskPaletteDefs.length, otherPaletteDefs.length]);
   const paletteSettingsSection = paletteSection === 'desks' ? 'desks' : 'objects';
 
   const addTypeToPalette = useCallback(
@@ -2175,6 +2193,17 @@ const PlanView = ({ planId }: Props) => {
     setObjectListQuery('');
     setExpandedType(null);
   }, [countsOpen]);
+
+  useEffect(() => {
+    if (!presenceOpen) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!presenceRef.current) return;
+      if (presenceRef.current.contains(event.target as Node)) return;
+      setPresenceOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [presenceOpen]);
 
   useEffect(() => {
     if (!roomsOpen) return;
@@ -2849,12 +2878,45 @@ const PlanView = ({ planId }: Props) => {
               </span>
             ) : null}
             {presenceUsers.length ? (
-              <span
-                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                title={presenceUsers.map((u) => u.username).join(', ')}
-              >
-                {t({ it: `${presenceUsers.length} utenti online`, en: `${presenceUsers.length} users online` })}
-              </span>
+              isSuperAdmin ? (
+                <div ref={presenceRef} className="relative">
+                  <button
+                    onClick={() => setPresenceOpen((v) => !v)}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({ it: 'Mostra utenti online', en: 'Show online users' })}
+                  >
+                    {t({ it: `${presenceUsers.length} utenti online`, en: `${presenceUsers.length} users online` })}
+                  </button>
+                  {presenceOpen ? (
+                    <div className="absolute left-0 z-50 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-card">
+                      <div className="flex items-center justify-between px-2 pb-2">
+                        <div className="font-semibold text-ink">{t({ it: 'Utenti online', en: 'Online users' })}</div>
+                        <button
+                          onClick={() => setPresenceOpen(false)}
+                          className="text-slate-400 hover:text-ink"
+                          title={t({ it: 'Chiudi', en: 'Close' })}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <div className="max-h-40 space-y-1 overflow-y-auto px-1 pb-1">
+                        {presenceList.map((name, index) => (
+                          <div key={`${name}-${index}`} className="rounded-lg px-2 py-1 text-slate-700">
+                            {name}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <span
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                  title={presenceUsers.map((u) => u.username).join(', ')}
+                >
+                  {t({ it: `${presenceUsers.length} utenti online`, en: `${presenceUsers.length} users online` })}
+                </span>
+              )
             ) : null}
             <div className="relative">
               <button
@@ -3714,72 +3776,101 @@ const PlanView = ({ planId }: Props) => {
                   </div>
                 ) : null}
                 <div className="my-3 h-px w-full bg-slate-200" />
-                <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
-                  <span className="sr-only">{t({ it: 'Palette', en: 'Palette' })}</span>
-                  <div className="flex items-center gap-1">
-                    <span>{paletteSection === 'desks' ? t({ it: 'Scrivanie', en: 'Desks' }) : t({ it: 'Oggetti', en: 'Objects' })}</span>
-                    <button
-                      onClick={() => {
-                        const url = `/settings?tab=objects&section=${paletteSettingsSection}`;
-                        if (hasNavigationEdits && !isReadOnly) {
-                          requestSaveAndNavigate(url);
-                          return;
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
+                      <button
+                        onClick={() => {
+                          if (!deskPaletteDefs.length) return;
+                          setPaletteSection('desks');
+                          setDesksOpen((prev) => !prev);
+                        }}
+                        disabled={!deskPaletteDefs.length}
+                        className="flex items-center gap-1 rounded-md px-1 py-0.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={
+                          desksOpen ? t({ it: 'Nascondi scrivanie', en: 'Collapse desks' }) : t({ it: 'Mostra scrivanie', en: 'Expand desks' })
                         }
-                        navigate(url);
-                      }}
-                      title={t({ it: 'Impostazioni', en: 'Settings' })}
-                      className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-2 w-full">
-                  <div className="flex w-full flex-col gap-2">
-                    <button
-                      onClick={() => setPaletteSection('desks')}
-                      disabled={!deskPaletteDefs.length}
-                      className={`w-full min-w-0 rounded-full border px-2 py-1 text-[10px] font-semibold ${
-                        paletteSection === 'desks'
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                      title={t({ it: 'Scrivanie', en: 'Desks' })}
-                    >
-                      {t({ it: 'Scrivanie', en: 'Desks' })}
-                    </button>
-                    <button
-                      onClick={() => setPaletteSection('objects')}
-                      disabled={!otherPaletteDefs.length}
-                      className={`w-full min-w-0 rounded-full border px-2 py-1 text-[10px] font-semibold ${
-                        paletteSection === 'objects'
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                      title={t({ it: 'Oggetti', en: 'Objects' })}
-                    >
-                      {t({ it: 'Oggetti', en: 'Objects' })}
-                    </button>
-                  </div>
-                  <div className="mt-3 flex flex-col items-center gap-3">
-                    {paletteSection === 'desks' && deskPaletteDefs.length ? (
-                      <Toolbar
-                        defs={deskPaletteDefs}
-                        order={deskPaletteOrder}
-                        onSelectType={(type) => setPendingType(type)}
-                        onRemoveFromPalette={(type) => removeTypeFromPalette(type)}
-                        activeType={pendingType}
-                        allowRemove
-                      />
+                      >
+                        {desksOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span>{t({ it: 'Scrivanie', en: 'Desks' })}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          const url = '/settings?tab=objects&section=desks';
+                          if (hasNavigationEdits && !isReadOnly) {
+                            requestSaveAndNavigate(url);
+                            return;
+                          }
+                          navigate(url);
+                        }}
+                        title={t({ it: 'Impostazioni scrivanie', en: 'Desk settings' })}
+                        className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </div>
+                    {desksOpen && deskPaletteDefs.length ? (
+                      <div className="mt-3 flex flex-col items-center gap-3">
+                        <Toolbar
+                          defs={deskPaletteDefs}
+                          order={deskPaletteOrder}
+                          onSelectType={(type) => {
+                            setPaletteSection('desks');
+                            setPendingType(type);
+                          }}
+                          onRemoveFromPalette={(type) => removeTypeFromPalette(type)}
+                          activeType={pendingType}
+                          allowRemove
+                        />
+                      </div>
                     ) : null}
-                    {paletteSection === 'objects' && otherPaletteDefs.length ? (
-                      <Toolbar
-                        defs={otherPaletteDefs}
-                        order={paletteOrder}
-                        onSelectType={(type) => setPendingType(type)}
-                        onRemoveFromPalette={(type) => removeTypeFromPalette(type)}
-                        activeType={pendingType}
-                      />
+                  </div>
+                  <div className="h-px w-full bg-slate-200" />
+                  <div>
+                    <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
+                      <button
+                        onClick={() => {
+                          if (!otherPaletteDefs.length) return;
+                          setPaletteSection('objects');
+                          setObjectsOpen((prev) => !prev);
+                        }}
+                        disabled={!otherPaletteDefs.length}
+                        className="flex items-center gap-1 rounded-md px-1 py-0.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={
+                          objectsOpen ? t({ it: 'Nascondi oggetti', en: 'Collapse objects' }) : t({ it: 'Mostra oggetti', en: 'Expand objects' })
+                        }
+                      >
+                        {objectsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span>{t({ it: 'Oggetti', en: 'Objects' })}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          const url = '/settings?tab=objects&section=objects';
+                          if (hasNavigationEdits && !isReadOnly) {
+                            requestSaveAndNavigate(url);
+                            return;
+                          }
+                          navigate(url);
+                        }}
+                        title={t({ it: 'Impostazioni oggetti', en: 'Object settings' })}
+                        className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </div>
+                    {objectsOpen && otherPaletteDefs.length ? (
+                      <div className="mt-3 flex flex-col items-center gap-3">
+                        <Toolbar
+                          defs={otherPaletteDefs}
+                          order={paletteOrder}
+                          onSelectType={(type) => {
+                            setPaletteSection('objects');
+                            setPendingType(type);
+                          }}
+                          onRemoveFromPalette={(type) => removeTypeFromPalette(type)}
+                          activeType={pendingType}
+                        />
+                      </div>
                     ) : null}
                   </div>
                 </div>

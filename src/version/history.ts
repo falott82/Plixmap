@@ -9,6 +9,56 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.6.1',
+    date: '2026-01-10',
+    type: 'minor',
+    notes: [
+      n(
+        'Palette: sezioni Scrivanie/Oggetti comprimibili e lista utenti online per superadmin',
+        'Palette: collapsible Desks/Objects sections and online user list for superadmin'
+      ),
+      n(
+        'Logs e security check: ultimo svuotamento/check con utente evidenziato',
+        'Logs and security check: last cleared/check with highlighted user'
+      ),
+      n(
+        'Email: porta impostata automaticamente in base a SSL/STARTTLS',
+        'Email: port automatically set based on SSL/STARTTLS'
+      ),
+      n(
+        'Quick help: export PDF senza tagli tra le sezioni',
+        'Quick help: PDF export without cutting across sections'
+      ),
+      n(
+        'Sidebar: avviso quando mancano sites/planimetrie con link alle impostazioni',
+        'Sidebar: warning when sites/floor plans are missing with settings shortcut'
+      )
+    ]
+  },
+  {
+    version: '1.6.0',
+    date: '2026-01-10',
+    type: 'minor',
+    notes: [
+      n(
+        'Logs: tab Auth/Mail/Audit con svuotamento tracciato e conferma dedicata',
+        'Logs: Auth/Mail/Audit tabs with tracked clears and dedicated confirmation'
+      ),
+      n(
+        'Email: impostazioni SMTP con subject test editabile e gestione errori migliorata',
+        'Email: SMTP settings with editable test subject and improved error handling'
+      ),
+      n(
+        'Quick help: menu argomenti e download PDF con versione in evidenza',
+        'Quick help: topic menu and PDF download with version reference'
+      ),
+      n(
+        'Nerd Area: toggle telemetria stile iOS e ultimo security check salvato',
+        'Nerd Area: iOS-style telemetry toggle and persisted last security check'
+      )
+    ]
+  },
+  {
     version: '1.5.6',
     date: '2026-01-08',
     type: 'fix',

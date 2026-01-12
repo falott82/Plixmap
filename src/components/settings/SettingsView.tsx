@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown, DownloadCloud, Eye, X, HelpCircle } from 'lucide-react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown, DownloadCloud, Eye, X, HelpCircle, Mail } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -13,8 +13,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import UsersPanel from './UsersPanel';
 import AccountPanel from './AccountPanel';
 import UserMenu from '../layout/UserMenu';
-import LogsPanel from './LogsPanel';
-import AuditTrailPanel from './AuditTrailPanel';
+import LogsTabsPanel from './LogsTabsPanel';
 import ClientModal from './ClientModal';
 import NerdAreaPanel from './NerdAreaPanel';
 import { useT } from '../../i18n/useT';
@@ -23,6 +22,7 @@ import ObjectTypesPanel from './ObjectTypesPanel';
 import BackupPanel from './BackupPanel';
 import CustomImportPanel from './CustomImportPanel';
 import VersionBadge from '../ui/VersionBadge';
+import EmailSettingsPanel from './EmailSettingsPanel';
 
 const SettingsView = () => {
   const {
@@ -62,7 +62,7 @@ const SettingsView = () => {
   const [planPreview, setPlanPreview] = useState<{ name: string; imageUrl: string } | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { selectedPlanId, openHelp } = useUIStore();
+  const { selectedPlanId, setSelectedPlan, openHelp } = useUIStore();
   const { user } = useAuthStore();
   const isAdmin = !!user?.isAdmin;
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
@@ -72,13 +72,14 @@ const SettingsView = () => {
     if (next === 'objects') return 'objects';
     if (next === 'users' && isAdmin) return 'users';
     if (next === 'logs' && isSuperAdmin) return 'logs';
+    if (next === 'email' && isSuperAdmin) return 'email';
     if (next === 'backup' && isSuperAdmin) return 'backup';
     if (next === 'import' && isSuperAdmin) return 'import';
     if (next === 'nerd' && isSuperAdmin) return 'nerd';
     if (next === 'data' && isAdmin) return 'data';
     return isAdmin ? 'data' : 'account';
   };
-  const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'backup' | 'import' | 'nerd'>(
+  const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd'>(
     () => resolveTab(location.search)
   );
   const setTabAndUrl = (nextTab: typeof tab) => {
@@ -130,6 +131,16 @@ const SettingsView = () => {
     return [...list].sort((a, b) => ((a as any).order ?? 0) - ((b as any).order ?? 0));
   }, [currentSite?.floorPlans]);
   const firstPlanId = useMemo(() => clients[0]?.sites[0]?.floorPlans[0]?.id, [clients]);
+  const defaultPlanId = useMemo(() => {
+    const candidate = (user as any)?.defaultPlanId as string | null | undefined;
+    if (!candidate) return null;
+    for (const c of clients) {
+      for (const s of c.sites) {
+        if (s.floorPlans.some((p) => p.id === candidate)) return candidate;
+      }
+    }
+    return null;
+  }, [clients, user]);
 
   const handleReplacePlanImage = async (planId: string, fileList: FileList | null) => {
     if (!fileList || !fileList[0]) return;
@@ -161,8 +172,11 @@ const SettingsView = () => {
         <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                const target = selectedPlanId || firstPlanId;
-                if (target) navigate(`/plan/${target}?dv=1`);
+                const target = defaultPlanId || selectedPlanId || firstPlanId;
+                if (target) {
+                  setSelectedPlan(target);
+                  navigate(`/plan/${target}?dv=1`);
+                }
               }}
               className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink shadow-card transition hover:-translate-y-0.5 hover:bg-slate-50"
             >
@@ -213,18 +227,16 @@ const SettingsView = () => {
               <Users size={16} /> {t({ it: 'Utenti', en: 'Users' })}
             </button>
             {isSuperAdmin ? (
-              <button
-                onClick={() => setTabAndUrl('logs')}
-                className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
-                  tab === 'logs' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
-                }`}
-                title={t({ it: 'Apri tab Logs', en: 'Open Logs tab' })}
-              >
-                {t({ it: 'Logs', en: 'Logs' })}
-              </button>
-            ) : null}
-            {isSuperAdmin ? (
               <>
+                <button
+                  onClick={() => setTabAndUrl('email')}
+                  className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+                    tab === 'email' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+                  }`}
+                  title={t({ it: 'Apri tab Email', en: 'Open Email tab' })}
+                >
+                  <Mail size={16} /> {t({ it: 'Email', en: 'Email' })}
+                </button>
                 <button
                   onClick={() => setTabAndUrl('backup')}
                   className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
@@ -278,6 +290,17 @@ const SettingsView = () => {
         >
           <UserCircle2 size={16} /> {t({ it: 'Account', en: 'Account' })}
         </button>
+        {isSuperAdmin ? (
+          <button
+            onClick={() => setTabAndUrl('logs')}
+            className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+              tab === 'logs' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+            }`}
+            title={t({ it: 'Apri tab Logs', en: 'Open Logs tab' })}
+          >
+            {t({ it: 'Logs', en: 'Logs' })}
+          </button>
+        ) : null}
       </div>
 
       <div className={modalActive ? 'pointer-events-none opacity-30' : ''} aria-hidden={modalActive}>
@@ -297,10 +320,7 @@ const SettingsView = () => {
 
         {tab === 'logs' ? (
           isSuperAdmin ? (
-            <div className="space-y-8">
-              <LogsPanel />
-              <AuditTrailPanel />
-            </div>
+            <LogsTabsPanel />
           ) : (
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
               {t({ it: 'Non hai i permessi per vedere i logs.', en: 'You do not have permission to view logs.' })}
@@ -318,6 +338,16 @@ const SettingsView = () => {
           ) : (
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
               {t({ it: 'Non hai i permessi per vedere la Nerd Area.', en: 'You do not have permission to view Nerd Area.' })}
+            </div>
+          )
+        ) : null}
+
+        {tab === 'email' ? (
+          isSuperAdmin ? (
+            <EmailSettingsPanel />
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
+              {t({ it: 'Non hai i permessi per vedere le impostazioni email.', en: 'You do not have permission to view email settings.' })}
             </div>
           )
         ) : null}

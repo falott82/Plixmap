@@ -55,6 +55,24 @@ const migrations = [
         // ignore: table created by main schema
       }
     }
+  },
+  {
+    version: 2,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS email_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ts INTEGER NOT NULL,
+          userId TEXT,
+          username TEXT,
+          recipient TEXT,
+          subject TEXT,
+          success INTEGER NOT NULL,
+          error TEXT,
+          details TEXT
+        );
+      `);
+    }
   }
 ];
 
@@ -124,6 +142,17 @@ const openDb = () => {
       method TEXT,
       path TEXT,
       userAgent TEXT,
+      details TEXT
+    );
+    CREATE TABLE IF NOT EXISTS email_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      userId TEXT,
+      username TEXT,
+      recipient TEXT,
+      subject TEXT,
+      success INTEGER NOT NULL,
+      error TEXT,
       details TEXT
     );
     CREATE TABLE IF NOT EXISTS app_settings (
