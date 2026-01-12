@@ -1,5 +1,5 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
+import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { Hand } from 'lucide-react';
@@ -277,6 +277,9 @@ const CanvasStageImpl = (
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(
     null
   );
+  const [pendingPreview, setPendingPreview] = useState<{ x: number; y: number } | null>(null);
+  const pendingPreviewRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingPreviewRaf = useRef<number | null>(null);
   const objectById = useMemo(() => new Map(plan.objects.map((o) => [o.id, o])), [plan.objects]);
   const selectionOrigin = useRef<{ x: number; y: number } | null>(null);
   const selectionDragRef = useRef<{
@@ -884,6 +887,21 @@ const CanvasStageImpl = (
 
   const isBoxSelecting = () => !!selectionOrigin.current;
 
+  useEffect(() => {
+    if (!pendingType) {
+      if (pendingPreviewRaf.current) cancelAnimationFrame(pendingPreviewRaf.current);
+      pendingPreviewRaf.current = null;
+      pendingPreviewRef.current = null;
+      setPendingPreview(null);
+      return;
+    }
+    const stage = stageRef.current;
+    const pos = stage?.getPointerPosition();
+    if (!pos) return;
+    const world = pointerToWorld(pos.x, pos.y);
+    setPendingPreview(world);
+  }, [pendingType]);
+
   const handleWheel = (event: any) => {
     event.evt.preventDefault();
     const evt = event.evt as WheelEvent;
@@ -1048,24 +1066,6 @@ const CanvasStageImpl = (
     if (!type) return;
     const { x, y } = toStageCoords(event.clientX, event.clientY);
     onPlaceNew(type, x, y);
-  };
-
-  const handleClickToAdd = (event: any) => {
-    if (isContextClick(event?.evt)) return;
-    if (Date.now() - lastContextMenuAtRef.current < 420) return;
-    if (Date.now() - lastBoxSelectAtRef.current < 420) return;
-    if (readOnly) {
-      onSelect(undefined);
-      return;
-    }
-    if (!pendingType) {
-      onSelect(undefined);
-      return;
-    }
-    const pos = event.target.getStage()?.getPointerPosition();
-    if (!pos) return;
-    const { x, y } = pointerToWorld(pos.x, pos.y);
-    onPlaceNew(pendingType, x, y);
   };
 
   const updateDraftRect = (event: any) => {
@@ -1340,6 +1340,14 @@ const CanvasStageImpl = (
             startPan(e);
             return;
           }
+          if (pendingType && !readOnly && !isContextClick(e.evt) && e.evt.button === 0) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (!pos) return;
+            const world = pointerToWorld(pos.x, pos.y);
+            onPlaceNew(pendingType, world.x, world.y);
+            return;
+          }
           if (isEmptyTarget && isBoxSelectGesture(e.evt) && !pendingType && (!roomDrawMode || readOnly) && (!printAreaMode || readOnly)) {
             e.evt.preventDefault();
             const stage = e.target.getStage();
@@ -1399,6 +1407,22 @@ const CanvasStageImpl = (
           if (!pendingType && isEmptyTarget && e.evt.button === 0) onSelect(undefined);
         }}
         onMouseMove={(e) => {
+          if (pendingType && !readOnly) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (pos) {
+              const world = pointerToWorld(pos.x, pos.y);
+              pendingPreviewRef.current = world;
+              if (!pendingPreviewRaf.current) {
+                pendingPreviewRaf.current = requestAnimationFrame(() => {
+                  pendingPreviewRaf.current = null;
+                  const next = pendingPreviewRef.current;
+                  pendingPreviewRef.current = null;
+                  if (next) setPendingPreview(next);
+                });
+              }
+            }
+          }
           if (updateSelectionBox(e)) return;
           if (updateDraftPrintRect(e)) return;
           if (updateDraftRect(e)) return;
@@ -1429,12 +1453,17 @@ const CanvasStageImpl = (
           if (finalizeDraftPrintRect()) return;
           if (finalizeDraftRect()) return;
           endPan();
+          if (pendingType) {
+            if (pendingPreviewRaf.current) cancelAnimationFrame(pendingPreviewRaf.current);
+            pendingPreviewRaf.current = null;
+            pendingPreviewRef.current = null;
+            setPendingPreview(null);
+          }
         }}
       >
         {/* Background layer (kept separate so dragging objects doesn't re-draw the full image every frame) */}
         <Layer
           perfectDrawEnabled={false}
-          onClick={handleClickToAdd}
           onContextMenu={(e) => {
             e.evt.preventDefault();
             e.cancelBubble = true;
@@ -1628,7 +1657,7 @@ const CanvasStageImpl = (
                 key={room.id}
                 x={room.x || 0}
                 y={room.y || 0}
-                draggable={!readOnly && !panToolActive}
+                draggable={!readOnly && !panToolActive && !pendingType}
                 onDragStart={(e) => {
                   roomDragRef.current = {
                     roomId: room.id,
@@ -1978,6 +2007,7 @@ const CanvasStageImpl = (
             const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(highlightNow / 80) : 0;
             const scale = obj.scale ?? 1;
             const isDesk = isDeskType(obj.type);
+            const isCamera = obj.type === 'camera';
             const deskScaleX = isDesk ? clamp(Number(obj.scaleX ?? 1) || 1, 0.4, 4) : 1;
             const deskScaleY = isDesk ? clamp(Number(obj.scaleY ?? 1) || 1, 0.4, 4) : 1;
             const objectOpacity = typeof obj.opacity === 'number' ? Math.max(0.2, Math.min(1, obj.opacity)) : 1;
@@ -2005,6 +2035,13 @@ const CanvasStageImpl = (
             const deskHalf = deskSize / 2;
             const deskThickness = 12 * scale;
             const deskRotation = isDesk ? Number(obj.rotation || 0) : 0;
+            const cameraRotation = isCamera ? Number(obj.rotation || 0) : 0;
+            const cameraRange = isCamera ? clamp(Number((obj as any).cctvRange ?? 160) || 160, 60, 600) : 0;
+            const cameraAngle = isCamera ? clamp(Number((obj as any).cctvAngle ?? 70) || 70, 20, 160) : 0;
+            const cameraOpacity = isCamera ? clamp(Number((obj as any).cctvOpacity ?? 0.6) || 0.6, 0.1, 0.9) : 0;
+            const cameraOpacityLow = isCamera ? Math.max(0.05, cameraOpacity * 0.15) : 0;
+            const cameraOpacityMid = isCamera ? Math.max(0.1, cameraOpacity * 0.55) : 0;
+            const bodyOpacity = isCamera ? 1 : objectOpacity;
             const deskRectW = deskSize * 1.45;
             const deskRectH = deskSize * 0.75;
             const deskLongW = deskSize * 1.85;
@@ -2122,6 +2159,27 @@ const CanvasStageImpl = (
                   onContextMenu({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
                 }}
               >
+                {isCamera ? (
+                  <Wedge
+                    radius={cameraRange}
+                    angle={cameraAngle}
+                    rotation={cameraRotation - cameraAngle / 2}
+                    fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+                    fillRadialGradientStartRadius={0}
+                    fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+                    fillRadialGradientEndRadius={cameraRange}
+                    fillRadialGradientColorStops={[
+                      0,
+                      `rgba(34,197,94,${cameraOpacityLow})`,
+                      0.6,
+                      `rgba(34,197,94,${cameraOpacityMid})`,
+                      1,
+                      `rgba(34,197,94,${cameraOpacity})`
+                    ]}
+                    opacity={1}
+                    listening={false}
+                  />
+                ) : null}
                 <Text
                   text={labelText}
                   x={-80}
@@ -2298,7 +2356,7 @@ const CanvasStageImpl = (
                     )}
                   </Group>
                 ) : (
-                  <>
+                  <Group rotation={isCamera ? cameraRotation : 0} opacity={isCamera ? objectOpacity : 1}>
                     <Rect
                       x={-(18 * scale)}
                       y={-(18 * scale)}
@@ -2308,7 +2366,7 @@ const CanvasStageImpl = (
                       fill="#ffffff"
                       stroke={outline}
                       strokeWidth={outlineWidth}
-                      opacity={objectOpacity}
+                      opacity={bodyOpacity}
                       shadowBlur={0}
                       shadowColor="transparent"
                     />
@@ -2319,7 +2377,7 @@ const CanvasStageImpl = (
                         y={-9 * scale}
                         width={18 * scale}
                         height={18 * scale}
-                        opacity={objectOpacity}
+                        opacity={bodyOpacity}
                         listening={false}
                       />
                     ) : (
@@ -2332,11 +2390,11 @@ const CanvasStageImpl = (
                         fontSize={15 * scale}
                         fontStyle="bold"
                         fill={'#2563eb'}
-                        opacity={objectOpacity}
+                        opacity={bodyOpacity}
                         listening={false}
                       />
                     )}
-                  </>
+                  </Group>
                 )}
               </Group>
             );
@@ -2353,6 +2411,68 @@ const CanvasStageImpl = (
             />
           ) : null}
         </Layer>
+
+        {pendingType && pendingPreview ? (
+          <Layer perfectDrawEnabled={false} listening={false}>
+            <Group x={pendingPreview.x} y={pendingPreview.y} opacity={0.7}>
+              {pendingType === 'camera' ? (
+                <Wedge
+                  radius={160}
+                  angle={70}
+                  rotation={-35}
+                  fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+                  fillRadialGradientStartRadius={0}
+                  fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+                  fillRadialGradientEndRadius={160}
+                  fillRadialGradientColorStops={[
+                    0,
+                    'rgba(34,197,94,0.08)',
+                    0.6,
+                    'rgba(34,197,94,0.25)',
+                    1,
+                    'rgba(34,197,94,0.45)'
+                  ]}
+                />
+              ) : null}
+              <Rect
+                x={-18}
+                y={-18}
+                width={36}
+                height={36}
+                cornerRadius={12}
+                fill="#ffffff"
+                stroke="#94a3b8"
+                strokeWidth={2}
+                shadowBlur={0}
+                shadowColor="transparent"
+              />
+              {pendingType ? (
+                iconImages[pendingType] ? (
+                  <KonvaImage
+                    image={iconImages[pendingType] as HTMLImageElement}
+                    x={-9}
+                    y={-9}
+                    width={18}
+                    height={18}
+                    opacity={0.9}
+                  />
+                ) : (
+                  <Text
+                    text={'?'}
+                    x={-18}
+                    y={-14}
+                    width={36}
+                    align="center"
+                    fontSize={15}
+                    fontStyle="bold"
+                    fill={'#2563eb'}
+                    opacity={0.9}
+                  />
+                )
+              ) : null}
+            </Group>
+          </Layer>
+        ) : null}
 
         {/* Selection box + multi-drag overlay */}
         <Layer perfectDrawEnabled={false}>

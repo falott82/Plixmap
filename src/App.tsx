@@ -38,7 +38,24 @@ const HomeRoute = () => {
   );
   const { user } = useAuthStore();
 
-  const findFirstPlanId = () => clients[0]?.sites[0]?.floorPlans[0]?.id;
+  const hasPlanId = (id?: string | null) => {
+    if (!id) return false;
+    for (const c of clients || []) {
+      for (const s of c.sites || []) {
+        if (s.floorPlans?.some((p) => p.id === id)) return true;
+      }
+    }
+    return false;
+  };
+  const findFirstPlanId = () => {
+    for (const c of clients || []) {
+      for (const s of c.sites || []) {
+        const plan = s.floorPlans?.[0];
+        if (plan?.id) return plan.id;
+      }
+    }
+    return null;
+  };
   const findDefaultPlanId = () => {
     const defaultPlanId = (user as any)?.defaultPlanId as string | null | undefined;
     if (!defaultPlanId) return null;
@@ -51,11 +68,13 @@ const HomeRoute = () => {
   };
 
   const defaultPlanId = findDefaultPlanId();
-  const planId = defaultPlanId || selectedPlanId || findFirstPlanId();
+  const selectedPlanIdSafe = hasPlanId(selectedPlanId) ? selectedPlanId : null;
+  const planId = defaultPlanId || selectedPlanIdSafe || findFirstPlanId();
   if (planId) {
-    if (!selectedPlanId) setSelectedPlan(planId);
+    if (selectedPlanId !== planId) setSelectedPlan(planId);
     return <Navigate to={`/plan/${planId}${defaultPlanId ? '?dv=1' : ''}`} replace />;
   }
+  if (selectedPlanId) setSelectedPlan(undefined);
   return <EmptyWorkspace />;
 };
 
@@ -328,25 +347,37 @@ const App = () => {
   }, [clients, hydrated, markSaved, objectTypes, savedVersion, setServerState, user, version]);
 
   useEffect(() => {
-    if (!selectedPlanId) {
-      const defaultPlanId = (user as any)?.defaultPlanId as string | null | undefined;
-      const pickPlanId = () => {
-        if (defaultPlanId) {
-          for (const c of clients) {
-            for (const s of c.sites) {
-              if (s.floorPlans.some((p) => p.id === defaultPlanId)) return defaultPlanId;
-            }
-          }
-        }
-        return clients[0]?.sites[0]?.floorPlans[0]?.id;
-      };
-      const planId = pickPlanId();
-      if (planId) {
-        setSelectedPlan(planId);
-        if (location.pathname === '/' || location.pathname === '') {
-          navigate(`/plan/${planId}`, { replace: true });
+    const hasPlanId = (id?: string | null) => {
+      if (!id) return false;
+      for (const c of clients || []) {
+        for (const s of c.sites || []) {
+          if (s.floorPlans?.some((p) => p.id === id)) return true;
         }
       }
+      return false;
+    };
+    const selectedValid = hasPlanId(selectedPlanId);
+    if (selectedValid) return;
+
+    const defaultPlanId = (user as any)?.defaultPlanId as string | null | undefined;
+    const pickPlanId = () => {
+      if (defaultPlanId && hasPlanId(defaultPlanId)) return defaultPlanId;
+      for (const c of clients || []) {
+        for (const s of c.sites || []) {
+          const plan = s.floorPlans?.[0];
+          if (plan?.id) return plan.id;
+        }
+      }
+      return null;
+    };
+    const planId = pickPlanId();
+    if (planId) {
+      setSelectedPlan(planId);
+      if (location.pathname === '/' || location.pathname === '') {
+        navigate(`/plan/${planId}`, { replace: true });
+      }
+    } else if (selectedPlanId) {
+      setSelectedPlan(undefined);
     }
   }, [clients, selectedPlanId, setSelectedPlan, navigate, location.pathname, user]);
 

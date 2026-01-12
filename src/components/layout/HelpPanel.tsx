@@ -269,6 +269,12 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'Quando scegli un oggetto da inserire, l’anteprima segue il mouse: clicca per piazzarlo.',
+                          en: 'When you pick an object to place, a live preview follows the mouse: click to place it.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'Utente reale: se configurato l’import, puoi trascinare “Utente reale” e scegliere il dipendente da una lista (con ricerca e filtro “solo non assegnati”).',
                           en: 'Real user: if import is configured, you can drag “Real user” and pick an employee from a searchable list (with “only unassigned” filter).'
                         })}
@@ -352,6 +358,12 @@ const HelpPanel = () => {
                         {t({
                           it: 'Oggetto: nella modale puoi assegnare uno o più livelli; serve per filtrare la mappa.',
                           en: 'Object: in the modal you can assign one or more layers; it’s used to filter the map.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'CCTV: le telecamere mostrano il cono di visione; da menu oggetto regoli angolo, raggio e rotazione.',
+                          en: 'CCTV: cameras show a view cone; use the object menu to adjust angle, range and rotation.'
                         })}
                       </li>
                       <li>
