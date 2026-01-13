@@ -9,6 +9,44 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.7.2',
+    date: '2026-01-15',
+    type: 'fix',
+    notes: [
+      n(
+        'Layers: fix crash nella tab Settings → Layers con ricerca',
+        'Layers: fixed crash in Settings → Layers tab with search'
+      ),
+      n(
+        'Layers: visibilità salvata correttamente per utente dopo logout/login',
+        'Layers: visibility is now saved per user after logout/login'
+      ),
+      n(
+        'Login: form correttamente racchiuso per evitare warning del browser',
+        'Login: inputs are now inside a form to avoid browser warnings'
+      )
+    ]
+  },
+  {
+    version: '1.7.1',
+    date: '2026-01-14',
+    type: 'minor',
+    notes: [
+      n(
+        'Settings: nuova tab Layers per creare, riordinare e configurare i layers per planimetria',
+        'Settings: new Layers tab to create, reorder, and configure layers per floor plan'
+      ),
+      n(
+        'Layers: mappatura tipologie oggetto per layer con aggiornamento degli oggetti esistenti',
+        'Layers: object type mapping per layer with updates for existing objects'
+      ),
+      n(
+        'Defaults: typeIds standard per i layers base (users/devices/desks/cctv/racks)',
+        'Defaults: standard typeIds for base layers (users/devices/desks/cctv/racks)'
+      )
+    ]
+  },
+  {
     version: '1.7.0',
     date: '2026-01-13',
     type: 'minor',

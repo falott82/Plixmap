@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Lock, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -63,6 +63,11 @@ const LoginView = () => {
     }
   };
 
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    submit();
+  };
+
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-sky-50 via-blue-100 to-indigo-200 px-4 text-ink">
       <div className="pointer-events-none absolute -left-24 top-10 h-72 w-72 rounded-full bg-sky-200/50 blur-3xl" />
@@ -82,7 +87,7 @@ const LoginView = () => {
           </div>
         </div>
 
-        <div className="mt-6 space-y-3">
+        <form className="mt-6 space-y-3" onSubmit={handleSubmit}>
           <label className="block text-sm font-medium text-slate-700">
             {t({ it: 'Utente', en: 'Username' })}
             <div className="relative mt-1">
@@ -93,9 +98,6 @@ const LoginView = () => {
                 className="w-full rounded-xl border border-slate-200 bg-white/90 pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                 placeholder={t({ it: 'Nome utente', en: 'Username' })}
                 autoComplete="username"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') submit();
-                }}
               />
             </div>
           </label>
@@ -110,9 +112,6 @@ const LoginView = () => {
                 placeholder="••••••••"
                 type="password"
                 autoComplete="current-password"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') submit();
-                }}
               />
             </div>
           </label>
@@ -130,7 +129,6 @@ const LoginView = () => {
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') submit();
                     if (e.key === 'Escape') {
                       setOtpRequired(false);
                       setOtp('');
@@ -151,15 +149,14 @@ const LoginView = () => {
               {error}
             </div>
           ) : null}
-        </div>
-
-        <button
-          onClick={submit}
-          disabled={loading || !username.trim() || !password || (otpRequired && !otp.trim())}
-          className="mt-6 w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-card enabled:hover:bg-primary/90 disabled:opacity-60"
-        >
-          {loading ? t({ it: 'Accesso…', en: 'Signing in…' }) : t({ it: 'Entra', en: 'Sign in' })}
-        </button>
+          <button
+            type="submit"
+            disabled={loading || !username.trim() || !password || (otpRequired && !otp.trim())}
+            className="mt-6 w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-card enabled:hover:bg-primary/90 disabled:opacity-60"
+          >
+            {loading ? t({ it: 'Accesso…', en: 'Signing in…' }) : t({ it: 'Entra', en: 'Sign in' })}
+          </button>
+        </form>
 
         {showFirstRunCredentials ? (
           <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

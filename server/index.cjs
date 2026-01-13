@@ -1881,7 +1881,7 @@ app.post('/api/auth/first-run', requireAuth, (req, res) => {
 });
 
 app.put('/api/auth/me', requireAuth, (req, res) => {
-  const { language, defaultPlanId, clientOrder, paletteFavorites } = req.body || {};
+  const { language, defaultPlanId, clientOrder, paletteFavorites, visibleLayerIdsByPlan } = req.body || {};
   const nextLanguage = language === 'en' ? 'en' : language === 'it' ? 'it' : undefined;
   const nextDefaultPlanId =
     typeof defaultPlanId === 'string' ? defaultPlanId : defaultPlanId === null ? null : undefined;
@@ -1897,21 +1897,29 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
       : paletteFavorites === null
         ? []
         : undefined;
+  const nextVisibleLayerIdsByPlan =
+    visibleLayerIdsByPlan === null
+      ? {}
+      : visibleLayerIdsByPlan && typeof visibleLayerIdsByPlan === 'object' && !Array.isArray(visibleLayerIdsByPlan)
+        ? visibleLayerIdsByPlan
+        : undefined;
 
   if (
     nextLanguage === undefined &&
     nextDefaultPlanId === undefined &&
     nextClientOrder === undefined &&
-    nextPaletteFavorites === undefined
+    nextPaletteFavorites === undefined &&
+    nextVisibleLayerIdsByPlan === undefined
   ) {
     res.status(400).json({ error: 'Invalid payload' });
     return;
   }
 
+  const state = readState();
+
   // Validate defaultPlanId: must exist and be accessible to the current user (unless admin).
   if (nextDefaultPlanId !== undefined) {
     if (nextDefaultPlanId !== null) {
-      const state = readState();
       let ok = false;
       if (req.isAdmin) ok = true;
       else {
@@ -1927,7 +1935,6 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
   }
 
   if (nextPaletteFavorites !== undefined) {
-    const state = readState();
     const allowed = new Set((state.objectTypes || []).map((d) => d.id));
     const uniq = [];
     const seen = new Set();
@@ -1940,6 +1947,29 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
     // If objectTypes is missing (very old state), accept but still de-dupe.
     // (uniq already de-dupes even if allowed is empty)
     var validatedPaletteFavorites = uniq;
+  }
+  if (nextVisibleLayerIdsByPlan !== undefined) {
+    let allowedPlanIds = null;
+    if (!req.isAdmin) {
+      const ctx = getUserWithPermissions(db, req.userId);
+      allowedPlanIds = computePlanAccess(state.clients, ctx?.permissions || []);
+    }
+    const out = {};
+    for (const [planId, ids] of Object.entries(nextVisibleLayerIdsByPlan || {})) {
+      if (typeof planId !== 'string') continue;
+      if (allowedPlanIds && !allowedPlanIds.has(planId)) continue;
+      if (!Array.isArray(ids)) continue;
+      const uniq = [];
+      const seen = new Set();
+      for (const id of ids) {
+        const val = String(id);
+        if (seen.has(val)) continue;
+        seen.add(val);
+        uniq.push(val);
+      }
+      out[planId] = uniq;
+    }
+    var validatedVisibleLayerIdsByPlan = out;
   }
 
   const now = Date.now();
@@ -1960,6 +1990,10 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
   if (nextPaletteFavorites !== undefined) {
     sets.push('paletteFavoritesJson = ?');
     params.push(JSON.stringify(validatedPaletteFavorites || []));
+  }
+  if (nextVisibleLayerIdsByPlan !== undefined) {
+    sets.push('visibleLayerIdsByPlanJson = ?');
+    params.push(JSON.stringify(validatedVisibleLayerIdsByPlan || {}));
   }
   sets.push('updatedAt = ?');
   params.push(now);

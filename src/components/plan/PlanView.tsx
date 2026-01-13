@@ -35,7 +35,7 @@ import ExportButton from './ExportButton';
 import ObjectModal from './ObjectModal';
 import RoomAllocationModal from './RoomAllocationModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { FloorPlan, FloorPlanView, MapObject, MapObjectType, PlanLink, RackItem, RackLink, RackPortKind, Room } from '../../store/types';
+import { FloorPlan, FloorPlanView, IconName, LayerDefinition, MapObject, MapObjectType, PlanLink, RackItem, RackLink, RackPortKind, Room } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
@@ -155,6 +155,15 @@ const PlanView = ({ planId }: Props) => {
   );
 
   const getTypeIcon = useCallback((typeId: string) => objectTypeById.get(typeId)?.icon, [objectTypeById]);
+  const getLayerNote = useCallback(
+    (layer: any) => {
+      const note = layer?.note;
+      if (!note) return '';
+      if (typeof note === 'string') return note;
+      return String(note?.[lang] || note?.it || note?.en || '').trim();
+    },
+    [lang]
+  );
 
   const objectTypeIcons = useMemo(() => {
     const out: Record<string, any> = {};
@@ -183,6 +192,16 @@ const PlanView = ({ planId }: Props) => {
               : ['devices'],
     [isCameraType]
   );
+  const normalizeVisibleLayerIdsByPlan = useCallback((input?: Record<string, string[]>) => {
+    const out: Record<string, string[]> = {};
+    for (const [planId, ids] of Object.entries(input || {})) {
+      if (!Array.isArray(ids)) continue;
+      const uniq = Array.from(new Set(ids.map((id) => String(id))));
+      uniq.sort();
+      out[planId] = uniq;
+    }
+    return out;
+  }, []);
 
   const {
     selectedObjectId,
@@ -345,13 +364,21 @@ const PlanView = ({ planId }: Props) => {
   const [crossPlanResults, setCrossPlanResults] = useState<CrossPlanSearchResult[]>([]);
   const [countsOpen, setCountsOpen] = useState(false);
   const [presenceOpen, setPresenceOpen] = useState(false);
+  const [layersPopoverOpen, setLayersPopoverOpen] = useState(false);
   const [expandedType, setExpandedType] = useState<string | null>(null);
+  const [typeMenu, setTypeMenu] = useState<{ typeId: string; label: string; icon?: IconName; x: number; y: number } | null>(null);
+  const typeMenuRef = useRef<HTMLDivElement | null>(null);
+  const [typeLayerModal, setTypeLayerModal] = useState<{ typeId: string; label: string } | null>(null);
+  const [typeLayerName, setTypeLayerName] = useState('');
+  const [typeLayerColor, setTypeLayerColor] = useState('#0ea5e9');
+  const typeLayerNameRef = useRef<HTMLInputElement | null>(null);
   const [objectListQuery, setObjectListQuery] = useState('');
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [roomAllocationOpen, setRoomAllocationOpen] = useState(false);
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement | null>(null);
   const presenceRef = useRef<HTMLDivElement | null>(null);
+  const layersPopoverRef = useRef<HTMLDivElement | null>(null);
   const [panToolActive, setPanToolActive] = useState(false);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
@@ -387,6 +414,7 @@ const PlanView = ({ planId }: Props) => {
   const confirmDeleteRef = useRef<string[] | null>(confirmDelete);
   const zoomRef = useRef<number>(zoom);
   const renderStartRef = useRef(0);
+  const layerVisibilitySyncRef = useRef<string>('');
   renderStartRef.current = performance.now();
 
   useEffect(() => {
@@ -651,21 +679,40 @@ const PlanView = ({ planId }: Props) => {
     const layers = (renderPlan as any)?.layers || [];
     return [...layers].sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
   }, [renderPlan]);
+  const getTypeLayerIds = useCallback(
+    (typeId: string) => {
+      const layers = (renderPlan as any)?.layers || [];
+      const matched = layers
+        .filter((l: any) => Array.isArray(l.typeIds) && l.typeIds.includes(typeId))
+        .map((l: any) => String(l.id));
+      return matched.length ? matched : null;
+    },
+    [renderPlan]
+  );
   const prevLayerIdsByPlanRef = useRef<Record<string, string[]>>({});
   const visibleLayerIds = (visibleLayerIdsByPlan[planId] as string[] | undefined) || planLayers.map((l: any) => String(l.id));
   const hideAllLayers = !!hiddenLayersByPlan[planId];
   const effectiveVisibleLayerIds = hideAllLayers ? [] : visibleLayerIds;
+  const visibleLayerCount = effectiveVisibleLayerIds.length;
+  const totalLayerCount = planLayers.length;
   useEffect(() => {
     if (!planLayers.length) return;
     const layerIds = planLayers.map((l: any) => String(l.id));
     const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
-    const prev = prevLayerIdsByPlanRef.current[planId] || [];
-    if (!current) {
+    const prev = prevLayerIdsByPlanRef.current[planId];
+    if (typeof current === 'undefined') {
       setVisibleLayerIds(planId, layerIds);
       prevLayerIdsByPlanRef.current[planId] = layerIds;
       return;
     }
     const filteredCurrent = current.filter((id) => layerIds.includes(id));
+    if (!prev) {
+      if (filteredCurrent.length !== current.length) {
+        setVisibleLayerIds(planId, filteredCurrent);
+      }
+      prevLayerIdsByPlanRef.current[planId] = layerIds;
+      return;
+    }
     const newIds = layerIds.filter((id) => !prev.includes(id));
     if (newIds.length || filteredCurrent.length !== current.length) {
       setVisibleLayerIds(planId, [...filteredCurrent, ...newIds]);
@@ -677,6 +724,8 @@ const PlanView = ({ planId }: Props) => {
     if (!renderPlan) return renderPlan;
     const visible = new Set(effectiveVisibleLayerIds);
     const normalizedLayerIdsForType = (typeId: string) => {
+      const mapped = getTypeLayerIds(typeId);
+      if (mapped?.length) return mapped;
       if (typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user') return ['users'];
       if (typeId === 'rack') return ['racks'];
       if (isDeskType(typeId)) return ['desks'];
@@ -701,7 +750,7 @@ const PlanView = ({ planId }: Props) => {
       : [];
     const links = [...baseLinks, ...rackLinks];
     return { ...renderPlan, objects, rooms, links };
-  }, [effectiveVisibleLayerIds, isCameraType, rackOverlayLinks, renderPlan]);
+  }, [effectiveVisibleLayerIds, getTypeLayerIds, isCameraType, rackOverlayLinks, renderPlan]);
 
   const linksModalObjectName = useMemo(() => {
     if (!linksModalObjectId) return '';
@@ -1992,6 +2041,100 @@ const PlanView = ({ planId }: Props) => {
     [getTypeLabel, objectTypeDefs, objectsByType]
   );
 
+  const handleSelectType = useCallback(
+    (typeId: string) => {
+      const ids = (objectsByType.get(typeId) || []).map((o) => o.id);
+      if (!ids.length) return;
+      setSelection(ids);
+      setCountsOpen(false);
+      setTypeMenu(null);
+    },
+    [objectsByType, setSelection]
+  );
+
+  const handleDeleteType = useCallback(
+    (typeId: string) => {
+      if (isReadOnly) return;
+      const ids = (objectsByType.get(typeId) || []).map((o) => o.id);
+      if (!ids.length) return;
+      setConfirmDelete(ids);
+      setCountsOpen(false);
+      setTypeMenu(null);
+    },
+    [isReadOnly, objectsByType]
+  );
+
+  const handleOpenTypeLayer = useCallback(
+    (typeId: string, label: string) => {
+      if (isReadOnly) return;
+      setTypeLayerModal({ typeId, label });
+      setTypeMenu(null);
+    },
+    [isReadOnly]
+  );
+
+  const handleCreateTypeLayer = useCallback(() => {
+    if (!typeLayerModal || !renderPlan || isReadOnly) return;
+    const name = typeLayerName.trim();
+    if (!name) return;
+    const layers = ((renderPlan as any).layers || []) as LayerDefinition[];
+    const fallbackTypeLayerIds = getTypeLayerIds(typeLayerModal.typeId) || inferDefaultLayerIds(typeLayerModal.typeId);
+    const fallbackTypeLayerSet = new Set(fallbackTypeLayerIds.map((id) => String(id)));
+    const baseId = `layer-${typeLayerModal.typeId}`;
+    let id = baseId;
+    let suffix = 1;
+    while (layers.some((l) => String(l.id) === id)) {
+      id = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+    const maxOrder = layers.reduce((acc, l) => Math.max(acc, Number(l.order || 0)), 0);
+    const nextLayer = {
+      id,
+      name: { it: name, en: name },
+      color: typeLayerColor || '#0ea5e9',
+      order: maxOrder + 1,
+      typeIds: [typeLayerModal.typeId]
+    };
+    const nextLayers = [...layers, nextLayer];
+    const nextObjects = renderPlan.objects.map((o) => {
+      if (o.type !== typeLayerModal.typeId) return o;
+      const currentLayerIds =
+        Array.isArray(o.layerIds) && o.layerIds.length ? o.layerIds.map((layerId) => String(layerId)) : fallbackTypeLayerIds;
+      const preserved = currentLayerIds.filter((layerId) => !fallbackTypeLayerSet.has(String(layerId)));
+      const nextLayerIds = Array.from(new Set([id, ...preserved]));
+      return { ...o, layerIds: nextLayerIds };
+    });
+    markTouched();
+    setFloorPlanContent(renderPlan.id, {
+      imageUrl: renderPlan.imageUrl,
+      width: renderPlan.width,
+      height: renderPlan.height,
+      objects: nextObjects,
+      rooms: renderPlan.rooms || [],
+      views: renderPlan.views || [],
+      layers: nextLayers,
+      links: (renderPlan as any).links,
+      racks: (renderPlan as any).racks,
+      rackItems: (renderPlan as any).rackItems,
+      rackLinks: (renderPlan as any).rackLinks,
+      printArea: (renderPlan as any).printArea
+    });
+    push(t({ it: 'Layer creato', en: 'Layer created' }), 'success');
+    setTypeLayerModal(null);
+  }, [
+    getTypeLayerIds,
+    inferDefaultLayerIds,
+    isReadOnly,
+    markTouched,
+    push,
+    renderPlan,
+    setFloorPlanContent,
+    t,
+    typeLayerColor,
+    typeLayerModal,
+    typeLayerName
+  ]);
+
   const isUserObject = useCallback((type: string) => type === 'user' || type === 'real_user' || type === 'generic_user', []);
 
   const rooms = useMemo(() => renderPlan?.rooms || [], [renderPlan?.rooms]);
@@ -2207,6 +2350,29 @@ const PlanView = ({ planId }: Props) => {
   }, [countsOpen]);
 
   useEffect(() => {
+    if (countsOpen) return;
+    setTypeMenu(null);
+  }, [countsOpen]);
+
+  useEffect(() => {
+    if (!typeMenu) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!typeMenuRef.current) return;
+      if (typeMenuRef.current.contains(event.target as Node)) return;
+      setTypeMenu(null);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [typeMenu]);
+
+  useEffect(() => {
+    if (!typeLayerModal) return;
+    setTypeLayerName(typeLayerModal.label);
+    setTypeLayerColor('#0ea5e9');
+    window.setTimeout(() => typeLayerNameRef.current?.focus(), 0);
+  }, [typeLayerModal]);
+
+  useEffect(() => {
     if (!presenceOpen) return;
     const handleClick = (event: MouseEvent) => {
       if (!presenceRef.current) return;
@@ -2218,10 +2384,50 @@ const PlanView = ({ planId }: Props) => {
   }, [presenceOpen]);
 
   useEffect(() => {
+    if (!layersPopoverOpen) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!layersPopoverRef.current) return;
+      if (layersPopoverRef.current.contains(event.target as Node)) return;
+      setLayersPopoverOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [layersPopoverOpen]);
+
+  useEffect(() => {
     if (!roomsOpen) return;
     setExpandedRoomId(null);
     setNewRoomMenuOpen(false);
   }, [roomsOpen]);
+
+  useEffect(() => {
+    if (!user) return;
+    const normalized = normalizeVisibleLayerIdsByPlan((user as any)?.visibleLayerIdsByPlan || {});
+    layerVisibilitySyncRef.current = JSON.stringify(normalized);
+  }, [normalizeVisibleLayerIdsByPlan, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const base = normalizeVisibleLayerIdsByPlan((user as any)?.visibleLayerIdsByPlan || {});
+    const current = normalizeVisibleLayerIdsByPlan(visibleLayerIdsByPlan || {});
+    const merged = { ...base, ...current };
+    const next = JSON.stringify(merged);
+    if (next === layerVisibilitySyncRef.current) return;
+    const handle = window.setTimeout(async () => {
+      try {
+        await updateMyProfile({ visibleLayerIdsByPlan: merged });
+        useAuthStore.setState((s) =>
+          s.user
+            ? ({ user: { ...s.user, visibleLayerIdsByPlan: merged } as any, permissions: s.permissions, hydrated: s.hydrated } as any)
+            : s
+        );
+        layerVisibilitySyncRef.current = next;
+      } catch {
+        // ignore
+      }
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [normalizeVisibleLayerIdsByPlan, user, visibleLayerIdsByPlan]);
 
   const beginRoomDraw = () => {
     if (isReadOnly) return;
@@ -2399,6 +2605,7 @@ const PlanView = ({ planId }: Props) => {
     if (modalState.mode === 'create') {
       markTouched();
       const extra = isCameraType(modalState.type) ? getCameraDefaults() : undefined;
+      const fallbackLayerIds = getTypeLayerIds(modalState.type) || inferDefaultLayerIds(modalState.type);
       const id = addObject(
         plan.id,
         modalState.type,
@@ -2407,7 +2614,7 @@ const PlanView = ({ planId }: Props) => {
         modalState.coords.x,
         modalState.coords.y,
         lastObjectScale,
-        payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(modalState.type),
+        payload.layerIds?.length ? payload.layerIds : fallbackLayerIds,
         extra
       );
       lastInsertedRef.current = { id, name: payload.name };
@@ -2762,7 +2969,8 @@ const PlanView = ({ planId }: Props) => {
   const modalInitials = useMemo(() => {
     if (!modalState || !renderPlan) return null;
     if (modalState.mode === 'create') {
-      return { type: modalState.type, name: '', description: '', layerIds: inferDefaultLayerIds(modalState.type) };
+      const fallbackLayerIds = getTypeLayerIds(modalState.type) || inferDefaultLayerIds(modalState.type);
+      return { type: modalState.type, name: '', description: '', layerIds: fallbackLayerIds };
     }
     const obj = renderPlan.objects.find((o) => o.id === modalState.objectId);
     if (!obj) return null;
@@ -2770,9 +2978,12 @@ const PlanView = ({ planId }: Props) => {
       type: obj.type,
       name: modalState.mode === 'duplicate' ? '' : obj.name,
       description: modalState.mode === 'duplicate' ? '' : obj.description || '',
-      layerIds: modalState.mode === 'duplicate' ? (obj.layerIds || inferDefaultLayerIds(obj.type)) : (obj.layerIds || inferDefaultLayerIds(obj.type))
+      layerIds:
+        modalState.mode === 'duplicate'
+          ? (obj.layerIds || getTypeLayerIds(obj.type) || inferDefaultLayerIds(obj.type))
+          : (obj.layerIds || getTypeLayerIds(obj.type) || inferDefaultLayerIds(obj.type))
     };
-  }, [inferDefaultLayerIds, modalState, renderPlan]);
+  }, [getTypeLayerIds, inferDefaultLayerIds, modalState, renderPlan]);
 
   const assignedCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -2952,6 +3163,88 @@ const PlanView = ({ planId }: Props) => {
                 </span>
               )
             ) : null}
+            {totalLayerCount ? (
+              <div ref={layersPopoverRef} className="relative">
+                <button
+                  onClick={() => setLayersPopoverOpen((v) => !v)}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Layers visibili', en: 'Visible layers' })}
+                >
+                  {t({ it: `${visibleLayerCount}/${totalLayerCount} livelli`, en: `${visibleLayerCount}/${totalLayerCount} layers` })}
+                </button>
+                {layersPopoverOpen ? (
+                  <div className="absolute left-0 z-50 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-card">
+                    <div className="flex items-center justify-between px-2 pb-2">
+                      <div className="font-semibold text-ink">{t({ it: 'Layers mostrati', en: 'Visible layers' })}</div>
+                      <button
+                        onClick={() => setLayersPopoverOpen(false)}
+                        className="text-slate-400 hover:text-ink"
+                        title={t({ it: 'Chiudi', en: 'Close' })}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    {hideAllLayers ? (
+                      <div className="mx-2 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+                        {t({ it: 'Solo mappa attivo', en: 'Map only active' })}
+                      </div>
+                    ) : null}
+                    <div className="mt-2 flex items-center gap-2 px-2">
+                      <button
+                        onClick={() => {
+                          setHideAllLayers(planId, false);
+                          setVisibleLayerIds(planId, planLayers.map((l: any) => String(l.id)));
+                        }}
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        {t({ it: 'Tutti', en: 'All' })}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setHideAllLayers(planId, false);
+                          setVisibleLayerIds(planId, []);
+                        }}
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        {t({ it: 'Nessuno', en: 'None' })}
+                      </button>
+                    </div>
+                    <div className="mt-2 max-h-56 space-y-1 overflow-y-auto px-2 pb-1">
+                      {planLayers.map((layer: any) => {
+                        const layerId = String(layer.id);
+                        const label = (layer?.name?.[lang] as string) || (layer?.name?.it as string) || layerId;
+                        const checked = visibleLayerIds.includes(layerId);
+                        const note = getLayerNote(layer);
+                        return (
+                          <label
+                            key={layerId}
+                            className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-[11px] text-slate-700 hover:bg-slate-50"
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
+                              checked={checked}
+                              onChange={() => {
+                                setHideAllLayers(planId, false);
+                                const next = checked ? visibleLayerIds.filter((id) => id !== layerId) : [...visibleLayerIds, layerId];
+                                setVisibleLayerIds(planId, next);
+                              }}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="truncate font-semibold">{label}</span>
+                                <span className="h-2 w-2 rounded-full" style={{ background: layer.color || '#94a3b8' }} />
+                              </div>
+                              {note ? <div className="mt-1 text-[10px] text-slate-500">{note}</div> : null}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="relative">
               <button
                 onClick={() => setCountsOpen((v) => !v)}
@@ -3015,11 +3308,16 @@ const PlanView = ({ planId }: Props) => {
 	                      <>
 		                        {counts.map((t) => (
 		                          <div key={t.id} className="rounded-lg border border-slate-100">
-			                            <button
-			                              onClick={() => setExpandedType(expandedType === t.id ? null : t.id)}
-			                              className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50"
-			                              title={t.label}
-			                            >
+                            <button
+                              onClick={() => setExpandedType(expandedType === t.id ? null : t.id)}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setTypeMenu({ typeId: t.id, label: t.label, icon: t.icon, x: e.clientX, y: e.clientY });
+                              }}
+                              className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50"
+                              title={t.label}
+                            >
 		                              <span className="flex items-center gap-2 font-semibold text-ink">
 		                                <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-primary">
 		                                  <Icon name={t.icon} />
@@ -3768,17 +4066,33 @@ const PlanView = ({ planId }: Props) => {
                         {layersOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         <span>{t({ it: 'Livelli', en: 'Layers' })}</span>
                       </button>
-                      <button
-                        onClick={() => setHideAllLayers(planId, !hideAllLayers)}
-                        className="flex h-6 w-6 items-center justify-center rounded-md text-slate-600 hover:bg-slate-50"
-                        title={
-                          hideAllLayers
-                            ? t({ it: 'Mostra livelli', en: 'Show layers' })
-                            : t({ it: 'Solo mappa', en: 'Map only' })
-                        }
-                      >
-                        {hideAllLayers ? <Eye size={14} /> : <EyeOff size={14} />}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setHideAllLayers(planId, !hideAllLayers)}
+                          className="flex h-6 w-6 items-center justify-center rounded-md text-slate-600 hover:bg-slate-50"
+                          title={
+                            hideAllLayers
+                              ? t({ it: 'Mostra livelli', en: 'Show layers' })
+                              : t({ it: 'Solo mappa', en: 'Map only' })
+                          }
+                        >
+                          {hideAllLayers ? <Eye size={14} /> : <EyeOff size={14} />}
+                        </button>
+                        <button
+                          onClick={() => {
+                            const url = '/settings?tab=layers';
+                            if (hasNavigationEdits && !isReadOnly) {
+                              requestSaveAndNavigate(url);
+                              return;
+                            }
+                            navigate(url);
+                          }}
+                          className="flex h-6 w-6 items-center justify-center rounded-md text-slate-600 hover:bg-slate-50"
+                          title={t({ it: 'Gestisci layers', en: 'Manage layers' })}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      </div>
                     </div>
                     {layersOpen ? (
                       <div className="mt-2 flex flex-col gap-2">
@@ -3937,6 +4251,54 @@ const PlanView = ({ planId }: Props) => {
 		          ) : null}
 	        </div>
 	      </div>
+
+      {typeMenu ? (
+        <div
+          ref={typeMenuRef}
+          className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+          style={{ top: typeMenu.y, left: typeMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-primary">
+                <Icon name={typeMenu.icon} />
+              </span>
+              <span className="truncate">{typeMenu.label}</span>
+            </div>
+            <button
+              onClick={() => setTypeMenu(null)}
+              className="text-slate-400 hover:text-ink"
+              title={t({ it: 'Chiudi', en: 'Close' })}
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <button
+            onClick={() => handleSelectType(typeMenu.typeId)}
+            className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+            title={t({ it: 'Seleziona tutti gli oggetti di questo tipo', en: 'Select all objects of this type' })}
+          >
+            <User size={14} className="text-slate-500" /> {t({ it: 'Seleziona tutti', en: 'Select all' })}
+          </button>
+          <button
+            onClick={() => handleOpenTypeLayer(typeMenu.typeId, typeMenu.label)}
+            disabled={isReadOnly}
+            className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            title={t({ it: 'Crea un layer per questo tipo', en: 'Create a layer for this type' })}
+          >
+            <LayoutGrid size={14} className="text-slate-500" /> {t({ it: 'Crea layer', en: 'Create layer' })}
+          </button>
+          <button
+            onClick={() => handleDeleteType(typeMenu.typeId)}
+            disabled={isReadOnly}
+            className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+            title={t({ it: 'Rimuovi tutti gli oggetti di questo tipo', en: 'Remove all objects of this type' })}
+          >
+            <Trash size={14} /> {t({ it: 'Rimuovi tutti', en: 'Remove all' })}
+          </button>
+        </div>
+      ) : null}
 
       {contextMenu && plan ? (
         <>
@@ -4711,6 +5073,104 @@ const PlanView = ({ planId }: Props) => {
           setPendingType(null);
         }}
       />
+
+      <Transition show={!!typeLayerModal} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setTypeLayerModal(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-center justify-between gap-3">
+                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Crea layer per tipologia', en: 'Create type layer' })}</Dialog.Title>
+                    <button
+                      onClick={() => setTypeLayerModal(null)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                    {t({
+                      it: `Questo layer raccoglierà tutti gli oggetti "${typeLayerModal?.label || ''}".`,
+                      en: `This layer will collect all "${typeLayerModal?.label || ''}" objects.`
+                    })}
+                  </Dialog.Description>
+                  <div className="mt-4 grid grid-cols-1 gap-3">
+                    <label className="text-sm font-semibold text-slate-700">
+                      {t({ it: 'Nome layer', en: 'Layer name' })}
+                      <input
+                        ref={typeLayerNameRef}
+                        value={typeLayerName}
+                        onChange={(e) => setTypeLayerName(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. Badge door', en: 'e.g. Badge door' })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && typeLayerName.trim()) {
+                            handleCreateTypeLayer();
+                          }
+                        }}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-slate-700">
+                      {t({ it: 'Colore', en: 'Color' })}
+                      <div className="mt-2 flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={typeLayerColor}
+                          onChange={(e) => setTypeLayerColor(e.target.value)}
+                          className="h-9 w-12 rounded-lg border border-slate-200 bg-white p-1"
+                          aria-label={t({ it: 'Colore layer', en: 'Layer color' })}
+                        />
+                        <input
+                          value={typeLayerColor}
+                          onChange={(e) => setTypeLayerColor(e.target.value)}
+                          className="w-full rounded-lg border border-slate-200 px-2 py-2 text-xs font-mono outline-none ring-primary/30 focus:ring-2"
+                          placeholder="#0ea5e9"
+                        />
+                      </div>
+                    </label>
+                  </div>
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      onClick={() => setTypeLayerModal(null)}
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      onClick={() => handleCreateTypeLayer()}
+                      disabled={!typeLayerName.trim()}
+                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {t({ it: 'Crea layer', en: 'Create layer' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
 
       <Transition show={realUserImportMissing} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setRealUserImportMissing(false)}>

@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackDefinition, RackItem, RackLink, Room, Site } from './types';
-import { defaultData, defaultObjectTypes } from './data';
+import { DEFAULT_CCTV_TYPES, DEFAULT_DESK_TYPES, DEFAULT_DEVICE_TYPES, DEFAULT_RACK_TYPES, DEFAULT_USER_TYPES, defaultData, defaultObjectTypes } from './data';
 import { useAuthStore } from './useAuthStore';
 
 interface DataState {
@@ -289,7 +289,13 @@ const snapshotRevision = (
     imageUrl: plan.imageUrl,
     width: plan.width,
     height: plan.height,
-    layers: plan.layers ? plan.layers.map((l) => ({ ...l, name: { ...l.name } })) : undefined,
+    layers: plan.layers
+      ? plan.layers.map((l) => ({
+          ...l,
+          name: { ...l.name },
+          note: typeof l.note === 'string' ? l.note : l.note ? { ...l.note } : undefined
+        }))
+      : undefined,
     views: normalizeViews(plan.views),
     rooms: plan.rooms ? plan.rooms.map((r) => ({ ...r })) : undefined,
     links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
@@ -301,14 +307,24 @@ const snapshotRevision = (
 };
 
 const defaultLayers = (): LayerDefinition[] => [
-  { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1 },
-  { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2 },
-  { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 3 },
-  { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 4 },
+  { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1, typeIds: DEFAULT_USER_TYPES },
+  { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2, typeIds: DEFAULT_DEVICE_TYPES },
+  { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 3, typeIds: DEFAULT_CCTV_TYPES },
+  { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 4, typeIds: DEFAULT_DESK_TYPES },
   { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 5 },
   { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 6 },
-  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 7 }
+  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 7, typeIds: DEFAULT_RACK_TYPES }
 ];
+
+const ensureLayerTypes = (layer: LayerDefinition): LayerDefinition => {
+  if (Array.isArray(layer.typeIds) && layer.typeIds.length) return layer;
+  if (layer.id === 'users') return { ...layer, typeIds: DEFAULT_USER_TYPES };
+  if (layer.id === 'devices') return { ...layer, typeIds: DEFAULT_DEVICE_TYPES };
+  if (layer.id === 'cctv') return { ...layer, typeIds: DEFAULT_CCTV_TYPES };
+  if (layer.id === 'desks') return { ...layer, typeIds: DEFAULT_DESK_TYPES };
+  if (layer.id === 'racks') return { ...layer, typeIds: DEFAULT_RACK_TYPES };
+  return layer;
+};
 
 const normalizePlan = (plan: FloorPlan): FloorPlan => {
   const next = { ...plan } as any;
@@ -318,22 +334,23 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
     if (!ids.has('cctv')) {
       next.layers = [
         ...next.layers,
-        { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: (next.layers.length || 4) + 1 }
+        { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: (next.layers.length || 4) + 1, typeIds: DEFAULT_CCTV_TYPES }
       ];
     }
     if (!ids.has('desks')) {
       next.layers = [
         ...next.layers,
-        { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: (next.layers.length || 4) + 1 }
+        { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: (next.layers.length || 4) + 1, typeIds: DEFAULT_DESK_TYPES }
       ];
     }
     if (!ids.has('racks')) {
       next.layers = [
         ...next.layers,
-        { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: (next.layers.length || 4) + 1 }
+        { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: (next.layers.length || 4) + 1, typeIds: DEFAULT_RACK_TYPES }
       ];
     }
   }
+  if (Array.isArray(next.layers)) next.layers = next.layers.map((layer: LayerDefinition) => ensureLayerTypes(layer));
   if (!Array.isArray(next.links)) next.links = [];
   next.views = normalizeViews(next.views) || [];
   if (!Array.isArray(next.rooms)) next.rooms = [];

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { AuthUser, Permission, fetchMe, login as apiLogin, logout as apiLogout } from '../api/auth';
 import { useCustomFieldsStore } from './useCustomFieldsStore';
+import { useUIStore } from './useUIStore';
 
 interface AuthState {
   user: AuthUser | null;
@@ -39,6 +40,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       }
       const me = await fetchMe();
       set({ user: me.user, permissions: me.permissions, hydrated: true });
+      const visibleLayers = me.user?.visibleLayerIdsByPlan;
+      useUIStore.getState().setVisibleLayerIdsByPlan(
+        visibleLayers && typeof visibleLayers === 'object' && !Array.isArray(visibleLayers) ? visibleLayers : {}
+      );
       try {
         window.localStorage.setItem('deskly_session_hint', '1');
       } catch {}
@@ -56,6 +61,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     await apiLogin(username, password, otp);
     const me = await fetchMe();
     set({ user: me.user, permissions: me.permissions, hydrated: true });
+    const visibleLayers = me.user?.visibleLayerIdsByPlan;
+    useUIStore.getState().setVisibleLayerIdsByPlan(
+      visibleLayers && typeof visibleLayers === 'object' && !Array.isArray(visibleLayers) ? visibleLayers : {}
+    );
     try {
       window.localStorage.setItem('deskly_session_hint', '1');
     } catch {}

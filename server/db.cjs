@@ -73,6 +73,15 @@ const migrations = [
         );
       `);
     }
+  },
+  {
+    version: 3,
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info('users')").all().map((c) => c.name);
+      if (!cols.includes('visibleLayerIdsByPlanJson')) {
+        db.exec("ALTER TABLE users ADD COLUMN visibleLayerIdsByPlanJson TEXT NOT NULL DEFAULT '{}'");
+      }
+    }
   }
 ];
 
@@ -114,6 +123,7 @@ const openDb = () => {
       defaultPlanId TEXT,
       clientOrderJson TEXT NOT NULL DEFAULT '[]',
       paletteFavoritesJson TEXT NOT NULL DEFAULT '[]',
+      visibleLayerIdsByPlanJson TEXT NOT NULL DEFAULT '{}',
       mustChangePassword INTEGER NOT NULL DEFAULT 0,
       firstName TEXT NOT NULL DEFAULT '',
       lastName TEXT NOT NULL DEFAULT '',

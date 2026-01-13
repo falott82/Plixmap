@@ -175,6 +175,7 @@ const ObjectTypesPanel = () => {
     'wifiOff',
     'cable',
     'lockKeyhole',
+    'badgeCheck',
     'shieldCheck',
     'shieldAlert',
     'bellRing',

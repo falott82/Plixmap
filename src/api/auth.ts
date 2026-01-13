@@ -14,6 +14,7 @@ export interface AuthUser {
   defaultPlanId?: string | null;
   clientOrder?: string[];
   paletteFavorites?: string[];
+  visibleLayerIdsByPlan?: Record<string, string[]>;
   mustChangePassword?: boolean;
   firstName: string;
   lastName: string;
@@ -90,6 +91,7 @@ export const updateMyProfile = async (payload: {
   defaultPlanId?: string | null;
   clientOrder?: string[];
   paletteFavorites?: string[];
+  visibleLayerIdsByPlan?: Record<string, string[]> | null;
 }): Promise<void> => {
   const res = await apiFetch('/api/auth/me', {
     method: 'PUT',
