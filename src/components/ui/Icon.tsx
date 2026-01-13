@@ -4,6 +4,7 @@ import {
   BatteryCharging,
   BatteryFull,
   BatteryLow,
+  BadgeCheck,
   Bell,
   BellRing,
   Bike,
@@ -110,6 +111,10 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
                     ? 'laptop'
                     : type === 'camera'
                       ? 'camera'
+                      : type === 'badge_door'
+                        ? 'lockKeyhole'
+                        : type === 'badge_presence'
+                          ? 'badgeCheck'
                       : undefined);
 
   switch (resolved) {
@@ -215,6 +220,8 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
       return <Cable {...common} />;
     case 'lockKeyhole':
       return <LockKeyhole {...common} />;
+    case 'badgeCheck':
+      return <BadgeCheck {...common} />;
     case 'shieldCheck':
       return <ShieldCheck {...common} />;
     case 'shieldAlert':

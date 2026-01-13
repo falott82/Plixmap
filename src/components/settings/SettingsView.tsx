@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, ChevronUp, ChevronDown, DownloadCloud, Eye, X, HelpCircle, Mail, Heart } from 'lucide-react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, HelpCircle, Mail, Heart } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -24,6 +24,7 @@ import CustomImportPanel from './CustomImportPanel';
 import VersionBadge from '../ui/VersionBadge';
 import EmailSettingsPanel from './EmailSettingsPanel';
 import DonationsPanel from './DonationsPanel';
+import LayersPanel from './LayersPanel';
 
 const SettingsView = () => {
   const {
@@ -71,6 +72,7 @@ const SettingsView = () => {
     const next = new URLSearchParams(search).get('tab')?.toLowerCase() || '';
     if (next === 'account') return 'account';
     if (next === 'objects') return 'objects';
+    if (next === 'layers' && isAdmin) return 'layers';
     if (next === 'users' && isAdmin) return 'users';
     if (next === 'logs' && isSuperAdmin) return 'logs';
     if (next === 'email' && isSuperAdmin) return 'email';
@@ -81,7 +83,7 @@ const SettingsView = () => {
     if (next === 'data' && isAdmin) return 'data';
     return isAdmin ? 'data' : 'account';
   };
-  const [tab, setTab] = useState<'data' | 'objects' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd' | 'donations'>(
+  const [tab, setTab] = useState<'data' | 'objects' | 'layers' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd' | 'donations'>(
     () => resolveTab(location.search)
   );
   const setTabAndUrl = (nextTab: typeof tab) => {
@@ -240,6 +242,15 @@ const SettingsView = () => {
               <LayoutGrid size={16} /> {t({ it: 'Oggetti', en: 'Objects' })}
             </button>
             <button
+              onClick={() => setTabAndUrl('layers')}
+              className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+                tab === 'layers' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+              }`}
+              title={t({ it: 'Apri tab Layers', en: 'Open Layers tab' })}
+            >
+              <Layers size={16} /> {t({ it: 'Layers', en: 'Layers' })}
+            </button>
+            <button
               onClick={() => setTabAndUrl('users')}
               className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                 tab === 'users' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
@@ -338,6 +349,16 @@ const SettingsView = () => {
         {tab === 'account' ? <AccountPanel /> : null}
 
         {tab === 'objects' ? <ObjectTypesPanel /> : null}
+
+        {tab === 'layers' ? (
+          isAdmin ? (
+            <LayersPanel />
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card text-sm text-slate-600">
+              {t({ it: 'Non hai i permessi per gestire i layers.', en: 'You do not have permission to manage layers.' })}
+            </div>
+          )
+        ) : null}
 
         {tab === 'donations' ? <DonationsPanel /> : null}
 

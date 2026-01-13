@@ -1,7 +1,7 @@
 const getUserWithPermissions = (db, userId) => {
   const user = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, paletteFavoritesJson, mustChangePassword, tokenVersion, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
+      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, paletteFavoritesJson, visibleLayerIdsByPlanJson, mustChangePassword, tokenVersion, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
     )
     .get(userId);
   if (!user) return null;
@@ -23,6 +23,29 @@ const getUserWithPermissions = (db, userId) => {
       return [];
     }
   })();
+  const visibleLayerIdsByPlan = (() => {
+    try {
+      const raw = JSON.parse(user.visibleLayerIdsByPlanJson || '{}');
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+      const out = {};
+      for (const [planId, ids] of Object.entries(raw)) {
+        if (typeof planId !== 'string') continue;
+        if (!Array.isArray(ids)) continue;
+        const uniq = [];
+        const seen = new Set();
+        for (const id of ids) {
+          const val = String(id);
+          if (seen.has(val)) continue;
+          seen.add(val);
+          uniq.push(val);
+        }
+        out[planId] = uniq;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  })();
   const permissions = isAdmin
     ? []
     : db
@@ -31,11 +54,13 @@ const getUserWithPermissions = (db, userId) => {
   // Do not leak raw JSON column.
   delete user.clientOrderJson;
   delete user.paletteFavoritesJson;
+  delete user.visibleLayerIdsByPlanJson;
   return {
     user: {
       ...user,
       clientOrder,
       paletteFavorites,
+      visibleLayerIdsByPlan,
       isAdmin,
       isSuperAdmin,
       disabled: !!user.disabled,

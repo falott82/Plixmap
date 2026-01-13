@@ -1,6 +1,6 @@
 # Deskly — Floor Plan Management (Drag & Drop)
 
-Current version: **1.7.0**
+Current version: **1.7.2**
 
 Deskly is a modern web app for planning offices and infrastructure on floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, rack management with ports and 1:1 links, saved views, revision history, search/highlight, and PDF exports.
 
@@ -117,6 +117,7 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
 - Site optional coordinates (`lat, lng`) with **Google Maps** link
 - Floor plan image upload (JPG/PNG only), replace image with automatic archival as a revision
 - Object types management (custom types + icon mapping), updating type/icon updates all objects
+- Layers management: create/edit/reorder layers, set colors, and assign object types to layers (multi-layer supported)
 - Object requests:
   - users can submit a **request** with custom fields and icon
   - superadmin receives a pending prompt and manages approvals in a dedicated modal
@@ -137,6 +138,11 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
   - Nerd Area: **Custom Import (Real users)** with a per-client status table, quick actions, and WebAPI/CSV configuration
 - Settings modals dim the background to keep focus on the active form
 - Settings tabs persist on refresh via the `?tab=` URL parameter
+
+### Layers (Settings → Layers)
+- Each layer has name, color, order, and optional **object type mapping**.
+- Objects can belong to **multiple layers**; if an object has no explicit `layerIds`, defaults are used.
+- When you change a layer’s type mapping, existing objects with explicit layers are updated to match.
 
 ### Workspace (Floor plan)
 - Floor plan shown as background; objects rendered on top with an icon and always-visible label
@@ -174,6 +180,7 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
   - viewport is persisted per floor plan (reload-safe)
 - Layers, grid and links:
   - assign objects to one or more **layers** and toggle visibility (work by “layers”)
+  - default layer assignments per object type can be customized from **Settings → Layers**
   - CCTV layer shows camera view cones; adjust angle/range/rotation from the object context menu
   - quick “Map only” toggle hides all layers (restores on reload)
   - optional **grid overlay** and configurable **grid snapping**

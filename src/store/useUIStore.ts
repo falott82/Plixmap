@@ -44,6 +44,7 @@ interface UIState {
   requestSaveAndNavigate: (to: string) => void;
   clearPendingSaveNavigate: () => void;
   setVisibleLayerIds: (planId: string, layerIds: string[]) => void;
+  setVisibleLayerIdsByPlan: (payload: Record<string, string[]>) => void;
   toggleLayerVisibility: (planId: string, layerId: string) => void;
   setGridSnapEnabled: (enabled: boolean) => void;
   setGridSize: (size: number) => void;
@@ -126,6 +127,10 @@ export const useUIStore = create<UIState>()(
       setVisibleLayerIds: (planId, layerIds) =>
         set((state) => ({
           visibleLayerIdsByPlan: { ...state.visibleLayerIdsByPlan, [planId]: Array.from(new Set(layerIds)) }
+        })),
+      setVisibleLayerIdsByPlan: (payload) =>
+        set(() => ({
+          visibleLayerIdsByPlan: { ...(payload || {}) }
         })),
       toggleLayerVisibility: (planId, layerId) =>
         set((state) => {

@@ -123,6 +123,7 @@ export type IconName =
   | 'wifiOff'
   | 'cable'
   | 'lockKeyhole'
+  | 'badgeCheck'
   | 'shieldCheck'
   | 'shieldAlert'
   | 'bellRing'
@@ -195,6 +196,8 @@ export interface LayerDefinition {
   name: { it: string; en: string };
   color?: string;
   order?: number;
+  typeIds?: string[];
+  note?: { it: string; en: string };
 }
 
 export interface PlanLink {
