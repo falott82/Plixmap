@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { KeyRound, Shield, X } from 'lucide-react';
 import QRCode from 'qrcode';
@@ -89,6 +89,12 @@ export default function MfaModal({
     }
   };
 
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (loading || !canSubmit) return;
+    submit();
+  };
+
   return (
     <Transition show={open} as={Fragment}>
       <Dialog as="div" className="relative z-50" onClose={onClose}>
@@ -108,13 +114,14 @@ export default function MfaModal({
                   </button>
                 </div>
 
-                <div className="mt-2 text-sm text-slate-600">
-                  {enabled
-                    ? t({ it: 'Per disattivare MFA conferma password e codice.', en: 'To disable MFA, confirm password and code.' })
-                    : t({ it: 'Configura un’app di autenticazione (TOTP) e conferma il codice.', en: 'Set up an authenticator app (TOTP) and confirm the code.' })}
-                </div>
+                <form className="mt-2" onSubmit={handleSubmit}>
+                  <div className="text-sm text-slate-600">
+                    {enabled
+                      ? t({ it: 'Per disattivare MFA conferma password e codice.', en: 'To disable MFA, confirm password and code.' })
+                      : t({ it: 'Configura un’app di autenticazione (TOTP) e conferma il codice.', en: 'Set up an authenticator app (TOTP) and confirm the code.' })}
+                  </div>
 
-                <div className="mt-5 space-y-3">
+                  <div className="mt-5 space-y-3">
                   <label className="block text-sm font-medium text-slate-700">
                     {t({ it: 'Password', en: 'Password' })} <span className="text-rose-600">*</span>
                     <div className="relative mt-1">
@@ -125,9 +132,6 @@ export default function MfaModal({
                         type="password"
                         autoComplete="current-password"
                         className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !setupSecret && !enabled) submit();
-                        }}
                       />
                     </div>
                   </label>
@@ -160,9 +164,6 @@ export default function MfaModal({
                         inputMode="numeric"
                         autoComplete="one-time-code"
                         placeholder={t({ it: 'Codice a 6 cifre', en: '6-digit code' })}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') submit();
-                        }}
                       />
                     </label>
                   ) : null}
@@ -172,39 +173,41 @@ export default function MfaModal({
                   ) : null}
                 </div>
 
-                <div className="mt-6 flex justify-end gap-2">
-                  <button
-                    onClick={onClose}
-                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
-                    title={t({ it: 'Chiudi senza modificare MFA', en: 'Close without changing MFA' })}
-                  >
-                    {t({ it: 'Annulla', en: 'Cancel' })}
-                  </button>
-                  <button
-                    onClick={submit}
-                    disabled={loading || !canSubmit}
-                    className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90 disabled:opacity-60"
-                    title={
-                      enabled
-                        ? t({ it: 'Disattiva MFA', en: 'Disable MFA' })
-                        : !setupSecret
-                          ? t({ it: 'Genera QR per MFA', en: 'Generate MFA QR' })
-                          : t({ it: 'Attiva MFA', en: 'Enable MFA' })
-                    }
-                  >
-                    {enabled
-                      ? loading
-                        ? t({ it: 'Disattivo…', en: 'Disabling…' })
-                        : t({ it: 'Disattiva', en: 'Disable' })
-                      : !setupSecret
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                      title={t({ it: 'Chiudi senza modificare MFA', en: 'Close without changing MFA' })}
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading || !canSubmit}
+                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90 disabled:opacity-60"
+                      title={
+                        enabled
+                          ? t({ it: 'Disattiva MFA', en: 'Disable MFA' })
+                          : !setupSecret
+                            ? t({ it: 'Genera QR per MFA', en: 'Generate MFA QR' })
+                            : t({ it: 'Attiva MFA', en: 'Enable MFA' })
+                      }
+                    >
+                      {enabled
                         ? loading
-                          ? t({ it: 'Genero…', en: 'Generating…' })
-                          : t({ it: 'Genera QR', en: 'Generate QR' })
-                        : loading
-                          ? t({ it: 'Attivo…', en: 'Enabling…' })
-                          : t({ it: 'Attiva', en: 'Enable' })}
-                  </button>
-                </div>
+                          ? t({ it: 'Disattivo…', en: 'Disabling…' })
+                          : t({ it: 'Disattiva', en: 'Disable' })
+                        : !setupSecret
+                          ? loading
+                            ? t({ it: 'Genero…', en: 'Generating…' })
+                            : t({ it: 'Genera QR', en: 'Generate QR' })
+                          : loading
+                            ? t({ it: 'Attivo…', en: 'Enabling…' })
+                            : t({ it: 'Attiva', en: 'Enable' })}
+                    </button>
+                  </div>
+                </form>
               </Dialog.Panel>
             </Transition.Child>
           </div>

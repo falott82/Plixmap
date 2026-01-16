@@ -4,6 +4,8 @@ export const SEED_CLIENT_ID = 'seed-client-acme';
 export const SEED_SITE_ID = 'seed-site-wall-street-01';
 export const SEED_PLAN_ID = 'seed-plan-floor-0';
 export const SEED_PLAN_IMAGE_URL = '/seed/new-default-plan.png';
+export const ALL_ITEMS_LAYER_ID = 'all-items';
+export const ALL_ITEMS_LAYER_COLOR = '#e11d48';
 export const DEFAULT_USER_TYPES = ['user', 'real_user', 'generic_user'];
 export const DEFAULT_CCTV_TYPES = ['camera'];
 export const DEFAULT_RACK_TYPES = ['rack'];
@@ -44,6 +46,16 @@ export const defaultData = (): Client[] => {
       address: 'Wall Street 01',
       description: 'Seed workspace',
       logoUrl: undefined,
+      layers: [
+        { id: ALL_ITEMS_LAYER_ID, name: { it: 'Tutti gli elementi', en: 'All Items' }, color: ALL_ITEMS_LAYER_COLOR, order: 1 },
+        { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 2, typeIds: DEFAULT_USER_TYPES },
+        { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 3, typeIds: DEFAULT_DEVICE_TYPES },
+        { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 4, typeIds: DEFAULT_CCTV_TYPES },
+        { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 5, typeIds: DEFAULT_DESK_TYPES },
+        { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 6 },
+        { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 7 },
+        { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 8, typeIds: DEFAULT_RACK_TYPES }
+      ],
       sites: [
         {
           id: SEED_SITE_ID,
@@ -57,15 +69,6 @@ export const defaultData = (): Client[] => {
               imageUrl: SEED_PLAN_IMAGE_URL,
               width: 650,
               height: 477,
-              layers: [
-                { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1, typeIds: DEFAULT_USER_TYPES },
-                { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2, typeIds: DEFAULT_DEVICE_TYPES },
-                { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 3, typeIds: DEFAULT_CCTV_TYPES },
-                { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 4, typeIds: DEFAULT_DESK_TYPES },
-                { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 5 },
-                { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 6 },
-                { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 7, typeIds: DEFAULT_RACK_TYPES }
-              ],
               views: [
                 {
                   id: 'seed-view-default',
