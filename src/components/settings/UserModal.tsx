@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { AdminUserRow, Permission } from '../../api/auth';
@@ -174,6 +174,11 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
     });
   };
 
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    submit();
+  };
+
   return (
     <Transition show={open} as={Fragment}>
       <Dialog as="div" className="relative z-50" onClose={onClose}>
@@ -209,7 +214,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                   </button>
                 </div>
 
-                <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <form className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2" onSubmit={handleSubmit}>
                   <div className="space-y-3">
                     {mode === 'create' ? (
                       <>
@@ -251,12 +256,6 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                             placeholder="••••••••"
                             autoComplete="new-password"
                             name="deskly_new_password_confirm"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                submit();
-                              }
-                            }}
                           />
                           {confirmPassword && password !== confirmPassword ? (
                             <div className="mt-1 text-xs font-semibold text-rose-700">
@@ -413,25 +412,25 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                       <PermissionsEditor clients={clients} value={permMap} onChange={setPermMap} />
                     )}
                   </div>
-                </div>
-
-                <div className="mt-6 flex justify-end gap-2">
-                  <button
-                    onClick={onClose}
-                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Chiudi senza salvare l’utente', en: 'Close without saving the user' })}
-                  >
-                    {t({ it: 'Annulla', en: 'Cancel' })}
-                  </button>
-                  <button
-                    onClick={submit}
-                    disabled={!canSubmit}
-                    className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
-                    title={t({ it: 'Salva l’utente', en: 'Save the user' })}
-                  >
-                    {t({ it: 'Salva', en: 'Save' })}
-                  </button>
-                </div>
+                  <div className="mt-6 flex justify-end gap-2 lg:col-span-2">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Chiudi senza salvare l’utente', en: 'Close without saving the user' })}
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!canSubmit}
+                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                      title={t({ it: 'Salva l’utente', en: 'Save the user' })}
+                    >
+                      {t({ it: 'Salva', en: 'Save' })}
+                    </button>
+                  </div>
+                </form>
               </Dialog.Panel>
             </Transition.Child>
           </div>

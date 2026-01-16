@@ -312,6 +312,7 @@ export interface Client {
   vatId?: string;
   pecEmail?: string;
   description?: string;
+  layers?: LayerDefinition[];
   // Legacy single-note fields (kept for migration/backward compatibility)
   notesHtml?: string;
   notesLexical?: string;

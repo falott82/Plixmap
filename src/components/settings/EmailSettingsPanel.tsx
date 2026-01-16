@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Mail, RefreshCw, Send } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { useToastStore } from '../../store/useToast';
@@ -127,6 +127,12 @@ const EmailSettingsPanel = () => {
     }
   };
 
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (saving) return;
+    save();
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
@@ -144,6 +150,7 @@ const EmailSettingsPanel = () => {
             </div>
           </div>
           <button
+            type="button"
             onClick={load}
             disabled={loading}
             className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
@@ -154,108 +161,110 @@ const EmailSettingsPanel = () => {
           </button>
         </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <div>
-            <label className="text-xs font-semibold text-slate-600">SMTP Host</label>
-            <input
-              value={form.host}
-              onChange={(e) => setForm((prev) => ({ ...prev, host: e.target.value }))}
-              placeholder="smtp.example.com"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+        <form onSubmit={handleSubmit}>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div>
-              <label className="text-xs font-semibold text-slate-600">Port</label>
+              <label className="text-xs font-semibold text-slate-600">SMTP Host</label>
               <input
-                type="number"
-                min={1}
-                value={form.port}
-                onChange={(e) => setForm((prev) => ({ ...prev, port: e.target.value }))}
-                placeholder="587"
+                value={form.host}
+                onChange={(e) => setForm((prev) => ({ ...prev, host: e.target.value }))}
+                placeholder="smtp.example.com"
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Port</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={form.port}
+                  onChange={(e) => setForm((prev) => ({ ...prev, port: e.target.value }))}
+                  placeholder="587"
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600">{t({ it: 'Sicurezza', en: 'Security' })}</label>
+                <select
+                  value={form.securityMode}
+                  onChange={(e) => {
+                    const mode = e.target.value === 'ssl' ? 'ssl' : 'starttls';
+                    const port = mode === 'ssl' ? '465' : '587';
+                    setForm((prev) => ({ ...prev, securityMode: mode, port }));
+                  }}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink outline-none ring-primary/30 focus:ring-2"
+                >
+                  <option value="ssl">SSL</option>
+                  <option value="starttls">STARTTLS</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">Username</label>
+              <input
+                value={form.username}
+                onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))}
+                placeholder="user@example.com"
                 className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
               />
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-600">{t({ it: 'Sicurezza', en: 'Security' })}</label>
-              <select
-                value={form.securityMode}
-                onChange={(e) => {
-                  const mode = e.target.value === 'ssl' ? 'ssl' : 'starttls';
-                  const port = mode === 'ssl' ? '465' : '587';
-                  setForm((prev) => ({ ...prev, securityMode: mode, port }));
+              <label className="text-xs font-semibold text-slate-600">{t({ it: 'Password SMTP', en: 'SMTP Password' })}</label>
+              <input
+                type="password"
+                value={!passwordEditing && form.hasPassword ? '********' : form.password}
+                onFocus={() => {
+                  if (!passwordEditing && form.hasPassword) setPasswordEditing(true);
                 }}
-                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink outline-none ring-primary/30 focus:ring-2"
-              >
-                <option value="ssl">SSL</option>
-                <option value="starttls">STARTTLS</option>
-              </select>
+                onBlur={() => {
+                  if (!passwordDirty && !form.password) setPasswordEditing(false);
+                }}
+                onChange={(e) => {
+                  if (!passwordEditing) setPasswordEditing(true);
+                  setPasswordDirty(true);
+                  setForm((prev) => ({ ...prev, password: e.target.value }));
+                }}
+                placeholder={form.hasPassword ? '********' : ''}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+              />
+              <div className="mt-1 text-[11px] text-slate-500">
+                {form.hasPassword
+                  ? t({ it: 'Password salvata. Modifica per sovrascrivere o lascia vuoto per rimuoverla.', en: 'Password saved. Edit to overwrite or leave blank to remove it.' })
+                  : t({ it: 'Nessuna password salvata.', en: 'No password saved.' })}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">{t({ it: 'Nome mittente', en: 'Sender name' })}</label>
+              <input
+                value={form.fromName}
+                onChange={(e) => setForm((prev) => ({ ...prev, fromName: e.target.value }))}
+                placeholder="Deskly"
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">{t({ it: 'Email mittente', en: 'Sender email' })}</label>
+              <input
+                value={form.fromEmail}
+                onChange={(e) => setForm((prev) => ({ ...prev, fromEmail: e.target.value }))}
+                placeholder="noreply@example.com"
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+              />
             </div>
           </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-600">Username</label>
-            <input
-              value={form.username}
-              onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))}
-              placeholder="user@example.com"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-600">{t({ it: 'Password SMTP', en: 'SMTP Password' })}</label>
-            <input
-              type="password"
-              value={!passwordEditing && form.hasPassword ? '********' : form.password}
-              onFocus={() => {
-                if (!passwordEditing && form.hasPassword) setPasswordEditing(true);
-              }}
-              onBlur={() => {
-                if (!passwordDirty && !form.password) setPasswordEditing(false);
-              }}
-              onChange={(e) => {
-                if (!passwordEditing) setPasswordEditing(true);
-                setPasswordDirty(true);
-                setForm((prev) => ({ ...prev, password: e.target.value }));
-              }}
-              placeholder={form.hasPassword ? '********' : ''}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-            />
-            <div className="mt-1 text-[11px] text-slate-500">
-              {form.hasPassword
-                ? t({ it: 'Password salvata. Modifica per sovrascrivere o lascia vuoto per rimuoverla.', en: 'Password saved. Edit to overwrite or leave blank to remove it.' })
-                : t({ it: 'Nessuna password salvata.', en: 'No password saved.' })}
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-600">{t({ it: 'Nome mittente', en: 'Sender name' })}</label>
-            <input
-              value={form.fromName}
-              onChange={(e) => setForm((prev) => ({ ...prev, fromName: e.target.value }))}
-              placeholder="Deskly"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-600">{t({ it: 'Email mittente', en: 'Sender email' })}</label>
-            <input
-              value={form.fromEmail}
-              onChange={(e) => setForm((prev) => ({ ...prev, fromEmail: e.target.value }))}
-              placeholder="noreply@example.com"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-            />
-          </div>
-        </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-slate-500">{updatedLabel ? `${t({ it: 'Ultimo aggiornamento', en: 'Last update' })}: ${updatedLabel}` : ''}</div>
-          <button
-            onClick={save}
-            disabled={saving}
-            className="rounded-xl border border-primary bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {saving ? t({ it: 'Salvataggio...', en: 'Saving...' }) : t({ it: 'Salva impostazioni', en: 'Save settings' })}
-          </button>
-        </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-slate-500">{updatedLabel ? `${t({ it: 'Ultimo aggiornamento', en: 'Last update' })}: ${updatedLabel}` : ''}</div>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-xl border border-primary bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {saving ? t({ it: 'Salvataggio...', en: 'Saving...' }) : t({ it: 'Salva impostazioni', en: 'Save settings' })}
+            </button>
+          </div>
+        </form>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card">

@@ -576,16 +576,18 @@ const CustomImportPanel = () => {
                             placeholder="api-user"
                           />
                         </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                          {t({ it: 'Password', en: 'Password' })}
-                          <input
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                            placeholder={cfg?.hasPassword ? t({ it: 'Lascia vuoto per non cambiare', en: 'Leave empty to keep' }) : '••••••'}
-                          />
-                        </label>
+                        <form onSubmit={(e) => e.preventDefault()} className="block">
+                          <label className="block text-sm font-medium text-slate-700">
+                            {t({ it: 'Password', en: 'Password' })}
+                            <input
+                              type="password"
+                              value={password}
+                              onChange={(e) => setPassword(e.target.value)}
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                              placeholder={cfg?.hasPassword ? t({ it: 'Lascia vuoto per non cambiare', en: 'Leave empty to keep' }) : '••••••'}
+                            />
+                          </label>
+                        </form>
                         <label className="block text-sm font-medium text-slate-700">
                           {t({ it: 'Body JSON (opzionale)', en: 'Body JSON (optional)' })}
                           <textarea

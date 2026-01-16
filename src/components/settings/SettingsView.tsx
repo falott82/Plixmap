@@ -66,8 +66,8 @@ const SettingsView = () => {
   const location = useLocation();
   const { selectedPlanId, setSelectedPlan, openHelp } = useUIStore();
   const { user } = useAuthStore();
-  const isAdmin = !!user?.isAdmin;
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
+  const isAdmin = !!user?.isAdmin || isSuperAdmin;
   const resolveTab = (search: string) => {
     const next = new URLSearchParams(search).get('tab')?.toLowerCase() || '';
     if (next === 'account') return 'account';

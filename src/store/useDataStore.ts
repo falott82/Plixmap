@@ -1,7 +1,17 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackDefinition, RackItem, RackLink, Room, Site } from './types';
-import { DEFAULT_CCTV_TYPES, DEFAULT_DESK_TYPES, DEFAULT_DEVICE_TYPES, DEFAULT_RACK_TYPES, DEFAULT_USER_TYPES, defaultData, defaultObjectTypes } from './data';
+import {
+  ALL_ITEMS_LAYER_ID,
+  ALL_ITEMS_LAYER_COLOR,
+  DEFAULT_CCTV_TYPES,
+  DEFAULT_DESK_TYPES,
+  DEFAULT_DEVICE_TYPES,
+  DEFAULT_RACK_TYPES,
+  DEFAULT_USER_TYPES,
+  defaultData,
+  defaultObjectTypes
+} from './data';
 import { useAuthStore } from './useAuthStore';
 
 interface DataState {
@@ -36,7 +46,7 @@ interface DataState {
   setFloorPlanContent: (
     floorPlanId: string,
     payload: Pick<FloorPlan, 'imageUrl' | 'width' | 'height' | 'objects' | 'rooms' | 'views'> &
-      Partial<Pick<FloorPlan, 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'layers' | 'printArea'>>
+      Partial<Pick<FloorPlan, 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'printArea'>>
   ) => void;
   addObject: (
     floorPlanId: string,
@@ -147,6 +157,11 @@ interface DataState {
     sourcePlanId: string,
     options?: { name?: string; includeRooms?: boolean; includeObjects?: boolean; includeViews?: boolean; includeLayers?: boolean }
   ) => string | null;
+  updateClientLayers: (
+    clientId: string,
+    layers: LayerDefinition[],
+    options?: { updateObjects?: (obj: MapObject) => MapObject }
+  ) => void;
 }
 
 const updateFloorPlanById = (
@@ -289,13 +304,6 @@ const snapshotRevision = (
     imageUrl: plan.imageUrl,
     width: plan.width,
     height: plan.height,
-    layers: plan.layers
-      ? plan.layers.map((l) => ({
-          ...l,
-          name: { ...l.name },
-          note: typeof l.note === 'string' ? l.note : l.note ? { ...l.note } : undefined
-        }))
-      : undefined,
     views: normalizeViews(plan.views),
     rooms: plan.rooms ? plan.rooms.map((r) => ({ ...r })) : undefined,
     links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
@@ -307,14 +315,17 @@ const snapshotRevision = (
 };
 
 const defaultLayers = (): LayerDefinition[] => [
-  { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 1, typeIds: DEFAULT_USER_TYPES },
-  { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 2, typeIds: DEFAULT_DEVICE_TYPES },
-  { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 3, typeIds: DEFAULT_CCTV_TYPES },
-  { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 4, typeIds: DEFAULT_DESK_TYPES },
-  { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 5 },
-  { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 6 },
-  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 7, typeIds: DEFAULT_RACK_TYPES }
+  { id: ALL_ITEMS_LAYER_ID, name: { it: 'Tutti gli elementi', en: 'All Items' }, color: ALL_ITEMS_LAYER_COLOR, order: 1 },
+  { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 2, typeIds: DEFAULT_USER_TYPES },
+  { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 3, typeIds: DEFAULT_DEVICE_TYPES },
+  { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 4, typeIds: DEFAULT_CCTV_TYPES },
+  { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 5, typeIds: DEFAULT_DESK_TYPES },
+  { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 6 },
+  { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 7 },
+  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 8, typeIds: DEFAULT_RACK_TYPES }
 ];
+
+const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling']);
 
 const ensureLayerTypes = (layer: LayerDefinition): LayerDefinition => {
   if (Array.isArray(layer.typeIds) && layer.typeIds.length) return layer;
@@ -326,31 +337,77 @@ const ensureLayerTypes = (layer: LayerDefinition): LayerDefinition => {
   return layer;
 };
 
-const normalizePlan = (plan: FloorPlan): FloorPlan => {
-  const next = { ...plan } as any;
-  if (!next.layers || !next.layers.length) next.layers = defaultLayers();
-  else {
-    const ids = new Set((next.layers || []).map((l: any) => l.id));
-    if (!ids.has('cctv')) {
-      next.layers = [
-        ...next.layers,
-        { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: (next.layers.length || 4) + 1, typeIds: DEFAULT_CCTV_TYPES }
-      ];
-    }
-    if (!ids.has('desks')) {
-      next.layers = [
-        ...next.layers,
-        { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: (next.layers.length || 4) + 1, typeIds: DEFAULT_DESK_TYPES }
-      ];
-    }
-    if (!ids.has('racks')) {
-      next.layers = [
-        ...next.layers,
-        { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: (next.layers.length || 4) + 1, typeIds: DEFAULT_RACK_TYPES }
-      ];
+const normalizeClientLayers = (client: Client): LayerDefinition[] => {
+  const legacyLayers: LayerDefinition[] = [];
+  for (const site of client.sites || []) {
+    for (const plan of site.floorPlans || []) {
+      if (Array.isArray((plan as any).layers)) {
+        legacyLayers.push(...((plan as any).layers as LayerDefinition[]));
+      }
     }
   }
-  if (Array.isArray(next.layers)) next.layers = next.layers.map((layer: LayerDefinition) => ensureLayerTypes(layer));
+  const baseLayers = Array.isArray(client.layers) && client.layers.length ? client.layers : legacyLayers;
+  const source = baseLayers.length ? baseLayers : defaultLayers();
+  const defaultsById = new Map(defaultLayers().map((layer) => [layer.id, layer]));
+  const byId = new Map<string, LayerDefinition>();
+
+  for (const layer of source) {
+    if (!layer || !layer.id) continue;
+    const id = String(layer.id);
+    const base = defaultsById.get(id);
+    const note = (layer as any).note;
+    const next: LayerDefinition = {
+      id,
+      name: {
+        it: String(layer.name?.it || layer.name?.en || base?.name?.it || id),
+        en: String(layer.name?.en || layer.name?.it || base?.name?.en || id)
+      },
+      color: layer.color || base?.color,
+      order: typeof layer.order === 'number' ? layer.order : base?.order,
+      typeIds: Array.isArray(layer.typeIds) ? layer.typeIds : base?.typeIds,
+      note: typeof note === 'string' ? { it: note, en: note } : note
+    };
+    if (id === ALL_ITEMS_LAYER_ID) {
+      const legacyColor = '#0f172a';
+      next.order = 1;
+      if (!next.color || next.color === legacyColor) {
+        next.color = ALL_ITEMS_LAYER_COLOR;
+      }
+    }
+    if (SYSTEM_LAYER_IDS.has(id)) {
+      delete (next as any).typeIds;
+    } else {
+      next.typeIds = ensureLayerTypes(next).typeIds;
+    }
+    byId.set(id, next);
+  }
+
+  for (const base of defaultsById.values()) {
+    if (!byId.has(base.id)) {
+      const note = (base as any).note;
+      byId.set(base.id, {
+        ...base,
+        name: { it: base.name.it, en: base.name.en },
+        note: typeof note === 'string' ? { it: note, en: note } : note
+      });
+    }
+  }
+
+  let maxOrder = 0;
+  for (const layer of byId.values()) {
+    if (typeof layer.order === 'number') maxOrder = Math.max(maxOrder, layer.order);
+  }
+  for (const layer of byId.values()) {
+    if (typeof layer.order !== 'number') {
+      maxOrder += 1;
+      layer.order = maxOrder;
+    }
+  }
+  return Array.from(byId.values());
+};
+
+const normalizePlan = (plan: FloorPlan): FloorPlan => {
+  const next = { ...plan } as any;
   if (!Array.isArray(next.links)) next.links = [];
   next.views = normalizeViews(next.views) || [];
   if (!Array.isArray(next.rooms)) next.rooms = [];
@@ -398,6 +455,7 @@ export const useDataStore = create<DataState>()(
         return {
           clients: (clients || []).map((c) => ({
             ...c,
+            layers: normalizeClientLayers(c),
             sites: (c.sites || []).map((s) => ({
               ...s,
               floorPlans: (s.floorPlans || []).map((p) => normalizePlan(p))
@@ -459,7 +517,10 @@ export const useDataStore = create<DataState>()(
     },
       addClient: (name) => {
         const id = nanoid();
-        set((state) => ({ clients: [...state.clients, { id, name, sites: [] }], version: state.version + 1 }));
+        set((state) => ({
+          clients: [...state.clients, { id, name, layers: defaultLayers(), sites: [] }],
+          version: state.version + 1
+        }));
         return id;
       },
       updateClient: (id, payload) => {
@@ -528,7 +589,6 @@ export const useDataStore = create<DataState>()(
               order: maxOrder + 1,
               width,
               height,
-              layers: defaultLayers(),
               links: [],
               racks: [],
               rackItems: [],
@@ -591,7 +651,6 @@ export const useDataStore = create<DataState>()(
             width: payload.width,
             height: payload.height,
             ...(payload as any).printArea !== undefined ? { printArea: (payload as any).printArea } : {},
-            ...(payload as any).layers ? { layers: (payload as any).layers } : {},
             objects: Array.isArray(payload.objects) ? payload.objects : [],
             rooms: Array.isArray(payload.rooms) ? payload.rooms : [],
             views: Array.isArray(payload.views) ? payload.views : [],
@@ -808,11 +867,10 @@ export const useDataStore = create<DataState>()(
             if (!rev) return plan;
             return {
               ...plan,
-              imageUrl: rev.imageUrl,
-              width: rev.width,
-              height: rev.height,
-              layers: Array.isArray((rev as any).layers) ? (rev as any).layers : plan.layers,
-              objects: Array.isArray(rev.objects) ? rev.objects : [],
+            imageUrl: rev.imageUrl,
+            width: rev.width,
+            height: rev.height,
+            objects: Array.isArray(rev.objects) ? rev.objects : [],
               rooms: Array.isArray(rev.rooms) ? rev.rooms : [],
               views: Array.isArray(rev.views) ? rev.views : [],
               links: Array.isArray((rev as any).links) ? (rev as any).links : (plan as any).links,
@@ -1107,7 +1165,6 @@ export const useDataStore = create<DataState>()(
         const includeRooms = options?.includeRooms !== false;
         const includeObjects = !!options?.includeObjects;
         const includeViews = options?.includeViews !== false;
-        const includeLayers = options?.includeLayers !== false;
         const id = nanoid();
 
         set((state) => {
@@ -1216,7 +1273,6 @@ export const useDataStore = create<DataState>()(
             order: maxOrder + 1,
             width: source.width,
             height: source.height,
-            layers: includeLayers ? source.layers?.map((l) => ({ ...l, name: { ...l.name } })) : defaultLayers(),
             views: nextViews,
             rooms: nextRooms,
             revisions: [],
@@ -1235,6 +1291,26 @@ export const useDataStore = create<DataState>()(
         });
 
         return id;
+      },
+      updateClientLayers: (clientId, layers, options) => {
+        set((state) => {
+          const nextClients = state.clients.map((client) => {
+            if (client.id !== clientId) return client;
+            const nextLayers = normalizeClientLayers({ ...client, layers } as Client);
+            if (!options?.updateObjects) {
+              return { ...client, layers: nextLayers };
+            }
+            const nextSites = (client.sites || []).map((site) => ({
+              ...site,
+              floorPlans: (site.floorPlans || []).map((plan) => ({
+                ...plan,
+                objects: (plan.objects || []).map((obj) => options.updateObjects!(obj))
+              }))
+            }));
+            return { ...client, layers: nextLayers, sites: nextSites };
+          });
+          return { clients: nextClients, version: state.version + 1 };
+        });
       }
   })
 );

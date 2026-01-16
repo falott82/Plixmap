@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ChevronDown, ChevronUp, Info, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, Info, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
 import { useUIStore } from '../../store/useUIStore';
@@ -8,8 +8,9 @@ import { LayerDefinition } from '../../store/types';
 import { useLang, useT } from '../../i18n/useT';
 import Icon from '../ui/Icon';
 import { isDeskType } from '../plan/deskTypes';
+import { ALL_ITEMS_LAYER_ID } from '../../store/data';
 
-const SPECIAL_LAYER_IDS = new Set(['rooms', 'cabling']);
+const SPECIAL_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling']);
 
 const slugify = (value: string) =>
   value
@@ -19,16 +20,20 @@ const slugify = (value: string) =>
     .replace(/^-+|-+$/g, '');
 
 const LayersPanel = () => {
-  const { clients, objectTypes, setFloorPlanContent } = useDataStore();
+  const { clients, objectTypes, updateClientLayers } = useDataStore();
   const selectedPlanId = useUIStore((s) => s.selectedPlanId);
   const setPlanDirty = useUIStore((s) => s.setPlanDirty);
   const { push } = useToastStore();
   const t = useT();
   const lang = useLang();
   const [planId, setPlanId] = useState<string | undefined>(selectedPlanId);
+  const [clientId, setClientId] = useState<string | undefined>(undefined);
   const [layerModal, setLayerModal] = useState<{ mode: 'create' } | { mode: 'edit'; layerId: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<LayerDefinition | null>(null);
   const [typeEditor, setTypeEditor] = useState<{ layerId: string; typeIds: string[]; query: string } | null>(null);
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
+  const [duplicateLayerIds, setDuplicateLayerIds] = useState<string[]>([]);
+  const [duplicateTargetIds, setDuplicateTargetIds] = useState<string[]>([]);
   const [draftNameIt, setDraftNameIt] = useState('');
   const [draftNameEn, setDraftNameEn] = useState('');
   const [draftColor, setDraftColor] = useState('#0ea5e9');
@@ -37,41 +42,76 @@ const LayersPanel = () => {
   const [layerQuery, setLayerQuery] = useState('');
   const nameRef = useRef<HTMLInputElement | null>(null);
 
-  const planIndex = useMemo(() => {
-    const map = new Map<string, { plan: any; site: any; client: any }>();
+  const selectedPlanClientId = useMemo(() => {
+    if (!selectedPlanId) return undefined;
     for (const client of clients) {
       for (const site of client.sites || []) {
         for (const plan of site.floorPlans || []) {
-          map.set(plan.id, { plan, site, client });
+          if (plan.id === selectedPlanId) return client.id;
         }
       }
     }
-    return map;
-  }, [clients]);
+    return undefined;
+  }, [clients, selectedPlanId]);
 
-  const planOptions = useMemo(() => {
+  const clientOptions = useMemo(() => {
     const list: Array<{ id: string; label: string }> = [];
-    for (const { plan, site, client } of planIndex.values()) {
-      const label = `${client.shortName || client.name} • ${site.name} • ${plan.name}`;
-      list.push({ id: plan.id, label });
+    for (const client of clients) {
+      const label = client.shortName || client.name;
+      list.push({ id: client.id, label });
     }
     return list.sort((a, b) => a.label.localeCompare(b.label));
-  }, [planIndex]);
+  }, [clients]);
 
   useEffect(() => {
-    if (selectedPlanId && planIndex.has(selectedPlanId)) {
-      setPlanId(selectedPlanId);
+    if (selectedPlanClientId && clients.some((c) => c.id === selectedPlanClientId)) {
+      setClientId(selectedPlanClientId);
       return;
     }
-    if (planId && planIndex.has(planId)) return;
-    setPlanId(planOptions[0]?.id);
-  }, [planId, planIndex, planOptions, selectedPlanId]);
+    if (clientId && clients.some((c) => c.id === clientId)) return;
+    setClientId(clientOptions[0]?.id);
+  }, [clientId, clientOptions, clients, selectedPlanClientId]);
 
-  const currentPlan = planId ? planIndex.get(planId)?.plan : undefined;
+  const currentClient = useMemo(
+    () => clients.find((c) => c.id === clientId) || clients[0],
+    [clientId, clients]
+  );
   const planLayers = useMemo(() => {
-    const layers = (currentPlan?.layers || []) as LayerDefinition[];
+    const layers = (currentClient?.layers || []) as LayerDefinition[];
     return [...layers].sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-  }, [currentPlan?.layers]);
+  }, [currentClient?.layers]);
+  const planOptions = useMemo(() => {
+    const list: Array<{ id: string; label: string }> = [];
+    if (!currentClient) return list;
+    for (const site of currentClient.sites || []) {
+      const plans = [...(site.floorPlans || [])].sort((a, b) => Number((a as any).order || 0) - Number((b as any).order || 0));
+      for (const plan of plans) {
+        const label = site.name ? `${site.name} · ${plan.name}` : plan.name;
+        list.push({ id: plan.id, label });
+      }
+    }
+    return list;
+  }, [currentClient]);
+
+  useEffect(() => {
+    if (!planOptions.length) {
+      if (planId !== undefined) setPlanId(undefined);
+      return;
+    }
+    if (planId && planOptions.some((opt) => opt.id === planId)) return;
+    const fallback =
+      (selectedPlanId && planOptions.some((opt) => opt.id === selectedPlanId) ? selectedPlanId : undefined) || planOptions[0]?.id;
+    if (fallback && fallback !== planId) setPlanId(fallback);
+  }, [planId, planOptions, selectedPlanId]);
+
+  const currentPlan = useMemo(() => {
+    if (!currentClient || !planId) return undefined;
+    for (const site of currentClient.sites || []) {
+      const plan = (site.floorPlans || []).find((p) => p.id === planId);
+      if (plan) return plan;
+    }
+    return undefined;
+  }, [currentClient, planId]);
   const editableLayers = useMemo(
     () => planLayers.filter((layer) => !SPECIAL_LAYER_IDS.has(String(layer.id))),
     [planLayers]
@@ -220,30 +260,26 @@ const LayersPanel = () => {
     window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [layerModal, planLayers]);
 
-  const savePlan = (nextLayers: LayerDefinition[], nextObjects = currentPlan?.objects || []) => {
-    if (!currentPlan) return;
-    setFloorPlanContent(currentPlan.id, {
-      imageUrl: currentPlan.imageUrl,
-      width: currentPlan.width,
-      height: currentPlan.height,
-      objects: nextObjects,
-      rooms: currentPlan.rooms || [],
-      views: currentPlan.views || [],
-      layers: nextLayers,
-      links: (currentPlan as any).links,
-      racks: (currentPlan as any).racks,
-      rackItems: (currentPlan as any).rackItems,
-      rackLinks: (currentPlan as any).rackLinks,
-      printArea: (currentPlan as any).printArea
-    });
-    setPlanDirty(currentPlan.id, true);
+  const markClientPlansDirty = useCallback(() => {
+    if (!currentClient) return;
+    for (const site of currentClient.sites || []) {
+      for (const plan of site.floorPlans || []) {
+        setPlanDirty(plan.id, true);
+      }
+    }
+  }, [currentClient, setPlanDirty]);
+
+  const updateLayers = (nextLayers: LayerDefinition[], updateObjects?: (obj: any) => any) => {
+    if (!currentClient) return;
+    updateClientLayers(currentClient.id, nextLayers, updateObjects ? { updateObjects } : undefined);
+    markClientPlansDirty();
   };
 
   const normalizeOrders = (layers: LayerDefinition[]) =>
     layers.map((layer, index) => ({ ...layer, order: index + 1 }));
 
   const handleCreateLayer = () => {
-    if (!currentPlan) return;
+    if (!currentClient) return;
     const nameIt = draftNameIt.trim();
     const nameEn = draftNameEn.trim();
     const noteIt = draftNoteIt.trim();
@@ -267,13 +303,13 @@ const LayersPanel = () => {
       typeIds: [],
       ...(noteIt || noteEn ? { note: { it: noteIt || noteEn, en: noteEn || noteIt } } : {})
     };
-    savePlan([...planLayers, nextLayer]);
+    updateLayers([...planLayers, nextLayer]);
     push(t({ it: 'Layer creato', en: 'Layer created' }), 'success');
     setLayerModal(null);
   };
 
   const handleUpdateLayer = () => {
-    if (!currentPlan || !layerModal || layerModal.mode !== 'edit') return;
+    if (!currentClient || !layerModal || layerModal.mode !== 'edit') return;
     const nameIt = draftNameIt.trim();
     const nameEn = draftNameEn.trim();
     const noteIt = draftNoteIt.trim();
@@ -289,7 +325,7 @@ const LayersPanel = () => {
           }
         : layer
     );
-    savePlan(nextLayers);
+    updateLayers(nextLayers);
     push(t({ it: 'Layer aggiornato', en: 'Layer updated' }), 'success');
     setLayerModal(null);
   };
@@ -309,19 +345,20 @@ const LayersPanel = () => {
     const temp = next[idx];
     next[idx] = next[targetIndex];
     next[targetIndex] = temp;
-    savePlan(normalizeOrders(next));
+    updateLayers(normalizeOrders(next));
   };
 
   const handleDeleteLayer = () => {
-    if (!currentPlan || !confirmDelete) return;
+    if (!currentClient || !confirmDelete) return;
     const layerId = String(confirmDelete.id);
     const nextLayers = planLayers.filter((l) => String(l.id) !== layerId);
-    const nextObjects = (currentPlan.objects || []).map((obj) => {
+    const updateObjects = (obj: any) => {
       if (!Array.isArray(obj.layerIds) || !obj.layerIds.length) return obj;
-      const nextLayerIds = obj.layerIds.filter((id) => String(id) !== layerId);
+      const nextLayerIds = obj.layerIds.filter((id: string) => String(id) !== layerId);
+      if (nextLayerIds.length === obj.layerIds.length) return obj;
       return nextLayerIds.length ? { ...obj, layerIds: nextLayerIds } : { ...obj, layerIds: undefined };
-    });
-    savePlan(normalizeOrders(nextLayers), nextObjects);
+    };
+    updateLayers(normalizeOrders(nextLayers), updateObjects);
     push(t({ it: 'Layer rimosso', en: 'Layer removed' }), 'info');
     setConfirmDelete(null);
   };
@@ -334,7 +371,7 @@ const LayersPanel = () => {
   };
 
   const saveTypeEditor = () => {
-    if (!currentPlan || !typeEditor) return;
+    if (!currentClient || !typeEditor) return;
     const layer = planLayers.find((l) => String(l.id) === typeEditor.layerId);
     if (!layer) return;
     const prevTypeIds = Array.isArray(layer.typeIds) ? layer.typeIds : [];
@@ -345,18 +382,22 @@ const LayersPanel = () => {
     for (const id of prevTypeIds) if (!nextSet.has(id)) changedTypes.add(id);
     for (const id of nextTypeIds) if (!prevSet.has(id)) changedTypes.add(id);
     const nextLayers = planLayers.map((l) => (String(l.id) === typeEditor.layerId ? { ...l, typeIds: nextTypeIds } : l));
-    const nextObjects = (currentPlan.objects || []).map((obj) => {
+    const updateObjects = (obj: any) => {
       if (!changedTypes.has(obj.type)) return obj;
       if (!Array.isArray(obj.layerIds) || !obj.layerIds.length) return obj;
-      let layerIds = obj.layerIds.map(String);
+      const currentLayerIds = obj.layerIds.map(String);
+      const hasLayer = currentLayerIds.includes(typeEditor.layerId);
+      let nextLayerIds = currentLayerIds;
       if (nextSet.has(obj.type)) {
-        if (!layerIds.includes(typeEditor.layerId)) layerIds = [...layerIds, typeEditor.layerId];
+        if (hasLayer) return obj;
+        nextLayerIds = [...currentLayerIds, typeEditor.layerId];
       } else {
-        layerIds = layerIds.filter((id) => id !== typeEditor.layerId);
+        if (!hasLayer) return obj;
+        nextLayerIds = currentLayerIds.filter((id) => id !== typeEditor.layerId);
       }
-      return layerIds.length ? { ...obj, layerIds } : { ...obj, layerIds: undefined };
-    });
-    savePlan(nextLayers, nextObjects);
+      return nextLayerIds.length ? { ...obj, layerIds: nextLayerIds } : { ...obj, layerIds: undefined };
+    };
+    updateLayers(nextLayers, updateObjects);
     push(t({ it: 'Tipi layer aggiornati', en: 'Layer types updated' }), 'success');
     setTypeEditor(null);
   };

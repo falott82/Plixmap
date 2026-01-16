@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import { Check, Globe, KeyRound, Lock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { fetchMe, firstRunSetup } from '../../api/auth';
@@ -54,6 +54,11 @@ const FirstRunView = () => {
     }
   };
 
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    submit();
+  };
+
   return (
     <div className="flex h-screen items-center justify-center bg-mist px-4 text-ink">
       <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 shadow-card">
@@ -80,7 +85,7 @@ const FirstRunView = () => {
           </div>
         </div>
 
-        <div className="mt-6 space-y-4">
+        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
           <div>
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
               <Globe size={16} className="text-slate-500" />
@@ -114,9 +119,6 @@ const FirstRunView = () => {
                 placeholder={t({ it: 'Scegli una password forte', en: 'Choose a strong password' })}
                 type="password"
                 autoComplete="new-password"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') submit();
-                }}
               />
             </div>
             <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-700">
@@ -142,9 +144,6 @@ const FirstRunView = () => {
                 placeholder="••••••••"
                 type="password"
                 autoComplete="new-password"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') submit();
-                }}
               />
             </div>
             {confirm && newPassword !== confirm ? (
@@ -157,15 +156,14 @@ const FirstRunView = () => {
           {error ? (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
           ) : null}
-        </div>
-
-        <button
-          onClick={submit}
-          disabled={loading || !canSubmit}
-          className="mt-6 w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-card enabled:hover:bg-primary/90 disabled:opacity-60"
-        >
-          {loading ? t({ it: 'Salvataggio…', en: 'Saving…' }) : t({ it: 'Continua', en: 'Continue' })}
-        </button>
+          <button
+            type="submit"
+            disabled={loading || !canSubmit}
+            className="mt-6 w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-card enabled:hover:bg-primary/90 disabled:opacity-60"
+          >
+            {loading ? t({ it: 'Salvataggio…', en: 'Saving…' }) : t({ it: 'Continua', en: 'Continue' })}
+          </button>
+        </form>
 
         <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <div className="font-semibold">{t({ it: 'Credenziali iniziali', en: 'Initial credentials' })}</div>

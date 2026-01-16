@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -44,6 +44,11 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
     onSubmit({ oldPassword: requireOld ? oldPassword : undefined, newPassword: newPassword.trim() });
   };
 
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    submit();
+  };
+
   return (
     <Transition show={open} as={Fragment}>
       <Dialog as="div" className="relative z-50" onClose={onClose}>
@@ -81,7 +86,7 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
                   </button>
                 </div>
 
-                <div className="mt-4 space-y-3">
+                <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
                   {requireOld ? (
                     <label className="block text-sm font-medium text-slate-700">
                       {t({ it: 'Password attuale', en: 'Current password' })}
@@ -102,12 +107,6 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
                       className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                       type="password"
                       placeholder={t({ it: 'Password forte', en: 'Strong password' })}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          submit();
-                        }
-                      }}
                     />
                   </label>
                   <label className="block text-sm font-medium text-slate-700">
@@ -118,12 +117,6 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
                       className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                       type="password"
                       placeholder="••••••••"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          submit();
-                        }
-                      }}
                     />
                     {confirm && newPassword !== confirm ? (
                       <div className="mt-1 text-xs font-semibold text-rose-700">
@@ -147,25 +140,25 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
                       en: 'Changing the password invalidates previous sessions.'
                     })}
                   </div>
-                </div>
-
-                <div className="mt-6 flex justify-end gap-2">
-                  <button
-                    onClick={onClose}
-                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Chiudi senza cambiare password', en: 'Close without changing password' })}
-                  >
-                    {t({ it: 'Annulla', en: 'Cancel' })}
-                  </button>
-                  <button
-                    onClick={submit}
-                    disabled={!isStrong || newPassword !== confirm || (requireOld && !oldPassword)}
-                    className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
-                    title={t({ it: 'Salva la nuova password', en: 'Save the new password' })}
-                  >
-                    {t({ it: 'Salva', en: 'Save' })}
-                  </button>
-                </div>
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      title={t({ it: 'Chiudi senza cambiare password', en: 'Close without changing password' })}
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!isStrong || newPassword !== confirm || (requireOld && !oldPassword)}
+                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                      title={t({ it: 'Salva la nuova password', en: 'Save the new password' })}
+                    >
+                      {t({ it: 'Salva', en: 'Save' })}
+                    </button>
+                  </div>
+                </form>
               </Dialog.Panel>
             </Transition.Child>
           </div>
