@@ -9,6 +9,29 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.7.3',
+    date: '2026-01-16',
+    type: 'minor',
+    notes: [
+      n(
+        'Import utenti: WebAPI supporta GET/POST, body opzionale e test con dettagli errore',
+        'User import: WebAPI supports GET/POST, optional body, and detailed test errors'
+      ),
+      n(
+        'Import utenti: accesso consentito a host privati quando la richiesta arriva da rete locale',
+        'User import: private hosts allowed when the request comes from a local network'
+      ),
+      n(
+        'Layers: gestione “Mostra Tutto” in cima all’elenco e indicatori colore aggiornati',
+        'Layers: “Show All” pinned to the top and updated color indicators'
+      ),
+      n(
+        'UI: toast migrati a Sonner',
+        'UI: toasts migrated to Sonner'
+      )
+    ]
+  },
+  {
     version: '1.7.2',
     date: '2026-01-15',
     type: 'fix',

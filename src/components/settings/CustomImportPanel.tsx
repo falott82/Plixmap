@@ -35,12 +35,12 @@ const CustomImportPanel = () => {
 
   const [configExpanded, setConfigExpanded] = useState(false);
   const [importMode, setImportMode] = useState<'webapi' | 'csv'>('webapi');
-  const [cfg, setCfg] = useState<{ url: string; username: string; hasPassword: boolean; bodyJson: string; updatedAt?: number } | null>(null);
+  const [cfg, setCfg] = useState<{ url: string; username: string; method: 'GET' | 'POST' | string; hasPassword: boolean; bodyJson: string; updatedAt?: number } | null>(null);
   const [password, setPassword] = useState('');
   const [savingCfg, setSavingCfg] = useState(false);
   const [testing, setTesting] = useState(false);
   const [syncingClientId, setSyncingClientId] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<{ ok: boolean; status: number; count?: number; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; status: number; count?: number; error?: string; contentType?: string; rawSnippet?: string } | null>(null);
   const [syncResult, setSyncResult] = useState<any | null>(null);
 
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
@@ -116,7 +116,8 @@ const CustomImportPanel = () => {
               url: res.config.url,
               username: res.config.username,
               hasPassword: res.config.hasPassword,
-              bodyJson: res.config.bodyJson || '{}',
+              method: res.config.method || 'POST',
+              bodyJson: res.config.bodyJson || '',
               updatedAt: res.config.updatedAt
             }
           : null
@@ -225,6 +226,7 @@ const CustomImportPanel = () => {
         url: cfg.url.trim(),
         username: cfg.username.trim(),
         password: password || undefined,
+        method: cfg.method || 'POST',
         bodyJson: cfg.bodyJson
       });
       setCfg(
@@ -233,7 +235,8 @@ const CustomImportPanel = () => {
               url: res.config.url,
               username: res.config.username,
               hasPassword: res.config.hasPassword,
-              bodyJson: res.config.bodyJson || '{}',
+              method: res.config.method || 'POST',
+              bodyJson: res.config.bodyJson || '',
               updatedAt: res.config.updatedAt
             }
           : null
@@ -254,7 +257,7 @@ const CustomImportPanel = () => {
     setTestResult(null);
     try {
       const res = await testImport(activeClientId);
-      setTestResult({ ok: res.ok, status: res.status, count: res.count });
+      setTestResult({ ok: res.ok, status: res.status, count: res.count, error: res.error, contentType: res.contentType, rawSnippet: res.rawSnippet });
       if (res.ok) push(t({ it: 'Test riuscito', en: 'Test successful' }), 'success');
       else push(t({ it: 'Test fallito', en: 'Test failed' }), 'danger');
     } catch {
@@ -562,7 +565,9 @@ const CustomImportPanel = () => {
                           {t({ it: 'WebAPI URL', en: 'WebAPI URL' })}
                           <input
                             value={cfg?.url || ''}
-                            onChange={(e) => setCfg((prev) => ({ ...(prev || { url: '', username: '', hasPassword: false, bodyJson: '{}' }), url: e.target.value }))}
+                            onChange={(e) =>
+                              setCfg((prev) => ({ ...(prev || { url: '', username: '', method: 'POST', hasPassword: false, bodyJson: '' }), url: e.target.value }))
+                            }
                             className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
                             placeholder="https://api.example.com/users"
                           />
@@ -571,10 +576,25 @@ const CustomImportPanel = () => {
                           {t({ it: 'Username', en: 'Username' })}
                           <input
                             value={cfg?.username || ''}
-                            onChange={(e) => setCfg((prev) => ({ ...(prev || { url: '', username: '', hasPassword: false, bodyJson: '{}' }), username: e.target.value }))}
+                            onChange={(e) =>
+                              setCfg((prev) => ({ ...(prev || { url: '', username: '', method: 'POST', hasPassword: false, bodyJson: '' }), username: e.target.value }))
+                            }
                             className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
                             placeholder="api-user"
                           />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Metodo', en: 'Method' })}
+                          <select
+                            value={cfg?.method || 'POST'}
+                            onChange={(e) =>
+                              setCfg((prev) => ({ ...(prev || { url: '', username: '', method: 'POST', hasPassword: false, bodyJson: '' }), method: e.target.value }))
+                            }
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                          >
+                            <option value="POST">POST</option>
+                            <option value="GET">GET</option>
+                          </select>
                         </label>
                         <form onSubmit={(e) => e.preventDefault()} className="block">
                           <label className="block text-sm font-medium text-slate-700">
@@ -592,7 +612,9 @@ const CustomImportPanel = () => {
                           {t({ it: 'Body JSON (opzionale)', en: 'Body JSON (optional)' })}
                           <textarea
                             value={cfg?.bodyJson || ''}
-                            onChange={(e) => setCfg((prev) => ({ ...(prev || { url: '', username: '', hasPassword: false, bodyJson: '{}' }), bodyJson: e.target.value }))}
+                            onChange={(e) =>
+                              setCfg((prev) => ({ ...(prev || { url: '', username: '', method: 'POST', hasPassword: false, bodyJson: '' }), bodyJson: e.target.value }))
+                            }
                             className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
                             rows={3}
                             placeholder='{"User":"...","Password":"..."}'
@@ -694,11 +716,24 @@ const CustomImportPanel = () => {
                   </div>
 
                   {testResult ? (
-                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                      {testResult.ok
-                        ? t({ it: `Test OK: ${testResult.count ?? 0} utenti trovati.`, en: `Test OK: ${testResult.count ?? 0} users found.` })
-                        : t({ it: 'Test fallito. Controlla URL/credenziali.', en: 'Test failed. Check URL/credentials.' })}
-                    </div>
+                    testResult.ok ? (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                        {t({ it: `Test OK: ${testResult.count ?? 0} utenti trovati.`, en: `Test OK: ${testResult.count ?? 0} users found.` })}
+                      </div>
+                    ) : (
+                      <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        <div className="font-semibold">
+                          {t({ it: `Test fallito (HTTP ${testResult.status || 0}).`, en: `Test failed (HTTP ${testResult.status || 0}).` })}
+                        </div>
+                        {testResult.error ? <div className="mt-1 text-xs">{testResult.error}</div> : null}
+                        {testResult.contentType ? <div className="mt-1 text-xs">Content-Type: {testResult.contentType}</div> : null}
+                        {testResult.rawSnippet ? (
+                          <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-white/70 p-2 text-[11px] text-slate-700">
+                            {String(testResult.rawSnippet).slice(0, 500)}
+                          </pre>
+                        ) : null}
+                      </div>
+                    )
                   ) : null}
                   {syncResult && syncResult.ok ? (
                     <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
