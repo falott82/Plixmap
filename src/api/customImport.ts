@@ -2,6 +2,7 @@ export interface ImportConfigSafe {
   clientId: string;
   url: string;
   username: string;
+  method: 'GET' | 'POST' | string;
   bodyJson: string;
   hasPassword: boolean;
   updatedAt: number;
@@ -63,6 +64,7 @@ export const saveImportConfig = async (payload: {
   url: string;
   username: string;
   password?: string;
+  method?: string;
   bodyJson?: string;
 }): Promise<{ ok: boolean; config: ImportConfigSafe }> => {
   const res = await apiFetch(`/api/import/config`, {

@@ -60,7 +60,8 @@ const resolveHost = async (hostname) => {
   }
 };
 
-const validateImportUrl = async (rawUrl) => {
+const validateImportUrl = async (rawUrl, options = {}) => {
+  const allowPrivate = options.allowPrivate === true || ALLOW_PRIVATE_IMPORT;
   let parsed;
   try {
     parsed = new URL(String(rawUrl || '').trim());
@@ -76,12 +77,12 @@ const validateImportUrl = async (rawUrl) => {
   if (!parsed.hostname) {
     return { ok: false, error: 'Invalid URL host' };
   }
-  if (!ALLOW_PRIVATE_IMPORT && isLoopbackHost(parsed.hostname)) {
+  if (!allowPrivate && isLoopbackHost(parsed.hostname)) {
     return { ok: false, error: 'Host not allowed' };
   }
   const ipType = net.isIP(parsed.hostname);
   if (ipType) {
-    if (!ALLOW_PRIVATE_IMPORT && isPrivateIp(parsed.hostname)) {
+    if (!allowPrivate && isPrivateIp(parsed.hostname)) {
       return { ok: false, error: 'Host not allowed' };
     }
     return { ok: true, url: parsed.toString() };
@@ -95,7 +96,7 @@ const validateImportUrl = async (rawUrl) => {
   if (!Array.isArray(records) || !records.length) {
     return { ok: false, error: 'Unable to resolve host' };
   }
-  if (!ALLOW_PRIVATE_IMPORT) {
+  if (!allowPrivate) {
     for (const record of records) {
       if (isPrivateIp(record.address)) {
         return { ok: false, error: 'Host not allowed' };
@@ -202,15 +203,17 @@ const fetchEmployeesFromApi = async (config) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
   try {
-    const urlCheck = await validateImportUrl(config.url);
+    const urlCheck = await validateImportUrl(config.url, { allowPrivate: !!config.allowPrivate });
     if (!urlCheck.ok) {
       return { ok: false, status: 0, error: urlCheck.error || 'Invalid URL' };
     }
-    const auth = Buffer.from(`${config.username}:${config.password}`, 'utf8').toString('base64');
+    const password = config.password ? String(config.password) : '';
+    const auth = Buffer.from(`${config.username}:${password}`, 'utf8').toString('base64');
+    const method = String(config.method || 'POST').trim().toUpperCase() === 'GET' ? 'GET' : 'POST';
     const bodyJson = typeof config.bodyJson === 'string' ? config.bodyJson.trim() : '';
-    const useBody = !!bodyJson;
+    const useBody = method === 'POST' && !!bodyJson;
     const res = await fetch(urlCheck.url, {
-      method: 'POST',
+      method,
       headers: {
         Authorization: `Basic ${auth}`,
         Accept: 'application/json',
@@ -254,22 +257,30 @@ const fetchEmployeesFromApi = async (config) => {
 
 const getImportConfig = (db, authSecret, clientId) => {
   const row = db
-    .prepare('SELECT clientId, url, username, passwordEnc, bodyJson FROM client_user_import WHERE clientId = ?')
+    .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson FROM client_user_import WHERE clientId = ?')
     .get(clientId);
   if (!row) return null;
   const password = decryptString(authSecret, row.passwordEnc);
-  return { clientId: row.clientId, url: row.url, username: row.username, password, bodyJson: row.bodyJson || '' };
+  return {
+    clientId: row.clientId,
+    url: row.url,
+    username: row.username,
+    password,
+    method: row.method || 'POST',
+    bodyJson: row.bodyJson || ''
+  };
 };
 
 const getImportConfigSafe = (db, clientId) => {
   const row = db
-    .prepare('SELECT clientId, url, username, passwordEnc, bodyJson, updatedAt FROM client_user_import WHERE clientId = ?')
+    .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson, updatedAt FROM client_user_import WHERE clientId = ?')
     .get(clientId);
   if (!row) return null;
   return {
     clientId: row.clientId,
     url: row.url,
     username: row.username,
+    method: row.method || 'POST',
     bodyJson: row.bodyJson || '',
     hasPassword: !!row.passwordEnc,
     updatedAt: row.updatedAt
@@ -278,7 +289,7 @@ const getImportConfigSafe = (db, clientId) => {
 
 const upsertImportConfig = (db, authSecret, payload) => {
   const now = Date.now();
-  const prev = db.prepare('SELECT passwordEnc, bodyJson FROM client_user_import WHERE clientId = ?').get(payload.clientId);
+  const prev = db.prepare('SELECT passwordEnc, bodyJson, method FROM client_user_import WHERE clientId = ?').get(payload.clientId);
   const nextPasswordEnc =
     payload.password !== undefined
       ? payload.password
@@ -286,11 +297,12 @@ const upsertImportConfig = (db, authSecret, payload) => {
         : null
       : prev?.passwordEnc || null;
   const nextBodyJson = payload.bodyJson !== undefined ? String(payload.bodyJson || '') : prev?.bodyJson || '';
+  const nextMethod = payload.method !== undefined ? String(payload.method || 'POST') : prev?.method || 'POST';
   db.prepare(
-    `INSERT INTO client_user_import (clientId, url, username, passwordEnc, bodyJson, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(clientId) DO UPDATE SET url=excluded.url, username=excluded.username, passwordEnc=excluded.passwordEnc, bodyJson=excluded.bodyJson, updatedAt=excluded.updatedAt`
-  ).run(payload.clientId, payload.url, payload.username, nextPasswordEnc, nextBodyJson, now);
+    `INSERT INTO client_user_import (clientId, url, username, passwordEnc, method, bodyJson, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(clientId) DO UPDATE SET url=excluded.url, username=excluded.username, passwordEnc=excluded.passwordEnc, method=excluded.method, bodyJson=excluded.bodyJson, updatedAt=excluded.updatedAt`
+  ).run(payload.clientId, payload.url, payload.username, nextPasswordEnc, nextMethod, nextBodyJson, now);
   return getImportConfigSafe(db, payload.clientId);
 };
 

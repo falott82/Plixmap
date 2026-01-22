@@ -82,6 +82,15 @@ const migrations = [
         db.exec("ALTER TABLE users ADD COLUMN visibleLayerIdsByPlanJson TEXT NOT NULL DEFAULT '{}'");
       }
     }
+  },
+  {
+    version: 4,
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info('client_user_import')").all().map((c) => c.name);
+      if (!cols.includes('method')) {
+        db.exec("ALTER TABLE client_user_import ADD COLUMN method TEXT NOT NULL DEFAULT 'POST'");
+      }
+    }
   }
 ];
 
@@ -190,6 +199,7 @@ const openDb = () => {
       url TEXT NOT NULL,
       username TEXT NOT NULL,
       passwordEnc TEXT,
+      method TEXT NOT NULL DEFAULT 'POST',
       bodyJson TEXT,
       updatedAt INTEGER NOT NULL
     );

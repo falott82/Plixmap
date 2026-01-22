@@ -1,4 +1,5 @@
 const fs = require('fs');
+const net = require('net');
 const path = require('path');
 const http = require('http');
 const express = require('express');
@@ -45,6 +46,49 @@ const { getEmailConfigSafe, getEmailConfig, upsertEmailConfig, logEmailAttempt, 
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
+
+const normalizeIp = (ip) => {
+  if (!ip) return '';
+  let value = String(ip).trim();
+  if (!value) return '';
+  if (value.includes(',')) value = value.split(',')[0].trim();
+  if (value.startsWith('::ffff:')) value = value.slice(7);
+  return value;
+};
+
+const isPrivateIpv4 = (ip) => {
+  const parts = ip.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 0) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+};
+
+const isPrivateIpv6 = (ip) => {
+  const val = ip.toLowerCase();
+  if (val === '::1') return true;
+  if (val.startsWith('fe80:') || val.startsWith('fe80::')) return true;
+  if (val.startsWith('fc') || val.startsWith('fd')) return true;
+  return false;
+};
+
+const isPrivateIp = (ip) => {
+  const type = net.isIP(ip);
+  if (type === 4) return isPrivateIpv4(ip);
+  if (type === 6) return isPrivateIpv6(ip);
+  return false;
+};
+
+const allowPrivateImportForRequest = (req) => {
+  const ip = normalizeIp(req.ip || req.connection?.remoteAddress || '');
+  if (!ip) return false;
+  return isPrivateIp(ip);
+};
 
 const app = express();
 app.use(express.json({ limit: '80mb' }));
@@ -1295,12 +1339,18 @@ app.put('/api/import/config', requireAuth, rateByUser('import_config', 60 * 1000
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
-  const { clientId, url, username, password, bodyJson } = req.body || {};
+  const { clientId, url, username, password, bodyJson, method } = req.body || {};
   const cid = String(clientId || '').trim();
   const u = String(url || '').trim();
   const un = String(username || '').trim();
   if (!cid || !u || !un) {
     res.status(400).json({ error: 'Missing clientId/url/username' });
+    return;
+  }
+  const methodRaw = String(method || '').trim().toUpperCase();
+  const nextMethod = methodRaw === 'GET' ? 'GET' : methodRaw === 'POST' || !methodRaw ? 'POST' : null;
+  if (!nextMethod) {
+    res.status(400).json({ error: 'Invalid method (use GET or POST)' });
     return;
   }
   if (bodyJson !== undefined && String(bodyJson || '').trim()) {
@@ -1311,7 +1361,7 @@ app.put('/api/import/config', requireAuth, rateByUser('import_config', 60 * 1000
       return;
     }
   }
-  const cfg = upsertImportConfig(db, dataSecret, { clientId: cid, url: u, username: un, password, bodyJson });
+  const cfg = upsertImportConfig(db, dataSecret, { clientId: cid, url: u, username: un, password, method: nextMethod, bodyJson });
   writeAuditLog(db, {
     level: 'important',
     event: 'import_config_update',
@@ -1319,7 +1369,13 @@ app.put('/api/import/config', requireAuth, rateByUser('import_config', 60 * 1000
     scopeType: 'client',
     scopeId: cid,
     ...requestMeta(req),
-    details: { url: u, username: un, passwordChanged: password !== undefined, bodyChanged: bodyJson !== undefined }
+    details: {
+      url: u,
+      username: un,
+      method: nextMethod,
+      passwordChanged: password !== undefined,
+      bodyChanged: bodyJson !== undefined
+    }
   });
   res.json({ ok: true, config: cfg });
 });
@@ -1335,11 +1391,11 @@ app.post('/api/import/test', requireAuth, rateByUser('import_test', 60 * 1000, 1
     return;
   }
   const cfg = getImportConfig(db, dataSecret, cid);
-  if (!cfg || !cfg.url || !cfg.username || !cfg.password) {
-    res.status(400).json({ error: 'Missing import config (url/username/password)' });
+  if (!cfg || !cfg.url || !cfg.username) {
+    res.status(400).json({ error: 'Missing import config (url/username)' });
     return;
   }
-  const result = await fetchEmployeesFromApi(cfg);
+  const result = await fetchEmployeesFromApi({ ...cfg, allowPrivate: allowPrivateImportForRequest(req) });
   writeAuditLog(db, { level: 'important', event: 'import_test', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { ok: !!result.ok, status: result.status } });
   if (!result.ok) {
     res.status(400).json({
@@ -1366,11 +1422,11 @@ app.post('/api/import/sync', requireAuth, rateByUser('import_sync', 60 * 1000, 1
     return;
   }
   const cfg = getImportConfig(db, dataSecret, cid);
-  if (!cfg || !cfg.url || !cfg.username || !cfg.password) {
-    res.status(400).json({ error: 'Missing import config (url/username/password)' });
+  if (!cfg || !cfg.url || !cfg.username) {
+    res.status(400).json({ error: 'Missing import config (url/username)' });
     return;
   }
-  const result = await fetchEmployeesFromApi(cfg);
+  const result = await fetchEmployeesFromApi({ ...cfg, allowPrivate: allowPrivateImportForRequest(req) });
   if (!result.ok) {
     writeAuditLog(db, { level: 'important', event: 'import_sync', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { ok: false, status: result.status, error: result.error || '' } });
     res.status(400).json({
@@ -1440,11 +1496,11 @@ app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 1
     return;
   }
   const cfg = getImportConfig(db, dataSecret, cid);
-  if (!cfg || !cfg.url || !cfg.username || !cfg.password) {
-    res.status(400).json({ error: 'Missing import config (url/username/password)' });
+  if (!cfg || !cfg.url || !cfg.username) {
+    res.status(400).json({ error: 'Missing import config (url/username)' });
     return;
   }
-  const result = await fetchEmployeesFromApi(cfg);
+  const result = await fetchEmployeesFromApi({ ...cfg, allowPrivate: allowPrivateImportForRequest(req) });
   if (!result.ok) {
     res.status(400).json({ ok: false, status: result.status, error: result.error || 'Request failed', contentType: result.contentType || '', rawSnippet: result.rawSnippet || '' });
     return;
