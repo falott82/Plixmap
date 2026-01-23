@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { Trash2, X } from 'lucide-react';
+import { HelpCircle, Trash2, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import Icon from '../ui/Icon';
 import { IconName, MapObject } from '../../store/types';
@@ -14,6 +14,8 @@ interface Props {
   initialShowName?: boolean;
   initialSurfaceSqm?: number;
   initialNotes?: string;
+  initialLogical?: boolean;
+  surfaceLocked?: boolean;
   objects?: MapObject[];
   getTypeLabel?: (typeId: string) => string;
   getTypeIcon?: (typeId: string) => IconName | undefined;
@@ -28,6 +30,7 @@ interface Props {
     showName: boolean;
     surfaceSqm?: number;
     notes?: string;
+    logical?: boolean;
   }) => boolean | void;
 }
 
@@ -42,6 +45,8 @@ const RoomModal = ({
   initialShowName = true,
   initialSurfaceSqm,
   initialNotes,
+  initialLogical = false,
+  surfaceLocked = false,
   objects,
   getTypeLabel,
   getTypeIcon,
@@ -58,6 +63,7 @@ const RoomModal = ({
   const [surfaceSqm, setSurfaceSqm] = useState('');
   const [notes, setNotes] = useState('');
   const [labelScale, setLabelScale] = useState(1);
+  const [logical, setLogical] = useState(initialLogical);
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'objects' | 'notes'>('info');
   const nameRef = useRef<HTMLInputElement | null>(null);
   const roomObjects = objects || [];
@@ -75,9 +81,10 @@ const RoomModal = ({
     setShowName(initialShowName !== false);
     setSurfaceSqm(Number.isFinite(initialSurfaceSqm) && (initialSurfaceSqm || 0) > 0 ? String(initialSurfaceSqm) : '');
     setNotes(initialNotes || '');
+    setLogical(!!initialLogical);
     setActiveTab('info');
     window.setTimeout(() => nameRef.current?.focus(), 0);
-  }, [initialColor, initialName, initialCapacity, initialShowName, initialSurfaceSqm, initialNotes, open]);
+  }, [initialColor, initialName, initialCapacity, initialShowName, initialSurfaceSqm, initialNotes, initialLogical, open]);
 
   const submit = () => {
     if (!name.trim()) return;
@@ -94,7 +101,8 @@ const RoomModal = ({
       labelScale: finalLabelScale,
       showName,
       surfaceSqm: finalSurface,
-      notes: finalNotes
+      notes: finalNotes,
+      logical
     });
     if (saved !== false) onClose();
   };
@@ -130,7 +138,7 @@ const RoomModal = ({
 
   return (
     <Transition show={open} as={Fragment}>
-      <Dialog as="div" className="relative z-50" onClose={onClose}>
+      <Dialog as="div" className="relative z-50" onClose={onClose} initialFocus={nameRef}>
         <Transition.Child
           as={Fragment}
           enter="ease-out duration-150"
@@ -155,7 +163,7 @@ const RoomModal = ({
             >
               <Dialog.Panel
                 className={`flex w-full flex-col rounded-2xl bg-white p-6 shadow-card ${
-                  shouldShowContents ? 'max-w-3xl h-[760px]' : 'max-w-md h-[680px]'
+                  shouldShowContents ? 'max-w-3xl max-h-[90vh]' : 'max-w-md max-h-[90vh]'
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -170,7 +178,7 @@ const RoomModal = ({
                     <X size={18} />
                   </button>
                 </div>
-                <div className={`mt-4 flex-1 pr-1 ${shouldShowContents ? 'overflow-y-auto' : 'overflow-y-visible'}`}>
+                <div className="mt-4 flex-1 min-h-0 overflow-y-auto pr-1">
                   <div className="flex flex-wrap items-center gap-2">
                     {[
                       { id: 'info', label: t({ it: 'Info', en: 'Info' }) },
@@ -254,14 +262,28 @@ const RoomModal = ({
                         {t({ it: 'Superficie (mq)', en: 'Surface (sqm)' })}
                         <input
                           value={surfaceSqm}
-                          onChange={(e) => setSurfaceSqm(e.target.value)}
+                          onChange={(e) => {
+                            if (surfaceLocked) return;
+                            setSurfaceSqm(e.target.value);
+                          }}
                           inputMode="decimal"
                           type="number"
                           min={0.1}
                           step={0.1}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          disabled={surfaceLocked}
+                          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${
+                            surfaceLocked ? 'border-slate-200 bg-slate-100 text-slate-500' : 'border-slate-200'
+                          }`}
                           placeholder={t({ it: 'Es. 24.5', en: 'e.g. 24.5' })}
                         />
+                        {surfaceLocked ? (
+                          <div className="mt-1 text-xs text-slate-500">
+                            {t({
+                              it: 'Calcolata automaticamente dalla scala della planimetria.',
+                              en: 'Calculated automatically from the floor plan scale.'
+                            })}
+                          </div>
+                        ) : null}
                       </label>
                       <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
                         <input
@@ -276,6 +298,33 @@ const RoomModal = ({
                             {t({
                               it: 'Mostra il nome della stanza direttamente sulla planimetria.',
                               en: 'Displays the room name directly on the floor plan.'
+                            })}
+                          </span>
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={logical}
+                          onChange={(e) => setLogical(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
+                        />
+                        <span>
+                          <span className="inline-flex items-center gap-2">
+                            {t({ it: 'Room logica', en: 'Logical room' })}
+                            <HelpCircle
+                              size={14}
+                              className="text-slate-400"
+                              title={t({
+                                it: 'Una room logica rappresenta un gruppo funzionale; la room normale rappresenta un ambiente fisico sulla planimetria.',
+                                en: 'A logical room represents a functional group; a normal room represents a physical space on the floor plan.'
+                              })}
+                            />
+                          </span>
+                          <span className="mt-1 block text-xs font-normal text-slate-500">
+                            {t({
+                              it: 'Segna la stanza come logica (non legata alla struttura fisica).',
+                              en: 'Marks the room as logical (not tied to the physical structure).'
                             })}
                           </span>
                         </span>

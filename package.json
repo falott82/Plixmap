@@ -1,7 +1,7 @@
 {
   "name": "deskly",
   "description": "Collaborative workspace planning with floor plans, desks, racks, and network links.",
-  "version": "1.7.3",
+  "version": "1.8.5",
   "private": true,
   "type": "module",
   "scripts": {

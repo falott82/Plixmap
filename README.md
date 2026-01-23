@@ -1,6 +1,6 @@
 # Deskly — Floor Plan Management (Drag & Drop)
 
-Current version: **1.7.3**
+Current version: **1.8.5**
 
 Deskly is a modern web app for planning offices and infrastructure on floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, rack management with ports and 1:1 links, saved views, revision history, search/highlight, and PDF exports.
 
@@ -144,6 +144,11 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
 - Objects can belong to **multiple layers**; if an object has no explicit `layerIds`, defaults are used.
 - When you change a layer’s type mapping, existing objects with explicit layers are updated to match.
 
+### Objects (Settings → Objects)
+- Objects tab manages palette visibility and ordering.
+- Desks tab lists the built-in desk shapes (visibility only).
+- Walls tab lists wall materials with attenuation and a generated color.
+
 ### Workspace (Floor plan)
 - Floor plan shown as background; objects rendered on top with an icon and always-visible label
 - Add objects via palette or context menu (type → name required, description optional)
@@ -160,6 +165,10 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
   - left-drag on an empty area to box-select (desktop-like)
   - Esc clears selection
   - Arrow keys nudge selected objects
+  - W starts wall drawing; click to add corners; press W again or double-click to finish
+  - Shift while drawing walls constrains to straight segments
+  - M starts measure distance (press again to stop)
+  - Esc removes the last wall segment while drawing (Backspace/Delete also step back)
   - Delete key opens a confirm dialog (Enter confirms, Esc cancels)
 - Quick edit (multi-selection):
   - the top pencil opens a list that includes selected objects and the links between them
@@ -169,6 +178,14 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
   - duplicate (asks for new name/description; placed next to original)
   - scale per object (slider)
   - delete
+- Wi-Fi antenna objects include DB, standard (802.11 family) and 2.4/5/6 GHz band flags
+- Walls and measurements:
+  - walls live on a dedicated layer; stroke colors are generated per wall type and can change type from the context menu
+  - double-click a wall segment to show its length; closed wall polygons show perimeter/area and per-side lengths on right-click
+  - corner labels (A, B, C...) appear on the wall and in the context menu
+  - closing a wall polygon opens a modal with side materials and an optional room creation flow
+  - right-click the map and choose Measure distance; click to add points, double-click to finish (closed loop shows area)
+  - the ruler button sets floor plan scale by picking two points and entering linear meters (per plan); Enter saves; right-click the map to clear the scale
 - Real users (optional):
   - once a client has imported users (WebAPI or CSV), a **Real user** object is available in the palette
   - dropping it opens a picker **scoped to the active Client** (client name + counts are shown), with search and filters
@@ -182,7 +199,7 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
   - assign objects to one or more **layers** and toggle visibility (work by “layers”)
   - default layer assignments per object type can be customized from **Settings → Layers**
   - CCTV layer shows camera view cones; adjust angle/range/rotation from the object context menu
-  - quick “Map only” toggle hides all layers (restores on reload)
+  - quick “Hide layers” toggle hides all layers (restores on reload)
   - optional **grid overlay** and configurable **grid snapping**
   - create **links** (arrows) between objects from the context menu
   - **double-click a link** to edit name/description and style (**color / width / dashed**)
@@ -190,7 +207,9 @@ Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
   - create **rectangle** or **polygon** rooms
   - resize/edit room shape
   - set a per-room color (helps visually separate areas)
+  - choose wall materials per side after creating a room (default: brick)
   - adjust room label scale (name + capacity)
+  - optional “logical room” flag in the room modal
   - room modal tabs for Info, Users, Objects, Notes
   - rooms cannot overlap
   - objects inside the room are automatically linked

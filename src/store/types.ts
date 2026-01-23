@@ -153,6 +153,8 @@ export interface ObjectTypeDefinition {
   name: { it: string; en: string };
   icon: IconName;
   builtin?: boolean;
+  attenuationDb?: number;
+  category?: 'wall';
 }
 
 export interface MapObject {
@@ -184,6 +186,14 @@ export interface MapObject {
   rotation?: number;
   strokeWidth?: number;
   strokeColor?: string;
+  points?: { x: number; y: number }[];
+  wallGroupId?: string;
+  wallGroupIndex?: number;
+  wifiDb?: number;
+  wifiStandard?: string;
+  wifiBand24?: boolean;
+  wifiBand5?: boolean;
+  wifiBand6?: boolean;
   roomId?: string;
   layerIds?: string[];
   cctvAngle?: number;
@@ -224,6 +234,7 @@ export interface Room {
   showName?: boolean;
   surfaceSqm?: number;
   notes?: string;
+  logical?: boolean;
   kind?: 'rect' | 'poly';
   // rect
   x?: number;
@@ -243,6 +254,12 @@ export interface FloorPlan {
   width?: number;
   height?: number;
   printArea?: { x: number; y: number; width: number; height: number };
+  scale?: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    meters: number;
+    metersPerPixel: number;
+  };
   layers?: LayerDefinition[];
   views?: FloorPlanView[];
   revisions?: FloorPlanRevision[];
@@ -274,6 +291,12 @@ export interface FloorPlanRevision {
   imageUrl: string;
   width?: number;
   height?: number;
+  scale?: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    meters: number;
+    metersPerPixel: number;
+  };
   layers?: LayerDefinition[];
   views?: FloorPlanView[];
   rooms?: Room[];

@@ -9,6 +9,121 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.8.5',
+    date: '2026-01-22',
+    type: 'minor',
+    notes: [
+      n(
+        'Quote: nuova misura fissa con tasto Q + layer dedicato',
+        'Quotes: new fixed measurement tool with Q hotkey + dedicated layer'
+      ),
+      n(
+        'Stanze: superfici ricalcolate automaticamente quando si imposta la scala',
+        'Rooms: surfaces automatically recalculated when the scale is set'
+      ),
+      n(
+        'Stanze: superficie non modificabile manualmente quando la scala è presente',
+        'Rooms: surface no longer editable manually when a scale is present'
+      ),
+      n(
+        'UI: tooltip per distinguere room logica vs room fisica',
+        'UI: tooltip explaining logical vs physical room'
+      )
+    ]
+  },
+  {
+    version: '1.8.4',
+    date: '2026-01-21',
+    type: 'minor',
+    notes: [
+      n(
+        'Realtime: fallback automatico se /ws non disponibile',
+        'Realtime: automatic fallback when /ws is unavailable'
+      ),
+      n(
+        'Muri: chiusura poligono apre una modale con lati e materiali + opzione crea stanza',
+        'Walls: polygon close opens a modal with sides/materials + optional room creation'
+      ),
+      n(
+        'Disegno muri: snap migliorato per evitare chiusure accidentali',
+        'Wall drawing: improved snap to prevent accidental closes'
+      ),
+      n(
+        'Scala: aggiunta voce “Cancella scala” dal menu contestuale',
+        'Scale: added “Clear scale” in the context menu'
+      ),
+      n(
+        'UI: modale stanza con altezza responsive per evitare overflow',
+        'UI: room modal made responsive to prevent button overflow'
+      )
+    ]
+  },
+  {
+    version: '1.8.2',
+    date: '2026-01-19',
+    type: 'minor',
+    notes: [
+      n(
+        'Stanze: scelta dei materiali muro per lato (default mattoni) + flag stanza logica',
+        'Rooms: choose wall materials per side (default brick) + logical room flag'
+      ),
+      n(
+        'Mura: colori generati per tipo materiale e aggiornati al cambio tipo',
+        'Walls: generated colors per material type, updated on type change'
+      ),
+      n(
+        'Disegno muri: Shift vincola i segmenti dritti; scala salvabile con Invio',
+        'Wall drawing: Shift constrains straight segments; scale can be saved with Enter'
+      )
+    ]
+  },
+  {
+    version: '1.8.1',
+    date: '2026-01-18',
+    type: 'minor',
+    notes: [
+      n(
+        'Mura: lettere agli angoli e menu con lati, perimetro e area (richiede scala impostata)',
+        'Walls: corner labels and context menu with side lengths, perimeter, and area (requires scale)'
+      ),
+      n(
+        'Palette: muri solo nella tab dedicata (Walls), esclusi dalla tab Oggetti',
+        'Palette: walls only in the dedicated tab (Walls), removed from Objects tab'
+      ),
+      n(
+        'Layers: pulsante “Nascondi livelli” al posto di “Solo mappa” e prompt eliminazione ripulito',
+        'Layers: “Hide layers” button replaces “Map only” and cleaner delete prompt copy'
+      ),
+      n(
+        'Hotkey: W per disegnare muri, M per misurare distanza',
+        'Hotkey: W draws walls, M measures distance'
+      )
+    ]
+  },
+  {
+    version: '1.8.0',
+    date: '2026-01-17',
+    type: 'minor',
+    notes: [
+      n(
+        'Planimetria: scala per singola planimetria con righello visibile',
+        'Floor plan: per-plan scale calibration with visible ruler'
+      ),
+      n(
+        'Mura: nuovo layer, materiali con attenuazione dB e modifica tipo con doppio click o multi-selezione',
+        'Walls: new layer, materials with dB attenuation, edit type via double-click or multi-selection'
+      ),
+      n(
+        'Misurazioni: strumento distanza/area da menu contestuale + calcolo area stanza',
+        'Measurements: distance/area tool from context menu + room area calculation'
+      ),
+      n(
+        'Hotkey: M avvia/chiude il disegno muro',
+        'Hotkey: M starts/finishes wall drawing'
+      )
+    ]
+  },
+  {
     version: '1.7.3',
     date: '2026-01-16',
     type: 'minor',

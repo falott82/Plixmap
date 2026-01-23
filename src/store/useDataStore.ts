@@ -9,6 +9,11 @@ import {
   DEFAULT_DEVICE_TYPES,
   DEFAULT_RACK_TYPES,
   DEFAULT_USER_TYPES,
+  DEFAULT_WIFI_TYPES,
+  DEFAULT_WALL_TYPES,
+  QUOTE_LAYER_COLOR,
+  WALL_LAYER_COLOR,
+  WIFI_LAYER_COLOR,
   defaultData,
   defaultObjectTypes
 } from './data';
@@ -40,13 +45,13 @@ interface DataState {
   updateSite: (id: string, payload: { name?: string; coords?: string }) => void;
   deleteSite: (id: string) => void;
   addFloorPlan: (siteId: string, name: string, imageUrl: string, width?: number, height?: number) => string;
-  updateFloorPlan: (id: string, payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height' | 'printArea'>>) => void;
+  updateFloorPlan: (id: string, payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height' | 'printArea' | 'scale'>>) => void;
   deleteFloorPlan: (id: string) => void;
   reorderFloorPlans: (siteId: string, movingPlanId: string, targetPlanId: string, before?: boolean) => void;
   setFloorPlanContent: (
     floorPlanId: string,
     payload: Pick<FloorPlan, 'imageUrl' | 'width' | 'height' | 'objects' | 'rooms' | 'views'> &
-      Partial<Pick<FloorPlan, 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'printArea'>>
+      Partial<Pick<FloorPlan, 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'printArea' | 'scale'>>
   ) => void;
   addObject: (
     floorPlanId: string,
@@ -79,6 +84,14 @@ interface DataState {
         | 'scaleY'
         | 'strokeWidth'
         | 'strokeColor'
+        | 'wifiDb'
+        | 'wifiStandard'
+        | 'wifiBand24'
+        | 'wifiBand5'
+        | 'wifiBand6'
+        | 'points'
+        | 'wallGroupId'
+        | 'wallGroupIndex'
       >
     >
   ) => string;
@@ -111,6 +124,15 @@ interface DataState {
         | 'scaleY'
         | 'strokeWidth'
         | 'strokeColor'
+        | 'wifiDb'
+        | 'wifiStandard'
+        | 'wifiBand24'
+        | 'wifiBand5'
+        | 'wifiBand6'
+        | 'points'
+        | 'wallGroupId'
+        | 'wallGroupIndex'
+        | 'type'
       >
     >
   ) => void;
@@ -304,6 +326,7 @@ const snapshotRevision = (
     imageUrl: plan.imageUrl,
     width: plan.width,
     height: plan.height,
+    scale: plan.scale ? { ...plan.scale } : undefined,
     views: normalizeViews(plan.views),
     rooms: plan.rooms ? plan.rooms.map((r) => ({ ...r })) : undefined,
     links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
@@ -318,21 +341,26 @@ const defaultLayers = (): LayerDefinition[] => [
   { id: ALL_ITEMS_LAYER_ID, name: { it: 'Tutti gli elementi', en: 'All Items' }, color: ALL_ITEMS_LAYER_COLOR, order: 1 },
   { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 2, typeIds: DEFAULT_USER_TYPES },
   { id: 'devices', name: { it: 'Dispositivi', en: 'Devices' }, color: '#0ea5e9', order: 3, typeIds: DEFAULT_DEVICE_TYPES },
-  { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 4, typeIds: DEFAULT_CCTV_TYPES },
-  { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 5, typeIds: DEFAULT_DESK_TYPES },
-  { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 6 },
-  { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 7 },
-  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 8, typeIds: DEFAULT_RACK_TYPES }
+  { id: 'wifi', name: { it: 'WiFi', en: 'WiFi' }, color: WIFI_LAYER_COLOR, order: 4, typeIds: DEFAULT_WIFI_TYPES },
+  { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 5, typeIds: DEFAULT_CCTV_TYPES },
+  { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 6, typeIds: DEFAULT_DESK_TYPES },
+  { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 7 },
+  { id: 'walls', name: { it: 'Mura', en: 'Walls' }, color: WALL_LAYER_COLOR, order: 8, typeIds: DEFAULT_WALL_TYPES },
+  { id: 'quotes', name: { it: 'Quote', en: 'Quotes' }, color: QUOTE_LAYER_COLOR, order: 9 },
+  { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 10 },
+  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 11, typeIds: DEFAULT_RACK_TYPES }
 ];
 
-const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling']);
+const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling', 'quotes']);
 
 const ensureLayerTypes = (layer: LayerDefinition): LayerDefinition => {
   if (Array.isArray(layer.typeIds) && layer.typeIds.length) return layer;
   if (layer.id === 'users') return { ...layer, typeIds: DEFAULT_USER_TYPES };
   if (layer.id === 'devices') return { ...layer, typeIds: DEFAULT_DEVICE_TYPES };
+  if (layer.id === 'wifi') return { ...layer, typeIds: DEFAULT_WIFI_TYPES };
   if (layer.id === 'cctv') return { ...layer, typeIds: DEFAULT_CCTV_TYPES };
   if (layer.id === 'desks') return { ...layer, typeIds: DEFAULT_DESK_TYPES };
+  if (layer.id === 'walls') return { ...layer, typeIds: DEFAULT_WALL_TYPES };
   if (layer.id === 'racks') return { ...layer, typeIds: DEFAULT_RACK_TYPES };
   return layer;
 };
@@ -374,6 +402,12 @@ const normalizeClientLayers = (client: Client): LayerDefinition[] => {
         next.color = ALL_ITEMS_LAYER_COLOR;
       }
     }
+    if (id === 'walls') {
+      const legacyColor = '#334155';
+      if (!next.color || next.color === legacyColor) {
+        next.color = WALL_LAYER_COLOR;
+      }
+    }
     if (SYSTEM_LAYER_IDS.has(id)) {
       delete (next as any).typeIds;
     } else {
@@ -413,6 +447,23 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
   if (!Array.isArray(next.rooms)) next.rooms = [];
   if (!Array.isArray(next.revisions)) next.revisions = [];
   if (!Array.isArray(next.objects)) next.objects = [];
+  if (Array.isArray(next.objects)) {
+    next.objects = next.objects.map((obj: MapObject) => {
+      if (obj?.type === 'wifi') {
+        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
+        const nextLayerIds = new Set(layerIds);
+        nextLayerIds.delete('devices');
+        nextLayerIds.add('wifi');
+        return { ...obj, layerIds: Array.from(nextLayerIds) };
+      }
+      if (obj?.type === 'quote') {
+        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
+        if (layerIds.includes('quotes')) return obj;
+        return { ...obj, layerIds: [...layerIds, 'quotes'] };
+      }
+      return obj;
+    });
+  }
   if (!Array.isArray(next.racks)) next.racks = [];
   if (!Array.isArray(next.rackItems)) next.rackItems = [];
   if (!Array.isArray(next.rackLinks)) next.rackLinks = [];
@@ -651,6 +702,7 @@ export const useDataStore = create<DataState>()(
             width: payload.width,
             height: payload.height,
             ...(payload as any).printArea !== undefined ? { printArea: (payload as any).printArea } : {},
+            ...(payload as any).scale !== undefined ? { scale: (payload as any).scale } : {},
             objects: Array.isArray(payload.objects) ? payload.objects : [],
             rooms: Array.isArray(payload.rooms) ? payload.rooms : [],
             views: Array.isArray(payload.views) ? payload.views : [],
@@ -1273,6 +1325,7 @@ export const useDataStore = create<DataState>()(
             order: maxOrder + 1,
             width: source.width,
             height: source.height,
+            scale: source.scale ? { ...source.scale } : undefined,
             views: nextViews,
             rooms: nextRooms,
             revisions: [],

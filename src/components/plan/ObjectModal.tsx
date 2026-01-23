@@ -9,7 +9,17 @@ import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 interface Props {
   open: boolean;
   onClose: () => void;
-  onSubmit: (payload: { name: string; description?: string; layerIds?: string[]; customValues?: Record<string, any> }) => void;
+  onSubmit: (payload: {
+    name: string;
+    description?: string;
+    layerIds?: string[];
+    customValues?: Record<string, any>;
+    wifiDb?: number;
+    wifiStandard?: string;
+    wifiBand24?: boolean;
+    wifiBand5?: boolean;
+    wifiBand6?: boolean;
+  }) => void;
   initialName?: string;
   initialDescription?: string;
   layers?: { id: string; label: string; color?: string }[];
@@ -19,7 +29,24 @@ interface Props {
   icon?: IconName;
   objectId?: string;
   readOnly?: boolean;
+  initialWifiDb?: number;
+  initialWifiStandard?: string;
+  initialWifiBand24?: boolean;
+  initialWifiBand5?: boolean;
+  initialWifiBand6?: boolean;
 }
+
+const WIFI_STANDARDS = [
+  { id: '802.11', it: 'Wi-Fi 1 \u2192 802.11', en: 'Wi-Fi 1 \u2192 802.11' },
+  { id: '802.11b', it: 'Wi-Fi 2 \u2192 802.11b', en: 'Wi-Fi 2 \u2192 802.11b' },
+  { id: '802.11a', it: 'Wi-Fi 3 \u2192 802.11a', en: 'Wi-Fi 3 \u2192 802.11a' },
+  { id: '802.11n', it: 'Wi-Fi 4 \u2192 802.11n', en: 'Wi-Fi 4 \u2192 802.11n' },
+  { id: '802.11ac', it: 'Wi-Fi 5 \u2192 802.11ac', en: 'Wi-Fi 5 \u2192 802.11ac' },
+  { id: '802.11ax', it: 'Wi-Fi 6 \u2192 802.11ax', en: 'Wi-Fi 6 \u2192 802.11ax' },
+  { id: '802.11ax-6ghz', it: 'Wi-Fi 6E \u2192 802.11ax (6 GHz)', en: 'Wi-Fi 6E \u2192 802.11ax (6 GHz)' },
+  { id: '802.11be', it: 'Wi-Fi 7 \u2192 802.11be', en: 'Wi-Fi 7 \u2192 802.11be' }
+];
+const WIFI_DEFAULT_STANDARD = '802.11ax';
 
 const ObjectModal = ({
   open,
@@ -33,15 +60,26 @@ const ObjectModal = ({
   type,
   icon,
   objectId,
-  readOnly = false
+  readOnly = false,
+  initialWifiDb,
+  initialWifiStandard,
+  initialWifiBand24,
+  initialWifiBand5,
+  initialWifiBand6
 }: Props) => {
   const t = useT();
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
   const [layerIds, setLayerIds] = useState<string[]>(initialLayerIds);
   const [customValues, setCustomValues] = useState<Record<string, any>>({});
+  const [wifiDb, setWifiDb] = useState<string>('');
+  const [wifiStandard, setWifiStandard] = useState<string>(WIFI_DEFAULT_STANDARD);
+  const [wifiBand24, setWifiBand24] = useState(false);
+  const [wifiBand5, setWifiBand5] = useState(false);
+  const [wifiBand6, setWifiBand6] = useState(false);
   const nameRef = useRef<HTMLInputElement | null>(null);
   const { hydrated, getFieldsForType, loadObjectValues } = useCustomFieldsStore();
+  const isWifi = type === 'wifi';
 
   useEffect(() => {
     if (open) {
@@ -49,9 +87,24 @@ const ObjectModal = ({
       setDescription(initialDescription);
       setLayerIds(initialLayerIds);
       setCustomValues({});
+      setWifiDb(initialWifiDb !== undefined ? String(initialWifiDb) : '');
+      setWifiStandard(initialWifiStandard || WIFI_DEFAULT_STANDARD);
+      setWifiBand24(!!initialWifiBand24);
+      setWifiBand5(!!initialWifiBand5);
+      setWifiBand6(!!initialWifiBand6);
       window.setTimeout(() => nameRef.current?.focus(), 0);
     }
-  }, [open, initialDescription, initialLayerIds, initialName]);
+  }, [
+    initialDescription,
+    initialLayerIds,
+    initialName,
+    initialWifiBand24,
+    initialWifiBand5,
+    initialWifiBand6,
+    initialWifiDb,
+    initialWifiStandard,
+    open
+  ]);
 
   const customFields = useMemo(() => (type ? getFieldsForType(type) : []), [getFieldsForType, type]);
 
@@ -67,11 +120,22 @@ const ObjectModal = ({
 
   const handleSave = () => {
     if (!name.trim()) return;
+    const dbRaw = wifiDb.trim().replace(',', '.');
+    const dbValue = dbRaw ? Number(dbRaw) : undefined;
     onSubmit({
       name: name.trim(),
       description: description.trim() || undefined,
       layerIds: layerIds.length ? layerIds : undefined,
-      customValues: customFields.length ? customValues : undefined
+      customValues: customFields.length ? customValues : undefined,
+      ...(isWifi
+        ? {
+            wifiDb: Number.isFinite(dbValue as number) ? (dbValue as number) : undefined,
+            wifiStandard: wifiStandard || WIFI_DEFAULT_STANDARD,
+            wifiBand24,
+            wifiBand5,
+            wifiBand6
+          }
+        : {})
     });
     onClose();
   };
@@ -143,6 +207,68 @@ const ObjectModal = ({
                       rows={3}
                     />
                   </label>
+                  {isWifi ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/40 px-3 py-3">
+                      <div className="text-sm font-semibold text-ink">{t({ it: 'Wi-Fi', en: 'Wi-Fi' })}</div>
+                      <div className="mt-3 grid gap-3">
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'DB', en: 'DB' })}
+                          <input
+                            value={wifiDb}
+                            disabled={readOnly}
+                            onChange={(e) => setWifiDb(e.target.value)}
+                            inputMode="decimal"
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Es. 12.5', en: 'e.g. 12.5' })}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Standard', en: 'Standard' })}
+                          <select
+                            value={wifiStandard}
+                            disabled={readOnly}
+                            onChange={(e) => setWifiStandard(e.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          >
+                            {WIFI_STANDARDS.map((opt) => (
+                              <option key={opt.id} value={opt.id}>
+                                {t({ it: opt.it, en: opt.en })}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={wifiBand24}
+                              disabled={readOnly}
+                              onChange={(e) => setWifiBand24(e.target.checked)}
+                            />
+                            2.4 GHz
+                          </label>
+                          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={wifiBand5}
+                              disabled={readOnly}
+                              onChange={(e) => setWifiBand5(e.target.checked)}
+                            />
+                            5 GHz
+                          </label>
+                          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={wifiBand6}
+                              disabled={readOnly}
+                              onChange={(e) => setWifiBand6(e.target.checked)}
+                            />
+                            6 GHz
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   {layers.length ? (
                     <div>
                       <div className="text-sm font-medium text-slate-700">{t({ it: 'Livelli', en: 'Layers' })}</div>

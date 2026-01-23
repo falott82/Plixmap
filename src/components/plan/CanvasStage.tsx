@@ -4,11 +4,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { Hand } from 'lucide-react';
 import { FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
+import { WALL_LAYER_COLOR } from '../../store/data';
 import { clamp } from '../../utils/geometry';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
 import { perfMetrics } from '../../utils/perfMetrics';
 import { isDeskType } from './deskTypes';
+import { getWallTypeColor } from '../../utils/wallColors';
 
 interface Props {
   plan: FloorPlan;
@@ -33,6 +35,28 @@ interface Props {
   printArea?: { x: number; y: number; width: number; height: number } | null;
   printAreaMode?: boolean;
   showPrintArea?: boolean;
+  toolMode?: 'scale' | 'wall' | 'measure' | 'quote' | null;
+  onToolPoint?: (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => void;
+  onToolMove?: (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => void;
+  onToolDoubleClick?: () => void;
+  onWallDraftContextMenu?: () => void;
+  wallTypeIds?: Set<string>;
+  wallDraft?: { points: { x: number; y: number }[]; pointer?: { x: number; y: number } | null };
+  scaleDraft?: { start?: { x: number; y: number }; end?: { x: number; y: number }; pointer?: { x: number; y: number } | null };
+  scaleLine?: { start: { x: number; y: number }; end: { x: number; y: number }; label?: string };
+  measureDraft?: {
+    points: { x: number; y: number }[];
+    pointer?: { x: number; y: number } | null;
+    closed?: boolean;
+    label?: string;
+    areaLabel?: string;
+  };
+  quoteDraft?: {
+    points: { x: number; y: number }[];
+    pointer?: { x: number; y: number } | null;
+    label?: string;
+  };
+  quoteLabels?: Record<string, string>;
   objectTypeIcons: Record<string, IconName | undefined>;
   zoom: number;
   pan: { x: number; y: number };
@@ -42,13 +66,14 @@ interface Props {
   perfEnabled?: boolean;
   onZoomChange: (zoom: number) => void;
   onPanChange: (pan: { x: number; y: number }) => void;
-	  onSelect: (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => void;
+  onSelect: (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => void;
 	  onSelectMany?: (ids: string[]) => void;
 	  onMoveStart?: (id: string, x: number, y: number, roomId?: string) => void;
 	  onMove: (id: string, x: number, y: number) => boolean | void;
 	  onPlaceNew: (type: MapObjectType, x: number, y: number) => void;
 	  onEdit: (id: string) => void;
-  onContextMenu: (payload: { id: string; clientX: number; clientY: number }) => void;
+  onContextMenu: (payload: { id: string; clientX: number; clientY: number; wallSegmentLengthPx?: number }) => void;
+  onWallSegmentDblClick?: (payload: { id: string; lengthPx: number }) => void;
   onLinkContextMenu?: (payload: { id: string; clientX: number; clientY: number }) => void;
   onLinkDblClick?: (id: string) => void;
   onMapContextMenu: (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) => void;
@@ -91,6 +116,27 @@ const hexToRgba = (hex: string, alpha: number) => {
   return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, alpha))})`;
 };
 
+const formatCornerLabel = (index: number) => {
+  if (index < 0) return '';
+  let n = index;
+  let label = '';
+  while (n >= 0) {
+    label = String.fromCharCode(65 + (n % 26)) + label;
+    n = Math.floor(n / 26) - 1;
+  }
+  return label;
+};
+
+const getWallCornerPoints = (points: { x: number; y: number }[]) => {
+  if (points.length < 3) return points;
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (first.x === last.x && first.y === last.y) {
+    return points.slice(0, -1);
+  }
+  return points;
+};
+
 const CanvasStageImpl = (
   {
   plan,
@@ -115,6 +161,18 @@ const CanvasStageImpl = (
   printArea = null,
   printAreaMode = false,
   showPrintArea = false,
+  toolMode = null,
+  onToolPoint,
+  onToolMove,
+  onToolDoubleClick,
+  onWallDraftContextMenu,
+  wallTypeIds,
+  wallDraft,
+  scaleDraft,
+  scaleLine,
+  measureDraft,
+  quoteDraft,
+  quoteLabels,
   objectTypeIcons,
   zoom,
   pan,
@@ -131,6 +189,7 @@ const CanvasStageImpl = (
 	  onPlaceNew,
 	  onEdit,
   onContextMenu,
+  onWallSegmentDblClick,
   onLinkContextMenu,
   onLinkDblClick,
   onMapContextMenu,
@@ -181,6 +240,7 @@ const CanvasStageImpl = (
   const [draftPolyPoints, setDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
   const [draftPolyPointer, setDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
   const draftPolyRaf = useRef<number | null>(null);
+  const draftPolyPointsRef = useRef<{ x: number; y: number }[]>([]);
   const panRaf = useRef<number | null>(null);
   const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
   const selectionBoxRaf = useRef<number | null>(null);
@@ -370,6 +430,31 @@ const CanvasStageImpl = (
       return { x: avg.x / count, y: avg.y / count };
     }
     return { x: cx / (6 * area), y: cy / (6 * area) };
+  };
+
+  const distancePointToSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (!dx && !dy) return Math.hypot(p.x - a.x, p.y - a.y);
+    const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy);
+    const clamped = Math.max(0, Math.min(1, t));
+    const proj = { x: a.x + clamped * dx, y: a.y + clamped * dy };
+    return Math.hypot(p.x - proj.x, p.y - proj.y);
+  };
+
+  const nearestWallSegment = (points: { x: number; y: number }[], target: { x: number; y: number }) => {
+    if (points.length < 2) return null;
+    let best: { index: number; length: number; distance: number } | null = null;
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const a = points[i];
+      const b = points[i + 1];
+      const length = Math.hypot(b.x - a.x, b.y - a.y);
+      const distance = distancePointToSegment(target, a, b);
+      if (!best || distance < best.distance) {
+        best = { index: i, length, distance };
+      }
+    }
+    return best;
   };
 
   const findInteriorPointAtY = (y: number, points: { x: number; y: number }[]) => {
@@ -686,11 +771,15 @@ const CanvasStageImpl = (
     pendingDraftRectRef.current = null;
     if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
     setDraftPolyPoints([]);
+    draftPolyPointsRef.current = [];
     if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
     setDraftPolyPointer(null);
     if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
     draftPolyRaf.current = null;
   }, [perfEnabled, roomDrawMode]);
+  useEffect(() => {
+    draftPolyPointsRef.current = draftPolyPoints;
+  }, [draftPolyPoints]);
 
   useEffect(() => {
     if (!transformerRef.current) return;
@@ -993,7 +1082,8 @@ const CanvasStageImpl = (
       evt?.button === 0 &&
       !pendingType &&
       (!roomDrawMode || readOnly) &&
-      (!printAreaMode || readOnly));
+      (!printAreaMode || readOnly) &&
+      !toolMode);
   // Box select: left-drag on empty area (desktop-like).
   const isBoxSelectGesture = (evt: any) => evt?.button === 0;
 
@@ -1184,15 +1274,17 @@ const CanvasStageImpl = (
 
   const finalizeDraftPoly = useCallback(() => {
     if (roomDrawMode !== 'poly' || readOnly) return false;
-    if (draftPolyPoints.length < 3) return true;
-    const points = draftPolyPoints.slice();
+    const points = draftPolyPointsRef.current;
+    if (points.length < 3) return true;
+    const nextPoints = points.slice();
     if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
     setDraftPolyPoints([]);
+    draftPolyPointsRef.current = [];
     if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
     setDraftPolyPointer(null);
-    onCreateRoom?.({ kind: 'poly', points });
+    onCreateRoom?.({ kind: 'poly', points: nextPoints });
     return true;
-  }, [draftPolyPoints, onCreateRoom, perfEnabled, readOnly, roomDrawMode]);
+  }, [onCreateRoom, perfEnabled, readOnly, roomDrawMode]);
 
   useEffect(() => {
     if (roomDrawMode !== 'poly') return;
@@ -1202,15 +1294,19 @@ const CanvasStageImpl = (
         finalizeDraftPoly();
       }
       if (e.key === 'Backspace') {
-        if (!draftPolyPoints.length) return;
+        if (!draftPolyPointsRef.current.length) return;
         e.preventDefault();
         if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-        setDraftPolyPoints((prev) => prev.slice(0, -1));
+        setDraftPolyPoints((prev) => {
+          const next = prev.slice(0, -1);
+          draftPolyPointsRef.current = next;
+          return next;
+        });
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [draftPolyPoints.length, finalizeDraftPoly, perfEnabled, roomDrawMode]);
+  }, [finalizeDraftPoly, perfEnabled, roomDrawMode]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1241,6 +1337,96 @@ const CanvasStageImpl = (
     pendingDraftPrintRectRef.current = null;
   }, [perfEnabled, printAreaMode]);
 
+  const wallTypeIdSet = useMemo(() => wallTypeIds || new Set<string>(), [wallTypeIds]);
+  const [wallObjects, quoteObjects, regularObjects] = useMemo(() => {
+    if (!wallTypeIdSet.size) {
+      const quotes = plan.objects.filter((obj) => obj.type === 'quote');
+      const others = plan.objects.filter((obj) => obj.type !== 'quote');
+      return [[], quotes, others];
+    }
+    const walls: MapObject[] = [];
+    const quotes: MapObject[] = [];
+    const others: MapObject[] = [];
+    for (const obj of plan.objects) {
+      if (wallTypeIdSet.has(obj.type)) walls.push(obj);
+      else if (obj.type === 'quote') quotes.push(obj);
+      else others.push(obj);
+    }
+    return [walls, quotes, others];
+  }, [plan.objects, wallTypeIdSet]);
+  const wallGroupSizes = useMemo(() => {
+    const map = new Map<string, number>();
+    wallObjects.forEach((wall) => {
+      if (!wall.wallGroupId) return;
+      const key = String(wall.wallGroupId);
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }, [wallObjects]);
+  const wallFallbackMeta = useMemo(() => {
+    const meta = new Map<string, { index: number; size: number }>();
+    const candidates = wallObjects.filter((wall) => !wall.wallGroupId && (wall.points || []).length >= 2);
+    if (candidates.length < 3) return meta;
+    const wallById = new Map<string, { id: string; a: { x: number; y: number }; b: { x: number; y: number }; keyA: string; keyB: string }>();
+    const endpointMap = new Map<string, string[]>();
+    const pointKey = (point: { x: number; y: number }) => `${point.x}:${point.y}`;
+    candidates.forEach((wall) => {
+      const pts = wall.points || [];
+      if (pts.length < 2) return;
+      const a = pts[0];
+      const b = pts[pts.length - 1];
+      const keyA = pointKey(a);
+      const keyB = pointKey(b);
+      wallById.set(wall.id, { id: wall.id, a, b, keyA, keyB });
+      endpointMap.set(keyA, [...(endpointMap.get(keyA) || []), wall.id]);
+      endpointMap.set(keyB, [...(endpointMap.get(keyB) || []), wall.id]);
+    });
+    const buildCycle = (startId: string, forward: boolean) => {
+      const start = wallById.get(startId);
+      if (!start) return null;
+      const startPoint = forward ? start.a : start.b;
+      const nextPoint = forward ? start.b : start.a;
+      const startKey = forward ? start.keyA : start.keyB;
+      let prevKey = startKey;
+      let currKey = forward ? start.keyB : start.keyA;
+      const ids = [startId];
+      const points = [startPoint, nextPoint];
+      let guard = 0;
+      while (guard++ < candidates.length + 2) {
+        if (currKey === startKey) {
+          if (ids.length >= 3) return { ids, points };
+          return null;
+        }
+        const connected = endpointMap.get(currKey) || [];
+        const nextIds = connected.filter((id) => id !== ids[ids.length - 1] && !ids.includes(id));
+        if (nextIds.length !== 1) return null;
+        const nextId = nextIds[0];
+        const next = wallById.get(nextId);
+        if (!next) return null;
+        const nextKey = next.keyA === currKey ? next.keyB : next.keyA;
+        if (nextKey === prevKey) return null;
+        const nextPointResolved = next.keyA === currKey ? next.b : next.a;
+        ids.push(nextId);
+        points.push(nextPointResolved);
+        prevKey = currKey;
+        currKey = nextKey;
+      }
+      return null;
+    };
+    const visited = new Set<string>();
+    candidates.forEach((wall) => {
+      if (visited.has(wall.id)) return;
+      const cycle = buildCycle(wall.id, true) || buildCycle(wall.id, false);
+      if (!cycle) return;
+      const size = cycle.ids.length;
+      cycle.ids.forEach((id, index) => {
+        meta.set(id, { index, size });
+        visited.add(id);
+      });
+    });
+    return meta;
+  }, [wallObjects]);
+
   const selectedBounds = useMemo(() => {
     const idsArr = selectedIds || (selectedId ? [selectedId] : []);
     if (!idsArr.length) return null;
@@ -1259,17 +1445,26 @@ const CanvasStageImpl = (
     if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
     return { minX, minY, maxX, maxY };
   }, [plan.objects, selectedId, selectedIds]);
+  const selectionHasWall = useMemo(() => {
+    const ids = selectedIds || (selectedId ? [selectedId] : []);
+    if (!ids.length || !wallTypeIdSet.size) return false;
+    return ids.some((id) => {
+      const obj = objectById.get(id);
+      return !!obj && wallTypeIdSet.has(obj.type);
+    });
+  }, [objectById, selectedId, selectedIds, wallTypeIdSet]);
+  const allowTool = !!toolMode && (!readOnly || toolMode === 'measure');
 
   return (
     <div
       className={`relative h-full w-full rounded-2xl border border-slate-200 border-b-4 border-b-slate-200 bg-white shadow-card ${
-        (roomDrawMode || printAreaMode) && !readOnly ? 'cursor-crosshair' : ''
+        roomDrawMode || printAreaMode || allowTool ? 'cursor-crosshair' : ''
       }`}
       onContextMenu={(e) => {
         e.preventDefault();
         // If another Konva context menu was just opened (object/link/bg), don't open map menu too.
         if (Date.now() - lastContextMenuAtRef.current < 60) return;
-        if (pendingType || readOnly) return;
+        if (pendingType || readOnly || toolMode) return;
         if ((e as any).metaKey || (e as any).altKey) return;
         if (isBoxSelecting()) return;
         const stage = stageRef.current;
@@ -1340,6 +1535,14 @@ const CanvasStageImpl = (
             startPan(e);
             return;
           }
+          if (allowTool && !isContextClick(e.evt) && e.evt.button === 0) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (!pos) return;
+            const world = pointerToWorld(pos.x, pos.y);
+            onToolPoint?.(world, { shiftKey: !!e.evt.shiftKey });
+            return;
+          }
           if (pendingType && !readOnly && !isContextClick(e.evt) && e.evt.button === 0) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
@@ -1348,7 +1551,14 @@ const CanvasStageImpl = (
             onPlaceNew(pendingType, world.x, world.y);
             return;
           }
-          if (isEmptyTarget && isBoxSelectGesture(e.evt) && !pendingType && (!roomDrawMode || readOnly) && (!printAreaMode || readOnly)) {
+          if (
+            isEmptyTarget &&
+            isBoxSelectGesture(e.evt) &&
+            !pendingType &&
+            (!roomDrawMode || readOnly) &&
+            (!printAreaMode || readOnly) &&
+            !toolMode
+          ) {
             e.evt.preventDefault();
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
@@ -1390,8 +1600,9 @@ const CanvasStageImpl = (
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
             const closeThreshold = 12 / Math.max(0.2, viewportRef.current.zoom || 1);
-            if (draftPolyPoints.length >= 3) {
-              const first = draftPolyPoints[0];
+            const currentPoints = draftPolyPointsRef.current;
+            if (currentPoints.length >= 3) {
+              const first = currentPoints[0];
               const dx = world.x - first.x;
               const dy = world.y - first.y;
               if (Math.hypot(dx, dy) <= closeThreshold) {
@@ -1400,13 +1611,36 @@ const CanvasStageImpl = (
               }
             }
             if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-            setDraftPolyPoints((prev) => [...prev, { x: world.x, y: world.y }]);
+            setDraftPolyPoints((prev) => {
+              const next = [...prev, { x: world.x, y: world.y }];
+              draftPolyPointsRef.current = next;
+              return next;
+            });
             return;
           }
           // Clear selection on left-click empty area (no pending placement)
-          if (!pendingType && isEmptyTarget && e.evt.button === 0) onSelect(undefined);
+          if (!pendingType && !toolMode && isEmptyTarget && e.evt.button === 0) onSelect(undefined);
+        }}
+        onDblClick={(e) => {
+          if (!allowTool) return;
+          e.cancelBubble = true;
+          if (e.evt?.button !== 0) return;
+          onToolDoubleClick?.();
         }}
         onMouseMove={(e) => {
+          if (allowTool) {
+            if (isPanning) {
+              movePan(e);
+              return;
+            }
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (pos) {
+              const world = pointerToWorld(pos.x, pos.y);
+              onToolMove?.(world, { shiftKey: !!e.evt.shiftKey });
+            }
+            return;
+          }
           if (pendingType && !readOnly) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
@@ -1468,9 +1702,13 @@ const CanvasStageImpl = (
             e.evt.preventDefault();
             e.cancelBubble = true;
             if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+            if (toolMode === 'wall') {
+              onWallDraftContextMenu?.();
+              return;
+            }
             if (isBoxSelecting()) return;
             lastContextMenuAtRef.current = Date.now();
-            if (pendingType || readOnly) return;
+            if (pendingType || readOnly || toolMode) return;
             const stage = stageRef.current;
             const pos = stage?.getPointerPosition();
             if (!pos) return;
@@ -1481,7 +1719,7 @@ const CanvasStageImpl = (
             // Never pan / clear selection while box-selecting.
             if (isBoxSelecting()) return;
             if (isContextClick(e.evt)) return;
-            if ((roomDrawMode || printAreaMode) && !readOnly) return;
+            if (roomDrawMode || printAreaMode || allowTool) return;
             if (e.target?.attrs?.name === 'bg-rect' && !pendingType) {
               if (isPanGesture(e.evt)) startPan(e);
               return;
@@ -1496,7 +1734,7 @@ const CanvasStageImpl = (
         </Layer>
 
         {/* Rooms layer */}
-        <Layer perfectDrawEnabled={false}>
+        <Layer perfectDrawEnabled={false} listening={!toolMode}>
           {(plan.rooms || []).map((room) => {
             const isSelectedRoom = selectedRoomId === room.id;
             const kind = (room.kind || (room.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
@@ -1683,7 +1921,7 @@ const CanvasStageImpl = (
                 onContextMenu={(e) => {
                   e.evt.preventDefault();
                   e.cancelBubble = true;
-                  if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                  if ((e.evt as any)?.metaKey) return;
                   if (isBoxSelecting()) return;
                   onSelectRoom?.(room.id, { keepContext: true });
                   onRoomContextMenu?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
@@ -1841,8 +2079,159 @@ const CanvasStageImpl = (
           ) : null}
         </Layer>
 
-        {/* Links layer */}
-        <Layer perfectDrawEnabled={false}>
+        {/* Walls + links layer */}
+        <Layer perfectDrawEnabled={false} listening={!toolMode}>
+          {wallObjects.map((obj) => {
+            const pts = obj.points || [];
+            if (pts.length < 2) return null;
+            const isSelected = selectedIds ? selectedIds.includes(obj.id) : selectedId === obj.id;
+            const highlightActive = !!(highlightId && highlightUntil && highlightId === obj.id && highlightUntil > highlightNow);
+            const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(highlightNow / 80) : 0;
+            const rawStroke = typeof obj.strokeColor === 'string' && obj.strokeColor.trim() ? obj.strokeColor.trim() : '';
+            const typeStroke = getWallTypeColor(obj.type);
+            const baseStroke = rawStroke && rawStroke !== WALL_LAYER_COLOR ? rawStroke : typeStroke;
+            const baseWidth = clamp(Number(obj.strokeWidth ?? 4) || 4, 1, 12);
+            const lineOpacity = clamp(Number(obj.opacity ?? 1) || 1, 0.1, 1);
+            const stroke = highlightActive ? '#22d3ee' : isSelected ? '#2563eb' : baseStroke;
+            const strokeWidth = highlightActive ? baseWidth + 1 + 2 * pulse : isSelected ? baseWidth + 1 : baseWidth;
+            const linePoints = pts.flatMap((p) => [p.x, p.y]);
+            const cornerPoints = isSelected ? getWallCornerPoints(pts) : [];
+            const groupId = obj.wallGroupId ? String(obj.wallGroupId) : '';
+            const groupSize = groupId ? wallGroupSizes.get(groupId) : undefined;
+            const groupIndex = Number.isFinite(obj.wallGroupIndex) ? Number(obj.wallGroupIndex) : null;
+            const fallbackMeta = wallFallbackMeta.get(obj.id);
+            const labelSize = groupSize && groupIndex !== null && groupIndex >= 0 ? groupSize : fallbackMeta?.size;
+            const labelIndex = groupSize && groupIndex !== null && groupIndex >= 0 ? groupIndex : fallbackMeta?.index;
+            const cornerLabels = isSelected
+              ? labelSize && labelIndex !== null && labelIndex !== undefined
+                ? [formatCornerLabel(labelIndex), formatCornerLabel((labelIndex + 1) % labelSize)]
+                : cornerPoints.map((_, index) => formatCornerLabel(index))
+              : [];
+            const labelScale = 1 / Math.max(0.6, zoom || 1);
+            const labelOffset = 10 * labelScale;
+            const labelFontSize = 18 * labelScale;
+            const labelStroke = 2.5 * labelScale;
+            return (
+              <Group key={obj.id}>
+                <Line
+                  points={linePoints}
+                  stroke={stroke}
+                  strokeWidth={strokeWidth}
+                  lineCap="round"
+                  lineJoin="round"
+                  hitStrokeWidth={Math.max(12, strokeWidth + 10)}
+                  opacity={lineOpacity}
+                  onClick={(e) => {
+                    e.cancelBubble = true;
+                    if (e.evt?.button !== 0) return;
+                    onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
+                  }}
+                  onDblClick={(e) => {
+                    e.cancelBubble = true;
+                    if (e.evt?.button !== 0) return;
+                    const stage = e.target.getStage();
+                    const pos = stage?.getPointerPosition();
+                    if (!pos) return;
+                    const world = pointerToWorld(pos.x, pos.y);
+                    const segment = nearestWallSegment(pts, world);
+                    if (!segment) return;
+                    onWallSegmentDblClick?.({ id: obj.id, lengthPx: segment.length });
+                  }}
+                  onContextMenu={(e) => {
+                    e.evt.preventDefault();
+                    e.cancelBubble = true;
+                    if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                    if (isBoxSelecting()) return;
+                    lastContextMenuAtRef.current = Date.now();
+                    const multiSelected = (selectedIds || []).length > 1;
+                    const multiKey = !!(e.evt.ctrlKey || e.evt.metaKey);
+                    if (!isSelected || !multiSelected) {
+                      onSelect(obj.id, { keepContext: true, multi: multiKey });
+                    }
+                    if (pendingType || readOnly) return;
+                    const stage = e.target.getStage();
+                    const pos = stage?.getPointerPosition();
+                    const world = pos ? pointerToWorld(pos.x, pos.y) : null;
+                    const segment = world ? nearestWallSegment(pts, world) : null;
+                    onContextMenu({
+                      id: obj.id,
+                      clientX: e.evt.clientX,
+                      clientY: e.evt.clientY,
+                      wallSegmentLengthPx: segment?.length
+                    });
+                  }}
+                />
+                {cornerPoints.length
+                  ? cornerPoints.map((point, index) => (
+                      <Text
+                        key={`${obj.id}-corner-${index}`}
+                        text={cornerLabels[index] || formatCornerLabel(index)}
+                        x={point.x + labelOffset}
+                        y={point.y - labelOffset}
+                        fontSize={labelFontSize}
+                        fontStyle="bold"
+                        fill="#0ea5e9"
+                        stroke="#0f172a"
+                        strokeWidth={labelStroke}
+                        listening={false}
+                      />
+                    ))
+                  : null}
+              </Group>
+            );
+          })}
+          {quoteObjects.map((obj) => {
+            const pts = obj.points || [];
+            if (pts.length < 2) return null;
+            const start = pts[0];
+            const end = pts[pts.length - 1];
+            const stroke = typeof obj.strokeColor === 'string' && obj.strokeColor.trim() ? obj.strokeColor.trim() : '#f97316';
+            const strokeWidth = clamp(Number(obj.strokeWidth ?? 2) || 2, 1, 6);
+            const label = quoteLabels?.[obj.id];
+            const midX = (start.x + end.x) / 2;
+            const midY = (start.y + end.y) / 2;
+            const textW = label ? estimateTextWidth(label, 12) + 12 : 0;
+            return (
+              <Group key={obj.id}>
+                <Arrow
+                  points={[start.x, start.y, end.x, end.y]}
+                  stroke={stroke}
+                  fill={stroke}
+                  pointerLength={8}
+                  pointerWidth={8}
+                  pointerAtBeginning
+                  strokeWidth={strokeWidth}
+                  hitStrokeWidth={Math.max(10, strokeWidth + 8)}
+                  opacity={0.95}
+                  onClick={(e) => {
+                    e.cancelBubble = true;
+                    if (e.evt?.button !== 0) return;
+                    onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
+                  }}
+                  onContextMenu={(e) => {
+                    e.evt.preventDefault();
+                    e.cancelBubble = true;
+                    if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                    if (isBoxSelecting()) return;
+                    lastContextMenuAtRef.current = Date.now();
+                    const multiSelected = (selectedIds || []).length > 1;
+                    const multiKey = !!(e.evt.ctrlKey || e.evt.metaKey);
+                    if (!selectedIds?.includes(obj.id) || !multiSelected) {
+                      onSelect(obj.id, { keepContext: true, multi: multiKey });
+                    }
+                    if (pendingType || readOnly) return;
+                    onContextMenu({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+                  }}
+                />
+                {label ? (
+                  <Group x={midX - textW / 2} y={midY - 16} listening={false}>
+                    <Rect width={textW} height={18} fill="rgba(255,255,255,0.9)" cornerRadius={6} />
+                    <Text text={label} width={textW} height={18} align="center" fontSize={11} fontStyle="bold" fill="#0f172a" />
+                  </Group>
+                ) : null}
+              </Group>
+            );
+          })}
           {(plan.links || []).map((link) => {
             const from = objectById.get(link.fromId);
             const to = objectById.get(link.toId);
@@ -1950,58 +2339,58 @@ const CanvasStageImpl = (
               );
             }
 
-	            return (
-	              <Group key={link.id}>
-	                <Arrow
-	                  points={[from.x, from.y, to.x, to.y]}
-	                  stroke={stroke}
-	                  fill={stroke}
-	                  pointerLength={8}
-	                  pointerWidth={8}
-	                  strokeWidth={isSelected ? width + 1 : width}
-	                  hitStrokeWidth={Math.max(14, (isSelected ? width + 1 : width) + 10)}
-	                  opacity={0.85}
-	                  onClick={(e) => {
-	                    e.cancelBubble = true;
-	                    onSelectLink?.(link.id);
-	                  }}
-	                  onDblClick={(e) => {
-	                    e.cancelBubble = true;
-	                    if (!onLinkDblClick) return;
-	                    if (readOnly) return;
-	                    onSelectLink?.(link.id);
-	                    onLinkDblClick(link.id);
-	                  }}
-	                  onContextMenu={(e) => {
-	                    e.evt.preventDefault();
-	                    e.cancelBubble = true;
-	                    if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
-	                    if (!onLinkContextMenu) return;
-	                    onSelectLink?.(link.id);
-	                    onLinkContextMenu({ id: link.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
-	                  }}
-	                />
-	                {String(link.name || link.label || '').trim() ? (
-	                  <Text
-	                    text={String(link.name || link.label || '').trim()}
-	                    x={(from.x + to.x) / 2 - 120}
-	                    y={(from.y + to.y) / 2 - 18}
-	                    width={240}
-	                    align="center"
-	                    fontSize={11}
-	                    fontStyle="bold"
-	                    fill="#0f172a"
-	                    listening={false}
-	                  />
-	                ) : null}
-	              </Group>
-	            );
-	          })}
-	        </Layer>
+            return (
+              <Group key={link.id}>
+                <Arrow
+                  points={[from.x, from.y, to.x, to.y]}
+                  stroke={stroke}
+                  fill={stroke}
+                  pointerLength={8}
+                  pointerWidth={8}
+                  strokeWidth={isSelected ? width + 1 : width}
+                  hitStrokeWidth={Math.max(14, (isSelected ? width + 1 : width) + 10)}
+                  opacity={0.85}
+                  onClick={(e) => {
+                    e.cancelBubble = true;
+                    onSelectLink?.(link.id);
+                  }}
+                  onDblClick={(e) => {
+                    e.cancelBubble = true;
+                    if (!onLinkDblClick) return;
+                    if (readOnly) return;
+                    onSelectLink?.(link.id);
+                    onLinkDblClick(link.id);
+                  }}
+                  onContextMenu={(e) => {
+                    e.evt.preventDefault();
+                    e.cancelBubble = true;
+                    if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                    if (!onLinkContextMenu) return;
+                    onSelectLink?.(link.id);
+                    onLinkContextMenu({ id: link.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+                  }}
+                />
+                {String(link.name || link.label || '').trim() ? (
+                  <Text
+                    text={String(link.name || link.label || '').trim()}
+                    x={(from.x + to.x) / 2 - 120}
+                    y={(from.y + to.y) / 2 - 18}
+                    width={240}
+                    align="center"
+                    fontSize={11}
+                    fontStyle="bold"
+                    fill="#0f172a"
+                    listening={false}
+                  />
+                ) : null}
+              </Group>
+            );
+          })}
+        </Layer>
 
         {/* Objects layer */}
-        <Layer perfectDrawEnabled={false} ref={objectsLayerRef}>
-          {plan.objects.map((obj) => {
+        <Layer perfectDrawEnabled={false} ref={objectsLayerRef} listening={!toolMode}>
+          {regularObjects.map((obj) => {
             const isSelected = selectedIds ? selectedIds.includes(obj.id) : selectedId === obj.id;
             const highlightActive = !!(highlightId && highlightUntil && highlightId === obj.id && highlightUntil > highlightNow);
             const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(highlightNow / 80) : 0;
@@ -2063,7 +2452,7 @@ const CanvasStageImpl = (
                 y={obj.y}
                 scaleX={isDesk ? deskScaleX : 1}
                 scaleY={isDesk ? deskScaleY : 1}
-                draggable={!readOnly && !panToolActive}
+                draggable={!readOnly && !panToolActive && !toolMode}
                 onDragStart={(e) => {
                   dragStartRef.current.set(obj.id, { x: obj.x, y: obj.y });
                   onMoveStart?.(obj.id, obj.x, obj.y, obj.roomId);
@@ -2412,70 +2801,228 @@ const CanvasStageImpl = (
           ) : null}
         </Layer>
 
-        {pendingType && pendingPreview ? (
-          <Layer perfectDrawEnabled={false} listening={false}>
-            <Group x={pendingPreview.x} y={pendingPreview.y} opacity={0.7}>
-              {pendingType === 'camera' ? (
-                <Wedge
-                  radius={160}
-                  angle={70}
-                  rotation={-35}
-                  fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-                  fillRadialGradientStartRadius={0}
-                  fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-                  fillRadialGradientEndRadius={160}
-                  fillRadialGradientColorStops={[
-                    0,
-                    'rgba(34,197,94,0.08)',
-                    0.6,
-                    'rgba(34,197,94,0.25)',
-                    1,
-                    'rgba(34,197,94,0.45)'
-                  ]}
-                />
+        {/* Overlays (drafts + selection) */}
+        <Layer perfectDrawEnabled={false} listening={!toolMode}>
+          {(scaleLine || scaleDraft || wallDraft || measureDraft || quoteDraft || (pendingType && pendingPreview)) ? (
+            <Group listening={false}>
+              {scaleLine ? (
+                <>
+                  <Line
+                    points={[scaleLine.start.x, scaleLine.start.y, scaleLine.end.x, scaleLine.end.y]}
+                    stroke="#0f172a"
+                    strokeWidth={2}
+                    dash={[8, 6]}
+                    lineCap="round"
+                    lineJoin="round"
+                  />
+                  <Circle x={scaleLine.start.x} y={scaleLine.start.y} radius={4} fill="#0f172a" opacity={0.85} />
+                  <Circle x={scaleLine.end.x} y={scaleLine.end.y} radius={4} fill="#0f172a" opacity={0.85} />
+                  {scaleLine.label ? (() => {
+                    const midX = (scaleLine.start.x + scaleLine.end.x) / 2;
+                    const midY = (scaleLine.start.y + scaleLine.end.y) / 2;
+                    const textW = estimateTextWidth(scaleLine.label, 12) + 12;
+                    return (
+                      <Group x={midX - textW / 2} y={midY - 20}>
+                        <Rect width={textW} height={18} fill="rgba(15,23,42,0.85)" cornerRadius={6} />
+                        <Text
+                          text={scaleLine.label}
+                          width={textW}
+                          height={18}
+                          align="center"
+                          verticalAlign="middle"
+                          fontSize={12}
+                          fill="#f8fafc"
+                        />
+                      </Group>
+                    );
+                  })() : null}
+                </>
               ) : null}
-              <Rect
-                x={-18}
-                y={-18}
-                width={36}
-                height={36}
-                cornerRadius={12}
-                fill="#ffffff"
-                stroke="#94a3b8"
-                strokeWidth={2}
-                shadowBlur={0}
-                shadowColor="transparent"
-              />
-              {pendingType ? (
-                iconImages[pendingType] ? (
-                  <KonvaImage
-                    image={iconImages[pendingType] as HTMLImageElement}
-                    x={-9}
-                    y={-9}
-                    width={18}
-                    height={18}
-                    opacity={0.9}
+
+              {scaleDraft?.start && (scaleDraft.end || scaleDraft.pointer) ? (
+                <>
+                  <Line
+                    points={[
+                      scaleDraft.start.x,
+                      scaleDraft.start.y,
+                      (scaleDraft.end || scaleDraft.pointer)!.x,
+                      (scaleDraft.end || scaleDraft.pointer)!.y
+                    ]}
+                    stroke="#0ea5e9"
+                    strokeWidth={2}
+                    dash={[6, 6]}
+                    lineCap="round"
+                    lineJoin="round"
                   />
-                ) : (
-                  <Text
-                    text={'?'}
+                  <Circle x={scaleDraft.start.x} y={scaleDraft.start.y} radius={4} fill="#0ea5e9" opacity={0.85} />
+                  {scaleDraft.end ? <Circle x={scaleDraft.end.x} y={scaleDraft.end.y} radius={4} fill="#0ea5e9" opacity={0.85} /> : null}
+                </>
+              ) : null}
+
+              {wallDraft?.points?.length ? (
+                <>
+                  <Line
+                    points={[
+                      ...wallDraft.points.flatMap((p) => [p.x, p.y]),
+                      ...(wallDraft.pointer ? [wallDraft.pointer.x, wallDraft.pointer.y] : [])
+                    ]}
+                    stroke="#475569"
+                    strokeWidth={3}
+                    dash={[8, 6]}
+                    lineCap="round"
+                    lineJoin="round"
+                  />
+                  {wallDraft.points.map((p, idx) => (
+                    <Circle key={`wall-draft-${idx}`} x={p.x} y={p.y} radius={3} fill="#475569" opacity={0.9} />
+                  ))}
+                </>
+              ) : null}
+
+              {measureDraft?.points?.length ? (
+                <>
+                  <Line
+                    points={[
+                      ...measureDraft.points.flatMap((p) => [p.x, p.y]),
+                      ...(measureDraft.pointer ? [measureDraft.pointer.x, measureDraft.pointer.y] : [])
+                    ]}
+                    stroke="#f97316"
+                    strokeWidth={2}
+                    lineCap="round"
+                    lineJoin="round"
+                    closed={!!measureDraft.closed}
+                    fill={measureDraft.closed ? 'rgba(249,115,22,0.12)' : undefined}
+                  />
+                  {measureDraft.label ? (() => {
+                    const anchor = measureDraft.pointer || measureDraft.points[measureDraft.points.length - 1];
+                    const textW = estimateTextWidth(measureDraft.label, 12) + 12;
+                    return (
+                      <Group x={anchor.x + 8} y={anchor.y - 20}>
+                        <Rect width={textW} height={18} fill="rgba(15,23,42,0.85)" cornerRadius={6} />
+                        <Text
+                          text={measureDraft.label}
+                          width={textW}
+                          height={18}
+                          align="center"
+                          verticalAlign="middle"
+                          fontSize={12}
+                          fill="#f8fafc"
+                        />
+                      </Group>
+                    );
+                  })() : null}
+                  {measureDraft.areaLabel && measureDraft.closed && measureDraft.points.length >= 3 ? (() => {
+                    const centroid = polygonCentroid(measureDraft.points);
+                    const textW = estimateTextWidth(measureDraft.areaLabel, 12) + 12;
+                    return (
+                      <Group x={centroid.x - textW / 2} y={centroid.y - 10}>
+                        <Rect width={textW} height={18} fill="rgba(15,23,42,0.85)" cornerRadius={6} />
+                        <Text
+                          text={measureDraft.areaLabel}
+                          width={textW}
+                          height={18}
+                          align="center"
+                          verticalAlign="middle"
+                          fontSize={12}
+                          fill="#f8fafc"
+                        />
+                      </Group>
+                    );
+                  })() : null}
+                </>
+              ) : null}
+              {quoteDraft?.points?.length ? (() => {
+                const pts = quoteDraft.pointer ? [...quoteDraft.points, quoteDraft.pointer] : quoteDraft.points;
+                if (pts.length < 2) return null;
+                const start = pts[0];
+                const end = pts[1];
+                const label = quoteDraft.label;
+                const midX = (start.x + end.x) / 2;
+                const midY = (start.y + end.y) / 2;
+                const textW = label ? estimateTextWidth(label, 12) + 12 : 0;
+                return (
+                  <>
+                    <Arrow
+                      points={[start.x, start.y, end.x, end.y]}
+                      stroke="#f97316"
+                      fill="#f97316"
+                      pointerLength={8}
+                      pointerWidth={8}
+                      pointerAtBeginning
+                      strokeWidth={2}
+                      opacity={0.9}
+                    />
+                    {label ? (
+                      <Group x={midX - textW / 2} y={midY - 16}>
+                        <Rect width={textW} height={18} fill="rgba(255,255,255,0.9)" cornerRadius={6} />
+                        <Text text={label} width={textW} height={18} align="center" fontSize={11} fontStyle="bold" fill="#0f172a" />
+                      </Group>
+                    ) : null}
+                  </>
+                );
+              })() : null}
+
+              {pendingType && pendingPreview ? (
+                <Group x={pendingPreview.x} y={pendingPreview.y} opacity={0.7}>
+                  {pendingType === 'camera' ? (
+                    <Wedge
+                      radius={160}
+                      angle={70}
+                      rotation={-35}
+                      fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+                      fillRadialGradientStartRadius={0}
+                      fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+                      fillRadialGradientEndRadius={160}
+                      fillRadialGradientColorStops={[
+                        0,
+                        'rgba(34,197,94,0.08)',
+                        0.6,
+                        'rgba(34,197,94,0.25)',
+                        1,
+                        'rgba(34,197,94,0.45)'
+                      ]}
+                    />
+                  ) : null}
+                  <Rect
                     x={-18}
-                    y={-14}
+                    y={-18}
                     width={36}
-                    align="center"
-                    fontSize={15}
-                    fontStyle="bold"
-                    fill={'#2563eb'}
-                    opacity={0.9}
+                    height={36}
+                    cornerRadius={12}
+                    fill="#ffffff"
+                    stroke="#94a3b8"
+                    strokeWidth={2}
+                    shadowBlur={0}
+                    shadowColor="transparent"
                   />
-                )
+                  {pendingType ? (
+                    iconImages[pendingType] ? (
+                      <KonvaImage
+                        image={iconImages[pendingType] as HTMLImageElement}
+                        x={-9}
+                        y={-9}
+                        width={18}
+                        height={18}
+                        opacity={0.9}
+                      />
+                    ) : (
+                      <Text
+                        text={'?'}
+                        x={-18}
+                        y={-14}
+                        width={36}
+                        align="center"
+                        fontSize={15}
+                        fontStyle="bold"
+                        fill={'#2563eb'}
+                        opacity={0.9}
+                      />
+                    )
+                  ) : null}
+                </Group>
               ) : null}
             </Group>
-          </Layer>
-        ) : null}
+          ) : null}
 
-        {/* Selection box + multi-drag overlay */}
-        <Layer perfectDrawEnabled={false}>
           {selectionBox ? (
             <Rect
               x={selectionBox.x}
@@ -2495,7 +3042,7 @@ const CanvasStageImpl = (
             <Group
               x={selectedBounds.minX}
               y={selectedBounds.minY}
-              draggable={!panToolActive}
+              draggable={!panToolActive && !toolMode && !selectionHasWall}
               onContextMenu={(e) => {
                 e.evt.preventDefault();
                 e.cancelBubble = true;
