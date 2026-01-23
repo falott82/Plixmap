@@ -11,6 +11,7 @@ interface Props {
   onConfirm: () => void;
   confirmLabel?: string;
   cancelLabel?: string | null;
+  confirmOnEnter?: boolean;
 }
 
 const ConfirmDialog = ({
@@ -20,7 +21,8 @@ const ConfirmDialog = ({
   onCancel,
   onConfirm,
   confirmLabel,
-  cancelLabel
+  cancelLabel,
+  confirmOnEnter = false
 }: Props) => {
   const t = useT();
   const okLabel = confirmLabel || t({ it: 'Conferma', en: 'Confirm' });
@@ -51,7 +53,15 @@ const ConfirmDialog = ({
             leaveFrom="opacity-100 scale-100"
             leaveTo="opacity-0 scale-95"
           >
-            <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-card transition-all">
+            <Dialog.Panel
+              className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-card transition-all"
+              onKeyDown={(e) => {
+                if (!confirmOnEnter) return;
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                onConfirm();
+              }}
+            >
               <div className="flex items-center justify-between">
                 <Dialog.Title className="text-lg font-semibold text-ink">{title}</Dialog.Title>
                 <button

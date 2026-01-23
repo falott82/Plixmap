@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Dialog, Transition } from '@headlessui/react';
 import { ChevronDown, ChevronUp, Copy, Info, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { useDataStore } from '../../store/useDataStore';
+import { WALL_TYPE_IDS } from '../../store/data';
 import { useToastStore } from '../../store/useToast';
 import { useUIStore } from '../../store/useUIStore';
 import { LayerDefinition } from '../../store/types';
@@ -148,6 +149,14 @@ const LayersPanel = () => {
     for (const def of objectTypes || []) map.set(def.id, def);
     return map;
   }, [objectTypes]);
+  const wallTypeIdSet = useMemo(() => {
+    const ids = new Set<string>(WALL_TYPE_IDS as string[]);
+    for (const def of objectTypes || []) {
+      if ((def as any)?.category === 'wall') ids.add(def.id);
+    }
+    return ids;
+  }, [objectTypes]);
+  const isWallType = useCallback((typeId: string) => wallTypeIdSet.has(typeId), [wallTypeIdSet]);
 
   const typeOptions = useMemo(() => {
     const ids = new Set<string>();
@@ -176,7 +185,9 @@ const LayersPanel = () => {
             ? ['desks']
             : typeId === 'camera'
               ? ['cctv']
-              : ['devices'];
+              : isWallType(typeId)
+                ? ['walls']
+                : ['devices'];
     return ids.filter((id) => layerIdSet.has(id));
   };
 

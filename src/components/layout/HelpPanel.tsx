@@ -501,6 +501,36 @@ const HelpPanel = () => {
                           en: 'Polygon rooms: Backspace removes the last point, Enter closes the area.'
                         })}
                       </li>
+                      <li>
+                        {t({
+                          it: 'W: avvia il disegno muro; premi di nuovo W (o doppio click) per chiudere.',
+                          en: 'W: start wall drawing; press W again (or double click) to finish.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Shift (durante il disegno muro): vincola le linee a segmenti dritti.',
+                          en: 'Shift (while drawing walls): constrain to straight segments.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'M: avvia la misura distanza; premi di nuovo M per interrompere.',
+                          en: 'M: start measuring distance; press M again to stop.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Q: avvia la quota fissa; clicca due punti per creare una quota.',
+                          en: 'Q: start a fixed quote; click two points to create a quote.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Scala: nella finestra di impostazione puoi premere Invio per salvare.',
+                          en: 'Scale: in the set-scale dialog you can press Enter to save.'
+                        })}
+                      </li>
                     </ul>
                   </div>
                   <div data-help-block id="help-views" className="rounded-xl bg-mist p-3">

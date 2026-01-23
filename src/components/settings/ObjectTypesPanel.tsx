@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Eye, EyeOff, GripVertical, Info, Plus, Search, Settings2, Trash2, X, Inbox, CheckCircle2, XCircle, Pencil, RefreshCw } from 'lucide-react';
 import { updateMyProfile } from '../../api/auth';
@@ -22,6 +22,8 @@ import { useLang, useT } from '../../i18n/useT';
 import { IconName } from '../../store/types';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { isDeskType } from '../plan/deskTypes';
+import { WALL_TYPE_IDS } from '../../store/data';
+import { getWallTypeColor } from '../../utils/wallColors';
 
 const ObjectTypesPanel = () => {
   const t = useT();
@@ -38,10 +40,13 @@ const ObjectTypesPanel = () => {
   const navigate = useNavigate();
   const resolveSection = (search: string) => {
     const section = new URLSearchParams(search).get('section')?.toLowerCase();
-    return section === 'desks' ? 'desks' : 'objects';
+    if (section === 'desks') return 'desks';
+    if (section === 'walls') return 'walls';
+    return 'objects';
   };
-  const [section, setSection] = useState<'objects' | 'desks'>(() => resolveSection(location.search));
+  const [section, setSection] = useState<'objects' | 'desks' | 'walls'>(() => resolveSection(location.search));
   const isDesksSection = section === 'desks';
+  const isWallsSection = section === 'walls';
 
   const [customOpen, setCustomOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
@@ -71,7 +76,7 @@ const ObjectTypesPanel = () => {
     if (next !== section) setSection(next);
   }, [location.search, section]);
 
-  const setSectionAndUrl = (nextSection: 'objects' | 'desks') => {
+  const setSectionAndUrl = (nextSection: 'objects' | 'desks' | 'walls') => {
     setSection(nextSection);
     const params = new URLSearchParams(location.search);
     params.set('section', nextSection);
@@ -88,13 +93,23 @@ const ObjectTypesPanel = () => {
     for (const d of objectTypes || []) map.set(d.id, d);
     return map;
   }, [objectTypes]);
+  const wallTypeIdSet = useMemo(() => {
+    const ids = new Set<string>(WALL_TYPE_IDS as string[]);
+    for (const def of objectTypes || []) {
+      if ((def as any)?.category === 'wall') ids.add(def.id);
+    }
+    return ids;
+  }, [objectTypes]);
+  const isWallType = useCallback((typeId: string) => wallTypeIdSet.has(typeId), [wallTypeIdSet]);
 
   const enabledDefs = useMemo(() => {
+    if (isWallsSection) return [];
     const term = q.trim().toLowerCase();
     const out: any[] = [];
     for (const id of enabled) {
       const d = defById.get(id);
       if (!d) continue;
+      if (isWallType(d.id)) continue;
       if (isDesksSection ? !isDeskType(d.id) : isDeskType(d.id)) continue;
       if (
         term &&
@@ -104,24 +119,36 @@ const ObjectTypesPanel = () => {
       out.push(d);
     }
     return out;
-  }, [defById, enabled, isDesksSection, q]);
+  }, [defById, enabled, isDesksSection, isWallType, isWallsSection, q]);
 
   const availableDefs = useMemo(() => {
+    if (isWallsSection) return [];
     const used = new Set(enabled);
     const list = (objectTypes || []).filter((d) => {
       if (used.has(d.id)) return false;
+      if (isWallType(d.id)) return false;
       return isDesksSection ? isDeskType(d.id) : !isDeskType(d.id);
     });
     const term = q.trim().toLowerCase();
     const sorted = list.slice().sort((a, b) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
     if (!term) return sorted;
     return sorted.filter((d) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term));
-  }, [enabled, isDesksSection, lang, objectTypes, q]);
+  }, [enabled, isDesksSection, isWallType, isWallsSection, lang, objectTypes, q]);
 
   const paletteDefs = useMemo(() => {
     const enabledIds = new Set(enabled);
     return [...enabledDefs, ...availableDefs.filter((d) => !enabledIds.has(d.id))];
   }, [availableDefs, enabled, enabledDefs]);
+
+  const wallDefs = useMemo(() => {
+    const list = (objectTypes || []).filter((d) => isWallType(d.id));
+    return list.sort((a, b) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
+  }, [isWallType, lang, objectTypes]);
+  const filteredWallDefs = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return wallDefs;
+    return wallDefs.filter((d) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term));
+  }, [q, wallDefs]);
 
   const iconOptionsAll: IconName[] = [
     'user',
@@ -630,41 +657,68 @@ const ObjectTypesPanel = () => {
         >
           {t({ it: 'Scrivanie', en: 'Desks' })}
         </button>
+        <button
+          onClick={() => setSectionAndUrl('walls')}
+          className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+            section === 'walls'
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          }`}
+        >
+          {t({ it: 'Mura', en: 'Walls' })}
+        </button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <div className="text-sm font-semibold text-ink">
-              {isDesksSection ? t({ it: 'Scrivanie (palette)', en: 'Desks (palette)' }) : t({ it: 'Oggetti (palette)', en: 'Objects (palette)' })}
+              {isWallsSection
+                ? t({ it: 'Mura (tipologie)', en: 'Walls (types)' })
+                : isDesksSection
+                  ? t({ it: 'Scrivanie (palette)', en: 'Desks (palette)' })
+                  : t({ it: 'Oggetti (palette)', en: 'Objects (palette)' })}
             </div>
             <span
               className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700"
               title={t({
-                it: isDesksSection
-                  ? 'Le scrivanie sono predefinite e non possono essere create o richieste. Puoi decidere quali mostrare nella palette con l’icona occhio.'
-                  : 'Qui puoi mostrare o nascondere gli oggetti nella palette con l’icona occhio. Le scrivanie hanno una sezione dedicata in planimetria. Tasto destro o ingranaggio per i campi personalizzati.',
-                en: isDesksSection
-                  ? 'Desks are built-in and cannot be created or requested. You can choose which ones appear in the palette with the eye icon.'
-                  : 'Show or hide objects in the palette with the eye icon. Desks have a dedicated section in the floor plan. Right-click or the cog for custom fields.'
+                it: isWallsSection
+                  ? 'Elenco dei materiali muro con attenuazione e colore.'
+                  : isDesksSection
+                    ? 'Le scrivanie sono predefinite e non possono essere create o richieste. Puoi decidere quali mostrare nella palette con l’icona occhio.'
+                    : 'Qui puoi mostrare o nascondere gli oggetti nella palette con l’icona occhio. Le scrivanie hanno una sezione dedicata in planimetria. Tasto destro o ingranaggio per i campi personalizzati.',
+                en: isWallsSection
+                  ? 'List of wall materials with attenuation and color.'
+                  : isDesksSection
+                    ? 'Desks are built-in and cannot be created or requested. You can choose which ones appear in the palette with the eye icon.'
+                    : 'Show or hide objects in the palette with the eye icon. Desks have a dedicated section in the floor plan. Right-click or the cog for custom fields.'
               })}
             >
               <Info size={16} />
             </span>
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            {isDesksSection
+            {isWallsSection
               ? t({
-                  it: 'La palette è per-utente: puoi nascondere o mostrare le scrivanie nella sezione dedicata.',
-                  en: 'The palette is per-user: you can hide or show desks in the dedicated section.'
+                  it: 'Qui trovi tutte le tipologie di muro disponibili.',
+                  en: 'Here you can see all available wall types.'
                 })
-              : t({
-                  it: 'La palette è per-utente: ogni utente può avere la propria lista e il proprio ordine. Le scrivanie compaiono nella sezione dedicata a destra.',
-                  en: 'The palette is per-user: each user can have their own list and ordering. Desks appear in the dedicated section on the right.'
-                })}
+              : isDesksSection
+                ? t({
+                    it: 'La palette è per-utente: puoi nascondere o mostrare le scrivanie nella sezione dedicata.',
+                    en: 'The palette is per-user: you can hide or show desks in the dedicated section.'
+                  })
+                : t({
+                    it: 'La palette è per-utente: ogni utente può avere la propria lista e il proprio ordine. Le scrivanie compaiono nella sezione dedicata a destra.',
+                    en: 'The palette is per-user: each user can have their own list and ordering. Desks appear in the dedicated section on the right.'
+                  })}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {isDesksSection ? (
+          {isWallsSection ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              {t({ it: 'Tipologie muro predefinite.', en: 'Built-in wall types.' })}
+            </div>
+          ) : isDesksSection ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
               {t({ it: 'Scrivanie predefinite: nessuna creazione o richiesta.', en: 'Built-in desks: no creation or requests.' })}
             </div>
@@ -725,21 +779,66 @@ const ObjectTypesPanel = () => {
             onChange={(e) => setQ(e.target.value)}
             className="w-full bg-transparent text-sm outline-none"
             placeholder={
-              isDesksSection
-                ? t({ it: 'Cerca scrivanie…', en: 'Search desks…' })
-                : t({ it: 'Cerca oggetti…', en: 'Search objects…' })
+              isWallsSection
+                ? t({ it: 'Cerca muri…', en: 'Search walls…' })
+                : isDesksSection
+                  ? t({ it: 'Cerca scrivanie…', en: 'Search desks…' })
+                  : t({ it: 'Cerca oggetti…', en: 'Search objects…' })
             }
           />
         </div>
         <div className="grid grid-cols-12 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
-          <div className="col-span-1" />
-          <div className="col-span-1">{t({ it: 'Icona', en: 'Icon' })}</div>
-          <div className="col-span-5">{t({ it: 'Nome', en: 'Name' })}</div>
-          <div className="col-span-3">ID</div>
-          <div className="col-span-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
+          {isWallsSection ? (
+            <>
+              <div className="col-span-1">{t({ it: 'Colore', en: 'Color' })}</div>
+              <div className="col-span-6">{t({ it: 'Nome', en: 'Name' })}</div>
+              <div className="col-span-2">{t({ it: 'Attenuazione', en: 'Attenuation' })}</div>
+              <div className="col-span-3">ID</div>
+            </>
+          ) : (
+            <>
+              <div className="col-span-1" />
+              <div className="col-span-1">{t({ it: 'Icona', en: 'Icon' })}</div>
+              <div className="col-span-5">{t({ it: 'Nome', en: 'Name' })}</div>
+              <div className="col-span-3">ID</div>
+              <div className="col-span-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
+            </>
+          )}
         </div>
         <div className="divide-y divide-slate-100">
-          {paletteDefs.length ? (
+          {isWallsSection ? (
+            filteredWallDefs.length ? (
+              filteredWallDefs.map((def) => {
+                const label = (def?.name?.[lang] as string) || (def?.name?.it as string) || def.id;
+                const attenuation = Number((def as any).attenuationDb);
+                return (
+                  <div key={def.id} className="grid grid-cols-12 items-center px-3 py-2 text-sm hover:bg-slate-50">
+                    <div className="col-span-1">
+                      <span
+                        className="inline-flex h-3 w-3 rounded-full border border-slate-200"
+                        style={{ background: getWallTypeColor(def.id) }}
+                        title={t({ it: 'Colore assegnato', en: 'Assigned color' })}
+                      />
+                    </div>
+                    <div className="col-span-6 min-w-0">
+                      <div className="truncate font-semibold text-ink">{label}</div>
+                    </div>
+                    <div className="col-span-2 text-xs text-slate-600">
+                      {Number.isFinite(attenuation) ? `${attenuation} dB` : '—'}
+                    </div>
+                    <div className="col-span-3 font-mono text-xs text-slate-700">{def.id}</div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="px-3 py-6 text-sm text-slate-600">
+                {t({
+                  it: 'Nessuna tipologia muro disponibile.',
+                  en: 'No wall types available.'
+                })}
+              </div>
+            )
+          ) : paletteDefs.length ? (
             paletteDefs.map((def) => {
               const label = (def?.name?.[lang] as string) || (def?.name?.it as string) || def.id;
               const isEnabled = enabled.includes(def.id);
@@ -776,7 +875,14 @@ const ObjectTypesPanel = () => {
                     </span>
                   </div>
                   <div className="col-span-5 min-w-0">
-                    <div className="truncate font-semibold text-ink">{label}</div>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="truncate font-semibold text-ink">{label}</div>
+                      {Number.isFinite((def as any).attenuationDb) ? (
+                        <span className="rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                          {(def as any).attenuationDb} dB
+                        </span>
+                      ) : null}
+                    </div>
                     <div className="text-xs text-slate-500">{t({ it: 'Tasto destro: campi custom', en: 'Right-click: custom fields' })}</div>
                   </div>
                   <div className="col-span-3 font-mono text-xs text-slate-700">{def.id}</div>
