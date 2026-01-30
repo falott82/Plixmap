@@ -1,4 +1,4 @@
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { Fragment, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
@@ -137,6 +137,28 @@ const formatMeasure = (value: number) => {
   if (!Number.isFinite(value)) return '0';
   const rounded = Math.round(value * 100) / 100;
   return rounded.toFixed(2).replace(/\.00$/, '');
+};
+
+const getDeskBounds = (
+  type: string,
+  dims: {
+    deskSize: number;
+    deskRectW: number;
+    deskRectH: number;
+    deskLongW: number;
+    deskLongH: number;
+    deskDoubleW: number;
+    deskDoubleH: number;
+    deskDoubleGap: number;
+    deskTrapBottom: number;
+    deskTrapHeight: number;
+  }
+) => {
+  if (type === 'desk_rect') return { width: dims.deskRectW, height: dims.deskRectH };
+  if (type === 'desk_double') return { width: dims.deskDoubleW * 2 + dims.deskDoubleGap, height: dims.deskDoubleH };
+  if (type === 'desk_long') return { width: dims.deskLongW, height: dims.deskLongH };
+  if (type === 'desk_trap') return { width: dims.deskTrapBottom, height: dims.deskTrapHeight };
+  return { width: dims.deskSize, height: dims.deskSize };
 };
 
 const intersectRaySegment = (
@@ -2690,7 +2712,8 @@ const getRoomBounds = (room: any) => {
               obj.type === 'real_user' && (((obj as any).firstName && String((obj as any).firstName).trim()) || ((obj as any).lastName && String((obj as any).lastName).trim()))
                 ? `${String((obj as any).firstName || '').trim()}\n${String((obj as any).lastName || '').trim()}`.trim()
                 : obj.name;
-            const labelLines = labelText.includes('\n') ? 2 : 1;
+            const labelValue = String(labelText || '').trim();
+            const labelLines = labelValue.includes('\n') ? 2 : 1;
             const labelLineHeight = 1.2;
             const labelFontSize = Math.max(4, 10 * scale);
             const labelHeight = labelLines * labelFontSize * labelLineHeight;
@@ -2740,9 +2763,28 @@ const getRoomBounds = (room: any) => {
             const deskTrapTop = deskSize * 0.75;
             const deskTrapBottom = deskSize * 1.15;
             const deskTrapHeight = deskSize * 0.75;
+            const deskBounds = isDesk
+              ? getDeskBounds(obj.type, {
+                  deskSize,
+                  deskRectW,
+                  deskRectH,
+                  deskLongW,
+                  deskLongH,
+                  deskDoubleW,
+                  deskDoubleH,
+                  deskDoubleGap,
+                  deskTrapBottom,
+                  deskTrapHeight
+                })
+              : null;
+            const rotateHandleRadius = 8;
+            const rotateHandleOffset = 10;
+            const rotateHandleScaleX = isDesk ? 1 / Math.max(0.2, deskScaleX) : 1;
+            const rotateHandleScaleY = isDesk ? 1 / Math.max(0.2, deskScaleY) : 1;
+            const rotateHandleScale = 1 / Math.max(0.2, zoom);
             return (
+              <Fragment key={obj.id}>
               <Group
-                key={obj.id}
                 ref={(node) => {
                   if (node) objectNodeRefs.current[obj.id] = node;
                   else delete objectNodeRefs.current[obj.id];
@@ -2916,20 +2958,6 @@ const getRoomBounds = (room: any) => {
                     />
                   </>
                 ) : null}
-                <Text
-                  text={labelText}
-                  x={-80}
-                  y={labelY}
-                  width={160}
-                  align="center"
-                  fontStyle="bold"
-                  fill="#0f172a"
-                  fontSize={labelFontSize}
-                  lineHeight={labelLineHeight}
-                  shadowBlur={0}
-                  shadowColor="transparent"
-                  listening={false}
-                />
                 {isDesk ? (
                   <Group rotation={deskRotation} opacity={objectOpacity}>
                     {obj.type === 'desk_round' ? (
@@ -3132,7 +3160,55 @@ const getRoomBounds = (room: any) => {
                     )}
                   </Group>
                 )}
+                {isDesk && isSelected && !readOnly && deskBounds ? (
+                  <Group
+                    x={deskBounds.width / 2 + rotateHandleOffset}
+                    y={-(deskBounds.height / 2 + rotateHandleOffset)}
+                    scaleX={rotateHandleScaleX * rotateHandleScale}
+                    scaleY={rotateHandleScaleY * rotateHandleScale}
+                    onClick={(e) => {
+                      e.cancelBubble = true;
+                      if (!onUpdateObject) return;
+                      onUpdateObject(obj.id, { rotation: (deskRotation + 90) % 360 });
+                    }}
+                    onMouseDown={(e) => {
+                      e.cancelBubble = true;
+                    }}
+                  >
+                    <Circle radius={rotateHandleRadius} fill="#0f172a" stroke="#ffffff" strokeWidth={1.5} opacity={0.92} />
+                    <Text
+                      text="↻"
+                      x={-rotateHandleRadius}
+                      y={-rotateHandleRadius}
+                      width={rotateHandleRadius * 2}
+                      height={rotateHandleRadius * 2}
+                      align="center"
+                      verticalAlign="middle"
+                      fontSize={rotateHandleRadius + 2}
+                      fontStyle="bold"
+                      fill="#ffffff"
+                      listening={false}
+                    />
+                  </Group>
+                ) : null}
               </Group>
+              {labelValue ? (
+                <Text
+                  text={labelValue}
+                  x={obj.x - 80}
+                  y={obj.y + labelY}
+                  width={160}
+                  align="center"
+                  fontStyle="bold"
+                  fill="#0f172a"
+                  fontSize={labelFontSize}
+                  lineHeight={labelLineHeight}
+                  shadowBlur={0}
+                  shadowColor="transparent"
+                  listening={false}
+                />
+              ) : null}
+              </Fragment>
             );
           })}
           {!readOnly ? (

@@ -298,7 +298,9 @@ const PlanView = ({ planId }: Props) => {
     setPlanDirty,
     requestSaveAndNavigate,
     pendingSaveNavigateTo,
-    clearPendingSaveNavigate
+    clearPendingSaveNavigate,
+    pendingPostSaveAction,
+    clearPendingPostSaveAction
   } = useUIStore(
     (s) => ({
       selectedObjectId: s.selectedObjectId,
@@ -338,13 +340,16 @@ const PlanView = ({ planId }: Props) => {
       setPlanDirty: (s as any).setPlanDirty,
       requestSaveAndNavigate: (s as any).requestSaveAndNavigate,
       pendingSaveNavigateTo: (s as any).pendingSaveNavigateTo,
-      clearPendingSaveNavigate: (s as any).clearPendingSaveNavigate
+      clearPendingSaveNavigate: (s as any).clearPendingSaveNavigate,
+      pendingPostSaveAction: (s as any).pendingPostSaveAction,
+      clearPendingPostSaveAction: (s as any).clearPendingPostSaveAction
     }),
     shallow
   );
 
   const push = useToastStore((s) => s.push);
   const saveCustomValues = useCustomFieldsStore((s) => s.saveObjectValues);
+  const loadCustomValues = useCustomFieldsStore((s) => s.loadObjectValues);
   const dataVersion = useDataStore((s) => s.version);
   const [pendingType, setPendingType] = useState<MapObjectType | null>(null);
   const [linkCreateMode, setLinkCreateMode] = useState<'arrow' | 'cable'>('arrow');
@@ -544,6 +549,13 @@ const PlanView = ({ planId }: Props) => {
   const confirmDeleteRef = useRef<string[] | null>(confirmDelete);
   const pendingRoomDeletesRef = useRef<string[]>(pendingRoomDeletes);
   const skipRoomWallTypesRef = useRef(false);
+  const clipboardRef = useRef<{
+    token: number;
+    items: MapObject[];
+    customValues: Record<string, Record<string, any>>;
+  } | null>(null);
+  const pasteCountRef = useRef(0);
+  const deskToastKeyRef = useRef<string>('');
   const wallMoveBatchRef = useRef<{ id: string | null; movedGroups: Set<string>; movedWalls: Set<string>; movedRooms: Set<string> }>({
     id: null,
     movedGroups: new Set(),
@@ -572,6 +584,7 @@ const PlanView = ({ planId }: Props) => {
     useCallback((s) => s.findSiteByPlan(planId), [planId])
   );
   const { user, permissions } = useAuthStore();
+  const logout = useAuthStore((s) => s.logout);
 
   const selectedRevisionId = selectedRevisionByPlan[planId] ?? null;
   const activeRevision = useMemo(() => {
@@ -1870,6 +1883,60 @@ const PlanView = ({ planId }: Props) => {
     pendingNavigateRef.current = pendingSaveNavigateTo;
     setSaveRevisionOpen(true);
   }, [clearPendingSaveNavigate, hasNavigationEdits, isReadOnly, navigate, pendingSaveNavigateTo]);
+
+  const performPendingPostSaveAction = useCallback(
+    async (action: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' }) => {
+      if (action.type === 'language') {
+        try {
+          await updateMyProfile({ language: action.value });
+          useAuthStore.setState((s) =>
+            s.user
+              ? { user: { ...s.user, language: action.value } as any, permissions: s.permissions, hydrated: s.hydrated }
+              : s
+          );
+        } catch {
+          // ignore
+        }
+        window.location.reload();
+        return;
+      }
+      await logout();
+      navigate('/login', { replace: true });
+    },
+    [logout, navigate]
+  );
+
+  useEffect(() => {
+    if (!pendingPostSaveAction) return;
+    if (isReadOnly || !hasNavigationEdits) {
+      clearPendingPostSaveAction();
+      void performPendingPostSaveAction(pendingPostSaveAction);
+      return;
+    }
+    if (!saveRevisionOpen) setSaveRevisionOpen(true);
+  }, [clearPendingPostSaveAction, hasNavigationEdits, isReadOnly, pendingPostSaveAction, performPendingPostSaveAction, saveRevisionOpen]);
+
+  const saveRevisionReason = useMemo(() => {
+    if (pendingNavigateRef.current) {
+      return {
+        it: 'Stai cambiando planimetria: salva una revisione per non perdere le modifiche.',
+        en: 'You are switching floor plans: save a revision to avoid losing changes.'
+      };
+    }
+    if (pendingPostSaveAction?.type === 'language') {
+      return {
+        it: 'Stai cambiando lingua: salva una revisione per non perdere le modifiche.',
+        en: 'You are changing language: save a revision to avoid losing changes.'
+      };
+    }
+    if (pendingPostSaveAction?.type === 'logout') {
+      return {
+        it: 'Stai uscendo: salva una revisione per non perdere le modifiche.',
+        en: 'You are logging out: save a revision to avoid losing changes.'
+      };
+    }
+    return null;
+  }, [pendingPostSaveAction]);
   const contextObject = useMemo(() => {
     if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return undefined;
     return renderPlan.objects.find((o) => o.id === contextMenu.id);
@@ -1980,6 +2047,30 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     selectedObjectIdsRef.current = selectedObjectIds;
   }, [selectedObjectIds]);
+  useEffect(() => {
+    if (!renderPlan || !selectedObjectIds.length) {
+      deskToastKeyRef.current = '';
+      return;
+    }
+    const deskIds = selectedObjectIds.filter((id) => {
+      const obj = renderPlan.objects.find((o) => o.id === id);
+      return !!obj && isDeskType(obj.type);
+    });
+    if (!deskIds.length) {
+      deskToastKeyRef.current = '';
+      return;
+    }
+    const key = deskIds.slice().sort().join(',');
+    if (deskToastKeyRef.current === key) return;
+    deskToastKeyRef.current = key;
+    push(
+      t({
+        it: 'Scrivania selezionata: sposta con le frecce (Shift per passi maggiori), ruota con Ctrl/Cmd + ←/→.',
+        en: 'Desk selected: move with arrow keys (Shift for larger steps), rotate with Ctrl/Cmd + ←/→.'
+      }),
+      'info'
+    );
+  }, [push, renderPlan, selectedObjectIds, t]);
   useEffect(() => {
     selectedLinkIdRef.current = selectedLinkId;
   }, [selectedLinkId]);
@@ -3685,6 +3776,143 @@ const PlanView = ({ planId }: Props) => {
         }
       }
 
+      const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
+      if (!isTyping && isCopy) {
+        if (!currentPlan) return;
+        const source = currentSelectedIds
+          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
+          .filter((obj): obj is MapObject => !!obj && !isWallType(obj.type));
+        if (!source.length) return;
+        e.preventDefault();
+        const token = Date.now();
+        clipboardRef.current = {
+          token,
+          items: source.map((obj) => ({
+            ...obj,
+            points: obj.points ? obj.points.map((p) => ({ ...p })) : undefined
+          })),
+          customValues: {}
+        };
+        pasteCountRef.current = 0;
+        Promise.all(
+          source.map(async (obj) => {
+            try {
+              const values = await loadCustomValues(obj.id);
+              return { id: obj.id, values };
+            } catch {
+              return { id: obj.id, values: {} };
+            }
+          })
+        ).then((results) => {
+          if (!clipboardRef.current || clipboardRef.current.token !== token) return;
+          const next: Record<string, Record<string, any>> = {};
+          results.forEach(({ id, values }) => {
+            next[id] = values || {};
+          });
+          clipboardRef.current = { ...clipboardRef.current, customValues: next };
+        });
+        push(
+          source.length === 1
+            ? t({ it: 'Oggetto copiato', en: 'Object copied' })
+            : t({ it: `Copiati ${source.length} oggetti`, en: `Copied ${source.length} objects` }),
+          'success'
+        );
+        return;
+      }
+
+      const isPaste = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
+      if (!isTyping && isPaste) {
+        if (!currentPlan || isReadOnlyRef.current) return;
+        const clipboard = clipboardRef.current;
+        if (!clipboard?.items?.length) return;
+        e.preventDefault();
+        markTouched();
+        pasteCountRef.current += 1;
+        const offset = 24 * pasteCountRef.current;
+        const newIds: string[] = [];
+        for (const obj of clipboard.items) {
+          const nextX = obj.x + offset;
+          const nextY = obj.y + offset * 0.6;
+          const layerIds =
+            Array.isArray(obj.layerIds) && obj.layerIds.length
+              ? obj.layerIds
+              : inferDefaultLayerIds(obj.type, layerIdSet);
+          const extra: Partial<MapObject> = {
+            opacity: obj.opacity,
+            rotation: obj.rotation,
+            strokeWidth: obj.strokeWidth,
+            strokeColor: obj.strokeColor,
+            scaleX: obj.scaleX,
+            scaleY: obj.scaleY,
+            points: obj.points ? obj.points.map((p) => ({ ...p })) : undefined,
+            wallGroupId: obj.wallGroupId,
+            wallGroupIndex: obj.wallGroupIndex,
+            wifiDb: obj.wifiDb,
+            wifiStandard: obj.wifiStandard,
+            wifiBand24: obj.wifiBand24,
+            wifiBand5: obj.wifiBand5,
+            wifiBand6: obj.wifiBand6,
+            wifiBrand: obj.wifiBrand,
+            wifiModel: obj.wifiModel,
+            wifiModelCode: obj.wifiModelCode,
+            wifiCoverageSqm: obj.wifiCoverageSqm,
+            wifiCatalogId: obj.wifiCatalogId,
+            wifiShowRange: obj.wifiShowRange,
+            cctvAngle: obj.cctvAngle,
+            cctvRange: obj.cctvRange,
+            cctvOpacity: obj.cctvOpacity,
+            externalClientId: obj.externalClientId,
+            externalUserId: obj.externalUserId,
+            firstName: obj.firstName,
+            lastName: obj.lastName,
+            externalRole: obj.externalRole,
+            externalDept1: obj.externalDept1,
+            externalDept2: obj.externalDept2,
+            externalDept3: obj.externalDept3,
+            externalEmail: obj.externalEmail,
+            externalExt1: obj.externalExt1,
+            externalExt2: obj.externalExt2,
+            externalExt3: obj.externalExt3,
+            externalIsExternal: obj.externalIsExternal
+          };
+          const id = addObject(
+            (currentPlan as FloorPlan).id,
+            obj.type,
+            obj.name,
+            obj.description,
+            nextX,
+            nextY,
+            obj.scale ?? 1,
+            layerIds,
+            extra
+          );
+          const nextRoomId = getRoomIdAt((currentPlan as FloorPlan).rooms, nextX, nextY);
+          if (nextRoomId) updateObject(id, { roomId: nextRoomId });
+          const customValues = clipboard.customValues?.[obj.id];
+          if (customValues && Object.keys(customValues).length) {
+            saveCustomValues(id, obj.type, customValues).catch(() => {});
+          }
+          newIds.push(id);
+        }
+        if (newIds.length) {
+          const last = newIds[newIds.length - 1];
+          const label =
+            newIds.length === 1
+              ? String(clipboard.items[0]?.name || getTypeLabel(clipboard.items[0]?.type || ''))
+              : t({ it: `${newIds.length} oggetti`, en: `${newIds.length} objects` });
+          lastInsertedRef.current = { id: last, name: label };
+          setSelection(newIds);
+          setContextMenu(null);
+          push(
+            newIds.length === 1
+              ? t({ it: `Oggetto duplicato: ${label}`, en: `Object duplicated: ${label}` })
+              : t({ it: `Duplicati ${newIds.length} oggetti`, en: `Duplicated ${newIds.length} objects` }),
+            'success'
+          );
+        }
+        return;
+      }
+
       const isCmdS = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
       if (isCmdS) {
         if (saveRevisionOpen) {
@@ -3871,6 +4099,7 @@ const PlanView = ({ planId }: Props) => {
     return () => window.removeEventListener('keydown', handler, true);
   }, [
     addRevision,
+    addObject,
     cancelScaleMode,
     deleteObject,
     push,
@@ -3889,6 +4118,7 @@ const PlanView = ({ planId }: Props) => {
     performUndo,
     resetTouched,
     setSelection,
+    setContextMenu,
     startWallDraw,
     startQuote,
     stopMeasure,
@@ -3898,6 +4128,11 @@ const PlanView = ({ planId }: Props) => {
     moveObject,
     updateObject,
     isWallType,
+    inferDefaultLayerIds,
+    layerIdSet,
+    loadCustomValues,
+    saveCustomValues,
+    getTypeLabel,
     getPlanUnsavedChanges,
     saveRevisionOpen,
     selectedRoomIds
@@ -9152,14 +9387,7 @@ const PlanView = ({ planId }: Props) => {
         hasExisting={hasAnyRevision}
         latestRevMajor={latestRev.major}
         latestRevMinor={latestRev.minor}
-        reason={
-          pendingNavigateRef.current
-            ? {
-                it: 'Stai cambiando planimetria: salva una revisione per non perdere le modifiche.',
-                en: 'You are switching floor plans: save a revision to avoid losing changes.'
-              }
-            : null
-        }
+        reason={saveRevisionReason}
         onDiscard={
           pendingNavigateRef.current
             ? () => {
@@ -9172,12 +9400,23 @@ const PlanView = ({ planId }: Props) => {
                 setSaveRevisionOpen(false);
                 if (to) navigate(to);
               }
-            : undefined
+            : pendingPostSaveAction
+              ? () => {
+                  const action = pendingPostSaveAction;
+                  clearPendingPostSaveAction();
+                  revertUnsavedChanges();
+                  resetTouched();
+                  entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+                  setSaveRevisionOpen(false);
+                  if (action) void performPendingPostSaveAction(action);
+                }
+              : undefined
         }
         onClose={() => {
           setSaveRevisionOpen(false);
           pendingNavigateRef.current = null;
           clearPendingSaveNavigate?.();
+          clearPendingPostSaveAction();
         }}
         onConfirm={({ bump, note }) => {
           if (!plan) return;
@@ -9207,6 +9446,12 @@ const PlanView = ({ planId }: Props) => {
           // New revision = clean state for navigation prompts.
           resetTouched();
           entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+          if (pendingPostSaveAction) {
+            const action = pendingPostSaveAction;
+            clearPendingPostSaveAction();
+            void performPendingPostSaveAction(action);
+            return;
+          }
           if (pendingNavigateRef.current) {
             const to = pendingNavigateRef.current;
             pendingNavigateRef.current = null;

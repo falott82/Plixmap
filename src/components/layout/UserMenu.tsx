@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
 import { useT } from '../../i18n/useT';
+import { useUIStore } from '../../store/useUIStore';
 
 const UserMenu = () => {
   const { user, logout } = useAuthStore();
@@ -11,6 +12,11 @@ const UserMenu = () => {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement | null>(null);
   const t = useT();
+  const { dirtyByPlan, setPendingPostSaveAction } = useUIStore((s) => ({
+    dirtyByPlan: s.dirtyByPlan,
+    setPendingPostSaveAction: s.setPendingPostSaveAction
+  }));
+  const hasDirtyPlans = useMemo(() => Object.values(dirtyByPlan || {}).some(Boolean), [dirtyByPlan]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -51,6 +57,11 @@ const UserMenu = () => {
                 onClick={async () => {
                   try {
                     if ((user as any).language === lang) return;
+                    if (hasDirtyPlans) {
+                      setOpen(false);
+                      setPendingPostSaveAction({ type: 'language', value: lang });
+                      return;
+                    }
                     await updateMyProfile({ language: lang });
                     useAuthStore.setState((s) =>
                       s.user ? { user: { ...s.user, language: lang } as any, permissions: s.permissions, hydrated: s.hydrated } : s
@@ -85,6 +96,10 @@ const UserMenu = () => {
           <button
             onClick={async () => {
               setOpen(false);
+              if (hasDirtyPlans) {
+                setPendingPostSaveAction({ type: 'logout' });
+                return;
+              }
               await logout();
               navigate('/login', { replace: true });
             }}
