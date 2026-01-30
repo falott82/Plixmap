@@ -4,6 +4,8 @@ Current version: **1.9.8**
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
+Note: This README was refreshed with a small formatting update.
+
 - UI supports **Italian and English** (language switch refreshes the app)
 - Drag & drop objects with layers, rooms, and grids
 - Walls with materials/attenuation, scale-based measurements, and quotes
