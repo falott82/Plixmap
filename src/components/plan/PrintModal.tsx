@@ -30,6 +30,9 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
   const [includeDesks, setIncludeDesks] = useState(true);
   const [includeLinks, setIncludeLinks] = useState(true);
   const [includeRooms, setIncludeRooms] = useState(true);
+  const [includeWalls, setIncludeWalls] = useState(true);
+  const [includeQuotes, setIncludeQuotes] = useState(true);
+  const [includeScale, setIncludeScale] = useState(true);
   const [quality, setQuality] = useState(78); // 40..95
   const [busy, setBusy] = useState(false);
 
@@ -250,12 +253,24 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                         />
                       </label>
                       <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Includi mura', en: 'Include walls' })}</span>
+                        <input type="checkbox" checked={includeWalls} onChange={(e) => setIncludeWalls(e.target.checked)} />
+                      </label>
+                      <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
                         <span>{t({ it: 'Includi collegamenti', en: 'Include links' })}</span>
                         <input type="checkbox" checked={includeLinks} onChange={(e) => setIncludeLinks(e.target.checked)} />
                       </label>
                       <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
                         <span>{t({ it: 'Includi stanze', en: 'Include rooms' })}</span>
                         <input type="checkbox" checked={includeRooms} onChange={(e) => setIncludeRooms(e.target.checked)} />
+                      </label>
+                      <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Includi quote', en: 'Include quotes' })}</span>
+                        <input type="checkbox" checked={includeQuotes} onChange={(e) => setIncludeQuotes(e.target.checked)} />
+                      </label>
+                      <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Includi scala', en: 'Include scale' })}</span>
+                        <input type="checkbox" checked={includeScale} onChange={(e) => setIncludeScale(e.target.checked)} />
                       </label>
                       <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
                         <span>{t({ it: 'Indice cliccabile', en: 'Clickable index' })}</span>
@@ -322,6 +337,9 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                                 includeDesks,
                                 includeLinks,
                                 includeRooms,
+                                includeWalls,
+                                includeQuotes,
+                                includeScale,
                                 objectTypeIcons,
                                 jpegQuality: qualityPreset.jpegQuality,
                                 targetLongPx: qualityPreset.targetLongPx

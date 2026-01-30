@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -25,11 +25,14 @@ const ConfirmDialog = ({
   confirmOnEnter = false
 }: Props) => {
   const t = useT();
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
   const okLabel = confirmLabel || t({ it: 'Conferma', en: 'Confirm' });
   const noLabel = cancelLabel === undefined ? t({ it: 'Annulla', en: 'Cancel' }) : cancelLabel;
+  const initialFocus = cancelLabel === null ? confirmRef : cancelRef;
   return (
     <Transition appear show={open} as={Fragment}>
-      <Dialog as="div" className="relative z-50" onClose={onCancel}>
+      <Dialog as="div" className="relative z-50" onClose={onCancel} initialFocus={initialFocus}>
       <Transition.Child
         as={Fragment}
         enter="ease-out duration-150"
@@ -80,6 +83,7 @@ const ConfirmDialog = ({
               <div className="mt-6 flex justify-end gap-2">
                 {cancelLabel === null ? null : (
                   <button
+                    ref={cancelRef}
                     onClick={onCancel}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
@@ -87,6 +91,7 @@ const ConfirmDialog = ({
                   </button>
                 )}
                 <button
+                  ref={confirmRef}
                   onClick={onConfirm}
                   className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                 >

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { HelpCircle, Trash2, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
+import RoomShapePreview from './RoomShapePreview';
 import Icon from '../ui/Icon';
 import { IconName, MapObject } from '../../store/types';
 
@@ -16,10 +17,22 @@ interface Props {
   initialNotes?: string;
   initialLogical?: boolean;
   surfaceLocked?: boolean;
+  measurements?: {
+    scaleMissing?: boolean;
+    perimeterLabel?: string | null;
+    areaLabel?: string | null;
+    segments?: { label: string; lengthLabel?: string | null }[];
+  } | null;
+  shapePreview?: {
+    points: { x: number; y: number }[];
+    segments: { label: string; lengthLabel?: string | null }[];
+  } | null;
   objects?: MapObject[];
   getTypeLabel?: (typeId: string) => string;
   getTypeIcon?: (typeId: string) => IconName | undefined;
   isUserObject?: (typeId: string) => boolean;
+  canCreateWalls?: boolean;
+  onCreateWalls?: () => void;
   onDeleteObject?: (id: string) => void;
   onClose: () => void;
   onSubmit: (payload: {
@@ -47,10 +60,14 @@ const RoomModal = ({
   initialNotes,
   initialLogical = false,
   surfaceLocked = false,
+  measurements,
+  shapePreview,
   objects,
   getTypeLabel,
   getTypeIcon,
   isUserObject,
+  canCreateWalls = false,
+  onCreateWalls,
   onDeleteObject,
   onClose,
   onSubmit
@@ -64,6 +81,7 @@ const RoomModal = ({
   const [notes, setNotes] = useState('');
   const [labelScale, setLabelScale] = useState(1);
   const [logical, setLogical] = useState(initialLogical);
+  const [nameError, setNameError] = useState('');
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'objects' | 'notes'>('info');
   const nameRef = useRef<HTMLInputElement | null>(null);
   const roomObjects = objects || [];
@@ -83,14 +101,19 @@ const RoomModal = ({
     setNotes(initialNotes || '');
     setLogical(!!initialLogical);
     setActiveTab('info');
+    setNameError('');
     window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [initialColor, initialName, initialCapacity, initialShowName, initialSurfaceSqm, initialNotes, initialLogical, open]);
 
   const submit = () => {
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      setNameError(t({ it: 'Il nome della stanza è obbligatorio.', en: 'Room name is required.' }));
+      window.setTimeout(() => nameRef.current?.focus(), 0);
+      return;
+    }
     const rawCapacity = Number(capacity);
     const finalCapacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
-    const finalLabelScale = Number.isFinite(labelScale) && labelScale > 0 ? Math.min(2, Math.max(0.6, labelScale)) : 1;
+    const finalLabelScale = Number.isFinite(labelScale) && labelScale > 0 ? Math.min(2, Math.max(0.2, labelScale)) : 1;
     const rawSurface = Number(surfaceSqm);
     const finalSurface = Number.isFinite(rawSurface) && rawSurface > 0 ? rawSurface : undefined;
     const finalNotes = notes.trim() ? notes.trim() : undefined;
@@ -163,7 +186,7 @@ const RoomModal = ({
             >
               <Dialog.Panel
                 className={`flex w-full flex-col rounded-2xl bg-white p-6 shadow-card ${
-                  shouldShowContents ? 'max-w-3xl max-h-[90vh]' : 'max-w-md max-h-[90vh]'
+                  shouldShowContents ? 'max-w-5xl max-h-[94vh]' : 'max-w-3xl max-h-[94vh]'
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -208,21 +231,113 @@ const RoomModal = ({
 
                   {activeTab === 'info' ? (
                     <div className="mt-4 space-y-3">
+                      {shapePreview || measurements ? (
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <div className="flex flex-col gap-3 md:flex-row">
+                            {shapePreview ? (
+                              <div className="md:w-64">
+                                <div className="text-xs font-semibold text-slate-600">
+                                  {t({ it: 'Forma stanza', en: 'Room shape' })}
+                                </div>
+                                <div className="mt-2 rounded-lg bg-slate-50 p-2">
+                                  <RoomShapePreview
+                                    points={shapePreview.points}
+                                    segments={shapePreview.segments}
+                                    width={240}
+                                    height={160}
+                                    className="h-40 w-full"
+                                  />
+                                </div>
+                              </div>
+                            ) : null}
+                            {measurements ? (
+                              <div className="flex-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                                <div className="font-semibold text-slate-700">
+                                  {t({ it: 'Misure stanza', en: 'Room measurements' })}
+                                </div>
+                                {measurements.scaleMissing ? (
+                                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+                                    {t({ it: 'Imposta una scala per misurare.', en: 'Set a scale to measure.' })}
+                                  </div>
+                                ) : (
+                                  <>
+                                    {measurements.perimeterLabel ? (
+                                      <div className="mt-1 flex items-center justify-between gap-2">
+                                        <span>{t({ it: 'Perimetro', en: 'Perimeter' })}</span>
+                                        <span className="font-mono">{measurements.perimeterLabel}</span>
+                                      </div>
+                                    ) : null}
+                                    {measurements.areaLabel ? (
+                                      <div className="mt-1 flex items-center justify-between gap-2">
+                                        <span>{t({ it: 'Area', en: 'Area' })}</span>
+                                        <span className="font-mono">{measurements.areaLabel}</span>
+                                      </div>
+                                    ) : null}
+                                    {measurements.segments?.length ? (
+                                      <div className="mt-2">
+                                        <div className="text-[11px] font-semibold text-slate-500">
+                                          {t({ it: 'Lati', en: 'Sides' })}
+                                        </div>
+                                        <div className="mt-1 max-h-32 space-y-1 overflow-y-auto text-[11px] text-slate-600">
+                                          {measurements.segments.map((seg) => (
+                                            <div key={seg.label} className="flex items-center justify-between gap-2">
+                                              <span className="font-mono">{seg.label}</span>
+                                              <span className="font-mono">{seg.lengthLabel}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                  </>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                      {canCreateWalls && onCreateWalls ? (
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                          <div className="text-xs font-semibold text-slate-600">
+                            {t({ it: 'Mura fisiche', en: 'Physical walls' })}
+                          </div>
+                          <div className="mt-2 flex items-center justify-between gap-3">
+                            <div className="text-xs text-slate-600">
+                              {t({
+                                it: 'Questa stanza non ha ancora muri fisici. Vuoi crearli ora?',
+                                en: 'This room has no physical walls yet. Do you want to create them now?'
+                              })}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={onCreateWalls}
+                              className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90"
+                            >
+                              {t({ it: 'Crea muri', en: 'Create walls' })}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                       <label className="block text-sm font-medium text-slate-700">
                         {t({ it: 'Nome stanza', en: 'Room name' })}
                         <input
                           ref={nameRef}
                           value={name}
-                          onChange={(e) => setName(e.target.value)}
+                          onChange={(e) => {
+                            setName(e.target.value);
+                            if (nameError) setNameError('');
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
                               submit();
                             }
                           }}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${
+                            nameError ? 'border-rose-300 ring-rose-200' : 'border-slate-200'
+                          }`}
                           placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
                         />
+                        {nameError ? <div className="mt-1 text-xs font-semibold text-rose-600">{nameError}</div> : null}
                       </label>
                       <label className="block text-sm font-medium text-slate-700">
                         {t({ it: 'Capienza postazioni', en: 'Seat capacity' })}
@@ -250,7 +365,7 @@ const RoomModal = ({
                         </div>
                         <input
                           type="range"
-                          min={0.6}
+                          min={0.2}
                           max={2}
                           step={0.05}
                           value={labelScale}
@@ -312,19 +427,20 @@ const RoomModal = ({
                         <span>
                           <span className="inline-flex items-center gap-2">
                             {t({ it: 'Room logica', en: 'Logical room' })}
-                            <HelpCircle
-                              size={14}
-                              className="text-slate-400"
-                              title={t({
-                                it: 'Una room logica rappresenta un gruppo funzionale; la room normale rappresenta un ambiente fisico sulla planimetria.',
-                                en: 'A logical room represents a functional group; a normal room represents a physical space on the floor plan.'
-                              })}
-                            />
+                            <span className="group relative inline-flex items-center">
+                              <HelpCircle size={14} className="text-slate-400" />
+                              <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 w-64 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+                                {t({
+                                  it: "Logica = gruppo funzionale (es. 'Marketing' su piu stanze). Normale = stanza fisica disegnata (es. 'Sala riunioni 1').",
+                                  en: "Logical = functional group (e.g. 'Marketing' across rooms). Normal = physical room drawn on the plan (e.g. 'Meeting room 1')."
+                                })}
+                              </span>
+                            </span>
                           </span>
                           <span className="mt-1 block text-xs font-normal text-slate-500">
                             {t({
-                              it: 'Segna la stanza come logica (non legata alla struttura fisica).',
-                              en: 'Marks the room as logical (not tied to the physical structure).'
+                              it: "Usa 'logica' per gruppi non legati a una singola stanza fisica (es. Team IT su piu ambienti).",
+                              en: "Use 'logical' for groups not tied to a single physical room (e.g. IT team across rooms)."
                             })}
                           </span>
                         </span>

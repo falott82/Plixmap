@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import html2canvas from 'html2canvas';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { FloorPlan, IconName, MapObject } from '../store/types';
+import { WALL_LAYER_COLOR, WALL_TYPE_IDS } from '../store/data';
 import { ReleaseNote } from '../version/history';
 import Icon from '../components/ui/Icon';
 import { sanitizeHtmlBasic } from './sanitizeHtml';
@@ -93,6 +94,9 @@ export const renderFloorPlanToJpegDataUrl = async (
     includeDesks?: boolean;
     includeLinks?: boolean;
     includeRooms?: boolean;
+    includeWalls?: boolean;
+    includeQuotes?: boolean;
+    includeScale?: boolean;
     objectTypeIcons?: Record<string, IconName | undefined>;
   }
 ): Promise<{ dataUrl: string; width: number; height: number }> => {
@@ -143,6 +147,22 @@ export const renderFloorPlanToJpegDataUrl = async (
   const worldToPxY = scaleY * outScale;
   const worldToPx = (worldToPxX + worldToPxY) / 2;
 
+  const drawArrowHead = (x1: number, y1: number, x2: number, y2: number, size: number) => {
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const a1 = angle + Math.PI * 0.82;
+    const a2 = angle - Math.PI * 0.82;
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 + Math.cos(a1) * size, y2 + Math.sin(a1) * size);
+    ctx.lineTo(x2 + Math.cos(a2) * size, y2 + Math.sin(a2) * size);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  const wallTypeSet = new Set<string>(WALL_TYPE_IDS as string[]);
+  const isWallObject = (obj: any) =>
+    wallTypeSet.has(String(obj?.type || '')) || String(obj?.type || '').startsWith('wall') || !!(obj as any)?.wallGroupId;
+
   if (opts.includeRooms) {
     const rooms = (plan.rooms || []) as any[];
     for (const r of rooms) {
@@ -173,21 +193,90 @@ export const renderFloorPlanToJpegDataUrl = async (
     }
   }
 
+  if (opts.includeWalls) {
+    const walls = (plan.objects || []).filter((o) => isWallObject(o));
+    for (const wall of walls) {
+      const pts = Array.isArray(wall.points) ? wall.points : [];
+      if (pts.length < 2) continue;
+      const stroke = String((wall as any).strokeColor || WALL_LAYER_COLOR);
+      const opacity = clamp(Number((wall as any).opacity ?? 1) || 1, 0.1, 1);
+      const widthWorld = Number((wall as any).strokeWidth ?? 1) || 1;
+      ctx.save();
+      ctx.strokeStyle = stroke;
+      ctx.globalAlpha = opacity;
+      ctx.lineWidth = Math.max(1, widthWorld * worldToPx);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i += 1) {
+        const px = (Number(pts[i].x) - ax) * worldToPxX;
+        const py = (Number(pts[i].y) - ay) * worldToPxY;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  if (opts.includeQuotes) {
+    const quotes = (plan.objects || []).filter((o) => o.type === 'quote');
+    const metersPerPixel = Number(plan.scale?.metersPerPixel);
+    for (const quote of quotes) {
+      const pts = Array.isArray(quote.points) ? quote.points : [];
+      if (pts.length < 2) continue;
+      const start = pts[0];
+      const end = pts[pts.length - 1];
+      const scale = clamp(Number((quote as any).scale ?? 1) || 1, 0.5, 1.6);
+      const stroke = String((quote as any).strokeColor || '#f97316');
+      const opacity = clamp(Number((quote as any).opacity ?? 1) || 1, 0.2, 1);
+      const strokeWidth = Math.max(1, (Number((quote as any).strokeWidth ?? 2) || 2) * scale * worldToPx);
+      const x1 = (Number(start.x) - ax) * worldToPxX;
+      const y1 = (Number(start.y) - ay) * worldToPxY;
+      const x2 = (Number(end.x) - ax) * worldToPxX;
+      const y2 = (Number(end.y) - ay) * worldToPxY;
+      if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;
+      ctx.save();
+      ctx.strokeStyle = stroke;
+      ctx.fillStyle = stroke;
+      ctx.globalAlpha = opacity;
+      ctx.lineWidth = strokeWidth;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      const headSize = Math.max(4, Math.round(5 * scale * worldToPx));
+      drawArrowHead(x1, y1, x2, y2, headSize);
+      drawArrowHead(x2, y2, x1, y1, headSize);
+
+      const lengthPx = Math.hypot(end.x - start.x, end.y - start.y);
+      const label =
+        Number.isFinite(metersPerPixel) && metersPerPixel > 0
+          ? `${(lengthPx * metersPerPixel).toFixed(2)} m`
+          : `${Math.round(lengthPx)} px`;
+      const fontSize = Math.max(8, Math.round(9 * scale * worldToPx));
+      const padding = Math.max(6, Math.round(8 * scale * worldToPx));
+      const textW = Math.max(20, label.length * fontSize * 0.6 + padding);
+      const textH = Math.max(12, Math.round(14 * scale * worldToPx));
+      const midX = (x1 + x2) / 2;
+      const midY = (y1 + y2) / 2 - textH * 0.9;
+      ctx.setLineDash([]);
+      ctx.globalAlpha = opacity;
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      drawRoundRect(ctx, midX - textW / 2, midY - textH / 2, textW, textH, Math.max(3, Math.round(4 * scale)));
+      ctx.fill();
+      ctx.fillStyle = '#0f172a';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `bold ${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif`;
+      ctx.fillText(label, midX, midY);
+      ctx.restore();
+    }
+  }
+
   if (opts.includeLinks) {
     const objectsById = new Map<string, MapObject>((plan.objects || []).map((o) => [o.id, o]));
     const links = ((plan as any).links || []) as any[];
-
-    const drawArrowHead = (x1: number, y1: number, x2: number, y2: number, size: number) => {
-      const angle = Math.atan2(y2 - y1, x2 - x1);
-      const a1 = angle + Math.PI * 0.82;
-      const a2 = angle - Math.PI * 0.82;
-      ctx.beginPath();
-      ctx.moveTo(x2, y2);
-      ctx.lineTo(x2 + Math.cos(a1) * size, y2 + Math.sin(a1) * size);
-      ctx.lineTo(x2 + Math.cos(a2) * size, y2 + Math.sin(a2) * size);
-      ctx.closePath();
-      ctx.fill();
-    };
 
     for (const l of links) {
       const from = objectsById.get(String((l as any).fromId || ''));
@@ -200,8 +289,12 @@ export const renderFloorPlanToJpegDataUrl = async (
       if (!Number.isFinite(x1) || !Number.isFinite(y1) || !Number.isFinite(x2) || !Number.isFinite(y2)) continue;
 
       const kind = String((l as any).kind || 'arrow') === 'cable' ? 'cable' : 'arrow';
+      const arrowMode = (l as any).arrow ?? 'none';
+      const arrowStart = arrowMode === 'start' || arrowMode === 'both';
+      const arrowEnd = arrowMode === 'end' || arrowMode === 'both';
       const color = String((l as any).color || '#94a3b8');
-      const widthWorld = Number((l as any).width || (kind === 'cable' ? 3 : 2)) || (kind === 'cable' ? 3 : 2);
+      const widthRaw = Number((l as any).width);
+      const widthWorld = Number.isFinite(widthRaw) && widthRaw > 0 ? widthRaw : 1;
       const dash = (l as any).dashed ? [Math.max(4, Math.round(8 * worldToPx)), Math.max(3, Math.round(6 * worldToPx))] : null;
       const route = ((l as any).route || 'vh') as 'vh' | 'hv';
 
@@ -263,7 +356,9 @@ export const renderFloorPlanToJpegDataUrl = async (
         ctx.lineTo(x2, y2);
         ctx.stroke();
         ctx.setLineDash([]);
-        drawArrowHead(x1, y1, x2, y2, Math.max(6, Math.round(8 * worldToPx)));
+        const headSize = Math.max(6, Math.round(8 * worldToPx));
+        if (arrowEnd) drawArrowHead(x1, y1, x2, y2, headSize);
+        if (arrowStart) drawArrowHead(x2, y2, x1, y1, headSize);
       }
 
       ctx.restore();
@@ -287,7 +382,11 @@ export const renderFloorPlanToJpegDataUrl = async (
       }
     };
 
-    const objects = (plan.objects || []).filter((o: any) => (includeDesks ? true : !isDeskType(o.type))) as any[];
+    const objects = (plan.objects || []).filter((o: any) => {
+      if (isWallObject(o) || o.type === 'quote') return false;
+      if (!includeDesks && isDeskType(o.type)) return false;
+      return true;
+    }) as any[];
     for (const obj of objects) {
       const cx = (Number(obj.x) - ax) * worldToPxX;
       const cy = (Number(obj.y) - ay) * worldToPxY;
@@ -467,6 +566,56 @@ export const renderFloorPlanToJpegDataUrl = async (
     }
   }
 
+  if (opts.includeScale && plan.scale?.start && plan.scale?.end) {
+    const start = plan.scale.start;
+    const end = plan.scale.end;
+    const x1 = (Number(start.x) - ax) * worldToPxX;
+    const y1 = (Number(start.y) - ay) * worldToPxY;
+    const x2 = (Number(end.x) - ax) * worldToPxX;
+    const y2 = (Number(end.y) - ay) * worldToPxY;
+    if (Number.isFinite(x1) && Number.isFinite(y1) && Number.isFinite(x2) && Number.isFinite(y2)) {
+      const scaleOpacity = clamp(Number(plan.scale.opacity ?? 1) || 1, 0.2, 1);
+      const labelScale = clamp(Number(plan.scale.labelScale ?? 1) || 1, 0.2, 2);
+      const strokeWidth = Math.max(1, (Number(plan.scale.strokeWidth ?? 1.2) || 1.2) * worldToPx);
+      const meters = Number(plan.scale.meters);
+      const label = Number.isFinite(meters) ? `${meters.toFixed(2)} m` : '';
+
+      ctx.save();
+      ctx.globalAlpha = scaleOpacity;
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = strokeWidth;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      const dotSize = Math.max(2, Math.round(3 * worldToPx));
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.arc(x1, y1, dotSize, 0, Math.PI * 2);
+      ctx.arc(x2, y2, dotSize, 0, Math.PI * 2);
+      ctx.fill();
+      if (label) {
+        const fontSize = Math.max(8, Math.round(9 * labelScale * worldToPx));
+        const padding = Math.max(6, Math.round(8 * labelScale * worldToPx));
+        const textW = Math.max(24, label.length * fontSize * 0.6 + padding);
+        const textH = Math.max(12, Math.round(12 * labelScale * worldToPx));
+        const midX = (x1 + x2) / 2;
+        const midY = (y1 + y2) / 2 - textH * 0.8;
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        drawRoundRect(ctx, midX - textW / 2, midY - textH / 2, textW, textH, Math.max(3, Math.round(4 * labelScale)));
+        ctx.fill();
+        ctx.fillStyle = '#0f172a';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `bold ${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif`;
+        ctx.fillText(label, midX, midY);
+      }
+      ctx.restore();
+    }
+  }
+
   const jpegQ = clamp(opts.jpegQuality || 0.9, 0.5, 0.95);
   return { dataUrl: canvas.toDataURL('image/jpeg', jpegQ), width: outW, height: outH };
 };
@@ -479,6 +628,9 @@ export const exportPlansToPdf = async (
     includeDesks?: boolean;
     includeLinks?: boolean;
     includeRooms?: boolean;
+    includeWalls?: boolean;
+    includeQuotes?: boolean;
+    includeScale?: boolean;
     objectTypeIcons?: Record<string, IconName | undefined>;
     jpegQuality?: number;
     targetLongPx?: number;
@@ -541,6 +693,9 @@ export const exportPlansToPdf = async (
       includeDesks: options.includeDesks ?? true,
       includeLinks: options.includeLinks ?? true,
       includeRooms: options.includeRooms ?? true,
+      includeWalls: options.includeWalls ?? true,
+      includeQuotes: options.includeQuotes ?? true,
+      includeScale: options.includeScale ?? true,
       objectTypeIcons: options.objectTypeIcons
     });
     const scale = Math.min(maxW / img.width, maxH / img.height);
@@ -647,8 +802,11 @@ export const exportPlansToPdf = async (
         const optsLine = [
           includeObjects ? 'Objects' : null,
           includeObjects && includeDesks ? 'Desks' : null,
+          options.includeWalls ?? true ? 'Walls' : null,
           options.includeLinks ?? true ? 'Links' : null,
-          options.includeRooms ?? true ? 'Rooms' : null
+          options.includeRooms ?? true ? 'Rooms' : null,
+          options.includeQuotes ?? true ? 'Quotes' : null,
+          options.includeScale ?? true ? 'Scale' : null
         ]
           .filter(Boolean)
           .join(' · ');

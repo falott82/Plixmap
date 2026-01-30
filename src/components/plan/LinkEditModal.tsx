@@ -3,26 +3,36 @@ import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 
-export type LinkEditPayload = { name?: string; description?: string; color?: string; width?: number; dashed?: boolean };
+export type LinkEditPayload = {
+  name?: string;
+  description?: string;
+  color?: string;
+  width?: number;
+  dashed?: boolean;
+  arrow?: 'none' | 'start' | 'end' | 'both';
+};
 
 interface Props {
   open: boolean;
   initial?: LinkEditPayload;
   onClose: () => void;
   onSubmit: (payload: LinkEditPayload) => void;
+  onDelete?: () => void;
 }
 
-const LinkEditModal = ({ open, initial, onClose, onSubmit }: Props) => {
+const LinkEditModal = ({ open, initial, onClose, onSubmit, onDelete }: Props) => {
   const t = useT();
   const nameRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [color, setColor] = useState('#94a3b8');
-  const [width, setWidth] = useState(2);
+  const [width, setWidth] = useState(1);
   const [dashed, setDashed] = useState(false);
+  const [arrowStart, setArrowStart] = useState(false);
+  const [arrowEnd, setArrowEnd] = useState(true);
 
   const widthLabel = useMemo(() => {
-    const w = Number(width) || 2;
+    const w = Number(width) || 1;
     return w.toFixed(0);
   }, [width]);
 
@@ -31,19 +41,36 @@ const LinkEditModal = ({ open, initial, onClose, onSubmit }: Props) => {
     setName(String(initial?.name || ''));
     setDescription(String(initial?.description || ''));
     setColor(String(initial?.color || '#94a3b8'));
-    setWidth(Math.max(1, Math.min(12, Number(initial?.width ?? 2) || 2)));
+    setWidth(Math.max(1, Math.min(12, Number(initial?.width ?? 1) || 1)));
     setDashed(!!initial?.dashed);
+    const arrow = initial?.arrow;
+    if (arrow === 'both') {
+      setArrowStart(true);
+      setArrowEnd(true);
+    } else if (arrow === 'start') {
+      setArrowStart(true);
+      setArrowEnd(false);
+    } else if (arrow === 'none') {
+      setArrowStart(false);
+      setArrowEnd(false);
+    } else {
+      setArrowStart(false);
+      setArrowEnd(false);
+    }
     window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [initial, open]);
 
-  const submit = () =>
+  const submit = () => {
+    const arrow = arrowStart && arrowEnd ? 'both' : arrowStart ? 'start' : arrowEnd ? 'end' : 'none';
     onSubmit({
       name: name.trim() || undefined,
       description: description.trim() || undefined,
       color: color || undefined,
       width: Number(width) || undefined,
-      dashed: !!dashed
+      dashed: !!dashed,
+      arrow
     });
+  };
 
   return (
     <Transition show={open} as={Fragment}>
@@ -132,9 +159,30 @@ const LinkEditModal = ({ open, initial, onClose, onSubmit }: Props) => {
                       <input type="checkbox" checked={dashed} onChange={(e) => setDashed(e.target.checked)} />
                     </label>
                   </div>
+                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <label className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <span>{t({ it: 'Freccia SX', en: 'Arrow left' })}</span>
+                      <input type="checkbox" checked={arrowStart} onChange={(e) => setArrowStart(e.target.checked)} />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <span>{t({ it: 'Freccia DX', en: 'Arrow right' })}</span>
+                      <input type="checkbox" checked={arrowEnd} onChange={(e) => setArrowEnd(e.target.checked)} />
+                    </label>
+                  </div>
                 </div>
 
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+                  {onDelete ? (
+                    <button
+                      onClick={onDelete}
+                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-100"
+                      title={t({ it: 'Elimina', en: 'Delete' })}
+                    >
+                      {t({ it: 'Elimina', en: 'Delete' })}
+                    </button>
+                  ) : (
+                    <span />
+                  )}
                   <button
                     onClick={onClose}
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"

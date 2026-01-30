@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Eye, EyeOff, GripVertical, Info, Plus, Search, Settings2, Trash2, X, Inbox, CheckCircle2, XCircle, Pencil, RefreshCw } from 'lucide-react';
+import { nanoid } from 'nanoid';
 import { updateMyProfile } from '../../api/auth';
 import {
   createObjectTypeRequest,
@@ -19,16 +20,17 @@ import CustomFieldsModal from './CustomFieldsModal';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { createCustomFieldsBulk } from '../../api/customFields';
 import { useLang, useT } from '../../i18n/useT';
-import { IconName } from '../../store/types';
+import { Client, IconName, WifiAntennaModel } from '../../store/types';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { isDeskType } from '../plan/deskTypes';
-import { WALL_TYPE_IDS } from '../../store/data';
+import { WALL_TYPE_IDS, WIFI_DEFAULT_STANDARD, WIFI_STANDARD_OPTIONS } from '../../store/data';
 import { getWallTypeColor } from '../../utils/wallColors';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
-const ObjectTypesPanel = () => {
+const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
   const lang = useLang();
-  const { objectTypes, addObjectType, updateObjectType } = useDataStore();
+  const { objectTypes, addObjectType, updateObjectType, updateClient } = useDataStore();
   const { push } = useToastStore();
   const user = useAuthStore((s) => s.user);
   const customFields = useCustomFieldsStore((s) => s.fields);
@@ -42,11 +44,13 @@ const ObjectTypesPanel = () => {
     const section = new URLSearchParams(search).get('section')?.toLowerCase();
     if (section === 'desks') return 'desks';
     if (section === 'walls') return 'walls';
+    if (section === 'wifi') return 'wifi';
     return 'objects';
   };
-  const [section, setSection] = useState<'objects' | 'desks' | 'walls'>(() => resolveSection(location.search));
+  const [section, setSection] = useState<'objects' | 'desks' | 'walls' | 'wifi'>(() => resolveSection(location.search));
   const isDesksSection = section === 'desks';
   const isWallsSection = section === 'walls';
+  const isWifiSection = section === 'wifi';
 
   const [customOpen, setCustomOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
@@ -70,13 +74,40 @@ const ObjectTypesPanel = () => {
   const [editRequestId, setEditRequestId] = useState<string | null>(null);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [reviewReason, setReviewReason] = useState('');
+  const [wifiModal, setWifiModal] = useState<{ mode: 'create' | 'edit'; model?: WifiAntennaModel } | null>(null);
+  const [wifiDraft, setWifiDraft] = useState({
+    brand: '',
+    model: '',
+    modelCode: '',
+    standard: WIFI_DEFAULT_STANDARD,
+    band24: false,
+    band5: false,
+    band6: false,
+    coverageSqm: ''
+  });
+  const [confirmDeleteWifiId, setConfirmDeleteWifiId] = useState<string | null>(null);
 
   useEffect(() => {
     const next = resolveSection(location.search);
     if (next !== section) setSection(next);
   }, [location.search, section]);
 
-  const setSectionAndUrl = (nextSection: 'objects' | 'desks' | 'walls') => {
+  useEffect(() => {
+    if (!wifiModal) return;
+    const model = wifiModal.model;
+    setWifiDraft({
+      brand: model?.brand || '',
+      model: model?.model || '',
+      modelCode: model?.modelCode || '',
+      standard: model?.standard || WIFI_DEFAULT_STANDARD,
+      band24: !!model?.band24,
+      band5: !!model?.band5,
+      band6: !!model?.band6,
+      coverageSqm: model?.coverageSqm ? String(model.coverageSqm) : ''
+    });
+  }, [wifiModal]);
+
+  const setSectionAndUrl = (nextSection: 'objects' | 'desks' | 'walls' | 'wifi') => {
     setSection(nextSection);
     const params = new URLSearchParams(location.search);
     params.set('section', nextSection);
@@ -101,6 +132,24 @@ const ObjectTypesPanel = () => {
     return ids;
   }, [objectTypes]);
   const isWallType = useCallback((typeId: string) => wallTypeIdSet.has(typeId), [wallTypeIdSet]);
+  const wifiStandardLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const opt of WIFI_STANDARD_OPTIONS) {
+      map.set(opt.id, lang === 'it' ? opt.it : opt.en);
+    }
+    return map;
+  }, [lang]);
+  const wifiModels = useMemo(() => {
+    const list = (client?.wifiAntennaModels || []).slice();
+    return list.sort((a, b) => `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`));
+  }, [client?.wifiAntennaModels]);
+  const filteredWifiModels = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return wifiModels;
+    return wifiModels.filter((m) =>
+      `${m.brand} ${m.model} ${m.modelCode} ${m.standard}`.toLowerCase().includes(term)
+    );
+  }, [q, wifiModels]);
 
   const enabledDefs = useMemo(() => {
     if (isWallsSection) return [];
@@ -395,6 +444,55 @@ const ObjectTypesPanel = () => {
     saveEnabled(next).catch(() => {});
   };
 
+  const wifiDraftValid = useMemo(() => {
+    if (!wifiModal) return false;
+    const coverage = Number(wifiDraft.coverageSqm);
+    if (!wifiDraft.brand.trim()) return false;
+    if (!wifiDraft.model.trim()) return false;
+    if (!wifiDraft.modelCode.trim()) return false;
+    if (!wifiDraft.standard) return false;
+    if (!(wifiDraft.band24 || wifiDraft.band5 || wifiDraft.band6)) return false;
+    return Number.isFinite(coverage) && coverage > 0;
+  }, [wifiDraft, wifiModal]);
+
+  const saveWifiModel = useCallback(() => {
+    if (!wifiModal || !client) return;
+    if (!wifiDraftValid) return;
+    const coverage = Number(wifiDraft.coverageSqm);
+    const payload: WifiAntennaModel = {
+      id: wifiModal.mode === 'edit' && wifiModal.model ? wifiModal.model.id : nanoid(),
+      brand: wifiDraft.brand.trim(),
+      model: wifiDraft.model.trim(),
+      modelCode: wifiDraft.modelCode.trim(),
+      standard: wifiDraft.standard,
+      band24: !!wifiDraft.band24,
+      band5: !!wifiDraft.band5,
+      band6: !!wifiDraft.band6,
+      coverageSqm: Number.isFinite(coverage) ? coverage : 0
+    };
+    const nextModels =
+      wifiModal.mode === 'edit'
+        ? wifiModels.map((m) => (m.id === payload.id ? payload : m))
+        : [...wifiModels, payload];
+    updateClient(client.id, { wifiAntennaModels: nextModels });
+    push(
+      t({
+        it: wifiModal.mode === 'edit' ? 'Modello WiFi aggiornato' : 'Modello WiFi aggiunto',
+        en: wifiModal.mode === 'edit' ? 'WiFi model updated' : 'WiFi model added'
+      }),
+      'success'
+    );
+    setWifiModal(null);
+  }, [client, push, t, updateClient, wifiDraft, wifiDraftValid, wifiModal, wifiModels]);
+
+  const deleteWifiModel = useCallback(() => {
+    if (!client || !confirmDeleteWifiId) return;
+    const nextModels = wifiModels.filter((m) => m.id !== confirmDeleteWifiId);
+    updateClient(client.id, { wifiAntennaModels: nextModels });
+    push(t({ it: 'Modello WiFi eliminato', en: 'WiFi model deleted' }), 'info');
+    setConfirmDeleteWifiId(null);
+  }, [client, confirmDeleteWifiId, push, t, updateClient, wifiModels]);
+
   const normalizeTypeId = (value: string) =>
     value
       .trim()
@@ -667,6 +765,16 @@ const ObjectTypesPanel = () => {
         >
           {t({ it: 'Mura', en: 'Walls' })}
         </button>
+        <button
+          onClick={() => setSectionAndUrl('wifi')}
+          className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+            section === 'wifi'
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          }`}
+        >
+          {t({ it: 'WiFi Antenna', en: 'WiFi Antenna' })}
+        </button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
@@ -676,7 +784,9 @@ const ObjectTypesPanel = () => {
                 ? t({ it: 'Mura (tipologie)', en: 'Walls (types)' })
                 : isDesksSection
                   ? t({ it: 'Scrivanie (palette)', en: 'Desks (palette)' })
-                  : t({ it: 'Oggetti (palette)', en: 'Objects (palette)' })}
+                  : isWifiSection
+                    ? t({ it: 'WiFi Antenna (catalogo)', en: 'WiFi Antenna (catalog)' })
+                    : t({ it: 'Oggetti (palette)', en: 'Objects (palette)' })}
             </div>
             <span
               className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700"
@@ -685,12 +795,16 @@ const ObjectTypesPanel = () => {
                   ? 'Elenco dei materiali muro con attenuazione e colore.'
                   : isDesksSection
                     ? 'Le scrivanie sono predefinite e non possono essere create o richieste. Puoi decidere quali mostrare nella palette con l’icona occhio.'
-                    : 'Qui puoi mostrare o nascondere gli oggetti nella palette con l’icona occhio. Le scrivanie hanno una sezione dedicata in planimetria. Tasto destro o ingranaggio per i campi personalizzati.',
+                    : isWifiSection
+                      ? 'Catalogo antenne WiFi usato per la selezione rapida quando aggiungi un’antenna.'
+                      : 'Qui puoi mostrare o nascondere gli oggetti nella palette con l’icona occhio. Le scrivanie hanno una sezione dedicata in planimetria. Tasto destro o ingranaggio per i campi personalizzati.',
                 en: isWallsSection
                   ? 'List of wall materials with attenuation and color.'
                   : isDesksSection
                     ? 'Desks are built-in and cannot be created or requested. You can choose which ones appear in the palette with the eye icon.'
-                    : 'Show or hide objects in the palette with the eye icon. Desks have a dedicated section in the floor plan. Right-click or the cog for custom fields.'
+                    : isWifiSection
+                      ? 'WiFi antenna catalog used for quick selection when adding an antenna.'
+                      : 'Show or hide objects in the palette with the eye icon. Desks have a dedicated section in the floor plan. Right-click or the cog for custom fields.'
               })}
             >
               <Info size={16} />
@@ -707,10 +821,15 @@ const ObjectTypesPanel = () => {
                     it: 'La palette è per-utente: puoi nascondere o mostrare le scrivanie nella sezione dedicata.',
                     en: 'The palette is per-user: you can hide or show desks in the dedicated section.'
                   })
-                : t({
-                    it: 'La palette è per-utente: ogni utente può avere la propria lista e il proprio ordine. Le scrivanie compaiono nella sezione dedicata a destra.',
-                    en: 'The palette is per-user: each user can have their own list and ordering. Desks appear in the dedicated section on the right.'
-                  })}
+                : isWifiSection
+                  ? t({
+                      it: 'Aggiungi o modifica modelli: tutti i campi sono obbligatori.',
+                      en: 'Add or edit models: all fields are required.'
+                    })
+                  : t({
+                      it: 'La palette è per-utente: ogni utente può avere la propria lista e il proprio ordine. Le scrivanie compaiono nella sezione dedicata a destra.',
+                      en: 'The palette is per-user: each user can have their own list and ordering. Desks appear in the dedicated section on the right.'
+                    })}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -718,6 +837,14 @@ const ObjectTypesPanel = () => {
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
               {t({ it: 'Tipologie muro predefinite.', en: 'Built-in wall types.' })}
             </div>
+          ) : isWifiSection ? (
+            <button
+              onClick={() => setWifiModal({ mode: 'create' })}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Plus size={16} />
+              {t({ it: 'Nuovo modello', en: 'New model' })}
+            </button>
           ) : isDesksSection ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
               {t({ it: 'Scrivanie predefinite: nessuna creazione o richiesta.', en: 'Built-in desks: no creation or requests.' })}
@@ -771,156 +898,233 @@ const ObjectTypesPanel = () => {
         </div>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-        <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
-          <Search size={16} className="text-slate-400" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="w-full bg-transparent text-sm outline-none"
-            placeholder={
-              isWallsSection
-                ? t({ it: 'Cerca muri…', en: 'Search walls…' })
-                : isDesksSection
-                  ? t({ it: 'Cerca scrivanie…', en: 'Search desks…' })
-                  : t({ it: 'Cerca oggetti…', en: 'Search objects…' })
-            }
-          />
+      {isWifiSection ? (
+        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+          <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+            <Search size={16} className="text-slate-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full bg-transparent text-sm outline-none"
+              placeholder={t({ it: 'Cerca antenne WiFi…', en: 'Search WiFi antennas…' })}
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="bg-slate-50 text-xs font-semibold text-slate-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">{t({ it: 'Marca', en: 'Brand' })}</th>
+                  <th className="px-3 py-2 text-left">{t({ it: 'Modello', en: 'Model' })}</th>
+                  <th className="px-3 py-2 text-left">{t({ it: 'Codice modello', en: 'Model code' })}</th>
+                  <th className="px-3 py-2 text-left">{t({ it: 'Standard WiFi', en: 'WiFi standard' })}</th>
+                  <th className="px-3 py-2 text-center">2.4 GHz</th>
+                  <th className="px-3 py-2 text-center">5 GHz</th>
+                  <th className="px-3 py-2 text-center">6 GHz</th>
+                  <th className="px-3 py-2 text-right">{t({ it: 'Copertura (m2)', en: 'Coverage (m2)' })}</th>
+                  <th className="px-3 py-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredWifiModels.length ? (
+                  filteredWifiModels.map((model) => (
+                    <tr key={model.id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-semibold text-ink">{model.brand}</td>
+                      <td className="px-3 py-2 text-slate-700">{model.model}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-slate-700">{model.modelCode}</td>
+                      <td className="px-3 py-2 text-slate-700">{wifiStandardLabels.get(model.standard) || model.standard}</td>
+                      <td className="px-3 py-2 text-center">
+                        {model.band24 ? <CheckCircle2 size={16} className="text-emerald-600" /> : <XCircle size={16} className="text-rose-500" />}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {model.band5 ? <CheckCircle2 size={16} className="text-emerald-600" /> : <XCircle size={16} className="text-rose-500" />}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {model.band6 ? <CheckCircle2 size={16} className="text-emerald-600" /> : <XCircle size={16} className="text-rose-500" />}
+                      </td>
+                      <td className="px-3 py-2 text-right font-semibold text-slate-700">{model.coverageSqm}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setWifiModal({ mode: 'edit', model })}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                            title={t({ it: 'Modifica', en: 'Edit' })}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteWifiId(model.id)}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                            title={t({ it: 'Elimina', en: 'Delete' })}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={9} className="px-3 py-6 text-sm text-slate-600">
+                      {t({ it: 'Nessun modello WiFi disponibile.', en: 'No WiFi models available.' })}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div className="grid grid-cols-12 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
-          {isWallsSection ? (
-            <>
-              <div className="col-span-1">{t({ it: 'Colore', en: 'Color' })}</div>
-              <div className="col-span-6">{t({ it: 'Nome', en: 'Name' })}</div>
-              <div className="col-span-2">{t({ it: 'Attenuazione', en: 'Attenuation' })}</div>
-              <div className="col-span-3">ID</div>
-            </>
-          ) : (
-            <>
-              <div className="col-span-1" />
-              <div className="col-span-1">{t({ it: 'Icona', en: 'Icon' })}</div>
-              <div className="col-span-5">{t({ it: 'Nome', en: 'Name' })}</div>
-              <div className="col-span-3">ID</div>
-              <div className="col-span-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
-            </>
-          )}
-        </div>
-        <div className="divide-y divide-slate-100">
-          {isWallsSection ? (
-            filteredWallDefs.length ? (
-              filteredWallDefs.map((def) => {
+      ) : (
+        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+          <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+            <Search size={16} className="text-slate-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full bg-transparent text-sm outline-none"
+              placeholder={
+                isWallsSection
+                  ? t({ it: 'Cerca muri…', en: 'Search walls…' })
+                  : isDesksSection
+                    ? t({ it: 'Cerca scrivanie…', en: 'Search desks…' })
+                    : t({ it: 'Cerca oggetti…', en: 'Search objects…' })
+              }
+            />
+          </div>
+          <div className="grid grid-cols-12 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+            {isWallsSection ? (
+              <>
+                <div className="col-span-1">{t({ it: 'Colore', en: 'Color' })}</div>
+                <div className="col-span-6">{t({ it: 'Nome', en: 'Name' })}</div>
+                <div className="col-span-2">{t({ it: 'Attenuazione', en: 'Attenuation' })}</div>
+                <div className="col-span-3">ID</div>
+              </>
+            ) : (
+              <>
+                <div className="col-span-1" />
+                <div className="col-span-1">{t({ it: 'Icona', en: 'Icon' })}</div>
+                <div className="col-span-5">{t({ it: 'Nome', en: 'Name' })}</div>
+                <div className="col-span-3">ID</div>
+                <div className="col-span-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
+              </>
+            )}
+          </div>
+          <div className="divide-y divide-slate-100">
+            {isWallsSection ? (
+              filteredWallDefs.length ? (
+                filteredWallDefs.map((def) => {
+                  const label = (def?.name?.[lang] as string) || (def?.name?.it as string) || def.id;
+                  const attenuation = Number((def as any).attenuationDb);
+                  return (
+                    <div key={def.id} className="grid grid-cols-12 items-center px-3 py-2 text-sm hover:bg-slate-50">
+                      <div className="col-span-1">
+                        <span
+                          className="inline-flex h-3 w-3 rounded-full border border-slate-200"
+                          style={{ background: getWallTypeColor(def.id) }}
+                          title={t({ it: 'Colore assegnato', en: 'Assigned color' })}
+                        />
+                      </div>
+                      <div className="col-span-6 min-w-0">
+                        <div className="truncate font-semibold text-ink">{label}</div>
+                      </div>
+                      <div className="col-span-2 text-xs text-slate-600">
+                        {Number.isFinite(attenuation) ? `${attenuation} dB` : '—'}
+                      </div>
+                      <div className="col-span-3 font-mono text-xs text-slate-700">{def.id}</div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="px-3 py-6 text-sm text-slate-600">
+                  {t({
+                    it: 'Nessuna tipologia muro disponibile.',
+                    en: 'No wall types available.'
+                  })}
+                </div>
+              )
+            ) : paletteDefs.length ? (
+              paletteDefs.map((def) => {
                 const label = (def?.name?.[lang] as string) || (def?.name?.it as string) || def.id;
-                const attenuation = Number((def as any).attenuationDb);
+                const isEnabled = enabled.includes(def.id);
                 return (
-                  <div key={def.id} className="grid grid-cols-12 items-center px-3 py-2 text-sm hover:bg-slate-50">
+                  <div
+                    key={def.id}
+                    draggable={isEnabled}
+                    onDragStart={() => {
+                      if (!isEnabled) return;
+                      dragIdRef.current = def.id;
+                    }}
+                    onDragEnd={() => (dragIdRef.current = null)}
+                    onDragOver={(e) => {
+                      if (!isEnabled) return;
+                      e.preventDefault();
+                      const from = dragIdRef.current;
+                      if (!from || from === def.id) return;
+                      moveType(from, def.id);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContext({ x: e.clientX, y: e.clientY, typeId: def.id });
+                    }}
+                    className="grid grid-cols-12 items-center px-3 py-2 text-sm hover:bg-slate-50"
+                    title={t({
+                      it: isEnabled ? 'Trascina per riordinare. Occhio per nascondere.' : 'Occhio per mostrare in palette.',
+                      en: isEnabled ? 'Drag to reorder. Eye to hide.' : 'Eye to show in palette.'
+                    })}
+                  >
+                    <div className="col-span-1 text-slate-400">{isEnabled ? <GripVertical size={16} /> : null}</div>
                     <div className="col-span-1">
-                      <span
-                        className="inline-flex h-3 w-3 rounded-full border border-slate-200"
-                        style={{ background: getWallTypeColor(def.id) }}
-                        title={t({ it: 'Colore assegnato', en: 'Assigned color' })}
-                      />
+                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary shadow-sm">
+                        <Icon name={def.icon} />
+                      </span>
                     </div>
-                    <div className="col-span-6 min-w-0">
-                      <div className="truncate font-semibold text-ink">{label}</div>
-                    </div>
-                    <div className="col-span-2 text-xs text-slate-600">
-                      {Number.isFinite(attenuation) ? `${attenuation} dB` : '—'}
+                    <div className="col-span-5 min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="truncate font-semibold text-ink">{label}</div>
+                        {Number.isFinite((def as any).attenuationDb) ? (
+                          <span className="rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                            {(def as any).attenuationDb} dB
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="text-xs text-slate-500">{t({ it: 'Tasto destro: campi custom', en: 'Right-click: custom fields' })}</div>
                     </div>
                     <div className="col-span-3 font-mono text-xs text-slate-700">{def.id}</div>
+                    <div className="col-span-2 flex justify-end gap-2">
+                      <button
+                        onClick={() => setCustomFieldsForType(def.id)}
+                        className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Campi personalizzati', en: 'Custom fields' })}
+                      >
+                        <Settings2 size={16} />
+                      </button>
+                      <button
+                        onClick={() => (isEnabled ? removeType(def.id) : addType(def.id))}
+                        className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
+                          isEnabled ? 'border-slate-200 bg-white text-slate-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        } hover:bg-slate-50`}
+                        title={t(
+                          isEnabled
+                            ? { it: 'Nascondi dalla palette', en: 'Hide from palette' }
+                            : { it: 'Mostra in palette', en: 'Show in palette' }
+                        )}
+                      >
+                        {isEnabled ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
                   </div>
                 );
               })
             ) : (
               <div className="px-3 py-6 text-sm text-slate-600">
                 {t({
-                  it: 'Nessuna tipologia muro disponibile.',
-                  en: 'No wall types available.'
+                  it: 'Nessun oggetto disponibile.',
+                  en: 'No available objects.'
                 })}
               </div>
-            )
-          ) : paletteDefs.length ? (
-            paletteDefs.map((def) => {
-              const label = (def?.name?.[lang] as string) || (def?.name?.it as string) || def.id;
-              const isEnabled = enabled.includes(def.id);
-              return (
-                <div
-                  key={def.id}
-                  draggable={isEnabled}
-                  onDragStart={() => {
-                    if (!isEnabled) return;
-                    dragIdRef.current = def.id;
-                  }}
-                  onDragEnd={() => (dragIdRef.current = null)}
-                  onDragOver={(e) => {
-                    if (!isEnabled) return;
-                    e.preventDefault();
-                    const from = dragIdRef.current;
-                    if (!from || from === def.id) return;
-                    moveType(from, def.id);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setContext({ x: e.clientX, y: e.clientY, typeId: def.id });
-                  }}
-                  className="grid grid-cols-12 items-center px-3 py-2 text-sm hover:bg-slate-50"
-                  title={t({
-                    it: isEnabled ? 'Trascina per riordinare. Occhio per nascondere.' : 'Occhio per mostrare in palette.',
-                    en: isEnabled ? 'Drag to reorder. Eye to hide.' : 'Eye to show in palette.'
-                  })}
-                >
-                  <div className="col-span-1 text-slate-400">{isEnabled ? <GripVertical size={16} /> : null}</div>
-                  <div className="col-span-1">
-                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary shadow-sm">
-                      <Icon name={def.icon} />
-                    </span>
-                  </div>
-                  <div className="col-span-5 min-w-0">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <div className="truncate font-semibold text-ink">{label}</div>
-                      {Number.isFinite((def as any).attenuationDb) ? (
-                        <span className="rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
-                          {(def as any).attenuationDb} dB
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="text-xs text-slate-500">{t({ it: 'Tasto destro: campi custom', en: 'Right-click: custom fields' })}</div>
-                  </div>
-                  <div className="col-span-3 font-mono text-xs text-slate-700">{def.id}</div>
-                  <div className="col-span-2 flex justify-end gap-2">
-                    <button
-                      onClick={() => setCustomFieldsForType(def.id)}
-                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      title={t({ it: 'Campi personalizzati', en: 'Custom fields' })}
-                    >
-                      <Settings2 size={16} />
-                    </button>
-                    <button
-                      onClick={() => (isEnabled ? removeType(def.id) : addType(def.id))}
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
-                        isEnabled ? 'border-slate-200 bg-white text-slate-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      } hover:bg-slate-50`}
-                      title={t(
-                        isEnabled
-                          ? { it: 'Nascondi dalla palette', en: 'Hide from palette' }
-                          : { it: 'Mostra in palette', en: 'Show in palette' }
-                      )}
-                    >
-                      {isEnabled ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="px-3 py-6 text-sm text-slate-600">
-              {t({
-                it: 'Nessun oggetto disponibile.',
-                en: 'No available objects.'
-              })}
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {context ? (
         <div
@@ -1573,6 +1777,148 @@ const ObjectTypesPanel = () => {
           </div>
         </Dialog>
       </Transition>
+
+      <Transition show={!!wifiModal} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setWifiModal(null)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                  <Dialog.Title className="text-lg font-semibold text-ink">
+                    {t({
+                      it: wifiModal?.mode === 'edit' ? 'Modifica modello WiFi' : 'Nuovo modello WiFi',
+                      en: wifiModal?.mode === 'edit' ? 'Edit WiFi model' : 'New WiFi model'
+                    })}
+                  </Dialog.Title>
+                  <div className="mt-4 grid grid-cols-1 gap-3">
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Marca', en: 'Brand' })}
+                      <input
+                        value={wifiDraft.brand}
+                        onChange={(e) => setWifiDraft((prev) => ({ ...prev, brand: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. Ubiquiti', en: 'e.g. Ubiquiti' })}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Modello', en: 'Model' })}
+                      <input
+                        value={wifiDraft.model}
+                        onChange={(e) => setWifiDraft((prev) => ({ ...prev, model: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. U7 Pro', en: 'e.g. U7 Pro' })}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Codice modello', en: 'Model code' })}
+                      <input
+                        value={wifiDraft.modelCode}
+                        onChange={(e) => setWifiDraft((prev) => ({ ...prev, modelCode: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. U7-Pro', en: 'e.g. U7-Pro' })}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Standard WiFi', en: 'WiFi standard' })}
+                      <select
+                        value={wifiDraft.standard}
+                        onChange={(e) => setWifiDraft((prev) => ({ ...prev, standard: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                      >
+                        {WIFI_STANDARD_OPTIONS.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {lang === 'it' ? opt.it : opt.en}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div>
+                      <div className="text-sm font-medium text-slate-700">{t({ it: 'Bande', en: 'Bands' })}</div>
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={wifiDraft.band24}
+                            onChange={(e) => setWifiDraft((prev) => ({ ...prev, band24: e.target.checked }))}
+                          />
+                          2.4 GHz
+                        </label>
+                        <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={wifiDraft.band5}
+                            onChange={(e) => setWifiDraft((prev) => ({ ...prev, band5: e.target.checked }))}
+                          />
+                          5 GHz
+                        </label>
+                        <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={wifiDraft.band6}
+                            onChange={(e) => setWifiDraft((prev) => ({ ...prev, band6: e.target.checked }))}
+                          />
+                          6 GHz
+                        </label>
+                      </div>
+                    </div>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Copertura (m2)', en: 'Coverage (m2)' })}
+                      <input
+                        value={wifiDraft.coverageSqm}
+                        onChange={(e) => setWifiDraft((prev) => ({ ...prev, coverageSqm: e.target.value }))}
+                        inputMode="decimal"
+                        type="number"
+                        min={1}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. 185', en: 'e.g. 185' })}
+                      />
+                    </label>
+                    {!wifiDraftValid ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                        {t({
+                          it: 'Compila tutti i campi e seleziona almeno una banda.',
+                          en: 'Fill all fields and select at least one band.'
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      onClick={() => setWifiModal(null)}
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      onClick={saveWifiModel}
+                      disabled={!wifiDraftValid}
+                      className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${wifiDraftValid ? 'bg-primary hover:bg-primary/90' : 'bg-slate-300 cursor-not-allowed'}`}
+                    >
+                      {t({ it: 'Salva', en: 'Save' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <ConfirmDialog
+        open={!!confirmDeleteWifiId}
+        title={t({ it: 'Eliminare il modello WiFi?', en: 'Delete WiFi model?' })}
+        description={t({
+          it: 'Questa operazione rimuove il modello dal catalogo. Le antenne gia inserite non verranno modificate.',
+          en: 'This removes the model from the catalog. Existing antennas will not be modified.'
+        })}
+        onCancel={() => setConfirmDeleteWifiId(null)}
+        onConfirm={deleteWifiModel}
+        confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+      />
 
       <CustomFieldsModal open={!!customFieldsForType} initialTypeId={customFieldsForType || undefined} lockType onClose={() => setCustomFieldsForType(null)} />
       </div>

@@ -9,6 +9,173 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.9.8',
+    date: '2026-01-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Planimetrie: auto-centramento quando la vista non mostra l’immagine',
+        'Floor plans: auto-fit when the plan is not visible in the viewport'
+      ),
+      n(
+        'Muri: toast persistente fino al termine + chiusura con tasto destro/Invio',
+        'Walls: persistent toast until finish + close with right click/Enter'
+      ),
+      n(
+        'Collegamenti: pulsante elimina e spessore predefinito a 1',
+        'Links: delete button and default width set to 1'
+      ),
+      n(
+        'Stanze: nome obbligatorio con messaggio di errore',
+        'Rooms: required name with inline validation'
+      )
+    ]
+  },
+  {
+    version: '1.9.7',
+    date: '2026-01-30',
+    type: 'fix',
+    notes: [
+      n(
+        'Menu planimetria: Aggiungi con sezioni Stanze/Oggetti/Scrivanie/Mura e catalogo oggetti in modale',
+        'Floor plan menu: Add sectioned into Rooms/Objects/Desks/Walls with an object catalog modal'
+      ),
+      n(
+        'PDF: opzioni dedicate per muri, quote e scala',
+        'PDF: dedicated options for walls, quotes, and scale'
+      ),
+      n(
+        'Collegamenti: frecce direzionali configurabili (SX/DX/nessuna) e misure con chiusura magnetica',
+        'Links: configurable directional arrows (left/right/none) and measurements with magnetic closure'
+      )
+    ]
+  },
+  {
+    version: '1.9.6',
+    date: '2026-01-29',
+    type: 'fix',
+    notes: [
+      n(
+        'Menu planimetria: sottomenu laterali compatti con azioni raggruppate',
+        'Floor plan menu: compact side submenus with grouped actions'
+      ),
+      n(
+        'Quote/Muri: linee dritte di default, Shift per diagonali',
+        'Quotes/Walls: straight lines by default, Shift for diagonals'
+      ),
+      n(
+        'Stanze: misure affiancate alla forma con preview piu compatto',
+        'Rooms: measurements alongside the shape with a more compact preview'
+      )
+    ]
+  },
+  {
+    version: '1.9.5',
+    date: '2026-01-28',
+    type: 'fix',
+    notes: [
+      n(
+        'Stanze: conferma se creare muri fisici dopo la creazione della room',
+        'Rooms: confirm whether to create physical walls after room creation'
+      ),
+      n(
+        'Stanze: preview forma con lati e misure nella modale',
+        'Rooms: shape preview with side labels and measurements in the modal'
+      ),
+      n(
+        'Muri stanza: preview forma e modale piu larga',
+        'Room walls: shape preview and wider modal'
+      )
+    ]
+  },
+  {
+    version: '1.9.4',
+    date: '2026-01-27',
+    type: 'fix',
+    notes: [
+      n(
+        'Stanze: tooltip room logica con spiegazione ed esempio',
+        'Rooms: logical room tooltip with explanation and example'
+      ),
+      n(
+        'Stanze: etichette ridotte e layout corretto quando il nome e nascosto',
+        'Rooms: smaller labels and fixed layout when the name is hidden'
+      ),
+      n(
+        'Scale/Quote: opacita e dimensione regolabili dal menu contestuale',
+        'Scale/Quotes: opacity and size adjustable from the context menu'
+      )
+    ]
+  },
+  {
+    version: '1.9.3',
+    date: '2026-01-26',
+    type: 'fix',
+    notes: [
+      n(
+        'Muri: ora segmenti singoli con toolbar rapida (tipo, elimina, dividi)',
+        'Walls: now single segments with a quick toolbar (type, delete, split)'
+      ),
+      n(
+        'Muri: lunghezza in tempo reale durante il disegno (con scala impostata)',
+        'Walls: live length while drawing (when a scale is set)'
+      ),
+      n(
+        'Stanze: misure di perimetro/area/lati spostate nella modale stanza',
+        'Rooms: perimeter/area/side measurements moved into the room modal'
+      )
+    ]
+  },
+  {
+    version: '1.9.2',
+    date: '2026-01-25',
+    type: 'fix',
+    notes: [
+      n(
+        'Muri: selezione e trascinamento dei poligoni allineati (niente offset)',
+        'Walls: polygon selection/drag alignment fixed (no offset)'
+      ),
+      n(
+        'Stanze: trascinamento con mura chiuse mantiene l’allineamento',
+        'Rooms: dragging closed wall groups keeps rooms aligned'
+      ),
+      n(
+        'Undo/Redo: scorciatoie Ctrl/⌘+Z e Ctrl/⌘+Y + pulsanti in alto',
+        'Undo/Redo: Ctrl/⌘+Z and Ctrl/⌘+Y shortcuts + top bar buttons'
+      )
+    ]
+  },
+  {
+    version: '1.9.1',
+    date: '2026-01-24',
+    type: 'fix',
+    notes: [
+      n(
+        'Muri: punto magnetico visibile durante il disegno per agganci rapidi',
+        'Walls: visible magnetic point during drawing for quick snapping'
+      ),
+      n(
+        'Muri: spessore linea regolabile dal menu contestuale',
+        'Walls: line thickness adjustable from the context menu'
+      ),
+      n(
+        'Muri/Stanze: migliorata la selezione delle stanze da spostare quando si trascinano i muri',
+        'Walls/Rooms: improved which rooms move when dragging wall groups'
+      )
+    ]
+  },
+  {
+    version: '1.9.0',
+    date: '2026-01-23',
+    type: 'minor',
+    notes: [
+      n(
+        'CCTV: il cono di visuale si interrompe sui muri',
+        'CCTV: the view cone is clipped by walls'
+      )
+    ]
+  },
+  {
     version: '1.8.5',
     date: '2026-01-22',
     type: 'minor',
