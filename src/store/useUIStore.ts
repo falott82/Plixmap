@@ -25,6 +25,7 @@ interface UIState {
   roomCapacityStateByPlan: Record<string, Record<string, { userCount: number; capacity?: number }>>;
   perfOverlayEnabled: boolean;
   hiddenLayersByPlan: Record<string, boolean>;
+  pendingPostSaveAction: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null;
   setSelectedPlan: (id?: string) => void;
   setSelectedObject: (id?: string) => void;
   setSelection: (ids: string[]) => void;
@@ -53,6 +54,8 @@ interface UIState {
   setRoomCapacityState: (planId: string, state: Record<string, { userCount: number; capacity?: number }>) => void;
   togglePerfOverlay: () => void;
   setHideAllLayers: (planId: string, hidden: boolean) => void;
+  setPendingPostSaveAction: (action: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null) => void;
+  clearPendingPostSaveAction: () => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -76,6 +79,7 @@ export const useUIStore = create<UIState>()(
       roomCapacityStateByPlan: {},
       perfOverlayEnabled: false,
       hiddenLayersByPlan: {},
+      pendingPostSaveAction: null,
       setSelectedPlan: (id) => set({ selectedPlanId: id, selectedObjectId: undefined, selectedObjectIds: [] }),
       setSelectedObject: (id) =>
         set({
@@ -152,7 +156,9 @@ export const useUIStore = create<UIState>()(
         })),
       togglePerfOverlay: () => set((state) => ({ perfOverlayEnabled: !state.perfOverlayEnabled })),
       setHideAllLayers: (planId, hidden) =>
-        set((state) => ({ hiddenLayersByPlan: { ...state.hiddenLayersByPlan, [planId]: !!hidden } }))
+        set((state) => ({ hiddenLayersByPlan: { ...state.hiddenLayersByPlan, [planId]: !!hidden } })),
+      setPendingPostSaveAction: (action) => set({ pendingPostSaveAction: action }),
+      clearPendingPostSaveAction: () => set({ pendingPostSaveAction: null })
     }),
     {
       name: 'deskly-ui',
