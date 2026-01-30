@@ -1,4 +1,4 @@
-import { Client, ObjectTypeDefinition } from './types';
+import { Client, ObjectTypeDefinition, WifiAntennaModel } from './types';
 
 export const SEED_CLIENT_ID = 'seed-client-acme';
 export const SEED_SITE_ID = 'seed-site-wall-street-01';
@@ -13,6 +13,17 @@ export const DEFAULT_USER_TYPES = ['user', 'real_user', 'generic_user'];
 export const DEFAULT_CCTV_TYPES = ['camera'];
 export const DEFAULT_RACK_TYPES = ['rack'];
 export const DEFAULT_WIFI_TYPES = ['wifi'];
+export const WIFI_STANDARD_OPTIONS = [
+  { id: '802.11', it: 'WiFi 1 (802.11)', en: 'WiFi 1 (802.11)' },
+  { id: '802.11b', it: 'WiFi 2 (802.11b)', en: 'WiFi 2 (802.11b)' },
+  { id: '802.11a', it: 'WiFi 3 (802.11a)', en: 'WiFi 3 (802.11a)' },
+  { id: '802.11n', it: 'WiFi 4 (802.11n)', en: 'WiFi 4 (802.11n)' },
+  { id: '802.11ac', it: 'WiFi 5 (802.11ac)', en: 'WiFi 5 (802.11ac)' },
+  { id: '802.11ax', it: 'WiFi 6 (802.11ax)', en: 'WiFi 6 (802.11ax)' },
+  { id: '802.11ax-6ghz', it: 'WiFi 6E (802.11ax 6 GHz)', en: 'WiFi 6E (802.11ax 6 GHz)' },
+  { id: '802.11be', it: 'WiFi 7 (802.11be)', en: 'WiFi 7 (802.11be)' }
+];
+export const WIFI_DEFAULT_STANDARD = '802.11ax';
 export const DEFAULT_WALL_TYPES = [
   'wall_concrete',
   'wall_drywall_standard',
@@ -58,6 +69,69 @@ export const DEFAULT_DEVICE_TYPES = [
 ];
 export const WALL_TYPE_IDS = DEFAULT_WALL_TYPES;
 
+const buildWifiModel = (
+  brand: string,
+  model: string,
+  modelCode: string,
+  standard: string,
+  band24: boolean,
+  band5: boolean,
+  band6: boolean,
+  coverageSqm: number
+): WifiAntennaModel => ({
+  id: `${brand}-${modelCode}`.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+  brand,
+  model,
+  modelCode,
+  standard,
+  band24,
+  band5,
+  band6,
+  coverageSqm
+});
+
+export const DEFAULT_WIFI_ANTENNA_MODELS: WifiAntennaModel[] = [
+  buildWifiModel('Ubiquiti', 'E7', 'E7', '802.11be', true, true, true, 185),
+  buildWifiModel('Ubiquiti', 'E7 Campus', 'E7-Campus-US', '802.11be', true, true, true, 465),
+  buildWifiModel('Ubiquiti', 'E7 Campus Indoor', 'E7-Campus-Indoor', '802.11be', true, true, true, 465),
+  buildWifiModel('Ubiquiti', 'E7 Audience', 'E7-Audience-US', '802.11be', false, true, true, 465),
+  buildWifiModel('Ubiquiti', 'E7 Audience Indoor', 'E7-Audience-Indoor', '802.11be', false, true, true, 465),
+  buildWifiModel('Ubiquiti', 'U7 Pro XGS', 'U7-Pro-XGS', '802.11be', true, true, true, 160),
+  buildWifiModel('Ubiquiti', 'U7 Pro Max', 'U7-Pro-Max', '802.11be', true, true, true, 160),
+  buildWifiModel('Ubiquiti', 'U7 Pro XG', 'U7-Pro-XG', '802.11be', true, true, true, 140),
+  buildWifiModel('Ubiquiti', 'U7 Pro', 'U7-Pro', '802.11be', true, true, true, 140),
+  buildWifiModel('Ubiquiti', 'U7 Pro Wall', 'U7-Pro-Wall', '802.11be', true, true, true, 140),
+  buildWifiModel('Ubiquiti', 'U7 Pro XG Wall', 'U7-Pro-XG-Wall', '802.11be', true, true, true, 140),
+  buildWifiModel('Ubiquiti', 'U7 Pro Outdoor', 'U7-Pro-Outdoor-US', '802.11be', true, true, true, 465),
+  buildWifiModel('Ubiquiti', 'U7 Long-Range', 'U7-LR', '802.11be', true, true, false, 160),
+  buildWifiModel('Ubiquiti', 'U7 Lite', 'U7-Lite', '802.11be', true, true, false, 115),
+  buildWifiModel('Ubiquiti', 'U7 In-Wall', 'U7-IW', '802.11be', true, true, false, 115),
+  buildWifiModel('Ubiquiti', 'U7 Outdoor', 'U7-Outdoor', '802.11be', true, true, false, 465),
+  buildWifiModel('Ubiquiti', 'U6 Enterprise', 'U6-Enterprise', '802.11ax-6ghz', true, true, true, 140),
+  buildWifiModel('Ubiquiti', 'U6 Enterprise In-Wall', 'U6-Enterprise-IW', '802.11ax-6ghz', true, true, true, 115),
+  buildWifiModel('Ubiquiti', 'U6 Long-Range', 'U6-LR', '802.11ax', true, true, false, 185),
+  buildWifiModel('Ubiquiti', 'U6 Mesh Pro', 'U6-Mesh-Pro', '802.11ax', true, true, false, 185),
+  buildWifiModel('Ubiquiti', 'U6 Pro', 'U6-Pro', '802.11ax', true, true, false, 140),
+  buildWifiModel('Ubiquiti', 'U6+', 'U6-PLUS', '802.11ax', true, true, false, 140),
+  buildWifiModel('Ubiquiti', 'U6 Mesh', 'U6-Mesh', '802.11ax', true, true, false, 140),
+  buildWifiModel('Ubiquiti', 'U6 Lite', 'U6-Lite', '802.11ax', true, true, false, 115),
+  buildWifiModel('Ubiquiti', 'U6 In-Wall', 'U6-IW', '802.11ax', true, true, false, 115),
+  buildWifiModel('Ubiquiti', 'U6 Extender', 'U6-Extender-US', '802.11ax', true, true, false, 115),
+  buildWifiModel('Ubiquiti', 'AC Long-Range', 'UAP-AC-LR', '802.11ac', true, true, false, 185),
+  buildWifiModel('Ubiquiti', 'AC Mesh Pro', 'UAP-AC-M-PRO', '802.11ac', true, true, false, 185),
+  buildWifiModel('Ubiquiti', 'AC Pro', 'UAP-AC-PRO', '802.11ac', true, true, false, 140),
+  buildWifiModel('Ubiquiti', 'nanoHD', 'UAP-nanoHD', '802.11ac', true, true, false, 140),
+  buildWifiModel('Ubiquiti', 'FlexHD', 'UAP-FlexHD', '802.11ac', true, true, false, 140),
+  buildWifiModel('Ubiquiti', 'AC Mesh', 'UAP-AC-M', '802.11ac', true, true, false, 140),
+  buildWifiModel('Ubiquiti', 'AC Lite', 'UAP-AC-LITE', '802.11ac', true, true, false, 115),
+  buildWifiModel('Ubiquiti', 'Swiss Army Knife', 'UK-Ultra', '802.11ac', true, true, false, 115),
+  buildWifiModel('Ubiquiti', 'In-Wall HD', 'UAP-IW-HD', '802.11ac', true, true, false, 90),
+  buildWifiModel('Ubiquiti', 'AC In-Wall', 'UAP-AC-IW', '802.11ac', true, true, false, 25),
+  buildWifiModel('TP-Link', 'Omada Ceiling Mount AP', 'EAP610', '802.11ax', true, true, false, 115),
+  buildWifiModel('TP-Link', 'Omada Ceiling Mount AP', 'EAP650', '802.11ax', true, true, false, 140),
+  buildWifiModel('TP-Link', 'Omada Indoor/Outdoor AP', 'EAP772-Outdoor', '802.11be', true, true, true, 300)
+];
+
 export const defaultData = (): Client[] => {
   return [
     {
@@ -67,6 +141,7 @@ export const defaultData = (): Client[] => {
       address: 'Wall Street 01',
       description: 'Seed workspace',
       logoUrl: undefined,
+      wifiAntennaModels: DEFAULT_WIFI_ANTENNA_MODELS,
       layers: [
         { id: ALL_ITEMS_LAYER_ID, name: { it: 'Tutti gli elementi', en: 'All Items' }, color: ALL_ITEMS_LAYER_COLOR, order: 1 },
         { id: 'users', name: { it: 'Utenti', en: 'Users' }, color: '#2563eb', order: 2, typeIds: DEFAULT_USER_TYPES },

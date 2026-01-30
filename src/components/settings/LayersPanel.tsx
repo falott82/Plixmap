@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ChevronDown, ChevronUp, Copy, Info, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Info, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { useDataStore } from '../../store/useDataStore';
 import { WALL_TYPE_IDS } from '../../store/data';
 import { useToastStore } from '../../store/useToast';
@@ -32,9 +32,6 @@ const LayersPanel = () => {
   const [layerModal, setLayerModal] = useState<{ mode: 'create' } | { mode: 'edit'; layerId: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<LayerDefinition | null>(null);
   const [typeEditor, setTypeEditor] = useState<{ layerId: string; typeIds: string[]; query: string } | null>(null);
-  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
-  const [duplicateLayerIds, setDuplicateLayerIds] = useState<string[]>([]);
-  const [duplicateTargetIds, setDuplicateTargetIds] = useState<string[]>([]);
   const [draftNameIt, setDraftNameIt] = useState('');
   const [draftNameEn, setDraftNameEn] = useState('');
   const [draftColor, setDraftColor] = useState('#0ea5e9');
@@ -404,7 +401,7 @@ const LayersPanel = () => {
         nextLayerIds = [...currentLayerIds, typeEditor.layerId];
       } else {
         if (!hasLayer) return obj;
-        nextLayerIds = currentLayerIds.filter((id) => id !== typeEditor.layerId);
+        nextLayerIds = currentLayerIds.filter((id: string) => id !== typeEditor.layerId);
       }
       return nextLayerIds.length ? { ...obj, layerIds: nextLayerIds } : { ...obj, layerIds: undefined };
     };

@@ -348,7 +348,7 @@ const SettingsView = () => {
       <div className={modalActive ? 'pointer-events-none opacity-30' : ''} aria-hidden={modalActive}>
         {tab === 'account' ? <AccountPanel /> : null}
 
-        {tab === 'objects' ? <ObjectTypesPanel /> : null}
+        {tab === 'objects' ? <ObjectTypesPanel client={currentClient} /> : null}
 
         {tab === 'layers' ? (
           isAdmin ? (

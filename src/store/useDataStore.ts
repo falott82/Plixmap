@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
-import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackDefinition, RackItem, RackLink, Room, Site } from './types';
+import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackDefinition, RackItem, RackLink, Room, Site, WifiAntennaModel } from './types';
 import {
   ALL_ITEMS_LAYER_ID,
   ALL_ITEMS_LAYER_COLOR,
@@ -9,9 +9,11 @@ import {
   DEFAULT_DEVICE_TYPES,
   DEFAULT_RACK_TYPES,
   DEFAULT_USER_TYPES,
+  DEFAULT_WIFI_ANTENNA_MODELS,
   DEFAULT_WIFI_TYPES,
   DEFAULT_WALL_TYPES,
   QUOTE_LAYER_COLOR,
+  WIFI_DEFAULT_STANDARD,
   WALL_LAYER_COLOR,
   WIFI_LAYER_COLOR,
   defaultData,
@@ -36,7 +38,17 @@ interface DataState {
     payload: Partial<
       Pick<
         Client,
-        'name' | 'logoUrl' | 'shortName' | 'address' | 'phone' | 'email' | 'vatId' | 'pecEmail' | 'description' | 'attachments'
+        'name'
+          | 'logoUrl'
+          | 'shortName'
+          | 'address'
+          | 'phone'
+          | 'email'
+          | 'vatId'
+          | 'pecEmail'
+          | 'description'
+          | 'attachments'
+          | 'wifiAntennaModels'
       >
     >
   ) => void;
@@ -89,6 +101,12 @@ interface DataState {
         | 'wifiBand24'
         | 'wifiBand5'
         | 'wifiBand6'
+        | 'wifiBrand'
+        | 'wifiModel'
+        | 'wifiModelCode'
+        | 'wifiCoverageSqm'
+        | 'wifiCatalogId'
+        | 'wifiShowRange'
         | 'points'
         | 'wallGroupId'
         | 'wallGroupIndex'
@@ -103,6 +121,8 @@ interface DataState {
         | 'name'
         | 'description'
         | 'scale'
+        | 'x'
+        | 'y'
         | 'roomId'
         | 'layerIds'
         | 'externalClientId'
@@ -129,9 +149,18 @@ interface DataState {
         | 'wifiBand24'
         | 'wifiBand5'
         | 'wifiBand6'
+        | 'wifiBrand'
+        | 'wifiModel'
+        | 'wifiModelCode'
+        | 'wifiCoverageSqm'
+        | 'wifiCatalogId'
+        | 'wifiShowRange'
         | 'points'
         | 'wallGroupId'
         | 'wallGroupIndex'
+        | 'cctvAngle'
+        | 'cctvRange'
+        | 'cctvOpacity'
         | 'type'
       >
     >
@@ -163,10 +192,24 @@ interface DataState {
     floorPlanId: string,
     fromId: string,
     toId: string,
-    payload?: { kind?: 'arrow' | 'cable'; name?: string; description?: string; label?: string; color?: string; width?: number; dashed?: boolean; route?: 'vh' | 'hv' }
+    payload?: {
+      kind?: 'arrow' | 'cable';
+      arrow?: 'none' | 'start' | 'end' | 'both';
+      name?: string;
+      description?: string;
+      label?: string;
+      color?: string;
+      width?: number;
+      dashed?: boolean;
+      route?: 'vh' | 'hv';
+    }
   ) => string;
   deleteLink: (floorPlanId: string, linkId: string) => void;
-  updateLink: (floorPlanId: string, linkId: string, payload: Partial<Pick<PlanLink, 'name' | 'description' | 'color' | 'width' | 'dashed' | 'route'>>) => void;
+  updateLink: (
+    floorPlanId: string,
+    linkId: string,
+    payload: Partial<Pick<PlanLink, 'name' | 'description' | 'color' | 'width' | 'dashed' | 'route' | 'arrow'>>
+  ) => void;
   ensureRack: (floorPlanId: string, rackId: string, payload: Pick<RackDefinition, 'name' | 'totalUnits'>) => void;
   updateRack: (floorPlanId: string, rackId: string, changes: Partial<Pick<RackDefinition, 'name' | 'totalUnits' | 'notes'>>) => void;
   deleteRack: (floorPlanId: string, rackId: string) => void;
@@ -353,6 +396,24 @@ const defaultLayers = (): LayerDefinition[] => [
 
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling', 'quotes']);
 
+const normalizeWifiAntennaModels = (models?: WifiAntennaModel[]): WifiAntennaModel[] => {
+  const source = Array.isArray(models) && models.length ? models : DEFAULT_WIFI_ANTENNA_MODELS;
+  return source.map((entry) => {
+    const coverage = Number(entry.coverageSqm);
+    return {
+      id: String(entry.id || nanoid()),
+      brand: String(entry.brand || '').trim(),
+      model: String(entry.model || '').trim(),
+      modelCode: String(entry.modelCode || '').trim(),
+      standard: String(entry.standard || WIFI_DEFAULT_STANDARD),
+      band24: !!entry.band24,
+      band5: !!entry.band5,
+      band6: !!entry.band6,
+      coverageSqm: Number.isFinite(coverage) ? coverage : 0
+    };
+  });
+};
+
 const ensureLayerTypes = (layer: LayerDefinition): LayerDefinition => {
   if (Array.isArray(layer.typeIds) && layer.typeIds.length) return layer;
   if (layer.id === 'users') return { ...layer, typeIds: DEFAULT_USER_TYPES };
@@ -507,6 +568,7 @@ export const useDataStore = create<DataState>()(
           clients: (clients || []).map((c) => ({
             ...c,
             layers: normalizeClientLayers(c),
+            wifiAntennaModels: normalizeWifiAntennaModels((c as any).wifiAntennaModels),
             sites: (c.sites || []).map((s) => ({
               ...s,
               floorPlans: (s.floorPlans || []).map((p) => normalizePlan(p))
@@ -569,7 +631,7 @@ export const useDataStore = create<DataState>()(
       addClient: (name) => {
         const id = nanoid();
         set((state) => ({
-          clients: [...state.clients, { id, name, layers: defaultLayers(), sites: [] }],
+          clients: [...state.clients, { id, name, layers: defaultLayers(), wifiAntennaModels: DEFAULT_WIFI_ANTENNA_MODELS, sites: [] }],
           version: state.version + 1
         }));
         return id;
@@ -1038,11 +1100,12 @@ export const useDataStore = create<DataState>()(
                 fromId,
                 toId,
                 kind: payload?.kind || 'arrow',
+                arrow: payload?.arrow ?? 'none',
                 name: payload?.name,
                 description: payload?.description,
                 label: payload?.label,
                 color: payload?.color,
-                width: payload?.width,
+                width: payload?.width ?? 1,
                 dashed: payload?.dashed,
                 route: payload?.route
               }

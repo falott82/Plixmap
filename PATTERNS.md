@@ -1,5 +1,5 @@
 # PATTERNS.md
-Version: 1.8.5
+Version: 1.9.2
 
 ## Problematic patterns (do not repeat)
 

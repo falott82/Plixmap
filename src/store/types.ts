@@ -194,11 +194,29 @@ export interface MapObject {
   wifiBand24?: boolean;
   wifiBand5?: boolean;
   wifiBand6?: boolean;
+  wifiBrand?: string;
+  wifiModel?: string;
+  wifiModelCode?: string;
+  wifiCoverageSqm?: number;
+  wifiCatalogId?: string;
+  wifiShowRange?: boolean;
   roomId?: string;
   layerIds?: string[];
   cctvAngle?: number;
   cctvRange?: number;
   cctvOpacity?: number;
+}
+
+export interface WifiAntennaModel {
+  id: string;
+  brand: string;
+  model: string;
+  modelCode: string;
+  standard: string;
+  band24: boolean;
+  band5: boolean;
+  band6: boolean;
+  coverageSqm: number;
 }
 
 export interface LayerDefinition {
@@ -215,6 +233,7 @@ export interface PlanLink {
   fromId: string;
   toId: string;
   kind?: 'arrow' | 'cable';
+  arrow?: 'none' | 'start' | 'end' | 'both';
   name?: string;
   description?: string;
   color?: string;
@@ -259,6 +278,9 @@ export interface FloorPlan {
     end: { x: number; y: number };
     meters: number;
     metersPerPixel: number;
+    labelScale?: number;
+    opacity?: number;
+    strokeWidth?: number;
   };
   layers?: LayerDefinition[];
   views?: FloorPlanView[];
@@ -296,6 +318,9 @@ export interface FloorPlanRevision {
     end: { x: number; y: number };
     meters: number;
     metersPerPixel: number;
+    labelScale?: number;
+    opacity?: number;
+    strokeWidth?: number;
   };
   layers?: LayerDefinition[];
   views?: FloorPlanView[];
@@ -344,6 +369,7 @@ export interface Client {
   // New multi-note model
   notes?: ClientNote[];
   attachments?: { id: string; name: string; dataUrl: string }[];
+  wifiAntennaModels?: WifiAntennaModel[];
   sites: Site[];
 }
 

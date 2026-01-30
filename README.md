@@ -1,23 +1,16 @@
-# Deskly — Floor Plan Management (Drag & Drop)
+# Deskly - Floor Plan Management
 
-Current version: **1.8.5**
+Current version: **1.9.8**
 
-Deskly is a modern web app for planning offices and infrastructure on floor plans using a fixed hierarchy **Client → Site → Floor plan**, with draggable objects, logical rooms, rack management with ports and 1:1 links, saved views, revision history, search/highlight, and PDF exports.
+Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
-The UI supports **Italian and English**. When you change language from the user menu, the app performs a full refresh to ensure every screen (including tooltips/modals) is consistently translated.
-
-## Quick features
-- Drag & drop floor plan editor with rooms, objects, and layers
-- Desks palette with multiple shapes, resize/rotate, and optional PDF export
-- CCTV cameras with adjustable view cones (angle, range, rotation)
-- Rack management with devices, ports, notes, and 1:1 links
-- Search, saved views, and revision history
-- PDF exports (plan-only, print area, and rack PDF)
-- Multi-user access with roles and per-plan permissions
-
-## Donations
-If Deskly helps your team, thank you for considering a donation. Every contribution supports maintenance and new features.
-PayPal: https://paypal.me/falott82
+- UI supports **Italian and English** (language switch refreshes the app)
+- Drag & drop objects with layers, rooms, and grids
+- Walls with materials/attenuation, scale-based measurements, and quotes
+- CCTV cones and Wi-Fi coverage with wall occlusion
+- Rack editor with ports, links, and PDF export
+- Saved views, revisions, search/highlight
+- Multi-user roles with per-plan permissions
 
 ## Screenshots
 ### Rack editor
@@ -26,372 +19,59 @@ PayPal: https://paypal.me/falott82
 ### Plan view
 ![Plan view](docs/screenshots/plan-view.png)
 
-### Customer configurations
-![Customer configurations](docs/screenshots/customer-configurations.png)
+## Tech stack
+- React + TypeScript (Vite), TailwindCSS, Zustand, react-konva
+- Node.js + Express + SQLite (better-sqlite3)
+- Export: jsPDF + html2canvas
 
-## Tech Stack
-- **Frontend:** React + TypeScript (Vite), TailwindCSS, Zustand, react-konva, lucide-react
-- **Export:** jsPDF + html2canvas
-- **Backend:** Node.js + Express + SQLite (better-sqlite3), cookie-based sessions (HttpOnly)
+## Quickstart
+### Prerequisites
+- Node.js 20+ (18+ should work)
 
-## Core Data Model (high level)
-- `Client { id, shortName, name, address?, phone?, email?, vatId?, pecEmail?, description?, logoUrl?, attachments?[], sites[] }`
-- `Site { id, clientId, name, coords?, floorPlans[] }` where `coords` is an optional `lat, lng` string
-- `FloorPlan { id, siteId, name, imageUrl, width?, height?, printArea?, objects[], rooms?, views?, revisions? }`
-- `MapObject { id, type, name, description?, x, y, scale?, roomId?, layerIds?, opacity?, rotation?, cctvAngle?, cctvRange?, cctvOpacity? }`
-- `Room { id, name, color?, kind: 'rect'|'poly', ... }` (rectangles and polygons supported)
-- `FloorPlanView { id, name, description?, zoom, pan, isDefault? }`
-- `FloorPlanRevision { id, createdAt, revMajor, revMinor, name, description?, imageUrl, objects, rooms?, views? }`
-
-## Authentication & Roles
-### First run (bootstrap)
-On the very first run, Deskly creates **one** default superadmin:
-- **username:** `superadmin`
-- **password:** `deskly`
-
-On first login you are **forced to change the password** and choose the UI language (IT/EN). The initial credentials are shown on the login page **only during first-run**; after the password change they are never shown again.
-After the first password change, Deskly shows a confirmation prompt (in the chosen language) and can take you directly to the **Users** tab to create additional accounts.
-
-### Password policy
-New passwords must be **strong**:
-- at least 8 characters
-- at least 1 uppercase letter
-- at least 1 lowercase letter
-- at least 1 number
-- at least 1 symbol
-
-### Superadmin recovery (offline)
-If the superadmin password is lost, reset it on the server (or inside the container):
-```
-docker compose exec deskly node server/reset-superadmin.cjs
-```
-You can also use `DESKLY_NEW_PASSWORD` (env) or `--password` (arg). The reset invalidates active sessions.
-
-If the superadmin loses the Authenticator app, reset MFA offline:
-```
-docker compose exec deskly node server/reset-superadmin-mfa.cjs
-```
-
-### MFA recovery (users)
-Admins can reset MFA for any user from **Settings → Users → Reset MFA**. The user will need to set up their Authenticator again.
-
-### Login lockout
-Too many failed login attempts temporarily lock the account. This protects against brute‑force attacks.
-
-### Upload limits (safe formats)
-To reduce risk, uploads are limited to safe formats and sizes:
-- Floor plan images: JPG/PNG/WEBP (max 12MB)
-- Client logos: JPG/PNG/WEBP (max 2MB)
-- Note images: JPG/PNG/WEBP (max 5MB)
-- PDF attachments: PDF only (max 20MB)
-
-Server overrides: `DESKLY_UPLOAD_MAX_IMAGE_MB`, `DESKLY_UPLOAD_MAX_PDF_MB`.
-
-### Roles
-- **Superadmin:** full access + can create admin users + can view audit logs (login/logout attempts)
-- **Admin:** full read/write access to all data (no per-scope permissions required)
-- **User:** can be granted **read-only** or **read/write** access per Client / Site / Floor plan
-
-## Main Features
-### Realtime collaboration (safe editing)
-- **Exclusive lock per floor plan**: only one user can edit a floor plan at a time (prevents conflicts).
-- **Presence**: shows who is currently online on the same floor plan.
-- If a floor plan is locked by someone else, it opens in **read-only** automatically.
-
-### Navigation
-- Tree sidebar with fixed hierarchy **Client → Site → Floor plan**
-- Quick search in the sidebar (filters clients/sites/floor plans by name)
-- Per-user client ordering (drag & drop clients); ordering is saved on the user profile
-- The default **ACME** demo client shows a small info badge in the sidebar; you can keep it for testing or remove it safely.
-- If a user has no default floor plan, the first available one opens automatically; if none are assigned, a notice explains that an admin must grant access.
-
-### Settings (Admin / Superadmin)
-- CRUD for **Clients**, **Sites**, **Floor plans**
-- Client details: short name (shown in workspace), full legal name, address, VAT/PEC, phone, email, description
-- Client notes: right-click a client in the sidebar and open **Client notes** to write formatted documentation (text, images, tables) — powered by **Lexical** for Word-like stability; supports **multiple notes per client** (titles, create/delete, search); editable by admins and by users with **read/write** permission on that client; includes **Export PDF** and **PDF attachments management**
-  - Client notes modal uses the full available height for easier reading
-- Client logo upload (auto-resized)
-- Client PDF attachments upload:
-  - download
-  - open in a new browser tab
-- Site optional coordinates (`lat, lng`) with **Google Maps** link
-- Floor plan image upload (JPG/PNG only), replace image with automatic archival as a revision
-- Object types management (custom types + icon mapping), updating type/icon updates all objects
-- Layers management: create/edit/reorder layers, set colors, and assign object types to layers (multi-layer supported)
-- Object requests:
-  - users can submit a **request** with custom fields and icon
-  - superadmin receives a pending prompt and manages approvals in a dedicated modal
-  - approved requests become immediately available in the object list
-- New objects default to a 0.50 scale on placement
-- Workspace backup:
-  - **Export JSON workspace** (optionally embed images/attachments)
-  - **Import JSON workspace** (replace workspace on this server)
-  - **Export Excel** workbook (object types, clients, sites, floor plans, layers, rooms, views, objects)
-- User management:
-  - create/edit/disable users
-  - language per user
-  - CSV/Excel-style export of the users table
-- Superadmin only:
-  - logs: login/logout + failed attempts, plus an **audit trail** of important events (optional Extended mode)
-  - Nerd Area: packages and versions used by the app
-  - Nerd Area: **Performance telemetry** toggle (local-only diagnostics panel)
-  - Nerd Area: **Custom Import (Real users)** with a per-client status table, quick actions, and WebAPI/CSV configuration
-- Settings modals dim the background to keep focus on the active form
-- Settings tabs persist on refresh via the `?tab=` URL parameter
-
-### Layers (Settings → Layers)
-- Each layer has name, color, order, and optional **object type mapping**.
-- Objects can belong to **multiple layers**; if an object has no explicit `layerIds`, defaults are used.
-- When you change a layer’s type mapping, existing objects with explicit layers are updated to match.
-
-### Objects (Settings → Objects)
-- Objects tab manages palette visibility and ordering.
-- Desks tab lists the built-in desk shapes (visibility only).
-- Walls tab lists wall materials with attenuation and a generated color.
-
-### Workspace (Floor plan)
-- Floor plan shown as background; objects rendered on top with an icon and always-visible label
-- Add objects via palette or context menu (type → name required, description optional)
-- Object placement shows a live preview that follows the cursor; click to place.
-- The palette can be customized per user (enabled objects + ordering) from **Settings → Objects**
-- If a user has an empty palette, a quick CTA is shown to open **Settings → Objects** and add items
-- Desks: dedicated palette section + layer with multiple shapes (round, square, rectangular, double, long bench, trapezoid, L, reverse L), stretch/resize + rotate (Ctrl/⌘ + ←/→), opacity + line color/weight; not linkable/searchable; optional in PDF export
-- The context menu works across the whole workspace area (even outside the visible plan image)
-- Always-visible “Saved/Unsaved” indicator to track local changes
-- Select / multi-select:
-  - click to select
-  - Ctrl/⌘ to multi-select
-  - Ctrl/⌘ + A selects all objects in the floor plan
-  - left-drag on an empty area to box-select (desktop-like)
-  - Esc clears selection
-  - Arrow keys nudge selected objects
-  - W starts wall drawing; click to add corners; press W again or double-click to finish
-  - Shift while drawing walls constrains to straight segments
-  - M starts measure distance (press again to stop)
-  - Esc removes the last wall segment while drawing (Backspace/Delete also step back)
-  - Delete key opens a confirm dialog (Enter confirms, Esc cancels)
-- Quick edit (multi-selection):
-  - the top pencil opens a list that includes selected objects and the links between them
-  - you can apply the same scale to all selected objects from the list
-- Object operations (right click / context menu):
-  - edit name/description
-  - duplicate (asks for new name/description; placed next to original)
-  - scale per object (slider)
-  - delete
-- Wi-Fi antenna objects include DB, standard (802.11 family) and 2.4/5/6 GHz band flags
-- Walls and measurements:
-  - walls live on a dedicated layer; stroke colors are generated per wall type and can change type from the context menu
-  - double-click a wall segment to show its length; closed wall polygons show perimeter/area and per-side lengths on right-click
-  - corner labels (A, B, C...) appear on the wall and in the context menu
-  - closing a wall polygon opens a modal with side materials and an optional room creation flow
-  - right-click the map and choose Measure distance; click to add points, double-click to finish (closed loop shows area)
-  - the ruler button sets floor plan scale by picking two points and entering linear meters (per plan); Enter saves; right-click the map to clear the scale
-- Real users (optional):
-  - once a client has imported users (WebAPI or CSV), a **Real user** object is available in the palette
-  - dropping it opens a picker **scoped to the active Client** (client name + counts are shown), with search and filters
-  - keyboard navigation: arrows to move, Enter to insert
-  - the label shows first name and last name on two lines
-- Pan & zoom:
-  - zoom controls (+ / -)
-  - pan the map (background + objects move together) using the **middle mouse button** or **Cmd/Alt + right-click**
-  - viewport is persisted per floor plan (reload-safe)
-- Layers, grid and links:
-  - assign objects to one or more **layers** and toggle visibility (work by “layers”)
-  - default layer assignments per object type can be customized from **Settings → Layers**
-  - CCTV layer shows camera view cones; adjust angle/range/rotation from the object context menu
-  - quick “Hide layers” toggle hides all layers (restores on reload)
-  - optional **grid overlay** and configurable **grid snapping**
-  - create **links** (arrows) between objects from the context menu
-  - **double-click a link** to edit name/description and style (**color / width / dashed**)
-- Rooms:
-  - create **rectangle** or **polygon** rooms
-  - resize/edit room shape
-  - set a per-room color (helps visually separate areas)
-  - choose wall materials per side after creating a room (default: brick)
-  - adjust room label scale (name + capacity)
-  - optional “logical room” flag in the room modal
-  - room modal tabs for Info, Users, Objects, Notes
-  - rooms cannot overlap
-  - objects inside the room are automatically linked
-  - room list with assigned objects and quick highlight
-  - placing a user in a full room asks for confirmation
-- Rack management:
-  - open racks from the map to manage **rack units** and devices
-  - drag devices into the rack, choose unit size, move with arrow keys
-  - drag a device onto another device with the same U size to swap positions
-  - configure devices with host/IP, ports, power options, and notes
-  - passive devices include **Passacavo**; Misc devices can be given a custom name
-  - port configuration per device (switch/patch panel/optical drawer) with 1:1 links
-  - link speeds: 100M/1G (copper) and 1G/10G/25G (fiber)
-  - search inside the rack by **host name** or **device type**
-  - delete single devices (with confirmation) or delete all devices
-  - export a **portrait PDF** with rack name and notes
-- Search:
-  - search objects (name/description) and rooms (name)
-  - highlight/blink the selected item on the map
-  - if multiple results exist, you can choose which one to focus
-  - keyboard navigation (arrows + Enter) inside results
-- Views:
-  - save the current viewport as a named view (with description)
-  - mark one view as default (only one default)
-  - views dropdown + context menu integration
-- Revisions (“Time Machine”):
-  - save immutable revisions (read-only history)
-  - revision numbering **Rev: X.Y** with Major/Minor bump
-  - **Cmd/Ctrl+S** creates a quick minor revision
-  - restore revisions, compare revisions, delete a revision, delete all revisions
-  - when saving, you can add a note
-- Export:
-  - export **plan-only** PDF (background only: no UI, no toolbars)
-  - optional per-floor-plan **print area** (rectangle)
-  - PDF options include orientation, clickable index (when exporting multiple plans), and a quality/size slider
-  - export the changelog to PDF
-
-## Custom Fields (per user)
-Deskly supports **per-user custom fields** for objects:
-- Define fields per object type in **Settings → Objects** (right-click an enabled object type)
-- Field types: **Text**, **Number**, **Boolean**
-- Values are stored **per user and per object** (not shared with other users)
-
-### PWA (optional)
-Deskly is a Progressive Web App:
-- can be installed on supported browsers
-- caches static assets and previously visited floor plan images (`/uploads`, `/seed`) for faster reloads
-
-### Google Maps integration
-- If a Site has valid coordinates (`lat, lng`):
-  - a Google Maps icon appears in Settings
-  - right-click on the Site name in the workspace tree shows **“View in Google Maps”**
-  - right-click on a Floor plan also shows **“View in Google Maps”** (it uses the parent Site coordinates)
-
-## Installation & Running
-
-### Prerequisites (all OS)
-- **Node.js 20+** recommended (Node 18+ should also work for this project)
-- npm (bundled with Node.js)
-
-### macOS
-1) Install Node.js (recommended via Homebrew):
-```bash
-brew install node
-```
-2) Install dependencies:
+### Development
 ```bash
 npm install
-```
-3) Development (two processes):
-```bash
-# Terminal 1 — API + SQLite + auth
+
+# Terminal 1 - API + SQLite
 npm run dev:api
 
-# Terminal 2 — Vite dev server
+# Terminal 2 - Vite dev server
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
 Open `http://localhost:5173`
 
-4) Production-like (single server: API + built UI):
+### Production
 ```bash
 npm run build
 npm start
 ```
 Open `http://localhost:8787`
 
-### Linux
-1) Install Node.js (example with nvm):
-```bash
-curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-nvm install 20
-nvm use 20
-```
-2) Install and run (same commands as macOS):
-```bash
-npm install
-npm run dev:api
-npm run dev -- --host 0.0.0.0 --port 5173
-```
-Or production:
-```bash
-npm run build
-npm start
-```
-
-### Windows
-1) Install Node.js 20+ from https://nodejs.org (LTS)
-2) Open PowerShell in the project folder and run:
-```powershell
-npm install
-npm run dev:api
-npm run dev -- --host 0.0.0.0 --port 5173
-```
-Or production:
-```powershell
-npm run build
-npm start
-```
-
-## Running in LAN
-### Development (Vite)
-Run Vite with `--host 0.0.0.0` and open from another machine:
-- `http://<YOUR_PC_IP>:5173`
-
-### Production (Node server)
-The server binds to `0.0.0.0` by default and exposes:
-- `http://<YOUR_PC_IP>:8787`
-
-All users on the LAN will see the **same data**, because the backend persists state in SQLite on the server machine.
-
 ## Docker
-Deskly ships with a Dockerfile and a docker-compose configuration.
-
-Quick install (Docker Compose):
 ```bash
-mkdir -p ~/apps
-cd ~/apps
-git clone https://github.com/falott82/Deskly
-cd Deskly
 docker compose up -d --build
 ```
+Open `http://localhost:8787`
 
-Build and run (manual):
-```bash
-docker compose up --build
-```
-Open:
-- `http://localhost:8787`
-- or from LAN: `http://<HOST_IP>:8787`
-
-First login:
+## First run
+A default superadmin is created on first run:
 - username: `superadmin`
-- password: `deskly` (you will be prompted to change it)
+- password: `deskly`
 
-Data persistence:
-- SQLite DB and uploaded assets are stored under `./data` (mapped as a volume in Docker Compose).
+You are forced to change the password on first login.
 
-## Environment Variables
+## Environment variables
 - `PORT` (default `8787`)
 - `HOST` (default `0.0.0.0`)
 - `DESKLY_DB_PATH` (default `data/deskly.sqlite`)
-- `DESKLY_AUTH_SECRET` (optional, recommended in production): signing secret for sessions; if not provided, it is stored in DB in production mode
+- `DESKLY_AUTH_SECRET` (optional; if not provided it is stored in DB in production)
 
-## Notes on Storage
-- Floor plan images, client logos and PDF attachments are stored on the server and referenced by URL (to keep the JSON state small).
-- Passwords are stored using **scrypt** (salted hash). Sessions are stored in an **HttpOnly** cookie.
+## Storage notes
+- SQLite DB and uploads live in `./data` (or `DESKLY_DB_PATH`).
+- Floor plan images, client logos, and PDFs are stored on disk and referenced by URL.
 
-## Security
-- Dependabot is enabled: `.github/dependabot.yml`
-- GitHub Action runs `npm audit --omit=dev`: `.github/workflows/security-audit.yml`
-- Recommended before releasing (local/npm):
-```bash
-npm audit --omit=dev --audit-level=high
-```
-- Or via npm script:
-```bash
-npm run audit:prod
-```
-- If running via Docker:
-```bash
-docker compose exec deskly npm audit --omit=dev --audit-level=high
-```
-- Users: create accounts, import permissions from an existing user, and manage access; superadmin is highlighted and cannot be disabled.
-- Users list shows the account creation timestamp to help auditing and onboarding.
-- Objects: superadmin can create **custom object types** (name + icon). Any user can submit a **creation request** (with custom fields); requests are managed in a dedicated modal where the superadmin can approve/reject with a reason, and the requester sees the status with timestamps.
+## LAN access
+- Dev: `http://<YOUR_PC_IP>:5173`
+- Prod: `http://<YOUR_PC_IP>:8787`
+
+All users on the LAN share the same SQLite data on the server machine.

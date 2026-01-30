@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
-import { nanoid } from 'nanoid';
 import {
   ChevronDown,
   ChevronRight,
@@ -29,7 +28,9 @@ import {
   User,
   LocateFixed,
   Users,
-  Ruler
+  Ruler,
+  Undo2,
+  Redo2
 } from 'lucide-react';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
@@ -54,6 +55,7 @@ import RevisionsModal from './RevisionsModal';
 import SaveRevisionModal from './SaveRevisionModal';
 import { DESK_TYPE_IDS, isDeskType } from './deskTypes';
 import RoomModal from './RoomModal';
+import RoomShapePreview from './RoomShapePreview';
 import RackModal from './RackModal';
 import RackPortsModal from './RackPortsModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
@@ -74,7 +76,7 @@ import { postAuditEvent } from '../../api/audit';
 import { hasExternalUsers } from '../../api/customImport';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
-import { ALL_ITEMS_LAYER_ID, DEFAULT_WALL_TYPES, WALL_TYPE_IDS } from '../../store/data';
+import { ALL_ITEMS_LAYER_ID, DEFAULT_WALL_TYPES, WALL_TYPE_IDS, WIFI_DEFAULT_STANDARD } from '../../store/data';
 import { getWallTypeColor } from '../../utils/wallColors';
 
 interface Props {
@@ -164,6 +166,20 @@ const PlanView = ({ planId }: Props) => {
     () => (objectTypeDefs || []).filter((def) => wallTypeIdSet.has(def.id)),
     [objectTypeDefs, wallTypeIdSet]
   );
+  const deskCatalogDefs = useMemo(
+    () => (objectTypeDefs || []).filter((def) => isDeskType(def.id)),
+    [objectTypeDefs]
+  );
+  const wallAttenuationByType = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const def of wallTypeDefs || []) {
+      const value = Number((def as any).attenuationDb);
+      if (Number.isFinite(value) && value > 0) {
+        map.set(def.id, value);
+      }
+    }
+    return map;
+  }, [wallTypeDefs]);
   const defaultWallTypeId = useMemo(() => {
     if (wallTypeIdSet.has('wall_brick')) return 'wall_brick';
     return wallTypeDefs[0]?.id || DEFAULT_WALL_TYPES[0];
@@ -339,6 +355,7 @@ const PlanView = ({ planId }: Props) => {
     | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
+  const [pendingRoomDeletes, setPendingRoomDeletes] = useState<string[]>([]);
   const [confirmDeleteViewId, setConfirmDeleteViewId] = useState<string | null>(null);
   const [confirmSetDefaultViewId, setConfirmSetDefaultViewId] = useState<string | null>(null);
   const [confirmClearObjects, setConfirmClearObjects] = useState(false);
@@ -373,12 +390,18 @@ const PlanView = ({ planId }: Props) => {
   const [undoConfirm, setUndoConfirm] = useState<{ id: string; name: string } | null>(null);
   const [overlapNotice, setOverlapNotice] = useState<string | null>(null);
   const roomOverlapNoticeRef = useRef(0);
+  const roomLayerNoticeRef = useRef(0);
   const [allTypesOpen, setAllTypesOpen] = useState(false);
+  const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'objects' | 'desks'>('objects');
+  const [roomCatalogOpen, setRoomCatalogOpen] = useState(false);
+  const [wallCatalogOpen, setWallCatalogOpen] = useState(false);
+  const [deskCatalogOpen, setDeskCatalogOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<
     | { kind: 'object'; id: string; x: number; y: number; wallSegmentLengthPx?: number }
     | { kind: 'link'; id: string; x: number; y: number }
     | { kind: 'room'; id: string; x: number; y: number }
-    | { kind: 'map'; x: number; y: number; worldX: number; worldY: number; addOpen: boolean; roomOpen: boolean }
+    | { kind: 'scale'; x: number; y: number }
+    | { kind: 'map'; x: number; y: number; worldX: number; worldY: number }
     | null
   >(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -418,11 +441,23 @@ const PlanView = ({ planId }: Props) => {
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement | null>(null);
   const presenceRef = useRef<HTMLDivElement | null>(null);
+  const [scaleActionsOpen, setScaleActionsOpen] = useState(false);
+  const [clearScaleConfirmOpen, setClearScaleConfirmOpen] = useState(false);
+  const [scalePromptDismissed, setScalePromptDismissed] = useState(false);
   const layersPopoverRef = useRef<HTMLDivElement | null>(null);
   const [panToolActive, setPanToolActive] = useState(false);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
+  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
+  const [wallQuickMenu, setWallQuickMenu] = useState<{
+    id: string;
+    x: number;
+    y: number;
+    world: { x: number; y: number };
+  } | null>(null);
+  const [wallTypeMenu, setWallTypeMenu] = useState<{ ids: string[]; x: number; y: number } | null>(null);
+  const [mapSubmenu, setMapSubmenu] = useState<null | 'view' | 'measure' | 'create' | 'print' | 'manage'>(null);
   const [linkFromId, setLinkFromId] = useState<string | null>(null);
   const [cableModal, setCableModal] = useState<{ mode: 'create'; fromId: string; toId: string } | { mode: 'edit'; linkId: string } | null>(null);
   const [linksModalObjectId, setLinksModalObjectId] = useState<string | null>(null);
@@ -433,8 +468,8 @@ const PlanView = ({ planId }: Props) => {
   const [wallDrawType, setWallDrawType] = useState<MapObjectType | null>(null);
   const [wallDraftPoints, setWallDraftPoints] = useState<{ x: number; y: number }[]>([]);
   const [wallDraftPointer, setWallDraftPointer] = useState<{ x: number; y: number } | null>(null);
-  const [wallEditTarget, setWallEditTarget] = useState<{ id: string; points: { x: number; y: number }[] } | null>(null);
   const wallDraftPointsRef = useRef<{ x: number; y: number }[]>([]);
+  const wallDraftSegmentIdsRef = useRef<string[]>([]);
   const [scaleMode, setScaleMode] = useState(false);
   const [scaleDraft, setScaleDraft] = useState<{ start?: { x: number; y: number }; end?: { x: number; y: number } } | null>(null);
   const [scaleDraftPointer, setScaleDraftPointer] = useState<{ x: number; y: number } | null>(null);
@@ -448,6 +483,21 @@ const PlanView = ({ planId }: Props) => {
   const [measurePointer, setMeasurePointer] = useState<{ x: number; y: number } | null>(null);
   const [measureClosed, setMeasureClosed] = useState(false);
   const [measureFinished, setMeasureFinished] = useState(false);
+  const measurePointsRef = useRef<{ x: number; y: number }[]>([]);
+  const measureClosedRef = useRef(false);
+  const measureFinishedRef = useRef(false);
+  const toolClickHistoryRef = useRef<{ x: number; y: number; at: number }[]>([]);
+  const scaleToastIdRef = useRef<string | number | null>(null);
+  const wallToastIdRef = useRef<string | number | null>(null);
+  useEffect(() => {
+    measurePointsRef.current = measurePoints;
+  }, [measurePoints]);
+  useEffect(() => {
+    measureClosedRef.current = measureClosed;
+  }, [measureClosed]);
+  useEffect(() => {
+    measureFinishedRef.current = measureFinished;
+  }, [measureFinished]);
   const [quoteMode, setQuoteMode] = useState(false);
   const [quotePoints, setQuotePoints] = useState<{ x: number; y: number }[]>([]);
   const [quotePointer, setQuotePointer] = useState<{ x: number; y: number } | null>(null);
@@ -470,6 +520,7 @@ const PlanView = ({ planId }: Props) => {
     | null
   >(null);
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
+  const [confirmDeleteRoomIds, setConfirmDeleteRoomIds] = useState<string[] | null>(null);
   const [wallTypeModal, setWallTypeModal] = useState<{ ids: string[]; typeId: string } | null>(null);
   const [wallTypeDraft, setWallTypeDraft] = useState<string>('');
   const [roomWallTypeModal, setRoomWallTypeModal] = useState<{
@@ -478,26 +529,27 @@ const PlanView = ({ planId }: Props) => {
     segments: { start: { x: number; y: number }; end: { x: number; y: number }; label: string }[];
   } | null>(null);
   const [roomWallTypeSelections, setRoomWallTypeSelections] = useState<string[]>([]);
-  const [wallPolygonModal, setWallPolygonModal] = useState<{
-    points: { x: number; y: number }[];
-    segments: { start: { x: number; y: number }; end: { x: number; y: number }; label: string; lengthPx: number }[];
-    mode: 'create' | 'edit';
-    sourceWallId?: string;
-    groupId?: string;
-    wallIds?: string[];
-    initialSelections?: string[];
+  const [roomWallPrompt, setRoomWallPrompt] = useState<{
+    roomId: string;
+    roomName: string;
+    kind: 'rect' | 'poly';
+    rect?: { x: number; y: number; width: number; height: number };
+    points?: { x: number; y: number }[];
   } | null>(null);
-  const [wallPolygonSelections, setWallPolygonSelections] = useState<string[]>([]);
-  const [wallPolygonCreateRoom, setWallPolygonCreateRoom] = useState(false);
 
   const planRef = useRef<FloorPlan | undefined>(undefined);
   const selectedObjectIdRef = useRef<string | undefined>(selectedObjectId);
   const selectedObjectIdsRef = useRef<string[]>(selectedObjectIds);
   const selectedLinkIdRef = useRef<string | null>(selectedLinkId);
   const confirmDeleteRef = useRef<string[] | null>(confirmDelete);
+  const pendingRoomDeletesRef = useRef<string[]>(pendingRoomDeletes);
   const skipRoomWallTypesRef = useRef(false);
-  const scaleNoticePlanRef = useRef<string | null>(null);
-  const wallPolygonCancelRef = useRef<HTMLButtonElement | null>(null);
+  const wallMoveBatchRef = useRef<{ id: string | null; movedGroups: Set<string>; movedWalls: Set<string>; movedRooms: Set<string> }>({
+    id: null,
+    movedGroups: new Set(),
+    movedWalls: new Set(),
+    movedRooms: new Set()
+  });
   const zoomRef = useRef<number>(zoom);
   const renderStartRef = useRef(0);
   const layerVisibilitySyncRef = useRef<string>('');
@@ -569,21 +621,6 @@ const PlanView = ({ planId }: Props) => {
   }, [defaultWallTypeId, roomWallTypeModal]);
 
   useEffect(() => {
-    if (!wallPolygonModal) {
-      setWallPolygonSelections([]);
-      setWallPolygonCreateRoom(false);
-      return;
-    }
-    const nextDefault = defaultWallTypeId || DEFAULT_WALL_TYPES[0];
-    const seeded = wallPolygonModal.initialSelections;
-    setWallPolygonSelections((prev) => {
-      if (seeded && seeded.length === wallPolygonModal.segments.length) return seeded;
-      if (prev.length === wallPolygonModal.segments.length) return prev;
-      return wallPolygonModal.segments.map((_, index) => seeded?.[index] || nextDefault);
-    });
-  }, [defaultWallTypeId, wallPolygonModal]);
-
-  useEffect(() => {
     // Always start from the "present" when entering the workspace for a plan.
     setSelectedRevision(planId, null);
   }, [planId, setSelectedRevision]);
@@ -599,11 +636,14 @@ const PlanView = ({ planId }: Props) => {
 
   // Avoid re-applying viewport on every data change (plan updates clone references).
   const viewportInitRef = useRef<string | null>(null);
+  const autoCenterRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Close any open context menus when switching plans.
     setContextMenu(null);
     setLinksModalObjectId(null);
+    setWallQuickMenu(null);
+    setWallTypeMenu(null);
   }, [planId]);
 
   useEffect(() => {
@@ -793,15 +833,40 @@ const PlanView = ({ planId }: Props) => {
     }
     return label;
   }, []);
-  const getWallCornerPoints = useCallback((points: { x: number; y: number }[]) => {
-    if (points.length < 3) return points;
-    const first = points[0];
-    const last = points[points.length - 1];
-    if (first.x === last.x && first.y === last.y) {
-      return points.slice(0, -1);
-    }
-    return points;
-  }, []);
+  const buildRoomPreview = useCallback(
+    (points: { x: number; y: number }[]) => {
+      if (!points.length) return null;
+      const cleaned =
+        points.length >= 3 && points[0].x === points[points.length - 1].x && points[0].y === points[points.length - 1].y
+          ? points.slice(0, -1)
+          : points;
+      if (cleaned.length < 2) return null;
+      const unit = metersPerPixel ? (lang === 'it' ? 'ml' : 'm') : 'px';
+      const segments = cleaned.map((start, index) => {
+        const end = cleaned[(index + 1) % cleaned.length];
+        const lengthPx = Math.hypot(end.x - start.x, end.y - start.y);
+        const lengthLabel = metersPerPixel
+          ? `${formatNumber(lengthPx * metersPerPixel)} ${unit}`
+          : `${formatNumber(lengthPx)} ${unit}`;
+        const label = `${formatCornerLabel(index)}-${formatCornerLabel((index + 1) % cleaned.length)}`;
+        return { label, lengthLabel };
+      });
+      return { points: cleaned, segments };
+    },
+    [formatCornerLabel, formatNumber, lang, metersPerPixel]
+  );
+  const projectPointOnSegment = useCallback(
+    (point: { x: number; y: number }, start: { x: number; y: number }, end: { x: number; y: number }) => {
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const lenSq = dx * dx + dy * dy;
+      if (!lenSq) return { x: start.x, y: start.y, t: 0 };
+      let t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      return { x: start.x + t * dx, y: start.y + t * dy, t };
+    },
+    []
+  );
   const buildRoomWallSegments = useCallback(
     (room: { kind: 'rect' | 'poly'; rect?: { x: number; y: number; width: number; height: number }; points?: { x: number; y: number }[] }) => {
       let points: { x: number; y: number }[] = [];
@@ -835,93 +900,13 @@ const PlanView = ({ planId }: Props) => {
     },
     [formatCornerLabel]
   );
-  const buildWallSegmentsFromPoints = useCallback(
-    (points: { x: number; y: number }[]) => {
-      const corners = getWallCornerPoints(points);
-      if (corners.length < 3) return [];
-      const segments: { start: { x: number; y: number }; end: { x: number; y: number }; label: string; lengthPx: number }[] = [];
-      for (let i = 0; i < corners.length; i += 1) {
-        const start = corners[i];
-        const end = corners[(i + 1) % corners.length];
-        const label = `${formatCornerLabel(i)}-${formatCornerLabel((i + 1) % corners.length)}`;
-        const lengthPx = Math.hypot(end.x - start.x, end.y - start.y);
-        segments.push({ start, end, label, lengthPx });
-      }
-      return segments;
-    },
-    [formatCornerLabel, getWallCornerPoints]
-  );
-  const openWallPolygonModal = useCallback(
-    (points: { x: number; y: number }[], sourceWallId?: string) => {
-      const segments = buildWallSegmentsFromPoints(points);
-      if (!segments.length) return;
-      setWallDrawMode(false);
-      setWallDraftPoints([]);
-      wallDraftPointsRef.current = [];
-      setWallDraftPointer(null);
-      setWallEditTarget(null);
-      setWallPolygonCreateRoom(false);
-      setWallPolygonModal({ points: getWallCornerPoints(points), segments, sourceWallId, mode: 'create' });
-    },
-    [buildWallSegmentsFromPoints, getWallCornerPoints]
-  );
-  const getWallGroup = useCallback(
-    (groupId: string) => {
-      if (!renderPlan) return null;
-      const walls = renderPlan.objects.filter(
-        (obj: any) => isWallType(obj.type) && String(obj.wallGroupId || '') === groupId
-      );
-      if (walls.length < 3) return null;
-      const ordered = walls
-        .slice()
-        .sort((a: any, b: any) => Number(a.wallGroupIndex ?? 0) - Number(b.wallGroupIndex ?? 0));
-      const points: { x: number; y: number }[] = [];
-      const wallIds: string[] = [];
-      const typeIds: string[] = [];
-      ordered.forEach((wall: any, index: number) => {
-        const pts = wall.points || [];
-        if (pts.length < 2) return;
-        if (index === 0) points.push(pts[0]);
-        points.push(pts[pts.length - 1]);
-        wallIds.push(wall.id);
-        typeIds.push(wall.type);
-      });
-      if (points.length < 4) return null;
-      const first = points[0];
-      const last = points[points.length - 1];
-      if (!first || !last || first.x !== last.x || first.y !== last.y) return null;
-      return { points, wallIds, typeIds };
-    },
-    [isWallType, renderPlan]
-  );
-  const openWallPolygonFromGroup = useCallback(
-    (groupId: string) => {
-      const group = getWallGroup(groupId);
-      if (!group) return;
-      const segments = buildWallSegmentsFromPoints(group.points);
-      if (!segments.length) return;
-      setWallPolygonCreateRoom(false);
-      setWallPolygonModal({
-        points: getWallCornerPoints(group.points),
-        segments,
-        mode: 'edit',
-        groupId,
-        wallIds: group.wallIds,
-        initialSelections: group.typeIds
-      });
-    },
-    [buildWallSegmentsFromPoints, getWallCornerPoints, getWallGroup]
-  );
   useEffect(() => {
     setWallDrawMode(false);
     setWallDrawType(null);
     setWallDraftPoints([]);
     wallDraftPointsRef.current = [];
+    wallDraftSegmentIdsRef.current = [];
     setWallDraftPointer(null);
-    setWallEditTarget(null);
-    setWallPolygonModal(null);
-    setWallPolygonSelections([]);
-    setWallPolygonCreateRoom(false);
     setScaleMode(false);
     setScaleDraft(null);
     setScaleDraftPointer(null);
@@ -936,23 +921,8 @@ const PlanView = ({ planId }: Props) => {
     setQuoteMode(false);
     setQuotePoints([]);
     setQuotePointer(null);
+    setScalePromptDismissed(false);
   }, [planId, planScale]);
-  useEffect(() => {
-    if (!planId) return;
-    if (planScale?.metersPerPixel) {
-      if (scaleNoticePlanRef.current === planId) scaleNoticePlanRef.current = null;
-      return;
-    }
-    if (scaleNoticePlanRef.current === planId) return;
-    scaleNoticePlanRef.current = planId;
-    toast.info(
-      t({
-        it: 'Imposta la scala premendo il tasto righello in alto nella barra degli oggetti.',
-        en: 'Set the scale using the ruler button at the top of the toolbar.'
-      }),
-      { duration: 4000 }
-    );
-  }, [planId, planScale?.metersPerPixel, t]);
   const scaleLabel = useMemo(() => {
     if (!planScale?.meters) return null;
     const unit = lang === 'it' ? 'ml' : 'm';
@@ -960,8 +930,26 @@ const PlanView = ({ planId }: Props) => {
   }, [formatNumber, lang, planScale?.meters]);
   const scaleLine = useMemo(() => {
     if (!showScaleLine || !planScale?.start || !planScale?.end) return null;
-    return { start: planScale.start, end: planScale.end, label: scaleLabel || undefined };
-  }, [planScale?.end, planScale?.start, scaleLabel, showScaleLine]);
+    const labelScale = Number(planScale?.labelScale);
+    const opacity = Number(planScale?.opacity);
+    const strokeWidth = Number(planScale?.strokeWidth);
+    return {
+      start: planScale.start,
+      end: planScale.end,
+      label: scaleLabel || undefined,
+      labelScale: Number.isFinite(labelScale) ? labelScale : 1,
+      opacity: Number.isFinite(opacity) ? opacity : 1,
+      strokeWidth: Number.isFinite(strokeWidth) ? strokeWidth : 1.2
+    };
+  }, [
+    planScale?.end,
+    planScale?.labelScale,
+    planScale?.opacity,
+    planScale?.start,
+    planScale?.strokeWidth,
+    scaleLabel,
+    showScaleLine
+  ]);
   const measurePreviewPoints = useMemo(() => {
     if (!measurePoints.length) return [];
     if (measurePointer && !measureFinished && !measureClosed) {
@@ -1386,11 +1374,41 @@ const PlanView = ({ planId }: Props) => {
     };
   }, []);
 
+  type HistorySnapshot = ReturnType<typeof toSnapshot> & {
+    printArea?: { x: number; y: number; width: number; height: number } | null;
+    links?: any[];
+  };
+
+  const [historyTick, setHistoryTick] = useState(0);
+  const historySnapshotRef = useRef<HistorySnapshot | null>(null);
+  const historyKeyRef = useRef('');
+  const undoStackRef = useRef<HistorySnapshot[]>([]);
+  const redoStackRef = useRef<HistorySnapshot[]>([]);
+  const historyLockRef = useRef(false);
+
+  const toHistorySnapshot = useCallback(
+    (p: any): HistorySnapshot => ({
+      ...toSnapshot(p),
+      printArea: (p as any)?.printArea ?? null,
+      links: Array.isArray((p as any)?.links) ? (p as any).links : []
+    }),
+    [toSnapshot]
+  );
+
+  const resetHistory = useCallback(() => {
+    historySnapshotRef.current = null;
+    historyKeyRef.current = '';
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setHistoryTick((x) => x + 1);
+  }, []);
+
   useEffect(() => {
     baselineSnapshotRef.current = null;
     entrySnapshotRef.current = null;
     touchedRef.current = false;
     setTouchedTick((x) => x + 1);
+    resetHistory();
   }, [planId]);
 
   useEffect(() => {
@@ -1404,6 +1422,7 @@ const PlanView = ({ planId }: Props) => {
     // Keep baseline aligned with background normalizations until the user edits.
     if (!baselineSnapshotRef.current || !touchedRef.current) baselineSnapshotRef.current = snap;
   }, [plan, toSnapshot]);
+
 
   const samePlanSnapshot = useCallback((
     current: {
@@ -1591,6 +1610,74 @@ const PlanView = ({ planId }: Props) => {
     [samePlanSnapshot]
   );
 
+  const applyHistorySnapshot = useCallback(
+    (snap: HistorySnapshot) => {
+      if (!planId) return;
+      historyLockRef.current = true;
+      historySnapshotRef.current = snap;
+      historyKeyRef.current = JSON.stringify(snap);
+      setFloorPlanContent(planId, {
+        ...snap,
+        printArea: snap.printArea ?? undefined,
+        scale: snap.scale,
+        objects: snap.objects,
+        views: snap.views,
+        rooms: snap.rooms,
+        links: snap.links,
+        racks: snap.racks,
+        rackItems: snap.rackItems,
+        rackLinks: snap.rackLinks
+      });
+      markTouched();
+      setHistoryTick((x) => x + 1);
+    },
+    [markTouched, planId, setFloorPlanContent]
+  );
+
+  const performUndo = useCallback(() => {
+    const current = historySnapshotRef.current;
+    const prev = undoStackRef.current.pop();
+    if (!prev || !current) return false;
+    redoStackRef.current.push(current);
+    applyHistorySnapshot(prev);
+    return true;
+  }, [applyHistorySnapshot]);
+
+  const performRedo = useCallback(() => {
+    const current = historySnapshotRef.current;
+    const next = redoStackRef.current.pop();
+    if (!next || !current) return false;
+    undoStackRef.current.push(current);
+    applyHistorySnapshot(next);
+    return true;
+  }, [applyHistorySnapshot]);
+
+  useEffect(() => {
+    if (!plan) return;
+    const snap = toHistorySnapshot(plan);
+    const nextKey = JSON.stringify(snap);
+    const prevKey = historyKeyRef.current;
+    const prev = historySnapshotRef.current;
+    if (!prev || !prevKey) {
+      historySnapshotRef.current = snap;
+      historyKeyRef.current = nextKey;
+      return;
+    }
+    if (historyLockRef.current) {
+      historySnapshotRef.current = snap;
+      historyKeyRef.current = nextKey;
+      historyLockRef.current = false;
+      return;
+    }
+    if (prevKey === nextKey) return;
+    undoStackRef.current.push(prev);
+    if (undoStackRef.current.length > 80) undoStackRef.current.shift();
+    redoStackRef.current = [];
+    historySnapshotRef.current = snap;
+    historyKeyRef.current = nextKey;
+    setHistoryTick((x) => x + 1);
+  }, [plan, toHistorySnapshot]);
+
   // Track plan state when the user enters it. Used for the navigation prompt.
   useEffect(() => {
     if (!plan) return;
@@ -1633,6 +1720,13 @@ const PlanView = ({ planId }: Props) => {
   );
 
   const hasUnsavedChanges = useMemo(() => getPlanUnsavedChanges(plan), [getPlanUnsavedChanges, plan]);
+  const { canUndo, canRedo } = useMemo(
+    () => ({
+      canUndo: undoStackRef.current.length > 0,
+      canRedo: redoStackRef.current.length > 0
+    }),
+    [historyTick]
+  );
 
   const hasLocalEdits = useMemo(() => {
     if (!plan) return false;
@@ -1681,6 +1775,7 @@ const PlanView = ({ planId }: Props) => {
       if (focusRoom) {
         clearSelection();
         setSelectedRoomId(focusRoom);
+        setSelectedRoomIds([focusRoom]);
         setHighlightRoom({ roomId: focusRoom, until: Date.now() + 3200 });
       }
       navigate(`/plan/${planId}`, { replace: true });
@@ -1834,114 +1929,8 @@ const PlanView = ({ planId }: Props) => {
   const contextIsCamera = contextObject?.type === 'camera';
   const contextIsWall = contextObject ? isWallType(contextObject.type) : false;
   const contextIsQuote = contextObject?.type === 'quote';
-  const wallContextMetrics = useMemo(() => {
-    if (!contextIsWall || !contextObject) return null;
-    const groupId = contextObject.wallGroupId ? String(contextObject.wallGroupId) : '';
-    const group = groupId ? getWallGroup(groupId) : null;
-    const points = group?.points || contextObject.points || [];
-    if (points.length < 2) return null;
-    const unit = lang === 'it' ? 'ml' : 'm';
-    const rawLengthPx =
-      typeof contextMenu?.wallSegmentLengthPx === 'number'
-        ? contextMenu.wallSegmentLengthPx
-        : computePolylineLength(points);
-    const scaleMissing = !metersPerPixel;
-    const lengthLabel = scaleMissing
-      ? null
-      : `${formatNumber(rawLengthPx * metersPerPixel)} ${unit}`;
-    const isClosed =
-      points.length >= 3 &&
-      points[0].x === points[points.length - 1].x &&
-      points[0].y === points[points.length - 1].y;
-    const cornerPoints = getWallCornerPoints(points);
-    const segments = points.length >= 2
-      ? points.slice(0, -1).map((point, index) => {
-          const next = points[index + 1];
-          const lengthPx = Math.hypot(next.x - point.x, next.y - point.y);
-          const aLabel = formatCornerLabel(index);
-          const bLabel = isClosed && index === points.length - 2 ? formatCornerLabel(0) : formatCornerLabel(index + 1);
-          return {
-            label: `${aLabel}-${bLabel}`,
-            lengthLabel: scaleMissing ? null : `${formatNumber(lengthPx * metersPerPixel)} ${unit}`
-          };
-        })
-      : [];
-    const cornerLabels = cornerPoints.map((_, index) => formatCornerLabel(index));
-    if (!isClosed) {
-      return { lengthLabel, scaleMissing, cornerLabels };
-    }
-    const perimeterPx = computePolylineLength(points);
-    const perimeterLabel = scaleMissing ? null : `${formatNumber(perimeterPx * metersPerPixel)} ${unit}`;
-    const areaPx = computePolygonArea(points);
-    const areaLabel = scaleMissing
-      ? null
-      : `${formatNumber(areaPx * metersPerPixel * metersPerPixel)} ${lang === 'it' ? 'mq' : 'sqm'}`;
-    return { lengthLabel, perimeterLabel, areaLabel, segments, cornerLabels, scaleMissing };
-  }, [
-    computePolygonArea,
-    computePolylineLength,
-    contextIsWall,
-    contextMenu?.wallSegmentLengthPx,
-    contextObject,
-    formatNumber,
-    formatCornerLabel,
-    getWallGroup,
-    getWallCornerPoints,
-    lang,
-    metersPerPixel
-  ]);
-  const wallPolygonMetrics = useMemo(() => {
-    if (!wallPolygonModal) return null;
-    const points = wallPolygonModal.points || [];
-    if (points.length < 3) return null;
-    const perimeterPx = computePolylineLength([...points, points[0]]);
-    const areaPx = computePolygonArea(points);
-    const lengthUnit = metersPerPixel ? (lang === 'it' ? 'ml' : 'm') : 'px';
-    const areaUnit = metersPerPixel ? (lang === 'it' ? 'mq' : 'sqm') : 'px^2';
-    const perimeterLabel = metersPerPixel
-      ? `${formatNumber(perimeterPx * metersPerPixel)} ${lengthUnit}`
-      : `${formatNumber(perimeterPx)} ${lengthUnit}`;
-    const areaLabel = metersPerPixel
-      ? `${formatNumber(areaPx * metersPerPixel * metersPerPixel)} ${areaUnit}`
-      : `${formatNumber(areaPx)} ${areaUnit}`;
-    return { perimeterLabel, areaLabel, lengthUnit, areaUnit };
-  }, [computePolygonArea, computePolylineLength, formatNumber, lang, metersPerPixel, wallPolygonModal]);
-  const wallPolygonPreview = useMemo(() => {
-    if (!wallPolygonModal) return null;
-    const points = wallPolygonModal.points || [];
-    if (points.length < 3) return null;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    points.forEach((point) => {
-      minX = Math.min(minX, point.x);
-      minY = Math.min(minY, point.y);
-      maxX = Math.max(maxX, point.x);
-      maxY = Math.max(maxY, point.y);
-    });
-    const width = 260;
-    const height = 160;
-    const padding = 16;
-    const dx = Math.max(1, maxX - minX);
-    const dy = Math.max(1, maxY - minY);
-    const scale = Math.min((width - padding * 2) / dx, (height - padding * 2) / dy);
-    const scaled = points.map((point, index) => ({
-      x: padding + (point.x - minX) * scale,
-      y: padding + (point.y - minY) * scale,
-      label: formatCornerLabel(index)
-    }));
-    const path = scaled.map((point) => `${point.x},${point.y}`).join(' ');
-    const segmentLabels = scaled.map((point, index) => {
-      const next = scaled[(index + 1) % scaled.length];
-      return {
-        x: (point.x + next.x) / 2,
-        y: (point.y + next.y) / 2,
-        label: `${formatCornerLabel(index)}-${formatCornerLabel((index + 1) % scaled.length)}`
-      };
-    });
-    return { width, height, points: scaled, path, segmentLabels };
-  }, [formatCornerLabel, wallPolygonModal]);
+  const contextIsWifi = contextObject?.type === 'wifi';
+  const contextWifiRangeOn = contextIsWifi ? (contextObject as any)?.wifiShowRange !== false : false;
   const roomModalInitialSurfaceSqm = useMemo(() => {
     if (!roomModal || roomModal.mode !== 'create') return undefined;
     if (roomModal.kind === 'rect' && roomModal.rect) {
@@ -1958,12 +1947,6 @@ const PlanView = ({ planId }: Props) => {
     if (!first) return defaultWallTypeId;
     return roomWallTypeSelections.every((value) => value === first) ? first : '';
   }, [defaultWallTypeId, roomWallTypeSelections]);
-  const wallPolygonAllValue = useMemo(() => {
-    if (!wallPolygonSelections.length) return defaultWallTypeId;
-    const first = wallPolygonSelections[0];
-    if (!first) return defaultWallTypeId;
-    return wallPolygonSelections.every((value) => value === first) ? first : '';
-  }, [defaultWallTypeId, wallPolygonSelections]);
   const selectionAllWalls = useMemo(() => {
     if (!renderPlan) return false;
     if (!selectedObjectIds?.length) return false;
@@ -2003,6 +1986,54 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     confirmDeleteRef.current = confirmDelete;
   }, [confirmDelete]);
+  useEffect(() => {
+    pendingRoomDeletesRef.current = pendingRoomDeletes;
+  }, [pendingRoomDeletes]);
+
+  useEffect(() => {
+    if (!wallQuickMenu) return;
+    const selectedIds = selectedObjectIds || [];
+    const stillSelected =
+      selectedObjectId === wallQuickMenu.id || (selectedIds.length ? selectedIds.includes(wallQuickMenu.id) : false);
+    if (!stillSelected) setWallQuickMenu(null);
+  }, [selectedObjectId, selectedObjectIds, wallQuickMenu]);
+
+  useEffect(() => {
+    if (wallQuickMenu) return;
+    setWallTypeMenu(null);
+  }, [wallQuickMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    setWallQuickMenu(null);
+    setWallTypeMenu(null);
+    if (contextMenu.kind === 'map') {
+      setMapSubmenu(null);
+    }
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!toolMode) return;
+    setWallQuickMenu(null);
+    setWallTypeMenu(null);
+  }, [toolMode]);
+
+  const getSubmenuStyle = useCallback(
+    (submenuWidth: number) => {
+      if (!contextMenu) return { top: 0, left: 0 };
+      const gap = 8;
+      const menuWidth = contextMenuRef.current?.offsetWidth || 224;
+      let left = contextMenu.x + menuWidth + gap;
+      if (typeof window !== 'undefined') {
+        if (left + submenuWidth > window.innerWidth - 12) {
+          const alt = contextMenu.x - submenuWidth - gap;
+          if (alt >= 12) left = alt;
+        }
+      }
+      return { top: contextMenu.y, left };
+    },
+    [contextMenu]
+  );
 
   useLayoutEffect(() => {
     if (!contextMenu) return;
@@ -2063,10 +2094,52 @@ const PlanView = ({ planId }: Props) => {
   }, [forceDefaultView, loadViewport, location.key, planId, renderPlan, saveViewport, selectedRevisionId, setPan, setZoom]);
 
   useEffect(() => {
+    if (!renderPlan) return;
+    const key = `${planId}:${selectedRevisionId || 'present'}`;
+    if (autoCenterRef.current === key) return;
+    const timer = window.setTimeout(() => {
+      const el = mapRef.current;
+      const stage = canvasStageRef.current;
+      if (!el || !stage?.fitView) return;
+      const cw = el.clientWidth;
+      const ch = el.clientHeight;
+      const width = Number(renderPlan.width || 0);
+      const height = Number(renderPlan.height || 0);
+      const z = Number(zoom);
+      const px = Number(pan?.x);
+      const py = Number(pan?.y);
+      let shouldFit = false;
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        shouldFit = true;
+      } else if (!Number.isFinite(z) || z <= 0 || !Number.isFinite(px) || !Number.isFinite(py) || cw <= 0 || ch <= 0) {
+        shouldFit = true;
+      } else {
+        const viewMinX = (-px) / z;
+        const viewMinY = (-py) / z;
+        const viewMaxX = (cw - px) / z;
+        const viewMaxY = (ch - py) / z;
+        const interW = Math.max(0, Math.min(width, viewMaxX) - Math.max(0, viewMinX));
+        const interH = Math.max(0, Math.min(height, viewMaxY) - Math.max(0, viewMinY));
+        const visibleRatio = (interW * interH) / (width * height);
+        shouldFit = !Number.isFinite(visibleRatio) || visibleRatio < 0.2;
+      }
+      if (shouldFit) {
+        stage.fitView();
+      }
+      autoCenterRef.current = key;
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [pan?.x, pan?.y, planId, renderPlan, renderPlan?.height, renderPlan?.width, selectedRevisionId, zoom]);
+
+  useEffect(() => {
     // entering/leaving read-only mode clears pending placement and context menu
     setPendingType(null);
     setContextMenu(null);
+    setWallQuickMenu(null);
+    setWallTypeMenu(null);
     clearSelection();
+    setSelectedRoomId(undefined);
+    setSelectedRoomIds([]);
     setSelectedLinkId(null);
     setLinkFromId(null);
   }, [isReadOnly]);
@@ -2113,7 +2186,7 @@ const PlanView = ({ planId }: Props) => {
             if (linkCreateMode === 'cable') {
               setCableModal({ mode: 'create', fromId: linkFromId, toId: id });
             } else {
-              addLink((planRef.current as any).id, linkFromId, id, { kind: 'arrow' });
+              addLink((planRef.current as any).id, linkFromId, id, { kind: 'arrow', arrow: 'none' });
               postAuditEvent({ event: 'link_create', scopeType: 'plan', scopeId: (planRef.current as any).id, details: { fromId: linkFromId, toId: id } });
               push(t({ it: 'Collegamento creato', en: 'Link created' }), 'success');
             }
@@ -2123,13 +2196,16 @@ const PlanView = ({ planId }: Props) => {
       if (!id) {
         clearSelection();
         setSelectedRoomId(undefined);
+        setSelectedRoomIds([]);
         setSelectedLinkId(null);
       } else if (options?.multi) {
         setSelectedRoomId(undefined);
+        setSelectedRoomIds([]);
         setSelectedLinkId(null);
         toggleSelectedObject(id);
       } else {
         setSelectedRoomId(undefined);
+        setSelectedRoomIds([]);
         setSelectedLinkId(null);
         const currentSelectedIds = selectedObjectIdsRef.current;
         const currentSelectedId = selectedObjectIdRef.current;
@@ -2172,6 +2248,25 @@ const PlanView = ({ planId }: Props) => {
     []
   );
 
+  const handleWallQuickMenu = useCallback(
+    ({ id, clientX, clientY, world }: { id: string; clientX: number; clientY: number; world: { x: number; y: number } }) => {
+      if (isReadOnlyRef.current) return;
+      const selectedIds = selectedObjectIdsRef.current || [];
+      if (selectedIds.length > 1 && selectedIds.includes(id)) {
+        setWallQuickMenu(null);
+        setWallTypeMenu(null);
+        return;
+      }
+      setWallQuickMenu({ id, x: clientX, y: clientY, world });
+      setWallTypeMenu(null);
+    },
+    []
+  );
+
+  const toggleMapSubmenu = useCallback((section: typeof mapSubmenu) => {
+    setMapSubmenu((prev) => (prev === section ? null : section));
+  }, []);
+
   const handleLinkContextMenu = useCallback(
     ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) => {
       if (isRackLinkId(id)) return;
@@ -2186,20 +2281,80 @@ const PlanView = ({ planId }: Props) => {
     []
   );
 
+  const handleScaleContextMenu = useCallback(
+    ({ clientX, clientY }: { clientX: number; clientY: number }) => {
+      if (!planScale?.start || !planScale?.end) return;
+      setContextMenu({ kind: 'scale', x: clientX, y: clientY });
+    },
+    [planScale?.end, planScale?.start]
+  );
+
+  const handleScaleDoubleClick = useCallback(() => {
+    if (!planScale?.start || !planScale?.end || isReadOnly) return;
+    setContextMenu(null);
+    setScaleActionsOpen(true);
+  }, [isReadOnly, planScale?.end, planScale?.start]);
+
+  const handleScaleMove = useCallback(
+    (payload: { start: { x: number; y: number }; end: { x: number; y: number } }) => {
+      if (!plan || isReadOnly) return;
+      if (!planScale?.meters || !planScale?.metersPerPixel) return;
+      markTouched();
+      updateFloorPlan(plan.id, {
+        scale: {
+          ...(planScale as any),
+          start: payload.start,
+          end: payload.end,
+          meters: planScale.meters,
+          metersPerPixel: planScale.metersPerPixel
+        }
+      });
+    },
+    [isReadOnly, markTouched, plan, planScale?.meters, planScale?.metersPerPixel, updateFloorPlan]
+  );
+
+  const openScaleEdit = useCallback(() => {
+    if (!planScale?.start || !planScale?.end || isReadOnly) return;
+    const distance = Math.hypot(planScale.end.x - planScale.start.x, planScale.end.y - planScale.start.y);
+    if (!Number.isFinite(distance) || distance <= 0) return;
+    setScaleMode(false);
+    setScaleDraft(null);
+    setScaleDraftPointer(null);
+    setScaleModal({ start: planScale.start, end: planScale.end, distance });
+    const meters = Number(planScale.meters);
+    setScaleMetersInput(Number.isFinite(meters) ? formatNumber(meters) : '');
+  }, [formatNumber, isReadOnly, planScale?.end, planScale?.meters, planScale?.start]);
+
   const handleMapContextMenu = useCallback(
     ({ clientX, clientY, worldX, worldY }: { clientX: number; clientY: number; worldX: number; worldY: number }) => {
       if (toolMode) return;
       const roomId = getRoomIdAt((renderPlan as FloorPlan | undefined)?.rooms, worldX, worldY);
       if (roomId) {
+        if (!effectiveVisibleLayerIds.includes('rooms')) {
+          const now = Date.now();
+          if (now - roomLayerNoticeRef.current > 1200) {
+            roomLayerNoticeRef.current = now;
+            push(
+              t({
+                it: 'La stanza è nascosta: abilita il layer "Stanze" per interagire.',
+                en: 'The room is hidden: enable the "Rooms" layer to interact.'
+              }),
+              'info'
+            );
+          }
+          setContextMenu({ kind: 'map', x: clientX, y: clientY, worldX, worldY });
+          return;
+        }
         clearSelection();
         setSelectedLinkId(null);
         setSelectedRoomId(roomId);
+        setSelectedRoomIds([roomId]);
         setContextMenu({ kind: 'room', id: roomId, x: clientX, y: clientY });
         return;
       }
-      setContextMenu({ kind: 'map', x: clientX, y: clientY, worldX, worldY, addOpen: false, roomOpen: false });
+      setContextMenu({ kind: 'map', x: clientX, y: clientY, worldX, worldY });
     },
-    [clearSelection, renderPlan, setSelectedLinkId, setSelectedRoomId, toolMode]
+    [clearSelection, effectiveVisibleLayerIds, push, renderPlan, setSelectedLinkId, setSelectedRoomId, setSelectedRoomIds, t, toolMode]
   );
 
   const applyView = useCallback((view: FloorPlanView) => {
@@ -2353,6 +2508,122 @@ const PlanView = ({ planId }: Props) => {
     ];
   };
 
+  const roomContextMetrics = useMemo(() => {
+    if (!contextMenu || contextMenu.kind !== 'room' || !renderPlan) return null;
+    const room = (renderPlan.rooms || []).find((r) => r.id === contextMenu.id);
+    if (!room) return null;
+    const points = getRoomPolygon(room);
+    if (points.length < 2) return null;
+    const unit = metersPerPixel ? (lang === 'it' ? 'ml' : 'm') : 'px';
+    const areaUnit = metersPerPixel ? (lang === 'it' ? 'mq' : 'sqm') : 'px^2';
+    const scaleMissing = !metersPerPixel;
+    const segments = points.map((start: { x: number; y: number }, index: number) => {
+      const end = points[(index + 1) % points.length];
+      const lengthPx = Math.hypot(end.x - start.x, end.y - start.y);
+      const label = `${formatCornerLabel(index)}-${formatCornerLabel((index + 1) % points.length)}`;
+      const lengthLabel = scaleMissing ? null : `${formatNumber(lengthPx * metersPerPixel)} ${unit}`;
+      return { label, lengthPx, lengthLabel };
+    });
+    const perimeterPx = computePolylineLength([...points, points[0]]);
+    const areaPx = computePolygonArea(points);
+    const perimeterLabel = scaleMissing ? null : `${formatNumber(perimeterPx * metersPerPixel)} ${unit}`;
+    const areaLabel = scaleMissing
+      ? null
+      : `${formatNumber(areaPx * metersPerPixel * metersPerPixel)} ${areaUnit}`;
+    return { segments, perimeterLabel, areaLabel, scaleMissing };
+  }, [
+    computePolygonArea,
+    computePolylineLength,
+    contextMenu,
+    formatCornerLabel,
+    formatNumber,
+    getRoomPolygon,
+    lang,
+    metersPerPixel,
+    renderPlan
+  ]);
+
+  const roomModalMetrics = useMemo(() => {
+    if (!roomModal) return null;
+    let points: { x: number; y: number }[] = [];
+    if (roomModal.mode === 'create') {
+      if (roomModal.kind === 'rect' && roomModal.rect) {
+        const { x, y, width, height } = roomModal.rect;
+        points = [
+          { x, y },
+          { x: x + width, y },
+          { x: x + width, y: y + height },
+          { x, y: y + height }
+        ];
+      } else if (roomModal.kind === 'poly') {
+        points = roomModal.points || [];
+      }
+    } else if (roomModal.mode === 'edit' && renderPlan) {
+      const room = (renderPlan.rooms || []).find((r) => r.id === roomModal.roomId);
+      if (room) points = getRoomPolygon(room);
+    }
+    if (points.length < 2) return null;
+    const unit = metersPerPixel ? (lang === 'it' ? 'ml' : 'm') : 'px';
+    const areaUnit = metersPerPixel ? (lang === 'it' ? 'mq' : 'sqm') : 'px^2';
+    const scaleMissing = !metersPerPixel;
+    const segments = points.map((start, index) => {
+      const end = points[(index + 1) % points.length];
+      const lengthPx = Math.hypot(end.x - start.x, end.y - start.y);
+      const label = `${formatCornerLabel(index)}-${formatCornerLabel((index + 1) % points.length)}`;
+      const lengthLabel = scaleMissing ? null : `${formatNumber(lengthPx * metersPerPixel)} ${unit}`;
+      return { label, lengthLabel };
+    });
+    const perimeterPx = computePolylineLength([...points, points[0]]);
+    const areaPx = computePolygonArea(points);
+    const perimeterLabel = scaleMissing ? null : `${formatNumber(perimeterPx * metersPerPixel)} ${unit}`;
+    const areaLabel = scaleMissing
+      ? null
+      : `${formatNumber(areaPx * metersPerPixel * metersPerPixel)} ${areaUnit}`;
+    return { segments, perimeterLabel, areaLabel, scaleMissing };
+  }, [
+    computePolygonArea,
+    computePolylineLength,
+    formatCornerLabel,
+    formatNumber,
+    getRoomPolygon,
+    lang,
+    metersPerPixel,
+    renderPlan,
+    roomModal
+  ]);
+  const roomModalPreview = useMemo(() => {
+    if (!roomModal) return null;
+    let points: { x: number; y: number }[] = [];
+    if (roomModal.mode === 'create') {
+      if (roomModal.kind === 'rect' && roomModal.rect) {
+        const { x, y, width, height } = roomModal.rect;
+        points = [
+          { x, y },
+          { x: x + width, y },
+          { x: x + width, y: y + height },
+          { x, y: y + height }
+        ];
+      } else if (roomModal.kind === 'poly') {
+        points = roomModal.points || [];
+      }
+    } else if (roomModal.mode === 'edit' && renderPlan) {
+      const room = (renderPlan.rooms || []).find((r) => r.id === roomModal.roomId);
+      if (room) points = getRoomPolygon(room);
+    }
+    return buildRoomPreview(points);
+  }, [buildRoomPreview, getRoomPolygon, renderPlan, roomModal]);
+  const roomHasWalls = useMemo(() => {
+    if (!roomModal || roomModal.mode !== 'edit' || !renderPlan) return false;
+    return (renderPlan.objects || []).some(
+      (obj) => isWallType(obj.type) && (obj as any).wallGroupId === roomModal.roomId
+    );
+  }, [isWallType, renderPlan, roomModal]);
+  const roomWallPreview = useMemo(() => {
+    if (!roomWallTypeModal) return null;
+    const points = (roomWallTypeModal.segments || []).map((segment) => segment.start);
+    return buildRoomPreview(points);
+  }, [buildRoomPreview, roomWallTypeModal]);
+
   const segmentsIntersect = (
     a: { x: number; y: number },
     b: { x: number; y: number },
@@ -2438,6 +2709,16 @@ const PlanView = ({ planId }: Props) => {
     setOverlapNotice(message);
   }, [t]);
 
+  const resetToolClickHistory = useCallback(() => {
+    toolClickHistoryRef.current = [];
+  }, []);
+
+  const dismissScaleToast = useCallback(() => {
+    if (scaleToastIdRef.current == null) return;
+    toast.dismiss(scaleToastIdRef.current);
+    scaleToastIdRef.current = null;
+  }, []);
+
   const computeRoomReassignments = (rooms: any[] | undefined, objects: any[]) => {
     const updates: Record<string, string | undefined> = {};
     for (const obj of objects) {
@@ -2450,8 +2731,24 @@ const PlanView = ({ planId }: Props) => {
     return updates;
   };
 
+  const resolveAxisLockedPoint = useCallback(
+    (point: { x: number; y: number }, anchor: { x: number; y: number } | null, options?: { shiftKey?: boolean }) => {
+      if (!anchor) return point;
+      if (options?.shiftKey) return point;
+      const dx = point.x - anchor.x;
+      const dy = point.y - anchor.y;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        return { x: point.x, y: anchor.y };
+      }
+      return { x: anchor.x, y: point.y };
+    },
+    []
+  );
+
   const startScaleMode = useCallback(() => {
     if (isReadOnly) return;
+    dismissScaleToast();
+    resetToolClickHistory();
     setScaleMode(true);
     setScaleDraft({});
     setScaleDraftPointer(null);
@@ -2464,8 +2761,14 @@ const PlanView = ({ planId }: Props) => {
     setQuotePoints([]);
     setQuotePointer(null);
     setPendingType(null);
-    push(t({ it: 'Seleziona due punti per impostare la scala.', en: 'Select two points to set the scale.' }), 'info');
-  }, [isReadOnly, push, t]);
+    scaleToastIdRef.current = toast.info(
+      t({
+        it: 'Scala: clicca due punti. La linea resta orizzontale/verticale di default, tieni Shift per renderla libera.',
+        en: 'Scale: click two points. The line snaps horizontal/vertical by default; hold Shift to make it free.'
+      }),
+      { duration: Infinity }
+    );
+  }, [dismissScaleToast, isReadOnly, resetToolClickHistory, t]);
 
   const cancelScaleMode = useCallback(() => {
     if (!scaleMode) return;
@@ -2473,11 +2776,13 @@ const PlanView = ({ planId }: Props) => {
     setScaleDraft(null);
     setScaleDraftPointer(null);
     setScaleMetersInput('');
+    dismissScaleToast();
+    resetToolClickHistory();
     push(t({ it: 'Impostazione scala annullata', en: 'Scale setup cancelled' }), 'info');
-  }, [push, scaleMode, t]);
+  }, [dismissScaleToast, push, resetToolClickHistory, scaleMode, t]);
 
   const handleScalePoint = useCallback(
-    (point: { x: number; y: number }) => {
+    (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
       if (!scaleMode) return;
       if (!scaleDraft?.start) {
         setScaleDraft({ start: point });
@@ -2485,15 +2790,16 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
       const start = scaleDraft.start;
-      const distance = Math.hypot(point.x - start.x, point.y - start.y);
+      const resolved = resolveAxisLockedPoint(point, start, options);
+      const distance = Math.hypot(resolved.x - start.x, resolved.y - start.y);
       if (!Number.isFinite(distance) || distance <= 0.0001) return;
-      setScaleDraft({ start, end: point });
+      setScaleDraft({ start, end: resolved });
       setScaleDraftPointer(null);
       setScaleMode(false);
       setScaleMetersInput('');
-      setScaleModal({ start, end: point, distance });
+      setScaleModal({ start, end: resolved, distance });
     },
-    [scaleDraft, scaleMode]
+    [resolveAxisLockedPoint, scaleDraft, scaleMode]
   );
 
   const applyScale = useCallback(() => {
@@ -2509,13 +2815,19 @@ const PlanView = ({ planId }: Props) => {
       push(t({ it: 'Scala non valida.', en: 'Invalid scale.' }), 'danger');
       return;
     }
+    const labelScaleValue = Number(planScale?.labelScale);
+    const opacityValue = Number(planScale?.opacity);
+    const strokeWidthValue = Number(planScale?.strokeWidth);
     markTouched();
     updateFloorPlan(plan.id, {
       scale: {
         start: scaleModal.start,
         end: scaleModal.end,
         meters,
-        metersPerPixel
+        metersPerPixel,
+        labelScale: Number.isFinite(labelScaleValue) ? labelScaleValue : 1,
+        opacity: Number.isFinite(opacityValue) ? opacityValue : 1,
+        strokeWidth: Number.isFinite(strokeWidthValue) ? strokeWidthValue : 1.2
       }
     });
     if (Array.isArray(plan.rooms) && plan.rooms.length) {
@@ -2524,6 +2836,7 @@ const PlanView = ({ planId }: Props) => {
         updateRoom(plan.id, room.id, { surfaceSqm });
       });
     }
+    dismissScaleToast();
     push(
       t({
         it: 'Scala impostata: superfici delle stanze aggiornate automaticamente e non modificabili manualmente.',
@@ -2536,9 +2849,24 @@ const PlanView = ({ planId }: Props) => {
     setShowScaleLine(true);
     setScaleModal(null);
     push(t({ it: 'Scala impostata correttamente', en: 'Scale saved successfully' }), 'success');
-  }, [computeRoomSurfaceSqm, isReadOnly, markTouched, plan, push, scaleMetersInput, scaleModal, t, updateFloorPlan, updateRoom]);
+  }, [
+    computeRoomSurfaceSqm,
+    dismissScaleToast,
+    isReadOnly,
+    markTouched,
+    plan,
+    planScale?.labelScale,
+    planScale?.opacity,
+    planScale?.strokeWidth,
+    push,
+    scaleMetersInput,
+    scaleModal,
+    t,
+    updateFloorPlan,
+    updateRoom
+  ]);
 
-  const clearScale = useCallback(() => {
+  const clearScaleNow = useCallback(() => {
     if (!plan || isReadOnly) return;
     markTouched();
     updateFloorPlan(plan.id, { scale: undefined });
@@ -2548,27 +2876,36 @@ const PlanView = ({ planId }: Props) => {
     setScaleMetersInput('');
     setShowScaleLine(false);
     setScaleModal(null);
+    dismissScaleToast();
     push(t({ it: 'Scala rimossa', en: 'Scale cleared' }), 'success');
-  }, [isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
+  }, [dismissScaleToast, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
+
+  const requestClearScale = useCallback(() => {
+    if (!plan || isReadOnly) return;
+    setClearScaleConfirmOpen(true);
+  }, [isReadOnly, plan]);
 
   const closeScaleModal = useCallback(() => {
     setScaleModal(null);
     setScaleDraft(null);
     setScaleDraftPointer(null);
     setScaleMetersInput('');
-  }, []);
+    dismissScaleToast();
+  }, [dismissScaleToast]);
 
   const startWallDraw = useCallback(
     (typeId?: string) => {
       if (isReadOnly) return;
+      dismissScaleToast();
+      resetToolClickHistory();
       const resolved = (typeId && isWallType(typeId) ? typeId : wallDrawType) || wallTypeDefs[0]?.id || DEFAULT_WALL_TYPES[0];
       if (!resolved) return;
       setWallDrawType(resolved);
       setWallDrawMode(true);
       setWallDraftPoints([]);
       wallDraftPointsRef.current = [];
+      wallDraftSegmentIdsRef.current = [];
       setWallDraftPointer(null);
-      setWallEditTarget(null);
       setRoomDrawMode(null);
       setScaleMode(false);
       setMeasureMode(false);
@@ -2576,83 +2913,76 @@ const PlanView = ({ planId }: Props) => {
       setQuotePoints([]);
       setQuotePointer(null);
       setPendingType(null);
-      toast.info(
-        t({
-          it: 'Disegno muro: clicca per aggiungere angoli. ESC elimina l’ultimo segmento. Se non li vedi, abilita il layer Mura.',
-          en: 'Wall drawing: click to add corners. ESC removes the last segment. If you cannot see them, enable the Walls layer.'
-        }),
-        { duration: 5000 }
+      if (wallToastIdRef.current != null) {
+        toast.dismiss(wallToastIdRef.current);
+      }
+      wallToastIdRef.current = toast.info(
+        lang === 'it' ? (
+          <span>
+            Disegno muro: clicca per aggiungere angoli. <strong>Tasto destro</strong> o <strong>Invio</strong> per terminare, ESC elimina l’ultimo segmento. Se non li vedi, abilita il layer Mura.
+          </span>
+        ) : (
+          <span>
+            Wall drawing: click to add corners. <strong>Right click</strong> or <strong>Enter</strong> to finish, ESC removes the last segment. If you cannot see them, enable the Walls layer.
+          </span>
+        ),
+        { duration: Infinity }
       );
     },
-    [isReadOnly, isWallType, measureMode, scaleMode, t, wallDrawType, wallTypeDefs]
+    [dismissScaleToast, isReadOnly, isWallType, lang, resetToolClickHistory, wallDrawType, wallTypeDefs]
   );
 
   const finishWallDraw = useCallback(
-    (options?: { cancel?: boolean; points?: { x: number; y: number }[] }) => {
-      if (!wallDrawMode && !options?.points) return;
-      const points = options?.points || wallDraftPointsRef.current;
-      const isClosedPolygon =
-        points.length >= 4 &&
-        points[0].x === points[points.length - 1].x &&
-        points[0].y === points[points.length - 1].y;
-      if (!options?.cancel && isClosedPolygon) {
-        openWallPolygonModal(points, wallEditTarget?.id);
-        return;
-      }
-      const editing = wallEditTarget;
+    (options?: { cancel?: boolean }) => {
+      if (!wallDrawMode) return;
       setWallDrawMode(false);
       setWallDraftPoints([]);
       wallDraftPointsRef.current = [];
+      wallDraftSegmentIdsRef.current = [];
       setWallDraftPointer(null);
-      setWallEditTarget(null);
-      if (options?.cancel || points.length < 2 || !renderPlan) {
-        if (!options?.cancel && points.length) {
-          push(t({ it: 'Muro annullato', en: 'Wall cancelled' }), 'info');
-        }
-        return;
+      resetToolClickHistory();
+      if (wallToastIdRef.current != null) {
+        toast.dismiss(wallToastIdRef.current);
+        wallToastIdRef.current = null;
       }
-      if (editing) {
-        markTouched();
-        updateObject(editing.id, { points });
-        push(t({ it: 'Muro aggiornato', en: 'Wall updated' }), 'success');
-        return;
+      if (options?.cancel) {
+        push(t({ it: 'Disegno muro annullato', en: 'Wall drawing cancelled' }), 'info');
       }
-      const typeId = (wallDrawType && isWallType(wallDrawType) ? wallDrawType : wallTypeDefs[0]?.id) || DEFAULT_WALL_TYPES[0];
-      if (!typeId) return;
-      const label = getTypeLabel(typeId);
-      const start = points[0];
-      markTouched();
-      const id = addObject(
-        renderPlan.id,
-        typeId,
-        label,
-        undefined,
-        start.x,
-        start.y,
-        1,
-        inferDefaultLayerIds(typeId, layerIdSet),
-        { points, strokeColor: getWallTypeColor(typeId), opacity: 1 }
-      );
-      lastInsertedRef.current = { id, name: label };
-      push(t({ it: 'Muro creato', en: 'Wall created' }), 'success');
     },
-    [
-      addObject,
-      getTypeLabel,
-      inferDefaultLayerIds,
-      isWallType,
-      layerIdSet,
-      markTouched,
-      openWallPolygonModal,
-      push,
-      renderPlan,
-      t,
-      updateObject,
-      wallDrawMode,
-      wallEditTarget,
-      wallDrawType,
-      wallTypeDefs
-    ]
+    [push, resetToolClickHistory, t, wallDrawMode]
+  );
+
+  const addWallSegment = useCallback(
+    (payload: {
+      start: { x: number; y: number };
+      end: { x: number; y: number };
+      typeId: string;
+      label: string;
+      layerIds?: string[];
+      strokeColor?: string;
+      opacity?: number;
+      strokeWidth?: number;
+    }) => {
+      if (!renderPlan) return null;
+      const layerIds = payload.layerIds || inferDefaultLayerIds(payload.typeId, layerIdSet);
+      return addObject(
+        renderPlan.id,
+        payload.typeId,
+        payload.label,
+        undefined,
+        payload.start.x,
+        payload.start.y,
+        1,
+        layerIds,
+        {
+          points: [payload.start, payload.end],
+          strokeColor: payload.strokeColor || getWallTypeColor(payload.typeId),
+          opacity: Number.isFinite(payload.opacity) ? payload.opacity : 1,
+          strokeWidth: Number.isFinite(payload.strokeWidth) ? payload.strokeWidth : 1
+        }
+      );
+    },
+    [addObject, getWallTypeColor, inferDefaultLayerIds, layerIdSet, renderPlan]
   );
 
   const wallSnapPoints = useMemo(() => {
@@ -2671,35 +3001,6 @@ const PlanView = ({ planId }: Props) => {
     return out;
   }, [isWallType, renderPlan]);
 
-  const findWallEndpointMatch = useCallback(
-    (point: { x: number; y: number }) => {
-      if (!renderPlan) return null;
-      const threshold = 12 / Math.max(0.2, zoom || 1);
-      let best: { id: string; points: { x: number; y: number }[]; useStart: boolean } | null = null;
-      let bestDist = Infinity;
-      for (const obj of renderPlan.objects || []) {
-        if (!isWallType(obj.type)) continue;
-        const pts = obj.points || [];
-        if (pts.length < 2) continue;
-        const start = pts[0];
-        const end = pts[pts.length - 1];
-        if (pts.length >= 3 && start.x === end.x && start.y === end.y) continue;
-        const distStart = Math.hypot(point.x - start.x, point.y - start.y);
-        if (distStart <= threshold && distStart < bestDist) {
-          best = { id: obj.id, points: pts, useStart: true };
-          bestDist = distStart;
-        }
-        const distEnd = Math.hypot(point.x - end.x, point.y - end.y);
-        if (distEnd <= threshold && distEnd < bestDist) {
-          best = { id: obj.id, points: pts, useStart: false };
-          bestDist = distEnd;
-        }
-      }
-      return best;
-    },
-    [isWallType, renderPlan, zoom]
-  );
-
   const resolveWallPoint = useCallback(
     (point: { x: number; y: number }, options?: { shiftKey?: boolean; avoidPoint?: { x: number; y: number } | null; avoidDistance?: number }) => {
       const anchor = wallDraftPointsRef.current.length
@@ -2708,7 +3009,7 @@ const PlanView = ({ planId }: Props) => {
       const closeThreshold = 12 / Math.max(0.2, zoom || 1);
       let axisLock: 'x' | 'y' | null = null;
       let next = { ...point };
-      if (options?.shiftKey && anchor) {
+      if (!options?.shiftKey && anchor) {
         const dx = point.x - anchor.x;
         const dy = point.y - anchor.y;
         if (Math.abs(dx) >= Math.abs(dy)) {
@@ -2740,6 +3041,81 @@ const PlanView = ({ planId }: Props) => {
     [wallSnapPoints, zoom]
   );
 
+  const splitWallAtPoint = useCallback(
+    (payload: { id: string; point?: { x: number; y: number } }) => {
+      if (isReadOnly || !renderPlan) return;
+      const wall = renderPlan.objects.find((obj) => obj.id === payload.id);
+      if (!wall || !isWallType(wall.type)) return;
+      const pts = wall.points || [];
+      if (pts.length < 2) return;
+      const start = pts[0];
+      const end = pts[pts.length - 1];
+      const fallbackPoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+      const rawPoint = payload.point && Number.isFinite(payload.point.x) && Number.isFinite(payload.point.y) ? payload.point : fallbackPoint;
+      const projected = projectPointOnSegment(rawPoint, start, end);
+      const minDistance = 6 / Math.max(0.2, zoom || 1);
+      if (
+        Math.hypot(projected.x - start.x, projected.y - start.y) <= minDistance ||
+        Math.hypot(projected.x - end.x, projected.y - end.y) <= minDistance
+      ) {
+        return;
+      }
+      const typeId = wall.type;
+      const label = String(wall.name || getTypeLabel(typeId));
+      const layerIds = Array.isArray((wall as any).layerIds)
+        ? (wall as any).layerIds
+        : inferDefaultLayerIds(typeId, layerIdSet);
+      const strokeColor =
+        typeof wall.strokeColor === 'string' && wall.strokeColor.trim()
+          ? wall.strokeColor.trim()
+          : getWallTypeColor(typeId);
+      const opacity = Number.isFinite(Number(wall.opacity)) ? Number(wall.opacity) : 1;
+      const strokeWidth = Number.isFinite(Number(wall.strokeWidth)) ? Number(wall.strokeWidth) : 1;
+      markTouched();
+      deleteObject(wall.id);
+      const firstId = addWallSegment({
+        start,
+        end: projected,
+        typeId,
+        label,
+        layerIds,
+        strokeColor,
+        opacity,
+        strokeWidth
+      });
+      const secondId = addWallSegment({
+        start: projected,
+        end,
+        typeId,
+        label,
+        layerIds,
+        strokeColor,
+        opacity,
+        strokeWidth
+      });
+      const nextId = firstId || secondId;
+      if (nextId) {
+        lastInsertedRef.current = { id: nextId, name: label };
+        setSelectedObject(nextId);
+      }
+    },
+    [
+      addWallSegment,
+      deleteObject,
+      getTypeLabel,
+      getWallTypeColor,
+      inferDefaultLayerIds,
+      isReadOnly,
+      isWallType,
+      layerIdSet,
+      markTouched,
+      projectPointOnSegment,
+      renderPlan,
+      setSelectedObject,
+      zoom
+    ]
+  );
+
   const handleWallPoint = useCallback(
     (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
       if (!wallDrawMode) return;
@@ -2750,42 +3126,54 @@ const PlanView = ({ planId }: Props) => {
       const shouldClose = draftPoints.length >= 3 && start && distToStartRaw <= closeThreshold;
       const avoidPoint = start && !shouldClose ? start : null;
       const resolved = resolveWallPoint(point, { ...options, avoidPoint, avoidDistance: closeThreshold });
-      if (!draftPoints.length && !wallEditTarget) {
-        const match = findWallEndpointMatch(resolved);
-        if (match) {
-          const selectedId = selectedObjectIdRef.current;
-          const selectedIds = selectedObjectIdsRef.current || [];
-          const canExtend = match.id === selectedId || selectedIds.includes(match.id);
-          if (!canExtend) {
-            // Keep the snapped point but start a new wall unless the matching wall is selected.
-            const nextPoints = [...draftPoints, resolved];
-            wallDraftPointsRef.current = nextPoints;
-            setWallDraftPoints(nextPoints);
-            return;
-          }
-          const basePoints = match.useStart ? [...match.points].reverse() : match.points.slice();
-          setWallEditTarget({ id: match.id, points: basePoints });
-          wallDraftPointsRef.current = basePoints;
-          setWallDraftPoints(basePoints);
-          setWallDraftPointer(null);
-          return;
-        }
-      }
-      if (shouldClose) {
-        openWallPolygonModal([...draftPoints, start], wallEditTarget?.id);
+      if (!draftPoints.length) {
+        const nextPoints = [resolved];
+        wallDraftPointsRef.current = nextPoints;
+        setWallDraftPoints(nextPoints);
+        setWallDraftPointer(null);
         return;
       }
       const last = draftPoints[draftPoints.length - 1];
       const minSegment = 2 / Math.max(0.2, zoom || 1);
-      if (last) {
-        const distToLast = Math.hypot(resolved.x - last.x, resolved.y - last.y);
-        if (distToLast <= minSegment) return;
+      const distToLast = Math.hypot(resolved.x - last.x, resolved.y - last.y);
+      if (distToLast <= minSegment) return;
+      const typeId = (wallDrawType && isWallType(wallDrawType) ? wallDrawType : wallTypeDefs[0]?.id) || DEFAULT_WALL_TYPES[0];
+      if (!typeId || !renderPlan) return;
+      const endPoint = shouldClose && start ? start : resolved;
+      markTouched();
+      const label = getTypeLabel(typeId);
+      const id = addWallSegment({
+        start: last,
+        end: endPoint,
+        typeId,
+        label,
+        strokeWidth: 1
+      });
+      if (id) {
+        wallDraftSegmentIdsRef.current.push(id);
+        lastInsertedRef.current = { id, name: label };
       }
-      const points = [...draftPoints, resolved];
+      const points = [...draftPoints, endPoint];
       wallDraftPointsRef.current = points;
       setWallDraftPoints(points);
+      setWallDraftPointer(null);
+      if (shouldClose) {
+        finishWallDraw();
+      }
     },
-    [findWallEndpointMatch, openWallPolygonModal, resolveWallPoint, wallDrawMode, wallEditTarget, zoom]
+    [
+      addWallSegment,
+      finishWallDraw,
+      getTypeLabel,
+      isWallType,
+      markTouched,
+      renderPlan,
+      resolveWallPoint,
+      wallDrawMode,
+      wallDrawType,
+      wallTypeDefs,
+      zoom
+    ]
   );
 
   const startMeasure = useCallback(
@@ -2795,10 +3183,14 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
       setMeasureMode(true);
-      setMeasurePoints(point ? [point] : []);
+      const nextPoints = point ? [point] : [];
+      measurePointsRef.current = nextPoints;
+      setMeasurePoints(nextPoints);
       setMeasurePointer(null);
       setMeasureClosed(false);
       setMeasureFinished(false);
+      measureClosedRef.current = false;
+      measureFinishedRef.current = false;
       setQuoteMode(false);
       setQuotePoints([]);
       setQuotePointer(null);
@@ -2817,6 +3209,9 @@ const PlanView = ({ planId }: Props) => {
     setMeasurePointer(null);
     setMeasureClosed(false);
     setMeasureFinished(false);
+    measurePointsRef.current = [];
+    measureClosedRef.current = false;
+    measureFinishedRef.current = false;
     push(t({ it: 'Misurazione annullata', en: 'Measurement cancelled' }), 'info');
   }, [measureMode, push, t]);
 
@@ -2849,14 +3244,15 @@ const PlanView = ({ planId }: Props) => {
   }, [quoteMode, push, t]);
 
   const handleQuotePoint = useCallback(
-    (point: { x: number; y: number }) => {
+    (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
       if (!quoteMode || isReadOnly || !renderPlan) return;
       if (!quotePoints.length) {
         setQuotePoints([point]);
         return;
       }
       const start = quotePoints[0];
-      const dist = Math.hypot(point.x - start.x, point.y - start.y);
+      const resolved = resolveAxisLockedPoint(point, start, options);
+      const dist = Math.hypot(resolved.x - start.x, resolved.y - start.y);
       const minSegment = 6 / Math.max(0.2, zoom || 1);
       if (dist < minSegment) return;
       markTouched();
@@ -2869,41 +3265,48 @@ const PlanView = ({ planId }: Props) => {
         start.y,
         1,
         inferDefaultLayerIds('quote', layerIdSet),
-        { points: [start, point], strokeColor: '#f97316', strokeWidth: 2, opacity: 1 }
+        { points: [start, resolved], strokeColor: '#f97316', strokeWidth: 2, opacity: 1 }
       );
       setQuotePoints([]);
       setQuotePointer(null);
     },
-    [addObject, inferDefaultLayerIds, isReadOnly, layerIdSet, markTouched, quoteMode, quotePoints, renderPlan, t, zoom]
+    [addObject, inferDefaultLayerIds, isReadOnly, layerIdSet, markTouched, quoteMode, quotePoints, renderPlan, resolveAxisLockedPoint, t, zoom]
   );
 
   const handleMeasurePoint = useCallback(
     (point: { x: number; y: number }) => {
-      if (!measureMode || measureFinished) return;
-      if (!measurePoints.length) {
-        setMeasurePoints([point]);
+      if (!measureMode || measureFinishedRef.current) return;
+      const points = measurePointsRef.current;
+      if (!points.length) {
+        const next = [point];
+        measurePointsRef.current = next;
+        setMeasurePoints(next);
         return;
       }
-      if (measurePoints.length >= 3) {
-        const first = measurePoints[0];
+      const closeThreshold = 12 / Math.max(0.2, zoom || 1);
+      if (points.length >= 3) {
+        const first = points[0];
         const dist = Math.hypot(point.x - first.x, point.y - first.y);
-        const closeThreshold = 12 / Math.max(0.2, zoom || 1);
         if (dist <= closeThreshold) {
           setMeasureClosed(true);
           setMeasureFinished(true);
+          measureClosedRef.current = true;
+          measureFinishedRef.current = true;
           setMeasurePointer(null);
           return;
         }
       }
-      setMeasurePoints((prev) => [...prev, point]);
+      const next = [...points, point];
+      measurePointsRef.current = next;
+      setMeasurePoints(next);
     },
-    [measureFinished, measureMode, measurePoints, zoom]
+    [measureMode, zoom]
   );
 
   const handleToolPoint = useCallback(
     (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
       if (scaleMode) {
-        handleScalePoint(point);
+        handleScalePoint(point, options);
         return;
       }
       if (wallDrawMode) {
@@ -2911,7 +3314,7 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
       if (quoteMode) {
-        handleQuotePoint(point);
+        handleQuotePoint(point, options);
         return;
       }
       if (measureMode) {
@@ -2924,7 +3327,7 @@ const PlanView = ({ planId }: Props) => {
   const handleToolMove = useCallback(
     (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
       if (scaleMode && scaleDraft?.start && !scaleDraft?.end) {
-        setScaleDraftPointer(point);
+        setScaleDraftPointer(resolveAxisLockedPoint(point, scaleDraft.start, options));
         return;
       }
       if (wallDrawMode) {
@@ -2943,30 +3346,55 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
       if (quoteMode) {
-        if (quotePoints.length && !isReadOnly) setQuotePointer(point);
+        if (quotePoints.length && !isReadOnly) {
+          setQuotePointer(resolveAxisLockedPoint(point, quotePoints[0], options));
+        }
         return;
       }
       if (measureMode) {
-        if (!measureFinished) setMeasurePointer(point);
+        if (measureFinishedRef.current) return;
+        const points = measurePointsRef.current;
+        if (points.length >= 3) {
+          const first = points[0];
+          const closeThreshold = 12 / Math.max(0.2, zoom || 1);
+          const dist = Math.hypot(point.x - first.x, point.y - first.y);
+          if (dist <= closeThreshold) {
+            setMeasurePointer(first);
+            return;
+          }
+        }
+        setMeasurePointer(point);
       }
     },
-    [isReadOnly, measureFinished, measureMode, quoteMode, quotePoints.length, resolveWallPoint, scaleDraft, scaleMode, wallDrawMode, zoom]
+    [
+      isReadOnly,
+      measureMode,
+      quoteMode,
+      quotePoints,
+      resolveAxisLockedPoint,
+      resolveWallPoint,
+      scaleDraft,
+      scaleMode,
+      wallDrawMode,
+      zoom
+    ]
   );
 
   const handleToolDoubleClick = useCallback(() => {
-    if (wallDrawMode) {
-      finishWallDraw();
+    if (measureMode) {
+      if (measureClosedRef.current) {
+        setMeasureFinished(true);
+        measureFinishedRef.current = true;
+        setMeasurePointer(null);
+      }
       return;
     }
-    if (measureMode) {
-      setMeasureFinished(true);
-      setMeasurePointer(null);
-    }
-  }, [finishWallDraw, measureMode, wallDrawMode]);
+  }, [measureMode]);
 
   const handleWallDraftContextMenu = useCallback(() => {
     if (!wallDrawMode) return;
-    if (wallDraftPointsRef.current.length >= 2) {
+    setContextMenu(null);
+    if (wallDraftSegmentIdsRef.current.length || wallDraftPointsRef.current.length >= 2) {
       finishWallDraw();
     } else {
       finishWallDraw({ cancel: true });
@@ -2975,14 +3403,6 @@ const PlanView = ({ planId }: Props) => {
 
   const handleWallSegmentDblClick = useCallback(
     (payload: { id: string; lengthPx: number }) => {
-      if (renderPlan) {
-        const obj = renderPlan.objects.find((item: any) => item.id === payload.id);
-        const groupId = obj?.wallGroupId ? String(obj.wallGroupId) : '';
-        if (groupId) {
-          openWallPolygonFromGroup(groupId);
-          return;
-        }
-      }
       const lengthPx = Number(payload?.lengthPx);
       if (!Number.isFinite(lengthPx) || lengthPx <= 0) return;
       if (metersPerPixel) {
@@ -3005,26 +3425,33 @@ const PlanView = ({ planId }: Props) => {
         'info'
       );
     },
-    [formatNumber, lang, metersPerPixel, openWallPolygonFromGroup, push, renderPlan, t]
+    [formatNumber, lang, metersPerPixel, push, t]
+  );
+
+  const applyWallTypeToIds = useCallback(
+    (ids: string[], typeId: string) => {
+      if (!ids.length || !typeId || !isWallType(typeId) || isReadOnly) return;
+      const nextLabel = getTypeLabel(typeId);
+      const nextColor = getWallTypeColor(typeId);
+      markTouched();
+      for (const id of ids) {
+        updateObject(id, { type: typeId, name: nextLabel, strokeColor: nextColor });
+      }
+      push(
+        ids.length > 1
+          ? t({ it: 'Muri aggiornati', en: 'Walls updated' })
+          : t({ it: 'Muro aggiornato', en: 'Wall updated' }),
+        'success'
+      );
+    },
+    [getTypeLabel, getWallTypeColor, isReadOnly, isWallType, markTouched, push, t, updateObject]
   );
 
   const applyWallType = useCallback(() => {
-    if (!wallTypeModal || !wallTypeDraft || isReadOnly) return;
-    if (!isWallType(wallTypeDraft)) return;
-    markTouched();
-    const nextLabel = getTypeLabel(wallTypeDraft);
-    const nextColor = getWallTypeColor(wallTypeDraft);
-    for (const id of wallTypeModal.ids) {
-      updateObject(id, { type: wallTypeDraft, name: nextLabel, strokeColor: nextColor });
-    }
-    push(
-      wallTypeModal.ids.length > 1
-        ? t({ it: 'Muri aggiornati', en: 'Walls updated' })
-        : t({ it: 'Muro aggiornato', en: 'Wall updated' }),
-      'success'
-    );
+    if (!wallTypeModal || !wallTypeDraft) return;
+    applyWallTypeToIds(wallTypeModal.ids, wallTypeDraft);
     setWallTypeModal(null);
-  }, [getTypeLabel, isReadOnly, isWallType, markTouched, push, t, updateObject, wallTypeDraft, wallTypeModal]);
+  }, [applyWallTypeToIds, wallTypeDraft, wallTypeModal]);
 
   const setRoomWallTypeAt = useCallback((index: number, typeId: string) => {
     setRoomWallTypeSelections((prev) => {
@@ -3050,7 +3477,6 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     markTouched();
-    const groupId = nanoid();
     segments.forEach((segment, index) => {
       const typeId = roomWallTypeSelections[index] || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
       if (!typeId) return;
@@ -3068,7 +3494,8 @@ const PlanView = ({ planId }: Props) => {
           points: [segment.start, segment.end],
           strokeColor: getWallTypeColor(typeId),
           opacity: 1,
-          wallGroupId: groupId,
+          strokeWidth: 1,
+          wallGroupId: roomWallTypeModal.roomId,
           wallGroupIndex: index
         }
       );
@@ -3093,126 +3520,6 @@ const PlanView = ({ planId }: Props) => {
     t
   ]);
 
-  const setWallPolygonTypeAt = useCallback((index: number, typeId: string) => {
-    setWallPolygonSelections((prev) => {
-      const next = prev.slice();
-      next[index] = typeId;
-      return next;
-    });
-  }, []);
-
-  const applyWallPolygonTypeAll = useCallback(
-    (typeId: string) => {
-      if (!wallPolygonModal) return;
-      setWallPolygonSelections(wallPolygonModal.segments.map(() => typeId));
-    },
-    [wallPolygonModal]
-  );
-
-  const createWallPolygon = useCallback(() => {
-    if (!wallPolygonModal || isReadOnly || !renderPlan) return;
-    const segments = wallPolygonModal.segments;
-    if (!segments.length) {
-      setWallPolygonModal(null);
-      return;
-    }
-    markTouched();
-    const groupId = wallPolygonModal.groupId || nanoid();
-    const isEditMode = wallPolygonModal.mode === 'edit' && wallPolygonModal.wallIds?.length === segments.length;
-    if (isEditMode) {
-      wallPolygonModal.wallIds?.forEach((id, index) => {
-        const typeId = wallPolygonSelections[index] || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
-        if (!typeId) return;
-        updateObject(id, {
-          type: typeId,
-          name: getTypeLabel(typeId),
-          strokeColor: getWallTypeColor(typeId),
-          wallGroupId: groupId,
-          wallGroupIndex: index
-        });
-      });
-      push(t({ it: 'Muri aggiornati', en: 'Walls updated' }), 'success');
-    } else {
-      segments.forEach((segment, index) => {
-        const typeId = wallPolygonSelections[index] || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
-        if (!typeId) return;
-        const label = getTypeLabel(typeId);
-        addObject(
-          renderPlan.id,
-          typeId,
-          label,
-          undefined,
-          segment.start.x,
-          segment.start.y,
-          1,
-          inferDefaultLayerIds(typeId, layerIdSet),
-          {
-            points: [segment.start, segment.end],
-            strokeColor: getWallTypeColor(typeId),
-            opacity: 1,
-            wallGroupId: groupId,
-            wallGroupIndex: index
-          }
-        );
-      });
-      if (wallPolygonModal.sourceWallId) {
-        deleteObject(wallPolygonModal.sourceWallId);
-      }
-      push(t({ it: 'Muri creati', en: 'Walls created' }), 'success');
-    }
-    const shouldCreateRoom = wallPolygonCreateRoom;
-    const roomPoints = wallPolygonModal.points;
-    setWallPolygonModal(null);
-    setWallPolygonCreateRoom(false);
-    if (shouldCreateRoom) {
-      skipRoomWallTypesRef.current = true;
-      setRoomModal({ mode: 'create', kind: 'poly', points: roomPoints });
-    }
-  }, [
-    addObject,
-    defaultWallTypeId,
-    deleteObject,
-    getTypeLabel,
-    inferDefaultLayerIds,
-    isReadOnly,
-    layerIdSet,
-    markTouched,
-    push,
-    renderPlan,
-    updateObject,
-    wallPolygonCreateRoom,
-    wallPolygonModal,
-    wallPolygonSelections,
-    t
-  ]);
-
-  const deleteWallPolygon = useCallback(() => {
-    if (!wallPolygonModal || isReadOnly) return;
-    const ids = new Set<string>();
-    if (wallPolygonModal.mode === 'edit' && Array.isArray(wallPolygonModal.wallIds)) {
-      wallPolygonModal.wallIds.forEach((id) => ids.add(id));
-    } else if (wallPolygonModal.sourceWallId) {
-      ids.add(wallPolygonModal.sourceWallId);
-    }
-    if (!ids.size) {
-      setWallPolygonModal(null);
-      setWallPolygonCreateRoom(false);
-      return;
-    }
-    markTouched();
-    ids.forEach((id) => deleteObject(id));
-    clearSelection();
-    push(t({ it: 'Muri eliminati', en: 'Walls deleted' }), 'info');
-    setWallPolygonModal(null);
-    setWallPolygonCreateRoom(false);
-  }, [clearSelection, deleteObject, isReadOnly, markTouched, push, t, wallPolygonModal]);
-
-  const canDeleteWallPolygon = useMemo(() => {
-    if (!wallPolygonModal) return false;
-    if (wallPolygonModal.mode === 'edit') return !!wallPolygonModal.wallIds?.length;
-    return !!wallPolygonModal.sourceWallId;
-  }, [wallPolygonModal]);
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -3231,7 +3538,13 @@ const PlanView = ({ planId }: Props) => {
 
       if (wallDrawMode && e.key === 'Escape') {
         e.preventDefault();
-        if (wallDraftPointsRef.current.length) {
+        const ids = wallDraftSegmentIdsRef.current;
+        if (ids.length) {
+          const lastId = ids.pop();
+          if (lastId) {
+            markTouched();
+            deleteObject(lastId);
+          }
           const next = wallDraftPointsRef.current.slice(0, -1);
           wallDraftPointsRef.current = next;
           setWallDraftPoints(next);
@@ -3239,6 +3552,12 @@ const PlanView = ({ planId }: Props) => {
         } else {
           finishWallDraw({ cancel: true });
         }
+        return;
+      }
+
+      if (!isTyping && wallDrawMode && e.key === 'Enter') {
+        e.preventDefault();
+        finishWallDraw();
         return;
       }
 
@@ -3286,9 +3605,20 @@ const PlanView = ({ planId }: Props) => {
 
       if (!isTyping && wallDrawMode && (e.key === 'Backspace' || e.key === 'Delete')) {
         e.preventDefault();
-        const next = wallDraftPointsRef.current.slice(0, -1);
-        wallDraftPointsRef.current = next;
-        setWallDraftPoints(next);
+        const ids = wallDraftSegmentIdsRef.current;
+        if (ids.length) {
+          const lastId = ids.pop();
+          if (lastId) {
+            markTouched();
+            deleteObject(lastId);
+          }
+          const next = wallDraftPointsRef.current.slice(0, -1);
+          wallDraftPointsRef.current = next;
+          setWallDraftPoints(next);
+          setWallDraftPointer(null);
+        } else {
+          finishWallDraw({ cancel: true });
+        }
         return;
       }
 
@@ -3296,7 +3626,11 @@ const PlanView = ({ planId }: Props) => {
         e.preventDefault();
         setMeasureClosed(false);
         setMeasureFinished(false);
-        setMeasurePoints((prev) => prev.slice(0, -1));
+        measureClosedRef.current = false;
+        measureFinishedRef.current = false;
+        const next = measurePointsRef.current.slice(0, -1);
+        measurePointsRef.current = next;
+        setMeasurePoints(next);
         return;
       }
 
@@ -3310,6 +3644,7 @@ const PlanView = ({ planId }: Props) => {
       if (!isTyping && measureMode && e.key === 'Enter') {
         e.preventDefault();
         setMeasureFinished(true);
+        measureFinishedRef.current = true;
         setMeasurePointer(null);
         return;
       }
@@ -3352,6 +3687,10 @@ const PlanView = ({ planId }: Props) => {
 
       const isCmdS = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
       if (isCmdS) {
+        if (saveRevisionOpen) {
+          e.preventDefault();
+          return;
+        }
         if (!currentPlan || isReadOnlyRef.current) return;
         if (!getPlanUnsavedChanges(currentPlan as FloorPlan)) {
           e.preventDefault();
@@ -3418,10 +3757,14 @@ const PlanView = ({ planId }: Props) => {
 
       if (isTyping) return;
 
-      const isCmdZ = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z';
-      if (isCmdZ) {
+      const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
+      const isRedo =
+        (e.ctrlKey || e.metaKey) &&
+        (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'));
+      if (isUndo) {
         if (!currentPlan || isReadOnlyRef.current) return;
         e.preventDefault();
+        if (performUndo()) return;
         const last = lastInsertedRef.current;
         if (!last) return;
         const exists = (currentPlan as FloorPlan).objects?.some((o) => o.id === last.id);
@@ -3432,19 +3775,27 @@ const PlanView = ({ planId }: Props) => {
         setUndoConfirm(last);
         return;
       }
+      if (isRedo) {
+        if (!currentPlan || isReadOnlyRef.current) return;
+        e.preventDefault();
+        performRedo();
+        return;
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         if (!currentPlan) return;
         e.preventDefault();
         const allIds = ((currentPlan as FloorPlan).objects || []).map((o) => o.id);
+        const allRoomIds = ((currentPlan as FloorPlan).rooms || []).map((r) => r.id);
         setSelection(allIds);
         setContextMenu(null);
-        setSelectedRoomId(undefined);
+        setSelectedRoomId(allRoomIds.length === 1 ? allRoomIds[0] : undefined);
+        setSelectedRoomIds(allRoomIds);
         setSelectedLinkId(null);
         push(
           t({
-            it: `Selezionati ${allIds.length} oggetti (Ctrl/Cmd+A).`,
-            en: `Selected ${allIds.length} objects (Ctrl/Cmd+A).`
+            it: `Selezionati ${allIds.length} oggetti e ${allRoomIds.length} stanze (Ctrl/Cmd+A).`,
+            en: `Selected ${allIds.length} objects and ${allRoomIds.length} rooms (Ctrl/Cmd+A).`
           }),
           'info'
         );
@@ -3452,11 +3803,12 @@ const PlanView = ({ planId }: Props) => {
       }
 
       if (e.key === 'Escape') {
-        if (currentSelectedIds.length || selectedRoomId) {
+        if (currentSelectedIds.length || selectedRoomId || selectedRoomIds.length) {
           e.preventDefault();
           setContextMenu(null);
           clearSelection();
           setSelectedRoomId(undefined);
+          setSelectedRoomIds([]);
           setSelectedLinkId(null);
         }
         return;
@@ -3486,14 +3838,18 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
       const isDeleteKey = e.key === 'Delete' || e.key === 'Backspace';
-      if (!currentSelectedIds.length && selectedRoomId && isDeleteKey && currentPlan) {
+      if (!currentSelectedIds.length && selectedRoomIds.length && isDeleteKey && currentPlan) {
         e.preventDefault();
         if (isReadOnlyRef.current) return;
-        setConfirmDeleteRoomId(selectedRoomId);
+        if (selectedRoomIds.length === 1) {
+          setConfirmDeleteRoomId(selectedRoomIds[0]);
+        } else {
+          setConfirmDeleteRoomIds([...selectedRoomIds]);
+        }
         return;
       }
       const linkId = selectedLinkIdRef.current;
-      if (!currentSelectedIds.length && !selectedRoomId && linkId && isDeleteKey && currentPlan) {
+      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && linkId && isDeleteKey && currentPlan) {
         e.preventDefault();
         if (isRackLinkId(linkId)) return;
         if (isReadOnlyRef.current) return;
@@ -3507,6 +3863,7 @@ const PlanView = ({ planId }: Props) => {
       if (!currentSelectedIds.length || !currentPlan) return;
       if (isDeleteKey) {
         e.preventDefault();
+        setPendingRoomDeletes([...selectedRoomIds]);
         setConfirmDelete([...currentSelectedIds]);
       }
     };
@@ -3528,6 +3885,8 @@ const PlanView = ({ planId }: Props) => {
     linkFromId,
     deleteLink,
     markTouched,
+    performRedo,
+    performUndo,
     resetTouched,
     setSelection,
     startWallDraw,
@@ -3539,7 +3898,9 @@ const PlanView = ({ planId }: Props) => {
     moveObject,
     updateObject,
     isWallType,
-    getPlanUnsavedChanges
+    getPlanUnsavedChanges,
+    saveRevisionOpen,
+    selectedRoomIds
   ]);
 
   const objectsByType = useMemo(() => {
@@ -3627,8 +3988,10 @@ const PlanView = ({ planId }: Props) => {
     const updateObjects = (o: any) => {
       if (o.type !== typeLayerModal.typeId) return o;
       const currentLayerIds =
-        Array.isArray(o.layerIds) && o.layerIds.length ? o.layerIds.map((layerId) => String(layerId)) : fallbackTypeLayerIds;
-      const preserved = currentLayerIds.filter((layerId) => !fallbackTypeLayerSet.has(String(layerId)));
+        Array.isArray(o.layerIds) && o.layerIds.length
+          ? o.layerIds.map((layerId: string) => String(layerId))
+          : fallbackTypeLayerIds;
+      const preserved = currentLayerIds.filter((layerId: string) => !fallbackTypeLayerSet.has(String(layerId)));
       const nextLayerIds = Array.from(new Set([id, ...preserved]));
       return { ...o, layerIds: nextLayerIds };
     };
@@ -3748,11 +4111,6 @@ const PlanView = ({ planId }: Props) => {
     [push, t]
   );
 
-  const mapAddMenuTypes = useMemo(() => {
-    const defs = objectTypeDefs || [];
-    return defs;
-  }, [objectTypeDefs]);
-
   useEffect(() => {
     if (!gridMenuOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -3838,6 +4196,38 @@ const PlanView = ({ planId }: Props) => {
       return true;
     },
     [markTouched, moveObject, roomStatsById, t, updateObject]
+  );
+
+  const handleWallMove = useCallback(
+    (id: string, dx: number, dy: number, batchId?: string, movedRoomIds?: string[]) => {
+      if (!Number.isFinite(dx) || !Number.isFinite(dy) || (!dx && !dy)) return;
+      if (batchId && wallMoveBatchRef.current.id !== batchId) {
+        wallMoveBatchRef.current = { id: batchId, movedGroups: new Set(), movedWalls: new Set(), movedRooms: new Set() };
+      }
+      if (batchId && Array.isArray(movedRoomIds)) {
+        movedRoomIds.forEach((roomId) => wallMoveBatchRef.current.movedRooms.add(roomId));
+      }
+      const useBatch = !!batchId;
+      const currentPlan = planRef.current as FloorPlan | undefined;
+      const currentObj = currentPlan?.objects?.find((o) => o.id === id);
+      if (!currentObj) return;
+      const applyWallMove = (wall: MapObject) => {
+        const pts = wall.points || [];
+        if (!pts.length) return;
+        const baseX = Number.isFinite(Number(wall.x)) ? Number(wall.x) : pts[0]?.x || 0;
+        const baseY = Number.isFinite(Number(wall.y)) ? Number(wall.y) : pts[0]?.y || 0;
+        const nextPoints = pts.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
+        updateObject(wall.id, { x: baseX + dx, y: baseY + dy, points: nextPoints });
+      };
+      if (useBatch && wallMoveBatchRef.current.movedWalls.has(currentObj.id)) return;
+      if (!isReadOnlyRef.current) markTouched();
+      applyWallMove(currentObj);
+      if (useBatch) wallMoveBatchRef.current.movedWalls.add(currentObj.id);
+    },
+    [
+      markTouched,
+      updateObject
+    ]
   );
 
   useEffect(() => {
@@ -4030,6 +4420,21 @@ const PlanView = ({ planId }: Props) => {
     [buildRoomWallSegments]
   );
 
+  const handleCreateWallsForRoom = useCallback(() => {
+    if (!roomModal || roomModal.mode !== 'edit' || !renderPlan) return;
+    const room = (renderPlan.rooms || []).find((r) => r.id === roomModal.roomId);
+    if (!room) return;
+    const kind = (room.kind || (Array.isArray(room.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+    openRoomWallTypes({
+      roomId: room.id,
+      roomName: room.name || t({ it: 'Stanza', en: 'Room' }),
+      kind,
+      rect: kind === 'rect' ? { x: room.x || 0, y: room.y || 0, width: room.width || 0, height: room.height || 0 } : undefined,
+      points: kind === 'poly' ? room.points || [] : undefined
+    });
+    setRoomModal(null);
+  }, [openRoomWallTypes, renderPlan, roomModal, t]);
+
   const openRealUserPickerAt = useCallback(
     async (x: number, y: number) => {
       if (isReadOnly) return;
@@ -4149,6 +4554,12 @@ const PlanView = ({ planId }: Props) => {
     wifiBand24?: boolean;
     wifiBand5?: boolean;
     wifiBand6?: boolean;
+    wifiBrand?: string;
+    wifiModel?: string;
+    wifiModelCode?: string;
+    wifiCoverageSqm?: number;
+    wifiCatalogId?: string;
+    wifiShowRange?: boolean;
   }) => {
     if (!plan || !modalState || isReadOnly) return;
     if (modalState.mode === 'create') {
@@ -4158,10 +4569,16 @@ const PlanView = ({ planId }: Props) => {
         ...(modalState.type === 'wifi'
           ? {
               wifiDb: payload.wifiDb,
-              wifiStandard: payload.wifiStandard || '802.11ax',
+              wifiStandard: payload.wifiStandard || WIFI_DEFAULT_STANDARD,
               wifiBand24: payload.wifiBand24,
               wifiBand5: payload.wifiBand5,
-              wifiBand6: payload.wifiBand6
+              wifiBand6: payload.wifiBand6,
+              wifiBrand: payload.wifiBrand,
+              wifiModel: payload.wifiModel,
+              wifiModelCode: payload.wifiModelCode,
+              wifiCoverageSqm: payload.wifiCoverageSqm,
+              wifiCatalogId: payload.wifiCatalogId,
+              wifiShowRange: payload.wifiShowRange ?? true
             }
           : {})
       };
@@ -4210,10 +4627,16 @@ const PlanView = ({ planId }: Props) => {
         ...(base?.type === 'wifi'
           ? {
               wifiDb: (base as any).wifiDb,
-              wifiStandard: (base as any).wifiStandard || '802.11ax',
+              wifiStandard: (base as any).wifiStandard || WIFI_DEFAULT_STANDARD,
               wifiBand24: (base as any).wifiBand24,
               wifiBand5: (base as any).wifiBand5,
-              wifiBand6: (base as any).wifiBand6
+              wifiBand6: (base as any).wifiBand6,
+              wifiBrand: (base as any).wifiBrand,
+              wifiModel: (base as any).wifiModel,
+              wifiModelCode: (base as any).wifiModelCode,
+              wifiCoverageSqm: (base as any).wifiCoverageSqm,
+              wifiCatalogId: (base as any).wifiCatalogId,
+              wifiShowRange: (base as any).wifiShowRange
             }
           : {})
       };
@@ -4293,6 +4716,12 @@ const PlanView = ({ planId }: Props) => {
     wifiBand24?: boolean;
     wifiBand5?: boolean;
     wifiBand6?: boolean;
+    wifiBrand?: string;
+    wifiModel?: string;
+    wifiModelCode?: string;
+    wifiCoverageSqm?: number;
+    wifiCatalogId?: string;
+    wifiShowRange?: boolean;
   }) => {
     if (!modalState || modalState.mode !== 'edit' || isReadOnly) return;
     markTouched();
@@ -4301,10 +4730,16 @@ const PlanView = ({ planId }: Props) => {
       obj?.type === 'wifi'
         ? {
             wifiDb: payload.wifiDb,
-            wifiStandard: payload.wifiStandard || '802.11ax',
+            wifiStandard: payload.wifiStandard || WIFI_DEFAULT_STANDARD,
             wifiBand24: payload.wifiBand24,
             wifiBand5: payload.wifiBand5,
-            wifiBand6: payload.wifiBand6
+            wifiBand6: payload.wifiBand6,
+            wifiBrand: payload.wifiBrand,
+            wifiModel: payload.wifiModel,
+            wifiModelCode: payload.wifiModelCode,
+            wifiCoverageSqm: payload.wifiCoverageSqm,
+            wifiCatalogId: payload.wifiCatalogId,
+            wifiShowRange: payload.wifiShowRange
           }
         : {};
     updateObject(modalState.objectId, {
@@ -4430,6 +4865,7 @@ const PlanView = ({ planId }: Props) => {
       setCrossPlanSearchTerm('');
       clearSelection();
       setSelectedRoomId(undefined);
+      setSelectedRoomIds([]);
       setHighlightRoom(null);
       return;
     }
@@ -4552,6 +4988,7 @@ const PlanView = ({ planId }: Props) => {
       if (isExactRoomMatch && onlyRoom) {
         clearSelection();
         setSelectedRoomId(onlyRoom.id);
+        setSelectedRoomIds([onlyRoom.id]);
         setHighlightRoom({ roomId: onlyRoom.id, until: Date.now() + 3200 });
         if (searchDebugEnabled) {
           console.log('[search-debug] exact room match', onlyRoom.name);
@@ -4580,10 +5017,11 @@ const PlanView = ({ planId }: Props) => {
         layerIds: fallbackLayerIds,
         ...(modalState.type === 'wifi'
           ? {
-              wifiStandard: '802.11ax',
+              wifiStandard: WIFI_DEFAULT_STANDARD,
               wifiBand24: false,
               wifiBand5: false,
-              wifiBand6: false
+              wifiBand6: false,
+              wifiShowRange: true
             }
           : {})
       };
@@ -4598,13 +5036,19 @@ const PlanView = ({ planId }: Props) => {
         modalState.mode === 'duplicate'
           ? (obj.layerIds || getTypeLayerIds(obj.type) || inferDefaultLayerIds(obj.type, layerIdSet))
           : (obj.layerIds || getTypeLayerIds(obj.type) || inferDefaultLayerIds(obj.type, layerIdSet)),
-      ...(obj.type === 'wifi'
-        ? {
+        ...(obj.type === 'wifi'
+          ? {
             wifiDb: (obj as any).wifiDb,
-            wifiStandard: (obj as any).wifiStandard || '802.11ax',
+            wifiStandard: (obj as any).wifiStandard || WIFI_DEFAULT_STANDARD,
             wifiBand24: !!(obj as any).wifiBand24,
             wifiBand5: !!(obj as any).wifiBand5,
-            wifiBand6: !!(obj as any).wifiBand6
+            wifiBand6: !!(obj as any).wifiBand6,
+            wifiBrand: (obj as any).wifiBrand,
+            wifiModel: (obj as any).wifiModel,
+            wifiModelCode: (obj as any).wifiModelCode,
+            wifiCoverageSqm: (obj as any).wifiCoverageSqm,
+            wifiCatalogId: (obj as any).wifiCatalogId,
+            wifiShowRange: (obj as any).wifiShowRange
           }
         : {})
     };
@@ -5093,6 +5537,7 @@ const PlanView = ({ planId }: Props) => {
 	                                  setExpandedRoomId(isExpanded ? null : room.id);
 	                                  clearSelection();
 	                                  setSelectedRoomId(room.id);
+	                                  setSelectedRoomIds([room.id]);
 	                                  setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
 	                                }}
 	                                className={`min-w-0 flex-1 text-left text-sm ${
@@ -5125,6 +5570,7 @@ const PlanView = ({ planId }: Props) => {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setSelectedRoomId(room.id);
+                                    setSelectedRoomIds([room.id]);
                                     setHighlightRoom({ roomId: room.id, until: Date.now() + 3200 });
                                   }}
                                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
@@ -5338,9 +5784,28 @@ const PlanView = ({ planId }: Props) => {
               onSelectRoom={(id) => {
                 clearSelection();
                 setSelectedRoomId(id);
+                setSelectedRoomIds([id]);
                 setHighlightRoom({ roomId: id, until: Date.now() + 3200 });
               }}
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => performUndo()}
+              disabled={!canUndo || isReadOnly}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              title={t({ it: 'Annulla (Ctrl/Cmd+Z)', en: 'Undo (Ctrl/Cmd+Z)' })}
+            >
+              <Undo2 size={16} />
+            </button>
+            <button
+              onClick={() => performRedo()}
+              disabled={!canRedo || isReadOnly}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              title={t({ it: 'Ripeti (Ctrl/Cmd+Y)', en: 'Redo (Ctrl/Cmd+Y)' })}
+            >
+              <Redo2 size={16} />
+            </button>
           </div>
           <div
             className={`rounded-full px-3 py-1 text-xs font-semibold ${
@@ -5595,6 +6060,31 @@ const PlanView = ({ planId }: Props) => {
         <div className="relative flex h-full min-h-0 gap-4 overflow-hidden">
 	        <div className="flex-1 min-w-0 min-h-0">
 	            <div className={`relative h-full min-h-0 w-full ${panToolActive ? 'cursor-grab active:cursor-grabbing' : ''}`} ref={mapRef}>
+                {!planScale?.metersPerPixel && !scalePromptDismissed ? (
+                  <div className="pointer-events-none absolute left-1/2 top-4 z-30 -translate-x-1/2">
+                    <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-100 shadow-lg">
+                      <span>
+                        {t({
+                          it: 'Imposta la scala della planimetria per misurazioni accurate.',
+                          en: 'Set your floor plan scale for accurate measurements.'
+                        })}
+                      </span>
+                      <button
+                        onClick={() => setScalePromptDismissed(true)}
+                        className="rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white shadow-sm hover:bg-rose-500"
+                      >
+                        {t({ it: 'Annulla', en: 'Cancel' })}
+                      </button>
+                      <button
+                        onClick={() => startScaleMode()}
+                        disabled={isReadOnly}
+                        className="rounded-full bg-sky-500 px-3 py-1 text-xs font-semibold text-white shadow-sm hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {t({ it: 'Imposta scala', en: 'Set scale' })}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                         <CanvasStage
                         ref={canvasStageRef}
                         containerRef={mapRef}
@@ -5602,6 +6092,7 @@ const PlanView = ({ planId }: Props) => {
                         selectedId={selectedObjectId}
                         selectedIds={selectedObjectIds}
 	                    selectedRoomId={selectedRoomId}
+                      selectedRoomIds={selectedRoomIds}
 	                    selectedLinkId={selectedLinkId}
 				                highlightId={highlight?.objectId}
 				                highlightUntil={highlight?.until}
@@ -5621,10 +6112,14 @@ const PlanView = ({ planId }: Props) => {
                       onToolDoubleClick={handleToolDoubleClick}
                       onWallDraftContextMenu={handleWallDraftContextMenu}
                       onWallSegmentDblClick={handleWallSegmentDblClick}
+                      onWallClick={handleWallQuickMenu}
                       wallTypeIds={wallTypeIdSet}
                       wallDraft={{ points: wallDraftPoints, pointer: wallDraftPointer }}
                       scaleDraft={{ start: scaleDraft?.start, end: scaleDraft?.end, pointer: scaleDraftPointer }}
                       scaleLine={scaleLine || undefined}
+                      onScaleContextMenu={handleScaleContextMenu}
+                      onScaleDoubleClick={handleScaleDoubleClick}
+                      onScaleMove={handleScaleMove}
                       measureDraft={{
                         points: measurePoints,
                         pointer: measurePointer,
@@ -5638,6 +6133,8 @@ const PlanView = ({ planId }: Props) => {
                         label: quoteDraftLabel || undefined
                       }}
                       quoteLabels={quoteLabels}
+                      metersPerPixel={metersPerPixel}
+                      wallAttenuationByType={wallAttenuationByType}
                       onSetPrintArea={(rect) => {
                         if (isReadOnly) return;
                         updateFloorPlan(basePlan.id, { printArea: rect });
@@ -5656,6 +6153,10 @@ const PlanView = ({ planId }: Props) => {
 			                onPanChange={handlePanChange}
 					                onSelect={handleStageSelect}
                       roomStatsById={roomStatsById}
+                      onSelectRooms={(ids) => {
+                        setSelectedRoomIds(ids);
+                        setSelectedRoomId(ids.length === 1 ? ids[0] : undefined);
+                      }}
 	                    onSelectLink={(id) => {
 	                      if (!id) {
 	                        setSelectedLinkId(null);
@@ -5667,15 +6168,16 @@ const PlanView = ({ planId }: Props) => {
 	                        setContextMenu(null);
 	                        clearSelection();
 	                        setSelectedRoomId(undefined);
+                        setSelectedRoomIds([]);
 	                        return;
 	                      }
 	                      setSelectedLinkId(id || null);
 	                      setContextMenu(null);
 	                      clearSelection();
 	                      setSelectedRoomId(undefined);
+                      setSelectedRoomIds([]);
 	                    }}
-	                  onSelectMany={(ids) => {
-	                    setSelectedRoomId(undefined);
+	                    onSelectMany={(ids) => {
                       setSelectedLinkId(null);
 	                    setSelection(ids);
 	                    setContextMenu(null);
@@ -5700,10 +6202,12 @@ const PlanView = ({ planId }: Props) => {
                     onSelectRoom={(roomId, options) => {
                       clearSelection();
                       setSelectedRoomId(roomId);
+                      setSelectedRoomIds(roomId ? [roomId] : []);
                       if (!options?.keepContext) setContextMenu(null);
                     }}
                     onOpenRoomDetails={(roomId) => {
                       setSelectedRoomId(roomId);
+                      setSelectedRoomIds([roomId]);
                       openEditRoom(roomId);
                     }}
                     onCreateRoom={(shape) => {
@@ -5735,6 +6239,7 @@ const PlanView = ({ planId }: Props) => {
                       markTouched();
                       updateObject(id, changes);
                     }}
+                    onMoveWall={handleWallMove}
 	              />
 	            </div>
 	          </div>
@@ -5962,7 +6467,10 @@ const PlanView = ({ planId }: Props) => {
                 {/* Bottom action: show all types when favorites are enabled */}
                 {paletteHasCustom && paletteHasMore ? (
                   <button
-                    onClick={() => setAllTypesOpen(true)}
+                    onClick={() => {
+                      setAllTypesDefaultTab(paletteSettingsSection);
+                      setAllTypesOpen(true);
+                    }}
                     className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
                     title={t({ it: 'Mostra tutti gli oggetti', en: 'Show all objects' })}
                   >
@@ -6021,6 +6529,85 @@ const PlanView = ({ planId }: Props) => {
           >
             <Trash size={14} /> {t({ it: 'Rimuovi tutti', en: 'Remove all' })}
           </button>
+        </div>
+      ) : null}
+
+      {wallQuickMenu ? (
+        <div
+          className="fixed z-50 flex items-center gap-2 rounded-xl bg-slate-900/90 px-2 py-1.5 text-white shadow-card"
+          style={{ top: wallQuickMenu.y - 52, left: wallQuickMenu.x - 42 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              setWallTypeMenu({ ids: [wallQuickMenu.id], x: wallQuickMenu.x + 8, y: wallQuickMenu.y - 12 });
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20"
+            title={t({ it: 'Tipo muro', en: 'Wall type' })}
+          >
+            <Square size={14} />
+          </button>
+          <button
+            onClick={() => {
+              setConfirmDelete([wallQuickMenu.id]);
+              setWallQuickMenu(null);
+              setWallTypeMenu(null);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20"
+            title={t({ it: 'Elimina muro', en: 'Delete wall' })}
+          >
+            <Trash size={14} />
+          </button>
+          <button
+            onClick={() => {
+              splitWallAtPoint({ id: wallQuickMenu.id, point: wallQuickMenu.world });
+              setWallQuickMenu(null);
+              setWallTypeMenu(null);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20"
+            title={t({ it: 'Dividi muro', en: 'Split wall' })}
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      ) : null}
+
+      {wallTypeMenu ? (
+        <div
+          className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+          style={{ top: wallTypeMenu.y, left: wallTypeMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">
+            {t({ it: 'Tipi muro', en: 'Wall types' })}
+          </div>
+          <div className="max-h-64 space-y-1 overflow-y-auto">
+            {wallTypeDefs.map((def) => {
+              const label = getTypeLabel(def.id);
+              const attenuation = Number((def as any).attenuationDb);
+              const suffix = Number.isFinite(attenuation) ? ` (${attenuation} dB)` : '';
+              return (
+                <button
+                  key={def.id}
+                  onClick={() => {
+                    applyWallTypeToIds(wallTypeMenu.ids, def.id);
+                    setWallTypeMenu(null);
+                    setWallQuickMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+                >
+                  <span
+                    className="inline-flex h-2.5 w-2.5 rounded-full border border-slate-200"
+                    style={{ background: getWallTypeColor(def.id) }}
+                  />
+                  <span className="truncate text-sm text-slate-700">
+                    {label}
+                    {suffix}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       ) : null}
 
@@ -6135,56 +6722,6 @@ const PlanView = ({ planId }: Props) => {
                       </div>
                     ) : (
                       <>
-                        {contextIsWall && wallContextMetrics ? (
-                          <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
-                            <div className="font-semibold text-slate-600">{t({ it: 'Info muro', en: 'Wall info' })}</div>
-                            {wallContextMetrics.scaleMissing ? (
-                              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
-                                {t({ it: 'Imposta una scala.', en: 'Set a scale.' })}
-                              </div>
-                            ) : (
-                              <>
-                                {wallContextMetrics.lengthLabel ? (
-                                  <div className="mt-1 flex items-center justify-between gap-2">
-                                    <span>{t({ it: 'Lunghezza', en: 'Length' })}</span>
-                                    <span className="font-mono">{wallContextMetrics.lengthLabel}</span>
-                                  </div>
-                                ) : null}
-                                {wallContextMetrics.perimeterLabel ? (
-                                  <div className="mt-1 flex items-center justify-between gap-2">
-                                    <span>{t({ it: 'Perimetro', en: 'Perimeter' })}</span>
-                                    <span className="font-mono">{wallContextMetrics.perimeterLabel}</span>
-                                  </div>
-                                ) : null}
-                                {wallContextMetrics.areaLabel ? (
-                                  <div className="mt-1 flex items-center justify-between gap-2">
-                                    <span>{t({ it: 'Area', en: 'Area' })}</span>
-                                    <span className="font-mono">{wallContextMetrics.areaLabel}</span>
-                                  </div>
-                                ) : null}
-                                {wallContextMetrics.segments?.length ? (
-                                  <div className="mt-2">
-                                    <div className="text-[11px] font-semibold text-slate-500">{t({ it: 'Lati', en: 'Sides' })}</div>
-                                    <div className="mt-1 space-y-1 text-[11px] text-slate-600">
-                                      {wallContextMetrics.segments.map((seg) => (
-                                        <div key={seg.label} className="flex items-center justify-between gap-2">
-                                          <span className="font-mono">{seg.label}</span>
-                                          <span className="font-mono">{seg.lengthLabel}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ) : null}
-                              </>
-                            )}
-                            {wallContextMetrics.cornerLabels?.length ? (
-                              <div className="mt-2 text-[11px] text-slate-500">
-                                {t({ it: 'Angoli', en: 'Corners' })}:{' '}
-                                <span className="font-mono">{wallContextMetrics.cornerLabels.join(', ')}</span>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
                         {!contextIsDesk && !contextIsWall ? (
                           <button
                             onClick={() => {
@@ -6195,6 +6732,30 @@ const PlanView = ({ planId }: Props) => {
                             title={t({ it: 'Modifica', en: 'Edit' })}
                           >
                             <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
+                          </button>
+                        ) : null}
+                        {contextIsWifi ? (
+                          <button
+                            onClick={() => {
+                              const ids =
+                                contextIsMulti && selectedObjectIds.length
+                                  ? selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'wifi')
+                                  : [contextMenu.id];
+                              const nextValue = !contextWifiRangeOn;
+                              ids.forEach((id) => updateObject(id, { wifiShowRange: nextValue }));
+                              setContextMenu(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                            title={t({
+                              it: contextWifiRangeOn ? 'Nascondi range access point' : 'Mostra range access point',
+                              en: contextWifiRangeOn ? 'Hide access point range' : 'Show access point range'
+                            })}
+                          >
+                            <Eye size={14} className="text-slate-500" />{' '}
+                            {t({
+                              it: contextWifiRangeOn ? 'Nascondi range' : 'Mostra range',
+                              en: contextWifiRangeOn ? 'Hide range' : 'Show range'
+                            })}
                           </button>
                         ) : null}
                         {canEditWallType ? (
@@ -6294,7 +6855,11 @@ const PlanView = ({ planId }: Props) => {
                         {!contextIsWall ? (
                           <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-                              <MoveDiagonal size={14} /> {t({ it: 'Scala', en: 'Scale' })}
+                              <MoveDiagonal size={14} />{' '}
+                              {t({
+                                it: contextIsQuote ? 'Scala quota' : 'Scala',
+                                en: contextIsQuote ? 'Quote scale' : 'Scale'
+                              })}
                               <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
                                 {(contextObject?.scale ?? 1).toFixed(2)}
                               </span>
@@ -6302,8 +6867,8 @@ const PlanView = ({ planId }: Props) => {
                             <input
                               key={contextMenu.id}
                               type="range"
-                              min={0.2}
-                              max={2.4}
+                              min={contextIsQuote ? 0.5 : 0.2}
+                              max={contextIsQuote ? 1.6 : 2.4}
                               step={0.05}
                               value={contextObject?.scale ?? 1}
                               onChange={(e) => {
@@ -6340,6 +6905,26 @@ const PlanView = ({ planId }: Props) => {
                             className="mt-1 w-full"
                           />
                         </div>
+                        {contextIsWall || contextIsQuote ? (
+                          <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                              <MoveDiagonal size={14} /> {t({ it: 'Spessore linea', en: 'Line thickness' })}
+                              <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
+                                {Number(contextObject?.strokeWidth ?? (contextIsQuote ? 2 : 1)).toFixed(1)} px
+                              </span>
+                            </div>
+                            <input
+                              key={`${contextMenu.id}-stroke-width`}
+                              type="range"
+                              min={contextIsQuote ? 0.5 : 1}
+                              max={contextIsQuote ? 6 : 12}
+                              step={contextIsQuote ? 0.1 : 1}
+                              value={contextObject?.strokeWidth ?? (contextIsQuote ? 2 : 1)}
+                              onChange={(e) => updateObject(contextMenu.id, { strokeWidth: Number(e.target.value) })}
+                              className="mt-1 w-full"
+                            />
+                          </div>
+                        ) : null}
                         {contextIsCamera ? (
                           <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
                             <div className="text-xs font-semibold text-slate-600">{t({ it: 'CCTV', en: 'CCTV' })}</div>
@@ -6500,7 +7085,7 @@ const PlanView = ({ planId }: Props) => {
                               return;
                             }
                             markTouched();
-                            const id = addLink(basePlan.id, a, b, { kind: 'arrow' });
+                            const id = addLink(basePlan.id, a, b, { kind: 'arrow', arrow: 'none' });
                             postAuditEvent({
                               event: 'link_create',
                               scopeType: 'plan',
@@ -6553,6 +7138,44 @@ const PlanView = ({ planId }: Props) => {
               </>
             ) : contextMenu.kind === 'room' ? (
             <>
+              {roomContextMetrics ? (
+                <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                  <div className="font-semibold text-slate-600">{t({ it: 'Info stanza', en: 'Room info' })}</div>
+                  {roomContextMetrics.scaleMissing ? (
+                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+                      {t({ it: 'Imposta una scala per misurare.', en: 'Set a scale to measure.' })}
+                    </div>
+                  ) : (
+                    <>
+                      {roomContextMetrics.perimeterLabel ? (
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <span>{t({ it: 'Perimetro', en: 'Perimeter' })}</span>
+                          <span className="font-mono">{roomContextMetrics.perimeterLabel}</span>
+                        </div>
+                      ) : null}
+                      {roomContextMetrics.areaLabel ? (
+                        <div className="mt-1 flex items-center justify-between gap-2">
+                          <span>{t({ it: 'Area', en: 'Area' })}</span>
+                          <span className="font-mono">{roomContextMetrics.areaLabel}</span>
+                        </div>
+                      ) : null}
+                      {roomContextMetrics.segments?.length ? (
+                        <div className="mt-2">
+                          <div className="text-[11px] font-semibold text-slate-500">{t({ it: 'Lati', en: 'Sides' })}</div>
+                          <div className="mt-1 space-y-1 text-[11px] text-slate-600">
+                            {roomContextMetrics.segments.map((seg: { label: string; lengthLabel?: string | null }) => (
+                              <div key={seg.label} className="flex items-center justify-between gap-2">
+                                <span className="font-mono">{seg.label}</span>
+                                <span className="font-mono">{seg.lengthLabel}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : null}
               {!isReadOnly ? (
 	                <button
 	                  onClick={() => {
@@ -6578,243 +7201,329 @@ const PlanView = ({ planId }: Props) => {
                 </button>
               ) : null}
             </>
+            ) : contextMenu.kind === 'scale' ? (
+            <>
+              <button
+                onClick={() => {
+                  openScaleEdit();
+                  setContextMenu(null);
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Ricalibra scala', en: 'Recalibrate scale' })}
+              >
+                <Ruler size={14} className="text-slate-500" /> {t({ it: 'Ricalibra scala', en: 'Recalibrate scale' })}
+              </button>
+              <button
+                onClick={() => {
+                  requestClearScale();
+                  setContextMenu(null);
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-700 hover:bg-rose-50"
+                title={t({ it: 'Elimina scala', en: 'Delete scale' })}
+              >
+                <Trash size={14} className="text-rose-600" /> {t({ it: 'Elimina scala', en: 'Delete scale' })}
+              </button>
+            </>
           ) : (
             <>
-              {!isReadOnly ? (
-	                <button
-	                onClick={() => {
-	                  setViewModalOpen(true);
-	                  setContextMenu(null);
-	                }}
-	                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                title={t({ it: 'Salva vista', en: 'Save view' })}
-	              >
-                <BookmarkPlus size={14} className="text-slate-500" /> {t({ it: 'Salva vista', en: 'Save view' })}
-              </button>
-              ) : null}
-              {!metersPerPixel && !isReadOnly ? (
-                <button
-                  onClick={() => {
-                    if ((contextMenu as any).kind !== 'map') return;
-                    startScaleMode();
-                    setContextMenu(null);
-                  }}
-                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-700 hover:bg-rose-50"
-                  title={t({ it: 'Imposta la scala della planimetria', en: 'Set the floor plan scale' })}
-                >
-                  <Ruler size={14} className="text-rose-600" /> {t({ it: 'Imposta scala', en: 'Set scale' })}
-                </button>
-              ) : null}
-              {metersPerPixel && !isReadOnly ? (
-                <button
-                  onClick={() => {
-                    if ((contextMenu as any).kind !== 'map') return;
-                    clearScale();
-                    setContextMenu(null);
-                  }}
-                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-700 hover:bg-rose-50"
-                  title={t({ it: 'Cancella la scala della planimetria', en: 'Clear the floor plan scale' })}
-                >
-                  <Ruler size={14} className="text-rose-600" /> {t({ it: 'Cancella scala', en: 'Clear scale' })}
-                </button>
-              ) : null}
               <button
-                onClick={() => {
-                  if ((contextMenu as any).kind !== 'map') return;
-                  startMeasure({ x: (contextMenu as any).worldX, y: (contextMenu as any).worldY });
-                  setContextMenu(null);
-                }}
+                onClick={() => toggleMapSubmenu('view')}
                 className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                title={t({ it: 'Misura distanza (m)', en: 'Measure distance (m)' })}
+                title={t({ it: 'Visualizza', en: 'View' })}
               >
-                <Ruler size={14} className="text-slate-500" /> {t({ it: 'Misura distanza (m)', en: 'Measure distance (m)' })}
-              </button>
-              <button
-                onClick={() => {
-                  if ((contextMenu as any).kind !== 'map') return;
-                  startQuote({ x: (contextMenu as any).worldX, y: (contextMenu as any).worldY });
-                  setContextMenu(null);
-                }}
-                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                title={t({ it: 'Quota (Q)', en: 'Quote (Q)' })}
-              >
-                <MoveDiagonal size={14} className="text-slate-500" /> {t({ it: 'Quota (Q)', en: 'Quote (Q)' })}
-              </button>
-              <div className="my-2 h-px bg-slate-100" />
-              {!isReadOnly ? (
-	                <button
-	                  onClick={() => setContextMenu({ ...contextMenu, roomOpen: !contextMenu.roomOpen, addOpen: false })}
-	                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                  title={t({ it: 'Nuova stanza', en: 'New room' })}
-	                >
-                  <Square size={14} className="text-slate-500" /> {t({ it: 'Nuova stanza', en: 'New room' })}
-                  <ChevronRight size={14} className="ml-auto text-slate-400" />
-                </button>
-              ) : null}
-	              <button
-	                onClick={() => {
-	                  goToDefaultView();
-	                  setContextMenu(null);
-	                }}
-	                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                title={t({ it: 'Vai a default', en: 'Go to default' })}
-	              >
-                <Home size={14} className="text-slate-500" /> {t({ it: 'Vai a default', en: 'Go to default' })}
-              </button>
-              {!isReadOnly ? (
-	                <button
-	                onClick={() => setContextMenu({ ...contextMenu, addOpen: !contextMenu.addOpen })}
-	                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                title={t({ it: 'Aggiungi oggetto', en: 'Add object' })}
-	              >
-                <Plus size={14} className="text-slate-500" /> {t({ it: 'Aggiungi oggetto', en: 'Add object' })}
+                <BookmarkPlus size={14} className="text-slate-500" /> {t({ it: 'Vista', en: 'View' })}
                 <ChevronRight size={14} className="ml-auto text-slate-400" />
               </button>
-              ) : null}
-              {!isReadOnly ? (
-	                <button
-	                onClick={() => {
-	                  setConfirmClearObjects(true);
-	                  setContextMenu(null);
-	                }}
-	                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
-	                title={t({ it: 'Elimina tutti gli oggetti', en: 'Delete all objects' })}
-	              >
-                <Trash size={14} /> {t({ it: 'Elimina tutti gli oggetti', en: 'Delete all objects' })}
+              <button
+                onClick={() => toggleMapSubmenu('measure')}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Misure', en: 'Measurements' })}
+              >
+                <Ruler size={14} className="text-slate-500" /> {t({ it: 'Misure', en: 'Measurements' })}
+                <ChevronRight size={14} className="ml-auto text-slate-400" />
               </button>
-              ) : null}
-              <div className="my-2 h-px bg-slate-100" />
-              {!isReadOnly ? (
-	                <button
-	                  onClick={() => {
-	                    if ((basePlan as any)?.printArea) {
-	                      updateFloorPlan(basePlan.id, { printArea: undefined });
-	                      setContextMenu(null);
-	                      push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
-	                      return;
-	                    }
-	                    setPrintAreaMode(true);
-	                    setContextMenu(null);
-	                    push(
-	                      t({
-	                        it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
-	                        en: 'Draw a rectangle on the map to set the print area.'
-	                      }),
-	                      'info'
-	                    );
-	                  }}
-	                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                  title={(basePlan as any)?.printArea ? t({ it: 'Rimuovi area di stampa', en: 'Clear print area' }) : t({ it: 'Imposta area di stampa', en: 'Set print area' })}
-	                >
-                  <Crop size={14} className="text-slate-500" />{' '}
-                  {(basePlan as any)?.printArea
-                    ? t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })
-                    : t({ it: 'Imposta area di stampa', en: 'Set print area' })}
-                </button>
-              ) : null}
-              {(basePlan as any)?.printArea ? (
-                <button
-                  onClick={() => {
-                    toggleShowPrintArea(basePlan.id);
-                    setContextMenu(null);
-                  }}
-                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                  title={t({ it: 'Mostra/nascondi area di stampa come overlay', en: 'Show/hide the print area overlay' })}
-                >
-                  {showPrintArea ? <EyeOff size={14} className="text-slate-500" /> : <Eye size={14} className="text-slate-500" />}{' '}
-                  {showPrintArea
-                    ? t({ it: 'Nascondi area di stampa', en: 'Hide print area' })
-                    : t({ it: 'Mostra area di stampa', en: 'Show print area' })}
-                </button>
-              ) : null}
-	              <button
-	                onClick={() => {
-	                  setExportModalOpen(true);
-	                  setContextMenu(null);
-	                }}
-	                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                title={t({ it: 'Esporta PDF', en: 'Export PDF' })}
-	              >
-                <FileDown size={14} className="text-slate-500" /> {t({ it: 'Esporta PDF', en: 'Export PDF' })}
+              <button
+                onClick={() => toggleMapSubmenu('create')}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Aggiungi', en: 'Add' })}
+              >
+                <Plus size={14} className="text-slate-500" /> {t({ it: 'Aggiungi', en: 'Add' })}
+                <ChevronRight size={14} className="ml-auto text-slate-400" />
+              </button>
+              <button
+                onClick={() => toggleMapSubmenu('print')}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Stampa', en: 'Print & export' })}
+              >
+                <Crop size={14} className="text-slate-500" /> {t({ it: 'Stampa', en: 'Print' })}
+                <ChevronRight size={14} className="ml-auto text-slate-400" />
+              </button>
+              <button
+                onClick={() => toggleMapSubmenu('manage')}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Gestione', en: 'Manage' })}
+              >
+                <Trash size={14} className="text-slate-500" /> {t({ it: 'Gestione', en: 'Manage' })}
+                <ChevronRight size={14} className="ml-auto text-slate-400" />
               </button>
             </>
           )}
         </div>
 
-        {contextMenu.kind !== 'object' && contextMenu.kind !== 'link' && (contextMenu as any).addOpen ? (
+        {contextMenu.kind === 'map' && mapSubmenu === 'view' ? (
           <div
-            className="fixed z-50 w-72 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
-            style={{ top: contextMenu.y, left: contextMenu.x + 236 }}
+            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">{t({ it: 'Aggiungi oggetto', en: 'Add object' })}</div>
-            <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-2">
-              {mapAddMenuTypes.map((def) => (
-                <button
-                  key={def.id}
-                  onClick={() => {
-                    if ((contextMenu as any).kind !== 'map') return;
-                    if (isWallType(def.id)) {
-                      startWallDraw(def.id);
-                      setContextMenu(null);
-                      return;
-                    }
-                    if (def.id === 'real_user' || def.id === 'user' || def.id === 'generic_user') {
-                      const worldX = (contextMenu as any).worldX;
-                      const worldY = (contextMenu as any).worldY;
-                      if (!shouldConfirmCapacity(def.id as MapObjectType, worldX, worldY)) {
-                        proceedPlaceUser(def.id as MapObjectType, worldX, worldY);
-                      }
-                      setContextMenu(null);
-                      return;
-                    }
-                    setModalState({
-                      mode: 'create',
-                      type: def.id,
-                      coords: { x: (contextMenu as any).worldX, y: (contextMenu as any).worldY }
-                    });
-                    setContextMenu(null);
-                  }}
-                  className="flex flex-col items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                  title={getTypeLabel(def.id)}
-                >
-                  <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary shadow-sm">
-                    <Icon name={def.icon} />
-                  </span>
-                  <span className="leading-tight">{getTypeLabel(def.id)}</span>
-                </button>
-              ))}
-            </div>
+            <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">{t({ it: 'Vista', en: 'View' })}</div>
+            {!isReadOnly ? (
+              <button
+                onClick={() => {
+                  setViewModalOpen(true);
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Salva vista', en: 'Save view' })}
+              >
+                <BookmarkPlus size={14} className="text-slate-500" /> {t({ it: 'Salva vista', en: 'Save view' })}
+              </button>
+            ) : null}
+            <button
+              onClick={() => {
+                goToDefaultView();
+                setContextMenu(null);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+              title={t({ it: 'Vai a default', en: 'Go to default' })}
+            >
+              <Home size={14} className="text-slate-500" /> {t({ it: 'Vai a default', en: 'Go to default' })}
+            </button>
           </div>
         ) : null}
 
-        {contextMenu.kind !== 'object' && contextMenu.kind !== 'link' && (contextMenu as any).roomOpen && !isReadOnly ? (
+        {contextMenu.kind === 'map' && mapSubmenu === 'measure' ? (
           <div
-            className="fixed z-50 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
-            style={{ top: contextMenu.y + 40, left: contextMenu.x + 236 }}
+            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">{t({ it: 'Nuova stanza', en: 'New room' })}</div>
-	            <button
-	              onClick={() => {
-	                beginRoomDraw();
-	                setContextMenu(null);
-	              }}
-	              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-	              title={t({ it: 'Rettangolo', en: 'Rectangle' })}
-	            >
-              <Square size={14} className="text-slate-500" /> {t({ it: 'Rettangolo', en: 'Rectangle' })}
+            <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">
+              {t({ it: 'Misure', en: 'Measurements' })}
+            </div>
+            {!metersPerPixel && !isReadOnly ? (
+              <button
+                onClick={() => {
+                  if ((contextMenu as any).kind !== 'map') return;
+                  startScaleMode();
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-700 hover:bg-rose-50"
+                title={t({ it: 'Imposta la scala della planimetria', en: 'Set the floor plan scale' })}
+              >
+                <Ruler size={14} className="text-rose-600" /> {t({ it: 'Imposta scala', en: 'Set scale' })}
+              </button>
+            ) : null}
+            {metersPerPixel && !isReadOnly ? (
+              <button
+                onClick={() => {
+                  if ((contextMenu as any).kind !== 'map') return;
+                  requestClearScale();
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-700 hover:bg-rose-50"
+                title={t({ it: 'Cancella la scala della planimetria', en: 'Clear the floor plan scale' })}
+              >
+                <Ruler size={14} className="text-rose-600" /> {t({ it: 'Cancella scala', en: 'Clear scale' })}
+              </button>
+            ) : null}
+            <button
+              onClick={() => {
+                if ((contextMenu as any).kind !== 'map') return;
+                startMeasure({ x: (contextMenu as any).worldX, y: (contextMenu as any).worldY });
+                setContextMenu(null);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+              title={t({ it: 'Misura distanza (m)', en: 'Measure distance (m)' })}
+            >
+              <Ruler size={14} className="text-slate-500" /> {t({ it: 'Misura distanza (m)', en: 'Measure distance (m)' })}
             </button>
-	            <button
-	              onClick={() => {
-	                beginRoomPolyDraw();
-	                setContextMenu(null);
-	              }}
-	              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-	              title={t({ it: 'Poligono', en: 'Polygon' })}
-	            >
-              <Square size={14} className="text-slate-500" /> {t({ it: 'Poligono', en: 'Polygon' })}
+            <button
+              onClick={() => {
+                if ((contextMenu as any).kind !== 'map') return;
+                startQuote({ x: (contextMenu as any).worldX, y: (contextMenu as any).worldY });
+                setContextMenu(null);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+              title={t({ it: 'Quota (Q)', en: 'Quote (Q)' })}
+            >
+              <MoveDiagonal size={14} className="text-slate-500" /> {t({ it: 'Quota (Q)', en: 'Quote (Q)' })}
             </button>
+          </div>
+        ) : null}
+
+        {contextMenu.kind === 'map' && mapSubmenu === 'create' ? (
+          <div
+            className="fixed z-50 w-80 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            style={getSubmenuStyle(320)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">{t({ it: 'Aggiungi', en: 'Add' })}</div>
+            {!isReadOnly ? (
+              <>
+                <div className="px-2 pt-1 text-[11px] font-semibold text-slate-500">{t({ it: 'Stanze', en: 'Rooms' })}</div>
+                <button
+                  onClick={() => {
+                    setRoomCatalogOpen(true);
+                    setContextMenu(null);
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Apri catalogo stanze', en: 'Open room catalog' })}
+                >
+                  <Square size={14} className="text-slate-500" /> {t({ it: 'Catalogo stanze', en: 'Room catalog' })}
+                </button>
+                <div className="my-2 h-px bg-slate-100" />
+                <div className="px-2 text-[11px] font-semibold text-slate-500">{t({ it: 'Oggetti', en: 'Objects' })}</div>
+                <button
+                  onClick={() => {
+                    setAllTypesDefaultTab('objects');
+                    setAllTypesOpen(true);
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Apri catalogo oggetti', en: 'Open object catalog' })}
+                >
+                  <LayoutGrid size={14} className="text-slate-500" /> {t({ it: 'Catalogo oggetti', en: 'Object catalog' })}
+                </button>
+                <div className="my-2 h-px bg-slate-100" />
+                <div className="px-2 text-[11px] font-semibold text-slate-500">{t({ it: 'Scrivanie', en: 'Desks' })}</div>
+                <button
+                  onClick={() => {
+                    if (!deskCatalogDefs.length) return;
+                    setDeskCatalogOpen(true);
+                    setContextMenu(null);
+                  }}
+                  disabled={!deskCatalogDefs.length}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  title={t({ it: 'Apri catalogo scrivanie', en: 'Open desk catalog' })}
+                >
+                  <LayoutGrid size={14} className="text-slate-500" /> {t({ it: 'Catalogo scrivanie', en: 'Desk catalog' })}
+                </button>
+                {!deskCatalogDefs.length ? (
+                  <div className="mt-2 px-2 text-xs text-slate-500">
+                    {t({ it: 'Nessuna scrivania disponibile.', en: 'No desks available.' })}
+                  </div>
+                ) : null}
+                <div className="my-2 h-px bg-slate-100" />
+                <div className="px-2 text-[11px] font-semibold text-slate-500">{t({ it: 'Mura', en: 'Walls' })}</div>
+                <button
+                  onClick={() => {
+                    if (!wallTypeDefs.length) return;
+                    setWallCatalogOpen(true);
+                    setContextMenu(null);
+                  }}
+                  disabled={!wallTypeDefs.length}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  title={t({ it: 'Apri catalogo mura', en: 'Open wall catalog' })}
+                >
+                  <Square size={14} className="text-slate-500" /> {t({ it: 'Catalogo mura', en: 'Wall catalog' })}
+                </button>
+                {!wallTypeDefs.length ? (
+                  <div className="mt-2 px-2 text-xs text-slate-500">
+                    {t({ it: 'Nessun muro disponibile.', en: 'No walls available.' })}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="px-2 py-2 text-xs text-slate-500">{t({ it: 'Sola lettura', en: 'Read-only' })}</div>
+            )}
+          </div>
+        ) : null}
+
+        {contextMenu.kind === 'map' && mapSubmenu === 'print' ? (
+          <div
+            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            style={getSubmenuStyle(240)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">{t({ it: 'Stampa', en: 'Print' })}</div>
+            {!isReadOnly ? (
+              <button
+                onClick={() => {
+                  if ((basePlan as any)?.printArea) {
+                    updateFloorPlan(basePlan.id, { printArea: undefined });
+                    setContextMenu(null);
+                    push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
+                    return;
+                  }
+                  setPrintAreaMode(true);
+                  setContextMenu(null);
+                  push(
+                    t({
+                      it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
+                      en: 'Draw a rectangle on the map to set the print area.'
+                    }),
+                    'info'
+                  );
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={(basePlan as any)?.printArea ? t({ it: 'Rimuovi area di stampa', en: 'Clear print area' }) : t({ it: 'Imposta area di stampa', en: 'Set print area' })}
+              >
+                <Crop size={14} className="text-slate-500" />{' '}
+                {(basePlan as any)?.printArea
+                  ? t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })
+                  : t({ it: 'Imposta area di stampa', en: 'Set print area' })}
+              </button>
+            ) : null}
+            {(basePlan as any)?.printArea ? (
+              <button
+                onClick={() => {
+                  toggleShowPrintArea(basePlan.id);
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Mostra/nascondi area di stampa come overlay', en: 'Show/hide the print area overlay' })}
+              >
+                {showPrintArea ? <EyeOff size={14} className="text-slate-500" /> : <Eye size={14} className="text-slate-500" />}{' '}
+                {showPrintArea
+                  ? t({ it: 'Nascondi area di stampa', en: 'Hide print area' })
+                  : t({ it: 'Mostra area di stampa', en: 'Show print area' })}
+              </button>
+            ) : null}
+            <button
+              onClick={() => {
+                setExportModalOpen(true);
+                setContextMenu(null);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+              title={t({ it: 'Esporta PDF', en: 'Export PDF' })}
+            >
+              <FileDown size={14} className="text-slate-500" /> {t({ it: 'Esporta PDF', en: 'Export PDF' })}
+            </button>
+          </div>
+        ) : null}
+
+        {contextMenu.kind === 'map' && mapSubmenu === 'manage' ? (
+          <div
+            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            style={getSubmenuStyle(240)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">{t({ it: 'Gestione', en: 'Manage' })}</div>
+            {!isReadOnly ? (
+              <button
+                onClick={() => {
+                  setConfirmClearObjects(true);
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
+                title={t({ it: 'Elimina tutti gli oggetti', en: 'Delete all objects' })}
+              >
+                <Trash size={14} /> {t({ it: 'Elimina tutti gli oggetti', en: 'Delete all objects' })}
+              </button>
+            ) : (
+              <div className="px-2 py-2 text-xs text-slate-500">{t({ it: 'Sola lettura', en: 'Read-only' })}</div>
+            )}
           </div>
         ) : null}
         </>
@@ -7024,7 +7733,7 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-card">
+                <Dialog.Panel className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-card">
                   <Dialog.Title className="text-lg font-semibold text-ink">
                     {t({ it: 'Muri stanza', en: 'Room walls' })}
                   </Dialog.Title>
@@ -7034,6 +7743,13 @@ const PlanView = ({ planId }: Props) => {
                       en: `Choose the wall material for room "${roomWallTypeModal?.roomName || 'room'}".`
                     })}
                   </div>
+                  {roomWallPreview ? (
+                    <RoomShapePreview
+                      points={roomWallPreview.points}
+                      segments={roomWallPreview.segments}
+                      className="mt-4 h-48 w-full"
+                    />
+                  ) : null}
                   <label className="mt-4 block text-sm font-semibold text-slate-700">
                     {t({ it: 'Tipo predefinito', en: 'Default wall type' })}
                   </label>
@@ -7057,36 +7773,38 @@ const PlanView = ({ planId }: Props) => {
                       );
                     })}
                   </select>
-                  <div className="mt-4 max-h-[320px] space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    {(roomWallTypeModal?.segments || []).map((segment, index) => {
-                      const value = roomWallTypeSelections[index] || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
-                      return (
-                        <div key={`${segment.label}-${index}`} className="flex items-center gap-3 rounded-lg bg-white px-3 py-2">
-                          <div className="min-w-[64px] text-xs font-semibold text-slate-600">{segment.label}</div>
-                          <span
-                            className="inline-flex h-3 w-3 rounded-full border border-slate-200"
-                            style={{ background: getWallTypeColor(value) }}
-                          />
-                          <select
-                            value={value}
-                            onChange={(e) => setRoomWallTypeAt(index, e.target.value)}
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                          >
-                            {wallTypeDefs.map((def) => {
-                              const label = getTypeLabel(def.id);
-                              const attenuation = Number((def as any).attenuationDb);
-                              const suffix = Number.isFinite(attenuation) ? ` (${attenuation} dB)` : '';
-                              return (
-                                <option key={def.id} value={def.id}>
-                                  {label}
-                                  {suffix}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        </div>
-                      );
-                    })}
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {(roomWallTypeModal?.segments || []).map((segment, index) => {
+                        const value = roomWallTypeSelections[index] || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
+                        return (
+                          <div key={`${segment.label}-${index}`} className="flex items-center gap-3 rounded-lg bg-white px-3 py-2">
+                            <div className="min-w-[64px] text-xs font-semibold text-slate-600">{segment.label}</div>
+                            <span
+                              className="inline-flex h-3 w-3 rounded-full border border-slate-200"
+                              style={{ background: getWallTypeColor(value) }}
+                            />
+                            <select
+                              value={value}
+                              onChange={(e) => setRoomWallTypeAt(index, e.target.value)}
+                              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            >
+                              {wallTypeDefs.map((def) => {
+                                const label = getTypeLabel(def.id);
+                                const attenuation = Number((def as any).attenuationDb);
+                                const suffix = Number.isFinite(attenuation) ? ` (${attenuation} dB)` : '';
+                                return (
+                                  <option key={def.id} value={def.id}>
+                                    {label}
+                                    {suffix}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div className="mt-4 flex items-center justify-end gap-2">
                     <button
@@ -7100,187 +7818,6 @@ const PlanView = ({ planId }: Props) => {
                       className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                     >
                       {t({ it: 'Crea muri', en: 'Create walls' })}
-                    </button>
-                  </div>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-
-      <Transition show={!!wallPolygonModal} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={() => setWallPolygonModal(null)} initialFocus={wallPolygonCancelRef}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-150"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-100"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-8">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-150"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-100"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-card">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({ it: 'Forma muri', en: 'Wall shape' })}
-                  </Dialog.Title>
-                  <div className="mt-2 text-sm text-slate-600">
-                    {t({
-                      it: 'Verifica i lati della forma e scegli il materiale per ogni muro.',
-                      en: 'Review the shape sides and choose the material for each wall.'
-                    })}
-                  </div>
-                  {wallPolygonPreview ? (
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <svg viewBox={`0 0 ${wallPolygonPreview.width} ${wallPolygonPreview.height}`} className="h-36 w-full">
-                        <polygon points={wallPolygonPreview.path} fill="none" stroke="#94a3b8" strokeWidth={2} />
-                        {wallPolygonPreview.segmentLabels.map((segment) => (
-                          <text
-                            key={`segment-${segment.label}`}
-                            x={segment.x}
-                            y={segment.y - 4}
-                            textAnchor="middle"
-                            fontSize="10"
-                            fill="#475569"
-                            fontWeight={600}
-                          >
-                            {segment.label}
-                          </text>
-                        ))}
-                        {wallPolygonPreview.points.map((point) => (
-                          <g key={`corner-${point.label}`}>
-                            <circle cx={point.x} cy={point.y} r={3} fill="#1d4ed8" />
-                            <text
-                              x={point.x + 6}
-                              y={point.y - 6}
-                              fontSize="11"
-                              fontWeight={700}
-                              fill="#2563eb"
-                              stroke="#0f172a"
-                              strokeWidth={0.6}
-                            >
-                              {point.label}
-                            </text>
-                          </g>
-                        ))}
-                      </svg>
-                    </div>
-                  ) : null}
-                  {wallPolygonMetrics ? (
-                    <div className="mt-3 grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
-                      <div>{t({ it: `Perimetro: ${wallPolygonMetrics.perimeterLabel}`, en: `Perimeter: ${wallPolygonMetrics.perimeterLabel}` })}</div>
-                      <div>{t({ it: `Area: ${wallPolygonMetrics.areaLabel}`, en: `Area: ${wallPolygonMetrics.areaLabel}` })}</div>
-                    </div>
-                  ) : null}
-                  <label className="mt-4 block text-sm font-semibold text-slate-700">
-                    {t({ it: 'Tipo predefinito', en: 'Default wall type' })}
-                  </label>
-                  <select
-                    value={wallPolygonAllValue || ''}
-                    onChange={(e) => applyWallPolygonTypeAll(e.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                  >
-                    <option value="" disabled>
-                      {t({ it: 'Selezione personalizzata', en: 'Custom selection' })}
-                    </option>
-                    {wallTypeDefs.map((def) => {
-                      const label = getTypeLabel(def.id);
-                      const attenuation = Number((def as any).attenuationDb);
-                      const suffix = Number.isFinite(attenuation) ? ` (${attenuation} dB)` : '';
-                      return (
-                        <option key={def.id} value={def.id}>
-                          {label}
-                          {suffix}
-                        </option>
-                      );
-                    })}
-                  </select>
-                  <div className="mt-4 max-h-[320px] space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    {(wallPolygonModal?.segments || []).map((segment, index) => {
-                      const value = wallPolygonSelections[index] || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
-                      const lengthUnit = metersPerPixel ? (lang === 'it' ? 'ml' : 'm') : 'px';
-                      const lengthValue = metersPerPixel ? segment.lengthPx * metersPerPixel : segment.lengthPx;
-                      const lengthLabel = `${formatNumber(lengthValue)} ${lengthUnit}`;
-                      return (
-                        <div key={`${segment.label}-${index}`} className="flex items-center gap-3 rounded-lg bg-white px-3 py-2">
-                          <div className="min-w-[64px] text-xs font-semibold text-slate-600">{segment.label}</div>
-                          <div className="min-w-[92px] text-xs text-slate-500">{lengthLabel}</div>
-                          <span
-                            className="inline-flex h-3 w-3 rounded-full border border-slate-200"
-                            style={{ background: getWallTypeColor(value) }}
-                          />
-                          <select
-                            value={value}
-                            onChange={(e) => setWallPolygonTypeAt(index, e.target.value)}
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                          >
-                            {wallTypeDefs.map((def) => {
-                              const label = getTypeLabel(def.id);
-                              const attenuation = Number((def as any).attenuationDb);
-                              const suffix = Number.isFinite(attenuation) ? ` (${attenuation} dB)` : '';
-                              return (
-                                <option key={def.id} value={def.id}>
-                                  {label}
-                                  {suffix}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <label className="mt-4 flex items-start gap-2 text-sm font-medium text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={wallPolygonCreateRoom}
-                      onChange={(e) => setWallPolygonCreateRoom(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
-                    />
-                    <span>
-                      {t({ it: 'Crea stanza interna', en: 'Create an internal room' })}
-                      <span className="mt-1 block text-xs font-normal text-slate-500">
-                        {t({
-                          it: 'Userai la stessa forma per creare una stanza con i dettagli completi.',
-                          en: 'Use the same shape to create a room with full details.'
-                        })}
-                      </span>
-                    </span>
-                  </label>
-                  <div className="mt-4 flex items-center justify-end gap-2">
-                    {canDeleteWallPolygon ? (
-                      <button
-                        onClick={deleteWallPolygon}
-                        className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
-                      >
-                        {t({ it: 'Elimina', en: 'Delete' })}
-                      </button>
-                    ) : null}
-                    <button
-                      ref={wallPolygonCancelRef}
-                      onClick={() => setWallPolygonModal(null)}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-                    >
-                      {t({ it: 'Annulla', en: 'Cancel' })}
-                    </button>
-                    <button
-                      onClick={createWallPolygon}
-                      className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-                    >
-                      {wallPolygonCreateRoom ? t({ it: 'Crea muri e stanza', en: 'Create walls and room' }) : t({ it: 'Crea muri', en: 'Create walls' })}
                     </button>
                   </div>
                 </Dialog.Panel>
@@ -7317,6 +7854,13 @@ const PlanView = ({ planId }: Props) => {
             initialWifiBand24={(modalInitials as any)?.wifiBand24}
             initialWifiBand5={(modalInitials as any)?.wifiBand5}
             initialWifiBand6={(modalInitials as any)?.wifiBand6}
+            initialWifiBrand={(modalInitials as any)?.wifiBrand}
+            initialWifiModel={(modalInitials as any)?.wifiModel}
+            initialWifiModelCode={(modalInitials as any)?.wifiModelCode}
+            initialWifiCoverageSqm={(modalInitials as any)?.wifiCoverageSqm}
+            initialWifiCatalogId={(modalInitials as any)?.wifiCatalogId}
+            initialWifiShowRange={(modalInitials as any)?.wifiShowRange}
+            wifiModels={client?.wifiAntennaModels}
             readOnly={isReadOnly}
             onClose={() => {
               setModalState(null);
@@ -7565,6 +8109,153 @@ const PlanView = ({ planId }: Props) => {
         </Dialog>
       </Transition>
 
+      <Transition show={roomCatalogOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setRoomCatalogOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="text-lg font-semibold text-ink">
+                      {t({ it: 'Catalogo stanze', en: 'Room catalog' })}
+                    </Dialog.Title>
+                    <button
+                      onClick={() => setRoomCatalogOpen(false)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                    {t({
+                      it: 'Scegli la tipologia di stanza da creare.',
+                      en: 'Choose the room type you want to create.'
+                    })}
+                  </Dialog.Description>
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <button
+                      onClick={() => {
+                        beginRoomDraw();
+                        setRoomCatalogOpen(false);
+                      }}
+                      disabled={isReadOnly}
+                      className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      title={t({ it: 'Rettangolo', en: 'Rectangle' })}
+                    >
+                      <Square size={16} className="text-slate-500" /> {t({ it: 'Rettangolo', en: 'Rectangle' })}
+                    </button>
+                    <button
+                      onClick={() => {
+                        beginRoomPolyDraw();
+                        setRoomCatalogOpen(false);
+                      }}
+                      disabled={isReadOnly}
+                      className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      title={t({ it: 'Poligono', en: 'Polygon' })}
+                    >
+                      <Square size={16} className="text-slate-500" /> {t({ it: 'Poligono', en: 'Polygon' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={wallCatalogOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setWallCatalogOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="text-lg font-semibold text-ink">
+                      {t({ it: 'Catalogo mura', en: 'Wall catalog' })}
+                    </Dialog.Title>
+                    <button
+                      onClick={() => setWallCatalogOpen(false)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                    {t({
+                      it: 'Seleziona il tipo di muro da disegnare.',
+                      en: 'Select the wall type to draw.'
+                    })}
+                  </Dialog.Description>
+                  <div className="mt-4 max-h-[60vh] space-y-1 overflow-y-auto">
+                    {wallTypeDefs.length ? (
+                      wallTypeDefs.map((def) => (
+                        <button
+                          key={def.id}
+                          onClick={() => {
+                            startWallDraw(def.id);
+                            setWallCatalogOpen(false);
+                          }}
+                          disabled={isReadOnly}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          title={getTypeLabel(def.id)}
+                        >
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getWallTypeColor(def.id) }} />
+                          <span className="truncate">{getTypeLabel(def.id)}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                        {t({ it: 'Nessun muro disponibile.', en: 'No walls available.' })}
+                      </div>
+                    )}
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
       <RoomModal
         open={!!roomModal}
         initialName={roomModal?.mode === 'edit' ? roomModal.initialName : ''}
@@ -7594,6 +8285,8 @@ const PlanView = ({ planId }: Props) => {
             : roomModalInitialSurfaceSqm
         }
         surfaceLocked={!!metersPerPixel}
+        measurements={roomModalMetrics}
+        shapePreview={roomModalPreview}
         initialNotes={
           roomModal?.mode === 'edit'
             ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.notes
@@ -7608,6 +8301,8 @@ const PlanView = ({ planId }: Props) => {
         getTypeLabel={getTypeLabel}
         getTypeIcon={getTypeIcon}
         isUserObject={isUserObject}
+        canCreateWalls={roomModal?.mode === 'edit' && !roomHasWalls && !isReadOnly}
+        onCreateWalls={handleCreateWallsForRoom}
         onDeleteObject={
           !isReadOnly && roomModal?.mode === 'edit'
             ? (id) => {
@@ -7651,6 +8346,7 @@ const PlanView = ({ planId }: Props) => {
               }
             });
             setSelectedRoomId(roomModal.roomId);
+            setSelectedRoomIds([roomModal.roomId]);
             setHighlightRoom({ roomId: roomModal.roomId, until: Date.now() + 2600 });
             setRoomModal(null);
             return true;
@@ -7743,22 +8439,119 @@ const PlanView = ({ planId }: Props) => {
             'success'
           );
           setSelectedRoomId(id);
+          setSelectedRoomIds([id]);
           setHighlightRoom({ roomId: id, until: Date.now() + 3200 });
-          const skipWallTypes = skipRoomWallTypesRef.current;
           skipRoomWallTypesRef.current = false;
-          if (!skipWallTypes) {
-            openRoomWallTypes({
-              roomId: id,
-              roomName: name,
-              kind: roomModal.kind,
-              rect: roomModal.kind === 'rect' ? roomModal.rect : undefined,
-              points: roomModal.kind === 'poly' ? roomModal.points : undefined
-            });
-          }
           setRoomModal(null);
+          setRoomWallPrompt({
+            roomId: id,
+            roomName: name,
+            kind: roomModal.kind,
+            rect: roomModal.kind === 'rect' ? roomModal.rect : undefined,
+            points: roomModal.kind === 'poly' ? roomModal.points : undefined
+          });
           return true;
         }}
       />
+
+      <ConfirmDialog
+        open={!!roomWallPrompt}
+        title={t({ it: 'Creare anche i muri?', en: 'Create walls too?' })}
+        description={t({
+          it: 'Vuoi creare i muri fisici partendo dalla forma della stanza appena creata?',
+          en: 'Do you want to create physical walls from the newly created room shape?'
+        })}
+        confirmLabel={t({ it: 'Si, crea muri', en: 'Yes, create walls' })}
+        cancelLabel={t({ it: 'No, solo stanza', en: 'No, room only' })}
+        onCancel={() => setRoomWallPrompt(null)}
+        onConfirm={() => {
+          if (!roomWallPrompt) return;
+          openRoomWallTypes({
+            roomId: roomWallPrompt.roomId,
+            roomName: roomWallPrompt.roomName,
+            kind: roomWallPrompt.kind,
+            rect: roomWallPrompt.kind === 'rect' ? roomWallPrompt.rect : undefined,
+            points: roomWallPrompt.kind === 'poly' ? roomWallPrompt.points : undefined
+          });
+          setRoomWallPrompt(null);
+        }}
+      />
+
+      <Transition show={scaleActionsOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setScaleActionsOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4 text-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-card transition-all">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="text-lg font-semibold text-ink">
+                      {t({ it: 'Scala planimetria', en: 'Floor plan scale' })}
+                    </Dialog.Title>
+                    <button
+                      onClick={() => setScaleActionsOpen(false)}
+                      className="text-slate-400 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                    {t({
+                      it: 'Vuoi aggiornare la scala o rimuoverla dalla planimetria?',
+                      en: 'Do you want to update the scale or remove it from the floor plan?'
+                    })}
+                  </Dialog.Description>
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      onClick={() => setScaleActionsOpen(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setScaleActionsOpen(false);
+                        openScaleEdit();
+                      }}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Ricalibra scala', en: 'Recalibrate scale' })}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setScaleActionsOpen(false);
+                        setClearScaleConfirmOpen(true);
+                      }}
+                      className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700"
+                    >
+                      {t({ it: 'Elimina scala', en: 'Delete scale' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
 
       <ConfirmDialog
         open={!!capacityConfirm}
@@ -7830,12 +8623,29 @@ const PlanView = ({ planId }: Props) => {
         }}
       />
 
+      <ConfirmDialog
+        open={clearScaleConfirmOpen}
+        title={t({ it: 'Rimuovere la scala?', en: 'Remove the scale?' })}
+        description={t({
+          it: 'Se rimuovi la scala, i range WiFi spariranno finché non ne imposti una nuova e le quote verranno convertite in pixel. Confermi?',
+          en: 'If you remove the scale, WiFi ranges will disappear until you set a new one, and existing quotes will switch to pixels. Continue?'
+        })}
+        confirmLabel={t({ it: 'Rimuovi scala', en: 'Remove scale' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+        onCancel={() => setClearScaleConfirmOpen(false)}
+        onConfirm={() => {
+          setClearScaleConfirmOpen(false);
+          clearScaleNow();
+        }}
+      />
+
       <RoomAllocationModal
         open={roomAllocationOpen}
         rooms={rooms}
         roomStatsById={roomStatsById}
         onHighlight={(roomId) => {
           setSelectedRoomId(roomId);
+          setSelectedRoomIds([roomId]);
           setHighlightRoom({ roomId, until: Date.now() + 3200 });
         }}
         onClose={() => setRoomAllocationOpen(false)}
@@ -7928,7 +8738,10 @@ const PlanView = ({ planId }: Props) => {
               });
 	          })()
 	        }
-        onCancel={() => setConfirmDelete(null)}
+        onCancel={() => {
+          setConfirmDelete(null);
+          setPendingRoomDeletes([]);
+        }}
         onConfirm={() => {
           if (!confirmDelete || !confirmDelete.length) return;
           markTouched();
@@ -7936,10 +8749,26 @@ const PlanView = ({ planId }: Props) => {
           if (lastInsertedRef.current && confirmDelete.includes(lastInsertedRef.current.id)) {
             lastInsertedRef.current = null;
           }
+          const roomDeletes = pendingRoomDeletesRef.current || [];
+          if (roomDeletes.length) {
+            const remainingRooms = rooms.filter((r) => !roomDeletes.includes(r.id));
+            const updates = computeRoomReassignments(remainingRooms, basePlan.objects);
+            for (const roomId of roomDeletes) {
+              deleteRoom(basePlan.id, roomId);
+              postAuditEvent({ event: 'room_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: roomId } });
+            }
+            if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
+            setSelectedRoomIds((prev) => prev.filter((id) => !roomDeletes.includes(id)));
+            if (selectedRoomId && roomDeletes.includes(selectedRoomId)) setSelectedRoomId(undefined);
+            setPendingRoomDeletes([]);
+          }
           push(
-            confirmDelete.length === 1
+            confirmDelete.length === 1 && !roomDeletes.length
               ? t({ it: 'Oggetto eliminato', en: 'Object deleted' })
-              : t({ it: 'Oggetti eliminati', en: 'Objects deleted' }),
+              : t({
+                  it: roomDeletes.length ? 'Oggetti e stanze eliminati' : 'Oggetti eliminati',
+                  en: roomDeletes.length ? 'Objects and rooms deleted' : 'Objects deleted'
+                }),
             'info'
           );
           postAuditEvent({
@@ -7996,6 +8825,9 @@ const PlanView = ({ planId }: Props) => {
           postAuditEvent({ event: 'room_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: confirmDeleteRoomId } });
           if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
           if (selectedRoomId === confirmDeleteRoomId) setSelectedRoomId(undefined);
+          if (selectedRoomIds.includes(confirmDeleteRoomId)) {
+            setSelectedRoomIds(selectedRoomIds.filter((id) => id !== confirmDeleteRoomId));
+          }
           push(
             t({
               it: `Stanza eliminata${roomName ? `: ${roomName}` : ''}`,
@@ -8004,6 +8836,45 @@ const PlanView = ({ planId }: Props) => {
             'info'
           );
           setConfirmDeleteRoomId(null);
+        }}
+        confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+        confirmOnEnter
+      />
+
+      <ConfirmDialog
+        open={!!confirmDeleteRoomIds}
+        title={t({ it: 'Eliminare le stanze?', en: 'Delete rooms?' })}
+        description={
+          confirmDeleteRoomIds?.length
+            ? t({
+                it: `Stai per eliminare ${confirmDeleteRoomIds.length} stanze e scollegare gli oggetti associati. Continuare?`,
+                en: `You are about to delete ${confirmDeleteRoomIds.length} rooms and unlink associated objects. Continue?`
+              })
+            : undefined
+        }
+        onCancel={() => setConfirmDeleteRoomIds(null)}
+        onConfirm={() => {
+          if (!confirmDeleteRoomIds?.length) return;
+          markTouched();
+          const roomIds = [...confirmDeleteRoomIds];
+          const remainingRooms = rooms.filter((r) => !roomIds.includes(r.id));
+          const updates = computeRoomReassignments(remainingRooms, basePlan.objects);
+          for (const roomId of roomIds) {
+            deleteRoom(basePlan.id, roomId);
+            postAuditEvent({ event: 'room_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: roomId } });
+          }
+          if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
+          setSelectedRoomIds((prev) => prev.filter((id) => !roomIds.includes(id)));
+          if (selectedRoomId && roomIds.includes(selectedRoomId)) setSelectedRoomId(undefined);
+          push(
+            t({
+              it: `Stanze eliminate: ${roomIds.length}`,
+              en: `Rooms deleted: ${roomIds.length}`
+            }),
+            'info'
+          );
+          setConfirmDeleteRoomIds(null);
         }}
         confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
         cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
@@ -8167,13 +9038,24 @@ const PlanView = ({ planId }: Props) => {
                   name: String(l.name || l.label || ''),
                   description: String(l.description || ''),
                   color: String(l.color || '#94a3b8'),
-                  width: Number(l.width || ((l as any).kind === 'cable' ? 3 : 2)),
-                  dashed: !!l.dashed
+                  width: Number.isFinite(Number(l.width)) && Number(l.width) > 0 ? Number(l.width) : 1,
+                  dashed: !!l.dashed,
+                  arrow: (l as any).arrow
                 };
               })()
             : undefined
         }
         onClose={() => {
+          setLinkEditId(null);
+          closeReturnToSelectionList();
+        }}
+        onDelete={() => {
+          if (!linkEditId || isReadOnly) return;
+          markTouched();
+          deleteLink(basePlan.id, linkEditId);
+          postAuditEvent({ event: 'link_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: linkEditId } });
+          push(t({ it: 'Collegamento eliminato', en: 'Link deleted' }), 'info');
+          if (selectedLinkId === linkEditId) setSelectedLinkId(null);
           setLinkEditId(null);
           closeReturnToSelectionList();
         }}
@@ -8185,7 +9067,8 @@ const PlanView = ({ planId }: Props) => {
             description: payload.description,
             color: payload.color,
             width: payload.width,
-            dashed: payload.dashed
+            dashed: payload.dashed,
+            arrow: payload.arrow
           });
           postAuditEvent({ event: 'link_update', scopeType: 'plan', scopeId: basePlan.id, details: { id: linkEditId, ...payload } });
           push(t({ it: 'Collegamento aggiornato', en: 'Link updated' }), 'success');
@@ -8209,9 +9092,21 @@ const PlanView = ({ planId }: Props) => {
           setPendingType(typeId);
           push(t({ it: 'Seleziona un punto sulla mappa per inserire l’oggetto', en: 'Click on the map to place the object' }), 'info');
         }}
-        defaultTab={paletteSettingsSection}
+        defaultTab={allTypesDefaultTab}
         paletteTypeIds={paletteOrder}
         onAddToPalette={addTypeToPalette}
+      />
+
+      <AllObjectTypesModal
+        open={deskCatalogOpen}
+        defs={deskCatalogDefs}
+        onClose={() => setDeskCatalogOpen(false)}
+        onPick={(typeId) => {
+          setPendingType(typeId);
+          push(t({ it: 'Seleziona un punto sulla mappa per inserire l’oggetto', en: 'Click on the map to place the object' }), 'info');
+          setDeskCatalogOpen(false);
+        }}
+        defaultTab="desks"
       />
 
       <RevisionsModal
@@ -8366,6 +9261,7 @@ const PlanView = ({ planId }: Props) => {
           } else {
             clearSelection();
             setSelectedRoomId(r.roomId);
+            setSelectedRoomIds([r.roomId]);
             setHighlightRoom({ roomId: r.roomId, until: Date.now() + 3200 });
           }
         }}

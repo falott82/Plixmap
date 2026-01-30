@@ -17,6 +17,7 @@ interface Props {
   selectedId?: string;
   selectedIds?: string[];
   selectedRoomId?: string;
+  selectedRoomIds?: string[];
   selectedLinkId?: string | null;
   snapEnabled?: boolean;
   gridSize?: number;
@@ -38,12 +39,20 @@ interface Props {
   toolMode?: 'scale' | 'wall' | 'measure' | 'quote' | null;
   onToolPoint?: (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => void;
   onToolMove?: (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => void;
-  onToolDoubleClick?: () => void;
+  onToolDoubleClick?: (point: { x: number; y: number }) => void;
   onWallDraftContextMenu?: () => void;
   wallTypeIds?: Set<string>;
   wallDraft?: { points: { x: number; y: number }[]; pointer?: { x: number; y: number } | null };
   scaleDraft?: { start?: { x: number; y: number }; end?: { x: number; y: number }; pointer?: { x: number; y: number } | null };
-  scaleLine?: { start: { x: number; y: number }; end: { x: number; y: number }; label?: string };
+  scaleLine?: {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    label?: string;
+    labelScale?: number;
+    opacity?: number;
+    strokeWidth?: number;
+  };
+  onScaleMove?: (payload: { start: { x: number; y: number }; end: { x: number; y: number } }) => void;
   measureDraft?: {
     points: { x: number; y: number }[];
     pointer?: { x: number; y: number } | null;
@@ -58,6 +67,7 @@ interface Props {
   };
   quoteLabels?: Record<string, string>;
   objectTypeIcons: Record<string, IconName | undefined>;
+  metersPerPixel?: number | null;
   zoom: number;
   pan: { x: number; y: number };
   containerRef: React.RefObject<HTMLDivElement>;
@@ -68,12 +78,16 @@ interface Props {
   onPanChange: (pan: { x: number; y: number }) => void;
   onSelect: (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => void;
 	  onSelectMany?: (ids: string[]) => void;
+	  onSelectRooms?: (ids: string[]) => void;
 	  onMoveStart?: (id: string, x: number, y: number, roomId?: string) => void;
 	  onMove: (id: string, x: number, y: number) => boolean | void;
 	  onPlaceNew: (type: MapObjectType, x: number, y: number) => void;
 	  onEdit: (id: string) => void;
   onContextMenu: (payload: { id: string; clientX: number; clientY: number; wallSegmentLengthPx?: number }) => void;
+  onScaleContextMenu?: (payload: { clientX: number; clientY: number }) => void;
+  onScaleDoubleClick?: () => void;
   onWallSegmentDblClick?: (payload: { id: string; lengthPx: number }) => void;
+  onWallClick?: (payload: { id: string; clientX: number; clientY: number; world: { x: number; y: number } }) => void;
   onLinkContextMenu?: (payload: { id: string; clientX: number; clientY: number }) => void;
   onLinkDblClick?: (id: string) => void;
   onMapContextMenu: (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) => void;
@@ -97,13 +111,16 @@ interface Props {
       points?: { x: number; y: number }[];
     }
   ) => void;
-  onUpdateObject?: (id: string, changes: Partial<Pick<MapObject, 'scaleX' | 'scaleY'>>) => void;
+  onUpdateObject?: (id: string, changes: Partial<Pick<MapObject, 'scaleX' | 'scaleY' | 'rotation'>>) => void;
+  onMoveWall?: (id: string, dx: number, dy: number, batchId?: string, movedRoomIds?: string[]) => void;
   onSetPrintArea?: (rect: { x: number; y: number; width: number; height: number }) => void;
+  wallAttenuationByType?: Map<string, number>;
 }
 
 export interface CanvasStageHandle {
   getSize: () => { width: number; height: number };
   exportDataUrl: (options?: { pixelRatio?: number; mimeType?: string; quality?: number }) => { dataUrl: string; width: number; height: number };
+  fitView: () => void;
 }
 
 const hexToRgba = (hex: string, alpha: number) => {
@@ -116,25 +133,27 @@ const hexToRgba = (hex: string, alpha: number) => {
   return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, alpha))})`;
 };
 
-const formatCornerLabel = (index: number) => {
-  if (index < 0) return '';
-  let n = index;
-  let label = '';
-  while (n >= 0) {
-    label = String.fromCharCode(65 + (n % 26)) + label;
-    n = Math.floor(n / 26) - 1;
-  }
-  return label;
+const formatMeasure = (value: number) => {
+  if (!Number.isFinite(value)) return '0';
+  const rounded = Math.round(value * 100) / 100;
+  return rounded.toFixed(2).replace(/\.00$/, '');
 };
 
-const getWallCornerPoints = (points: { x: number; y: number }[]) => {
-  if (points.length < 3) return points;
-  const first = points[0];
-  const last = points[points.length - 1];
-  if (first.x === last.x && first.y === last.y) {
-    return points.slice(0, -1);
-  }
-  return points;
+const intersectRaySegment = (
+  origin: { x: number; y: number },
+  dir: { x: number; y: number },
+  a: { x: number; y: number },
+  b: { x: number; y: number }
+) => {
+  const v = { x: b.x - a.x, y: b.y - a.y };
+  const denom = dir.x * v.y - dir.y * v.x;
+  if (!Number.isFinite(denom) || Math.abs(denom) < 1e-6) return null;
+  const w = { x: a.x - origin.x, y: a.y - origin.y };
+  const t = (w.x * v.y - w.y * v.x) / denom;
+  const u = (w.x * dir.y - w.y * dir.x) / denom;
+  if (t < 0) return null;
+  if (u < 0 || u > 1) return null;
+  return t;
 };
 
 const CanvasStageImpl = (
@@ -143,6 +162,7 @@ const CanvasStageImpl = (
   selectedId,
   selectedIds,
   selectedRoomId,
+  selectedRoomIds,
   selectedLinkId = null,
   snapEnabled = false,
   gridSize = 20,
@@ -170,10 +190,12 @@ const CanvasStageImpl = (
   wallDraft,
   scaleDraft,
   scaleLine,
+  onScaleMove,
   measureDraft,
   quoteDraft,
   quoteLabels,
   objectTypeIcons,
+  metersPerPixel = null,
   zoom,
   pan,
   containerRef,
@@ -184,12 +206,16 @@ const CanvasStageImpl = (
   onPanChange,
 	  onSelect,
 	  onSelectMany,
+  onSelectRooms,
 	  onMoveStart,
 	  onMove,
 	  onPlaceNew,
-	  onEdit,
+  onEdit,
   onContextMenu,
+  onScaleContextMenu,
+  onScaleDoubleClick,
   onWallSegmentDblClick,
+  onWallClick,
   onLinkContextMenu,
   onLinkDblClick,
   onMapContextMenu,
@@ -199,8 +225,10 @@ const CanvasStageImpl = (
   onCreateRoom,
   onUpdateRoom,
   onUpdateObject,
+  onMoveWall,
   onRoomContextMenu,
-  onSetPrintArea
+  onSetPrintArea,
+  wallAttenuationByType
 }: Props,
   ref: React.ForwardedRef<CanvasStageHandle>
 ) => {
@@ -224,6 +252,7 @@ const CanvasStageImpl = (
   const baseWidth = plan.width || bgImage?.width || dimensions.width;
   const baseHeight = plan.height || bgImage?.height || dimensions.height;
   const viewportRef = useRef({ zoom, pan });
+  const fitViewRef = useRef<() => void>(() => undefined);
   const wheelCommitTimer = useRef<number | null>(null);
   const pendingFocusRef = useRef<{ x: number; y: number; zoom?: number; nonce: number } | null>(null);
   const appliedFocusNonceRef = useRef<number | null>(null);
@@ -250,6 +279,10 @@ const CanvasStageImpl = (
   const pendingDraftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftPrintRectRaf = useRef<number | null>(null);
   const pendingDraftPrintRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [cameraRotateId, setCameraRotateId] = useState<string | null>(null);
+  const cameraRotateRef = useRef<{ id: string; origin: { x: number; y: number } } | null>(null);
+  const cameraRotateRaf = useRef<number | null>(null);
+  const cameraRotatePendingRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!perfEnabled) return;
@@ -281,50 +314,16 @@ const CanvasStageImpl = (
     return () => window.clearInterval(id);
   }, [perfEnabled]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      getSize: () => ({ width: dimensions.width, height: dimensions.height }),
-      exportDataUrl: (options) => {
-        const stage = stageRef.current;
-        const pixelRatio = Math.max(1, Number(options?.pixelRatio || 1));
-        const mimeType = options?.mimeType || 'image/jpeg';
-        const quality = typeof options?.quality === 'number' ? options.quality : 0.82;
-        const width = Math.round(dimensions.width * pixelRatio);
-        const height = Math.round(dimensions.height * pixelRatio);
-        if (!stage) return { dataUrl: '', width, height };
-        try {
-          // Konva JPEG export fills transparency with black. Render to canvas, then composite on white.
-          const rawCanvas: HTMLCanvasElement | null = stage.toCanvas ? stage.toCanvas({ pixelRatio }) : null;
-          if (!rawCanvas) {
-            if (!stage.toDataURL) return { dataUrl: '', width, height };
-            const dataUrl = stage.toDataURL({ pixelRatio, mimeType, quality });
-            return { dataUrl, width, height };
-          }
-          const out = document.createElement('canvas');
-          out.width = rawCanvas.width;
-          out.height = rawCanvas.height;
-          const ctx = out.getContext('2d');
-          if (!ctx) return { dataUrl: '', width, height };
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, out.width, out.height);
-          ctx.drawImage(rawCanvas, 0, 0);
-          const dataUrl = out.toDataURL(mimeType, quality);
-          return { dataUrl, width: out.width, height: out.height };
-        } catch {
-          return { dataUrl: '', width, height };
-        }
-      }
-    }),
-    [dimensions.height, dimensions.width]
-  );
   const transformerRef = useRef<any>(null);
   const deskTransformerRef = useRef<any>(null);
   const selectedRoomNodeRef = useRef<any>(null);
+  const roomNodeRefs = useRef<Record<string, any>>({});
   const polyLineRefs = useRef<Record<string, any>>({});
   const polyVertexRefs = useRef<Record<string, Record<number, any>>>({});
   const objectsLayerRef = useRef<any>(null);
   const objectNodeRefs = useRef<Record<string, any>>({});
+  const selectedRoomIdsRef = useRef<string[]>([]);
+  const boxSelectionActiveRef = useRef(false);
   const roomDragRef = useRef<{
     roomId: string;
     kind: 'rect' | 'poly';
@@ -346,6 +345,8 @@ const CanvasStageImpl = (
     startX: number;
     startY: number;
     startById: Record<string, { x: number; y: number }>;
+    batchId: string;
+    roomStartById?: Record<string, { x: number; y: number; kind: 'rect' | 'poly' }>;
   } | null>(null);
   const stagePixelRatio = useMemo(() => {
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -411,26 +412,53 @@ const CanvasStageImpl = (
     return inside;
   };
 
-  const polygonCentroid = (points: { x: number; y: number }[]) => {
-    let area = 0;
-    let cx = 0;
-    let cy = 0;
-    for (let i = 0; i < points.length; i++) {
-      const p0 = points[i];
-      const p1 = points[(i + 1) % points.length];
-      const cross = p0.x * p1.y - p1.x * p0.y;
-      area += cross;
-      cx += (p0.x + p1.x) * cross;
-      cy += (p0.y + p1.y) * cross;
+const polygonCentroid = (points: { x: number; y: number }[]) => {
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const p0 = points[i];
+    const p1 = points[(i + 1) % points.length];
+    const cross = p0.x * p1.y - p1.x * p0.y;
+    area += cross;
+    cx += (p0.x + p1.x) * cross;
+    cy += (p0.y + p1.y) * cross;
+  }
+  area *= 0.5;
+  if (!Number.isFinite(area) || Math.abs(area) < 0.00001) {
+    const avg = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+    const count = points.length || 1;
+    return { x: avg.x / count, y: avg.y / count };
+  }
+  return { x: cx / (6 * area), y: cy / (6 * area) };
+};
+
+const getRoomBounds = (room: any) => {
+  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as
+    | 'rect'
+    | 'poly';
+  if (kind === 'poly') {
+    const pts = Array.isArray(room?.points) ? room.points : [];
+    if (pts.length < 3) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of pts) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
     }
-    area *= 0.5;
-    if (!Number.isFinite(area) || Math.abs(area) < 0.00001) {
-      const avg = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
-      const count = points.length || 1;
-      return { x: avg.x / count, y: avg.y / count };
-    }
-    return { x: cx / (6 * area), y: cy / (6 * area) };
-  };
+    return { minX, minY, maxX, maxY };
+  }
+  const rx = Number(room?.x || 0);
+  const ry = Number(room?.y || 0);
+  const rw = Number(room?.width || 0);
+  const rh = Number(room?.height || 0);
+  if (!Number.isFinite(rx) || !Number.isFinite(ry) || !Number.isFinite(rw) || !Number.isFinite(rh)) return null;
+  return { minX: rx, minY: ry, maxX: rx + rw, maxY: ry + rh };
+};
 
   const distancePointToSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
     const dx = b.x - a.x;
@@ -556,51 +584,110 @@ const CanvasStageImpl = (
   }) => {
     const { bounds, name, showName, capacityText, overCapacity, labelScale } = options;
     if (!bounds.width || !bounds.height) return null;
-    const minDim = Math.max(10, Math.min(bounds.width, bounds.height));
-    const padding = Math.max(4, Math.min(8, Math.round(minDim / 8)));
-    const baseNameSize = Math.max(8, Math.min(14, Math.round(minDim / 6)));
-    const baseCapacitySize = Math.max(8, Math.min(12, Math.round(minDim / 8)));
+    const minDim = Math.max(8, Math.min(bounds.width, bounds.height));
+    const padding = Math.max(3, Math.min(6, Math.round(minDim / 10)));
+    const baseNameSize = Math.max(7, Math.min(12, Math.round(minDim / 7)));
+    const baseCapacitySize = Math.max(6, Math.min(10, Math.round(minDim / 9)));
     const scale = Number(labelScale) > 0 ? Number(labelScale) : 1;
     const nameFontSize = Math.max(6, Math.round(baseNameSize * scale));
     const capacityFontSize = Math.max(6, Math.round(baseCapacitySize * scale));
-    const capacityWidth = capacityText ? estimateTextWidth(capacityText, capacityFontSize) + padding : 0;
-    const nameWidth = Math.max(0, bounds.width - padding * 2 - capacityWidth);
-    const nameVisible = showName && !!name && nameWidth > 8;
-    const capacityVisible = !!capacityText && bounds.width > 10 && bounds.height > 10;
-    const y = bounds.y + padding;
+    const nameVisible = showName && !!name;
+    const capacityVisible = !!capacityText;
+    if (!nameVisible && !capacityVisible) return null;
+    const maxWidth = Math.max(0, bounds.width - padding * 2);
+    const capacityWidth = capacityVisible ? estimateTextWidth(capacityText || '', capacityFontSize) + padding : 0;
+    let useStacked = false;
+    let nameWidth = maxWidth;
+    if (nameVisible && capacityVisible) {
+      nameWidth = Math.max(0, maxWidth - capacityWidth);
+      if (nameWidth < 28) useStacked = true;
+    }
+    const lineGap = 2;
+    const labelHeight = useStacked
+      ? nameFontSize + capacityFontSize + lineGap + 6
+      : Math.max(nameFontSize, capacityFontSize) + 6;
+    const labelWidth = Math.min(
+      maxWidth,
+      Math.max(36, useStacked ? maxWidth : Math.max(nameWidth + (capacityVisible ? capacityWidth : 0), capacityWidth))
+    );
+    if (!labelWidth || labelWidth <= 0) return null;
+    const labelX = nameVisible ? bounds.x + padding : bounds.x + Math.max(0, (bounds.width - labelWidth) / 2);
+    const labelY = bounds.y + padding;
+    const capacityAlign = nameVisible ? 'right' : 'center';
     return (
       <>
-        {nameVisible ? (
-          <Text
-            x={bounds.x + padding}
-            y={y}
-            width={nameWidth}
-            text={name}
-            fontSize={nameFontSize}
-            fontStyle="bold"
-            fill="#000000"
-            listening={false}
-            ellipsis
-            lineHeight={1.1}
-            stroke="rgba(255,255,255,0.8)"
-            strokeWidth={2}
-          />
-        ) : null}
-        {capacityVisible ? (
-          <Text
-            x={bounds.x + padding}
-            y={y}
-            width={Math.max(0, bounds.width - padding * 2)}
-            align="right"
-            text={capacityText || ''}
-            fontSize={capacityFontSize}
-            fontStyle="bold"
-            fill={overCapacity ? '#dc2626' : '#334155'}
-            listening={false}
-            stroke="rgba(255,255,255,0.8)"
-            strokeWidth={2}
-          />
-        ) : null}
+        <Rect
+          x={labelX - 3}
+          y={labelY - 3}
+          width={labelWidth + 6}
+          height={labelHeight}
+          fill="rgba(255,255,255,0.85)"
+          stroke="rgba(148,163,184,0.6)"
+          strokeWidth={1}
+          cornerRadius={5}
+          listening={false}
+        />
+        {useStacked ? (
+          <>
+            {nameVisible ? (
+              <Text
+                x={labelX}
+                y={labelY}
+                width={labelWidth}
+                text={name}
+                fontSize={nameFontSize}
+                fontStyle="bold"
+                fill="#0f172a"
+                listening={false}
+                ellipsis
+                lineHeight={1.05}
+              />
+            ) : null}
+            {capacityVisible ? (
+              <Text
+                x={labelX}
+                y={labelY + nameFontSize + lineGap}
+                width={labelWidth}
+                align="right"
+                text={capacityText || ''}
+                fontSize={capacityFontSize}
+                fontStyle="bold"
+                fill={overCapacity ? '#dc2626' : '#334155'}
+                listening={false}
+              />
+            ) : null}
+          </>
+        ) : (
+          <>
+            {nameVisible ? (
+              <Text
+                x={labelX}
+                y={labelY}
+                width={Math.max(0, labelWidth - (capacityVisible ? capacityWidth : 0))}
+                text={name}
+                fontSize={nameFontSize}
+                fontStyle="bold"
+                fill="#0f172a"
+                listening={false}
+                ellipsis
+                lineHeight={1.05}
+              />
+            ) : null}
+            {capacityVisible ? (
+              <Text
+                x={labelX}
+                y={labelY}
+                width={labelWidth}
+                align={capacityAlign}
+                text={capacityText || ''}
+                fontSize={capacityFontSize}
+                fontStyle="bold"
+                fill={overCapacity ? '#dc2626' : '#334155'}
+                listening={false}
+              />
+            ) : null}
+          </>
+        )}
       </>
     );
   };
@@ -918,6 +1005,49 @@ const CanvasStageImpl = (
   }, [applyStageTransform, baseHeight, baseWidth, clampPan, commitViewport, containerRef, plan.id]);
 
   useEffect(() => {
+    fitViewRef.current = fitView;
+  }, [fitView]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getSize: () => ({ width: dimensions.width, height: dimensions.height }),
+      exportDataUrl: (options) => {
+        const stage = stageRef.current;
+        const pixelRatio = Math.max(1, Number(options?.pixelRatio || 1));
+        const mimeType = options?.mimeType || 'image/jpeg';
+        const quality = typeof options?.quality === 'number' ? options.quality : 0.82;
+        const width = Math.round(dimensions.width * pixelRatio);
+        const height = Math.round(dimensions.height * pixelRatio);
+        if (!stage) return { dataUrl: '', width, height };
+        try {
+          // Konva JPEG export fills transparency with black. Render to canvas, then composite on white.
+          const rawCanvas: HTMLCanvasElement | null = stage.toCanvas ? stage.toCanvas({ pixelRatio }) : null;
+          if (!rawCanvas) {
+            if (!stage.toDataURL) return { dataUrl: '', width, height };
+            const dataUrl = stage.toDataURL({ pixelRatio, mimeType, quality });
+            return { dataUrl, width, height };
+          }
+          const out = document.createElement('canvas');
+          out.width = rawCanvas.width;
+          out.height = rawCanvas.height;
+          const ctx = out.getContext('2d');
+          if (!ctx) return { dataUrl: '', width, height };
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, out.width, out.height);
+          ctx.drawImage(rawCanvas, 0, 0);
+          const dataUrl = out.toDataURL(mimeType, quality);
+          return { dataUrl, width: out.width, height: out.height };
+        } catch {
+          return { dataUrl: '', width, height };
+        }
+      },
+      fitView: () => fitViewRef.current()
+    }),
+    [dimensions.height, dimensions.width]
+  );
+
+  useEffect(() => {
     if (!autoFit) return;
     if (fitApplied.current === plan.id) return;
     fitView();
@@ -973,6 +1103,43 @@ const CanvasStageImpl = (
     x: (localX - viewportRef.current.pan.x) / viewportRef.current.zoom,
     y: (localY - viewportRef.current.pan.y) / viewportRef.current.zoom
   });
+
+  const commitCameraRotation = useCallback(() => {
+    const active = cameraRotateRef.current;
+    const pending = cameraRotatePendingRef.current;
+    if (!active || !pending || !onUpdateObject || readOnly) return;
+    const dx = pending.x - active.origin.x;
+    const dy = pending.y - active.origin.y;
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return;
+    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    if (!Number.isFinite(angle)) return;
+    const normalized = angle < 0 ? angle + 360 : angle;
+    onUpdateObject(active.id, { rotation: normalized });
+  }, [onUpdateObject, readOnly]);
+
+  const scheduleCameraRotation = useCallback(
+    (world: { x: number; y: number }) => {
+      cameraRotatePendingRef.current = world;
+      if (cameraRotateRaf.current) return;
+      cameraRotateRaf.current = requestAnimationFrame(() => {
+        cameraRotateRaf.current = null;
+        commitCameraRotation();
+      });
+    },
+    [commitCameraRotation]
+  );
+
+  const stopCameraRotation = useCallback(() => {
+    if (!cameraRotateRef.current) return false;
+    cameraRotateRef.current = null;
+    cameraRotatePendingRef.current = null;
+    if (cameraRotateRaf.current) {
+      cancelAnimationFrame(cameraRotateRaf.current);
+      cameraRotateRaf.current = null;
+    }
+    setCameraRotateId(null);
+    return true;
+  }, []);
 
   const isBoxSelecting = () => !!selectionOrigin.current;
 
@@ -1131,6 +1298,7 @@ const CanvasStageImpl = (
     if (wPx < 8 || hPx < 8) {
       // Desktop behavior: click on empty area clears selection.
       onSelect(undefined);
+      selectedRoomIdsRef.current = [];
       return true;
     }
     const minX = rect.x;
@@ -1140,6 +1308,16 @@ const CanvasStageImpl = (
     const ids = (plan.objects || [])
       .filter((o) => o.x >= minX && o.x <= maxX && o.y >= minY && o.y <= maxY)
       .map((o) => o.id);
+    const roomIds = (plan.rooms || [])
+      .filter((room) => {
+        const bounds = getRoomBounds(room);
+        if (!bounds) return false;
+        return bounds.maxX >= minX && bounds.minX <= maxX && bounds.maxY >= minY && bounds.minY <= maxY;
+      })
+      .map((room) => room.id);
+    selectedRoomIdsRef.current = roomIds;
+    if (onSelectRooms) onSelectRooms(roomIds);
+    boxSelectionActiveRef.current = true;
     if (onSelectMany) onSelectMany(ids);
     else {
       onSelect(undefined);
@@ -1338,6 +1516,7 @@ const CanvasStageImpl = (
   }, [perfEnabled, printAreaMode]);
 
   const wallTypeIdSet = useMemo(() => wallTypeIds || new Set<string>(), [wallTypeIds]);
+  const wallAttenuationMap = useMemo(() => wallAttenuationByType || new Map<string, number>(), [wallAttenuationByType]);
   const [wallObjects, quoteObjects, regularObjects] = useMemo(() => {
     if (!wallTypeIdSet.size) {
       const quotes = plan.objects.filter((obj) => obj.type === 'quote');
@@ -1354,78 +1533,109 @@ const CanvasStageImpl = (
     }
     return [walls, quotes, others];
   }, [plan.objects, wallTypeIdSet]);
-  const wallGroupSizes = useMemo(() => {
-    const map = new Map<string, number>();
-    wallObjects.forEach((wall) => {
-      if (!wall.wallGroupId) return;
-      const key = String(wall.wallGroupId);
-      map.set(key, (map.get(key) || 0) + 1);
-    });
-    return map;
-  }, [wallObjects]);
-  const wallFallbackMeta = useMemo(() => {
-    const meta = new Map<string, { index: number; size: number }>();
-    const candidates = wallObjects.filter((wall) => !wall.wallGroupId && (wall.points || []).length >= 2);
-    if (candidates.length < 3) return meta;
-    const wallById = new Map<string, { id: string; a: { x: number; y: number }; b: { x: number; y: number }; keyA: string; keyB: string }>();
-    const endpointMap = new Map<string, string[]>();
-    const pointKey = (point: { x: number; y: number }) => `${point.x}:${point.y}`;
-    candidates.forEach((wall) => {
+  const wallSegments = useMemo(() => {
+    if (!wallObjects.length) return [] as Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }>;
+    const segments: Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }> = [];
+    for (const wall of wallObjects) {
+      const attenuation = Number(wallAttenuationMap.get(wall.type) ?? 0);
+      if (!Number.isFinite(attenuation) || attenuation <= 0) continue;
       const pts = wall.points || [];
-      if (pts.length < 2) return;
-      const a = pts[0];
-      const b = pts[pts.length - 1];
-      const keyA = pointKey(a);
-      const keyB = pointKey(b);
-      wallById.set(wall.id, { id: wall.id, a, b, keyA, keyB });
-      endpointMap.set(keyA, [...(endpointMap.get(keyA) || []), wall.id]);
-      endpointMap.set(keyB, [...(endpointMap.get(keyB) || []), wall.id]);
-    });
-    const buildCycle = (startId: string, forward: boolean) => {
-      const start = wallById.get(startId);
-      if (!start) return null;
-      const startPoint = forward ? start.a : start.b;
-      const nextPoint = forward ? start.b : start.a;
-      const startKey = forward ? start.keyA : start.keyB;
-      let prevKey = startKey;
-      let currKey = forward ? start.keyB : start.keyA;
-      const ids = [startId];
-      const points = [startPoint, nextPoint];
-      let guard = 0;
-      while (guard++ < candidates.length + 2) {
-        if (currKey === startKey) {
-          if (ids.length >= 3) return { ids, points };
-          return null;
-        }
-        const connected = endpointMap.get(currKey) || [];
-        const nextIds = connected.filter((id) => id !== ids[ids.length - 1] && !ids.includes(id));
-        if (nextIds.length !== 1) return null;
-        const nextId = nextIds[0];
-        const next = wallById.get(nextId);
-        if (!next) return null;
-        const nextKey = next.keyA === currKey ? next.keyB : next.keyA;
-        if (nextKey === prevKey) return null;
-        const nextPointResolved = next.keyA === currKey ? next.b : next.a;
-        ids.push(nextId);
-        points.push(nextPointResolved);
-        prevKey = currKey;
-        currKey = nextKey;
+      if (pts.length < 2) continue;
+      for (let i = 0; i < pts.length - 1; i += 1) {
+        const a = pts[i];
+        const b = pts[i + 1];
+        segments.push({ a, b, attenuation });
       }
-      return null;
-    };
-    const visited = new Set<string>();
-    candidates.forEach((wall) => {
-      if (visited.has(wall.id)) return;
-      const cycle = buildCycle(wall.id, true) || buildCycle(wall.id, false);
-      if (!cycle) return;
-      const size = cycle.ids.length;
-      cycle.ids.forEach((id, index) => {
-        meta.set(id, { index, size });
-        visited.add(id);
-      });
-    });
-    return meta;
+    }
+    return segments;
+  }, [wallAttenuationMap, wallObjects]);
+  const cameraWallSegments = useMemo(() => {
+    if (!wallObjects.length) return [] as Array<{ a: { x: number; y: number }; b: { x: number; y: number } }>;
+    const segments: Array<{ a: { x: number; y: number }; b: { x: number; y: number } }> = [];
+    for (const wall of wallObjects) {
+      const typeId = String(wall.type || '');
+      if (typeId.includes('glass') || typeId.includes('window')) continue;
+      const pts = wall.points || [];
+      if (pts.length < 2) continue;
+      for (let i = 0; i < pts.length - 1; i += 1) {
+        const a = pts[i];
+        const b = pts[i + 1];
+        segments.push({ a, b });
+      }
+    }
+    return segments;
   }, [wallObjects]);
+  const wifiRayAngles = useMemo(() => {
+    const steps = 72;
+    const list: number[] = [];
+    for (let i = 0; i < steps; i += 1) {
+      list.push((i / steps) * Math.PI * 2);
+    }
+    return list;
+  }, []);
+  const buildWifiRangeRings = useCallback(
+    (origin: { x: number; y: number }, baseRadiusPx: number) => {
+      const outer: number[] = [];
+      const mid: number[] = [];
+      const inner: number[] = [];
+      for (const angle of wifiRayAngles) {
+        const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+        const hits: Array<{ t: number; attenuation: number }> = [];
+        if (wallSegments.length) {
+          for (const seg of wallSegments) {
+            const t = intersectRaySegment(origin, dir, seg.a, seg.b);
+            if (t !== null && t <= baseRadiusPx) {
+              hits.push({ t, attenuation: seg.attenuation });
+            }
+          }
+        }
+        hits.sort((a, b) => a.t - b.t);
+        let dist = baseRadiusPx;
+        for (const hit of hits) {
+          if (hit.t > dist) break;
+          const remaining = dist - hit.t;
+          if (remaining <= 0) {
+            dist = hit.t;
+            break;
+          }
+          const factor = Math.pow(10, hit.attenuation / 20);
+          dist = hit.t + remaining / factor;
+        }
+        dist = Math.max(0, dist);
+        outer.push(dir.x * dist, dir.y * dist);
+        mid.push(dir.x * dist * 0.7, dir.y * dist * 0.7);
+        inner.push(dir.x * dist * 0.4, dir.y * dist * 0.4);
+      }
+      return { outer, mid, inner };
+    },
+    [wallSegments, wifiRayAngles]
+  );
+  const buildCameraFovPolygon = useCallback(
+    (origin: { x: number; y: number }, rangePx: number, angleDeg: number, rotationDeg: number) => {
+      if (!Number.isFinite(rangePx) || rangePx <= 0) return null;
+      if (!Number.isFinite(angleDeg) || angleDeg <= 0) return null;
+      const clampedAngle = Math.min(360, Math.max(5, angleDeg));
+      const steps = Math.max(12, Math.ceil(clampedAngle / 5));
+      const startRad = ((rotationDeg - clampedAngle / 2) * Math.PI) / 180;
+      const endRad = ((rotationDeg + clampedAngle / 2) * Math.PI) / 180;
+      const points: number[] = [0, 0];
+      for (let i = 0; i <= steps; i += 1) {
+        const angle = startRad + ((endRad - startRad) * i) / steps;
+        const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+        let dist = rangePx;
+        if (cameraWallSegments.length) {
+          for (const seg of cameraWallSegments) {
+            const t = intersectRaySegment(origin, dir, seg.a, seg.b);
+            if (t !== null && t < dist) dist = t;
+          }
+        }
+        dist = Math.max(0, dist);
+        points.push(dir.x * dist, dir.y * dist);
+      }
+      return points;
+    },
+    [cameraWallSegments]
+  );
 
   const selectedBounds = useMemo(() => {
     const idsArr = selectedIds || (selectedId ? [selectedId] : []);
@@ -1437,6 +1647,17 @@ const CanvasStageImpl = (
     let maxY = -Infinity;
     for (const obj of plan.objects) {
       if (!ids.has(obj.id)) continue;
+      const isWall = wallTypeIdSet.has(obj.type);
+      const pts = isWall ? obj.points || [] : [];
+      if (isWall && pts.length) {
+        for (const pt of pts) {
+          minX = Math.min(minX, pt.x);
+          minY = Math.min(minY, pt.y);
+          maxX = Math.max(maxX, pt.x);
+          maxY = Math.max(maxY, pt.y);
+        }
+        continue;
+      }
       minX = Math.min(minX, obj.x);
       minY = Math.min(minY, obj.y);
       maxX = Math.max(maxX, obj.x);
@@ -1444,15 +1665,15 @@ const CanvasStageImpl = (
     }
     if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
     return { minX, minY, maxX, maxY };
-  }, [plan.objects, selectedId, selectedIds]);
-  const selectionHasWall = useMemo(() => {
-    const ids = selectedIds || (selectedId ? [selectedId] : []);
-    if (!ids.length || !wallTypeIdSet.size) return false;
-    return ids.some((id) => {
-      const obj = objectById.get(id);
-      return !!obj && wallTypeIdSet.has(obj.type);
-    });
-  }, [objectById, selectedId, selectedIds, wallTypeIdSet]);
+  }, [plan.objects, selectedId, selectedIds, wallTypeIdSet]);
+
+  useEffect(() => {
+    if (boxSelectionActiveRef.current) {
+      boxSelectionActiveRef.current = false;
+      return;
+    }
+    selectedRoomIdsRef.current = Array.isArray(selectedRoomIds) ? [...selectedRoomIds] : [];
+  }, [selectedRoomIds]);
   const allowTool = !!toolMode && (!readOnly || toolMode === 'measure');
 
   return (
@@ -1625,9 +1846,22 @@ const CanvasStageImpl = (
           if (!allowTool) return;
           e.cancelBubble = true;
           if (e.evt?.button !== 0) return;
-          onToolDoubleClick?.();
+          const stage = e.target.getStage();
+          const pos = stage?.getPointerPosition();
+          if (!pos) return;
+          const world = pointerToWorld(pos.x, pos.y);
+          onToolDoubleClick?.(world);
         }}
         onMouseMove={(e) => {
+          if (cameraRotateRef.current) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (pos) {
+              const world = pointerToWorld(pos.x, pos.y);
+              scheduleCameraRotation(world);
+            }
+            return;
+          }
           if (allowTool) {
             if (isPanning) {
               movePan(e);
@@ -1676,6 +1910,7 @@ const CanvasStageImpl = (
           movePan(e);
         }}
         onMouseUp={(e) => {
+          if (stopCameraRotation()) return;
           if (finalizeSelectionBox()) return;
           if (isContextClick(e.evt)) return;
           if (finalizeDraftPrintRect()) return;
@@ -1683,6 +1918,7 @@ const CanvasStageImpl = (
           endPan();
         }}
         onMouseLeave={() => {
+          if (stopCameraRotation()) return;
           if (finalizeSelectionBox()) return;
           if (finalizeDraftPrintRect()) return;
           if (finalizeDraftRect()) return;
@@ -1736,7 +1972,7 @@ const CanvasStageImpl = (
         {/* Rooms layer */}
         <Layer perfectDrawEnabled={false} listening={!toolMode}>
           {(plan.rooms || []).map((room) => {
-            const isSelectedRoom = selectedRoomId === room.id;
+            const isSelectedRoom = selectedRoomId === room.id || (selectedRoomIds || []).includes(room.id);
             const kind = (room.kind || (room.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
             const baseColor = (room as any).color || '#64748b';
             const stats = roomStatsById?.get(room.id);
@@ -1762,6 +1998,10 @@ const CanvasStageImpl = (
               return (
                 <Group
                   key={room.id}
+                  ref={(node) => {
+                    if (node) roomNodeRefs.current[room.id] = node;
+                    else delete roomNodeRefs.current[room.id];
+                  }}
                   draggable={!readOnly && !panToolActive}
                   onDragStart={(e) => {
                     roomDragRef.current = {
@@ -1893,6 +2133,10 @@ const CanvasStageImpl = (
             return (
               <Group
                 key={room.id}
+                ref={(node) => {
+                  if (node) roomNodeRefs.current[room.id] = node;
+                  else delete roomNodeRefs.current[room.id];
+                }}
                 x={room.x || 0}
                 y={room.y || 0}
                 draggable={!readOnly && !panToolActive && !pendingType}
@@ -2090,29 +2334,35 @@ const CanvasStageImpl = (
             const rawStroke = typeof obj.strokeColor === 'string' && obj.strokeColor.trim() ? obj.strokeColor.trim() : '';
             const typeStroke = getWallTypeColor(obj.type);
             const baseStroke = rawStroke && rawStroke !== WALL_LAYER_COLOR ? rawStroke : typeStroke;
-            const baseWidth = clamp(Number(obj.strokeWidth ?? 4) || 4, 1, 12);
+            const baseWidth = clamp(Number(obj.strokeWidth ?? 1) || 1, 1, 12);
             const lineOpacity = clamp(Number(obj.opacity ?? 1) || 1, 0.1, 1);
             const stroke = highlightActive ? '#22d3ee' : isSelected ? '#2563eb' : baseStroke;
             const strokeWidth = highlightActive ? baseWidth + 1 + 2 * pulse : isSelected ? baseWidth + 1 : baseWidth;
             const linePoints = pts.flatMap((p) => [p.x, p.y]);
-            const cornerPoints = isSelected ? getWallCornerPoints(pts) : [];
-            const groupId = obj.wallGroupId ? String(obj.wallGroupId) : '';
-            const groupSize = groupId ? wallGroupSizes.get(groupId) : undefined;
-            const groupIndex = Number.isFinite(obj.wallGroupIndex) ? Number(obj.wallGroupIndex) : null;
-            const fallbackMeta = wallFallbackMeta.get(obj.id);
-            const labelSize = groupSize && groupIndex !== null && groupIndex >= 0 ? groupSize : fallbackMeta?.size;
-            const labelIndex = groupSize && groupIndex !== null && groupIndex >= 0 ? groupIndex : fallbackMeta?.index;
-            const cornerLabels = isSelected
-              ? labelSize && labelIndex !== null && labelIndex !== undefined
-                ? [formatCornerLabel(labelIndex), formatCornerLabel((labelIndex + 1) % labelSize)]
-                : cornerPoints.map((_, index) => formatCornerLabel(index))
-              : [];
-            const labelScale = 1 / Math.max(0.6, zoom || 1);
-            const labelOffset = 10 * labelScale;
-            const labelFontSize = 18 * labelScale;
-            const labelStroke = 2.5 * labelScale;
+            const multiSelected = (selectedIds || []).length > 1;
+            const allowWallDrag = isSelected && !readOnly && !panToolActive && !toolMode && !multiSelected;
             return (
-              <Group key={obj.id}>
+              <Group
+                key={obj.id}
+                ref={(node) => {
+                  if (node) objectNodeRefs.current[obj.id] = node;
+                  else delete objectNodeRefs.current[obj.id];
+                }}
+                draggable={allowWallDrag}
+                onDragStart={(e) => {
+                  e.cancelBubble = true;
+                }}
+                onDragEnd={(e) => {
+                  if (!allowWallDrag) return;
+                  const node = e.target;
+                  const dx = node.x();
+                  const dy = node.y();
+                  node.position({ x: 0, y: 0 });
+                  node.getLayer()?.batchDraw?.();
+                  if (!dx && !dy) return;
+                  onMoveWall?.(obj.id, dx, dy);
+                }}
+              >
                 <Line
                   points={linePoints}
                   stroke={stroke}
@@ -2124,7 +2374,15 @@ const CanvasStageImpl = (
                   onClick={(e) => {
                     e.cancelBubble = true;
                     if (e.evt?.button !== 0) return;
-                    onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
+                    const isMulti = !!(e.evt.ctrlKey || e.evt.metaKey);
+                    onSelect(obj.id, { multi: isMulti });
+                    if (onWallClick && !isMulti) {
+                      const stage = e.target.getStage();
+                      const pos = stage?.getPointerPosition();
+                      if (!pos) return;
+                      const world = pointerToWorld(pos.x, pos.y);
+                      onWallClick({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY, world });
+                    }
                   }}
                   onDblClick={(e) => {
                     e.cancelBubble = true;
@@ -2161,22 +2419,6 @@ const CanvasStageImpl = (
                     });
                   }}
                 />
-                {cornerPoints.length
-                  ? cornerPoints.map((point, index) => (
-                      <Text
-                        key={`${obj.id}-corner-${index}`}
-                        text={cornerLabels[index] || formatCornerLabel(index)}
-                        x={point.x + labelOffset}
-                        y={point.y - labelOffset}
-                        fontSize={labelFontSize}
-                        fontStyle="bold"
-                        fill="#0ea5e9"
-                        stroke="#0f172a"
-                        strokeWidth={labelStroke}
-                        listening={false}
-                      />
-                    ))
-                  : null}
               </Group>
             );
           })}
@@ -2186,23 +2428,28 @@ const CanvasStageImpl = (
             const start = pts[0];
             const end = pts[pts.length - 1];
             const stroke = typeof obj.strokeColor === 'string' && obj.strokeColor.trim() ? obj.strokeColor.trim() : '#f97316';
-            const strokeWidth = clamp(Number(obj.strokeWidth ?? 2) || 2, 1, 6);
+            const scale = clamp(Number(obj.scale ?? 1) || 1, 0.5, 1.6);
+            const strokeWidth = clamp((Number(obj.strokeWidth ?? 2) || 2) * scale, 0.8, 6);
+            const opacity = clamp(Number(obj.opacity ?? 1) || 1, 0.2, 1);
+            const pointerSize = Math.max(4, Math.round(5 * scale));
+            const labelFontSize = Math.max(8, Math.round(9 * scale));
+            const labelPadding = Math.max(6, Math.round(8 * scale));
             const label = quoteLabels?.[obj.id];
             const midX = (start.x + end.x) / 2;
             const midY = (start.y + end.y) / 2;
-            const textW = label ? estimateTextWidth(label, 12) + 12 : 0;
+            const textW = label ? estimateTextWidth(label, labelFontSize) + labelPadding : 0;
             return (
               <Group key={obj.id}>
                 <Arrow
                   points={[start.x, start.y, end.x, end.y]}
                   stroke={stroke}
                   fill={stroke}
-                  pointerLength={8}
-                  pointerWidth={8}
+                  pointerLength={pointerSize}
+                  pointerWidth={pointerSize}
                   pointerAtBeginning
                   strokeWidth={strokeWidth}
                   hitStrokeWidth={Math.max(10, strokeWidth + 8)}
-                  opacity={0.95}
+                  opacity={opacity}
                   onClick={(e) => {
                     e.cancelBubble = true;
                     if (e.evt?.button !== 0) return;
@@ -2224,9 +2471,40 @@ const CanvasStageImpl = (
                   }}
                 />
                 {label ? (
-                  <Group x={midX - textW / 2} y={midY - 16} listening={false}>
-                    <Rect width={textW} height={18} fill="rgba(255,255,255,0.9)" cornerRadius={6} />
-                    <Text text={label} width={textW} height={18} align="center" fontSize={11} fontStyle="bold" fill="#0f172a" />
+                  <Group
+                    x={midX - textW / 2}
+                    y={midY - 12 * scale}
+                    opacity={opacity}
+                    onClick={(e) => {
+                      e.cancelBubble = true;
+                      if (e.evt?.button !== 0) return;
+                      onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
+                    }}
+                    onContextMenu={(e) => {
+                      e.evt.preventDefault();
+                      e.cancelBubble = true;
+                      if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                      if (isBoxSelecting()) return;
+                      lastContextMenuAtRef.current = Date.now();
+                      const multiSelected = (selectedIds || []).length > 1;
+                      const multiKey = !!(e.evt.ctrlKey || e.evt.metaKey);
+                      if (!selectedIds?.includes(obj.id) || !multiSelected) {
+                        onSelect(obj.id, { keepContext: true, multi: multiKey });
+                      }
+                      if (pendingType || readOnly) return;
+                      onContextMenu({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+                    }}
+                  >
+                    <Rect width={textW} height={Math.max(12, Math.round(14 * scale))} fill="rgba(255,255,255,0.9)" cornerRadius={4} />
+                    <Text
+                      text={label}
+                      width={textW}
+                      height={Math.max(12, Math.round(14 * scale))}
+                      align="center"
+                      fontSize={labelFontSize}
+                      fontStyle="bold"
+                      fill="#0f172a"
+                    />
                   </Group>
                 ) : null}
               </Group>
@@ -2238,8 +2516,12 @@ const CanvasStageImpl = (
             if (!from || !to) return null;
             const isSelected = !!selectedLinkId && selectedLinkId === link.id;
             const kind = (link as any).kind || 'arrow';
+            const arrowMode = (link as any).arrow ?? 'none';
+            const arrowStart = arrowMode === 'start' || arrowMode === 'both';
+            const arrowEnd = arrowMode === 'end' || arrowMode === 'both';
             const stroke = isSelected ? '#2563eb' : link.color || '#94a3b8';
-            const width = Number((link as any).width || (kind === 'cable' ? 3 : 2));
+            const widthRaw = Number((link as any).width);
+            const width = Number.isFinite(widthRaw) && widthRaw > 0 ? widthRaw : 1;
             const dash = (link as any).dashed ? [8, 6] : undefined;
             const route = ((link as any).route || 'vh') as 'vh' | 'hv';
 
@@ -2345,8 +2627,10 @@ const CanvasStageImpl = (
                   points={[from.x, from.y, to.x, to.y]}
                   stroke={stroke}
                   fill={stroke}
-                  pointerLength={8}
-                  pointerWidth={8}
+                  pointerLength={arrowStart || arrowEnd ? 8 : 0}
+                  pointerWidth={arrowStart || arrowEnd ? 8 : 0}
+                  pointerAtBeginning={arrowStart}
+                  pointerAtEnding={arrowEnd}
                   strokeWidth={isSelected ? width + 1 : width}
                   hitStrokeWidth={Math.max(14, (isSelected ? width + 1 : width) + 10)}
                   opacity={0.85}
@@ -2397,6 +2681,7 @@ const CanvasStageImpl = (
             const scale = obj.scale ?? 1;
             const isDesk = isDeskType(obj.type);
             const isCamera = obj.type === 'camera';
+            const isWifi = obj.type === 'wifi';
             const deskScaleX = isDesk ? clamp(Number(obj.scaleX ?? 1) || 1, 0.4, 4) : 1;
             const deskScaleY = isDesk ? clamp(Number(obj.scaleY ?? 1) || 1, 0.4, 4) : 1;
             const objectOpacity = typeof obj.opacity === 'number' ? Math.max(0.2, Math.min(1, obj.opacity)) : 1;
@@ -2430,6 +2715,20 @@ const CanvasStageImpl = (
             const cameraOpacity = isCamera ? clamp(Number((obj as any).cctvOpacity ?? 0.6) || 0.6, 0.1, 0.9) : 0;
             const cameraOpacityLow = isCamera ? Math.max(0.05, cameraOpacity * 0.15) : 0;
             const cameraOpacityMid = isCamera ? Math.max(0.1, cameraOpacity * 0.55) : 0;
+            const cameraFovPoints = isCamera ? buildCameraFovPolygon({ x: obj.x, y: obj.y }, cameraRange, cameraAngle, cameraRotation) : null;
+            const showCameraHandle = isCamera && isSelected && !readOnly;
+            const cameraHandleDistance = isCamera ? Math.max(22, Math.min(cameraRange * 0.85, cameraRange - 8)) : 0;
+            const cameraHandleAngle = (cameraRotation * Math.PI) / 180;
+            const cameraHandleX = isCamera ? Math.cos(cameraHandleAngle) * cameraHandleDistance : 0;
+            const cameraHandleY = isCamera ? Math.sin(cameraHandleAngle) * cameraHandleDistance : 0;
+            const wifiCoverageSqm = isWifi ? Number((obj as any).wifiCoverageSqm || 0) : 0;
+            const wifiShowRange = isWifi ? (obj as any).wifiShowRange !== false : false;
+            const wifiRangePx =
+              isWifi && metersPerPixel && Number.isFinite(wifiCoverageSqm) && wifiCoverageSqm > 0
+                ? Math.sqrt(wifiCoverageSqm / Math.PI) / metersPerPixel
+                : 0;
+            const wifiRings =
+              isWifi && wifiShowRange && wifiRangePx > 0 ? buildWifiRangeRings({ x: obj.x, y: obj.y }, wifiRangePx) : null;
             const bodyOpacity = isCamera ? 1 : objectOpacity;
             const deskRectW = deskSize * 1.45;
             const deskRectH = deskSize * 0.75;
@@ -2452,8 +2751,13 @@ const CanvasStageImpl = (
                 y={obj.y}
                 scaleX={isDesk ? deskScaleX : 1}
                 scaleY={isDesk ? deskScaleY : 1}
-                draggable={!readOnly && !panToolActive && !toolMode}
+                draggable={!readOnly && !panToolActive && !toolMode && !(isCamera && cameraRotateId === obj.id)}
                 onDragStart={(e) => {
+                  if (cameraRotateRef.current?.id === obj.id) {
+                    e.cancelBubble = true;
+                    e.target.stopDrag?.();
+                    return;
+                  }
                   dragStartRef.current.set(obj.id, { x: obj.x, y: obj.y });
                   onMoveStart?.(obj.id, obj.x, obj.y, obj.roomId);
                   onSelect(obj.id, { multi: !!(e?.evt?.ctrlKey || e?.evt?.metaKey) });
@@ -2548,26 +2852,69 @@ const CanvasStageImpl = (
                   onContextMenu({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
                 }}
               >
-                {isCamera ? (
-                  <Wedge
-                    radius={cameraRange}
-                    angle={cameraAngle}
-                    rotation={cameraRotation - cameraAngle / 2}
+                {isCamera && cameraFovPoints ? (
+                  <Line
+                    points={cameraFovPoints}
+                    closed
                     fillRadialGradientStartPoint={{ x: 0, y: 0 }}
                     fillRadialGradientStartRadius={0}
                     fillRadialGradientEndPoint={{ x: 0, y: 0 }}
                     fillRadialGradientEndRadius={cameraRange}
                     fillRadialGradientColorStops={[
                       0,
-                      `rgba(34,197,94,${cameraOpacityLow})`,
+                      `rgba(34,197,94,${cameraOpacity})`,
                       0.6,
                       `rgba(34,197,94,${cameraOpacityMid})`,
                       1,
-                      `rgba(34,197,94,${cameraOpacity})`
+                      `rgba(34,197,94,${cameraOpacityLow})`
                     ]}
                     opacity={1}
                     listening={false}
                   />
+                ) : null}
+                {showCameraHandle ? (
+                  <Circle
+                    x={cameraHandleX}
+                    y={cameraHandleY}
+                    radius={4}
+                    fill="#0f172a"
+                    stroke="#f8fafc"
+                    strokeWidth={1.5}
+                    onMouseDown={(e) => {
+                      e.cancelBubble = true;
+                      if (readOnly) return;
+                      cameraRotateRef.current = { id: obj.id, origin: { x: obj.x, y: obj.y } };
+                      setCameraRotateId(obj.id);
+                      const stage = e.target.getStage();
+                      const pos = stage?.getPointerPosition();
+                      if (pos) {
+                        const world = pointerToWorld(pos.x, pos.y);
+                        scheduleCameraRotation(world);
+                      }
+                    }}
+                  />
+                ) : null}
+                {wifiRings ? (
+                  <>
+                    <Line
+                      points={wifiRings.outer}
+                      closed
+                      fill="rgba(239,68,68,0.12)"
+                      listening={false}
+                    />
+                    <Line
+                      points={wifiRings.mid}
+                      closed
+                      fill="rgba(234,179,8,0.18)"
+                      listening={false}
+                    />
+                    <Line
+                      points={wifiRings.inner}
+                      closed
+                      fill="rgba(34,197,94,0.22)"
+                      listening={false}
+                    />
+                  </>
                 ) : null}
                 <Text
                   text={labelText}
@@ -2804,41 +3151,93 @@ const CanvasStageImpl = (
         {/* Overlays (drafts + selection) */}
         <Layer perfectDrawEnabled={false} listening={!toolMode}>
           {(scaleLine || scaleDraft || wallDraft || measureDraft || quoteDraft || (pendingType && pendingPreview)) ? (
-            <Group listening={false}>
-              {scaleLine ? (
-                <>
-                  <Line
-                    points={[scaleLine.start.x, scaleLine.start.y, scaleLine.end.x, scaleLine.end.y]}
-                    stroke="#0f172a"
-                    strokeWidth={2}
-                    dash={[8, 6]}
-                    lineCap="round"
-                    lineJoin="round"
-                  />
-                  <Circle x={scaleLine.start.x} y={scaleLine.start.y} radius={4} fill="#0f172a" opacity={0.85} />
-                  <Circle x={scaleLine.end.x} y={scaleLine.end.y} radius={4} fill="#0f172a" opacity={0.85} />
-                  {scaleLine.label ? (() => {
-                    const midX = (scaleLine.start.x + scaleLine.end.x) / 2;
-                    const midY = (scaleLine.start.y + scaleLine.end.y) / 2;
-                    const textW = estimateTextWidth(scaleLine.label, 12) + 12;
-                    return (
-                      <Group x={midX - textW / 2} y={midY - 20}>
-                        <Rect width={textW} height={18} fill="rgba(15,23,42,0.85)" cornerRadius={6} />
-                        <Text
-                          text={scaleLine.label}
-                          width={textW}
-                          height={18}
-                          align="center"
-                          verticalAlign="middle"
-                          fontSize={12}
-                          fill="#f8fafc"
-                        />
-                      </Group>
-                    );
-                  })() : null}
-                </>
-              ) : null}
-
+            <>
+              {scaleLine ? (() => {
+                const scaleOpacity = clamp(Number(scaleLine.opacity ?? 1) || 1, 0.2, 1);
+                const scaleLabelScale = clamp(Number(scaleLine.labelScale ?? 1) || 1, 0.6, 1.6);
+                const rawLineWidth = Number(scaleLine.strokeWidth ?? 1.2);
+                const lineWidth = clamp(Number.isFinite(rawLineWidth) ? rawLineWidth : 1.2, 0.6, 6);
+                const dotRadius = Math.max(2, lineWidth + 1);
+                const labelFontSize = Math.max(8, Math.round(9 * scaleLabelScale));
+                const labelPadding = Math.max(6, Math.round(8 * scaleLabelScale));
+                const labelHeight = Math.max(12, Math.round(12 * scaleLabelScale));
+                return (
+                  <Group
+                    draggable={!readOnly && !toolMode && !!onScaleMove}
+                    onDragStart={(e) => {
+                      if (!onScaleMove || readOnly || toolMode) return;
+                      e.cancelBubble = true;
+                    }}
+                    onDragEnd={(e) => {
+                      if (!onScaleMove || !scaleLine || readOnly) return;
+                      const node = e.target;
+                      const dx = node.x();
+                      const dy = node.y();
+                      node.position({ x: 0, y: 0 });
+                      node.getLayer()?.batchDraw?.();
+                      if (!dx && !dy) return;
+                      onScaleMove({
+                        start: { x: scaleLine.start.x + dx, y: scaleLine.start.y + dy },
+                        end: { x: scaleLine.end.x + dx, y: scaleLine.end.y + dy }
+                      });
+                    }}
+                    onContextMenu={(e) => {
+                      if (!onScaleContextMenu) return;
+                      e.evt.preventDefault();
+                      e.cancelBubble = true;
+                      onScaleContextMenu({ clientX: e.evt.clientX, clientY: e.evt.clientY });
+                    }}
+                    onDblClick={(e) => {
+                      if (!onScaleDoubleClick) return;
+                      e.evt.preventDefault();
+                      e.cancelBubble = true;
+                      onScaleDoubleClick();
+                    }}
+                  >
+                    <Line
+                      points={[scaleLine.start.x, scaleLine.start.y, scaleLine.end.x, scaleLine.end.y]}
+                      stroke="#0f172a"
+                      strokeWidth={lineWidth}
+                      dash={[6, 4]}
+                      lineCap="round"
+                      lineJoin="round"
+                      opacity={scaleOpacity}
+                    />
+                    <Circle x={scaleLine.start.x} y={scaleLine.start.y} radius={dotRadius} fill="#0f172a" opacity={scaleOpacity} />
+                    <Circle x={scaleLine.end.x} y={scaleLine.end.y} radius={dotRadius} fill="#0f172a" opacity={scaleOpacity} />
+                    {scaleLine.label ? (() => {
+                      const midX = (scaleLine.start.x + scaleLine.end.x) / 2;
+                      const midY = (scaleLine.start.y + scaleLine.end.y) / 2;
+                      const textW = estimateTextWidth(scaleLine.label, labelFontSize) + labelPadding;
+                      return (
+                        <Group
+                          x={midX - textW / 2}
+                          y={midY - labelHeight - 4}
+                          opacity={scaleOpacity}
+                          onContextMenu={(e) => {
+                            if (!onScaleContextMenu) return;
+                            e.evt.preventDefault();
+                            e.cancelBubble = true;
+                            onScaleContextMenu({ clientX: e.evt.clientX, clientY: e.evt.clientY });
+                          }}
+                        >
+                          <Rect width={textW} height={labelHeight} fill="rgba(15,23,42,0.85)" cornerRadius={4} />
+                          <Text
+                            text={scaleLine.label}
+                            width={textW}
+                            height={labelHeight}
+                            align="center"
+                            verticalAlign="middle"
+                            fontSize={labelFontSize}
+                            fill="#f8fafc"
+                          />
+                        </Group>
+                      );
+                    })() : null}
+                  </Group>
+                );
+              })() : null}
+              <Group listening={false}>
               {scaleDraft?.start && (scaleDraft.end || scaleDraft.pointer) ? (
                 <>
                   <Line
@@ -2849,13 +3248,13 @@ const CanvasStageImpl = (
                       (scaleDraft.end || scaleDraft.pointer)!.y
                     ]}
                     stroke="#0ea5e9"
-                    strokeWidth={2}
-                    dash={[6, 6]}
+                    strokeWidth={1.5}
+                    dash={[6, 4]}
                     lineCap="round"
                     lineJoin="round"
                   />
-                  <Circle x={scaleDraft.start.x} y={scaleDraft.start.y} radius={4} fill="#0ea5e9" opacity={0.85} />
-                  {scaleDraft.end ? <Circle x={scaleDraft.end.x} y={scaleDraft.end.y} radius={4} fill="#0ea5e9" opacity={0.85} /> : null}
+                  <Circle x={scaleDraft.start.x} y={scaleDraft.start.y} radius={3} fill="#0ea5e9" opacity={0.85} />
+                  {scaleDraft.end ? <Circle x={scaleDraft.end.x} y={scaleDraft.end.y} radius={3} fill="#0ea5e9" opacity={0.85} /> : null}
                 </>
               ) : null}
 
@@ -2867,15 +3266,52 @@ const CanvasStageImpl = (
                       ...(wallDraft.pointer ? [wallDraft.pointer.x, wallDraft.pointer.y] : [])
                     ]}
                     stroke="#475569"
-                    strokeWidth={3}
-                    dash={[8, 6]}
+                    strokeWidth={2}
+                    dash={[6, 4]}
                     lineCap="round"
                     lineJoin="round"
                   />
                   {wallDraft.points.map((p, idx) => (
                     <Circle key={`wall-draft-${idx}`} x={p.x} y={p.y} radius={3} fill="#475569" opacity={0.9} />
                   ))}
+                  {wallDraft.pointer ? (
+                    <Circle
+                      x={wallDraft.pointer.x}
+                      y={wallDraft.pointer.y}
+                      radius={4}
+                      fill="#0ea5e9"
+                      opacity={0.95}
+                    />
+                  ) : null}
+                  {metersPerPixel && wallDraft.pointer ? (() => {
+                    const start = wallDraft.points[wallDraft.points.length - 1];
+                    if (!start) return null;
+                    const end = wallDraft.pointer;
+                    const lengthPx = Math.hypot(end.x - start.x, end.y - start.y);
+                    const meters = lengthPx * metersPerPixel;
+                    const unit = t({ it: 'ml', en: 'm' });
+                    const label = `${formatMeasure(meters)} ${unit}`;
+                    const midX = (start.x + end.x) / 2;
+                    const midY = (start.y + end.y) / 2;
+                    const textW = estimateTextWidth(label, 10) + 10;
+                    return (
+                      <Group x={midX - textW / 2} y={midY - 18}>
+                        <Rect width={textW} height={16} fill="rgba(15,23,42,0.85)" cornerRadius={5} />
+                        <Text
+                          text={label}
+                          width={textW}
+                          height={16}
+                          align="center"
+                          verticalAlign="middle"
+                          fontSize={10}
+                          fill="#f8fafc"
+                        />
+                      </Group>
+                    );
+                  })() : null}
                 </>
+              ) : wallDraft?.pointer ? (
+                <Circle x={wallDraft.pointer.x} y={wallDraft.pointer.y} radius={4} fill="#0ea5e9" opacity={0.95} />
               ) : null}
 
               {measureDraft?.points?.length ? (
@@ -2938,23 +3374,23 @@ const CanvasStageImpl = (
                 const label = quoteDraft.label;
                 const midX = (start.x + end.x) / 2;
                 const midY = (start.y + end.y) / 2;
-                const textW = label ? estimateTextWidth(label, 12) + 12 : 0;
+                const textW = label ? estimateTextWidth(label, 10) + 10 : 0;
                 return (
                   <>
                     <Arrow
                       points={[start.x, start.y, end.x, end.y]}
                       stroke="#f97316"
                       fill="#f97316"
-                      pointerLength={8}
-                      pointerWidth={8}
+                      pointerLength={6}
+                      pointerWidth={6}
                       pointerAtBeginning
                       strokeWidth={2}
                       opacity={0.9}
                     />
                     {label ? (
                       <Group x={midX - textW / 2} y={midY - 16}>
-                        <Rect width={textW} height={18} fill="rgba(255,255,255,0.9)" cornerRadius={6} />
-                        <Text text={label} width={textW} height={18} align="center" fontSize={11} fontStyle="bold" fill="#0f172a" />
+                        <Rect width={textW} height={16} fill="rgba(255,255,255,0.9)" cornerRadius={5} />
+                        <Text text={label} width={textW} height={16} align="center" fontSize={10} fontStyle="bold" fill="#0f172a" />
                       </Group>
                     ) : null}
                   </>
@@ -3020,7 +3456,8 @@ const CanvasStageImpl = (
                   ) : null}
                 </Group>
               ) : null}
-            </Group>
+              </Group>
+            </>
           ) : null}
 
           {selectionBox ? (
@@ -3042,7 +3479,7 @@ const CanvasStageImpl = (
             <Group
               x={selectedBounds.minX}
               y={selectedBounds.minY}
-              draggable={!panToolActive && !toolMode && !selectionHasWall}
+              draggable={!panToolActive && !toolMode}
               onContextMenu={(e) => {
                 e.evt.preventDefault();
                 e.cancelBubble = true;
@@ -3059,9 +3496,28 @@ const CanvasStageImpl = (
                 for (const id of ids) {
                   const obj = objectById.get(id);
                   if (!obj) continue;
-                  startById[id] = { x: obj.x, y: obj.y };
+                  const node = objectNodeRefs.current[id];
+                  if (node) {
+                    const pos = node.position();
+                    startById[id] = { x: pos.x, y: pos.y };
+                  } else {
+                    startById[id] = { x: obj.x, y: obj.y };
+                  }
                 }
-                selectionDragRef.current = { startX: e.target.x(), startY: e.target.y(), startById };
+                const roomStartById: Record<string, { x: number; y: number; kind: 'rect' | 'poly' }> = {};
+                for (const roomId of selectedRoomIdsRef.current) {
+                  const room = (plan.rooms || []).find((r) => r.id === roomId);
+                  if (!room) continue;
+                  const node = roomNodeRefs.current[roomId];
+                  if (!node) continue;
+                  const pos = node.position();
+                  const kind = (room.kind || (Array.isArray(room.points) && room.points.length ? 'poly' : 'rect')) as
+                    | 'rect'
+                    | 'poly';
+                  roomStartById[roomId] = { x: pos.x, y: pos.y, kind };
+                }
+                const batchId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                selectionDragRef.current = { startX: e.target.x(), startY: e.target.y(), startById, batchId, roomStartById };
               }}
               onDragMove={(e) => {
                 const ref = selectionDragRef.current;
@@ -3073,6 +3529,14 @@ const CanvasStageImpl = (
                   if (!node) continue;
                   node.position({ x: start.x + dx, y: start.y + dy });
                 }
+                if (ref.roomStartById) {
+                  for (const [roomId, start] of Object.entries(ref.roomStartById)) {
+                    const node = roomNodeRefs.current[roomId];
+                    if (!node) continue;
+                    node.position({ x: start.x + dx, y: start.y + dy });
+                    node.getLayer()?.batchDraw?.();
+                  }
+                }
                 objectsLayerRef.current?.batchDraw?.();
               }}
               onDragEnd={(e) => {
@@ -3081,10 +3545,44 @@ const CanvasStageImpl = (
                 if (!ref) return;
                 const dx = e.target.x() - ref.startX;
                 const dy = e.target.y() - ref.startY;
+                const movedRoomIds = ref.roomStartById ? Object.keys(ref.roomStartById) : undefined;
                 for (const [id, start] of Object.entries(ref.startById)) {
                   const nx = start.x + dx;
                   const ny = start.y + dy;
-                  onMove(id, snapEnabled ? snap(nx) : nx, snapEnabled ? snap(ny) : ny);
+                  const obj = objectById.get(id);
+                  if (obj && wallTypeIdSet.has(obj.type)) {
+                    const node = objectNodeRefs.current[id];
+                    if (node) {
+                      node.position({ x: 0, y: 0 });
+                      node.getLayer()?.batchDraw?.();
+                    }
+                    onMoveWall?.(id, dx, dy, ref.batchId, movedRoomIds);
+                  } else {
+                    onMove(id, snapEnabled ? snap(nx) : nx, snapEnabled ? snap(ny) : ny);
+                  }
+                }
+                if (ref.roomStartById) {
+                  for (const [roomId] of Object.entries(ref.roomStartById)) {
+                    const room = (plan.rooms || []).find((r) => r.id === roomId);
+                    if (!room) continue;
+                    const kind = (room.kind || (Array.isArray(room.points) && room.points.length ? 'poly' : 'rect')) as
+                      | 'rect'
+                      | 'poly';
+                    if (kind === 'poly') {
+                      const node = roomNodeRefs.current[roomId];
+                      if (node) {
+                        node.position({ x: 0, y: 0 });
+                        node.getLayer()?.batchDraw?.();
+                      }
+                      const pts = Array.isArray(room.points) ? room.points : [];
+                      if (!pts.length) continue;
+                      onUpdateRoom?.(roomId, { kind: 'poly', points: pts.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })) });
+                    } else {
+                      const rx = Number(room.x || 0);
+                      const ry = Number(room.y || 0);
+                      onUpdateRoom?.(roomId, { kind: 'rect', x: rx + dx, y: ry + dy, width: room.width || 0, height: room.height || 0 });
+                    }
+                  }
                 }
               }}
             >
