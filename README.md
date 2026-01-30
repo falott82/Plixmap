@@ -38,6 +38,11 @@ npm run dev:api
 # Terminal 2 - Vite dev server
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
+
+### Build
+```bash
+npm run build
+```
 Open `http://localhost:5173`
 
 ### Production
