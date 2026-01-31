@@ -9,6 +9,29 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '1.9.9',
+    date: '2026-01-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Quote: posizione etichetta configurabile (sopra/sotto/centro o sinistra/destra/centro) con preset per nuove quote',
+        'Quotes: configurable label position (above/below/center or left/right/center) with presets for new quotes'
+      ),
+      n(
+        'Quote: colore dedicato e selezione con evidenza + scorciatoie da tastiera per spostare la scritta',
+        'Quotes: dedicated color, selection highlight, and keyboard shortcuts to move the label'
+      ),
+      n(
+        'Quote: doppio click per aprire la modale di modifica',
+        'Quotes: double click to open the edit modal'
+      ),
+      n(
+        'Scala planimetria: controlli separati per spessore linea e scala etichetta',
+        'Floor plan scale: separate controls for line thickness and label scale'
+      )
+    ]
+  },
+  {
     version: '1.9.8',
     date: '2026-01-31',
     type: 'fix',

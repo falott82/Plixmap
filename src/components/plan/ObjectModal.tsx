@@ -15,6 +15,7 @@ interface Props {
     description?: string;
     layerIds?: string[];
     customValues?: Record<string, any>;
+    scale?: number;
     wifiDb?: number;
     wifiStandard?: string;
     wifiBand24?: boolean;
@@ -31,6 +32,7 @@ interface Props {
   initialDescription?: string;
   layers?: { id: string; label: string; color?: string }[];
   initialLayerIds?: string[];
+  initialScale?: number;
   typeLabel?: string;
   type?: MapObjectType;
   icon?: IconName;
@@ -58,6 +60,7 @@ const ObjectModal = ({
   initialDescription = '',
   layers = [],
   initialLayerIds = [],
+  initialScale = 1,
   typeLabel,
   type,
   icon,
@@ -80,6 +83,7 @@ const ObjectModal = ({
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
   const [layerIds, setLayerIds] = useState<string[]>(initialLayerIds);
+  const [scale, setScale] = useState<number>(initialScale);
   const [customValues, setCustomValues] = useState<Record<string, any>>({});
   const [wifiDb, setWifiDb] = useState<string>('');
   const [wifiStandard, setWifiStandard] = useState<string>(WIFI_DEFAULT_STANDARD);
@@ -144,9 +148,9 @@ const ObjectModal = ({
   const hasWifiCatalog = wifiModels.length > 0;
   const canSave = useMemo(() => {
     if (readOnly) return false;
-    if (!name.trim()) return false;
+    if (type !== 'quote' && !name.trim()) return false;
     return wifiFormValid;
-  }, [name, readOnly, wifiFormValid]);
+  }, [name, readOnly, type, wifiFormValid]);
   const customFields = useMemo(() => (type ? getFieldsForType(type) : []), [getFieldsForType, type]);
 
   useEffect(() => {
@@ -154,6 +158,7 @@ const ObjectModal = ({
       setName(initialName);
       setDescription(initialDescription);
       setLayerIds(initialLayerIds);
+      setScale(Number.isFinite(initialScale) ? initialScale : 1);
       setCustomValues({});
       setWifiDb(initialWifiDb !== undefined ? String(initialWifiDb) : '');
       const hasCatalog = (wifiModels || []).length > 0;
@@ -214,6 +219,7 @@ const ObjectModal = ({
     initialDescription,
     initialLayerIds,
     initialName,
+    initialScale,
     initialWifiBand24,
     initialWifiBand5,
     initialWifiBand6,
@@ -300,7 +306,7 @@ const ObjectModal = ({
   }, [closeWifiCatalogSearch, open]);
 
   const handleSave = () => {
-    if (!name.trim()) return;
+    if (type !== 'quote' && !name.trim()) return;
     const dbRaw = wifiDb.trim().replace(',', '.');
     const dbValue = dbRaw ? Number(dbRaw) : undefined;
     const coverageRaw = wifiCoverageSqm.trim().replace(',', '.');
@@ -314,11 +320,13 @@ const ObjectModal = ({
       if (!(wifiBand24 || wifiBand5 || wifiBand6)) return;
       if (!Number.isFinite(coverageValue as number) || (coverageValue as number) <= 0) return;
     }
+    const safeName = type === 'quote' ? name.trim() : name.trim();
     onSubmit({
-      name: name.trim(),
+      name: safeName,
       description: description.trim() || undefined,
       layerIds: layerIds.length ? layerIds : undefined,
       customValues: customFields.length ? customValues : undefined,
+      scale: Number.isFinite(scale) ? Math.max(0.2, Math.min(2.4, scale)) : undefined,
       ...(isWifi
         ? {
             wifiDb: Number.isFinite(dbValue as number) ? (dbValue as number) : undefined,
@@ -633,6 +641,25 @@ const ObjectModal = ({
                       </div>
                     </div>
                   ) : null}
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                      {t({ it: 'Scala oggetto', en: 'Object scale' })}
+                      <span className="ml-auto text-xs font-mono text-slate-500 tabular-nums">{scale.toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.2}
+                      max={2.4}
+                      step={0.05}
+                      value={scale}
+                      disabled={readOnly}
+                      onChange={(e) => setScale(Number(e.target.value))}
+                      className="mt-2 w-full"
+                    />
+                    <div className="mt-1 text-xs text-slate-500">
+                      {t({ it: 'Regola la dimensione dell’oggetto nella planimetria.', en: 'Adjust the object size on the floor plan.' })}
+                    </div>
+                  </div>
 
                   {customFields.length ? (
                     <div>

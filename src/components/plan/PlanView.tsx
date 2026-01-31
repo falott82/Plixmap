@@ -280,6 +280,15 @@ const PlanView = ({ planId }: Props) => {
     highlight,
     openHelp,
     lastObjectScale,
+    setLastObjectScale,
+    lastQuoteScale,
+    setLastQuoteScale,
+    lastQuoteColor,
+    setLastQuoteColor,
+    lastQuoteLabelPosH,
+    setLastQuoteLabelPosH,
+    lastQuoteLabelPosV,
+    setLastQuoteLabelPosV,
     visibleLayerIdsByPlan,
     setVisibleLayerIds,
     gridSnapEnabled,
@@ -322,6 +331,15 @@ const PlanView = ({ planId }: Props) => {
       highlight: s.highlight,
       openHelp: s.openHelp,
       lastObjectScale: s.lastObjectScale,
+      setLastObjectScale: s.setLastObjectScale,
+      lastQuoteScale: s.lastQuoteScale,
+      setLastQuoteScale: s.setLastQuoteScale,
+      lastQuoteColor: s.lastQuoteColor,
+      setLastQuoteColor: s.setLastQuoteColor,
+      lastQuoteLabelPosH: s.lastQuoteLabelPosH,
+      setLastQuoteLabelPosH: s.setLastQuoteLabelPosH,
+      lastQuoteLabelPosV: s.lastQuoteLabelPosV,
+      setLastQuoteLabelPosV: s.setLastQuoteLabelPosV,
       visibleLayerIdsByPlan: (s as any).visibleLayerIdsByPlan,
       setVisibleLayerIds: (s as any).setVisibleLayerIds,
       gridSnapEnabled: (s as any).gridSnapEnabled,
@@ -562,6 +580,7 @@ const PlanView = ({ planId }: Props) => {
     movedWalls: new Set(),
     movedRooms: new Set()
   });
+  const quoteToastKeyRef = useRef('');
   const zoomRef = useRef<number>(zoom);
   const renderStartRef = useRef(0);
   const layerVisibilitySyncRef = useRef<string>('');
@@ -941,6 +960,22 @@ const PlanView = ({ planId }: Props) => {
     const unit = lang === 'it' ? 'ml' : 'm';
     return `${formatNumber(Number(planScale.meters))} ${unit}`;
   }, [formatNumber, lang, planScale?.meters]);
+  const recommendedObjectScale = useMemo(() => {
+    const w = Number(renderPlan?.width || 0);
+    const h = Number(renderPlan?.height || 0);
+    const maxDim = Math.max(w, h);
+    if (!Number.isFinite(maxDim) || maxDim <= 0) return 1;
+    const minDim = 3000;
+    const maxDimRef = 12000;
+    if (maxDim <= minDim) return 1;
+    if (maxDim >= maxDimRef) return 2.4;
+    const t = (maxDim - minDim) / (maxDimRef - minDim);
+    return Number((1 + t * (2.4 - 1)).toFixed(2));
+  }, [renderPlan?.height, renderPlan?.width]);
+  const defaultObjectScale = useMemo(() => {
+    if (lastObjectScale !== 1) return lastObjectScale;
+    return Number.isFinite(recommendedObjectScale) ? recommendedObjectScale : 1;
+  }, [lastObjectScale, recommendedObjectScale]);
   const scaleLine = useMemo(() => {
     if (!showScaleLine || !planScale?.start || !planScale?.end) return null;
     const labelScale = Number(planScale?.labelScale);
@@ -1203,10 +1238,21 @@ const PlanView = ({ planId }: Props) => {
       if (!obj || obj.type !== 'quote') continue;
       const pts = obj.points || [];
       const label = formatQuoteLabel(pts);
-      if (label) map[obj.id] = label;
+      const name = String(obj.name || '').trim();
+      const combined = name && label ? `${name} · ${label}` : name || label;
+      if (combined) map[obj.id] = combined;
     }
     return map;
   }, [canvasPlan, formatQuoteLabel, renderPlan]);
+
+  const getQuoteOrientation = useCallback((points?: { x: number; y: number }[]) => {
+    if (!points || points.length < 2) return 'horizontal' as const;
+    const start = points[0];
+    const end = points[points.length - 1];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    return Math.abs(dy) > Math.abs(dx) ? ('vertical' as const) : ('horizontal' as const);
+  }, []);
 
   const linksModalObjectName = useMemo(() => {
     if (!linksModalObjectId) return '';
@@ -1968,10 +2014,10 @@ const PlanView = ({ planId }: Props) => {
     return String(obj?.name || realUserDetailsId);
   }, [realUserDetailsId, renderPlan]);
 
-  const contextLink = useMemo(() => {
-    if (!renderPlan || !contextMenu || contextMenu.kind !== 'link') return undefined;
-    return ((renderPlan as any).links || []).find((l: any) => l.id === contextMenu.id);
-  }, [renderPlan, contextMenu]);
+    const contextLink = useMemo(() => {
+      if (!renderPlan || !contextMenu || contextMenu.kind !== 'link') return undefined;
+      return ((renderPlan as any).links || []).find((l: any) => l.id === contextMenu.id);
+    }, [renderPlan, contextMenu]);
 
   const contextObjectLinkCount = useMemo(() => {
     if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return 0;
@@ -1998,6 +2044,11 @@ const PlanView = ({ planId }: Props) => {
   const contextIsQuote = contextObject?.type === 'quote';
   const contextIsWifi = contextObject?.type === 'wifi';
   const contextWifiRangeOn = contextIsWifi ? (contextObject as any)?.wifiShowRange !== false : false;
+  const contextQuoteOrientation = useMemo(() => {
+    if (!contextIsQuote) return 'horizontal' as const;
+    const pts = (contextObject as any)?.points as { x: number; y: number }[] | undefined;
+    return getQuoteOrientation(pts);
+  }, [contextIsQuote, contextObject, getQuoteOrientation]);
   const roomModalInitialSurfaceSqm = useMemo(() => {
     if (!roomModal || roomModal.mode !== 'create') return undefined;
     if (roomModal.kind === 'rect' && roomModal.rect) {
@@ -2067,6 +2118,30 @@ const PlanView = ({ planId }: Props) => {
       t({
         it: 'Scrivania selezionata: sposta con le frecce (Shift per passi maggiori), ruota con Ctrl/Cmd + ←/→.',
         en: 'Desk selected: move with arrow keys (Shift for larger steps), rotate with Ctrl/Cmd + ←/→.'
+      }),
+      'info'
+    );
+  }, [push, renderPlan, selectedObjectIds, t]);
+  useEffect(() => {
+    if (!renderPlan || !selectedObjectIds.length) {
+      quoteToastKeyRef.current = '';
+      return;
+    }
+    const quoteIds = selectedObjectIds.filter((id) => {
+      const obj = renderPlan.objects.find((o) => o.id === id);
+      return !!obj && obj.type === 'quote';
+    });
+    if (!quoteIds.length) {
+      quoteToastKeyRef.current = '';
+      return;
+    }
+    const key = quoteIds.slice().sort().join(',');
+    if (quoteToastKeyRef.current === key) return;
+    quoteToastKeyRef.current = key;
+    push(
+      t({
+        it: 'Quota selezionata: sposta con le frecce (Shift per passi maggiori). Ctrl/Cmd + frecce sposta la scritta (sopra/sotto o sinistra/destra).',
+        en: 'Quote selected: move with arrow keys (Shift for larger steps). Ctrl/Cmd + arrows moves the label (above/below or left/right).'
       }),
       'info'
     );
@@ -2258,6 +2333,7 @@ const PlanView = ({ planId }: Props) => {
 
 	  const handleStageSelect = useCallback(
 	    (id?: string, options?: { keepContext?: boolean; multi?: boolean }) => {
+        if (panToolActive && id) setPanToolActive(false);
 	      // If the user is drawing a room (especially polygon mode) and clicks an object,
 	      // treat it as an explicit cancel of the drawing gesture.
 	      if (roomDrawMode && id) {
@@ -2316,8 +2392,10 @@ const PlanView = ({ planId }: Props) => {
 	      linkCreateMode,
 	      linkFromId,
 	      markTouched,
+	      panToolActive,
 	      push,
 	      roomDrawMode,
+	      setPanToolActive,
 	      setSelectedObject,
 	      t,
 	      toggleSelectedObject
@@ -2404,6 +2482,26 @@ const PlanView = ({ planId }: Props) => {
     [isReadOnly, markTouched, plan, planScale?.meters, planScale?.metersPerPixel, updateFloorPlan]
   );
 
+  const updateScaleStyle = useCallback(
+    (payload: { labelScale?: number; strokeWidth?: number }) => {
+      if (!plan || isReadOnly) return;
+      if (!planScale?.start || !planScale?.end || !planScale?.meters || !planScale?.metersPerPixel) return;
+      markTouched();
+      updateFloorPlan(plan.id, {
+        scale: {
+          start: planScale.start,
+          end: planScale.end,
+          meters: planScale.meters,
+          metersPerPixel: planScale.metersPerPixel,
+          labelScale: Number.isFinite(payload.labelScale as number) ? Number(payload.labelScale) : (planScale as any).labelScale,
+          strokeWidth: Number.isFinite(payload.strokeWidth as number) ? Number(payload.strokeWidth) : (planScale as any).strokeWidth,
+          opacity: Number.isFinite(Number(planScale.opacity)) ? Number(planScale.opacity) : 1
+        }
+      });
+    },
+    [isReadOnly, markTouched, plan, planScale?.end, planScale?.meters, planScale?.metersPerPixel, planScale?.opacity, planScale?.start, updateFloorPlan]
+  );
+
   const openScaleEdit = useCallback(() => {
     if (!planScale?.start || !planScale?.end || isReadOnly) return;
     const distance = Math.hypot(planScale.end.x - planScale.start.x, planScale.end.y - planScale.start.y);
@@ -2415,6 +2513,20 @@ const PlanView = ({ planId }: Props) => {
     const meters = Number(planScale.meters);
     setScaleMetersInput(Number.isFinite(meters) ? formatNumber(meters) : '');
   }, [formatNumber, isReadOnly, planScale?.end, planScale?.meters, planScale?.start]);
+
+  const updateQuoteLabelPos = useCallback(
+    (id: string, pos: 'center' | 'above' | 'below' | 'left' | 'right', orientation?: 'horizontal' | 'vertical') => {
+      if (!id) return;
+      updateObject(id, { quoteLabelPos: pos });
+      const resolved = orientation || getQuoteOrientation((renderPlan as any)?.objects?.find((o: any) => o.id === id)?.points);
+      if (resolved === 'vertical') {
+        if (pos === 'left' || pos === 'right' || pos === 'center') setLastQuoteLabelPosV(pos as any);
+      } else {
+        if (pos === 'above' || pos === 'below' || pos === 'center') setLastQuoteLabelPosH(pos as any);
+      }
+    },
+    [getQuoteOrientation, renderPlan, setLastQuoteLabelPosH, setLastQuoteLabelPosV, updateObject]
+  );
 
   const handleMapContextMenu = useCallback(
     ({ clientX, clientY, worldX, worldY }: { clientX: number; clientY: number; worldX: number; worldY: number }) => {
@@ -2909,6 +3021,12 @@ const PlanView = ({ planId }: Props) => {
     const labelScaleValue = Number(planScale?.labelScale);
     const opacityValue = Number(planScale?.opacity);
     const strokeWidthValue = Number(planScale?.strokeWidth);
+    const prevMeters = Number(planScale?.meters);
+    const ratio = Number.isFinite(prevMeters) && prevMeters > 0 ? meters / prevMeters : 1;
+    const boost = ratio > 1 ? ratio : 1;
+    const clampScale = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+    const nextLabelScale = clampScale((Number.isFinite(labelScaleValue) ? labelScaleValue : 1) * boost, 0.6, 1.8);
+    const nextStrokeWidth = clampScale((Number.isFinite(strokeWidthValue) ? strokeWidthValue : 1.2) * boost, 0.6, 6);
     markTouched();
     updateFloorPlan(plan.id, {
       scale: {
@@ -2916,9 +3034,9 @@ const PlanView = ({ planId }: Props) => {
         end: scaleModal.end,
         meters,
         metersPerPixel,
-        labelScale: Number.isFinite(labelScaleValue) ? labelScaleValue : 1,
+        labelScale: nextLabelScale,
         opacity: Number.isFinite(opacityValue) ? opacityValue : 1,
-        strokeWidth: Number.isFinite(strokeWidthValue) ? strokeWidthValue : 1.2
+        strokeWidth: nextStrokeWidth
       }
     });
     if (Array.isArray(plan.rooms) && plan.rooms.length) {
@@ -3346,22 +3464,26 @@ const PlanView = ({ planId }: Props) => {
       const dist = Math.hypot(resolved.x - start.x, resolved.y - start.y);
       const minSegment = 6 / Math.max(0.2, zoom || 1);
       if (dist < minSegment) return;
+      const quoteScale = Math.max(0.5, Math.min(1.6, Number(lastQuoteScale) || 1));
+      const orientation = getQuoteOrientation([start, resolved]);
+      const quoteLabelPos = orientation === 'vertical' ? lastQuoteLabelPosV : lastQuoteLabelPosH;
+      const quoteColor = lastQuoteColor || '#f97316';
       markTouched();
       addObject(
         renderPlan.id,
         'quote',
-        t({ it: 'Quota', en: 'Quote' }),
+        '',
         undefined,
         start.x,
         start.y,
-        1,
+        quoteScale,
         inferDefaultLayerIds('quote', layerIdSet),
-        { points: [start, resolved], strokeColor: '#f97316', strokeWidth: 2, opacity: 1 }
+        { points: [start, resolved], strokeColor: quoteColor, strokeWidth: 2, opacity: 1, quoteLabelPos }
       );
       setQuotePoints([]);
       setQuotePointer(null);
     },
-    [addObject, inferDefaultLayerIds, isReadOnly, layerIdSet, markTouched, quoteMode, quotePoints, renderPlan, resolveAxisLockedPoint, t, zoom]
+    [addObject, getQuoteOrientation, inferDefaultLayerIds, isReadOnly, lastQuoteColor, lastQuoteLabelPosH, lastQuoteLabelPosV, lastQuoteScale, layerIdSet, markTouched, quoteMode, quotePoints, renderPlan, resolveAxisLockedPoint, t, zoom]
   );
 
   const handleMeasurePoint = useCallback(
@@ -3965,6 +4087,33 @@ const PlanView = ({ planId }: Props) => {
       const isArrowRight = e.key === 'ArrowRight' || e.code === 'ArrowRight';
       const isArrowUp = e.key === 'ArrowUp' || e.code === 'ArrowUp';
       const isArrowDown = e.key === 'ArrowDown' || e.code === 'ArrowDown';
+      const isArrow = isArrowUp || isArrowDown || isArrowLeft || isArrowRight;
+      const isCtrlArrow = (e.ctrlKey || e.metaKey) && isArrow;
+      if (isCtrlArrow) {
+        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
+        const quoteObjs = currentSelectedIds
+          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
+          .filter((obj): obj is MapObject => !!obj && obj.type === 'quote');
+        if (quoteObjs.length) {
+          e.preventDefault();
+          markTouched();
+          for (const obj of quoteObjs) {
+            const orientation = getQuoteOrientation(obj.points);
+            let nextPos: 'center' | 'above' | 'below' | 'left' | 'right' | null = null;
+            if (orientation === 'vertical') {
+              if (isArrowLeft) nextPos = 'left';
+              else if (isArrowRight) nextPos = 'right';
+              else if (isArrowUp || isArrowDown) nextPos = 'center';
+            } else {
+              if (isArrowUp) nextPos = 'above';
+              else if (isArrowDown) nextPos = 'below';
+              else if (isArrowLeft || isArrowRight) nextPos = 'center';
+            }
+            if (nextPos) updateQuoteLabelPos(obj.id, nextPos, orientation);
+          }
+          return;
+        }
+      }
       const isRotateShortcut = (e.ctrlKey || e.metaKey) && (isArrowLeft || isArrowRight);
       if (isRotateShortcut) {
         if (!currentSelectedIds.length || !currentPlan) return;
@@ -4042,7 +4191,6 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
-      const isArrow = isArrowUp || isArrowDown || isArrowLeft || isArrowRight;
       if (isArrow) {
         if (!currentSelectedIds.length || !currentPlan) return;
         if (isReadOnlyRef.current) return;
@@ -4133,9 +4281,11 @@ const PlanView = ({ planId }: Props) => {
     loadCustomValues,
     saveCustomValues,
     getTypeLabel,
+    getQuoteOrientation,
     getPlanUnsavedChanges,
     saveRevisionOpen,
-    selectedRoomIds
+    selectedRoomIds,
+    updateQuoteLabelPos
   ]);
 
   const objectsByType = useMemo(() => {
@@ -4731,6 +4881,7 @@ const PlanView = ({ planId }: Props) => {
 
   const handlePlaceNew = (type: MapObjectType, x: number, y: number) => {
     if (isReadOnly) return;
+    if (panToolActive) setPanToolActive(false);
     if (shouldConfirmCapacity(type, x, y)) return;
     if (type === 'real_user' || type === 'user' || type === 'generic_user') {
       proceedPlaceUser(type, x, y);
@@ -4748,7 +4899,7 @@ const PlanView = ({ planId }: Props) => {
         undefined,
         x,
         y,
-        lastObjectScale,
+        defaultObjectScale,
         ['desks'],
         { opacity: 1, rotation: 0, strokeWidth: 2, strokeColor: '#cbd5e1', scaleX: 1, scaleY: 1 }
       );
@@ -4784,6 +4935,7 @@ const PlanView = ({ planId }: Props) => {
     description?: string;
     layerIds?: string[];
     customValues?: Record<string, any>;
+    scale?: number;
     wifiDb?: number;
     wifiStandard?: string;
     wifiBand24?: boolean;
@@ -4799,6 +4951,7 @@ const PlanView = ({ planId }: Props) => {
     if (!plan || !modalState || isReadOnly) return;
     if (modalState.mode === 'create') {
       markTouched();
+      const nextScale = Number.isFinite(payload.scale as number) ? Number(payload.scale) : defaultObjectScale;
       const extra = {
         ...(isCameraType(modalState.type) ? getCameraDefaults() : {}),
         ...(modalState.type === 'wifi'
@@ -4825,10 +4978,11 @@ const PlanView = ({ planId }: Props) => {
         payload.description,
         modalState.coords.x,
         modalState.coords.y,
-        lastObjectScale,
+        Math.max(0.2, Math.min(2.4, nextScale || 1)),
         payload.layerIds?.length ? payload.layerIds : fallbackLayerIds,
         Object.keys(extra).length ? extra : undefined
       );
+      setLastObjectScale(Math.max(0.2, Math.min(2.4, nextScale || 1)));
       lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
       if (roomId) updateObject(id, { roomId });
@@ -4849,7 +5003,7 @@ const PlanView = ({ planId }: Props) => {
     if (modalState.mode === 'duplicate') {
       markTouched();
       const base = plan.objects.find((o) => o.id === modalState.objectId);
-      const scale = base?.scale ?? 1;
+      const scale = Number.isFinite(payload.scale as number) ? Number(payload.scale) : (base?.scale ?? 1);
       const extra = {
         ...(base && isCameraType(base.type)
           ? {
@@ -4882,10 +5036,11 @@ const PlanView = ({ planId }: Props) => {
         payload.description,
         modalState.coords.x,
         modalState.coords.y,
-        scale,
+        Math.max(0.2, Math.min(2.4, scale || 1)),
         payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(base?.type || 'user', layerIdSet),
         Object.keys(extra).length ? extra : undefined
       );
+      setLastObjectScale(Math.max(0.2, Math.min(2.4, scale || 1)));
       lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
       if (roomId) updateObject(id, { roomId });
@@ -4946,6 +5101,7 @@ const PlanView = ({ planId }: Props) => {
     description?: string;
     layerIds?: string[];
     customValues?: Record<string, any>;
+    scale?: number;
     wifiDb?: number;
     wifiStandard?: string;
     wifiBand24?: boolean;
@@ -4981,8 +5137,12 @@ const PlanView = ({ planId }: Props) => {
       name: payload.name,
       description: payload.description,
       layerIds: payload.layerIds,
+      ...(payload.scale !== undefined ? { scale: Math.max(0.2, Math.min(2.4, Number(payload.scale) || 1)) } : {}),
       ...(wifiUpdates as any)
     });
+    if (payload.scale !== undefined) {
+      setLastObjectScale(Math.max(0.2, Math.min(2.4, Number(payload.scale) || 1)));
+    }
     if (obj && payload.customValues) {
       saveCustomValues(modalState.objectId, obj.type, payload.customValues).catch(() => {});
     }
@@ -5250,6 +5410,7 @@ const PlanView = ({ planId }: Props) => {
         name: '',
         description: '',
         layerIds: fallbackLayerIds,
+        scale: defaultObjectScale,
         ...(modalState.type === 'wifi'
           ? {
               wifiStandard: WIFI_DEFAULT_STANDARD,
@@ -5271,6 +5432,7 @@ const PlanView = ({ planId }: Props) => {
         modalState.mode === 'duplicate'
           ? (obj.layerIds || getTypeLayerIds(obj.type) || inferDefaultLayerIds(obj.type, layerIdSet))
           : (obj.layerIds || getTypeLayerIds(obj.type) || inferDefaultLayerIds(obj.type, layerIdSet)),
+      scale: Number.isFinite(obj.scale as number) ? Number(obj.scale) : defaultObjectScale,
         ...(obj.type === 'wifi'
           ? {
             wifiDb: (obj as any).wifiDb,
@@ -5287,7 +5449,7 @@ const PlanView = ({ planId }: Props) => {
           }
         : {})
     };
-  }, [getTypeLayerIds, inferDefaultLayerIds, layerIdSet, modalState, renderPlan]);
+  }, [defaultObjectScale, getTypeLayerIds, inferDefaultLayerIds, layerIdSet, modalState, renderPlan]);
 
   const assignedCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -7109,7 +7271,11 @@ const PlanView = ({ planId }: Props) => {
                               onChange={(e) => {
                                 const next = Number(e.target.value);
                                 updateObject(contextMenu.id, { scale: next });
-                                useUIStore.getState().setLastObjectScale(next);
+                                if (contextIsQuote) {
+                                  setLastQuoteScale(next);
+                                } else {
+                                  setLastObjectScale(next);
+                                }
                               }}
                               className="mt-1 w-full"
                             />
@@ -7158,6 +7324,59 @@ const PlanView = ({ planId }: Props) => {
                               onChange={(e) => updateObject(contextMenu.id, { strokeWidth: Number(e.target.value) })}
                               className="mt-1 w-full"
                             />
+                          </div>
+                        ) : null}
+                        {contextIsQuote ? (
+                          <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
+                            <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-600">
+                              <span>{t({ it: 'Colore quota', en: 'Quote color' })}</span>
+                              <input
+                                type="color"
+                                value={contextObject?.strokeColor || lastQuoteColor || '#f97316'}
+                                onChange={(e) => {
+                                  const next = e.target.value;
+                                  updateObject(contextMenu.id, { strokeColor: next });
+                                  setLastQuoteColor(next);
+                                }}
+                                className="h-7 w-9 rounded border border-slate-200 bg-white"
+                                title={t({ it: 'Colore quota', en: 'Quote color' })}
+                              />
+                            </div>
+                            <div className="mt-2 text-xs font-semibold text-slate-600">
+                              {t({ it: 'Posizione scritta', en: 'Label position' })}
+                            </div>
+                            <select
+                              value={
+                                (contextObject as any)?.quoteLabelPos ||
+                                (contextQuoteOrientation === 'vertical' ? lastQuoteLabelPosV : lastQuoteLabelPosH)
+                              }
+                              onChange={(e) => {
+                                const next = e.target.value as any;
+                                updateQuoteLabelPos(contextMenu.id, next, contextQuoteOrientation);
+                              }}
+                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
+                              title={t({ it: 'Posizione etichetta quota', en: 'Quote label position' })}
+                            >
+                              {contextQuoteOrientation === 'vertical' ? (
+                                <>
+                                  <option value="left">{t({ it: 'Sinistra', en: 'Left' })}</option>
+                                  <option value="center">{t({ it: 'Centro', en: 'Center' })}</option>
+                                  <option value="right">{t({ it: 'Destra', en: 'Right' })}</option>
+                                </>
+                              ) : (
+                                <>
+                                  <option value="above">{t({ it: 'Sopra', en: 'Above' })}</option>
+                                  <option value="center">{t({ it: 'Centro', en: 'Center' })}</option>
+                                  <option value="below">{t({ it: 'Sotto', en: 'Below' })}</option>
+                                </>
+                              )}
+                            </select>
+                            <div className="mt-2 text-[11px] text-slate-500">
+                              {t({
+                                it: 'La prossima quota usa la stessa posizione in base all’orientamento.',
+                                en: 'Next quotes reuse this position based on orientation.'
+                              })}
+                            </div>
                           </div>
                         ) : null}
                         {contextIsCamera ? (
@@ -7831,30 +8050,32 @@ const PlanView = ({ planId }: Props) => {
                   <label className="mt-4 block text-sm font-semibold text-slate-700">
                     {t({ it: 'Metri lineari', en: 'Linear meters' })}
                   </label>
-                  <input
-                    value={scaleMetersInput}
-                    onChange={(e) => setScaleMetersInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        applyScale();
-                      }
-                    }}
-                    placeholder={t({ it: 'Esempio: 10,20', en: 'Example: 10.20' })}
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                  />
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      value={scaleMetersInput}
+                      onChange={(e) => setScaleMetersInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          applyScale();
+                        }
+                      }}
+                      placeholder={t({ it: 'Esempio: 10,20', en: 'Example: 10.20' })}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                    />
+                    <button
+                      onClick={applyScale}
+                      className="shrink-0 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    >
+                      {t({ it: 'Salva', en: 'Save' })}
+                    </button>
+                  </div>
                   <div className="mt-4 flex items-center justify-end gap-2">
                     <button
                       onClick={closeScaleModal}
                       className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
-                    </button>
-                    <button
-                      onClick={applyScale}
-                      className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-                    >
-                      {t({ it: 'Salva', en: 'Save' })}
                     </button>
                   </div>
                 </Dialog.Panel>
@@ -8075,6 +8296,7 @@ const PlanView = ({ planId }: Props) => {
                 color: l.color
               }))}
             initialLayerIds={(modalInitials as any)?.layerIds || []}
+            initialScale={(modalInitials as any)?.scale}
             typeLabel={
               modalState?.mode === 'create'
                 ? `${t({ it: 'Nuovo', en: 'New' })} ${modalInitials?.type ? getTypeLabel(modalInitials.type) : ''} (${Math.round((modalState as any)?.coords?.x || 0)}, ${Math.round(
@@ -8156,7 +8378,7 @@ const PlanView = ({ planId }: Props) => {
             desc,
             realUserPicker.x,
             realUserPicker.y,
-            lastObjectScale,
+            defaultObjectScale,
             ['users'],
             {
               externalClientId: client?.id,
@@ -8755,6 +8977,52 @@ const PlanView = ({ planId }: Props) => {
                       en: 'Do you want to update the scale or remove it from the floor plan?'
                     })}
                   </Dialog.Description>
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between text-sm text-slate-600">
+                      <span>{t({ it: 'Dimensione impostata', en: 'Set size' })}</span>
+                      <span className="font-mono text-slate-800">
+                        {scaleLabel || t({ it: 'Non impostata', en: 'Not set' })}
+                      </span>
+                    </div>
+                    <div className="mt-4 grid gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <MoveDiagonal size={14} />
+                          {t({ it: 'Spessore linea scala', en: 'Scale line thickness' })}
+                          <span className="ml-auto text-xs font-mono text-slate-600 tabular-nums">
+                            {Number(planScale?.strokeWidth ?? 1.2).toFixed(1)}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.6}
+                          max={6}
+                          step={0.1}
+                          value={Number(planScale?.strokeWidth ?? 1.2)}
+                          onChange={(e) => updateScaleStyle({ strokeWidth: Number(e.target.value) })}
+                          className="mt-1 w-full"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <MoveDiagonal size={14} />
+                          {t({ it: 'Scala etichetta', en: 'Label scale' })}
+                          <span className="ml-auto text-xs font-mono text-slate-600 tabular-nums">
+                            {Number(planScale?.labelScale ?? 1).toFixed(2)}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.6}
+                          max={1.8}
+                          step={0.05}
+                          value={Number(planScale?.labelScale ?? 1)}
+                          onChange={(e) => updateScaleStyle({ labelScale: Number(e.target.value) })}
+                          className="mt-1 w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
                   <div className="mt-6 flex justify-end gap-2">
                     <button
                       onClick={() => setScaleActionsOpen(false)}

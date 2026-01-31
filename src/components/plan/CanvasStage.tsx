@@ -2449,7 +2449,9 @@ const getRoomBounds = (room: any) => {
             if (pts.length < 2) return null;
             const start = pts[0];
             const end = pts[pts.length - 1];
-            const stroke = typeof obj.strokeColor === 'string' && obj.strokeColor.trim() ? obj.strokeColor.trim() : '#f97316';
+            const isSelected = !!selectedIds?.includes(obj.id);
+            const baseStroke = typeof obj.strokeColor === 'string' && obj.strokeColor.trim() ? obj.strokeColor.trim() : '#f97316';
+            const stroke = isSelected ? '#2563eb' : baseStroke;
             const scale = clamp(Number(obj.scale ?? 1) || 1, 0.5, 1.6);
             const strokeWidth = clamp((Number(obj.strokeWidth ?? 2) || 2) * scale, 0.8, 6);
             const opacity = clamp(Number(obj.opacity ?? 1) || 1, 0.2, 1);
@@ -2460,6 +2462,21 @@ const getRoomBounds = (room: any) => {
             const midX = (start.x + end.x) / 2;
             const midY = (start.y + end.y) / 2;
             const textW = label ? estimateTextWidth(label, labelFontSize) + labelPadding : 0;
+            const textH = Math.max(12, Math.round(14 * scale));
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const orientation = Math.abs(dy) > Math.abs(dx) ? 'vertical' : 'horizontal';
+            const labelPos = (obj as any).quoteLabelPos || 'center';
+            const offsetDist = Math.max(6, Math.round(6 * scale)) + textH / 2;
+            let offsetX = 0;
+            let offsetY = 0;
+            if (orientation === 'vertical') {
+              if (labelPos === 'left') offsetX = -offsetDist;
+              if (labelPos === 'right') offsetX = offsetDist;
+            } else {
+              if (labelPos === 'above') offsetY = -offsetDist;
+              if (labelPos === 'below') offsetY = offsetDist;
+            }
             return (
               <Group key={obj.id}>
                 <Arrow
@@ -2476,6 +2493,11 @@ const getRoomBounds = (room: any) => {
                     e.cancelBubble = true;
                     if (e.evt?.button !== 0) return;
                     onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
+                  }}
+                  onDblClick={(e) => {
+                    e.cancelBubble = true;
+                    if (readOnly || toolMode) return;
+                    onEdit(obj.id);
                   }}
                   onContextMenu={(e) => {
                     e.evt.preventDefault();
@@ -2494,13 +2516,19 @@ const getRoomBounds = (room: any) => {
                 />
                 {label ? (
                   <Group
-                    x={midX - textW / 2}
-                    y={midY - 12 * scale}
+                    x={midX + offsetX}
+                    y={midY + offsetY}
                     opacity={opacity}
+                    rotation={orientation === 'vertical' ? -90 : 0}
                     onClick={(e) => {
                       e.cancelBubble = true;
                       if (e.evt?.button !== 0) return;
                       onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
+                    }}
+                    onDblClick={(e) => {
+                      e.cancelBubble = true;
+                      if (readOnly || toolMode) return;
+                      onEdit(obj.id);
                     }}
                     onContextMenu={(e) => {
                       e.evt.preventDefault();
@@ -2517,15 +2545,24 @@ const getRoomBounds = (room: any) => {
                       onContextMenu({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
                     }}
                   >
-                    <Rect width={textW} height={Math.max(12, Math.round(14 * scale))} fill="rgba(255,255,255,0.9)" cornerRadius={4} />
+                    <Rect
+                      x={-textW / 2}
+                      y={-textH / 2}
+                      width={textW}
+                      height={textH}
+                      fill="rgba(255,255,255,0.9)"
+                      cornerRadius={4}
+                    />
                     <Text
                       text={label}
+                      x={-textW / 2}
+                      y={-textH / 2}
                       width={textW}
-                      height={Math.max(12, Math.round(14 * scale))}
+                      height={textH}
                       align="center"
                       fontSize={labelFontSize}
                       fontStyle="bold"
-                      fill="#0f172a"
+                      fill={isSelected ? stroke : '#0f172a'}
                     />
                   </Group>
                 ) : null}
