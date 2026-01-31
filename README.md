@@ -1,6 +1,6 @@
 # Deskly - Floor Plan Management
 
-Current version: **1.9.9**
+Current version: **2.0.0**
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 

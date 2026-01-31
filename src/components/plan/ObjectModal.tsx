@@ -16,6 +16,11 @@ interface Props {
     layerIds?: string[];
     customValues?: Record<string, any>;
     scale?: number;
+    quoteLabelScale?: number;
+    quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
+    quoteDashed?: boolean;
+    quoteEndpoint?: 'arrows' | 'dots' | 'none';
+    strokeColor?: string;
     wifiDb?: number;
     wifiStandard?: string;
     wifiBand24?: boolean;
@@ -33,11 +38,19 @@ interface Props {
   layers?: { id: string; label: string; color?: string }[];
   initialLayerIds?: string[];
   initialScale?: number;
+  initialQuoteLabelScale?: number;
+  initialQuoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
+  initialQuoteDashed?: boolean;
+  initialQuoteEndpoint?: 'arrows' | 'dots' | 'none';
+  initialQuoteColor?: string;
+  initialQuoteLengthLabel?: string;
+  initialQuotePoints?: { x: number; y: number }[];
   typeLabel?: string;
   type?: MapObjectType;
   icon?: IconName;
   objectId?: string;
   readOnly?: boolean;
+  onDelete?: () => void;
   initialWifiDb?: number;
   initialWifiStandard?: string;
   initialWifiBand24?: boolean;
@@ -61,11 +74,19 @@ const ObjectModal = ({
   layers = [],
   initialLayerIds = [],
   initialScale = 1,
+  initialQuoteLabelScale = 1,
+  initialQuoteLabelPos = 'center',
+  initialQuoteDashed = false,
+  initialQuoteEndpoint = 'arrows',
+  initialQuoteColor = '#f97316',
+  initialQuoteLengthLabel,
+  initialQuotePoints,
   typeLabel,
   type,
   icon,
   objectId,
   readOnly = false,
+  onDelete,
   initialWifiDb,
   initialWifiStandard,
   initialWifiBand24,
@@ -84,6 +105,11 @@ const ObjectModal = ({
   const [description, setDescription] = useState(initialDescription);
   const [layerIds, setLayerIds] = useState<string[]>(initialLayerIds);
   const [scale, setScale] = useState<number>(initialScale);
+  const [quoteLabelScale, setQuoteLabelScale] = useState<number>(initialQuoteLabelScale);
+  const [quoteLabelPos, setQuoteLabelPos] = useState<'center' | 'above' | 'below' | 'left' | 'right'>(initialQuoteLabelPos);
+  const [quoteDashed, setQuoteDashed] = useState<boolean>(!!initialQuoteDashed);
+  const [quoteEndpoint, setQuoteEndpoint] = useState<'arrows' | 'dots' | 'none'>(initialQuoteEndpoint);
+  const [quoteColor, setQuoteColor] = useState<string>(initialQuoteColor);
   const [customValues, setCustomValues] = useState<Record<string, any>>({});
   const [wifiDb, setWifiDb] = useState<string>('');
   const [wifiStandard, setWifiStandard] = useState<string>(WIFI_DEFAULT_STANDARD);
@@ -103,6 +129,8 @@ const ObjectModal = ({
   const wifiCatalogSearchRef = useRef<HTMLInputElement | null>(null);
   const { hydrated, getFieldsForType, loadObjectValues } = useCustomFieldsStore();
   const isWifi = type === 'wifi';
+  const isQuote = type === 'quote';
+  const isEdit = !!objectId;
   const wifiModelsById = useMemo(() => {
     const map = new Map<string, WifiAntennaModel>();
     for (const model of wifiModels || []) map.set(model.id, model);
@@ -152,6 +180,22 @@ const ObjectModal = ({
     return wifiFormValid;
   }, [name, readOnly, type, wifiFormValid]);
   const customFields = useMemo(() => (type ? getFieldsForType(type) : []), [getFieldsForType, type]);
+  const quoteOrientation = useMemo(() => {
+    if (!initialQuotePoints || initialQuotePoints.length < 2) return 'horizontal' as const;
+    const start = initialQuotePoints[0];
+    const end = initialQuotePoints[initialQuotePoints.length - 1];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    return Math.abs(dy) > Math.abs(dx) ? ('vertical' as const) : ('horizontal' as const);
+  }, [initialQuotePoints]);
+  const quoteLengthLabel = initialQuoteLengthLabel || '';
+  const quoteLabelPosEffective = useMemo(() => {
+    if (!isQuote) return 'center';
+    if (quoteOrientation === 'vertical') {
+      return quoteLabelPos === 'left' || quoteLabelPos === 'right' || quoteLabelPos === 'center' ? quoteLabelPos : 'center';
+    }
+    return quoteLabelPos === 'above' || quoteLabelPos === 'below' || quoteLabelPos === 'center' ? quoteLabelPos : 'center';
+  }, [isQuote, quoteLabelPos, quoteOrientation]);
 
   useEffect(() => {
     if (open) {
@@ -159,6 +203,11 @@ const ObjectModal = ({
       setDescription(initialDescription);
       setLayerIds(initialLayerIds);
       setScale(Number.isFinite(initialScale) ? initialScale : 1);
+      setQuoteLabelScale(Number.isFinite(initialQuoteLabelScale) ? initialQuoteLabelScale : 1);
+      setQuoteLabelPos(initialQuoteLabelPos || 'center');
+      setQuoteDashed(!!initialQuoteDashed);
+      setQuoteEndpoint(initialQuoteEndpoint || 'arrows');
+      setQuoteColor(initialQuoteColor || '#f97316');
       setCustomValues({});
       setWifiDb(initialWifiDb !== undefined ? String(initialWifiDb) : '');
       const hasCatalog = (wifiModels || []).length > 0;
@@ -220,6 +269,11 @@ const ObjectModal = ({
     initialLayerIds,
     initialName,
     initialScale,
+    initialQuoteDashed,
+    initialQuoteEndpoint,
+    initialQuoteLabelPos,
+    initialQuoteLabelScale,
+    initialQuoteColor,
     initialWifiBand24,
     initialWifiBand5,
     initialWifiBand6,
@@ -327,6 +381,11 @@ const ObjectModal = ({
       layerIds: layerIds.length ? layerIds : undefined,
       customValues: customFields.length ? customValues : undefined,
       scale: Number.isFinite(scale) ? Math.max(0.2, Math.min(2.4, scale)) : undefined,
+      quoteLabelScale: Number.isFinite(quoteLabelScale) ? Math.max(0.6, Math.min(2, quoteLabelScale)) : undefined,
+      quoteLabelPos: quoteLabelPosEffective as any,
+      quoteDashed,
+      quoteEndpoint,
+      strokeColor: quoteColor,
       ...(isWifi
         ? {
             wifiDb: Number.isFinite(dbValue as number) ? (dbValue as number) : undefined,
@@ -375,7 +434,9 @@ const ObjectModal = ({
                 <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
                   <div className="flex items-center justify-between">
                     <Dialog.Title className="text-lg font-semibold text-ink">
-                      {initialName ? t({ it: 'Modifica oggetto', en: 'Edit object' }) : t({ it: 'Nuovo oggetto', en: 'New object' })}
+                      {isEdit
+                        ? (isQuote ? t({ it: 'Modifica quota', en: 'Edit quote' }) : t({ it: 'Modifica oggetto', en: 'Edit object' }))
+                        : (isQuote ? t({ it: 'Nuova quota', en: 'New quote' }) : t({ it: 'Nuovo oggetto', en: 'New object' }))}
                     </Dialog.Title>
                     <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
@@ -390,7 +451,7 @@ const ObjectModal = ({
                   <div className="mt-4 space-y-3">
                   <label className="block text-sm font-medium text-slate-700">
                     {isWifi ? t({ it: 'Device Name', en: 'Device Name' }) : t({ it: 'Nome', en: 'Name' })}{' '}
-                    <span className="text-rose-600">*</span>
+                    {isQuote ? null : <span className="text-rose-600">*</span>}
                     <input
                       ref={nameRef}
                       value={name}
@@ -609,7 +670,7 @@ const ObjectModal = ({
                       </div>
                     </div>
                   ) : null}
-                  {layers.length ? (
+                  {!isQuote && layers.length ? (
                     <div>
                       <div className="text-sm font-medium text-slate-700">{t({ it: 'Livelli', en: 'Layers' })}</div>
                       <div className="mt-2 grid grid-cols-2 gap-2">
@@ -641,25 +702,225 @@ const ObjectModal = ({
                       </div>
                     </div>
                   ) : null}
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                      {t({ it: 'Scala oggetto', en: 'Object scale' })}
-                      <span className="ml-auto text-xs font-mono text-slate-500 tabular-nums">{scale.toFixed(2)}</span>
+                  {!isQuote ? (
+                    <div>
+                      <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                        {t({ it: 'Scala oggetto', en: 'Object scale' })}
+                        <span className="ml-auto text-xs font-mono text-slate-500 tabular-nums">{scale.toFixed(2)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.2}
+                        max={2.4}
+                        step={0.05}
+                        value={scale}
+                        disabled={readOnly}
+                        onChange={(e) => setScale(Number(e.target.value))}
+                        className="mt-2 w-full"
+                      />
+                      <div className="mt-1 text-xs text-slate-500">
+                        {t({ it: 'Regola la dimensione dell’oggetto nella planimetria.', en: 'Adjust the object size on the floor plan.' })}
+                      </div>
                     </div>
-                    <input
-                      type="range"
-                      min={0.2}
-                      max={2.4}
-                      step={0.05}
-                      value={scale}
-                      disabled={readOnly}
-                      onChange={(e) => setScale(Number(e.target.value))}
-                      className="mt-2 w-full"
-                    />
-                    <div className="mt-1 text-xs text-slate-500">
-                      {t({ it: 'Regola la dimensione dell’oggetto nella planimetria.', en: 'Adjust the object size on the floor plan.' })}
+                  ) : (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Opzioni quota', en: 'Quote options' })}</span>
+                        {quoteLengthLabel ? (
+                          <span className="text-xs font-mono text-slate-500">{quoteLengthLabel}</span>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 grid gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                            {t({ it: 'Scala freccia', en: 'Arrow scale' })}
+                            <span className="ml-auto text-xs font-mono text-slate-500 tabular-nums">{scale.toFixed(2)}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0.5}
+                            max={1.6}
+                            step={0.05}
+                            value={scale}
+                            disabled={readOnly}
+                            onChange={(e) => setScale(Number(e.target.value))}
+                            className="mt-1 w-full"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                            {t({ it: 'Scala etichetta', en: 'Label scale' })}
+                            <span className="ml-auto text-xs font-mono text-slate-500 tabular-nums">{quoteLabelScale.toFixed(2)}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0.6}
+                            max={2}
+                            step={0.05}
+                            value={quoteLabelScale}
+                            disabled={readOnly}
+                            onChange={(e) => setQuoteLabelScale(Number(e.target.value))}
+                            className="mt-1 w-full"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-slate-600">
+                            {t({ it: 'Posizione scritta', en: 'Label position' })}
+                          </label>
+                          <select
+                            value={quoteLabelPosEffective}
+                            disabled={readOnly}
+                            onChange={(e) => setQuoteLabelPos(e.target.value as any)}
+                            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
+                          >
+                            {quoteOrientation === 'vertical' ? (
+                              <>
+                                <option value="left">{t({ it: 'Sinistra', en: 'Left' })}</option>
+                                <option value="center">{t({ it: 'Centro', en: 'Center' })}</option>
+                                <option value="right">{t({ it: 'Destra', en: 'Right' })}</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="above">{t({ it: 'Sopra', en: 'Above' })}</option>
+                                <option value="center">{t({ it: 'Centro', en: 'Center' })}</option>
+                                <option value="below">{t({ it: 'Sotto', en: 'Below' })}</option>
+                              </>
+                            )}
+                          </select>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={quoteDashed}
+                              disabled={readOnly}
+                              onChange={(e) => setQuoteDashed(e.target.checked)}
+                            />
+                            {t({ it: 'Tratteggio', en: 'Dashed' })}
+                          </label>
+                          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                            <span>{t({ it: 'Apici', en: 'Endpoints' })}</span>
+                            <select
+                              value={quoteEndpoint}
+                              disabled={readOnly}
+                              onChange={(e) => setQuoteEndpoint(e.target.value as any)}
+                              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
+                            >
+                              <option value="arrows">{t({ it: 'Frecce', en: 'Arrows' })}</option>
+                              <option value="dots">{t({ it: 'Puntini', en: 'Dots' })}</option>
+                              <option value="none">{t({ it: 'Nessuno', en: 'None' })}</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-600">
+                          <span>{t({ it: 'Colore linea', en: 'Line color' })}</span>
+                          <input
+                            type="color"
+                            value={quoteColor}
+                            disabled={readOnly}
+                            onChange={(e) => setQuoteColor(e.target.value)}
+                            className="h-7 w-9 rounded border border-slate-200 bg-white"
+                            title={t({ it: 'Colore linea', en: 'Line color' })}
+                          />
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                          <div className="text-xs font-semibold text-slate-600">{t({ it: 'Anteprima', en: 'Preview' })}</div>
+                          <div className="mt-2">
+                            <svg viewBox="0 0 240 80" className="h-16 w-full">
+                              {quoteOrientation === 'vertical' ? (
+                                <>
+                                  <line
+                                    x1="120"
+                                    y1="12"
+                                    x2="120"
+                                    y2="68"
+                                    stroke={quoteColor}
+                                    strokeWidth={2 * scale}
+                                    strokeDasharray={quoteDashed ? '6 5' : undefined}
+                                  />
+                                  {quoteEndpoint === 'dots' ? (
+                                    <>
+                                      <circle cx="120" cy="12" r="3" fill={quoteColor} />
+                                      <circle cx="120" cy="68" r="3" fill={quoteColor} />
+                                    </>
+                                  ) : null}
+                                  {quoteEndpoint === 'arrows' ? (
+                                    <>
+                                      <polygon points="120,6 114,16 126,16" fill={quoteColor} />
+                                      <polygon points="120,74 114,64 126,64" fill={quoteColor} />
+                                    </>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <>
+                                  <line
+                                    x1="20"
+                                    y1="40"
+                                    x2="220"
+                                    y2="40"
+                                    stroke={quoteColor}
+                                    strokeWidth={2 * scale}
+                                    strokeDasharray={quoteDashed ? '6 5' : undefined}
+                                  />
+                                  {quoteEndpoint === 'dots' ? (
+                                    <>
+                                      <circle cx="20" cy="40" r="3" fill={quoteColor} />
+                                      <circle cx="220" cy="40" r="3" fill={quoteColor} />
+                                    </>
+                                  ) : null}
+                                  {quoteEndpoint === 'arrows' ? (
+                                    <>
+                                      <polygon points="14,40 24,34 24,46" fill={quoteColor} />
+                                      <polygon points="226,40 216,34 216,46" fill={quoteColor} />
+                                    </>
+                                  ) : null}
+                                </>
+                              )}
+                              <rect
+                                x={quoteOrientation === 'vertical'
+                                  ? (quoteLabelPosEffective === 'left' ? 36 : quoteLabelPosEffective === 'right' ? 144 : 84)
+                                  : 80}
+                                y={quoteOrientation === 'vertical'
+                                  ? 28
+                                  : (quoteLabelPosEffective === 'above' ? 8 : quoteLabelPosEffective === 'below' ? 52 : 28)}
+                                width="80"
+                                height="24"
+                                rx="6"
+                                fill="rgba(255,255,255,0.9)"
+                                stroke="#e2e8f0"
+                              />
+                              {quoteOrientation === 'vertical' ? (
+                                <text
+                                  x={quoteLabelPosEffective === 'left' ? 76 : quoteLabelPosEffective === 'right' ? 184 : 124}
+                                  y={44}
+                                  textAnchor="middle"
+                                  dominantBaseline="middle"
+                                  fontSize={10 * quoteLabelScale}
+                                  fontWeight="bold"
+                                  fill="#0f172a"
+                                  transform={`rotate(-90 ${quoteLabelPosEffective === 'left' ? 76 : quoteLabelPosEffective === 'right' ? 184 : 124} 44)`}
+                                >
+                                  {quoteLengthLabel || '0'}
+                                </text>
+                              ) : (
+                                <text
+                                  x={120}
+                                  y={quoteLabelPosEffective === 'above' ? 24 : quoteLabelPosEffective === 'below' ? 68 : 44}
+                                  textAnchor="middle"
+                                  dominantBaseline="middle"
+                                  fontSize={10 * quoteLabelScale}
+                                  fontWeight="bold"
+                                  fill="#0f172a"
+                                >
+                                  {quoteLengthLabel || '0'}
+                                </text>
+                              )}
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {customFields.length ? (
                     <div>
@@ -709,6 +970,15 @@ const ObjectModal = ({
                   ) : null}
                 </div>
                 <div className="mt-5 flex justify-end gap-2">
+                  {isQuote && isEdit && onDelete ? (
+                    <button
+                      onClick={onDelete}
+                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                      title={t({ it: 'Elimina quota', en: 'Delete quote' })}
+                    >
+                      {t({ it: 'Elimina quota', en: 'Delete quote' })}
+                    </button>
+                  ) : null}
                   <button
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"

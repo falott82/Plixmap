@@ -187,6 +187,9 @@ export interface MapObject {
   strokeWidth?: number;
   strokeColor?: string;
   quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
+  quoteLabelScale?: number;
+  quoteDashed?: boolean;
+  quoteEndpoint?: 'arrows' | 'dots' | 'none';
   points?: { x: number; y: number }[];
   wallGroupId?: string;
   wallGroupIndex?: number;

@@ -29,6 +29,9 @@ interface UIState {
   lastQuoteColor: string;
   lastQuoteLabelPosH: 'center' | 'above' | 'below';
   lastQuoteLabelPosV: 'center' | 'left' | 'right';
+  lastQuoteLabelScale: number;
+  lastQuoteDashed: boolean;
+  lastQuoteEndpoint: 'arrows' | 'dots' | 'none';
   pendingPostSaveAction: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null;
   setSelectedPlan: (id?: string) => void;
   setSelectedObject: (id?: string) => void;
@@ -62,6 +65,9 @@ interface UIState {
   setLastQuoteColor: (color: string) => void;
   setLastQuoteLabelPosH: (pos: 'center' | 'above' | 'below') => void;
   setLastQuoteLabelPosV: (pos: 'center' | 'left' | 'right') => void;
+  setLastQuoteLabelScale: (scale: number) => void;
+  setLastQuoteDashed: (value: boolean) => void;
+  setLastQuoteEndpoint: (value: 'arrows' | 'dots' | 'none') => void;
   setPendingPostSaveAction: (action: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null) => void;
   clearPendingPostSaveAction: () => void;
 }
@@ -91,6 +97,9 @@ export const useUIStore = create<UIState>()(
       lastQuoteColor: '#f97316',
       lastQuoteLabelPosH: 'center',
       lastQuoteLabelPosV: 'center',
+      lastQuoteLabelScale: 1,
+      lastQuoteDashed: false,
+      lastQuoteEndpoint: 'arrows',
       pendingPostSaveAction: null,
       setSelectedPlan: (id) => set({ selectedPlanId: id, selectedObjectId: undefined, selectedObjectIds: [] }),
       setSelectedObject: (id) =>
@@ -173,12 +182,15 @@ export const useUIStore = create<UIState>()(
       setLastQuoteColor: (color) => set({ lastQuoteColor: color || '#f97316' }),
       setLastQuoteLabelPosH: (pos) => set({ lastQuoteLabelPosH: pos || 'center' }),
       setLastQuoteLabelPosV: (pos) => set({ lastQuoteLabelPosV: pos || 'center' }),
+      setLastQuoteLabelScale: (scale) => set({ lastQuoteLabelScale: Math.max(0.6, Math.min(2, Number(scale) || 1)) }),
+      setLastQuoteDashed: (value) => set({ lastQuoteDashed: !!value }),
+      setLastQuoteEndpoint: (value) => set({ lastQuoteEndpoint: value || 'arrows' }),
       setPendingPostSaveAction: (action) => set({ pendingPostSaveAction: action }),
       clearPendingPostSaveAction: () => set({ pendingPostSaveAction: null })
     }),
     {
       name: 'deskly-ui',
-      version: 3,
+      version: 4,
       migrate: (persistedState: any, _version: number) => {
         if (persistedState && typeof persistedState === 'object') {
           // Do not persist time-machine selection across reloads (always start from "present").
@@ -187,6 +199,9 @@ export const useUIStore = create<UIState>()(
           if (!('lastQuoteColor' in persistedState)) persistedState.lastQuoteColor = '#f97316';
           if (!('lastQuoteLabelPosH' in persistedState)) persistedState.lastQuoteLabelPosH = 'center';
           if (!('lastQuoteLabelPosV' in persistedState)) persistedState.lastQuoteLabelPosV = 'center';
+          if (!('lastQuoteLabelScale' in persistedState)) persistedState.lastQuoteLabelScale = 1;
+          if (!('lastQuoteDashed' in persistedState)) persistedState.lastQuoteDashed = false;
+          if (!('lastQuoteEndpoint' in persistedState)) persistedState.lastQuoteEndpoint = 'arrows';
         }
         return persistedState as any;
       },
@@ -205,7 +220,10 @@ export const useUIStore = create<UIState>()(
         lastQuoteScale: state.lastQuoteScale,
         lastQuoteColor: state.lastQuoteColor,
         lastQuoteLabelPosH: state.lastQuoteLabelPosH,
-        lastQuoteLabelPosV: state.lastQuoteLabelPosV
+        lastQuoteLabelPosV: state.lastQuoteLabelPosV,
+        lastQuoteLabelScale: state.lastQuoteLabelScale,
+        lastQuoteDashed: state.lastQuoteDashed,
+        lastQuoteEndpoint: state.lastQuoteEndpoint
       })
     }
   )

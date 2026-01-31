@@ -289,6 +289,12 @@ const PlanView = ({ planId }: Props) => {
     setLastQuoteLabelPosH,
     lastQuoteLabelPosV,
     setLastQuoteLabelPosV,
+    lastQuoteLabelScale,
+    setLastQuoteLabelScale,
+    lastQuoteDashed,
+    setLastQuoteDashed,
+    lastQuoteEndpoint,
+    setLastQuoteEndpoint,
     visibleLayerIdsByPlan,
     setVisibleLayerIds,
     gridSnapEnabled,
@@ -340,6 +346,12 @@ const PlanView = ({ planId }: Props) => {
       setLastQuoteLabelPosH: s.setLastQuoteLabelPosH,
       lastQuoteLabelPosV: s.lastQuoteLabelPosV,
       setLastQuoteLabelPosV: s.setLastQuoteLabelPosV,
+      lastQuoteLabelScale: s.lastQuoteLabelScale,
+      setLastQuoteLabelScale: s.setLastQuoteLabelScale,
+      lastQuoteDashed: s.lastQuoteDashed,
+      setLastQuoteDashed: s.setLastQuoteDashed,
+      lastQuoteEndpoint: s.lastQuoteEndpoint,
+      setLastQuoteEndpoint: s.setLastQuoteEndpoint,
       visibleLayerIdsByPlan: (s as any).visibleLayerIdsByPlan,
       setVisibleLayerIds: (s as any).setVisibleLayerIds,
       gridSnapEnabled: (s as any).gridSnapEnabled,
@@ -581,6 +593,7 @@ const PlanView = ({ planId }: Props) => {
     movedRooms: new Set()
   });
   const quoteToastKeyRef = useRef('');
+  const quoteToastIdRef = useRef<string | number | null>(null);
   const zoomRef = useRef<number>(zoom);
   const renderStartRef = useRef(0);
   const layerVisibilitySyncRef = useRef<string>('');
@@ -2049,6 +2062,14 @@ const PlanView = ({ planId }: Props) => {
     const pts = (contextObject as any)?.points as { x: number; y: number }[] | undefined;
     return getQuoteOrientation(pts);
   }, [contextIsQuote, contextObject, getQuoteOrientation]);
+  const contextQuoteLabelPos = useMemo(() => {
+    if (!contextIsQuote) return 'center' as const;
+    const current = String((contextObject as any)?.quoteLabelPos || 'center');
+    if (contextQuoteOrientation === 'vertical') {
+      return current === 'left' || current === 'right' || current === 'center' ? (current as any) : lastQuoteLabelPosV;
+    }
+    return current === 'above' || current === 'below' || current === 'center' ? (current as any) : lastQuoteLabelPosH;
+  }, [contextIsQuote, contextObject, contextQuoteOrientation, lastQuoteLabelPosH, lastQuoteLabelPosV]);
   const roomModalInitialSurfaceSqm = useMemo(() => {
     if (!roomModal || roomModal.mode !== 'create') return undefined;
     if (roomModal.kind === 'rect' && roomModal.rect) {
@@ -2121,10 +2142,14 @@ const PlanView = ({ planId }: Props) => {
       }),
       'info'
     );
-  }, [push, renderPlan, selectedObjectIds, t]);
+  }, [renderPlan, selectedObjectIds, t]);
   useEffect(() => {
     if (!renderPlan || !selectedObjectIds.length) {
       quoteToastKeyRef.current = '';
+      if (quoteToastIdRef.current != null) {
+        toast.dismiss(quoteToastIdRef.current);
+        quoteToastIdRef.current = null;
+      }
       return;
     }
     const quoteIds = selectedObjectIds.filter((id) => {
@@ -2133,17 +2158,24 @@ const PlanView = ({ planId }: Props) => {
     });
     if (!quoteIds.length) {
       quoteToastKeyRef.current = '';
+      if (quoteToastIdRef.current != null) {
+        toast.dismiss(quoteToastIdRef.current);
+        quoteToastIdRef.current = null;
+      }
       return;
     }
     const key = quoteIds.slice().sort().join(',');
     if (quoteToastKeyRef.current === key) return;
     quoteToastKeyRef.current = key;
-    push(
+    if (quoteToastIdRef.current != null) {
+      toast.dismiss(quoteToastIdRef.current);
+    }
+    quoteToastIdRef.current = toast.info(
       t({
         it: 'Quota selezionata: sposta con le frecce (Shift per passi maggiori). Ctrl/Cmd + frecce sposta la scritta (sopra/sotto o sinistra/destra).',
         en: 'Quote selected: move with arrow keys (Shift for larger steps). Ctrl/Cmd + arrows moves the label (above/below or left/right).'
       }),
-      'info'
+      { duration: Infinity }
     );
   }, [push, renderPlan, selectedObjectIds, t]);
   useEffect(() => {
@@ -3468,6 +3500,9 @@ const PlanView = ({ planId }: Props) => {
       const orientation = getQuoteOrientation([start, resolved]);
       const quoteLabelPos = orientation === 'vertical' ? lastQuoteLabelPosV : lastQuoteLabelPosH;
       const quoteColor = lastQuoteColor || '#f97316';
+      const quoteLabelScale = Math.max(0.6, Math.min(2, Number(lastQuoteLabelScale) || 1));
+      const quoteDashed = !!lastQuoteDashed;
+      const quoteEndpoint = lastQuoteEndpoint || 'arrows';
       markTouched();
       addObject(
         renderPlan.id,
@@ -3477,13 +3512,33 @@ const PlanView = ({ planId }: Props) => {
         start.x,
         start.y,
         quoteScale,
-        inferDefaultLayerIds('quote', layerIdSet),
-        { points: [start, resolved], strokeColor: quoteColor, strokeWidth: 2, opacity: 1, quoteLabelPos }
+        ['quotes'],
+        { points: [start, resolved], strokeColor: quoteColor, strokeWidth: 2, opacity: 1, quoteLabelPos, quoteLabelScale, quoteDashed, quoteEndpoint }
       );
       setQuotePoints([]);
       setQuotePointer(null);
     },
-    [addObject, getQuoteOrientation, inferDefaultLayerIds, isReadOnly, lastQuoteColor, lastQuoteLabelPosH, lastQuoteLabelPosV, lastQuoteScale, layerIdSet, markTouched, quoteMode, quotePoints, renderPlan, resolveAxisLockedPoint, t, zoom]
+    [
+      addObject,
+      getQuoteOrientation,
+      inferDefaultLayerIds,
+      isReadOnly,
+      lastQuoteColor,
+      lastQuoteDashed,
+      lastQuoteEndpoint,
+      lastQuoteLabelPosH,
+      lastQuoteLabelPosV,
+      lastQuoteLabelScale,
+      lastQuoteScale,
+      layerIdSet,
+      markTouched,
+      quoteMode,
+      quotePoints,
+      renderPlan,
+      resolveAxisLockedPoint,
+      t,
+      zoom
+    ]
   );
 
   const handleMeasurePoint = useCallback(
@@ -4936,6 +4991,11 @@ const PlanView = ({ planId }: Props) => {
     layerIds?: string[];
     customValues?: Record<string, any>;
     scale?: number;
+    quoteLabelScale?: number;
+    quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
+    quoteDashed?: boolean;
+    quoteEndpoint?: 'arrows' | 'dots' | 'none';
+    strokeColor?: string;
     wifiDb?: number;
     wifiStandard?: string;
     wifiBand24?: boolean;
@@ -4954,6 +5014,17 @@ const PlanView = ({ planId }: Props) => {
       const nextScale = Number.isFinite(payload.scale as number) ? Number(payload.scale) : defaultObjectScale;
       const extra = {
         ...(isCameraType(modalState.type) ? getCameraDefaults() : {}),
+        ...(modalState.type === 'quote'
+          ? {
+              strokeColor: payload.strokeColor || lastQuoteColor || '#f97316',
+              quoteLabelScale: Number.isFinite(payload.quoteLabelScale as number)
+                ? Number(payload.quoteLabelScale)
+                : Number(lastQuoteLabelScale) || 1,
+              quoteLabelPos: payload.quoteLabelPos || (lastQuoteLabelPosH as any),
+              quoteDashed: payload.quoteDashed ?? lastQuoteDashed,
+              quoteEndpoint: payload.quoteEndpoint || lastQuoteEndpoint
+            }
+          : {}),
         ...(modalState.type === 'wifi'
           ? {
               wifiDb: payload.wifiDb,
@@ -4970,7 +5041,8 @@ const PlanView = ({ planId }: Props) => {
             }
           : {})
       };
-      const fallbackLayerIds = getTypeLayerIds(modalState.type) || inferDefaultLayerIds(modalState.type, layerIdSet);
+      const fallbackLayerIds =
+        modalState.type === 'quote' ? ['quotes'] : (getTypeLayerIds(modalState.type) || inferDefaultLayerIds(modalState.type, layerIdSet));
       const id = addObject(
         plan.id,
         modalState.type,
@@ -4979,10 +5051,22 @@ const PlanView = ({ planId }: Props) => {
         modalState.coords.x,
         modalState.coords.y,
         Math.max(0.2, Math.min(2.4, nextScale || 1)),
-        payload.layerIds?.length ? payload.layerIds : fallbackLayerIds,
+        modalState.type === 'quote' ? ['quotes'] : (payload.layerIds?.length ? payload.layerIds : fallbackLayerIds),
         Object.keys(extra).length ? extra : undefined
       );
-      setLastObjectScale(Math.max(0.2, Math.min(2.4, nextScale || 1)));
+      if (modalState.type === 'quote') {
+        setLastQuoteScale(Math.max(0.5, Math.min(1.6, nextScale || 1)));
+        if (payload.strokeColor) setLastQuoteColor(payload.strokeColor);
+        if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
+        if (payload.quoteLabelPos) {
+          setLastQuoteLabelPosH(payload.quoteLabelPos as any);
+          setLastQuoteLabelPosV(payload.quoteLabelPos as any);
+        }
+        if (payload.quoteDashed !== undefined) setLastQuoteDashed(payload.quoteDashed);
+        if (payload.quoteEndpoint) setLastQuoteEndpoint(payload.quoteEndpoint);
+      } else {
+        setLastObjectScale(Math.max(0.2, Math.min(2.4, nextScale || 1)));
+      }
       lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
       if (roomId) updateObject(id, { roomId });
@@ -5013,6 +5097,17 @@ const PlanView = ({ planId }: Props) => {
               cctvOpacity: (base as any).cctvOpacity ?? 0.6
             }
           : {}),
+        ...(base?.type === 'quote'
+          ? {
+              strokeColor: payload.strokeColor || base?.strokeColor || lastQuoteColor || '#f97316',
+              quoteLabelScale: Number.isFinite(payload.quoteLabelScale as number)
+                ? Number(payload.quoteLabelScale)
+                : Number((base as any)?.quoteLabelScale) || Number(lastQuoteLabelScale) || 1,
+              quoteLabelPos: payload.quoteLabelPos || (base as any)?.quoteLabelPos || (lastQuoteLabelPosH as any),
+              quoteDashed: payload.quoteDashed ?? (base as any)?.quoteDashed ?? lastQuoteDashed,
+              quoteEndpoint: payload.quoteEndpoint || (base as any)?.quoteEndpoint || lastQuoteEndpoint
+            }
+          : {}),
         ...(base?.type === 'wifi'
           ? {
               wifiDb: (base as any).wifiDb,
@@ -5037,10 +5132,23 @@ const PlanView = ({ planId }: Props) => {
         modalState.coords.x,
         modalState.coords.y,
         Math.max(0.2, Math.min(2.4, scale || 1)),
-        payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(base?.type || 'user', layerIdSet),
+        base?.type === 'quote' ? ['quotes'] : (payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(base?.type || 'user', layerIdSet)),
         Object.keys(extra).length ? extra : undefined
       );
-      setLastObjectScale(Math.max(0.2, Math.min(2.4, scale || 1)));
+      if (base?.type === 'quote') {
+        setLastQuoteScale(Math.max(0.5, Math.min(1.6, scale || 1)));
+        if (payload.strokeColor) setLastQuoteColor(payload.strokeColor);
+        if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
+        if (payload.quoteLabelPos) {
+          const orientation = getQuoteOrientation((base as any)?.points);
+          if (orientation === 'vertical') setLastQuoteLabelPosV(payload.quoteLabelPos as any);
+          else setLastQuoteLabelPosH(payload.quoteLabelPos as any);
+        }
+        if (payload.quoteDashed !== undefined) setLastQuoteDashed(payload.quoteDashed);
+        if (payload.quoteEndpoint) setLastQuoteEndpoint(payload.quoteEndpoint);
+      } else {
+        setLastObjectScale(Math.max(0.2, Math.min(2.4, scale || 1)));
+      }
       lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
       if (roomId) updateObject(id, { roomId });
@@ -5102,6 +5210,11 @@ const PlanView = ({ planId }: Props) => {
     layerIds?: string[];
     customValues?: Record<string, any>;
     scale?: number;
+    quoteLabelScale?: number;
+    quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
+    quoteDashed?: boolean;
+    quoteEndpoint?: 'arrows' | 'dots' | 'none';
+    strokeColor?: string;
     wifiDb?: number;
     wifiStandard?: string;
     wifiBand24?: boolean;
@@ -5117,6 +5230,7 @@ const PlanView = ({ planId }: Props) => {
     if (!modalState || modalState.mode !== 'edit' || isReadOnly) return;
     markTouched();
     const obj = plan?.objects?.find((o) => o.id === modalState.objectId);
+    const isQuote = obj?.type === 'quote';
     const wifiUpdates =
       obj?.type === 'wifi'
         ? {
@@ -5136,11 +5250,29 @@ const PlanView = ({ planId }: Props) => {
     updateObject(modalState.objectId, {
       name: payload.name,
       description: payload.description,
-      layerIds: payload.layerIds,
+      layerIds: isQuote ? ['quotes'] : payload.layerIds,
       ...(payload.scale !== undefined ? { scale: Math.max(0.2, Math.min(2.4, Number(payload.scale) || 1)) } : {}),
+      ...(isQuote && payload.quoteLabelScale !== undefined
+        ? { quoteLabelScale: Math.max(0.6, Math.min(2, Number(payload.quoteLabelScale) || 1)) }
+        : {}),
+      ...(isQuote && payload.quoteLabelPos ? { quoteLabelPos: payload.quoteLabelPos } : {}),
+      ...(isQuote && payload.quoteDashed !== undefined ? { quoteDashed: payload.quoteDashed } : {}),
+      ...(isQuote && payload.quoteEndpoint ? { quoteEndpoint: payload.quoteEndpoint } : {}),
+      ...(isQuote && payload.strokeColor ? { strokeColor: payload.strokeColor } : {}),
       ...(wifiUpdates as any)
     });
-    if (payload.scale !== undefined) {
+    if (isQuote) {
+      if (payload.scale !== undefined) setLastQuoteScale(Math.max(0.5, Math.min(1.6, Number(payload.scale) || 1)));
+      if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
+      if (payload.quoteLabelPos) {
+        const orientation = getQuoteOrientation(obj?.points);
+        if (orientation === 'vertical') setLastQuoteLabelPosV(payload.quoteLabelPos as any);
+        else setLastQuoteLabelPosH(payload.quoteLabelPos as any);
+      }
+      if (payload.strokeColor) setLastQuoteColor(payload.strokeColor);
+      if (payload.quoteDashed !== undefined) setLastQuoteDashed(payload.quoteDashed);
+      if (payload.quoteEndpoint) setLastQuoteEndpoint(payload.quoteEndpoint);
+    } else if (payload.scale !== undefined) {
       setLastObjectScale(Math.max(0.2, Math.min(2.4, Number(payload.scale) || 1)));
     }
     if (obj && payload.customValues) {
@@ -5404,13 +5536,23 @@ const PlanView = ({ planId }: Props) => {
   const modalInitials = useMemo(() => {
     if (!modalState || !renderPlan) return null;
     if (modalState.mode === 'create') {
-      const fallbackLayerIds = getTypeLayerIds(modalState.type) || inferDefaultLayerIds(modalState.type, layerIdSet);
+      const fallbackLayerIds =
+        modalState.type === 'quote' ? ['quotes'] : (getTypeLayerIds(modalState.type) || inferDefaultLayerIds(modalState.type, layerIdSet));
       return {
         type: modalState.type,
         name: '',
         description: '',
         layerIds: fallbackLayerIds,
         scale: defaultObjectScale,
+        ...(modalState.type === 'quote'
+          ? {
+              quoteLabelScale: lastQuoteLabelScale,
+              quoteLabelPos: lastQuoteLabelPosH,
+              quoteDashed: lastQuoteDashed,
+              quoteEndpoint: lastQuoteEndpoint,
+              quoteColor: lastQuoteColor
+            }
+          : {}),
         ...(modalState.type === 'wifi'
           ? {
               wifiStandard: WIFI_DEFAULT_STANDARD,
@@ -5424,6 +5566,7 @@ const PlanView = ({ planId }: Props) => {
     }
     const obj = renderPlan.objects.find((o) => o.id === modalState.objectId);
     if (!obj) return null;
+    const quoteLabel = obj.type === 'quote' ? formatQuoteLabel(obj.points || []) : undefined;
     return {
       type: obj.type,
       name: modalState.mode === 'duplicate' ? '' : obj.name,
@@ -5433,6 +5576,13 @@ const PlanView = ({ planId }: Props) => {
           ? (obj.layerIds || getTypeLayerIds(obj.type) || inferDefaultLayerIds(obj.type, layerIdSet))
           : (obj.layerIds || getTypeLayerIds(obj.type) || inferDefaultLayerIds(obj.type, layerIdSet)),
       scale: Number.isFinite(obj.scale as number) ? Number(obj.scale) : defaultObjectScale,
+      quoteLabelScale: Number.isFinite((obj as any).quoteLabelScale) ? Number((obj as any).quoteLabelScale) : lastQuoteLabelScale,
+      quoteLabelPos: (obj as any).quoteLabelPos,
+      quoteDashed: !!(obj as any).quoteDashed,
+      quoteEndpoint: (obj as any).quoteEndpoint,
+      quoteColor: obj.strokeColor,
+      quoteLengthLabel: quoteLabel,
+      quotePoints: obj.points,
         ...(obj.type === 'wifi'
           ? {
             wifiDb: (obj as any).wifiDb,
@@ -5449,7 +5599,20 @@ const PlanView = ({ planId }: Props) => {
           }
         : {})
     };
-  }, [defaultObjectScale, getTypeLayerIds, inferDefaultLayerIds, layerIdSet, modalState, renderPlan]);
+  }, [
+    defaultObjectScale,
+    formatQuoteLabel,
+    getTypeLayerIds,
+    inferDefaultLayerIds,
+    layerIdSet,
+    lastQuoteColor,
+    lastQuoteDashed,
+    lastQuoteEndpoint,
+    lastQuoteLabelPosH,
+    lastQuoteLabelScale,
+    modalState,
+    renderPlan
+  ]);
 
   const assignedCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -7346,10 +7509,7 @@ const PlanView = ({ planId }: Props) => {
                               {t({ it: 'Posizione scritta', en: 'Label position' })}
                             </div>
                             <select
-                              value={
-                                (contextObject as any)?.quoteLabelPos ||
-                                (contextQuoteOrientation === 'vertical' ? lastQuoteLabelPosV : lastQuoteLabelPosH)
-                              }
+                              value={contextQuoteLabelPos}
                               onChange={(e) => {
                                 const next = e.target.value as any;
                                 updateQuoteLabelPos(contextMenu.id, next, contextQuoteOrientation);
@@ -8297,6 +8457,13 @@ const PlanView = ({ planId }: Props) => {
               }))}
             initialLayerIds={(modalInitials as any)?.layerIds || []}
             initialScale={(modalInitials as any)?.scale}
+            initialQuoteLabelScale={(modalInitials as any)?.quoteLabelScale}
+            initialQuoteLabelPos={(modalInitials as any)?.quoteLabelPos}
+            initialQuoteDashed={(modalInitials as any)?.quoteDashed}
+            initialQuoteEndpoint={(modalInitials as any)?.quoteEndpoint}
+            initialQuoteColor={(modalInitials as any)?.quoteColor}
+            initialQuoteLengthLabel={(modalInitials as any)?.quoteLengthLabel}
+            initialQuotePoints={(modalInitials as any)?.quotePoints}
             typeLabel={
               modalState?.mode === 'create'
                 ? `${t({ it: 'Nuovo', en: 'New' })} ${modalInitials?.type ? getTypeLabel(modalInitials.type) : ''} (${Math.round((modalState as any)?.coords?.x || 0)}, ${Math.round(
@@ -8323,8 +8490,23 @@ const PlanView = ({ planId }: Props) => {
               setModalState(null);
               closeReturnToSelectionList();
             }}
-		        onSubmit={modalState?.mode === 'edit' ? handleUpdate : handleCreate}
-		      />
+            onDelete={modalState?.mode === 'edit' ? () => {
+              if (isReadOnly) return;
+              if (!modalState || modalState.mode !== 'edit') return;
+              markTouched();
+              deleteObject(modalState.objectId);
+              postAuditEvent({
+                event: 'object_delete',
+                scopeType: 'plan',
+                scopeId: planId,
+                details: { id: modalState.objectId }
+              });
+              setModalState(null);
+              closeReturnToSelectionList();
+              push(t({ it: 'Quota eliminata', en: 'Quote deleted' }), 'info');
+            } : undefined}
+            onSubmit={modalState?.mode === 'edit' ? handleUpdate : handleCreate}
+          />
 
       <SelectedObjectsModal
         open={selectedObjectsModalOpen}

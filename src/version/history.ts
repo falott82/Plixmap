@@ -9,6 +9,29 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.0.0',
+    date: '2026-01-31',
+    type: 'major',
+    notes: [
+      n(
+        'Quote: modale completa con scala freccia/etichetta, posizione testo, colore, tratteggio ed apici (puntini/frecce)',
+        'Quotes: full modal with arrow/label scale, text position, color, dashed line, and endpoints (dots/arrows)'
+      ),
+      n(
+        'Quote: anteprima grafica, dimensione mostrata e scorciatoie persistenti in toast',
+        'Quotes: graphic preview, size display, and persistent shortcut toast'
+      ),
+      n(
+        'Quote: selezione evidenziata, doppio click per modifica e posizione testo personalizzabile per orientamento',
+        'Quotes: highlighted selection, double click to edit, and per-orientation text placement'
+      ),
+      n(
+        'Quote: sempre nel layer dedicato, livelli rimossi dalla modale',
+        'Quotes: always in the dedicated layer, layers removed from the modal'
+      )
+    ]
+  },
+  {
     version: '1.9.9',
     date: '2026-01-31',
     type: 'fix',
