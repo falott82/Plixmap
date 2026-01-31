@@ -9,6 +9,21 @@ const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.0.1',
+    date: '2026-01-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Quote: scala linea + scala etichetta separate, background etichetta opzionale e anteprima più grande',
+        'Quotes: separate line/label scale, optional label background, and larger preview'
+      ),
+      n(
+        'Quote: trascinamento con mouse, spostamento con frecce, e apici trascinabili per allungare/accorciare',
+        'Quotes: mouse drag, arrow-key move, and draggable endpoints to extend/shrink'
+      )
+    ]
+  },
+  {
     version: '2.0.0',
     date: '2026-01-31',
     type: 'major',

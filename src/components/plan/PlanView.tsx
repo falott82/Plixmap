@@ -291,6 +291,8 @@ const PlanView = ({ planId }: Props) => {
     setLastQuoteLabelPosV,
     lastQuoteLabelScale,
     setLastQuoteLabelScale,
+    lastQuoteLabelBg,
+    setLastQuoteLabelBg,
     lastQuoteDashed,
     setLastQuoteDashed,
     lastQuoteEndpoint,
@@ -348,6 +350,8 @@ const PlanView = ({ planId }: Props) => {
       setLastQuoteLabelPosV: s.setLastQuoteLabelPosV,
       lastQuoteLabelScale: s.lastQuoteLabelScale,
       setLastQuoteLabelScale: s.setLastQuoteLabelScale,
+      lastQuoteLabelBg: s.lastQuoteLabelBg,
+      setLastQuoteLabelBg: s.setLastQuoteLabelBg,
       lastQuoteDashed: s.lastQuoteDashed,
       setLastQuoteDashed: s.setLastQuoteDashed,
       lastQuoteEndpoint: s.lastQuoteEndpoint,
@@ -2172,8 +2176,8 @@ const PlanView = ({ planId }: Props) => {
     }
     quoteToastIdRef.current = toast.info(
       t({
-        it: 'Quota selezionata: sposta con le frecce (Shift per passi maggiori). Ctrl/Cmd + frecce sposta la scritta (sopra/sotto o sinistra/destra).',
-        en: 'Quote selected: move with arrow keys (Shift for larger steps). Ctrl/Cmd + arrows moves the label (above/below or left/right).'
+        it: 'Quota selezionata: trascina per spostare, frecce per muovere (Shift per passi maggiori). Ctrl/Cmd + frecce sposta la scritta. Trascina gli apici per allungare o accorciare.',
+        en: 'Quote selected: drag to move, arrows to move (Shift for larger steps). Ctrl/Cmd + arrows moves the label. Drag the endpoints to extend or shrink.'
       }),
       { duration: Infinity }
     );
@@ -3501,6 +3505,7 @@ const PlanView = ({ planId }: Props) => {
       const quoteLabelPos = orientation === 'vertical' ? lastQuoteLabelPosV : lastQuoteLabelPosH;
       const quoteColor = lastQuoteColor || '#f97316';
       const quoteLabelScale = Math.max(0.6, Math.min(2, Number(lastQuoteLabelScale) || 1));
+      const quoteLabelBg = lastQuoteLabelBg !== false;
       const quoteDashed = !!lastQuoteDashed;
       const quoteEndpoint = lastQuoteEndpoint || 'arrows';
       markTouched();
@@ -3513,7 +3518,7 @@ const PlanView = ({ planId }: Props) => {
         start.y,
         quoteScale,
         ['quotes'],
-        { points: [start, resolved], strokeColor: quoteColor, strokeWidth: 2, opacity: 1, quoteLabelPos, quoteLabelScale, quoteDashed, quoteEndpoint }
+        { points: [start, resolved], strokeColor: quoteColor, strokeWidth: 2, opacity: 1, quoteLabelPos, quoteLabelScale, quoteLabelBg, quoteDashed, quoteEndpoint }
       );
       setQuotePoints([]);
       setQuotePointer(null);
@@ -3529,6 +3534,7 @@ const PlanView = ({ planId }: Props) => {
       lastQuoteLabelPosH,
       lastQuoteLabelPosV,
       lastQuoteLabelScale,
+      lastQuoteLabelBg,
       lastQuoteScale,
       layerIdSet,
       markTouched,
@@ -4257,6 +4263,17 @@ const PlanView = ({ planId }: Props) => {
         for (const id of currentSelectedIds) {
           const obj = (currentPlan as FloorPlan).objects?.find((o) => o.id === id);
           if (!obj || isWallType(obj.type)) continue;
+          if (obj.type === 'quote') {
+            const pts = Array.isArray(obj.points) ? obj.points : [];
+            if (pts.length >= 2) {
+              updateObject(id, {
+                x: obj.x + dx,
+                y: obj.y + dy,
+                points: pts.map((p) => ({ x: p.x + dx, y: p.y + dy }))
+              });
+            }
+            continue;
+          }
           const nextX = obj.x + dx;
           const nextY = obj.y + dy;
           const nextRoomId = getRoomIdAt((currentPlan as FloorPlan).rooms, nextX, nextY);
@@ -4598,6 +4615,20 @@ const PlanView = ({ planId }: Props) => {
       const currentObj = currentPlan?.objects?.find((o) => o.id === id);
       if (!currentObj) return;
       const prev = dragStartRef.current.get(id) || { x: currentObj.x, y: currentObj.y, roomId: currentObj.roomId ?? undefined };
+      if (currentObj.type === 'quote') {
+        const pts = Array.isArray(currentObj.points) ? currentObj.points : [];
+        if (pts.length >= 2) {
+          const dx = x - prev.x;
+          const dy = y - prev.y;
+          updateObject(id, {
+            x,
+            y,
+            points: pts.map((p) => ({ x: p.x + dx, y: p.y + dy }))
+          });
+          dragStartRef.current.delete(id);
+          return true;
+        }
+      }
       const nextRoomId = !isReadOnlyRef.current && currentPlan ? getRoomIdAt(currentPlan.rooms, x, y) : undefined;
       const currentRoomId = currentObj.roomId ?? undefined;
       if (
@@ -4992,6 +5023,7 @@ const PlanView = ({ planId }: Props) => {
     customValues?: Record<string, any>;
     scale?: number;
     quoteLabelScale?: number;
+    quoteLabelBg?: boolean;
     quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
     quoteDashed?: boolean;
     quoteEndpoint?: 'arrows' | 'dots' | 'none';
@@ -5020,6 +5052,7 @@ const PlanView = ({ planId }: Props) => {
               quoteLabelScale: Number.isFinite(payload.quoteLabelScale as number)
                 ? Number(payload.quoteLabelScale)
                 : Number(lastQuoteLabelScale) || 1,
+              quoteLabelBg: payload.quoteLabelBg ?? lastQuoteLabelBg,
               quoteLabelPos: payload.quoteLabelPos || (lastQuoteLabelPosH as any),
               quoteDashed: payload.quoteDashed ?? lastQuoteDashed,
               quoteEndpoint: payload.quoteEndpoint || lastQuoteEndpoint
@@ -5058,6 +5091,7 @@ const PlanView = ({ planId }: Props) => {
         setLastQuoteScale(Math.max(0.5, Math.min(1.6, nextScale || 1)));
         if (payload.strokeColor) setLastQuoteColor(payload.strokeColor);
         if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
+        if (payload.quoteLabelBg !== undefined) setLastQuoteLabelBg(payload.quoteLabelBg);
         if (payload.quoteLabelPos) {
           setLastQuoteLabelPosH(payload.quoteLabelPos as any);
           setLastQuoteLabelPosV(payload.quoteLabelPos as any);
@@ -5103,6 +5137,7 @@ const PlanView = ({ planId }: Props) => {
               quoteLabelScale: Number.isFinite(payload.quoteLabelScale as number)
                 ? Number(payload.quoteLabelScale)
                 : Number((base as any)?.quoteLabelScale) || Number(lastQuoteLabelScale) || 1,
+              quoteLabelBg: payload.quoteLabelBg ?? (base as any)?.quoteLabelBg ?? lastQuoteLabelBg,
               quoteLabelPos: payload.quoteLabelPos || (base as any)?.quoteLabelPos || (lastQuoteLabelPosH as any),
               quoteDashed: payload.quoteDashed ?? (base as any)?.quoteDashed ?? lastQuoteDashed,
               quoteEndpoint: payload.quoteEndpoint || (base as any)?.quoteEndpoint || lastQuoteEndpoint
@@ -5139,6 +5174,7 @@ const PlanView = ({ planId }: Props) => {
         setLastQuoteScale(Math.max(0.5, Math.min(1.6, scale || 1)));
         if (payload.strokeColor) setLastQuoteColor(payload.strokeColor);
         if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
+        if (payload.quoteLabelBg !== undefined) setLastQuoteLabelBg(payload.quoteLabelBg);
         if (payload.quoteLabelPos) {
           const orientation = getQuoteOrientation((base as any)?.points);
           if (orientation === 'vertical') setLastQuoteLabelPosV(payload.quoteLabelPos as any);
@@ -5211,6 +5247,7 @@ const PlanView = ({ planId }: Props) => {
     customValues?: Record<string, any>;
     scale?: number;
     quoteLabelScale?: number;
+    quoteLabelBg?: boolean;
     quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
     quoteDashed?: boolean;
     quoteEndpoint?: 'arrows' | 'dots' | 'none';
@@ -5255,23 +5292,25 @@ const PlanView = ({ planId }: Props) => {
       ...(isQuote && payload.quoteLabelScale !== undefined
         ? { quoteLabelScale: Math.max(0.6, Math.min(2, Number(payload.quoteLabelScale) || 1)) }
         : {}),
+      ...(isQuote && payload.quoteLabelBg !== undefined ? { quoteLabelBg: payload.quoteLabelBg } : {}),
       ...(isQuote && payload.quoteLabelPos ? { quoteLabelPos: payload.quoteLabelPos } : {}),
       ...(isQuote && payload.quoteDashed !== undefined ? { quoteDashed: payload.quoteDashed } : {}),
       ...(isQuote && payload.quoteEndpoint ? { quoteEndpoint: payload.quoteEndpoint } : {}),
       ...(isQuote && payload.strokeColor ? { strokeColor: payload.strokeColor } : {}),
       ...(wifiUpdates as any)
     });
-    if (isQuote) {
-      if (payload.scale !== undefined) setLastQuoteScale(Math.max(0.5, Math.min(1.6, Number(payload.scale) || 1)));
-      if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
-      if (payload.quoteLabelPos) {
-        const orientation = getQuoteOrientation(obj?.points);
-        if (orientation === 'vertical') setLastQuoteLabelPosV(payload.quoteLabelPos as any);
-        else setLastQuoteLabelPosH(payload.quoteLabelPos as any);
-      }
-      if (payload.strokeColor) setLastQuoteColor(payload.strokeColor);
-      if (payload.quoteDashed !== undefined) setLastQuoteDashed(payload.quoteDashed);
-      if (payload.quoteEndpoint) setLastQuoteEndpoint(payload.quoteEndpoint);
+      if (isQuote) {
+        if (payload.scale !== undefined) setLastQuoteScale(Math.max(0.5, Math.min(1.6, Number(payload.scale) || 1)));
+        if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
+        if (payload.quoteLabelBg !== undefined) setLastQuoteLabelBg(payload.quoteLabelBg);
+        if (payload.quoteLabelPos) {
+          const orientation = getQuoteOrientation(obj?.points);
+          if (orientation === 'vertical') setLastQuoteLabelPosV(payload.quoteLabelPos as any);
+          else setLastQuoteLabelPosH(payload.quoteLabelPos as any);
+        }
+        if (payload.strokeColor) setLastQuoteColor(payload.strokeColor);
+        if (payload.quoteDashed !== undefined) setLastQuoteDashed(payload.quoteDashed);
+        if (payload.quoteEndpoint) setLastQuoteEndpoint(payload.quoteEndpoint);
     } else if (payload.scale !== undefined) {
       setLastObjectScale(Math.max(0.2, Math.min(2.4, Number(payload.scale) || 1)));
     }
@@ -5547,6 +5586,7 @@ const PlanView = ({ planId }: Props) => {
         ...(modalState.type === 'quote'
           ? {
               quoteLabelScale: lastQuoteLabelScale,
+              quoteLabelBg: lastQuoteLabelBg,
               quoteLabelPos: lastQuoteLabelPosH,
               quoteDashed: lastQuoteDashed,
               quoteEndpoint: lastQuoteEndpoint,
@@ -5577,6 +5617,7 @@ const PlanView = ({ planId }: Props) => {
           : (obj.layerIds || getTypeLayerIds(obj.type) || inferDefaultLayerIds(obj.type, layerIdSet)),
       scale: Number.isFinite(obj.scale as number) ? Number(obj.scale) : defaultObjectScale,
       quoteLabelScale: Number.isFinite((obj as any).quoteLabelScale) ? Number((obj as any).quoteLabelScale) : lastQuoteLabelScale,
+      quoteLabelBg: (obj as any).quoteLabelBg ?? lastQuoteLabelBg,
       quoteLabelPos: (obj as any).quoteLabelPos,
       quoteDashed: !!(obj as any).quoteDashed,
       quoteEndpoint: (obj as any).quoteEndpoint,
@@ -5609,6 +5650,7 @@ const PlanView = ({ planId }: Props) => {
     lastQuoteDashed,
     lastQuoteEndpoint,
     lastQuoteLabelPosH,
+    lastQuoteLabelBg,
     lastQuoteLabelScale,
     modalState,
     renderPlan
@@ -6744,6 +6786,12 @@ const PlanView = ({ planId }: Props) => {
 	                  }}
                       onMoveStart={handleStageMoveStart}
 					                onMove={handleStageMove}
+                      onUpdateQuotePoints={(id, points) => {
+                        if (isReadOnly) return;
+                        if (!points.length) return;
+                        markTouched();
+                        updateObject(id, { points, x: points[0].x, y: points[0].y });
+                      }}
 					                onPlaceNew={handlePlaceNew}
 		                onEdit={handleEdit}
 		        onContextMenu={handleObjectContextMenu}
@@ -8458,6 +8506,7 @@ const PlanView = ({ planId }: Props) => {
             initialLayerIds={(modalInitials as any)?.layerIds || []}
             initialScale={(modalInitials as any)?.scale}
             initialQuoteLabelScale={(modalInitials as any)?.quoteLabelScale}
+            initialQuoteLabelBg={(modalInitials as any)?.quoteLabelBg}
             initialQuoteLabelPos={(modalInitials as any)?.quoteLabelPos}
             initialQuoteDashed={(modalInitials as any)?.quoteDashed}
             initialQuoteEndpoint={(modalInitials as any)?.quoteEndpoint}

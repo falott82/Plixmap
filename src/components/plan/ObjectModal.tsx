@@ -17,6 +17,7 @@ interface Props {
     customValues?: Record<string, any>;
     scale?: number;
     quoteLabelScale?: number;
+    quoteLabelBg?: boolean;
     quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
     quoteDashed?: boolean;
     quoteEndpoint?: 'arrows' | 'dots' | 'none';
@@ -39,6 +40,7 @@ interface Props {
   initialLayerIds?: string[];
   initialScale?: number;
   initialQuoteLabelScale?: number;
+  initialQuoteLabelBg?: boolean;
   initialQuoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
   initialQuoteDashed?: boolean;
   initialQuoteEndpoint?: 'arrows' | 'dots' | 'none';
@@ -75,6 +77,7 @@ const ObjectModal = ({
   initialLayerIds = [],
   initialScale = 1,
   initialQuoteLabelScale = 1,
+  initialQuoteLabelBg = true,
   initialQuoteLabelPos = 'center',
   initialQuoteDashed = false,
   initialQuoteEndpoint = 'arrows',
@@ -106,6 +109,7 @@ const ObjectModal = ({
   const [layerIds, setLayerIds] = useState<string[]>(initialLayerIds);
   const [scale, setScale] = useState<number>(initialScale);
   const [quoteLabelScale, setQuoteLabelScale] = useState<number>(initialQuoteLabelScale);
+  const [quoteLabelBg, setQuoteLabelBg] = useState<boolean>(!!initialQuoteLabelBg);
   const [quoteLabelPos, setQuoteLabelPos] = useState<'center' | 'above' | 'below' | 'left' | 'right'>(initialQuoteLabelPos);
   const [quoteDashed, setQuoteDashed] = useState<boolean>(!!initialQuoteDashed);
   const [quoteEndpoint, setQuoteEndpoint] = useState<'arrows' | 'dots' | 'none'>(initialQuoteEndpoint);
@@ -204,6 +208,7 @@ const ObjectModal = ({
       setLayerIds(initialLayerIds);
       setScale(Number.isFinite(initialScale) ? initialScale : 1);
       setQuoteLabelScale(Number.isFinite(initialQuoteLabelScale) ? initialQuoteLabelScale : 1);
+      setQuoteLabelBg(!!initialQuoteLabelBg);
       setQuoteLabelPos(initialQuoteLabelPos || 'center');
       setQuoteDashed(!!initialQuoteDashed);
       setQuoteEndpoint(initialQuoteEndpoint || 'arrows');
@@ -273,6 +278,7 @@ const ObjectModal = ({
     initialQuoteEndpoint,
     initialQuoteLabelPos,
     initialQuoteLabelScale,
+    initialQuoteLabelBg,
     initialQuoteColor,
     initialWifiBand24,
     initialWifiBand5,
@@ -378,10 +384,11 @@ const ObjectModal = ({
     onSubmit({
       name: safeName,
       description: description.trim() || undefined,
-      layerIds: layerIds.length ? layerIds : undefined,
+      layerIds: isQuote ? undefined : (layerIds.length ? layerIds : undefined),
       customValues: customFields.length ? customValues : undefined,
       scale: Number.isFinite(scale) ? Math.max(0.2, Math.min(2.4, scale)) : undefined,
       quoteLabelScale: Number.isFinite(quoteLabelScale) ? Math.max(0.6, Math.min(2, quoteLabelScale)) : undefined,
+      quoteLabelBg,
       quoteLabelPos: quoteLabelPosEffective as any,
       quoteDashed,
       quoteEndpoint,
@@ -733,7 +740,7 @@ const ObjectModal = ({
                       <div className="mt-3 grid gap-3">
                         <div>
                           <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-                            {t({ it: 'Scala freccia', en: 'Arrow scale' })}
+                            {t({ it: 'Scala linea', en: 'Line scale' })}
                             <span className="ml-auto text-xs font-mono text-slate-500 tabular-nums">{scale.toFixed(2)}</span>
                           </div>
                           <input
@@ -826,86 +833,73 @@ const ObjectModal = ({
                         <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
                           <div className="text-xs font-semibold text-slate-600">{t({ it: 'Anteprima', en: 'Preview' })}</div>
                           <div className="mt-2">
-                            <svg viewBox="0 0 240 80" className="h-16 w-full">
+                            <svg viewBox="0 0 300 110" className="h-20 w-full">
                               {quoteOrientation === 'vertical' ? (
                                 <>
                                   <line
-                                    x1="120"
-                                    y1="12"
-                                    x2="120"
-                                    y2="68"
+                                    x1="150"
+                                    y1="16"
+                                    x2="150"
+                                    y2="94"
                                     stroke={quoteColor}
                                     strokeWidth={2 * scale}
                                     strokeDasharray={quoteDashed ? '6 5' : undefined}
                                   />
                                   {quoteEndpoint === 'dots' ? (
                                     <>
-                                      <circle cx="120" cy="12" r="3" fill={quoteColor} />
-                                      <circle cx="120" cy="68" r="3" fill={quoteColor} />
+                                      <circle cx="150" cy="16" r="3" fill={quoteColor} />
+                                      <circle cx="150" cy="94" r="3" fill={quoteColor} />
                                     </>
                                   ) : null}
                                   {quoteEndpoint === 'arrows' ? (
                                     <>
-                                      <polygon points="120,6 114,16 126,16" fill={quoteColor} />
-                                      <polygon points="120,74 114,64 126,64" fill={quoteColor} />
+                                      <polygon points="150,8 142,20 158,20" fill={quoteColor} />
+                                      <polygon points="150,102 142,90 158,90" fill={quoteColor} />
                                     </>
                                   ) : null}
                                 </>
                               ) : (
                                 <>
                                   <line
-                                    x1="20"
-                                    y1="40"
-                                    x2="220"
-                                    y2="40"
+                                    x1="30"
+                                    y1="55"
+                                    x2="270"
+                                    y2="55"
                                     stroke={quoteColor}
                                     strokeWidth={2 * scale}
                                     strokeDasharray={quoteDashed ? '6 5' : undefined}
                                   />
                                   {quoteEndpoint === 'dots' ? (
                                     <>
-                                      <circle cx="20" cy="40" r="3" fill={quoteColor} />
-                                      <circle cx="220" cy="40" r="3" fill={quoteColor} />
+                                      <circle cx="30" cy="55" r="3" fill={quoteColor} />
+                                      <circle cx="270" cy="55" r="3" fill={quoteColor} />
                                     </>
                                   ) : null}
                                   {quoteEndpoint === 'arrows' ? (
                                     <>
-                                      <polygon points="14,40 24,34 24,46" fill={quoteColor} />
-                                      <polygon points="226,40 216,34 216,46" fill={quoteColor} />
+                                      <polygon points="24,55 36,48 36,62" fill={quoteColor} />
+                                      <polygon points="276,55 264,48 264,62" fill={quoteColor} />
                                     </>
                                   ) : null}
                                 </>
                               )}
-                              <rect
-                                x={quoteOrientation === 'vertical'
-                                  ? (quoteLabelPosEffective === 'left' ? 36 : quoteLabelPosEffective === 'right' ? 144 : 84)
-                                  : 80}
-                                y={quoteOrientation === 'vertical'
-                                  ? 28
-                                  : (quoteLabelPosEffective === 'above' ? 8 : quoteLabelPosEffective === 'below' ? 52 : 28)}
-                                width="80"
-                                height="24"
-                                rx="6"
-                                fill="rgba(255,255,255,0.9)"
-                                stroke="#e2e8f0"
-                              />
                               {quoteOrientation === 'vertical' ? (
                                 <text
-                                  x={quoteLabelPosEffective === 'left' ? 76 : quoteLabelPosEffective === 'right' ? 184 : 124}
-                                  y={44}
+                                  x={quoteLabelPosEffective === 'left' ? 90 : quoteLabelPosEffective === 'right' ? 210 : 150}
+                                  y={55}
                                   textAnchor="middle"
                                   dominantBaseline="middle"
                                   fontSize={10 * quoteLabelScale}
                                   fontWeight="bold"
                                   fill="#0f172a"
-                                  transform={`rotate(-90 ${quoteLabelPosEffective === 'left' ? 76 : quoteLabelPosEffective === 'right' ? 184 : 124} 44)`}
+                                  transform={`rotate(-90 ${quoteLabelPosEffective === 'left' ? 90 : quoteLabelPosEffective === 'right' ? 210 : 150} 55)`}
                                 >
                                   {quoteLengthLabel || '0'}
                                 </text>
                               ) : (
                                 <text
-                                  x={120}
-                                  y={quoteLabelPosEffective === 'above' ? 24 : quoteLabelPosEffective === 'below' ? 68 : 44}
+                                  x={150}
+                                  y={quoteLabelPosEffective === 'above' ? 30 : quoteLabelPosEffective === 'below' ? 84 : 55}
                                   textAnchor="middle"
                                   dominantBaseline="middle"
                                   fontSize={10 * quoteLabelScale}
@@ -1133,3 +1127,12 @@ const ObjectModal = ({
 };
 
 export default ObjectModal;
+                        <label className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-600">
+                          <span>{t({ it: 'Background etichetta', en: 'Label background' })}</span>
+                          <input
+                            type="checkbox"
+                            checked={quoteLabelBg}
+                            disabled={readOnly}
+                            onChange={(e) => setQuoteLabelBg(e.target.checked)}
+                          />
+                        </label>

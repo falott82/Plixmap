@@ -115,6 +115,7 @@ interface Props {
   onMoveWall?: (id: string, dx: number, dy: number, batchId?: string, movedRoomIds?: string[]) => void;
   onSetPrintArea?: (rect: { x: number; y: number; width: number; height: number }) => void;
   wallAttenuationByType?: Map<string, number>;
+  onUpdateQuotePoints?: (id: string, points: { x: number; y: number }[]) => void;
 }
 
 export interface CanvasStageHandle {
@@ -250,7 +251,8 @@ const CanvasStageImpl = (
   onMoveWall,
   onRoomContextMenu,
   onSetPrintArea,
-  wallAttenuationByType
+  wallAttenuationByType,
+  onUpdateQuotePoints
 }: Props,
   ref: React.ForwardedRef<CanvasStageHandle>
 ) => {
@@ -2468,6 +2470,7 @@ const getRoomBounds = (room: any) => {
             const dy = end.y - start.y;
             const orientation = Math.abs(dy) > Math.abs(dx) ? 'vertical' : 'horizontal';
             const labelPos = (obj as any).quoteLabelPos || 'center';
+            const labelBg = (obj as any).quoteLabelBg !== false;
             const offsetDist = Math.max(6, Math.round(6 * labelScale)) + textH / 2;
             let offsetX = 0;
             let offsetY = 0;
@@ -2482,7 +2485,24 @@ const getRoomBounds = (room: any) => {
             const dashed = !!(obj as any).quoteDashed;
             const dash = dashed ? [8 * scale, 6 * scale] : undefined;
             return (
-              <Group key={obj.id}>
+              <Group
+                key={obj.id}
+                draggable={isSelected && !readOnly && !panToolActive && !toolMode}
+                onDragStart={() => {
+                  if (!isSelected || !onMoveStart) return;
+                  onMoveStart(obj.id, obj.x ?? start.x, obj.y ?? start.y, obj.roomId);
+                }}
+                onDragEnd={(e) => {
+                  if (!isSelected || !onMove) return;
+                  const dx = e.target.x();
+                  const dy = e.target.y();
+                  e.target.position({ x: 0, y: 0 });
+                  if (!dx && !dy) return;
+                  const baseX = Number.isFinite(obj.x) ? obj.x : start.x;
+                  const baseY = Number.isFinite(obj.y) ? obj.y : start.y;
+                  onMove(obj.id, baseX + dx, baseY + dy);
+                }}
+              >
                 {endpoint === 'arrows' ? (
                   <Arrow
                     points={[start.x, start.y, end.x, end.y]}
@@ -2595,14 +2615,16 @@ const getRoomBounds = (room: any) => {
                       onContextMenu({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
                     }}
                   >
-                    <Rect
-                      x={-textW / 2}
-                      y={-textH / 2}
-                      width={textW}
-                      height={textH}
-                      fill="rgba(255,255,255,0.9)"
-                      cornerRadius={4}
-                    />
+                    {labelBg ? (
+                      <Rect
+                        x={-textW / 2}
+                        y={-textH / 2}
+                        width={textW}
+                        height={textH}
+                        fill="rgba(255,255,255,0.9)"
+                        cornerRadius={4}
+                      />
+                    ) : null}
                     <Text
                       text={label}
                       x={-textW / 2}
@@ -2615,6 +2637,40 @@ const getRoomBounds = (room: any) => {
                       fill={isSelected ? stroke : '#0f172a'}
                     />
                   </Group>
+                ) : null}
+                {isSelected && !readOnly && !panToolActive && !toolMode ? (
+                  <>
+                    <Circle
+                      x={start.x}
+                      y={start.y}
+                      radius={Math.max(4, Math.round(4 * scale))}
+                      fill="#ffffff"
+                      stroke={stroke}
+                      strokeWidth={2}
+                      draggable
+                      onDragEnd={(e) => {
+                        if (!onUpdateQuotePoints) return;
+                        const next = [...pts];
+                        next[0] = { x: e.target.x(), y: e.target.y() };
+                        onUpdateQuotePoints(obj.id, next);
+                      }}
+                    />
+                    <Circle
+                      x={end.x}
+                      y={end.y}
+                      radius={Math.max(4, Math.round(4 * scale))}
+                      fill="#ffffff"
+                      stroke={stroke}
+                      strokeWidth={2}
+                      draggable
+                      onDragEnd={(e) => {
+                        if (!onUpdateQuotePoints) return;
+                        const next = [...pts];
+                        next[next.length - 1] = { x: e.target.x(), y: e.target.y() };
+                        onUpdateQuotePoints(obj.id, next);
+                      }}
+                    />
+                  </>
                 ) : null}
               </Group>
             );
