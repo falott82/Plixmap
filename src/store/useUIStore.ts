@@ -25,6 +25,10 @@ interface UIState {
   roomCapacityStateByPlan: Record<string, Record<string, { userCount: number; capacity?: number }>>;
   perfOverlayEnabled: boolean;
   hiddenLayersByPlan: Record<string, boolean>;
+  lastQuoteScale: number;
+  lastQuoteColor: string;
+  lastQuoteLabelPosH: 'center' | 'above' | 'below';
+  lastQuoteLabelPosV: 'center' | 'left' | 'right';
   pendingPostSaveAction: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null;
   setSelectedPlan: (id?: string) => void;
   setSelectedObject: (id?: string) => void;
@@ -54,6 +58,10 @@ interface UIState {
   setRoomCapacityState: (planId: string, state: Record<string, { userCount: number; capacity?: number }>) => void;
   togglePerfOverlay: () => void;
   setHideAllLayers: (planId: string, hidden: boolean) => void;
+  setLastQuoteScale: (scale: number) => void;
+  setLastQuoteColor: (color: string) => void;
+  setLastQuoteLabelPosH: (pos: 'center' | 'above' | 'below') => void;
+  setLastQuoteLabelPosV: (pos: 'center' | 'left' | 'right') => void;
   setPendingPostSaveAction: (action: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null) => void;
   clearPendingPostSaveAction: () => void;
 }
@@ -79,6 +87,10 @@ export const useUIStore = create<UIState>()(
       roomCapacityStateByPlan: {},
       perfOverlayEnabled: false,
       hiddenLayersByPlan: {},
+      lastQuoteScale: 1,
+      lastQuoteColor: '#f97316',
+      lastQuoteLabelPosH: 'center',
+      lastQuoteLabelPosV: 'center',
       pendingPostSaveAction: null,
       setSelectedPlan: (id) => set({ selectedPlanId: id, selectedObjectId: undefined, selectedObjectIds: [] }),
       setSelectedObject: (id) =>
@@ -157,16 +169,24 @@ export const useUIStore = create<UIState>()(
       togglePerfOverlay: () => set((state) => ({ perfOverlayEnabled: !state.perfOverlayEnabled })),
       setHideAllLayers: (planId, hidden) =>
         set((state) => ({ hiddenLayersByPlan: { ...state.hiddenLayersByPlan, [planId]: !!hidden } })),
+      setLastQuoteScale: (scale) => set({ lastQuoteScale: scale }),
+      setLastQuoteColor: (color) => set({ lastQuoteColor: color || '#f97316' }),
+      setLastQuoteLabelPosH: (pos) => set({ lastQuoteLabelPosH: pos || 'center' }),
+      setLastQuoteLabelPosV: (pos) => set({ lastQuoteLabelPosV: pos || 'center' }),
       setPendingPostSaveAction: (action) => set({ pendingPostSaveAction: action }),
       clearPendingPostSaveAction: () => set({ pendingPostSaveAction: null })
     }),
     {
       name: 'deskly-ui',
-      version: 2,
+      version: 3,
       migrate: (persistedState: any, _version: number) => {
         if (persistedState && typeof persistedState === 'object') {
           // Do not persist time-machine selection across reloads (always start from "present").
           if ('selectedRevisionByPlan' in persistedState) delete persistedState.selectedRevisionByPlan;
+          if (!('lastQuoteScale' in persistedState)) persistedState.lastQuoteScale = 1;
+          if (!('lastQuoteColor' in persistedState)) persistedState.lastQuoteColor = '#f97316';
+          if (!('lastQuoteLabelPosH' in persistedState)) persistedState.lastQuoteLabelPosH = 'center';
+          if (!('lastQuoteLabelPosV' in persistedState)) persistedState.lastQuoteLabelPosV = 'center';
         }
         return persistedState as any;
       },
@@ -181,7 +201,11 @@ export const useUIStore = create<UIState>()(
         showGrid: state.showGrid,
         showPrintAreaByPlan: state.showPrintAreaByPlan,
         roomCapacityStateByPlan: state.roomCapacityStateByPlan,
-        perfOverlayEnabled: state.perfOverlayEnabled
+        perfOverlayEnabled: state.perfOverlayEnabled,
+        lastQuoteScale: state.lastQuoteScale,
+        lastQuoteColor: state.lastQuoteColor,
+        lastQuoteLabelPosH: state.lastQuoteLabelPosH,
+        lastQuoteLabelPosV: state.lastQuoteLabelPosV
       })
     }
   )
