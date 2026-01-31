@@ -2453,21 +2453,22 @@ const getRoomBounds = (room: any) => {
             const baseStroke = typeof obj.strokeColor === 'string' && obj.strokeColor.trim() ? obj.strokeColor.trim() : '#f97316';
             const stroke = isSelected ? '#2563eb' : baseStroke;
             const scale = clamp(Number(obj.scale ?? 1) || 1, 0.5, 1.6);
+            const labelScale = clamp(Number((obj as any).quoteLabelScale ?? 1) || 1, 0.6, 2);
             const strokeWidth = clamp((Number(obj.strokeWidth ?? 2) || 2) * scale, 0.8, 6);
             const opacity = clamp(Number(obj.opacity ?? 1) || 1, 0.2, 1);
             const pointerSize = Math.max(4, Math.round(5 * scale));
-            const labelFontSize = Math.max(8, Math.round(9 * scale));
-            const labelPadding = Math.max(6, Math.round(8 * scale));
+            const labelFontSize = Math.max(8, Math.round(9 * labelScale));
+            const labelPadding = Math.max(6, Math.round(8 * labelScale));
             const label = quoteLabels?.[obj.id];
             const midX = (start.x + end.x) / 2;
             const midY = (start.y + end.y) / 2;
             const textW = label ? estimateTextWidth(label, labelFontSize) + labelPadding : 0;
-            const textH = Math.max(12, Math.round(14 * scale));
+            const textH = Math.max(12, Math.round(14 * labelScale));
             const dx = end.x - start.x;
             const dy = end.y - start.y;
             const orientation = Math.abs(dy) > Math.abs(dx) ? 'vertical' : 'horizontal';
             const labelPos = (obj as any).quoteLabelPos || 'center';
-            const offsetDist = Math.max(6, Math.round(6 * scale)) + textH / 2;
+            const offsetDist = Math.max(6, Math.round(6 * labelScale)) + textH / 2;
             let offsetX = 0;
             let offsetY = 0;
             if (orientation === 'vertical') {
@@ -2477,43 +2478,92 @@ const getRoomBounds = (room: any) => {
               if (labelPos === 'above') offsetY = -offsetDist;
               if (labelPos === 'below') offsetY = offsetDist;
             }
+            const endpoint = (obj as any).quoteEndpoint || 'arrows';
+            const dashed = !!(obj as any).quoteDashed;
+            const dash = dashed ? [8 * scale, 6 * scale] : undefined;
             return (
               <Group key={obj.id}>
-                <Arrow
-                  points={[start.x, start.y, end.x, end.y]}
-                  stroke={stroke}
-                  fill={stroke}
-                  pointerLength={pointerSize}
-                  pointerWidth={pointerSize}
-                  pointerAtBeginning
-                  strokeWidth={strokeWidth}
-                  hitStrokeWidth={Math.max(10, strokeWidth + 8)}
-                  opacity={opacity}
-                  onClick={(e) => {
-                    e.cancelBubble = true;
-                    if (e.evt?.button !== 0) return;
-                    onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
-                  }}
-                  onDblClick={(e) => {
-                    e.cancelBubble = true;
-                    if (readOnly || toolMode) return;
-                    onEdit(obj.id);
-                  }}
-                  onContextMenu={(e) => {
-                    e.evt.preventDefault();
-                    e.cancelBubble = true;
-                    if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
-                    if (isBoxSelecting()) return;
-                    lastContextMenuAtRef.current = Date.now();
-                    const multiSelected = (selectedIds || []).length > 1;
-                    const multiKey = !!(e.evt.ctrlKey || e.evt.metaKey);
-                    if (!selectedIds?.includes(obj.id) || !multiSelected) {
-                      onSelect(obj.id, { keepContext: true, multi: multiKey });
-                    }
-                    if (pendingType || readOnly) return;
-                    onContextMenu({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
-                  }}
-                />
+                {endpoint === 'arrows' ? (
+                  <Arrow
+                    points={[start.x, start.y, end.x, end.y]}
+                    stroke={stroke}
+                    fill={stroke}
+                    pointerLength={pointerSize}
+                    pointerWidth={pointerSize}
+                    pointerAtBeginning
+                    pointerAtEnding
+                    strokeWidth={strokeWidth}
+                    dash={dash}
+                    hitStrokeWidth={Math.max(10, strokeWidth + 8)}
+                    opacity={opacity}
+                    onClick={(e) => {
+                      e.cancelBubble = true;
+                      if (e.evt?.button !== 0) return;
+                      onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
+                    }}
+                    onDblClick={(e) => {
+                      e.cancelBubble = true;
+                      if (readOnly || toolMode) return;
+                      onEdit(obj.id);
+                    }}
+                    onContextMenu={(e) => {
+                      e.evt.preventDefault();
+                      e.cancelBubble = true;
+                      if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                      if (isBoxSelecting()) return;
+                      lastContextMenuAtRef.current = Date.now();
+                      const multiSelected = (selectedIds || []).length > 1;
+                      const multiKey = !!(e.evt.ctrlKey || e.evt.metaKey);
+                      if (!selectedIds?.includes(obj.id) || !multiSelected) {
+                        onSelect(obj.id, { keepContext: true, multi: multiKey });
+                      }
+                      if (pendingType || readOnly) return;
+                      onContextMenu({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+                    }}
+                  />
+                ) : (
+                  <>
+                    <Line
+                      points={[start.x, start.y, end.x, end.y]}
+                      stroke={stroke}
+                      strokeWidth={strokeWidth}
+                      dash={dash}
+                      lineCap="round"
+                      hitStrokeWidth={Math.max(10, strokeWidth + 8)}
+                      opacity={opacity}
+                      onClick={(e) => {
+                        e.cancelBubble = true;
+                        if (e.evt?.button !== 0) return;
+                        onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
+                      }}
+                      onDblClick={(e) => {
+                        e.cancelBubble = true;
+                        if (readOnly || toolMode) return;
+                        onEdit(obj.id);
+                      }}
+                      onContextMenu={(e) => {
+                        e.evt.preventDefault();
+                        e.cancelBubble = true;
+                        if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                        if (isBoxSelecting()) return;
+                        lastContextMenuAtRef.current = Date.now();
+                        const multiSelected = (selectedIds || []).length > 1;
+                        const multiKey = !!(e.evt.ctrlKey || e.evt.metaKey);
+                        if (!selectedIds?.includes(obj.id) || !multiSelected) {
+                          onSelect(obj.id, { keepContext: true, multi: multiKey });
+                        }
+                        if (pendingType || readOnly) return;
+                        onContextMenu({ id: obj.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+                      }}
+                    />
+                    {endpoint === 'dots' ? (
+                      <>
+                        <Circle x={start.x} y={start.y} radius={Math.max(2, Math.round(3 * scale))} fill={stroke} opacity={opacity} />
+                        <Circle x={end.x} y={end.y} radius={Math.max(2, Math.round(3 * scale))} fill={stroke} opacity={opacity} />
+                      </>
+                    ) : null}
+                  </>
+                )}
                 {label ? (
                   <Group
                     x={midX + offsetX}
