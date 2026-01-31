@@ -30,6 +30,7 @@ interface UIState {
   lastQuoteLabelPosH: 'center' | 'above' | 'below';
   lastQuoteLabelPosV: 'center' | 'left' | 'right';
   lastQuoteLabelScale: number;
+  lastQuoteLabelBg: boolean;
   lastQuoteDashed: boolean;
   lastQuoteEndpoint: 'arrows' | 'dots' | 'none';
   pendingPostSaveAction: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null;
@@ -66,6 +67,7 @@ interface UIState {
   setLastQuoteLabelPosH: (pos: 'center' | 'above' | 'below') => void;
   setLastQuoteLabelPosV: (pos: 'center' | 'left' | 'right') => void;
   setLastQuoteLabelScale: (scale: number) => void;
+  setLastQuoteLabelBg: (value: boolean) => void;
   setLastQuoteDashed: (value: boolean) => void;
   setLastQuoteEndpoint: (value: 'arrows' | 'dots' | 'none') => void;
   setPendingPostSaveAction: (action: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null) => void;
@@ -98,6 +100,7 @@ export const useUIStore = create<UIState>()(
       lastQuoteLabelPosH: 'center',
       lastQuoteLabelPosV: 'center',
       lastQuoteLabelScale: 1,
+      lastQuoteLabelBg: true,
       lastQuoteDashed: false,
       lastQuoteEndpoint: 'arrows',
       pendingPostSaveAction: null,
@@ -183,6 +186,7 @@ export const useUIStore = create<UIState>()(
       setLastQuoteLabelPosH: (pos) => set({ lastQuoteLabelPosH: pos || 'center' }),
       setLastQuoteLabelPosV: (pos) => set({ lastQuoteLabelPosV: pos || 'center' }),
       setLastQuoteLabelScale: (scale) => set({ lastQuoteLabelScale: Math.max(0.6, Math.min(2, Number(scale) || 1)) }),
+      setLastQuoteLabelBg: (value) => set({ lastQuoteLabelBg: !!value }),
       setLastQuoteDashed: (value) => set({ lastQuoteDashed: !!value }),
       setLastQuoteEndpoint: (value) => set({ lastQuoteEndpoint: value || 'arrows' }),
       setPendingPostSaveAction: (action) => set({ pendingPostSaveAction: action }),
@@ -190,7 +194,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'deskly-ui',
-      version: 4,
+      version: 5,
       migrate: (persistedState: any, _version: number) => {
         if (persistedState && typeof persistedState === 'object') {
           // Do not persist time-machine selection across reloads (always start from "present").
@@ -200,6 +204,7 @@ export const useUIStore = create<UIState>()(
           if (!('lastQuoteLabelPosH' in persistedState)) persistedState.lastQuoteLabelPosH = 'center';
           if (!('lastQuoteLabelPosV' in persistedState)) persistedState.lastQuoteLabelPosV = 'center';
           if (!('lastQuoteLabelScale' in persistedState)) persistedState.lastQuoteLabelScale = 1;
+          if (!('lastQuoteLabelBg' in persistedState)) persistedState.lastQuoteLabelBg = true;
           if (!('lastQuoteDashed' in persistedState)) persistedState.lastQuoteDashed = false;
           if (!('lastQuoteEndpoint' in persistedState)) persistedState.lastQuoteEndpoint = 'arrows';
         }
@@ -222,6 +227,7 @@ export const useUIStore = create<UIState>()(
         lastQuoteLabelPosH: state.lastQuoteLabelPosH,
         lastQuoteLabelPosV: state.lastQuoteLabelPosV,
         lastQuoteLabelScale: state.lastQuoteLabelScale,
+        lastQuoteLabelBg: state.lastQuoteLabelBg,
         lastQuoteDashed: state.lastQuoteDashed,
         lastQuoteEndpoint: state.lastQuoteEndpoint
       })

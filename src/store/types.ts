@@ -188,6 +188,7 @@ export interface MapObject {
   strokeColor?: string;
   quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
   quoteLabelScale?: number;
+  quoteLabelBg?: boolean;
   quoteDashed?: boolean;
   quoteEndpoint?: 'arrows' | 'dots' | 'none';
   points?: { x: number; y: number }[];

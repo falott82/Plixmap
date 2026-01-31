@@ -274,6 +274,7 @@ export const renderFloorPlanToJpegDataUrl = async (
       const midY = (y1 + y2) / 2;
       const orientation = Math.abs(y2 - y1) > Math.abs(x2 - x1) ? 'vertical' : 'horizontal';
       const labelPos = String((quote as any).quoteLabelPos || 'center');
+      const labelBg = (quote as any).quoteLabelBg !== false;
       const offset = Math.max(6, Math.round(6 * labelScale * worldToPx)) + textH / 2;
       let offsetX = 0;
       let offsetY = 0;
@@ -290,8 +291,10 @@ export const renderFloorPlanToJpegDataUrl = async (
       ctx.save();
       ctx.translate(midX + offsetX, midY + offsetY);
       if (orientation === 'vertical') ctx.rotate(-Math.PI / 2);
-      drawRoundRect(ctx, -textW / 2, -textH / 2, textW, textH, Math.max(3, Math.round(4 * labelScale)));
-      ctx.fill();
+      if (labelBg) {
+        drawRoundRect(ctx, -textW / 2, -textH / 2, textW, textH, Math.max(3, Math.round(4 * labelScale)));
+        ctx.fill();
+      }
       ctx.fillStyle = '#0f172a';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
