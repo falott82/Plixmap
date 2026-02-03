@@ -13,27 +13,19 @@ interface Props {
   onPick: (typeId: string) => void;
   paletteTypeIds?: string[];
   onAddToPalette?: (typeId: string) => void;
-  defaultTab?: 'objects' | 'desks';
+  defaultTab?: 'objects' | 'desks' | 'walls' | 'text' | 'notes';
 }
 
 const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAddToPalette, defaultTab = 'objects' }: Props) => {
   const t = useT();
   const lang = useLang();
   const [q, setQ] = useState('');
-  const [tab, setTab] = useState<'objects' | 'desks'>(defaultTab);
+  const [tab, setTab] = useState<'objects' | 'desks' | 'walls' | 'text' | 'notes'>(defaultTab);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [context, setContext] = useState<{ x: number; y: number; typeId: string } | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
 
   const paletteSet = useMemo(() => new Set(Array.isArray(paletteTypeIds) ? paletteTypeIds : []), [paletteTypeIds]);
-
-  useEffect(() => {
-    if (!open) return;
-    setQ('');
-    setContext(null);
-    setTab(defaultTab);
-    window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [defaultTab, open]);
 
   useEffect(() => {
     if (!context) return;
@@ -58,8 +50,57 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
   }, [defs, lang, q]);
 
   const deskDefs = useMemo(() => filtered.filter((d) => isDeskType(d.id)), [filtered]);
-  const otherDefs = useMemo(() => filtered.filter((d) => !isDeskType(d.id)), [filtered]);
-  const activeDefs = tab === 'desks' ? deskDefs : otherDefs;
+  const wallDefs = useMemo(
+    () => filtered.filter((d) => d.category === 'wall' || String(d.id).startsWith('wall_')),
+    [filtered]
+  );
+  const textDefs = useMemo(() => filtered.filter((d) => d.id === 'text'), [filtered]);
+  const noteDefs = useMemo(() => filtered.filter((d) => d.id === 'postit'), [filtered]);
+  const otherDefs = useMemo(
+    () =>
+      filtered.filter(
+        (d) =>
+          !isDeskType(d.id) &&
+          !(d.category === 'wall' || String(d.id).startsWith('wall_')) &&
+          d.id !== 'text' &&
+          d.id !== 'postit'
+      ),
+    [filtered]
+  );
+  const activeDefs =
+    tab === 'desks'
+      ? deskDefs
+      : tab === 'walls'
+        ? wallDefs
+        : tab === 'text'
+          ? textDefs
+          : tab === 'notes'
+            ? noteDefs
+            : otherDefs;
+
+  useEffect(() => {
+    if (!open) return;
+    setQ('');
+    setContext(null);
+    const fallbackTab =
+      (defaultTab === 'desks' && deskDefs.length) ||
+      (defaultTab === 'walls' && wallDefs.length) ||
+      (defaultTab === 'text' && textDefs.length) ||
+      (defaultTab === 'notes' && noteDefs.length) ||
+      (defaultTab === 'objects' && otherDefs.length)
+        ? defaultTab
+        : deskDefs.length
+          ? 'desks'
+          : wallDefs.length
+            ? 'walls'
+            : textDefs.length
+              ? 'text'
+              : noteDefs.length
+                ? 'notes'
+                : 'objects';
+    setTab(fallbackTab);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [defaultTab, deskDefs.length, noteDefs.length, open, otherDefs.length, textDefs.length, wallDefs.length]);
 
   return (
     <Transition show={open} as={Fragment}>
@@ -89,7 +130,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                   />
                 </div>
 
-                <div className="mt-4 flex items-center gap-2">
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => setTab('desks')}
                     disabled={!deskDefs.length}
@@ -101,6 +142,42 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                     title={t({ it: 'Scrivanie', en: 'Desks' })}
                   >
                     {t({ it: 'Scrivanie', en: 'Desks' })}
+                  </button>
+                  <button
+                    onClick={() => setTab('walls')}
+                    disabled={!wallDefs.length}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      tab === 'walls'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    title={t({ it: 'Mura', en: 'Walls' })}
+                  >
+                    {t({ it: 'Mura', en: 'Walls' })}
+                  </button>
+                  <button
+                    onClick={() => setTab('text')}
+                    disabled={!textDefs.length}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      tab === 'text'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    title={t({ it: 'Testo', en: 'Text' })}
+                  >
+                    {t({ it: 'Testo', en: 'Text' })}
+                  </button>
+                  <button
+                    onClick={() => setTab('notes')}
+                    disabled={!noteDefs.length}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      tab === 'notes'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    title={t({ it: 'Scritte', en: 'Notes' })}
+                  >
+                    {t({ it: 'Scritte', en: 'Notes' })}
                   </button>
                   <button
                     onClick={() => setTab('objects')}

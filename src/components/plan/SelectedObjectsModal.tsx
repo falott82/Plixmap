@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ChevronRight, Link2, Search, Trash2, X } from 'lucide-react';
+import { ChevronRight, Link2, LocateFixed, MinusCircle, Search, Trash2, X } from 'lucide-react';
 import { IconName, MapObject, PlanLink } from '../../store/types';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
@@ -15,6 +15,8 @@ interface Props {
   onPickObject: (objectId: string) => void;
   onPickLink: (linkId: string) => void;
   onSetScaleAll?: (scale: number) => void;
+  onRemoveFromSelection?: (objectId: string) => void;
+  onFocusObject?: (objectId: string) => void;
   onRequestDeleteObject?: (objectId: string) => void;
   readOnly?: boolean;
   onClose: () => void;
@@ -30,6 +32,8 @@ const SelectedObjectsModal = ({
   onPickObject,
   onPickLink,
   onSetScaleAll,
+  onRemoveFromSelection,
+  onFocusObject,
   onRequestDeleteObject,
   readOnly = false,
   onClose
@@ -78,6 +82,7 @@ const SelectedObjectsModal = ({
   }, [q, rows]);
 
   const hasAny = objects.length + links.length;
+  const showMultiActions = objects.length > 1;
 
   return (
     <Transition show={open} as={Fragment}>
@@ -211,6 +216,24 @@ const SelectedObjectsModal = ({
                               </div>
                               <ChevronRight size={18} className="text-slate-400" />
                             </button>
+                            {showMultiActions && onFocusObject ? (
+                              <button
+                                onClick={() => onFocusObject(o.id)}
+                                className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                title={t({ it: 'Trova sulla mappa', en: 'Find on map' })}
+                              >
+                                <LocateFixed size={16} />
+                              </button>
+                            ) : null}
+                            {showMultiActions && onRemoveFromSelection ? (
+                              <button
+                                onClick={() => onRemoveFromSelection(o.id)}
+                                className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                title={t({ it: 'Rimuovi dalla selezione', en: 'Remove from selection' })}
+                              >
+                                <MinusCircle size={16} />
+                              </button>
+                            ) : null}
                             {!readOnly && onRequestDeleteObject ? (
                               <button
                                 onClick={() => onRequestDeleteObject(o.id)}

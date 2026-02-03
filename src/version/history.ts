@@ -8,6 +8,39 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.1.3',
+    date: '2026-02-03',
+    type: 'fix',
+    notes: [
+      n('Allinea: solo orizzontale/verticale con riferimento all’oggetto selezionato', 'Align: horizontal/vertical only using the selected object as reference'),
+      n('Incolla: avviso quando si copiano oggetti tra planimetrie', 'Paste: warning when copying objects across floor plans'),
+      n('Utenti reali: blocco copia su altri clienti e avviso se già presenti in una planimetria', 'Real users: block copy to other clients and warn if already present in a floor plan')
+    ]
+  },
+  {
+    version: '2.1.2',
+    date: '2026-02-03',
+    type: 'fix',
+    notes: [
+      n('Layer: counter 0/x quando si nascondono tutti i livelli', 'Layers: counter shows 0/x when all layers are hidden'),
+      n('Allinea: opzioni da menu contestuale per multi-selezione (sinistra/centro/destra/alto/medio/basso)', 'Align: context menu options for multi-selection (left/center/right/top/middle/bottom)'),
+      n('Selezione: azioni “rimuovi” e “trova” nella modale multi-selezione', 'Selection: “remove” and “find” actions in multi-selection modal'),
+      n('Toast selezione: persistenti con contenuti per 1, 2 o più oggetti', 'Selection toasts: persistent with content for 1, 2, or more objects')
+    ]
+  },
+  {
+    version: '2.1.1',
+    date: '2026-02-03',
+    type: 'fix',
+    notes: [
+      n('Toast scorciatoie: testo nero leggibile e comandi in grassetto', 'Keybind toasts: readable black text with bold commands'),
+      n('Scorciatoia E: modifica collegamenti e stanze con toast dedicati', 'E shortcut: edit links and rooms with dedicated toasts'),
+      n('Muri: doppio click su poligono apre modale completa + matita nei controlli rapidi', 'Walls: double click on polygon opens full modal + pencil in quick controls'),
+      n('Ricerca: prompt per abilitare i layer nascosti prima di mostrare un oggetto', 'Search: prompt to enable hidden layers before showing an object'),
+      n('Layers: menu rapido con tasto destro per mostrare/nascondere tutto', 'Layers: right-click quick menu to show/hide all')
+    ]
+  },
+  {
     version: '2.1.0',
     date: '2026-02-03',
     type: 'minor',

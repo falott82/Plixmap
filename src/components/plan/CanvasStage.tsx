@@ -132,6 +132,7 @@ export interface CanvasStageHandle {
   getSize: () => { width: number; height: number };
   exportDataUrl: (options?: { pixelRatio?: number; mimeType?: string; quality?: number }) => { dataUrl: string; width: number; height: number };
   fitView: () => void;
+  getObjectBounds: (id: string) => { minX: number; minY: number; maxX: number; maxY: number } | null;
 }
 
 const hexToRgba = (hex: string, alpha: number) => {
@@ -1205,9 +1206,14 @@ const getRoomBounds = (room: any) => {
           return { dataUrl: '', width, height };
         }
       },
-      fitView: () => fitViewRef.current()
+      fitView: () => fitViewRef.current(),
+      getObjectBounds: (id: string) => {
+        const obj = plan.objects.find((o) => o.id === id);
+        if (!obj) return null;
+        return getObjectBounds(obj);
+      }
     }),
-    [dimensions.height, dimensions.width]
+    [dimensions.height, dimensions.width, getObjectBounds, plan.objects]
   );
 
   useEffect(() => {
@@ -1498,7 +1504,7 @@ const getRoomBounds = (room: any) => {
     }
   };
 
-  const getObjectBounds = (obj: MapObject) => {
+  function getObjectBounds(obj: MapObject) {
     const type = obj.type;
     if (wallTypeIdSet.has(type) || type === 'quote') {
       const pts = obj.points || [];
@@ -1595,7 +1601,7 @@ const getRoomBounds = (room: any) => {
     const size = 36 * baseScale;
     const rotation = type === 'camera' ? Number(obj.rotation || 0) : 0;
     return getRotatedRectBounds(x, y, size, size, rotation);
-  };
+  }
 
   const updateSelectionBox = (event: any) => {
     if (!selectionOrigin.current) return false;
@@ -3446,6 +3452,15 @@ const getRoomBounds = (room: any) => {
             const deskTrapTop = deskSize * 0.75;
             const deskTrapBottom = deskSize * 1.15;
             const deskTrapHeight = deskSize * 0.75;
+            const deskTopLight = '#f9f3e7';
+            const deskTopDark = '#e2c79b';
+            const deskInsetStroke = 'rgba(255,255,255,0.55)';
+            const deskInset = Math.max(1.5, 2 * scale);
+            const deskGradient = (w: number, h: number) => ({
+              fillLinearGradientStartPoint: { x: -w / 2, y: -h / 2 },
+              fillLinearGradientEndPoint: { x: w / 2, y: h / 2 },
+              fillLinearGradientColorStops: [0, deskTopLight, 1, deskTopDark]
+            });
             const deskBounds = isDesk
               ? getDeskBounds(obj.type, {
                   deskSize,
@@ -3693,45 +3708,86 @@ const getRoomBounds = (room: any) => {
                 {isDesk ? (
                   <Group rotation={deskRotation} opacity={objectOpacity}>
                     {obj.type === 'desk_round' ? (
-                      <Circle
-                        x={0}
-                        y={0}
-                        radius={deskHalf}
-                        fill="#f8fafc"
-                        stroke={deskStroke}
-                        strokeWidth={deskStrokeWidth}
-                        strokeScaleEnabled={false}
-                        shadowBlur={0}
-                        shadowColor="transparent"
-                      />
+                      <>
+                        <Circle
+                          x={0}
+                          y={0}
+                          radius={deskHalf}
+                          fillRadialGradientStartPoint={{ x: -deskHalf * 0.3, y: -deskHalf * 0.3 }}
+                          fillRadialGradientStartRadius={deskHalf * 0.1}
+                          fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+                          fillRadialGradientEndRadius={deskHalf}
+                          fillRadialGradientColorStops={[0, '#fdf8ef', 0.7, deskTopLight, 1, deskTopDark]}
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                        <Circle
+                          x={0}
+                          y={0}
+                          radius={Math.max(6 * scale, deskHalf - deskInset)}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
+                        />
+                      </>
                     ) : obj.type === 'desk_square' ? (
-                      <Rect
-                        x={-deskHalf}
-                        y={-deskHalf}
-                        width={deskSize}
-                        height={deskSize}
-                        cornerRadius={6 * scale}
-                        fill="#f8fafc"
-                        stroke={deskStroke}
-                        strokeWidth={deskStrokeWidth}
-                        strokeScaleEnabled={false}
-                        shadowBlur={0}
-                        shadowColor="transparent"
-                      />
+                      <>
+                        <Rect
+                          x={-deskHalf}
+                          y={-deskHalf}
+                          width={deskSize}
+                          height={deskSize}
+                          cornerRadius={6 * scale}
+                          {...deskGradient(deskSize, deskSize)}
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                        <Rect
+                          x={-deskHalf + deskInset}
+                          y={-deskHalf + deskInset}
+                          width={deskSize - deskInset * 2}
+                          height={deskSize - deskInset * 2}
+                          cornerRadius={Math.max(2, 5 * scale)}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
+                        />
+                      </>
                     ) : obj.type === 'desk_rect' ? (
-                      <Rect
-                        x={-deskRectW / 2}
-                        y={-deskRectH / 2}
-                        width={deskRectW}
-                        height={deskRectH}
-                        cornerRadius={6 * scale}
-                        fill="#f8fafc"
-                        stroke={deskStroke}
-                        strokeWidth={deskStrokeWidth}
-                        strokeScaleEnabled={false}
-                        shadowBlur={0}
-                        shadowColor="transparent"
-                      />
+                      <>
+                        <Rect
+                          x={-deskRectW / 2}
+                          y={-deskRectH / 2}
+                          width={deskRectW}
+                          height={deskRectH}
+                          cornerRadius={6 * scale}
+                          {...deskGradient(deskRectW, deskRectH)}
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                        <Rect
+                          x={-deskRectW / 2 + deskInset}
+                          y={-deskRectH / 2 + deskInset}
+                          width={deskRectW - deskInset * 2}
+                          height={deskRectH - deskInset * 2}
+                          cornerRadius={Math.max(2, 5 * scale)}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
+                        />
+                      </>
                     ) : obj.type === 'desk_double' ? (
                       <>
                         <Rect
@@ -3740,7 +3796,7 @@ const getRoomBounds = (room: any) => {
                           width={deskDoubleW}
                           height={deskDoubleH}
                           cornerRadius={6 * scale}
-                          fill="#f8fafc"
+                          {...deskGradient(deskDoubleW, deskDoubleH)}
                           stroke={deskStroke}
                           strokeWidth={deskStrokeWidth}
                           strokeScaleEnabled={false}
@@ -3753,28 +3809,63 @@ const getRoomBounds = (room: any) => {
                           width={deskDoubleW}
                           height={deskDoubleH}
                           cornerRadius={6 * scale}
-                          fill="#f8fafc"
+                          {...deskGradient(deskDoubleW, deskDoubleH)}
                           stroke={deskStroke}
                           strokeWidth={deskStrokeWidth}
                           strokeScaleEnabled={false}
                           shadowBlur={0}
                           shadowColor="transparent"
                         />
+                        <Rect
+                          x={-(deskDoubleW + deskDoubleGap / 2) + deskInset}
+                          y={-deskDoubleH / 2 + deskInset}
+                          width={deskDoubleW - deskInset * 2}
+                          height={deskDoubleH - deskInset * 2}
+                          cornerRadius={Math.max(2, 5 * scale)}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
+                        />
+                        <Rect
+                          x={deskDoubleGap / 2 + deskInset}
+                          y={-deskDoubleH / 2 + deskInset}
+                          width={deskDoubleW - deskInset * 2}
+                          height={deskDoubleH - deskInset * 2}
+                          cornerRadius={Math.max(2, 5 * scale)}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
+                        />
                       </>
                     ) : obj.type === 'desk_long' ? (
-                      <Rect
-                        x={-deskLongW / 2}
-                        y={-deskLongH / 2}
-                        width={deskLongW}
-                        height={deskLongH}
-                        cornerRadius={6 * scale}
-                        fill="#f8fafc"
-                        stroke={deskStroke}
-                        strokeWidth={deskStrokeWidth}
-                        strokeScaleEnabled={false}
-                        shadowBlur={0}
-                        shadowColor="transparent"
-                      />
+                      <>
+                        <Rect
+                          x={-deskLongW / 2}
+                          y={-deskLongH / 2}
+                          width={deskLongW}
+                          height={deskLongH}
+                          cornerRadius={6 * scale}
+                          {...deskGradient(deskLongW, deskLongH)}
+                          stroke={deskStroke}
+                          strokeWidth={deskStrokeWidth}
+                          strokeScaleEnabled={false}
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                        <Rect
+                          x={-deskLongW / 2 + deskInset}
+                          y={-deskLongH / 2 + deskInset}
+                          width={deskLongW - deskInset * 2}
+                          height={deskLongH - deskInset * 2}
+                          cornerRadius={Math.max(2, 5 * scale)}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
+                        />
+                      </>
                     ) : obj.type === 'desk_trap' ? (
                       <Line
                         points={[
@@ -3788,7 +3879,7 @@ const getRoomBounds = (room: any) => {
                           deskTrapHeight / 2
                         ]}
                         closed
-                        fill="#f8fafc"
+                        {...deskGradient(deskTrapBottom, deskTrapHeight)}
                         stroke={deskStroke}
                         strokeWidth={deskStrokeWidth}
                         strokeScaleEnabled={false}
@@ -3802,7 +3893,7 @@ const getRoomBounds = (room: any) => {
                           y={deskHalf - deskThickness}
                           width={deskSize}
                           height={deskThickness}
-                          fill="#f8fafc"
+                          {...deskGradient(deskSize, deskThickness)}
                           stroke={deskStroke}
                           strokeWidth={deskStrokeWidth}
                           strokeScaleEnabled={false}
@@ -3814,12 +3905,32 @@ const getRoomBounds = (room: any) => {
                           y={-deskHalf}
                           width={deskThickness}
                           height={deskSize}
-                          fill="#f8fafc"
+                          {...deskGradient(deskThickness, deskSize)}
                           stroke={deskStroke}
                           strokeWidth={deskStrokeWidth}
                           strokeScaleEnabled={false}
                           shadowBlur={0}
                           shadowColor="transparent"
+                        />
+                        <Rect
+                          x={-deskHalf + deskInset}
+                          y={deskHalf - deskThickness + deskInset}
+                          width={deskSize - deskInset * 2}
+                          height={Math.max(2, deskThickness - deskInset * 2)}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
+                        />
+                        <Rect
+                          x={-deskHalf + deskInset}
+                          y={-deskHalf + deskInset}
+                          width={Math.max(2, deskThickness - deskInset * 2)}
+                          height={deskSize - deskInset * 2}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
                         />
                       </>
                     ) : (
@@ -3829,7 +3940,7 @@ const getRoomBounds = (room: any) => {
                           y={deskHalf - deskThickness}
                           width={deskSize}
                           height={deskThickness}
-                          fill="#f8fafc"
+                          {...deskGradient(deskSize, deskThickness)}
                           stroke={deskStroke}
                           strokeWidth={deskStrokeWidth}
                           strokeScaleEnabled={false}
@@ -3841,12 +3952,32 @@ const getRoomBounds = (room: any) => {
                           y={-deskHalf}
                           width={deskThickness}
                           height={deskSize}
-                          fill="#f8fafc"
+                          {...deskGradient(deskThickness, deskSize)}
                           stroke={deskStroke}
                           strokeWidth={deskStrokeWidth}
                           strokeScaleEnabled={false}
                           shadowBlur={0}
                           shadowColor="transparent"
+                        />
+                        <Rect
+                          x={-deskHalf + deskInset}
+                          y={deskHalf - deskThickness + deskInset}
+                          width={deskSize - deskInset * 2}
+                          height={Math.max(2, deskThickness - deskInset * 2)}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
+                        />
+                        <Rect
+                          x={deskHalf - deskThickness + deskInset}
+                          y={-deskHalf + deskInset}
+                          width={Math.max(2, deskThickness - deskInset * 2)}
+                          height={deskSize - deskInset * 2}
+                          stroke={deskInsetStroke}
+                          strokeWidth={1}
+                          strokeScaleEnabled={false}
+                          listening={false}
                         />
                       </>
                     )}
