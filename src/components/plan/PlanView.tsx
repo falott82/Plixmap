@@ -95,12 +95,43 @@ interface Props {
 
 const isRackLinkId = (id?: string | null) => typeof id === 'string' && id.startsWith('racklink:');
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling', 'quotes']);
+type ClipboardPayload = {
+  token: number;
+  items: MapObject[];
+  customValues: Record<string, Record<string, any>>;
+  sourcePlanId?: string;
+  sourcePlanName?: string;
+  sourceClientId?: string;
+  sourceClientName?: string;
+};
+
+type PasteConfirmPayload = {
+  title: string;
+  description: string;
+  clipboard: ClipboardPayload;
+  targetPlanId: string;
+};
 
 const PlanView = ({ planId }: Props) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasStageRef = useRef<CanvasStageHandle | null>(null);
   const t = useT();
   const lang = useLang();
+  const renderKeybindToast = useCallback(
+    (title: { it: string; en: string }, items: Array<{ cmd: string; it: string; en: string }>) => (
+      <div className="text-left text-slate-900">
+        <div className="text-sm font-semibold text-slate-900">{t(title)}</div>
+        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-slate-900">
+          {items.map((item, index) => (
+            <li key={`${item.cmd}-${index}`}>
+              <strong className="font-semibold">{item.cmd}</strong> {t({ it: item.it, en: item.en })}
+            </li>
+          ))}
+        </ul>
+      </div>
+    ),
+    [t]
+  );
   const [autoFitEnabled, setAutoFitEnabled] = useState(true);
   const {
     addObject,
@@ -418,6 +449,7 @@ const PlanView = ({ planId }: Props) => {
   const [confirmDeleteViewId, setConfirmDeleteViewId] = useState<string | null>(null);
   const [confirmSetDefaultViewId, setConfirmSetDefaultViewId] = useState<string | null>(null);
   const [confirmClearObjects, setConfirmClearObjects] = useState(false);
+  const [pasteConfirm, setPasteConfirm] = useState<PasteConfirmPayload | null>(null);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkEditSelectionOpen, setBulkEditSelectionOpen] = useState(false);
   const [selectedObjectsModalOpen, setSelectedObjectsModalOpen] = useState(false);
@@ -451,7 +483,7 @@ const PlanView = ({ planId }: Props) => {
   const roomOverlapNoticeRef = useRef(0);
   const roomLayerNoticeRef = useRef(0);
   const [allTypesOpen, setAllTypesOpen] = useState(false);
-  const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'objects' | 'desks'>('objects');
+  const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'objects' | 'desks' | 'walls' | 'text' | 'notes'>('objects');
   const [roomCatalogOpen, setRoomCatalogOpen] = useState(false);
   const [wallCatalogOpen, setWallCatalogOpen] = useState(false);
   const [deskCatalogOpen, setDeskCatalogOpen] = useState(false);
@@ -463,6 +495,7 @@ const PlanView = ({ planId }: Props) => {
     | { kind: 'map'; x: number; y: number; worldX: number; worldY: number }
     | null
   >(null);
+  const [alignMenuOpen, setAlignMenuOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const returnToSelectionListRef = useRef(false);
   const lastInsertedRef = useRef<{ id: string; name: string } | null>(null);
@@ -486,6 +519,13 @@ const PlanView = ({ planId }: Props) => {
   const [countsOpen, setCountsOpen] = useState(false);
   const [presenceOpen, setPresenceOpen] = useState(false);
   const [layersPopoverOpen, setLayersPopoverOpen] = useState(false);
+  const [layersQuickMenu, setLayersQuickMenu] = useState<{ x: number; y: number } | null>(null);
+  const [layerRevealPrompt, setLayerRevealPrompt] = useState<{
+    objectId: string;
+    objectName: string;
+    typeId: string;
+    missingLayerIds: string[];
+  } | null>(null);
   const [expandedType, setExpandedType] = useState<string | null>(null);
   const [typeMenu, setTypeMenu] = useState<{ typeId: string; label: string; icon?: IconName; x: number; y: number } | null>(null);
   const typeMenuRef = useRef<HTMLDivElement | null>(null);
@@ -504,6 +544,7 @@ const PlanView = ({ planId }: Props) => {
   const [clearScaleConfirmOpen, setClearScaleConfirmOpen] = useState(false);
   const [scalePromptDismissed, setScalePromptDismissed] = useState(false);
   const layersPopoverRef = useRef<HTMLDivElement | null>(null);
+  const layersQuickMenuRef = useRef<HTMLDivElement | null>(null);
   const [panToolActive, setPanToolActive] = useState(false);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
@@ -586,6 +627,9 @@ const PlanView = ({ planId }: Props) => {
     roomId: string;
     roomName: string;
     segments: { start: { x: number; y: number }; end: { x: number; y: number }; label: string }[];
+    mode?: 'create' | 'edit';
+    wallIds?: string[];
+    wallTypes?: string[];
   } | null>(null);
   const [roomWallTypeSelections, setRoomWallTypeSelections] = useState<string[]>([]);
   const [roomWallPrompt, setRoomWallPrompt] = useState<{
@@ -600,22 +644,24 @@ const PlanView = ({ planId }: Props) => {
   const selectedObjectIdRef = useRef<string | undefined>(selectedObjectId);
   const selectedObjectIdsRef = useRef<string[]>(selectedObjectIds);
   const selectedLinkIdRef = useRef<string | null>(selectedLinkId);
+  const selectedRoomIdRef = useRef<string | undefined>(selectedRoomId);
   const confirmDeleteRef = useRef<string[] | null>(confirmDelete);
   const pendingRoomDeletesRef = useRef<string[]>(pendingRoomDeletes);
   const skipRoomWallTypesRef = useRef(false);
-  const clipboardRef = useRef<{
-    token: number;
-    items: MapObject[];
-    customValues: Record<string, Record<string, any>>;
-  } | null>(null);
+  const clipboardRef = useRef<ClipboardPayload | null>(null);
   const pasteCountRef = useRef(0);
   const deskToastKeyRef = useRef<string>('');
+  const deskToastIdRef = useRef<string | number | null>(null);
   const wallMoveBatchRef = useRef<{ id: string | null; movedGroups: Set<string>; movedWalls: Set<string>; movedRooms: Set<string> }>({
     id: null,
     movedGroups: new Set(),
     movedWalls: new Set(),
     movedRooms: new Set()
   });
+  const selectionToastKeyRef = useRef<string>('');
+  const selectionToastIdRef = useRef<string | number | null>(null);
+  const multiToastKeyRef = useRef<string>('');
+  const multiToastIdRef = useRef<string | number | null>(null);
   const quoteToastKeyRef = useRef('');
   const quoteToastIdRef = useRef<string | number | null>(null);
   const mediaToastKeyRef = useRef('');
@@ -685,10 +731,11 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     const nextDefault = defaultWallTypeId || DEFAULT_WALL_TYPES[0];
-    setRoomWallTypeSelections((prev) => {
-      if (prev.length === roomWallTypeModal.segments.length) return prev;
-      return roomWallTypeModal.segments.map(() => nextDefault);
-    });
+    const desired =
+      roomWallTypeModal.wallTypes && roomWallTypeModal.wallTypes.length === roomWallTypeModal.segments.length
+        ? roomWallTypeModal.wallTypes
+        : roomWallTypeModal.segments.map(() => nextDefault);
+    setRoomWallTypeSelections(desired);
   }, [defaultWallTypeId, roomWallTypeModal]);
 
   useEffect(() => {
@@ -971,6 +1018,123 @@ const PlanView = ({ planId }: Props) => {
     },
     [formatCornerLabel]
   );
+  const getWallPolygonData = useCallback(
+    (wallId: string) => {
+      if (!renderPlan) return null;
+      const wall = renderPlan.objects.find((o) => o.id === wallId);
+      if (!wall || !isWallType(wall.type)) return null;
+
+      const groupId = String((wall as any).wallGroupId || '');
+      if (groupId) {
+        const groupWalls = renderPlan.objects.filter(
+          (o) => isWallType(o.type) && String((o as any).wallGroupId || '') === groupId
+        );
+        if (groupWalls.length >= 3) {
+          const room = (renderPlan.rooms || []).find((r) => r.id === groupId);
+          const ordered = groupWalls
+            .slice()
+            .sort((a, b) => Number((a as any).wallGroupIndex ?? 0) - Number((b as any).wallGroupIndex ?? 0));
+          const segmentsFromWalls = ordered
+            .map((w, index) => {
+              const pts = (w as any).points as { x: number; y: number }[] | undefined;
+              if (!Array.isArray(pts) || pts.length < 2) return null;
+              const label = `${formatCornerLabel(index)}-${formatCornerLabel((index + 1) % ordered.length)}`;
+              return { start: pts[0], end: pts[1], label };
+            })
+            .filter(Boolean) as { start: { x: number; y: number }; end: { x: number; y: number }; label: string }[];
+          let segments: { start: { x: number; y: number }; end: { x: number; y: number }; label: string }[] = segmentsFromWalls;
+          if (room) {
+            const kind = (room.kind || (Array.isArray(room.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+            const roomSegments = buildRoomWallSegments({
+              kind,
+              rect: kind === 'rect' ? { x: room.x || 0, y: room.y || 0, width: room.width || 0, height: room.height || 0 } : undefined,
+              points: kind === 'poly' ? room.points || [] : undefined
+            });
+            if (roomSegments.length === ordered.length) segments = roomSegments;
+          }
+          const wallIds = ordered.map((w) => w.id);
+          const wallTypes = ordered.map((w) => w.type);
+          return {
+            roomId: groupId,
+            roomName: room?.name || t({ it: 'Poligono muri', en: 'Wall polygon' }),
+            segments,
+            wallIds,
+            wallTypes
+          };
+        }
+      }
+
+      const walls = renderPlan.objects.filter((o) => isWallType(o.type));
+      const byId = new Map(walls.map((w) => [w.id, w]));
+      const keyOf = (p: { x: number; y: number }) =>
+        `${Math.round(p.x * 100) / 100},${Math.round(p.y * 100) / 100}`;
+      const adjacency = new Map<string, Array<{ wallId: string; otherKey: string; otherPoint: { x: number; y: number } }>>();
+      const addAdj = (from: { x: number; y: number }, to: { x: number; y: number }, id: string) => {
+        const fromKey = keyOf(from);
+        const list = adjacency.get(fromKey) || [];
+        list.push({ wallId: id, otherKey: keyOf(to), otherPoint: to });
+        adjacency.set(fromKey, list);
+      };
+      walls.forEach((w) => {
+        const pts = (w as any).points as { x: number; y: number }[] | undefined;
+        if (!Array.isArray(pts) || pts.length < 2) return;
+        addAdj(pts[0], pts[1], w.id);
+        addAdj(pts[1], pts[0], w.id);
+      });
+
+      const startWall = byId.get(wallId);
+      const startPts = (startWall as any)?.points as { x: number; y: number }[] | undefined;
+      if (!startWall || !startPts || startPts.length < 2) return null;
+
+      const tryBuild = (startPoint: { x: number; y: number }, nextPoint: { x: number; y: number }) => {
+        const startKey = keyOf(startPoint);
+        let currentKey = keyOf(nextPoint);
+        const wallIds = [startWall.id];
+        const points = [startPoint, nextPoint];
+        const visited = new Set<string>(wallIds);
+        let guard = 0;
+        while (guard < walls.length + 2) {
+          guard += 1;
+          if (currentKey === startKey) {
+            return wallIds.length >= 3 ? { wallIds, points } : null;
+          }
+          const options = (adjacency.get(currentKey) || []).filter((o) => !visited.has(o.wallId));
+          if (options.length !== 1) return null;
+          const next = options[0];
+          visited.add(next.wallId);
+          wallIds.push(next.wallId);
+          points.push(next.otherPoint);
+          currentKey = next.otherKey;
+        }
+        return null;
+      };
+
+      const attempt =
+        tryBuild(startPts[0], startPts[1]) || tryBuild(startPts[1], startPts[0]);
+      if (!attempt) return null;
+      const pts = attempt.points.slice();
+      if (pts.length < 3) return null;
+      if (pts.length > 2 && keyOf(pts[0]) === keyOf(pts[pts.length - 1])) {
+        pts.pop();
+      }
+      if (pts.length < 3) return null;
+      const segments = pts.map((start, index) => {
+        const end = pts[(index + 1) % pts.length];
+        const label = `${formatCornerLabel(index)}-${formatCornerLabel((index + 1) % pts.length)}`;
+        return { start, end, label };
+      });
+      const wallIds = attempt.wallIds;
+      const wallTypes = wallIds.map((id) => byId.get(id)?.type || defaultWallTypeId || DEFAULT_WALL_TYPES[0]);
+      return {
+        roomId: wallId,
+        roomName: t({ it: 'Poligono muri', en: 'Wall polygon' }),
+        segments,
+        wallIds,
+        wallTypes
+      };
+    },
+    [buildRoomWallSegments, defaultWallTypeId, formatCornerLabel, isWallType, renderPlan, t]
+  );
   useEffect(() => {
     setWallDrawMode(false);
     setWallDrawType(null);
@@ -1241,7 +1405,7 @@ const PlanView = ({ planId }: Props) => {
     : allItemsSelected
       ? nonAllLayerIds
       : visibleLayerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
-  const visibleLayerCount = allItemsSelected ? nonAllLayerIds.length : effectiveVisibleLayerIds.length;
+  const visibleLayerCount = hideAllLayers ? 0 : allItemsSelected ? nonAllLayerIds.length : effectiveVisibleLayerIds.length;
   const totalLayerCount = nonAllLayerIds.length;
   const layerActivationRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -1268,6 +1432,49 @@ const PlanView = ({ planId }: Props) => {
     },
     [getTypeLabel]
   );
+  const promptRevealForObject = useCallback(
+    (obj: MapObject) => {
+      const rawLayerIds =
+        Array.isArray(obj.layerIds) && obj.layerIds.length ? obj.layerIds : inferDefaultLayerIds(obj.type, layerIdSet);
+      const normalizedLayerIds = rawLayerIds.map((layerId) => String(layerId)).filter((layerId) => layerId !== ALL_ITEMS_LAYER_ID);
+      if (!normalizedLayerIds.length) return false;
+      const visibleSet = new Set(effectiveVisibleLayerIds);
+      const missing = hideAllLayers
+        ? normalizedLayerIds
+        : normalizedLayerIds.filter((layerId) => !visibleSet.has(layerId));
+      if (!missing.length) return false;
+      setLayerRevealPrompt({
+        objectId: obj.id,
+        objectName: String(obj.name || ''),
+        typeId: obj.type,
+        missingLayerIds: Array.from(new Set(missing))
+      });
+      return true;
+    },
+    [effectiveVisibleLayerIds, hideAllLayers, inferDefaultLayerIds, layerIdSet]
+  );
+  const getObjectBoundsForAlign = useCallback((obj: MapObject) => {
+    const boundsFromStage = canvasStageRef.current?.getObjectBounds?.(obj.id);
+    if (boundsFromStage) return boundsFromStage;
+    if (Array.isArray((obj as any).points) && (obj as any).points.length) {
+      const pts = (obj as any).points as { x: number; y: number }[];
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const p of pts) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+      if ([minX, minY, maxX, maxY].every(Number.isFinite)) return { minX, minY, maxX, maxY };
+    }
+    const x = Number(obj.x);
+    const y = Number(obj.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) return { minX: x, minY: y, maxX: x, maxY: y };
+    return null;
+  }, []);
   const ensureObjectLayerVisible = useCallback(
     (layerIds: string[] | undefined, name: string | undefined, typeId: string) => {
       if (!planId || !layerIds?.length) return;
@@ -1549,6 +1756,197 @@ const PlanView = ({ planId }: Props) => {
     touchedRef.current = false;
     setTouchedTick((x) => x + 1);
   }, []);
+  const alignSelection = useCallback(
+    (mode: 'horizontal' | 'vertical', referenceId?: string) => {
+      if (isReadOnly || !renderPlan) return;
+      if (selectedObjectIds.length < 2) return;
+      const objects = selectedObjectIds
+        .map((id) => renderPlan.objects.find((o) => o.id === id))
+        .filter(Boolean) as MapObject[];
+      if (objects.length < 2) return;
+      const fallbackRef = objects[0];
+      const refObject = referenceId ? objects.find((obj) => obj.id === referenceId) || fallbackRef : fallbackRef;
+      if (!refObject) return;
+      const boundsById = new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>();
+      for (const obj of objects) {
+        const bounds = getObjectBoundsForAlign(obj);
+        if (bounds) boundsById.set(obj.id, bounds);
+      }
+      const refBounds = boundsById.get(refObject.id);
+      if (!refBounds) return;
+      const targetX = (refBounds.minX + refBounds.maxX) / 2;
+      const targetY = (refBounds.minY + refBounds.maxY) / 2;
+      markTouched();
+      for (const obj of objects) {
+        const bounds = boundsById.get(obj.id);
+        if (!bounds) continue;
+        const centerX = (bounds.minX + bounds.maxX) / 2;
+        const centerY = (bounds.minY + bounds.maxY) / 2;
+        const dx = mode === 'vertical' ? targetX - centerX : 0;
+        const dy = mode === 'horizontal' ? targetY - centerY : 0;
+        if (!dx && !dy) continue;
+        if (isWallType(obj.type) || obj.type === 'quote') {
+          const pts = Array.isArray((obj as any).points) ? (obj as any).points : [];
+          if (!pts.length) continue;
+          const nextPoints = pts.map((p: any) => ({ x: p.x + dx, y: p.y + dy }));
+          const nextX = Number.isFinite(Number(obj.x)) ? Number(obj.x) + dx : obj.x;
+          const nextY = Number.isFinite(Number(obj.y)) ? Number(obj.y) + dy : obj.y;
+          updateObject(obj.id, { points: nextPoints, x: nextX, y: nextY });
+          continue;
+        }
+        const nextX = Number(obj.x) + dx;
+        const nextY = Number(obj.y) + dy;
+        if (Number.isFinite(nextX) && Number.isFinite(nextY)) moveObject(obj.id, nextX, nextY);
+      }
+    },
+    [getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan, selectedObjectIds, updateObject]
+  );
+
+  const getRealUserPasteDuplicates = useCallback(
+    (clipboard: ClipboardPayload, targetClientId: string) => {
+      if (!client || !targetClientId) return [];
+      const users = clipboard.items.filter((obj) => obj.type === 'real_user');
+      if (!users.length) return [];
+      const wanted = new Map<string, { name: string }>();
+      for (const obj of users) {
+        const externalUserId = String((obj as any).externalUserId || '').trim();
+        const externalClientId = String((obj as any).externalClientId || targetClientId).trim();
+        if (!externalUserId || !externalClientId) continue;
+        const key = `${externalClientId}:${externalUserId}`;
+        if (!wanted.has(key)) {
+          const fallbackName = `${String((obj as any).firstName || '').trim()} ${String((obj as any).lastName || '').trim()}`.trim();
+          const name = String(obj.name || fallbackName || externalUserId);
+          wanted.set(key, { name });
+        }
+      }
+      if (!wanted.size) return [];
+      const matches: { name: string; planName: string }[] = [];
+      for (const s of client.sites || []) {
+        for (const p of s.floorPlans || []) {
+          for (const o of p.objects || []) {
+            if (o.type !== 'real_user') continue;
+            const ocid = String((o as any).externalClientId || '').trim();
+            const oeid = String((o as any).externalUserId || '').trim();
+            if (!ocid || !oeid) continue;
+            const key = `${ocid}:${oeid}`;
+            const entry = wanted.get(key);
+            if (!entry) continue;
+            const planName = String(p.name || '') || t({ it: 'Planimetria', en: 'Floor plan' });
+            matches.push({ name: entry.name, planName });
+            wanted.delete(key);
+            if (!wanted.size) return matches;
+          }
+        }
+      }
+      return matches;
+    },
+    [client, t]
+  );
+
+  const performPaste = useCallback(
+    (clipboard: ClipboardPayload, currentPlan: FloorPlan) => {
+      if (isReadOnlyRef.current) return;
+      if (!clipboard?.items?.length) return;
+      markTouched();
+      pasteCountRef.current += 1;
+      const offset = 24 * pasteCountRef.current;
+      const newIds: string[] = [];
+      for (const obj of clipboard.items) {
+        const nextX = obj.x + offset;
+        const nextY = obj.y + offset * 0.6;
+        const layerIds =
+          Array.isArray(obj.layerIds) && obj.layerIds.length ? obj.layerIds : inferDefaultLayerIds(obj.type, layerIdSet);
+        const extra: Partial<MapObject> = {
+          opacity: obj.opacity,
+          rotation: obj.rotation,
+          strokeWidth: obj.strokeWidth,
+          strokeColor: obj.strokeColor,
+          scaleX: obj.scaleX,
+          scaleY: obj.scaleY,
+          points: obj.points ? obj.points.map((p) => ({ ...p })) : undefined,
+          wallGroupId: obj.wallGroupId,
+          wallGroupIndex: obj.wallGroupIndex,
+          wifiDb: obj.wifiDb,
+          wifiStandard: obj.wifiStandard,
+          wifiBand24: obj.wifiBand24,
+          wifiBand5: obj.wifiBand5,
+          wifiBand6: obj.wifiBand6,
+          wifiBrand: obj.wifiBrand,
+          wifiModel: obj.wifiModel,
+          wifiModelCode: obj.wifiModelCode,
+          wifiCoverageSqm: obj.wifiCoverageSqm,
+          wifiCatalogId: obj.wifiCatalogId,
+          wifiShowRange: obj.wifiShowRange,
+          cctvAngle: obj.cctvAngle,
+          cctvRange: obj.cctvRange,
+          cctvOpacity: obj.cctvOpacity,
+          externalClientId: obj.externalClientId,
+          externalUserId: obj.externalUserId,
+          firstName: obj.firstName,
+          lastName: obj.lastName,
+          externalRole: obj.externalRole,
+          externalDept1: obj.externalDept1,
+          externalDept2: obj.externalDept2,
+          externalDept3: obj.externalDept3,
+          externalEmail: obj.externalEmail,
+          externalExt1: obj.externalExt1,
+          externalExt2: obj.externalExt2,
+          externalExt3: obj.externalExt3,
+          externalIsExternal: obj.externalIsExternal
+        };
+        const id = addObject(
+          currentPlan.id,
+          obj.type,
+          obj.name,
+          obj.description,
+          nextX,
+          nextY,
+          obj.scale ?? 1,
+          layerIds,
+          extra
+        );
+        ensureObjectLayerVisible(layerIds, obj.name, obj.type);
+        const nextRoomId = getRoomIdAt(currentPlan.rooms, nextX, nextY);
+        if (nextRoomId) updateObject(id, { roomId: nextRoomId });
+        const customValues = clipboard.customValues?.[obj.id];
+        if (customValues && Object.keys(customValues).length) {
+          saveCustomValues(id, obj.type, customValues).catch(() => {});
+        }
+        newIds.push(id);
+      }
+      if (newIds.length) {
+        const last = newIds[newIds.length - 1];
+        const label =
+          newIds.length === 1
+            ? String(clipboard.items[0]?.name || getTypeLabel(clipboard.items[0]?.type || ''))
+            : t({ it: `${newIds.length} oggetti`, en: `${newIds.length} objects` });
+        lastInsertedRef.current = { id: last, name: label };
+        setSelection(newIds);
+        setContextMenu(null);
+        push(
+          newIds.length === 1
+            ? t({ it: `Oggetto duplicato: ${label}`, en: `Object duplicated: ${label}` })
+            : t({ it: `Duplicati ${newIds.length} oggetti`, en: `Duplicated ${newIds.length} objects` }),
+          'success'
+        );
+      }
+    },
+    [
+      addObject,
+      ensureObjectLayerVisible,
+      getRoomIdAt,
+      getTypeLabel,
+      inferDefaultLayerIds,
+      layerIdSet,
+      markTouched,
+      push,
+      saveCustomValues,
+      setContextMenu,
+      setSelection,
+      t,
+      updateObject
+    ]
+  );
 
   const toSnapshot = useCallback((p: any) => {
     return {
@@ -2176,6 +2574,10 @@ const PlanView = ({ planId }: Props) => {
   const contextIsQuote = contextObject?.type === 'quote';
   const contextIsWifi = contextObject?.type === 'wifi';
   const contextWifiRangeOn = contextIsWifi ? (contextObject as any)?.wifiShowRange !== false : false;
+  const contextWallPolygon = useMemo(() => {
+    if (!contextIsWall || !contextMenu || contextMenu.kind !== 'object') return null;
+    return getWallPolygonData(contextMenu.id);
+  }, [contextIsWall, contextMenu, getWallPolygonData]);
   const contextQuoteOrientation = useMemo(() => {
     if (!contextIsQuote) return 'horizontal' as const;
     const pts = (contextObject as any)?.points as { x: number; y: number }[] | undefined;
@@ -2239,8 +2641,51 @@ const PlanView = ({ planId }: Props) => {
     selectedObjectIdsRef.current = selectedObjectIds;
   }, [selectedObjectIds]);
   useEffect(() => {
-    if (!renderPlan || !selectedObjectIds.length) {
+    if (!renderPlan || selectedObjectIds.length < 2) {
+      multiToastKeyRef.current = '';
+      if (multiToastIdRef.current != null) {
+        toast.dismiss(multiToastIdRef.current);
+        multiToastIdRef.current = null;
+      }
+      return;
+    }
+    const key = selectedObjectIds.slice().sort().join(',');
+    if (multiToastKeyRef.current === key) return;
+    multiToastKeyRef.current = key;
+    if (multiToastIdRef.current != null) {
+      toast.dismiss(multiToastIdRef.current);
+    }
+    const count = selectedObjectIds.length;
+    const items =
+      count === 2
+        ? [
+            { cmd: 'L', it: 'collega i 2 oggetti', en: 'link the 2 objects' },
+            { cmd: '+ / −', it: 'scala', en: 'scale' },
+            { cmd: 'Ctrl/Cmd + C / V', it: 'copia/incolla', en: 'copy/paste' },
+            { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
+            { cmd: 'Canc', it: 'elimina', en: 'delete' }
+          ]
+        : [
+            { cmd: '+ / −', it: 'scala', en: 'scale' },
+            { cmd: 'Ctrl/Cmd + C / V', it: 'copia/incolla', en: 'copy/paste' },
+            { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
+            { cmd: 'Canc', it: 'elimina', en: 'delete' }
+          ];
+    multiToastIdRef.current = toast.info(
+      renderKeybindToast(
+        { it: `${count} oggetti selezionati`, en: `${count} objects selected` },
+        items
+      ),
+      { duration: Infinity }
+    );
+  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
+  useEffect(() => {
+    if (!renderPlan || selectedObjectIds.length !== 1) {
       deskToastKeyRef.current = '';
+      if (deskToastIdRef.current != null) {
+        toast.dismiss(deskToastIdRef.current);
+        deskToastIdRef.current = null;
+      }
       return;
     }
     const deskIds = selectedObjectIds.filter((id) => {
@@ -2249,21 +2694,33 @@ const PlanView = ({ planId }: Props) => {
     });
     if (!deskIds.length) {
       deskToastKeyRef.current = '';
+      if (deskToastIdRef.current != null) {
+        toast.dismiss(deskToastIdRef.current);
+        deskToastIdRef.current = null;
+      }
       return;
     }
     const key = deskIds.slice().sort().join(',');
     if (deskToastKeyRef.current === key) return;
     deskToastKeyRef.current = key;
-    push(
-      t({
-        it: 'Scrivania selezionata: frecce per muovere (Shift per passi maggiori), Ctrl/Cmd + ←/→ ruota 90°, +/− scala. L collega 2 oggetti selezionati.',
-        en: 'Desk selected: arrows to move (Shift for larger steps), Ctrl/Cmd + ←/→ rotates 90°, +/− scales. L links 2 selected objects.'
-      }),
-      'info'
+    if (deskToastIdRef.current != null) {
+      toast.dismiss(deskToastIdRef.current);
+    }
+    deskToastIdRef.current = toast.info(
+      renderKeybindToast(
+        { it: 'Scrivania selezionata', en: 'Desk selected' },
+        [
+          { cmd: 'Frecce', it: 'sposta (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
+          { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
+          { cmd: '+ / −', it: 'scala', en: 'scale' },
+          { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+        ]
+      ),
+      { duration: Infinity }
     );
-  }, [renderPlan, selectedObjectIds, t]);
+  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
-    if (!renderPlan || !selectedObjectIds.length) {
+    if (!renderPlan || selectedObjectIds.length !== 1) {
       quoteToastKeyRef.current = '';
       if (quoteToastIdRef.current != null) {
         toast.dismiss(quoteToastIdRef.current);
@@ -2290,15 +2747,27 @@ const PlanView = ({ planId }: Props) => {
       toast.dismiss(quoteToastIdRef.current);
     }
     quoteToastIdRef.current = toast.info(
-      t({
-        it: 'Quota selezionata: trascina per spostare, frecce per muovere (Shift per passi maggiori). Ctrl/Cmd + frecce sposta la scritta. Trascina gli apici per allungare o accorciare (Shift per bloccare orizzontale/verticale). +/− scala. L collega 2 oggetti selezionati.',
-        en: 'Quote selected: drag to move, arrows to move (Shift for larger steps). Ctrl/Cmd + arrows moves the label. Drag the endpoints to extend or shrink (Shift locks horizontal/vertical). +/− scales. L links 2 selected objects.'
-      }),
+      renderKeybindToast(
+        { it: 'Quota selezionata', en: 'Quote selected' },
+        [
+          { cmd: 'Trascina', it: 'sposta la quota', en: 'move the quote' },
+          { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
+          { cmd: 'Ctrl/Cmd + Frecce', it: 'sposta la scritta', en: 'move the label' },
+          {
+            cmd: 'Trascina gli apici',
+            it: 'allunga/accorcia (Shift blocca orizz./vert.)',
+            en: 'extend/shrink (Shift locks horizontal/vertical)'
+          },
+          { cmd: '+ / −', it: 'scala', en: 'scale' },
+          { cmd: 'E', it: 'modifica', en: 'edit' },
+          { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+        ]
+      ),
       { duration: Infinity }
     );
-  }, [push, renderPlan, selectedObjectIds, t]);
+  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
-    if (!renderPlan || !selectedObjectIds.length) {
+    if (!renderPlan || selectedObjectIds.length !== 1) {
       mediaToastKeyRef.current = '';
       if (mediaToastIdRef.current != null) {
         toast.dismiss(mediaToastIdRef.current);
@@ -2328,29 +2797,106 @@ const PlanView = ({ planId }: Props) => {
     }
     const message =
       textIds.length && !imageIds.length && !postitIds.length
-        ? t({
-            it: 'Testo selezionato: trascina per spostare, frecce per muovere (Shift per passi maggiori), usa i punti per ridimensionare/ruotare. Ctrl/Cmd + ←/→ ruota 90°. +/− dimensione font. F font avanti, Shift+B font indietro. C colore avanti, Shift+C colore indietro. B mostra/nasconde background. Doppio click per modificare. L collega 2 oggetti selezionati.',
-            en: 'Text selected: drag to move, arrows to move (Shift for larger steps), use handles to resize and rotate. Ctrl/Cmd + ←/→ rotates 90°. +/− changes font size. F next font, Shift+B previous font. C next color, Shift+C previous color. B toggles background. Double click to edit. L links 2 selected objects.'
-          })
+        ? renderKeybindToast(
+            { it: 'Testo selezionato', en: 'Text selected' },
+            [
+              { cmd: 'Trascina', it: 'sposta', en: 'move' },
+              { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
+              { cmd: 'Maniglie', it: 'ridimensiona/ruota', en: 'resize/rotate' },
+              { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
+              { cmd: '+ / −', it: 'dimensione font', en: 'font size' },
+              { cmd: 'F', it: 'font avanti', en: 'next font' },
+              { cmd: 'Shift + B', it: 'font indietro', en: 'previous font' },
+              { cmd: 'C', it: 'colore avanti', en: 'next color' },
+              { cmd: 'Shift + C', it: 'colore indietro', en: 'previous color' },
+              { cmd: 'B', it: 'mostra/nasconde background', en: 'toggle background' },
+              { cmd: 'E', it: 'modifica', en: 'edit' },
+              { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+            ]
+          )
         : imageIds.length && !textIds.length && !postitIds.length
-          ? t({
-              it: 'Immagine selezionata: trascina per spostare, frecce per muovere (Shift per passi maggiori), usa i punti per ridimensionare e ruotare. Ctrl/Cmd + ←/→ ruota 90°. +/− scala. Doppio click per modificare. L collega 2 oggetti selezionati.',
-              en: 'Image selected: drag to move, arrows to move (Shift for larger steps), use handles to resize and rotate. Ctrl/Cmd + ←/→ rotates 90°. +/− scales. Double click to edit. L links 2 selected objects.'
-            })
+          ? renderKeybindToast(
+              { it: 'Immagine selezionata', en: 'Image selected' },
+              [
+                { cmd: 'Trascina', it: 'sposta', en: 'move' },
+                { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
+                { cmd: 'Maniglie', it: 'ridimensiona/ruota', en: 'resize/rotate' },
+                { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
+                { cmd: '+ / −', it: 'scala', en: 'scale' },
+                { cmd: 'E', it: 'modifica', en: 'edit' },
+                { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+              ]
+            )
           : postitIds.length && !textIds.length && !imageIds.length
-            ? t({
-                it: 'Post-it selezionato: trascina per spostare, click sull’icona per compattare. +/− scala. Doppio click per modificare. L collega 2 oggetti selezionati.',
-                en: 'Post-it selected: drag to move, click the icon to compact. +/− scales. Double click to edit. L links 2 selected objects.'
-              })
-            : t({
-                it: 'Annotazioni selezionate: trascina per spostare, frecce per muovere (Shift per passi maggiori), usa i punti per ridimensionare/ruotare. Ctrl/Cmd + ←/→ ruota 90°. +/− scala. Doppio click per modificare. L collega 2 oggetti selezionati.',
-                en: 'Annotations selected: drag to move, arrows to move (Shift for larger steps), use handles to resize/rotate. Ctrl/Cmd + ←/→ rotates 90°. +/− scales. Double click to edit. L links 2 selected objects.'
-              });
+            ? renderKeybindToast(
+                { it: 'Post-it selezionato', en: 'Post-it selected' },
+                [
+                  { cmd: 'Trascina', it: 'sposta', en: 'move' },
+                  { cmd: 'Click icona', it: 'compatta/espandi', en: 'compact/expand' },
+                  { cmd: '+ / −', it: 'scala', en: 'scale' },
+                  { cmd: 'E', it: 'modifica', en: 'edit' },
+                  { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+                ]
+              )
+            : renderKeybindToast(
+                { it: 'Annotazioni selezionate', en: 'Annotations selected' },
+                [
+                  { cmd: 'Trascina', it: 'sposta', en: 'move' },
+                  { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
+                  { cmd: 'Maniglie', it: 'ridimensiona/ruota', en: 'resize/rotate' },
+                  { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
+                  { cmd: '+ / −', it: 'scala', en: 'scale' },
+                  { cmd: 'E', it: 'modifica', en: 'edit' },
+                  { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+                ]
+              );
     mediaToastIdRef.current = toast.info(message, { duration: Infinity });
-  }, [renderPlan, selectedObjectIds, t]);
+  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
+  useEffect(() => {
+    if (!renderPlan || selectedObjectIds.length !== 1) {
+      selectionToastKeyRef.current = '';
+      if (selectionToastIdRef.current != null) {
+        toast.dismiss(selectionToastIdRef.current);
+        selectionToastIdRef.current = null;
+      }
+      return;
+    }
+    const id = selectedObjectIds[0];
+    const obj = renderPlan.objects.find((o) => o.id === id);
+    if (!obj) return;
+    if (isDeskType(obj.type) || obj.type === 'quote' || obj.type === 'text' || obj.type === 'image' || obj.type === 'postit') {
+      selectionToastKeyRef.current = '';
+      if (selectionToastIdRef.current != null) {
+        toast.dismiss(selectionToastIdRef.current);
+        selectionToastIdRef.current = null;
+      }
+      return;
+    }
+    if (selectionToastKeyRef.current === id) return;
+    selectionToastKeyRef.current = id;
+    if (selectionToastIdRef.current != null) {
+      toast.dismiss(selectionToastIdRef.current);
+    }
+    selectionToastIdRef.current = toast.info(
+      renderKeybindToast(
+        { it: 'Oggetto selezionato', en: 'Object selected' },
+        [
+          { cmd: 'Trascina', it: 'sposta', en: 'move' },
+          { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
+          { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
+          { cmd: '+ / −', it: 'scala', en: 'scale' },
+          { cmd: 'E', it: 'modifica', en: 'edit' }
+        ]
+      ),
+      { duration: Infinity }
+    );
+  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
     selectedLinkIdRef.current = selectedLinkId;
   }, [selectedLinkId]);
+  useEffect(() => {
+    selectedRoomIdRef.current = selectedRoomId;
+  }, [selectedRoomId]);
   useEffect(() => {
     confirmDeleteRef.current = confirmDelete;
   }, [confirmDelete]);
@@ -2375,6 +2921,7 @@ const PlanView = ({ planId }: Props) => {
     if (!contextMenu) return;
     setWallQuickMenu(null);
     setWallTypeMenu(null);
+    setAlignMenuOpen(false);
     if (contextMenu.kind === 'map') {
       setMapSubmenu(null);
     }
@@ -2887,14 +3434,14 @@ const PlanView = ({ planId }: Props) => {
     return x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
   };
 
-  const getRoomIdAt = (rooms: any[] | undefined, x: number, y: number) => {
+  function getRoomIdAt(rooms: any[] | undefined, x: number, y: number) {
     const list = rooms || [];
     for (let i = list.length - 1; i >= 0; i--) {
       const room = list[i];
       if (isPointInRoom(room, x, y)) return room.id as string;
     }
     return undefined;
-  };
+  }
 
   const getRoomPolygon = (room: any) => {
     const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
@@ -3942,6 +4489,19 @@ const PlanView = ({ planId }: Props) => {
     if (sampleTypeId) {
       ensureObjectLayerVisible(inferDefaultLayerIds(sampleTypeId, layerIdSet), getTypeLabel(sampleTypeId), sampleTypeId);
     }
+    if (roomWallTypeModal.mode === 'edit') {
+      const wallIds = roomWallTypeModal.wallIds || [];
+      segments.forEach((_, index) => {
+        const wallId = wallIds[index];
+        if (!wallId) return;
+        const typeId = roomWallTypeSelections[index] || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
+        if (!typeId) return;
+        updateObject(wallId, { type: typeId, name: getTypeLabel(typeId), strokeColor: getWallTypeColor(typeId) });
+      });
+      push(t({ it: 'Muri aggiornati', en: 'Walls updated' }), 'success');
+      setRoomWallTypeModal(null);
+      return;
+    }
     segments.forEach((segment, index) => {
       const typeId = roomWallTypeSelections[index] || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
       if (!typeId) return;
@@ -3975,6 +4535,7 @@ const PlanView = ({ planId }: Props) => {
     defaultWallTypeId,
     ensureObjectLayerVisible,
     getTypeLabel,
+    getWallTypeColor,
     inferDefaultLayerIds,
     isReadOnly,
     layerIdSet,
@@ -3983,7 +4544,8 @@ const PlanView = ({ planId }: Props) => {
     renderPlan,
     roomWallTypeModal,
     roomWallTypeSelections,
-    t
+    t,
+    updateObject
   ]);
 
   useEffect(() => {
@@ -4160,13 +4722,19 @@ const PlanView = ({ planId }: Props) => {
         if (!source.length) return;
         e.preventDefault();
         const token = Date.now();
+        const sourcePlanName =
+          String((currentPlan as FloorPlan).name || '') || t({ it: 'Planimetria', en: 'Floor plan' });
         clipboardRef.current = {
           token,
           items: source.map((obj) => ({
             ...obj,
             points: obj.points ? obj.points.map((p) => ({ ...p })) : undefined
           })),
-          customValues: {}
+          customValues: {},
+          sourcePlanId: (currentPlan as FloorPlan).id,
+          sourcePlanName,
+          sourceClientId: client?.id,
+          sourceClientName: client?.shortName || client?.name || ''
         };
         pasteCountRef.current = 0;
         Promise.all(
@@ -4201,91 +4769,58 @@ const PlanView = ({ planId }: Props) => {
         const clipboard = clipboardRef.current;
         if (!clipboard?.items?.length) return;
         e.preventDefault();
-        markTouched();
-        pasteCountRef.current += 1;
-        const offset = 24 * pasteCountRef.current;
-        const newIds: string[] = [];
-        for (const obj of clipboard.items) {
-          const nextX = obj.x + offset;
-          const nextY = obj.y + offset * 0.6;
-          const layerIds =
-            Array.isArray(obj.layerIds) && obj.layerIds.length
-              ? obj.layerIds
-              : inferDefaultLayerIds(obj.type, layerIdSet);
-          const extra: Partial<MapObject> = {
-            opacity: obj.opacity,
-            rotation: obj.rotation,
-            strokeWidth: obj.strokeWidth,
-            strokeColor: obj.strokeColor,
-            scaleX: obj.scaleX,
-            scaleY: obj.scaleY,
-            points: obj.points ? obj.points.map((p) => ({ ...p })) : undefined,
-            wallGroupId: obj.wallGroupId,
-            wallGroupIndex: obj.wallGroupIndex,
-            wifiDb: obj.wifiDb,
-            wifiStandard: obj.wifiStandard,
-            wifiBand24: obj.wifiBand24,
-            wifiBand5: obj.wifiBand5,
-            wifiBand6: obj.wifiBand6,
-            wifiBrand: obj.wifiBrand,
-            wifiModel: obj.wifiModel,
-            wifiModelCode: obj.wifiModelCode,
-            wifiCoverageSqm: obj.wifiCoverageSqm,
-            wifiCatalogId: obj.wifiCatalogId,
-            wifiShowRange: obj.wifiShowRange,
-            cctvAngle: obj.cctvAngle,
-            cctvRange: obj.cctvRange,
-            cctvOpacity: obj.cctvOpacity,
-            externalClientId: obj.externalClientId,
-            externalUserId: obj.externalUserId,
-            firstName: obj.firstName,
-            lastName: obj.lastName,
-            externalRole: obj.externalRole,
-            externalDept1: obj.externalDept1,
-            externalDept2: obj.externalDept2,
-            externalDept3: obj.externalDept3,
-            externalEmail: obj.externalEmail,
-            externalExt1: obj.externalExt1,
-            externalExt2: obj.externalExt2,
-            externalExt3: obj.externalExt3,
-            externalIsExternal: obj.externalIsExternal
-          };
-          const id = addObject(
-            (currentPlan as FloorPlan).id,
-            obj.type,
-            obj.name,
-            obj.description,
-            nextX,
-            nextY,
-            obj.scale ?? 1,
-            layerIds,
-            extra
-          );
-          ensureObjectLayerVisible(layerIds, obj.name, obj.type);
-          const nextRoomId = getRoomIdAt((currentPlan as FloorPlan).rooms, nextX, nextY);
-          if (nextRoomId) updateObject(id, { roomId: nextRoomId });
-          const customValues = clipboard.customValues?.[obj.id];
-          if (customValues && Object.keys(customValues).length) {
-            saveCustomValues(id, obj.type, customValues).catch(() => {});
-          }
-          newIds.push(id);
-        }
-        if (newIds.length) {
-          const last = newIds[newIds.length - 1];
-          const label =
-            newIds.length === 1
-              ? String(clipboard.items[0]?.name || getTypeLabel(clipboard.items[0]?.type || ''))
-              : t({ it: `${newIds.length} oggetti`, en: `${newIds.length} objects` });
-          lastInsertedRef.current = { id: last, name: label };
-          setSelection(newIds);
-          setContextMenu(null);
+        if (pasteConfirm) return;
+        const targetClientId = client?.id || '';
+        const hasRealUsers = clipboard.items.some((obj) => obj.type === 'real_user');
+        if (hasRealUsers && targetClientId && clipboard.sourceClientId && clipboard.sourceClientId !== targetClientId) {
           push(
-            newIds.length === 1
-              ? t({ it: `Oggetto duplicato: ${label}`, en: `Object duplicated: ${label}` })
-              : t({ it: `Duplicati ${newIds.length} oggetti`, en: `Duplicated ${newIds.length} objects` }),
-            'success'
+            t({
+              it: 'Non puoi copiare utenti reali su un altro cliente.',
+              en: 'You cannot copy real users to another client.'
+            }),
+            'danger'
           );
+          return;
         }
+        const crossPlan = !!(clipboard.sourcePlanId && clipboard.sourcePlanId !== (currentPlan as FloorPlan).id);
+        const duplicates = hasRealUsers && targetClientId ? getRealUserPasteDuplicates(clipboard, targetClientId) : [];
+        if (crossPlan || duplicates.length) {
+          const fromName =
+            String(clipboard.sourcePlanName || '') || t({ it: 'Planimetria', en: 'Floor plan' });
+          const toName = String((currentPlan as FloorPlan).name || '') || t({ it: 'Planimetria', en: 'Floor plan' });
+          const parts: string[] = [];
+          if (crossPlan) {
+            parts.push(
+              t({
+                it: `Stai incollando oggetti dalla planimetria "${fromName}" alla planimetria "${toName}".`,
+                en: `You are pasting objects from "${fromName}" into "${toName}".`
+              })
+            );
+          }
+          if (duplicates.length) {
+            const list = duplicates.map((d) => `${d.name} (${d.planName})`).join(', ');
+            parts.push(
+              duplicates.length === 1
+                ? t({
+                    it: `L'utente reale ${list} è già presente nel cliente.`,
+                    en: `The real user ${list} is already present in this client.`
+                  })
+                : t({
+                    it: `Gli utenti reali ${list} sono già presenti nel cliente.`,
+                    en: `The real users ${list} are already present in this client.`
+                  })
+            );
+          }
+          parts.push(t({ it: 'Vuoi procedere comunque?', en: 'Do you want to proceed anyway?' }));
+          setPasteConfirm({
+            title: t({ it: 'Conferma incolla', en: 'Confirm paste' }),
+            description: parts.join(' '),
+            clipboard,
+            targetPlanId: (currentPlan as FloorPlan).id
+          });
+          return;
+        }
+        performPaste(clipboard, currentPlan as FloorPlan);
         return;
       }
 
@@ -4416,6 +4951,30 @@ const PlanView = ({ planId }: Props) => {
       if (isTyping) return;
 
       const key = e.key.toLowerCase();
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && key === 'e') {
+        if (!currentPlan || isReadOnlyRef.current) return;
+        if (currentSelectedIds.length) {
+          if (currentSelectedIds.length !== 1) return;
+          const targetId = currentSelectedIds[0];
+          const obj = (currentPlan as FloorPlan).objects?.find((o) => o.id === targetId);
+          if (!obj || isDeskType(obj.type)) return;
+          e.preventDefault();
+          handleEdit(targetId);
+          return;
+        }
+        const linkId = selectedLinkIdRef.current;
+        if (linkId && !isRackLinkId(linkId)) {
+          e.preventDefault();
+          setLinkEditId(linkId);
+          return;
+        }
+        const roomId = selectedRoomIdRef.current;
+        if (roomId) {
+          e.preventDefault();
+          openEditRoom(roomId);
+        }
+        return;
+      }
       if (!e.ctrlKey && !e.metaKey && !e.altKey && key === 'b' && !e.shiftKey) {
         if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
         const textObjs = currentSelectedIds
@@ -4670,48 +5229,44 @@ const PlanView = ({ planId }: Props) => {
     return () => window.removeEventListener('keydown', handler, true);
   }, [
     addRevision,
-    addObject,
     addLink,
-    ensureObjectLayerVisible,
     cancelScaleMode,
-    deleteObject,
-    push,
     clearSelection,
-    finishWallDraw,
-    roomDrawMode,
-    wallDrawMode,
-    scaleMode,
-    measureMode,
-    quoteMode,
-    selectedRoomId,
-    linkFromId,
+    client,
     deleteLink,
+    deleteObject,
+    finishWallDraw,
+    getPlanUnsavedChanges,
+    getQuoteOrientation,
+    getRealUserPasteDuplicates,
+    isDeskType,
+    isWallType,
+    linkFromId,
     markTouched,
+    measureMode,
+    moveObject,
+    pasteConfirm,
+    performPaste,
     performRedo,
     performUndo,
+    postAuditEvent,
+    push,
+    quoteMode,
     resetTouched,
-    setSelection,
+    roomDrawMode,
+    saveRevisionOpen,
+    scaleMode,
+    selectedRoomId,
+    selectedRoomIds,
     setContextMenu,
-    startWallDraw,
+    setSelection,
     startQuote,
+    startWallDraw,
     stopMeasure,
     stopQuote,
     t,
     toSnapshot,
-    moveObject,
     updateObject,
-    isDeskType,
-    isWallType,
-    inferDefaultLayerIds,
-    layerIdSet,
-    loadCustomValues,
-    saveCustomValues,
-    postAuditEvent,
-    getTypeLabel,
-    getQuoteOrientation,
-    getPlanUnsavedChanges,
-    saveRevisionOpen,
-    selectedRoomIds,
     updateQuoteLabelPos
   ]);
 
@@ -5141,6 +5696,16 @@ const PlanView = ({ planId }: Props) => {
   }, [layersPopoverOpen]);
 
   useEffect(() => {
+    if (!layersQuickMenu) return;
+    const handleClick = (event: MouseEvent) => {
+      if (layersQuickMenuRef.current?.contains(event.target as Node)) return;
+      setLayersQuickMenu(null);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [layersQuickMenu]);
+
+  useEffect(() => {
     if (!roomsOpen) return;
     setExpandedRoomId(null);
     setNewRoomMenuOpen(false);
@@ -5242,9 +5807,26 @@ const PlanView = ({ planId }: Props) => {
     (payload: { roomId: string; roomName: string; kind: 'rect' | 'poly'; rect?: { x: number; y: number; width: number; height: number }; points?: { x: number; y: number }[] }) => {
       const segments = buildRoomWallSegments({ kind: payload.kind, rect: payload.rect, points: payload.points });
       if (!segments.length) return;
-      setRoomWallTypeModal({ roomId: payload.roomId, roomName: payload.roomName, segments });
+      setRoomWallTypeModal({ roomId: payload.roomId, roomName: payload.roomName, segments, mode: 'create' });
     },
     [buildRoomWallSegments]
+  );
+
+  const openWallGroupModal = useCallback(
+    (wallId: string) => {
+      const data = getWallPolygonData(wallId);
+      if (!data || data.segments.length < 3) return false;
+      setRoomWallTypeModal({
+        roomId: data.roomId,
+        roomName: data.roomName,
+        segments: data.segments,
+        mode: 'edit',
+        wallIds: data.wallIds,
+        wallTypes: data.wallTypes
+      });
+      return true;
+    },
+    [getWallPolygonData]
   );
 
   const handleCreateWallsForRoom = useCallback(() => {
@@ -5662,6 +6244,7 @@ const PlanView = ({ planId }: Props) => {
     }
     if (obj && isDeskType(obj.type)) return;
     if (obj && isWallType(obj.type)) {
+      if (openWallGroupModal(obj.id)) return;
       setWallTypeModal({ ids: [obj.id], typeId: obj.type });
       return;
     }
@@ -5673,6 +6256,7 @@ const PlanView = ({ planId }: Props) => {
     const obj = renderPlan?.objects.find((o) => o.id === objectId);
     if (obj && isDeskType(obj.type)) return;
     if (obj && isWallType(obj.type)) {
+      if (openWallGroupModal(obj.id)) return;
       setWallTypeModal({ ids: [obj.id], typeId: obj.type });
       return;
     }
@@ -6030,6 +6614,7 @@ const PlanView = ({ planId }: Props) => {
       const isExactRoomMatch =
         !!onlyRoom && String(onlyRoom.name || '').trim().toLowerCase() === normalized;
       if (isExactObjectMatch && onlyObject) {
+        if (promptRevealForObject(onlyObject)) return;
         setSelectedObject(onlyObject.id);
         triggerHighlight(onlyObject.id);
         if (searchDebugEnabled) {
@@ -6341,6 +6926,11 @@ const PlanView = ({ planId }: Props) => {
               <div ref={layersPopoverRef} className="relative">
                 <button
                   onClick={() => setLayersPopoverOpen((v) => !v)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setLayersQuickMenu({ x: e.clientX, y: e.clientY });
+                    setLayersPopoverOpen(false);
+                  }}
                   className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                   title={t({ it: 'Layers visibili', en: 'Visible layers' })}
                 >
@@ -6883,6 +7473,9 @@ const PlanView = ({ planId }: Props) => {
                 setSearchResultsRooms([]);
               }}
               onSelectObject={(id) => {
+                const obj = renderPlan?.objects.find((o) => o.id === id);
+                if (!obj) return;
+                if (promptRevealForObject(obj)) return;
                 setSelectedObject(id);
                 triggerHighlight(id);
               }}
@@ -7752,6 +8345,17 @@ const PlanView = ({ planId }: Props) => {
           </button>
           <button
             onClick={() => {
+              handleEdit(wallQuickMenu.id);
+              setWallQuickMenu(null);
+              setWallTypeMenu(null);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20"
+            title={t({ it: 'Modifica muro', en: 'Edit wall' })}
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            onClick={() => {
               setConfirmDelete([wallQuickMenu.id]);
               setWallQuickMenu(null);
               setWallTypeMenu(null);
@@ -7771,6 +8375,37 @@ const PlanView = ({ planId }: Props) => {
             title={t({ it: 'Dividi muro', en: 'Split wall' })}
           >
             <Plus size={14} />
+          </button>
+        </div>
+      ) : null}
+
+      {layersQuickMenu ? (
+        <div
+          ref={layersQuickMenuRef}
+          className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-xs shadow-card"
+          style={{ top: layersQuickMenu.y, left: layersQuickMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              setHideAllLayers(planId, false);
+              setVisibleLayerIds(planId, layerIds);
+              setLayersQuickMenu(null);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left font-semibold text-slate-700 hover:bg-slate-50"
+            title={t({ it: 'Mostra tutti i livelli', en: 'Show all layers' })}
+          >
+            <Eye size={14} className="text-slate-500" /> {t({ it: 'Mostra tutti i livelli', en: 'Show all layers' })}
+          </button>
+          <button
+            onClick={() => {
+              setHideAllLayers(planId, true);
+              setLayersQuickMenu(null);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left font-semibold text-slate-700 hover:bg-slate-50"
+            title={t({ it: 'Nascondi tutti i livelli', en: 'Hide all layers' })}
+          >
+            <EyeOff size={14} className="text-slate-500" /> {t({ it: 'Nascondi tutti i livelli', en: 'Hide all layers' })}
           </button>
         </div>
       ) : null}
@@ -7959,6 +8594,18 @@ const PlanView = ({ planId }: Props) => {
                               it: contextWifiRangeOn ? 'Nascondi range' : 'Mostra range',
                               en: contextWifiRangeOn ? 'Hide range' : 'Show range'
                             })}
+                          </button>
+                        ) : null}
+                        {contextIsWall && contextWallPolygon ? (
+                          <button
+                            onClick={() => {
+                              openWallGroupModal(contextMenu.id);
+                              setContextMenu(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                            title={t({ it: 'Modifica poligono', en: 'Edit polygon' })}
+                          >
+                            <Pencil size={14} /> {t({ it: 'Modifica poligono', en: 'Edit polygon' })}
                           </button>
                         ) : null}
                         {canEditWallType ? (
@@ -8323,6 +8970,44 @@ const PlanView = ({ planId }: Props) => {
                       </>
                     )}
 
+                    {contextIsMulti ? (
+                      <div className="relative mt-2">
+                        <button
+                          onClick={() => setAlignMenuOpen((v) => !v)}
+                          className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          title={t({ it: 'Allinea', en: 'Align' })}
+                        >
+                          <span>{t({ it: 'Allinea', en: 'Align' })}</span>
+                          <ChevronRight size={14} className="text-slate-400" />
+                        </button>
+                        {alignMenuOpen ? (
+                          <div className="absolute left-full top-0 z-10 ml-2 w-40 rounded-xl border border-slate-200 bg-white p-2 text-xs shadow-card">
+                            <div className="grid grid-cols-1 gap-1">
+                              <button
+                                onClick={() => {
+                                  alignSelection('horizontal', contextMenu.id);
+                                  setAlignMenuOpen(false);
+                                  setContextMenu(null);
+                                }}
+                                className="rounded-md px-2 py-1 text-left font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                {t({ it: 'Allinea orizzontale', en: 'Align horizontally' })}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  alignSelection('vertical', contextMenu.id);
+                                  setAlignMenuOpen(false);
+                                  setContextMenu(null);
+                                }}
+                                className="rounded-md px-2 py-1 text-left font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                {t({ it: 'Allinea verticale', en: 'Align vertically' })}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {contextIsMulti ? (
                       !isReadOnly && selectedObjectIds.length === 2 && !selectionHasRack && !selectionHasDesk ? (
                         <button
@@ -9046,8 +9731,14 @@ const PlanView = ({ planId }: Props) => {
                   </Dialog.Title>
                   <div className="mt-2 text-sm text-slate-600">
                     {t({
-                      it: `Seleziona il materiale per i muri della stanza "${roomWallTypeModal?.roomName || 'stanza'}".`,
-                      en: `Choose the wall material for room "${roomWallTypeModal?.roomName || 'room'}".`
+                      it:
+                        roomWallTypeModal?.mode === 'edit'
+                          ? `Modifica il materiale per i muri della stanza "${roomWallTypeModal?.roomName || 'stanza'}".`
+                          : `Seleziona il materiale per i muri della stanza "${roomWallTypeModal?.roomName || 'stanza'}".`,
+                      en:
+                        roomWallTypeModal?.mode === 'edit'
+                          ? `Edit the wall material for room "${roomWallTypeModal?.roomName || 'room'}".`
+                          : `Choose the wall material for room "${roomWallTypeModal?.roomName || 'room'}".`
                     })}
                   </div>
                   {roomWallPreview ? (
@@ -9124,7 +9815,9 @@ const PlanView = ({ planId }: Props) => {
                       onClick={createRoomWalls}
                       className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
                     >
-                      {t({ it: 'Crea muri', en: 'Create walls' })}
+                      {roomWallTypeModal?.mode === 'edit'
+                        ? t({ it: 'Salva muri', en: 'Save walls' })
+                        : t({ it: 'Crea muri', en: 'Create walls' })}
                     </button>
                   </div>
                 </Dialog.Panel>
@@ -9223,6 +9916,18 @@ const PlanView = ({ planId }: Props) => {
         getObjectName={getObjectNameById}
         onPickObject={openEditFromSelectionList}
         onPickLink={openLinkEditFromSelectionList}
+        onRemoveFromSelection={(objectId) => {
+          const next = selectedObjectIds.filter((id) => id !== objectId);
+          setSelection(next);
+          if (selectedObjectId === objectId) {
+            setSelectedObject(next[0]);
+          }
+        }}
+        onFocusObject={(objectId) => {
+          setSelectedObjectsModalOpen(false);
+          setSelectedObject(objectId);
+          triggerHighlight(objectId);
+        }}
         readOnly={isReadOnly}
         onSetScaleAll={(scale) => {
           if (isReadOnly) return;
@@ -10027,6 +10732,25 @@ const PlanView = ({ planId }: Props) => {
         }}
       />
 
+      <ConfirmDialog
+        open={!!pasteConfirm}
+        title={pasteConfirm?.title || ''}
+        description={pasteConfirm?.description}
+        confirmLabel={t({ it: 'Incolla', en: 'Paste' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+        onCancel={() => setPasteConfirm(null)}
+        onConfirm={() => {
+          if (!pasteConfirm) return;
+          const currentPlan = planRef.current;
+          if (!currentPlan || currentPlan.id !== pasteConfirm.targetPlanId) {
+            setPasteConfirm(null);
+            return;
+          }
+          performPaste(pasteConfirm.clipboard, currentPlan);
+          setPasteConfirm(null);
+        }}
+      />
+
       <RoomAllocationModal
         open={roomAllocationOpen}
         rooms={rooms}
@@ -10094,13 +10818,43 @@ const PlanView = ({ planId }: Props) => {
         }}
       />
 
-	      <ConfirmDialog
-	        open={!!confirmDelete}
-	        title={
-            confirmDelete && confirmDelete.length > 1
-              ? t({ it: 'Eliminare gli oggetti?', en: 'Delete objects?' })
-              : t({ it: 'Eliminare l’oggetto?', en: 'Delete object?' })
-          }
+      <ConfirmDialog
+        open={!!layerRevealPrompt}
+        title={t({ it: 'Oggetto in layer nascosto', en: 'Object in hidden layer' })}
+        description={
+          layerRevealPrompt
+            ? t({
+                it: `Per visualizzare "${getObjectToastLabel(layerRevealPrompt.objectName, layerRevealPrompt.typeId)}" devi attivare il layer ${getLayerLabel(layerRevealPrompt.missingLayerIds[0])}${
+                  layerRevealPrompt.missingLayerIds.length > 1 ? ' (e altri).' : '.'
+                }`,
+                en: `To show "${getObjectToastLabel(layerRevealPrompt.objectName, layerRevealPrompt.typeId)}" you need to enable layer ${getLayerLabel(layerRevealPrompt.missingLayerIds[0])}${
+                  layerRevealPrompt.missingLayerIds.length > 1 ? ' (and others).' : '.'
+                }`
+              })
+            : undefined
+        }
+        onCancel={() => setLayerRevealPrompt(null)}
+        onConfirm={() => {
+          if (!layerRevealPrompt) return;
+          const missing = layerRevealPrompt.missingLayerIds;
+          if (hideAllLayers) setHideAllLayers(planId, false);
+          const next = normalizeLayerSelection([...visibleLayerIds, ...missing]);
+          setVisibleLayerIds(planId, next);
+          const targetId = layerRevealPrompt.objectId;
+          setLayerRevealPrompt(null);
+          setSelectedObject(targetId);
+          triggerHighlight(targetId);
+        }}
+        confirmLabel={t({ it: 'Mostra', en: 'Show' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+      />
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title={
+          confirmDelete && confirmDelete.length > 1
+            ? t({ it: 'Eliminare gli oggetti?', en: 'Delete objects?' })
+            : t({ it: 'Eliminare l’oggetto?', en: 'Delete object?' })
+        }
 	        description={
 	          (() => {
 	            if (!confirmDelete || !confirmDelete.length)
