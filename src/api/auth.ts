@@ -36,11 +36,12 @@ export class MFARequiredError extends Error {
 }
 
 export const login = async (username: string, password: string, otp?: string): Promise<void> => {
+  const normalizedUsername = String(username || '').trim().toLowerCase();
   const res = await apiFetch('/api/auth/login', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, ...(otp ? { otp } : {}) })
+    body: JSON.stringify({ username: normalizedUsername, password, ...(otp ? { otp } : {}) })
   });
   if (!res.ok) {
     if (res.status === 429) {
@@ -136,11 +137,12 @@ export const adminCreateUser = async (payload: {
   isAdmin: boolean;
   permissions: Permission[];
 }): Promise<{ ok: boolean; id: string }> => {
+  const normalizedUsername = String(payload.username || '').trim().toLowerCase();
   const res = await apiFetch('/api/users', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ ...payload, username: normalizedUsername })
   });
   if (!res.ok) throw new Error(`Failed to create user (${res.status})`);
   return res.json();

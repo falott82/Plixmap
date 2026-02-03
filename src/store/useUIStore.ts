@@ -25,12 +25,15 @@ interface UIState {
   roomCapacityStateByPlan: Record<string, Record<string, { userCount: number; capacity?: number }>>;
   perfOverlayEnabled: boolean;
   hiddenLayersByPlan: Record<string, boolean>;
+  expandedClients: Record<string, boolean>;
+  expandedSites: Record<string, boolean>;
   lastQuoteScale: number;
   lastQuoteColor: string;
   lastQuoteLabelPosH: 'center' | 'above' | 'below';
   lastQuoteLabelPosV: 'center' | 'left' | 'right';
   lastQuoteLabelScale: number;
   lastQuoteLabelBg: boolean;
+  lastQuoteLabelColor: string;
   lastQuoteDashed: boolean;
   lastQuoteEndpoint: 'arrows' | 'dots' | 'none';
   pendingPostSaveAction: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null;
@@ -62,12 +65,17 @@ interface UIState {
   setRoomCapacityState: (planId: string, state: Record<string, { userCount: number; capacity?: number }>) => void;
   togglePerfOverlay: () => void;
   setHideAllLayers: (planId: string, hidden: boolean) => void;
+  setExpandedClients: (expanded: Record<string, boolean>) => void;
+  setExpandedSites: (expanded: Record<string, boolean>) => void;
+  toggleClientExpanded: (clientId: string, expanded?: boolean) => void;
+  toggleSiteExpanded: (siteKey: string, expanded?: boolean) => void;
   setLastQuoteScale: (scale: number) => void;
   setLastQuoteColor: (color: string) => void;
   setLastQuoteLabelPosH: (pos: 'center' | 'above' | 'below') => void;
   setLastQuoteLabelPosV: (pos: 'center' | 'left' | 'right') => void;
   setLastQuoteLabelScale: (scale: number) => void;
   setLastQuoteLabelBg: (value: boolean) => void;
+  setLastQuoteLabelColor: (color: string) => void;
   setLastQuoteDashed: (value: boolean) => void;
   setLastQuoteEndpoint: (value: 'arrows' | 'dots' | 'none') => void;
   setPendingPostSaveAction: (action: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null) => void;
@@ -95,12 +103,15 @@ export const useUIStore = create<UIState>()(
       roomCapacityStateByPlan: {},
       perfOverlayEnabled: false,
       hiddenLayersByPlan: {},
+      expandedClients: {},
+      expandedSites: {},
       lastQuoteScale: 1,
       lastQuoteColor: '#f97316',
       lastQuoteLabelPosH: 'center',
       lastQuoteLabelPosV: 'center',
       lastQuoteLabelScale: 1,
-      lastQuoteLabelBg: true,
+      lastQuoteLabelBg: false,
+      lastQuoteLabelColor: '#0f172a',
       lastQuoteDashed: false,
       lastQuoteEndpoint: 'arrows',
       pendingPostSaveAction: null,
@@ -181,12 +192,39 @@ export const useUIStore = create<UIState>()(
       togglePerfOverlay: () => set((state) => ({ perfOverlayEnabled: !state.perfOverlayEnabled })),
       setHideAllLayers: (planId, hidden) =>
         set((state) => ({ hiddenLayersByPlan: { ...state.hiddenLayersByPlan, [planId]: !!hidden } })),
+      setExpandedClients: (expanded) => set({ expandedClients: { ...(expanded || {}) } }),
+      setExpandedSites: (expanded) => set({ expandedSites: { ...(expanded || {}) } }),
+      toggleClientExpanded: (clientId, expanded) =>
+        set((state) => {
+          const isExpanded = state.expandedClients[clientId] !== false;
+          const nextValue = typeof expanded === 'boolean' ? expanded : !isExpanded;
+          const next = { ...state.expandedClients };
+          if (nextValue) {
+            if (clientId in next) delete next[clientId];
+          } else {
+            next[clientId] = false;
+          }
+          return { expandedClients: next };
+        }),
+      toggleSiteExpanded: (siteKey, expanded) =>
+        set((state) => {
+          const isExpanded = state.expandedSites[siteKey] !== false;
+          const nextValue = typeof expanded === 'boolean' ? expanded : !isExpanded;
+          const next = { ...state.expandedSites };
+          if (nextValue) {
+            if (siteKey in next) delete next[siteKey];
+          } else {
+            next[siteKey] = false;
+          }
+          return { expandedSites: next };
+        }),
       setLastQuoteScale: (scale) => set({ lastQuoteScale: scale }),
       setLastQuoteColor: (color) => set({ lastQuoteColor: color || '#f97316' }),
       setLastQuoteLabelPosH: (pos) => set({ lastQuoteLabelPosH: pos || 'center' }),
       setLastQuoteLabelPosV: (pos) => set({ lastQuoteLabelPosV: pos || 'center' }),
       setLastQuoteLabelScale: (scale) => set({ lastQuoteLabelScale: Math.max(0.6, Math.min(2, Number(scale) || 1)) }),
       setLastQuoteLabelBg: (value) => set({ lastQuoteLabelBg: !!value }),
+      setLastQuoteLabelColor: (color) => set({ lastQuoteLabelColor: color || '#0f172a' }),
       setLastQuoteDashed: (value) => set({ lastQuoteDashed: !!value }),
       setLastQuoteEndpoint: (value) => set({ lastQuoteEndpoint: value || 'arrows' }),
       setPendingPostSaveAction: (action) => set({ pendingPostSaveAction: action }),
@@ -194,17 +232,20 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'deskly-ui',
-      version: 5,
+      version: 7,
       migrate: (persistedState: any, _version: number) => {
         if (persistedState && typeof persistedState === 'object') {
           // Do not persist time-machine selection across reloads (always start from "present").
           if ('selectedRevisionByPlan' in persistedState) delete persistedState.selectedRevisionByPlan;
+          if (!('expandedClients' in persistedState)) persistedState.expandedClients = {};
+          if (!('expandedSites' in persistedState)) persistedState.expandedSites = {};
           if (!('lastQuoteScale' in persistedState)) persistedState.lastQuoteScale = 1;
           if (!('lastQuoteColor' in persistedState)) persistedState.lastQuoteColor = '#f97316';
           if (!('lastQuoteLabelPosH' in persistedState)) persistedState.lastQuoteLabelPosH = 'center';
           if (!('lastQuoteLabelPosV' in persistedState)) persistedState.lastQuoteLabelPosV = 'center';
           if (!('lastQuoteLabelScale' in persistedState)) persistedState.lastQuoteLabelScale = 1;
-          if (!('lastQuoteLabelBg' in persistedState)) persistedState.lastQuoteLabelBg = true;
+          if (!('lastQuoteLabelBg' in persistedState)) persistedState.lastQuoteLabelBg = false;
+          if (!('lastQuoteLabelColor' in persistedState)) persistedState.lastQuoteLabelColor = '#0f172a';
           if (!('lastQuoteDashed' in persistedState)) persistedState.lastQuoteDashed = false;
           if (!('lastQuoteEndpoint' in persistedState)) persistedState.lastQuoteEndpoint = 'arrows';
         }
@@ -222,12 +263,15 @@ export const useUIStore = create<UIState>()(
         showPrintAreaByPlan: state.showPrintAreaByPlan,
         roomCapacityStateByPlan: state.roomCapacityStateByPlan,
         perfOverlayEnabled: state.perfOverlayEnabled,
+        expandedClients: state.expandedClients,
+        expandedSites: state.expandedSites,
         lastQuoteScale: state.lastQuoteScale,
         lastQuoteColor: state.lastQuoteColor,
         lastQuoteLabelPosH: state.lastQuoteLabelPosH,
         lastQuoteLabelPosV: state.lastQuoteLabelPosV,
         lastQuoteLabelScale: state.lastQuoteLabelScale,
         lastQuoteLabelBg: state.lastQuoteLabelBg,
+        lastQuoteLabelColor: state.lastQuoteLabelColor,
         lastQuoteDashed: state.lastQuoteDashed,
         lastQuoteEndpoint: state.lastQuoteEndpoint
       })

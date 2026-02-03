@@ -62,7 +62,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       setPermMap(seedClientExists ? { [SEED_CLIENT_ID]: 'rw' } : {});
       setImportFromUserId('');
     } else {
-      setUsername(initial?.username || '');
+      setUsername((initial?.username || '').toLowerCase());
       setPassword('');
       setConfirmPassword('');
       setFirstName(initial?.firstName || '');
@@ -162,7 +162,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
     if (!canSubmit) return;
     const lockedDisabled = initial?.isSuperAdmin ? false : disabled;
     onSubmit({
-      ...(mode === 'create' ? { username: username.trim(), password } : {}),
+      ...(mode === 'create' ? { username: username.trim().toLowerCase(), password } : {}),
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       phone: phone.trim(),
@@ -223,7 +223,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                           <input
                             ref={userRef}
                             value={username}
-                            onChange={(e) => setUsername(e.target.value)}
+                            onChange={(e) => setUsername(e.target.value.toLowerCase())}
                             required
                             className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                             placeholder=""

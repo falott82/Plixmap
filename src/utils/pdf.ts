@@ -274,8 +274,18 @@ export const renderFloorPlanToJpegDataUrl = async (
       const midY = (y1 + y2) / 2;
       const orientation = Math.abs(y2 - y1) > Math.abs(x2 - x1) ? 'vertical' : 'horizontal';
       const labelPos = String((quote as any).quoteLabelPos || 'center');
-      const labelBg = (quote as any).quoteLabelBg !== false;
-      const offset = Math.max(6, Math.round(6 * labelScale * worldToPx)) + textH / 2;
+      const labelBg = labelPos === 'center' || (quote as any).quoteLabelBg === true;
+      const labelColor = String((quote as any).quoteLabelColor || '#0f172a');
+      const labelOffsetRaw = Number((quote as any).quoteLabelOffset);
+      const labelOffsetFactor = Number.isFinite(labelOffsetRaw) && labelOffsetRaw > 0 ? labelOffsetRaw : null;
+      const baseOffset = Math.max(6, Math.round(6 * labelScale * worldToPx));
+      const perpSize = orientation === 'vertical' ? textW : textH;
+      const sideFactor = orientation === 'vertical' && (labelPos === 'left' || labelPos === 'right') ? 0.2 : 0.5;
+      const defaultFactor =
+        orientation === 'horizontal' && labelPos === 'below'
+          ? 1.15
+          : 1;
+      const offset = (baseOffset + perpSize / 2) * sideFactor * (labelOffsetFactor ?? defaultFactor);
       let offsetX = 0;
       let offsetY = 0;
       if (orientation === 'vertical') {
@@ -295,7 +305,7 @@ export const renderFloorPlanToJpegDataUrl = async (
         drawRoundRect(ctx, -textW / 2, -textH / 2, textW, textH, Math.max(3, Math.round(4 * labelScale)));
         ctx.fill();
       }
-      ctx.fillStyle = '#0f172a';
+      ctx.fillStyle = labelColor;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.font = `bold ${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif`;
@@ -399,6 +409,7 @@ export const renderFloorPlanToJpegDataUrl = async (
   if (opts.includeObjects) {
     const includeDesks = opts.includeDesks ?? true;
     const iconCache = new Map<string, HTMLImageElement>();
+    const imageCache = new Map<string, HTMLImageElement>();
     const getIconImg = async (typeId: string) => {
       const iconName = opts.objectTypeIcons?.[typeId];
       if (!iconName) return null;
@@ -409,6 +420,18 @@ export const renderFloorPlanToJpegDataUrl = async (
         return ii;
       } catch {
         iconCache.set(iconName, null as any);
+        return null;
+      }
+    };
+    const getObjectImage = async (src: string) => {
+      if (!src) return null;
+      if (imageCache.has(src)) return imageCache.get(src) || null;
+      try {
+        const img = await loadImage(src);
+        imageCache.set(src, img);
+        return img;
+      } catch {
+        imageCache.set(src, null as any);
         return null;
       }
     };
@@ -424,12 +447,84 @@ export const renderFloorPlanToJpegDataUrl = async (
       if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
       if (cx < -200 || cy < -200 || cx > outW + 200 || cy > outH + 200) continue;
 
-      const oScale = Number(obj.scale ?? 1) || 1;
+      const baseScale = Number(obj.scale ?? 1) || 1;
       const objectOpacity = typeof obj.opacity === 'number' ? Math.max(0.2, Math.min(1, obj.opacity)) : 1;
+      const isDesk = isDeskType(String(obj.type || ''));
+      const isText = obj.type === 'text';
+      const isImage = obj.type === 'image';
+      const oScale = isText || isImage ? 1 : baseScale;
       const markerSize = 36 * worldToPx * oScale;
       const iconSize = 18 * worldToPx * oScale;
       const corner = 12 * worldToPx * oScale;
-      const isDesk = isDeskType(String(obj.type || ''));
+
+      if (isText) {
+        const textValue = String(obj.name || '');
+        const textLines = textValue ? textValue.split('\n') : [''];
+        const textFont = (obj as any).textFont || 'Arial, sans-serif';
+        const textSizeRaw = Number((obj as any).textSize ?? 18) || 18;
+        const textBg = (obj as any).textBg !== false;
+        const textBgColor = (obj as any).textBgColor || '#ffffff';
+        const textScaleX = Number(obj.scaleX ?? 1) || 1;
+        const textScaleY = Number(obj.scaleY ?? 1) || 1;
+        const rotation = (Number(obj.rotation || 0) * Math.PI) / 180;
+        const fontPx = Math.max(6, Math.round(textSizeRaw * worldToPx * oScale));
+        const lineH = fontPx * 1.2;
+        const totalH = textLines.length * lineH;
+        const textPadding = Math.max(4, Math.round(fontPx * 0.35));
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rotation);
+        ctx.scale(textScaleX, textScaleY);
+        ctx.globalAlpha = objectOpacity;
+        ctx.fillStyle = (obj as any).textColor || '#000000';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `${fontPx}px ${textFont}`;
+        if (textBg) {
+          const widths = textLines.map((line) => ctx.measureText(line).width);
+          const maxW = widths.length ? Math.max(...widths) : 0;
+          const bgW = maxW + textPadding * 2;
+          const bgH = totalH + textPadding * 2;
+          ctx.fillStyle = textBgColor;
+          drawRoundRect(ctx, -bgW / 2, -bgH / 2, bgW, bgH, Math.max(4, Math.round(fontPx * 0.25)));
+          ctx.fill();
+          ctx.fillStyle = (obj as any).textColor || '#000000';
+        }
+        const startY = -totalH / 2 + lineH / 2;
+        for (let i = 0; i < textLines.length; i += 1) {
+          ctx.fillText(textLines[i], 0, startY + i * lineH);
+        }
+        ctx.restore();
+        continue;
+      }
+
+      if (isImage) {
+        const src = String((obj as any).imageUrl || '');
+        const img = src ? await getObjectImage(src) : null;
+        const baseW = Number((obj as any).imageWidth ?? 160) || 160;
+        const baseH = Number((obj as any).imageHeight ?? 120) || 120;
+        const drawW = baseW * worldToPx * oScale;
+        const drawH = baseH * worldToPx * oScale;
+        const imgScaleX = Number(obj.scaleX ?? 1) || 1;
+        const imgScaleY = Number(obj.scaleY ?? 1) || 1;
+        const rotation = (Number(obj.rotation || 0) * Math.PI) / 180;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rotation);
+        ctx.scale(imgScaleX, imgScaleY);
+        ctx.globalAlpha = objectOpacity;
+        if (img) {
+          ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+        } else {
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = Math.max(1, worldToPx);
+          ctx.setLineDash([6 * worldToPx, 4 * worldToPx]);
+          ctx.strokeRect(-drawW / 2, -drawH / 2, drawW, drawH);
+          ctx.setLineDash([]);
+        }
+        ctx.restore();
+        continue;
+      }
 
       // label (same logic as CanvasStage)
       const labelText =

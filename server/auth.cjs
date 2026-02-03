@@ -114,7 +114,7 @@ const ensureBootstrapAdmins = (db) => {
   if (count > 0) {
     try {
       const row = db
-        .prepare('SELECT id, passwordSalt, passwordHash, mustChangePassword FROM users WHERE username = ?')
+        .prepare('SELECT id, passwordSalt, passwordHash, mustChangePassword FROM users WHERE lower(username) = ?')
         .get('superadmin');
       if (row && Number(row.mustChangePassword) === 1) {
         const isDefault = verifyPassword('deskly', row.passwordSalt, row.passwordHash);
@@ -139,10 +139,11 @@ const ensureBootstrapAdmins = (db) => {
      VALUES (?, ?, ?, ?, 1, 1, 1, 0, 'it', ?, 1, ?, ?, ?, ?, ?, ?, ?)`
   );
   const createSuperAdmin = (username, password, defaultPlanId, firstName, lastName, email) => {
+    const normalizedUsername = String(username || '').trim().toLowerCase();
     const { salt, hash } = hashPassword(password);
     insert.run(
       crypto.randomUUID(),
-      username,
+      normalizedUsername,
       salt,
       hash,
       defaultPlanId,

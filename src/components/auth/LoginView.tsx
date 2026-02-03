@@ -37,7 +37,7 @@ const LoginView = () => {
     setError(null);
     setLoading(true);
     try {
-      await login(username.trim(), password, otpRequired ? otp.trim() : undefined);
+      await login(username.trim().toLowerCase(), password, otpRequired ? otp.trim() : undefined);
       navigate('/', { replace: true });
     } catch (e: any) {
       if (e?.lockedUntil) {
@@ -94,7 +94,7 @@ const LoginView = () => {
               <User size={16} className="absolute left-3 top-3 text-slate-400" />
               <input
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) => setUsername(e.target.value.toLowerCase())}
                 className="w-full rounded-xl border border-slate-200 bg-white/90 pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                 placeholder={t({ it: 'Nome utente', en: 'Username' })}
                 autoComplete="username"
