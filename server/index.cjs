@@ -672,10 +672,11 @@ const requireAuth = (req, res, next) => {
       return;
     }
   }
+  const normalizedUsername = String(userRow.username || '').toLowerCase();
   req.userId = session.userId;
-  req.username = userRow.username;
+  req.username = normalizedUsername;
   req.isAdmin = !!userRow.isAdmin;
-  req.isSuperAdmin = !!userRow.isSuperAdmin && userRow.username === 'superadmin';
+  req.isSuperAdmin = !!userRow.isSuperAdmin && normalizedUsername === 'superadmin';
   ensureCsrfCookie(req, res);
   next();
 };
@@ -698,14 +699,14 @@ const getWsAuthContext = (req) => {
   const row = db.prepare('SELECT id, username, disabled FROM users WHERE id = ?').get(session.userId);
   if (!row) return null;
   if (Number(row.disabled) === 1) return null;
-  return { userId: row.id, username: row.username };
+  return { userId: row.id, username: String(row.username || '').toLowerCase() };
 };
 
 // Public: used by the login UI to decide whether to show first-run credentials.
 app.get('/api/auth/bootstrap-status', (_req, res) => {
   try {
     const row = db
-      .prepare("SELECT mustChangePassword, passwordSalt, passwordHash FROM users WHERE username = 'superadmin'")
+      .prepare("SELECT mustChangePassword, passwordSalt, passwordHash FROM users WHERE lower(username) = 'superadmin'")
       .get();
     const count = db.prepare('SELECT COUNT(*) as n FROM users').get()?.n || 0;
     if (!row) {
@@ -828,7 +829,8 @@ const shouldUseSecureCookie = (req) => resolveSecureCookie(req);
 
 app.post('/api/auth/login', (req, res) => {
   const { username, password, otp } = req.body || {};
-  if (!username || !password) {
+  const normalizedUsername = normalizeLoginKey(username);
+  if (!normalizedUsername || !password) {
     res.status(400).json({ error: 'Missing username/password' });
     return;
   }
@@ -837,40 +839,39 @@ app.post('/api/auth/login', (req, res) => {
     res.status(429).json({ error: 'Too many attempts' });
     return;
   }
-  const lockedUntil = getUserLock(username);
+  const lockedUntil = getUserLock(normalizedUsername);
   if (lockedUntil) {
-    writeAuthLog(db, { event: 'login', success: false, username: String(username), ...meta, details: { reason: 'locked', lockedUntil } });
+    writeAuthLog(db, { event: 'login', success: false, username: normalizedUsername, ...meta, details: { reason: 'locked', lockedUntil } });
     res.status(429).json({ error: 'Account temporarily locked', lockedUntil });
     return;
   }
   let row = db
     .prepare(
-      'SELECT id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, mfaEnabled, mfaSecretEnc, mustChangePassword FROM users WHERE username = ?'
+      'SELECT id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, mfaEnabled, mfaSecretEnc, mustChangePassword FROM users WHERE lower(username) = ?'
     )
-    .get(String(username).trim());
+    .get(normalizedUsername);
   if (!row) {
-    const trimmed = String(username).trim();
-    if (trimmed === 'superadmin' && String(password) === 'deskly') {
+    if (normalizedUsername === 'superadmin' && String(password) === 'deskly') {
       try {
         const count = db.prepare('SELECT COUNT(*) as n FROM users').get()?.n || 0;
         if (count === 0) {
           ensureBootstrapAdmins(db);
           row = db
             .prepare(
-              'SELECT id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, mfaEnabled, mfaSecretEnc, mustChangePassword FROM users WHERE username = ?'
+              'SELECT id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, mfaEnabled, mfaSecretEnc, mustChangePassword FROM users WHERE lower(username) = ?'
             )
-            .get(trimmed);
+            .get(normalizedUsername);
         }
       } catch {
         // ignore
       }
     }
     if (!row) {
-      const lock = registerUserLoginFailure(username);
+      const lock = registerUserLoginFailure(normalizedUsername);
       if (lock.lockedNow) {
-        writeAuditLog(db, { level: 'important', event: 'login_lockout', username: String(username), ...meta, details: { lockedUntil: lock.lockedUntil } });
+        writeAuditLog(db, { level: 'important', event: 'login_lockout', username: normalizedUsername, ...meta, details: { lockedUntil: lock.lockedUntil } });
       }
-      writeAuthLog(db, { event: 'login', success: false, username: String(username), ...meta, details: { reason: 'user_not_found' } });
+      writeAuthLog(db, { event: 'login', success: false, username: normalizedUsername, ...meta, details: { reason: 'user_not_found' } });
       res.status(401).json({ error: 'Invalid credentials' });
       return;
     }
@@ -2533,12 +2534,16 @@ app.get('/api/users', requireAuth, (req, res) => {
       'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, firstName, lastName, phone, email, createdAt, updatedAt FROM users ORDER BY createdAt DESC'
     )
     .all()
-    .map((u) => ({
-      ...u,
-      isAdmin: !!u.isAdmin,
-      isSuperAdmin: !!u.isSuperAdmin && u.username === 'superadmin',
-      disabled: !!u.disabled
-    }));
+    .map((u) => {
+      const normalizedUsername = String(u.username || '').toLowerCase();
+      return {
+        ...u,
+        username: normalizedUsername,
+        isAdmin: !!u.isAdmin,
+        isSuperAdmin: !!u.isSuperAdmin && normalizedUsername === 'superadmin',
+        disabled: !!u.disabled
+      };
+    });
   const perms = db.prepare('SELECT userId, scopeType, scopeId, access FROM permissions').all();
   const permsByUser = new Map();
   for (const p of perms) {
@@ -2571,7 +2576,8 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
     isAdmin = false,
     permissions = []
   } = req.body || {};
-  if (!username || !password) {
+  const normalizedUsername = normalizeLoginKey(username);
+  if (!normalizedUsername || !password) {
     res.status(400).json({ error: 'Missing username/password' });
     return;
   }
@@ -2587,6 +2593,11 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
     res.status(403).json({ error: 'Only superadmin can create admin users' });
     return;
   }
+  const existing = db.prepare('SELECT id FROM users WHERE lower(username) = ?').get(normalizedUsername);
+  if (existing) {
+    res.status(400).json({ error: 'Username already exists' });
+    return;
+  }
   const now = Date.now();
   const id = crypto.randomUUID();
   const { salt, hash } = hashPassword(String(password));
@@ -2597,7 +2608,7 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
        VALUES (?, ?, ?, ?, 1, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
-      String(username).trim(),
+      normalizedUsername,
       salt,
       hash,
       isAdmin ? 1 : 0,
@@ -2629,7 +2640,7 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
     scopeType: 'user',
     scopeId: id,
     ...requestMeta(req),
-    details: { username: String(username).trim(), isAdmin: !!isAdmin, permissions: Array.isArray(permissions) ? permissions.length : 0 }
+    details: { username: normalizedUsername, isAdmin: !!isAdmin, permissions: Array.isArray(permissions) ? permissions.length : 0 }
   });
   res.json({ ok: true, id });
 });

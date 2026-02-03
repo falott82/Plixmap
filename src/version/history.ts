@@ -6,8 +6,65 @@ export interface ReleaseNote {
 }
 
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
-
 export const releaseHistory: ReleaseNote[] = [
+  {
+    version: '2.1.0',
+    date: '2026-02-03',
+    type: 'minor',
+    notes: [
+      n('Autenticazione: username normalizzati in minuscolo (login case-insensitive)', 'Auth: usernames normalized to lowercase (case-insensitive login)'),
+      n('Rack: collegamenti aggregati, una linea per rame e una per fibra', 'Rack: links aggregated, one line for copper and one for fiber'),
+      n('Selezione: tratteggio sui box testo e bordi più sottili', 'Selection: dashed outline for text boxes and thinner borders'),
+      n('Testo: sfondo predefinito trasparente', 'Text: default background is transparent'),
+      n('Wi-Fi: catalogo con focus forzato sulla ricerca', 'Wi-Fi: catalog forces focus on the search field')
+    ]
+  },
+  {
+    version: '2.0.7',
+    date: '2026-02-03',
+    type: 'minor',
+    notes: [
+      n('Testo: resize del box senza scalare il font', 'Text: resize the box without scaling the font'),
+      n('Selezione elastica: include testo, immagini e post-it', 'Box selection now includes text, images, and post-its'),
+      n('Sidebar: compatta/scompatta clienti e sedi con memoria + compatta/scompatta tutto', 'Sidebar: collapse/expand clients and sites with memory + collapse/expand all'),
+      n('Wi-Fi: copertura con raggio/diametro e catalogo con selezione riga, tasti e pulsante', 'Wi-Fi: coverage shows radius/diameter and catalog supports row selection, keys, and button'),
+      n('Muri: tasto destro per chiudere il disegno', 'Walls: right click to finish drawing')
+    ]
+  },
+  {
+    version: '2.0.3',
+    date: '2026-01-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Quote: rework completo del resize con apici e rilascio stabile delle posizioni',
+        'Quotes: full resize rework with endpoints and stable release positions'
+      ),
+      n(
+        'Quote: distanza etichetta configurabile da modale con default più distante quando è sotto',
+        'Quotes: configurable label distance in modal with a slightly larger default when below'
+      )
+    ]
+  },
+  {
+    version: '2.0.2',
+    date: '2026-01-31',
+    type: 'fix',
+    notes: [
+      n(
+        'Quote: apici ora rilasciano esattamente nel punto trascinato',
+        'Quotes: endpoints now release exactly where dragged'
+      ),
+      n(
+        'Quote: distanza etichetta uniforme sopra/sotto e background automatico quando centrata',
+        'Quotes: uniform label distance above/below and automatic background when centered'
+      ),
+      n(
+        'Quote: aggiunto colore testo per l’etichetta',
+        'Quotes: added label text color'
+      )
+    ]
+  },
   {
     version: '2.0.1',
     date: '2026-01-31',

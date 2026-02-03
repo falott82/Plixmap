@@ -5,8 +5,9 @@ const getUserWithPermissions = (db, userId) => {
     )
     .get(userId);
   if (!user) return null;
+  const normalizedUsername = String(user.username || '').toLowerCase();
   const isAdmin = !!user.isAdmin;
-  const isSuperAdmin = !!user.isSuperAdmin && user.username === 'superadmin';
+  const isSuperAdmin = !!user.isSuperAdmin && normalizedUsername === 'superadmin';
   const clientOrder = (() => {
     try {
       const arr = JSON.parse(user.clientOrderJson || '[]');
@@ -58,6 +59,7 @@ const getUserWithPermissions = (db, userId) => {
   return {
     user: {
       ...user,
+      username: normalizedUsername,
       clientOrder,
       paletteFavorites,
       visibleLayerIdsByPlan,

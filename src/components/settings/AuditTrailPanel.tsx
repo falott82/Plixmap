@@ -156,7 +156,10 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
           <button
             onClick={() => setConfirmClearOpen(true)}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-            title={t({ it: 'Svuota audit trail', en: 'Clear audit trail' })}
+            title={t({
+              it: 'Svuota audit trail: elimina definitivamente tutte le righe di log (non annulla azioni o modifiche).',
+              en: 'Clear audit trail: permanently deletes all log entries (does not undo actions or changes).'
+            })}
           >
             <Trash2 size={16} />
           </button>
@@ -180,7 +183,10 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
               }
             }}
             className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-ink hover:bg-slate-50"
-            title={t({ it: 'Abilita/disabilita audit esteso', en: 'Enable/disable extended audit' })}
+            title={t({
+              it: 'Audit esteso: registra eventi principali + dettagli tecnici/contesto utili per diagnosi (più righe e spazio). Audit ridotto: solo eventi principali. Non cambia il comportamento dell’app, cambia solo cosa viene salvato nel log.',
+              en: 'Extended audit: records key events plus extra technical/context details for troubleshooting (more rows and storage). Reduced audit: only key events. It does not change app behavior, only what is written in the log.'
+            })}
             disabled={auditVerboseLoading}
           >
             {auditVerbose ? <ToggleRight size={16} className="text-primary" /> : <ToggleLeft size={16} className="text-slate-500" />}

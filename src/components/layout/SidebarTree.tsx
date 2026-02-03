@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Copy, Crop, FileText, History, Info, Map as MapIcon, MapPinned, Paperclip, Search, Star, Trash } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, Crop, FileText, History, Info, Map as MapIcon, MapPinned, Paperclip, Search, Star, Trash } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -98,12 +98,29 @@ const SidebarTree = () => {
   );
   const updateFloorPlan = useDataStore((s) => s.updateFloorPlan);
   const cloneFloorPlan = useDataStore((s) => (s as any).cloneFloorPlan);
-  const { selectedPlanId, setSelectedPlan, sidebarCollapsed, toggleSidebar } = useUIStore(
+  const {
+    selectedPlanId,
+    setSelectedPlan,
+    sidebarCollapsed,
+    toggleSidebar,
+    expandedClients,
+    expandedSites,
+    setExpandedClients,
+    setExpandedSites,
+    toggleClientExpanded,
+    toggleSiteExpanded
+  } = useUIStore(
     (s) => ({
       selectedPlanId: s.selectedPlanId,
       setSelectedPlan: s.setSelectedPlan,
       sidebarCollapsed: s.sidebarCollapsed,
-      toggleSidebar: s.toggleSidebar
+      toggleSidebar: s.toggleSidebar,
+      expandedClients: s.expandedClients,
+      expandedSites: s.expandedSites,
+      setExpandedClients: s.setExpandedClients,
+      setExpandedSites: s.setExpandedSites,
+      toggleClientExpanded: s.toggleClientExpanded,
+      toggleSiteExpanded: s.toggleSiteExpanded
     }),
     shallow
   );
@@ -214,6 +231,26 @@ const SidebarTree = () => {
       .filter((c): c is TreeClient => !!c);
   }, [orderedClients, treeQuery]);
 
+  const searchActive = !!treeQuery.trim();
+
+  const handleCollapseAll = () => {
+    const nextClients: Record<string, boolean> = {};
+    const nextSites: Record<string, boolean> = {};
+    for (const client of orderedClients) {
+      nextClients[client.id] = false;
+      for (const site of client.sites) {
+        nextSites[`${client.id}:${site.id}`] = false;
+      }
+    }
+    setExpandedClients(nextClients);
+    setExpandedSites(nextSites);
+  };
+
+  const handleExpandAll = () => {
+    setExpandedClients({});
+    setExpandedSites({});
+  };
+
   if (sidebarCollapsed) {
     return (
       <aside className="flex h-screen w-14 flex-col items-center gap-4 border-r border-slate-200 bg-white py-4">
@@ -265,11 +302,29 @@ const SidebarTree = () => {
           />
         </div>
       </div>
+      <div className="flex items-center gap-2 px-4 pb-2">
+        <button
+          onClick={handleCollapseAll}
+          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          title={t({ it: 'Compatta tutti i clienti e le sedi', en: 'Collapse all clients and sites' })}
+        >
+          {t({ it: 'Compatta tutto', en: 'Collapse all' })}
+        </button>
+        <button
+          onClick={handleExpandAll}
+          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          title={t({ it: 'Espandi tutti i clienti e le sedi', en: 'Expand all clients and sites' })}
+        >
+          {t({ it: 'Scompatta tutto', en: 'Expand all' })}
+        </button>
+      </div>
       <div className="px-4 pb-3 text-xs font-semibold uppercase text-slate-500">
         {t({ it: 'Cliente → Sede → Planimetria', en: 'Client → Site → Floor plan' })}
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto px-3 pb-6">
-        {filteredClients.map((client) => (
+        {filteredClients.map((client) => {
+          const clientExpanded = searchActive || expandedClients[client.id] !== false;
+          return (
           <div key={client.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
             <div
               className="flex items-center gap-2 text-sm font-semibold text-ink"
@@ -277,6 +332,9 @@ const SidebarTree = () => {
                 const hasPlans = client.sites.some((site) => site.floorPlans.length > 0);
                 if (!hasPlans) {
                   setMissingPlansNotice({ clientName: client.shortName || client.name });
+                }
+                if (!searchActive) {
+                  toggleClientExpanded(client.id);
                 }
               }}
               onContextMenu={(e) => {
@@ -314,6 +372,18 @@ const SidebarTree = () => {
               }}
               title={t({ it: 'Tasto destro: info cliente', en: 'Right-click: client info' })}
             >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleClientExpanded(client.id);
+                }}
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                title={clientExpanded ? t({ it: 'Compatta cliente', en: 'Collapse client' }) : t({ it: 'Espandi cliente', en: 'Expand client' })}
+                aria-label={clientExpanded ? t({ it: 'Compatta cliente', en: 'Collapse client' }) : t({ it: 'Espandi cliente', en: 'Expand client' })}
+              >
+                {clientExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </button>
               {client.logoUrl ? (
                 <img
                   src={client.logoUrl}
@@ -348,95 +418,121 @@ const SidebarTree = () => {
                 ) : null}
               </div>
             </div>
-            {client.sites.map((site) => (
-              <div key={site.id} className="mt-3 space-y-2 rounded-lg bg-white p-2 shadow-inner">
-                <div
-                  className="text-xs font-semibold text-slate-500"
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setSiteMenu({ siteName: site.name, coords: site.coords, x: e.clientX, y: e.clientY });
-                  }}
-                >
-                  {site.name}
-                </div>
-                <div className="space-y-1">
-                  {[...site.floorPlans]
-                    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-                    .map((plan) => {
-                    const active = selectedPlanId === plan.id || location.pathname.includes(plan.id);
-                    const isDefault = !!defaultPlanId && defaultPlanId === plan.id;
-                    const hasPrintArea = !!plan.printArea;
-                    return (
-                      <button
-                        key={plan.id}
+            {clientExpanded
+              ? client.sites.map((site) => {
+                  const siteKey = `${client.id}:${site.id}`;
+                  const siteExpanded = searchActive || expandedSites[siteKey] !== false;
+                  return (
+                    <div key={site.id} className="mt-3 space-y-2 rounded-lg bg-white p-2 shadow-inner">
+                      <div
+                        className="flex items-center gap-2 text-xs font-semibold text-slate-500"
                         onClick={() => {
-                          if (selectedPlanId && selectedPlanId !== plan.id && dirtyByPlan[selectedPlanId]) {
-                            requestSaveAndNavigate?.(`/plan/${plan.id}`);
-                            return;
+                          if (!searchActive) {
+                            toggleSiteExpanded(siteKey);
                           }
-                          setSelectedPlan(plan.id);
-                          navigate(`/plan/${plan.id}`);
                         }}
                         onContextMenu={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          setPlanMenu({ planId: plan.id, coords: site.coords, x: e.clientX, y: e.clientY });
+                          setSiteMenu({ siteName: site.name, coords: site.coords, x: e.clientX, y: e.clientY });
                         }}
-                        draggable={!!user?.isAdmin}
-                        onDragStart={() => {
-                          dragRef.current = { siteId: site.id, planId: plan.id };
-                        }}
-                        onDragOver={(e) => {
-                          if (!user?.isAdmin) return;
-                          e.preventDefault();
-                        }}
-                        onDrop={(e) => {
-                          if (!user?.isAdmin) return;
-                          e.preventDefault();
-                          const drag = dragRef.current;
-                          dragRef.current = null;
-                          if (!drag || drag.siteId !== site.id) return;
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          const before = e.clientY < rect.top + rect.height / 2;
-                          reorderFloorPlans(site.id, drag.planId, plan.id, before);
-                        }}
-                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition hover:bg-slate-100 ${active ? 'bg-slate-200 font-semibold' : ''}`}
                       >
-                        <MapIcon size={16} className="text-primary" />
-                        <span className="truncate">{plan.name}</span>
-                        {isDefault ? (
-                          <span
-                            title={t({
-                              it: 'Planimetria predefinita: all’avvio Deskly caricherà automaticamente questa planimetria.',
-                              en: 'Default floor plan: on startup, Deskly will automatically load this floor plan.'
-                            })}
-                          >
-                            <Star size={14} className="text-amber-500" />
-                          </span>
-                        ) : null}
-                        <span
-                          className={`ml-auto flex h-7 w-7 items-center justify-center rounded-lg border ${
-                            hasPrintArea ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-400'
-                          }`}
-                          title={hasPrintArea ? t({ it: 'Area di stampa impostata', en: 'Print area set' }) : t({ it: 'Area di stampa automatica', en: 'Auto print area' })}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSiteExpanded(siteKey);
+                          }}
+                          className="flex h-5 w-5 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          title={siteExpanded ? t({ it: 'Compatta sede', en: 'Collapse site' }) : t({ it: 'Espandi sede', en: 'Expand site' })}
+                          aria-label={siteExpanded ? t({ it: 'Compatta sede', en: 'Collapse site' }) : t({ it: 'Espandi sede', en: 'Expand site' })}
                         >
-                          <Crop size={14} />
-                        </span>
-                        <ChevronRight size={14} className="text-slate-400" />
-                      </button>
-                    );
-                  })}
-                  {!site.floorPlans.length && (
-                    <div className="rounded-lg bg-slate-50 px-2 py-1 text-xs text-slate-500">
-                      {t({ it: 'Nessuna planimetria', en: 'No floor plans' })}
+                          {siteExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        </button>
+                        <span className="truncate">{site.name}</span>
+                      </div>
+                      {siteExpanded ? (
+                        <div className="space-y-1">
+                          {[...site.floorPlans]
+                            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+                            .map((plan) => {
+                              const active = selectedPlanId === plan.id || location.pathname.includes(plan.id);
+                              const isDefault = !!defaultPlanId && defaultPlanId === plan.id;
+                              const hasPrintArea = !!plan.printArea;
+                              return (
+                                <button
+                                  key={plan.id}
+                                  onClick={() => {
+                                    if (selectedPlanId && selectedPlanId !== plan.id && dirtyByPlan[selectedPlanId]) {
+                                      requestSaveAndNavigate?.(`/plan/${plan.id}`);
+                                      return;
+                                    }
+                                    setSelectedPlan(plan.id);
+                                    navigate(`/plan/${plan.id}`);
+                                  }}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setPlanMenu({ planId: plan.id, coords: site.coords, x: e.clientX, y: e.clientY });
+                                  }}
+                                  draggable={!!user?.isAdmin}
+                                  onDragStart={() => {
+                                    dragRef.current = { siteId: site.id, planId: plan.id };
+                                  }}
+                                  onDragOver={(e) => {
+                                    if (!user?.isAdmin) return;
+                                    e.preventDefault();
+                                  }}
+                                  onDrop={(e) => {
+                                    if (!user?.isAdmin) return;
+                                    e.preventDefault();
+                                    const drag = dragRef.current;
+                                    dragRef.current = null;
+                                    if (!drag || drag.siteId !== site.id) return;
+                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                    const before = e.clientY < rect.top + rect.height / 2;
+                                    reorderFloorPlans(site.id, drag.planId, plan.id, before);
+                                  }}
+                                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition hover:bg-slate-100 ${active ? 'bg-slate-200 font-semibold' : ''}`}
+                                >
+                                  <MapIcon size={16} className="text-primary" />
+                                  <span className="truncate">{plan.name}</span>
+                                  {isDefault ? (
+                                    <span
+                                      title={t({
+                                        it: 'Planimetria predefinita: all’avvio Deskly caricherà automaticamente questa planimetria.',
+                                        en: 'Default floor plan: on startup, Deskly will automatically load this floor plan.'
+                                      })}
+                                    >
+                                      <Star size={14} className="text-amber-500" />
+                                    </span>
+                                  ) : null}
+                                  <span
+                                    className={`ml-auto flex h-7 w-7 items-center justify-center rounded-lg border ${
+                                      hasPrintArea ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-400'
+                                    }`}
+                                    title={hasPrintArea ? t({ it: 'Area di stampa impostata', en: 'Print area set' }) : t({ it: 'Area di stampa automatica', en: 'Auto print area' })}
+                                  >
+                                    <Crop size={14} />
+                                  </span>
+                                  <ChevronRight size={14} className="text-slate-400" />
+                                </button>
+                              );
+                            })}
+                          {!site.floorPlans.length && (
+                            <div className="rounded-lg bg-slate-50 px-2 py-1 text-xs text-slate-500">
+                              {t({ it: 'Nessuna planimetria', en: 'No floor plans' })}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
-                  )}
-                </div>
-              </div>
-            ))}
+                  );
+                })
+              : null}
           </div>
-        ))}
+          );
+        })}
       </div>
       <FooterInfo />
 

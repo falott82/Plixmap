@@ -467,6 +467,48 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: '+ / −: aumenta o riduce la scala degli oggetti selezionati (per il testo cambia la dimensione del font).',
+                          en: '+ / −: increase or decrease the scale of selected objects (for text it changes font size).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Ctrl/Cmd + ←/→: ruota di 90° gli oggetti che supportano la rotazione.',
+                          en: 'Ctrl/Cmd + ←/→: rotate by 90° the objects that support rotation.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'F: cambia il font del testo selezionato.',
+                          en: 'F: change the font of the selected text.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Shift+B: torna al font precedente del testo selezionato.',
+                          en: 'Shift+B: previous font for the selected text.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'C: cambia colore del testo selezionato (Shift+C colore precedente).',
+                          en: 'C: change selected text color (Shift+C previous color).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'B: mostra o nasconde il background del testo selezionato.',
+                          en: 'B: toggle background for the selected text.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'L: collega 2 oggetti selezionati (se compatibili).',
+                          en: 'L: link 2 selected objects (if compatible).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'Ctrl+S / Cmd+S: salva un aggiornamento rapido (minor automatico).',
                           en: 'Ctrl+S / Cmd+S: saves a quick update (automatic minor).'
                         })}

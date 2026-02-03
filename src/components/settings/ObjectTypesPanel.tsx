@@ -1,6 +1,24 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { Eye, EyeOff, GripVertical, Info, Plus, Search, Settings2, Trash2, X, Inbox, CheckCircle2, XCircle, Pencil, RefreshCw } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  GripVertical,
+  Inbox,
+  Info,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings2,
+  Trash2,
+  X,
+  XCircle
+} from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { updateMyProfile } from '../../api/auth';
 import {
@@ -75,6 +93,8 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [reviewReason, setReviewReason] = useState('');
   const [wifiModal, setWifiModal] = useState<{ mode: 'create' | 'edit'; model?: WifiAntennaModel } | null>(null);
+  type WifiSortKey = 'brand' | 'model' | 'modelCode' | 'standard' | 'band24' | 'band5' | 'band6' | 'coverageSqm';
+  const [wifiSort, setWifiSort] = useState<{ key: WifiSortKey; dir: 'asc' | 'desc' }>({ key: 'brand', dir: 'asc' });
   const [wifiDraft, setWifiDraft] = useState({
     brand: '',
     model: '',
@@ -150,6 +170,64 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
       `${m.brand} ${m.model} ${m.modelCode} ${m.standard}`.toLowerCase().includes(term)
     );
   }, [q, wifiModels]);
+  const sortedWifiModels = useMemo(() => {
+    const list = filteredWifiModels.slice();
+    const getValue = (model: WifiAntennaModel): string | number => {
+      switch (wifiSort.key) {
+        case 'brand':
+          return model.brand || '';
+        case 'model':
+          return model.model || '';
+        case 'modelCode':
+          return model.modelCode || '';
+        case 'standard':
+          return wifiStandardLabels.get(model.standard) || model.standard || '';
+        case 'band24':
+          return model.band24 ? 1 : 0;
+        case 'band5':
+          return model.band5 ? 1 : 0;
+        case 'band6':
+          return model.band6 ? 1 : 0;
+        case 'coverageSqm':
+          return Number(model.coverageSqm) || 0;
+        default:
+          return '';
+      }
+    };
+    const compareValues = (a: string | number, b: string | number) => {
+      if (typeof a === 'number' && typeof b === 'number') return a - b;
+      return `${a}`.localeCompare(`${b}`);
+    };
+    list.sort((a, b) => {
+      const base = compareValues(getValue(a), getValue(b));
+      if (base !== 0) return wifiSort.dir === 'asc' ? base : -base;
+      const brand = (a.brand || '').localeCompare(b.brand || '');
+      if (brand !== 0) return brand;
+      const model = (a.model || '').localeCompare(b.model || '');
+      if (model !== 0) return model;
+      return (a.modelCode || '').localeCompare(b.modelCode || '');
+    });
+    return list;
+  }, [filteredWifiModels, wifiSort.dir, wifiSort.key, wifiStandardLabels]);
+  const toggleWifiSort = useCallback((key: WifiSortKey) => {
+    setWifiSort((prev) => {
+      if (prev.key === key) {
+        return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, dir: 'asc' };
+    });
+  }, []);
+  const renderWifiSortIcon = useCallback(
+    (key: WifiSortKey) => {
+      if (wifiSort.key !== key) return <ArrowUpDown size={14} className="text-slate-400" />;
+      return wifiSort.dir === 'asc' ? (
+        <ArrowUp size={14} className="text-primary" />
+      ) : (
+        <ArrowDown size={14} className="text-primary" />
+      );
+    },
+    [wifiSort.dir, wifiSort.key]
+  );
 
   const enabledDefs = useMemo(() => {
     if (isWallsSection) return [];
@@ -913,20 +991,100 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
             <table className="w-full min-w-[900px] text-sm">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-600">
                 <tr>
-                  <th className="px-3 py-2 text-left">{t({ it: 'Marca', en: 'Brand' })}</th>
-                  <th className="px-3 py-2 text-left">{t({ it: 'Modello', en: 'Model' })}</th>
-                  <th className="px-3 py-2 text-left">{t({ it: 'Codice modello', en: 'Model code' })}</th>
-                  <th className="px-3 py-2 text-left">{t({ it: 'Standard WiFi', en: 'WiFi standard' })}</th>
-                  <th className="px-3 py-2 text-center">2.4 GHz</th>
-                  <th className="px-3 py-2 text-center">5 GHz</th>
-                  <th className="px-3 py-2 text-center">6 GHz</th>
-                  <th className="px-3 py-2 text-right">{t({ it: 'Copertura (m2)', en: 'Coverage (m2)' })}</th>
+                  <th className="px-3 py-2 text-left">
+                    <button
+                      type="button"
+                      onClick={() => toggleWifiSort('brand')}
+                      className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-800"
+                      title={t({ it: 'Ordina per marca', en: 'Sort by brand' })}
+                    >
+                      {t({ it: 'Marca', en: 'Brand' })}
+                      {renderWifiSortIcon('brand')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button
+                      type="button"
+                      onClick={() => toggleWifiSort('model')}
+                      className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-800"
+                      title={t({ it: 'Ordina per modello', en: 'Sort by model' })}
+                    >
+                      {t({ it: 'Modello', en: 'Model' })}
+                      {renderWifiSortIcon('model')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button
+                      type="button"
+                      onClick={() => toggleWifiSort('modelCode')}
+                      className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-800"
+                      title={t({ it: 'Ordina per codice modello', en: 'Sort by model code' })}
+                    >
+                      {t({ it: 'Codice modello', en: 'Model code' })}
+                      {renderWifiSortIcon('modelCode')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button
+                      type="button"
+                      onClick={() => toggleWifiSort('standard')}
+                      className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-800"
+                      title={t({ it: 'Ordina per standard WiFi', en: 'Sort by WiFi standard' })}
+                    >
+                      {t({ it: 'Standard WiFi', en: 'WiFi standard' })}
+                      {renderWifiSortIcon('standard')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => toggleWifiSort('band24')}
+                      className="inline-flex items-center justify-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-800"
+                      title={t({ it: 'Ordina per 2.4 GHz', en: 'Sort by 2.4 GHz' })}
+                    >
+                      2.4 GHz
+                      {renderWifiSortIcon('band24')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => toggleWifiSort('band5')}
+                      className="inline-flex items-center justify-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-800"
+                      title={t({ it: 'Ordina per 5 GHz', en: 'Sort by 5 GHz' })}
+                    >
+                      5 GHz
+                      {renderWifiSortIcon('band5')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => toggleWifiSort('band6')}
+                      className="inline-flex items-center justify-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-800"
+                      title={t({ it: 'Ordina per 6 GHz', en: 'Sort by 6 GHz' })}
+                    >
+                      6 GHz
+                      {renderWifiSortIcon('band6')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => toggleWifiSort('coverageSqm')}
+                      className="inline-flex items-center justify-end gap-1 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:text-slate-800"
+                      title={t({ it: 'Ordina per copertura', en: 'Sort by coverage' })}
+                    >
+                      {t({ it: 'Copertura (m2)', en: 'Coverage (m2)' })}
+                      {renderWifiSortIcon('coverageSqm')}
+                    </button>
+                  </th>
                   <th className="px-3 py-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredWifiModels.length ? (
-                  filteredWifiModels.map((model) => (
+                {sortedWifiModels.length ? (
+                  sortedWifiModels.map((model) => (
                     <tr key={model.id} className="hover:bg-slate-50">
                       <td className="px-3 py-2 font-semibold text-ink">{model.brand}</td>
                       <td className="px-3 py-2 text-slate-700">{model.model}</td>

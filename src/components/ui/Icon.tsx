@@ -22,6 +22,7 @@ import {
   Gauge,
   HardDrive,
   Headphones,
+  Image as ImageIcon,
   KeyRound,
   Laptop,
   Lightbulb,
@@ -52,6 +53,7 @@ import {
   ThermometerSun,
   TrainFront,
   Truck,
+  Type as TypeIcon,
   Unlock,
   User,
   UserCheck,
@@ -115,6 +117,12 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
                         ? 'lockKeyhole'
                         : type === 'badge_presence'
                           ? 'badgeCheck'
+                          : type === 'text'
+                      ? 'text'
+                        : type === 'image'
+                          ? 'image'
+                          : type === 'postit'
+                            ? 'postit'
                       : undefined);
 
   switch (resolved) {
@@ -311,6 +319,19 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
         <svg {...svgProps}>
           <rect x="4" y="16" width="16" height="4" rx="1" />
           <rect x="16" y="4" width="4" height="16" rx="1" />
+        </svg>
+      );
+    case 'text':
+      return <TypeIcon {...common} />;
+    case 'image':
+      return <ImageIcon {...common} />;
+    case 'postit':
+      return (
+        <svg {...svgProps}>
+          <rect x="4" y="3" width="16" height="18" rx="2.5" fill="#fde047" stroke="#ca8a04" />
+          <path d="M14 3v6h6" fill="#fef08a" stroke="#ca8a04" />
+          <path d="M7.5 11h9" stroke="#b45309" strokeWidth={1.6} strokeLinecap="round" />
+          <path d="M7.5 14h7.5" stroke="#b45309" strokeWidth={1.6} strokeLinecap="round" />
         </svg>
       );
     default:

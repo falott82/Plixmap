@@ -146,7 +146,10 @@ export type IconName =
   | 'deskLong'
   | 'deskTrapezoid'
   | 'deskL'
-  | 'deskLReverse';
+  | 'deskLReverse'
+  | 'text'
+  | 'image'
+  | 'postit';
 
 export interface ObjectTypeDefinition {
   id: string; // stable key used in MapObject.type
@@ -189,8 +192,21 @@ export interface MapObject {
   quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
   quoteLabelScale?: number;
   quoteLabelBg?: boolean;
+  quoteLabelColor?: string;
+  quoteLabelOffset?: number;
   quoteDashed?: boolean;
   quoteEndpoint?: 'arrows' | 'dots' | 'none';
+  textFont?: string;
+  textSize?: number;
+  textColor?: string;
+  textBg?: boolean;
+  textBgColor?: string;
+  textBoxWidth?: number;
+  textBoxHeight?: number;
+  imageUrl?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+  postitCompact?: boolean;
   points?: { x: number; y: number }[];
   wallGroupId?: string;
   wallGroupIndex?: number;

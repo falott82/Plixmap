@@ -30,7 +30,10 @@ import {
   Users,
   Ruler,
   Undo2,
-  Redo2
+  Redo2,
+  Type as TypeIcon,
+  Image as ImageIcon,
+  StickyNote
 } from 'lucide-react';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
@@ -76,7 +79,14 @@ import { postAuditEvent } from '../../api/audit';
 import { hasExternalUsers } from '../../api/customImport';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
-import { ALL_ITEMS_LAYER_ID, DEFAULT_WALL_TYPES, WALL_TYPE_IDS, WIFI_DEFAULT_STANDARD } from '../../store/data';
+import {
+  ALL_ITEMS_LAYER_ID,
+  DEFAULT_WALL_TYPES,
+  TEXT_COLOR_OPTIONS,
+  TEXT_FONT_OPTIONS,
+  WALL_TYPE_IDS,
+  WIFI_DEFAULT_STANDARD
+} from '../../store/data';
 import { getWallTypeColor } from '../../utils/wallColors';
 
 interface Props {
@@ -242,9 +252,15 @@ const PlanView = ({ planId }: Props) => {
                   ? ['wifi']
                   : typeId === 'quote'
                     ? ['quotes']
-                  : isWallType(typeId)
-                    ? ['walls']
-                    : ['devices'];
+                    : typeId === 'text'
+                      ? ['text']
+                      : typeId === 'image'
+                        ? ['images']
+                        : typeId === 'postit'
+                          ? ['text']
+                    : isWallType(typeId)
+                      ? ['walls']
+                      : ['devices'];
       return layerIdSet ? ids.filter((id) => layerIdSet.has(id)) : ids;
     },
     [isCameraType, isWallType]
@@ -293,6 +309,8 @@ const PlanView = ({ planId }: Props) => {
     setLastQuoteLabelScale,
     lastQuoteLabelBg,
     setLastQuoteLabelBg,
+    lastQuoteLabelColor,
+    setLastQuoteLabelColor,
     lastQuoteDashed,
     setLastQuoteDashed,
     lastQuoteEndpoint,
@@ -352,6 +370,8 @@ const PlanView = ({ planId }: Props) => {
       setLastQuoteLabelScale: s.setLastQuoteLabelScale,
       lastQuoteLabelBg: s.lastQuoteLabelBg,
       setLastQuoteLabelBg: s.setLastQuoteLabelBg,
+      lastQuoteLabelColor: s.lastQuoteLabelColor,
+      setLastQuoteLabelColor: s.setLastQuoteLabelColor,
       lastQuoteDashed: s.lastQuoteDashed,
       setLastQuoteDashed: s.setLastQuoteDashed,
       lastQuoteEndpoint: s.lastQuoteEndpoint,
@@ -388,7 +408,7 @@ const PlanView = ({ planId }: Props) => {
   const [pendingType, setPendingType] = useState<MapObjectType | null>(null);
   const [linkCreateMode, setLinkCreateMode] = useState<'arrow' | 'cable'>('arrow');
   const [modalState, setModalState] = useState<
-    | { mode: 'create'; type: MapObjectType; coords: { x: number; y: number } }
+    | { mode: 'create'; type: MapObjectType; coords: { x: number; y: number }; textBoxWidth?: number; textBoxHeight?: number }
     | { mode: 'edit'; objectId: string }
     | { mode: 'duplicate'; objectId: string; coords: { x: number; y: number } }
     | null
@@ -598,6 +618,8 @@ const PlanView = ({ planId }: Props) => {
   });
   const quoteToastKeyRef = useRef('');
   const quoteToastIdRef = useRef<string | number | null>(null);
+  const mediaToastKeyRef = useRef('');
+  const mediaToastIdRef = useRef<string | number | null>(null);
   const zoomRef = useRef<number>(zoom);
   const renderStartRef = useRef(0);
   const layerVisibilitySyncRef = useRef<string>('');
@@ -1075,7 +1097,10 @@ const PlanView = ({ planId }: Props) => {
     const rackObjectsById = new Map(
       (renderPlan.objects || []).filter((obj) => obj.type === 'rack').map((obj) => [obj.id, obj])
     );
-    const grouped = new Map<string, { link: RackLink; fromItem: RackItem; toItem: RackItem }[]>();
+    const grouped = new Map<
+      string,
+      { rackA: string; rackB: string; ethernet: { link: RackLink; fromItem: RackItem; toItem: RackItem }[]; fiber: { link: RackLink; fromItem: RackItem; toItem: RackItem }[] }
+    >();
     for (const link of rackLinks) {
       const fromItem = itemsById.get(link.fromItemId);
       const toItem = itemsById.get(link.toItemId);
@@ -1084,43 +1109,70 @@ const PlanView = ({ planId }: Props) => {
       const fromObj = rackObjectsById.get(fromItem.rackId);
       const toObj = rackObjectsById.get(toItem.rackId);
       if (!fromObj || !toObj) continue;
-      const key = [fromItem.rackId, toItem.rackId].sort().join('|');
-      const list = grouped.get(key) || [];
-      list.push({ link, fromItem, toItem });
-      grouped.set(key, list);
+      const pair = [fromItem.rackId, toItem.rackId].sort();
+      const key = pair.join('|');
+      const kind = link.kind === 'fiber' ? 'fiber' : 'ethernet';
+      const entry = grouped.get(key) || { rackA: pair[0], rackB: pair[1], ethernet: [], fiber: [] };
+      entry[kind].push({ link, fromItem, toItem });
+      grouped.set(key, entry);
     }
     const out: any[] = [];
-    const spacing = 10;
-    grouped.forEach((list) => {
-      const sorted = list.slice().sort((a, b) => Number(a.link.createdAt || 0) - Number(b.link.createdAt || 0));
-      const count = sorted.length;
-      const center = (count - 1) / 2;
-      sorted.forEach((entry, index) => {
-        const { link, fromItem, toItem } = entry;
-        const fromObj = rackObjectsById.get(fromItem.rackId);
-        const toObj = rackObjectsById.get(toItem.rackId);
-        if (!fromObj || !toObj) return;
-        const kind = link.kind === 'fiber' ? 'fiber' : 'ethernet';
-        const color = kind === 'fiber' ? '#a855f7' : '#3b82f6';
-        const offset = (index - center) * spacing;
-        out.push({
-          id: `racklink:${link.id}`,
-          fromId: fromObj.id,
-          toId: toObj.id,
-          kind: 'cable',
-          dashed: true,
-          route: 'vh',
-          width: 2,
-          color,
-          offset,
-          rackLinkId: link.id,
-          rackFromItemId: link.fromItemId,
-          rackToItemId: link.toItemId,
-          rackKind: kind,
-          rackFromRackId: fromItem.rackId,
-          rackToRackId: toItem.rackId
-        });
-      });
+    const spacing = 8;
+    const baseWidth = 2 * 0.6;
+    grouped.forEach((entry, key) => {
+      const hasEthernet = entry.ethernet.length > 0;
+      const hasFiber = entry.fiber.length > 0;
+      const offsetDelta = hasEthernet && hasFiber ? spacing / 2 : 0;
+      if (hasEthernet) {
+        const rep = entry.ethernet
+          .slice()
+          .sort((a, b) => Number(a.link.createdAt || 0) - Number(b.link.createdAt || 0))[0];
+        if (rep) {
+          out.push({
+            id: `racklink:${key}:ethernet`,
+            fromId: entry.rackA,
+            toId: entry.rackB,
+            kind: 'cable',
+            dashed: true,
+            route: 'vh',
+            width: baseWidth,
+            selectedWidthDelta: 0.6,
+            color: '#3b82f6',
+            offset: hasFiber ? -offsetDelta : 0,
+            rackLinkId: rep.link.id,
+            rackFromItemId: rep.link.fromItemId,
+            rackToItemId: rep.link.toItemId,
+            rackKind: 'ethernet',
+            rackFromRackId: rep.fromItem.rackId,
+            rackToRackId: rep.toItem.rackId
+          });
+        }
+      }
+      if (hasFiber) {
+        const rep = entry.fiber
+          .slice()
+          .sort((a, b) => Number(a.link.createdAt || 0) - Number(b.link.createdAt || 0))[0];
+        if (rep) {
+          out.push({
+            id: `racklink:${key}:fiber`,
+            fromId: entry.rackA,
+            toId: entry.rackB,
+            kind: 'cable',
+            dashed: true,
+            route: 'vh',
+            width: baseWidth,
+            selectedWidthDelta: 0.6,
+            color: '#a855f7',
+            offset: hasEthernet ? offsetDelta : 0,
+            rackLinkId: rep.link.id,
+            rackFromItemId: rep.link.fromItemId,
+            rackToItemId: rep.link.toItemId,
+            rackKind: 'fiber',
+            rackFromRackId: rep.fromItem.rackId,
+            rackToRackId: rep.toItem.rackId
+          });
+        }
+      }
     });
     return out;
   }, [renderPlan]);
@@ -1191,6 +1243,69 @@ const PlanView = ({ planId }: Props) => {
       : visibleLayerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
   const visibleLayerCount = allItemsSelected ? nonAllLayerIds.length : effectiveVisibleLayerIds.length;
   const totalLayerCount = nonAllLayerIds.length;
+  const layerActivationRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    layerActivationRef.current = new Set(effectiveVisibleLayerIds);
+  }, [effectiveVisibleLayerIds]);
+
+  const getLayerLabel = useCallback(
+    (layerId: string) => {
+      const layer = planLayers.find((l: any) => String(l.id) === layerId);
+      if (!layer) return layerId;
+      const name = layer?.name;
+      if (typeof name === 'string') return name;
+      return String(name?.[lang] || name?.it || name?.en || layerId);
+    },
+    [lang, planLayers]
+  );
+  const getObjectToastLabel = useCallback(
+    (name: string | undefined, typeId: string) => {
+      const trimmed = String(name || '').trim().replace(/\s+/g, ' ');
+      const fallback = getTypeLabel(typeId);
+      const value = trimmed || fallback || typeId;
+      if (value.length > 60) return `${value.slice(0, 57)}...`;
+      return value;
+    },
+    [getTypeLabel]
+  );
+  const ensureObjectLayerVisible = useCallback(
+    (layerIds: string[] | undefined, name: string | undefined, typeId: string) => {
+      if (!planId || !layerIds?.length) return;
+      const valid = layerIds.filter((id) => layerIdSet.has(id) && id !== ALL_ITEMS_LAYER_ID);
+      if (!valid.length) return;
+      const visibleSet = new Set(layerActivationRef.current);
+      const missing = valid.filter((id) => !visibleSet.has(id));
+      if (!missing.length && !hideAllLayers) return;
+      if (hideAllLayers) setHideAllLayers(planId, false);
+      if (!missing.length) return;
+      missing.forEach((id) => visibleSet.add(id));
+      layerActivationRef.current = visibleSet;
+      const next = normalizeLayerSelection([...visibleLayerIds, ...missing]);
+      setVisibleLayerIds(planId, next);
+      const layerLabel = getLayerLabel(missing[0]);
+      const objectLabel = getObjectToastLabel(name, typeId);
+      push(
+        t({
+          it: `Attivato Layer ${layerLabel} per visualizzazione oggetto ${objectLabel}.`,
+          en: `Enabled layer ${layerLabel} to show object ${objectLabel}.`
+        }),
+        'info'
+      );
+    },
+    [
+      getLayerLabel,
+      getObjectToastLabel,
+      hideAllLayers,
+      layerIdSet,
+      normalizeLayerSelection,
+      planId,
+      push,
+      setHideAllLayers,
+      setVisibleLayerIds,
+      t,
+      visibleLayerIds
+    ]
+  );
   useEffect(() => {
     if (!layerIds.length) return;
     const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
@@ -2141,8 +2256,8 @@ const PlanView = ({ planId }: Props) => {
     deskToastKeyRef.current = key;
     push(
       t({
-        it: 'Scrivania selezionata: sposta con le frecce (Shift per passi maggiori), ruota con Ctrl/Cmd + ←/→.',
-        en: 'Desk selected: move with arrow keys (Shift for larger steps), rotate with Ctrl/Cmd + ←/→.'
+        it: 'Scrivania selezionata: frecce per muovere (Shift per passi maggiori), Ctrl/Cmd + ←/→ ruota 90°, +/− scala. L collega 2 oggetti selezionati.',
+        en: 'Desk selected: arrows to move (Shift for larger steps), Ctrl/Cmd + ←/→ rotates 90°, +/− scales. L links 2 selected objects.'
       }),
       'info'
     );
@@ -2176,12 +2291,63 @@ const PlanView = ({ planId }: Props) => {
     }
     quoteToastIdRef.current = toast.info(
       t({
-        it: 'Quota selezionata: trascina per spostare, frecce per muovere (Shift per passi maggiori). Ctrl/Cmd + frecce sposta la scritta. Trascina gli apici per allungare o accorciare.',
-        en: 'Quote selected: drag to move, arrows to move (Shift for larger steps). Ctrl/Cmd + arrows moves the label. Drag the endpoints to extend or shrink.'
+        it: 'Quota selezionata: trascina per spostare, frecce per muovere (Shift per passi maggiori). Ctrl/Cmd + frecce sposta la scritta. Trascina gli apici per allungare o accorciare (Shift per bloccare orizzontale/verticale). +/− scala. L collega 2 oggetti selezionati.',
+        en: 'Quote selected: drag to move, arrows to move (Shift for larger steps). Ctrl/Cmd + arrows moves the label. Drag the endpoints to extend or shrink (Shift locks horizontal/vertical). +/− scales. L links 2 selected objects.'
       }),
       { duration: Infinity }
     );
   }, [push, renderPlan, selectedObjectIds, t]);
+  useEffect(() => {
+    if (!renderPlan || !selectedObjectIds.length) {
+      mediaToastKeyRef.current = '';
+      if (mediaToastIdRef.current != null) {
+        toast.dismiss(mediaToastIdRef.current);
+        mediaToastIdRef.current = null;
+      }
+      return;
+    }
+    const textIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'text');
+    const imageIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'image');
+    const postitIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'postit');
+    if (!textIds.length && !imageIds.length && !postitIds.length) {
+      mediaToastKeyRef.current = '';
+      if (mediaToastIdRef.current != null) {
+        toast.dismiss(mediaToastIdRef.current);
+        mediaToastIdRef.current = null;
+      }
+      return;
+    }
+    const key = `t:${textIds.slice().sort().join(',')}|i:${imageIds.slice().sort().join(',')}|p:${postitIds
+      .slice()
+      .sort()
+      .join(',')}`;
+    if (mediaToastKeyRef.current === key) return;
+    mediaToastKeyRef.current = key;
+    if (mediaToastIdRef.current != null) {
+      toast.dismiss(mediaToastIdRef.current);
+    }
+    const message =
+      textIds.length && !imageIds.length && !postitIds.length
+        ? t({
+            it: 'Testo selezionato: trascina per spostare, frecce per muovere (Shift per passi maggiori), usa i punti per ridimensionare/ruotare. Ctrl/Cmd + ←/→ ruota 90°. +/− dimensione font. F font avanti, Shift+B font indietro. C colore avanti, Shift+C colore indietro. B mostra/nasconde background. Doppio click per modificare. L collega 2 oggetti selezionati.',
+            en: 'Text selected: drag to move, arrows to move (Shift for larger steps), use handles to resize and rotate. Ctrl/Cmd + ←/→ rotates 90°. +/− changes font size. F next font, Shift+B previous font. C next color, Shift+C previous color. B toggles background. Double click to edit. L links 2 selected objects.'
+          })
+        : imageIds.length && !textIds.length && !postitIds.length
+          ? t({
+              it: 'Immagine selezionata: trascina per spostare, frecce per muovere (Shift per passi maggiori), usa i punti per ridimensionare e ruotare. Ctrl/Cmd + ←/→ ruota 90°. +/− scala. Doppio click per modificare. L collega 2 oggetti selezionati.',
+              en: 'Image selected: drag to move, arrows to move (Shift for larger steps), use handles to resize and rotate. Ctrl/Cmd + ←/→ rotates 90°. +/− scales. Double click to edit. L links 2 selected objects.'
+            })
+          : postitIds.length && !textIds.length && !imageIds.length
+            ? t({
+                it: 'Post-it selezionato: trascina per spostare, click sull’icona per compattare. +/− scala. Doppio click per modificare. L collega 2 oggetti selezionati.',
+                en: 'Post-it selected: drag to move, click the icon to compact. +/− scales. Double click to edit. L links 2 selected objects.'
+              })
+            : t({
+                it: 'Annotazioni selezionate: trascina per spostare, frecce per muovere (Shift per passi maggiori), usa i punti per ridimensionare/ruotare. Ctrl/Cmd + ←/→ ruota 90°. +/− scala. Doppio click per modificare. L collega 2 oggetti selezionati.',
+                en: 'Annotations selected: drag to move, arrows to move (Shift for larger steps), use handles to resize/rotate. Ctrl/Cmd + ←/→ rotates 90°. +/− scales. Double click to edit. L links 2 selected objects.'
+              });
+    mediaToastIdRef.current = toast.info(message, { duration: Infinity });
+  }, [renderPlan, selectedObjectIds, t]);
   useEffect(() => {
     selectedLinkIdRef.current = selectedLinkId;
   }, [selectedLinkId]);
@@ -2632,6 +2798,7 @@ const PlanView = ({ planId }: Props) => {
     if (isDeskType(obj.type)) {
       markTouched();
       const label = String(obj.name || getTypeLabel(obj.type)).trim() || getTypeLabel(obj.type);
+      const layerIds = obj.layerIds || inferDefaultLayerIds(obj.type, layerIdSet);
       const id = addObject(
         renderPlan.id,
         obj.type,
@@ -2640,7 +2807,7 @@ const PlanView = ({ planId }: Props) => {
         obj.x + offset,
         obj.y + offset * 0.4,
         obj.scale ?? 1,
-        obj.layerIds || inferDefaultLayerIds(obj.type, layerIdSet),
+        layerIds,
         {
           opacity: obj.opacity,
           rotation: obj.rotation,
@@ -2650,6 +2817,7 @@ const PlanView = ({ planId }: Props) => {
           scaleY: obj.scaleY
         }
       );
+      ensureObjectLayerVisible(layerIds, label, obj.type);
       lastInsertedRef.current = { id, name: label };
       const roomId = getRoomIdAt((renderPlan as FloorPlan).rooms, obj.x + offset, obj.y + offset * 0.4);
       if (roomId) updateObject(id, { roomId });
@@ -3210,7 +3378,7 @@ const PlanView = ({ planId }: Props) => {
     }) => {
       if (!renderPlan) return null;
       const layerIds = payload.layerIds || inferDefaultLayerIds(payload.typeId, layerIdSet);
-      return addObject(
+      const id = addObject(
         renderPlan.id,
         payload.typeId,
         payload.label,
@@ -3226,8 +3394,10 @@ const PlanView = ({ planId }: Props) => {
           strokeWidth: Number.isFinite(payload.strokeWidth) ? payload.strokeWidth : 1
         }
       );
+      ensureObjectLayerVisible(layerIds, payload.label, payload.typeId);
+      return id;
     },
-    [addObject, getWallTypeColor, inferDefaultLayerIds, layerIdSet, renderPlan]
+    [addObject, ensureObjectLayerVisible, getWallTypeColor, inferDefaultLayerIds, layerIdSet, renderPlan]
   );
 
   const wallSnapPoints = useMemo(() => {
@@ -3505,7 +3675,9 @@ const PlanView = ({ planId }: Props) => {
       const quoteLabelPos = orientation === 'vertical' ? lastQuoteLabelPosV : lastQuoteLabelPosH;
       const quoteColor = lastQuoteColor || '#f97316';
       const quoteLabelScale = Math.max(0.6, Math.min(2, Number(lastQuoteLabelScale) || 1));
-      const quoteLabelBg = lastQuoteLabelBg !== false;
+      const quoteLabelBg = quoteLabelPos === 'center' || lastQuoteLabelBg === true;
+      const quoteLabelColor = lastQuoteLabelColor || '#0f172a';
+      const quoteLabelOffset = orientation === 'horizontal' && quoteLabelPos === 'below' ? 1.15 : 1;
       const quoteDashed = !!lastQuoteDashed;
       const quoteEndpoint = lastQuoteEndpoint || 'arrows';
       markTouched();
@@ -3518,14 +3690,29 @@ const PlanView = ({ planId }: Props) => {
         start.y,
         quoteScale,
         ['quotes'],
-        { points: [start, resolved], strokeColor: quoteColor, strokeWidth: 2, opacity: 1, quoteLabelPos, quoteLabelScale, quoteLabelBg, quoteDashed, quoteEndpoint }
+        {
+          points: [start, resolved],
+          strokeColor: quoteColor,
+          strokeWidth: 2,
+          opacity: 1,
+          quoteLabelPos,
+          quoteLabelScale,
+          quoteLabelBg,
+          quoteLabelColor,
+          quoteLabelOffset,
+          quoteDashed,
+          quoteEndpoint
+        }
       );
+      ensureObjectLayerVisible(['quotes'], getTypeLabel('quote'), 'quote');
       setQuotePoints([]);
       setQuotePointer(null);
     },
     [
       addObject,
+      ensureObjectLayerVisible,
       getQuoteOrientation,
+      getTypeLabel,
       inferDefaultLayerIds,
       isReadOnly,
       lastQuoteColor,
@@ -3751,6 +3938,10 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     markTouched();
+    const sampleTypeId = roomWallTypeSelections.find(Boolean) || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
+    if (sampleTypeId) {
+      ensureObjectLayerVisible(inferDefaultLayerIds(sampleTypeId, layerIdSet), getTypeLabel(sampleTypeId), sampleTypeId);
+    }
     segments.forEach((segment, index) => {
       const typeId = roomWallTypeSelections[index] || defaultWallTypeId || DEFAULT_WALL_TYPES[0];
       if (!typeId) return;
@@ -3782,6 +3973,7 @@ const PlanView = ({ planId }: Props) => {
   }, [
     addObject,
     defaultWallTypeId,
+    ensureObjectLayerVisible,
     getTypeLabel,
     inferDefaultLayerIds,
     isReadOnly,
@@ -4069,6 +4261,7 @@ const PlanView = ({ planId }: Props) => {
             layerIds,
             extra
           );
+          ensureObjectLayerVisible(layerIds, obj.name, obj.type);
           const nextRoomId = getRoomIdAt((currentPlan as FloorPlan).rooms, nextX, nextY);
           if (nextRoomId) updateObject(id, { roomId: nextRoomId });
           const customValues = clipboard.customValues?.[obj.id];
@@ -4151,8 +4344,11 @@ const PlanView = ({ planId }: Props) => {
       const isArrow = isArrowUp || isArrowDown || isArrowLeft || isArrowRight;
       const isCtrlArrow = (e.ctrlKey || e.metaKey) && isArrow;
       if (isCtrlArrow) {
-        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
-        const quoteObjs = currentSelectedIds
+        const ids = currentSelectedIds.length
+          ? currentSelectedIds
+          : (selectedObjectIdRef.current ? [selectedObjectIdRef.current] : []);
+        if (!ids.length || !currentPlan || isReadOnlyRef.current) return;
+        const quoteObjs = ids
           .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
           .filter((obj): obj is MapObject => !!obj && obj.type === 'quote');
         if (quoteObjs.length) {
@@ -4160,15 +4356,36 @@ const PlanView = ({ planId }: Props) => {
           markTouched();
           for (const obj of quoteObjs) {
             const orientation = getQuoteOrientation(obj.points);
+            const currentRaw = String((obj as any)?.quoteLabelPos || 'center');
+            const currentPos =
+              orientation === 'vertical'
+                ? (currentRaw === 'left' || currentRaw === 'right' || currentRaw === 'center' ? currentRaw : 'center')
+                : (currentRaw === 'above' || currentRaw === 'below' || currentRaw === 'center' ? currentRaw : 'center');
             let nextPos: 'center' | 'above' | 'below' | 'left' | 'right' | null = null;
             if (orientation === 'vertical') {
-              if (isArrowLeft) nextPos = 'left';
-              else if (isArrowRight) nextPos = 'right';
-              else if (isArrowUp || isArrowDown) nextPos = 'center';
+              if (isArrowLeft) {
+                if (currentPos === 'right') nextPos = 'center';
+                else if (currentPos === 'center') nextPos = 'left';
+                else nextPos = 'left';
+              } else if (isArrowRight) {
+                if (currentPos === 'left') nextPos = 'center';
+                else if (currentPos === 'center') nextPos = 'right';
+                else nextPos = 'right';
+              } else if (isArrowUp || isArrowDown) {
+                nextPos = 'center';
+              }
             } else {
-              if (isArrowUp) nextPos = 'above';
-              else if (isArrowDown) nextPos = 'below';
-              else if (isArrowLeft || isArrowRight) nextPos = 'center';
+              if (isArrowUp) {
+                if (currentPos === 'below') nextPos = 'center';
+                else if (currentPos === 'center') nextPos = 'above';
+                else nextPos = 'above';
+              } else if (isArrowDown) {
+                if (currentPos === 'above') nextPos = 'center';
+                else if (currentPos === 'center') nextPos = 'below';
+                else nextPos = 'below';
+              } else if (isArrowLeft || isArrowRight) {
+                nextPos = 'center';
+              }
             }
             if (nextPos) updateQuoteLabelPos(obj.id, nextPos, orientation);
           }
@@ -4181,7 +4398,10 @@ const PlanView = ({ planId }: Props) => {
         if (isReadOnlyRef.current) return;
         const rotatable = currentSelectedIds
           .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
-          .filter((obj): obj is MapObject => !!obj && (isDeskType(obj.type) || isCameraType(obj.type)));
+          .filter(
+            (obj): obj is MapObject =>
+              !!obj && (isDeskType(obj.type) || isCameraType(obj.type) || obj.type === 'text' || obj.type === 'image')
+          );
         if (!rotatable.length) return;
         e.preventDefault();
         markTouched();
@@ -4194,6 +4414,137 @@ const PlanView = ({ planId }: Props) => {
       }
 
       if (isTyping) return;
+
+      const key = e.key.toLowerCase();
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && key === 'b' && !e.shiftKey) {
+        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
+        const textObjs = currentSelectedIds
+          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
+          .filter((obj): obj is MapObject => !!obj && obj.type === 'text');
+        if (!textObjs.length) return;
+        e.preventDefault();
+        markTouched();
+        for (const obj of textObjs) {
+          const current = !!(obj as any).textBg;
+          updateObject(obj.id, { textBg: !current });
+        }
+        return;
+      }
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && (key === 'f' || (key === 'b' && e.shiftKey))) {
+        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
+        const textObjs = currentSelectedIds
+          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
+          .filter((obj): obj is MapObject => !!obj && obj.type === 'text');
+        if (!textObjs.length) return;
+        e.preventDefault();
+        markTouched();
+        const fontValues = TEXT_FONT_OPTIONS.map((opt) => opt.value);
+        if (!fontValues.length) return;
+        const delta = key === 'f' ? 1 : -1;
+        for (const obj of textObjs) {
+          const currentFont = String((obj as any).textFont || fontValues[0]);
+          const currentIndex = fontValues.indexOf(currentFont);
+          const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+          const nextFont = fontValues[(safeIndex + delta + fontValues.length) % fontValues.length];
+          updateObject(obj.id, { textFont: nextFont });
+        }
+        return;
+      }
+
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && key === 'c') {
+        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
+        const textObjs = currentSelectedIds
+          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
+          .filter((obj): obj is MapObject => !!obj && obj.type === 'text');
+        if (!textObjs.length) return;
+        e.preventDefault();
+        markTouched();
+        const colorValues = TEXT_COLOR_OPTIONS.map((opt) => opt.value);
+        if (!colorValues.length) return;
+        const delta = e.shiftKey ? -1 : 1;
+        for (const obj of textObjs) {
+          const currentColor = String((obj as any).textColor || colorValues[0]).toLowerCase();
+          const currentIndex = colorValues.findIndex((c) => c.toLowerCase() === currentColor);
+          const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+          const nextColor = colorValues[(safeIndex + delta + colorValues.length) % colorValues.length];
+          updateObject(obj.id, { textColor: nextColor });
+        }
+        return;
+      }
+
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && key === 'l') {
+        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
+        if (currentSelectedIds.length !== 2) return;
+        e.preventDefault();
+        const [a, b] = currentSelectedIds;
+        const objA = (currentPlan as FloorPlan).objects?.find((o) => o.id === a);
+        const objB = (currentPlan as FloorPlan).objects?.find((o) => o.id === b);
+        if (!objA || !objB) return;
+        if (objA.type === 'rack' || objB.type === 'rack' || isDeskType(objA.type) || isDeskType(objB.type)) {
+          push(t({ it: 'Questi oggetti non possono essere collegati', en: 'These objects cannot be linked' }), 'info');
+          return;
+        }
+        const links = (((currentPlan as any).links || []) as any[]).filter(Boolean);
+        const existing = links.find(
+          (l) =>
+            (String((l as any).fromId || '') === a && String((l as any).toId || '') === b) ||
+            (String((l as any).fromId || '') === b && String((l as any).toId || '') === a)
+        );
+        if (existing) {
+          setSelectedLinkId(String(existing.id));
+          push(t({ it: 'Collegamento già presente', en: 'Link already exists' }), 'info');
+          return;
+        }
+        markTouched();
+        const id = addLink((currentPlan as FloorPlan).id, a, b, { kind: 'arrow', arrow: 'none' });
+        postAuditEvent({
+          event: 'link_create',
+          scopeType: 'plan',
+          scopeId: (currentPlan as FloorPlan).id,
+          details: { id, fromId: a, toId: b, kind: 'arrow' }
+        });
+        setSelectedLinkId(id);
+        push(t({ it: 'Collegamento creato', en: 'Link created' }), 'success');
+        return;
+      }
+
+      const isScaleUp = (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !e.ctrlKey && !e.metaKey;
+      const isScaleDown = (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') && !e.ctrlKey && !e.metaKey;
+      if (isScaleUp || isScaleDown) {
+        if (!currentSelectedIds.length || !currentPlan) return;
+        if (isReadOnlyRef.current) return;
+        e.preventDefault();
+        markTouched();
+        const step = e.shiftKey ? 0.2 : 0.1;
+        const delta = isScaleUp ? step : -step;
+        const fontStep = e.shiftKey ? 4 : 2;
+        for (const id of currentSelectedIds) {
+          const obj = (currentPlan as FloorPlan).objects?.find((o) => o.id === id);
+          if (!obj || isWallType(obj.type)) continue;
+          if (obj.type === 'text') {
+            const currentSize = Number((obj as any).textSize ?? 18) || 18;
+            const nextSize = Math.max(6, Math.min(160, currentSize + (isScaleUp ? fontStep : -fontStep)));
+            updateObject(id, { textSize: nextSize });
+            continue;
+          }
+          if (obj.type === 'text' || obj.type === 'image') {
+            const nextScaleX = Math.max(0.2, Math.min(6, Number(obj.scaleX ?? 1) + delta));
+            const nextScaleY = Math.max(0.2, Math.min(6, Number(obj.scaleY ?? 1) + delta));
+            updateObject(id, { scaleX: nextScaleX, scaleY: nextScaleY });
+            continue;
+          }
+          const min = obj.type === 'quote' ? 0.5 : 0.2;
+          const max = obj.type === 'quote' ? 1.6 : 2.4;
+          const nextScale = Math.max(min, Math.min(max, Number(obj.scale ?? 1) + delta));
+          updateObject(id, { scale: nextScale });
+          if (obj.type === 'quote') {
+            setLastQuoteScale(nextScale);
+          } else {
+            setLastObjectScale(nextScale);
+          }
+        }
+        return;
+      }
 
       const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
       const isRedo =
@@ -4320,6 +4671,8 @@ const PlanView = ({ planId }: Props) => {
   }, [
     addRevision,
     addObject,
+    addLink,
+    ensureObjectLayerVisible,
     cancelScaleMode,
     deleteObject,
     push,
@@ -4347,11 +4700,13 @@ const PlanView = ({ planId }: Props) => {
     toSnapshot,
     moveObject,
     updateObject,
+    isDeskType,
     isWallType,
     inferDefaultLayerIds,
     layerIdSet,
     loadCustomValues,
     saveCustomValues,
+    postAuditEvent,
     getTypeLabel,
     getQuoteOrientation,
     getPlanUnsavedChanges,
@@ -4512,6 +4867,7 @@ const PlanView = ({ planId }: Props) => {
     return defs.filter((d) => !deskTypeSet.has(d.id) && !isWallType(d.id));
   }, [deskTypeSet, isWallType, objectTypeDefs]);
   const [paletteSection, setPaletteSection] = useState<'desks' | 'objects'>('objects');
+  const [annotationsOpen, setAnnotationsOpen] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
   const [desksOpen, setDesksOpen] = useState(false);
   const [objectsOpen, setObjectsOpen] = useState(false);
@@ -4965,7 +5321,12 @@ const PlanView = ({ planId }: Props) => {
     [plan, roomStatsById, rooms, t]
   );
 
-  const handlePlaceNew = (type: MapObjectType, x: number, y: number) => {
+  const handlePlaceNew = (
+    type: MapObjectType,
+    x: number,
+    y: number,
+    options?: { textBoxWidth?: number; textBoxHeight?: number }
+  ) => {
     if (isReadOnly) return;
     if (panToolActive) setPanToolActive(false);
     if (shouldConfirmCapacity(type, x, y)) return;
@@ -4989,6 +5350,7 @@ const PlanView = ({ planId }: Props) => {
         ['desks'],
         { opacity: 1, rotation: 0, strokeWidth: 2, strokeColor: '#cbd5e1', scaleX: 1, scaleY: 1 }
       );
+      ensureObjectLayerVisible(['desks'], label, type);
       lastInsertedRef.current = { id, name: label };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, x, y);
       if (roomId) updateObject(id, { roomId });
@@ -5002,7 +5364,16 @@ const PlanView = ({ planId }: Props) => {
       setPendingType(null);
       return;
     }
-    setModalState({ mode: 'create', type, coords: { x, y } });
+    const textBoxWidth =
+      type === 'text' && Number.isFinite(options?.textBoxWidth as number) ? Number(options?.textBoxWidth) : undefined;
+    const textBoxHeight =
+      type === 'text' && Number.isFinite(options?.textBoxHeight as number) ? Number(options?.textBoxHeight) : undefined;
+    setModalState({
+      mode: 'create',
+      type,
+      coords: { x, y },
+      ...(type === 'text' ? { textBoxWidth, textBoxHeight } : {})
+    });
     setPendingType(null);
   };
 
@@ -5024,10 +5395,20 @@ const PlanView = ({ planId }: Props) => {
     scale?: number;
     quoteLabelScale?: number;
     quoteLabelBg?: boolean;
+    quoteLabelColor?: string;
+    quoteLabelOffset?: number;
     quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
     quoteDashed?: boolean;
     quoteEndpoint?: 'arrows' | 'dots' | 'none';
     strokeColor?: string;
+    textFont?: string;
+    textSize?: number;
+    textColor?: string;
+    textBg?: boolean;
+    textBgColor?: string;
+    imageUrl?: string;
+    imageWidth?: number;
+    imageHeight?: number;
     wifiDb?: number;
     wifiStandard?: string;
     wifiBand24?: boolean;
@@ -5044,6 +5425,18 @@ const PlanView = ({ planId }: Props) => {
     if (modalState.mode === 'create') {
       markTouched();
       const nextScale = Number.isFinite(payload.scale as number) ? Number(payload.scale) : defaultObjectScale;
+      const rawTextBoxWidth = modalState.type === 'text' ? Number((modalState as any).textBoxWidth) : undefined;
+      const rawTextBoxHeight = modalState.type === 'text' ? Number((modalState as any).textBoxHeight) : undefined;
+      const resolvedTextBoxWidth =
+        Number.isFinite(rawTextBoxWidth as number) && (rawTextBoxWidth as number) > 0
+          ? Math.max(80, Number(rawTextBoxWidth))
+          : undefined;
+      const resolvedTextBoxHeight =
+        Number.isFinite(rawTextBoxHeight as number) && (rawTextBoxHeight as number) > 0
+          ? Math.max(32, Number(rawTextBoxHeight))
+          : undefined;
+      const resolvedQuoteLabelPos = payload.quoteLabelPos || (lastQuoteLabelPosH as any);
+      const resolvedQuoteLabelBg = payload.quoteLabelBg ?? lastQuoteLabelBg;
       const extra = {
         ...(isCameraType(modalState.type) ? getCameraDefaults() : {}),
         ...(modalState.type === 'quote'
@@ -5052,8 +5445,12 @@ const PlanView = ({ planId }: Props) => {
               quoteLabelScale: Number.isFinite(payload.quoteLabelScale as number)
                 ? Number(payload.quoteLabelScale)
                 : Number(lastQuoteLabelScale) || 1,
-              quoteLabelBg: payload.quoteLabelBg ?? lastQuoteLabelBg,
-              quoteLabelPos: payload.quoteLabelPos || (lastQuoteLabelPosH as any),
+              quoteLabelBg: resolvedQuoteLabelBg,
+              quoteLabelPos: resolvedQuoteLabelPos,
+              quoteLabelColor: payload.quoteLabelColor || lastQuoteLabelColor || '#0f172a',
+              quoteLabelOffset: Number.isFinite(payload.quoteLabelOffset as number)
+                ? Number(payload.quoteLabelOffset)
+                : undefined,
               quoteDashed: payload.quoteDashed ?? lastQuoteDashed,
               quoteEndpoint: payload.quoteEndpoint || lastQuoteEndpoint
             }
@@ -5072,10 +5469,30 @@ const PlanView = ({ planId }: Props) => {
               wifiCatalogId: payload.wifiCatalogId,
               wifiShowRange: payload.wifiShowRange ?? true
             }
+          : {}),
+        ...(modalState.type === 'text'
+          ? {
+              textFont: payload.textFont,
+              textSize: payload.textSize,
+              textColor: payload.textColor,
+              textBg: payload.textBg ?? false,
+              textBgColor: payload.textBgColor || '#ffffff',
+              ...(resolvedTextBoxWidth ? { textBoxWidth: resolvedTextBoxWidth } : {}),
+              ...(resolvedTextBoxHeight ? { textBoxHeight: resolvedTextBoxHeight } : {})
+            }
+          : {}),
+        ...(modalState.type === 'image'
+          ? {
+              imageUrl: payload.imageUrl,
+              imageWidth: payload.imageWidth,
+              imageHeight: payload.imageHeight
+            }
           : {})
       };
       const fallbackLayerIds =
         modalState.type === 'quote' ? ['quotes'] : (getTypeLayerIds(modalState.type) || inferDefaultLayerIds(modalState.type, layerIdSet));
+      const layerIds =
+        modalState.type === 'quote' ? ['quotes'] : (payload.layerIds?.length ? payload.layerIds : fallbackLayerIds);
       const id = addObject(
         plan.id,
         modalState.type,
@@ -5084,14 +5501,16 @@ const PlanView = ({ planId }: Props) => {
         modalState.coords.x,
         modalState.coords.y,
         Math.max(0.2, Math.min(2.4, nextScale || 1)),
-        modalState.type === 'quote' ? ['quotes'] : (payload.layerIds?.length ? payload.layerIds : fallbackLayerIds),
+        layerIds,
         Object.keys(extra).length ? extra : undefined
       );
+      ensureObjectLayerVisible(layerIds, payload.name, modalState.type);
       if (modalState.type === 'quote') {
         setLastQuoteScale(Math.max(0.5, Math.min(1.6, nextScale || 1)));
         if (payload.strokeColor) setLastQuoteColor(payload.strokeColor);
         if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
-        if (payload.quoteLabelBg !== undefined) setLastQuoteLabelBg(payload.quoteLabelBg);
+        if (resolvedQuoteLabelBg !== undefined) setLastQuoteLabelBg(resolvedQuoteLabelBg);
+        if (payload.quoteLabelColor) setLastQuoteLabelColor(payload.quoteLabelColor);
         if (payload.quoteLabelPos) {
           setLastQuoteLabelPosH(payload.quoteLabelPos as any);
           setLastQuoteLabelPosV(payload.quoteLabelPos as any);
@@ -5122,6 +5541,9 @@ const PlanView = ({ planId }: Props) => {
       markTouched();
       const base = plan.objects.find((o) => o.id === modalState.objectId);
       const scale = Number.isFinite(payload.scale as number) ? Number(payload.scale) : (base?.scale ?? 1);
+      const resolvedDupLabelPos =
+        payload.quoteLabelPos || (base as any)?.quoteLabelPos || (lastQuoteLabelPosH as any);
+      const resolvedDupLabelBg = payload.quoteLabelBg ?? (base as any)?.quoteLabelBg ?? lastQuoteLabelBg;
       const extra = {
         ...(base && isCameraType(base.type)
           ? {
@@ -5137,8 +5559,12 @@ const PlanView = ({ planId }: Props) => {
               quoteLabelScale: Number.isFinite(payload.quoteLabelScale as number)
                 ? Number(payload.quoteLabelScale)
                 : Number((base as any)?.quoteLabelScale) || Number(lastQuoteLabelScale) || 1,
-              quoteLabelBg: payload.quoteLabelBg ?? (base as any)?.quoteLabelBg ?? lastQuoteLabelBg,
-              quoteLabelPos: payload.quoteLabelPos || (base as any)?.quoteLabelPos || (lastQuoteLabelPosH as any),
+              quoteLabelBg: resolvedDupLabelBg,
+              quoteLabelPos: resolvedDupLabelPos,
+              quoteLabelColor: payload.quoteLabelColor || (base as any)?.quoteLabelColor || lastQuoteLabelColor || '#0f172a',
+              quoteLabelOffset: Number.isFinite(payload.quoteLabelOffset as number)
+                ? Number(payload.quoteLabelOffset)
+                : Number((base as any)?.quoteLabelOffset) || undefined,
               quoteDashed: payload.quoteDashed ?? (base as any)?.quoteDashed ?? lastQuoteDashed,
               quoteEndpoint: payload.quoteEndpoint || (base as any)?.quoteEndpoint || lastQuoteEndpoint
             }
@@ -5157,8 +5583,30 @@ const PlanView = ({ planId }: Props) => {
               wifiCatalogId: (base as any).wifiCatalogId,
               wifiShowRange: (base as any).wifiShowRange
             }
+          : {}),
+        ...(base?.type === 'text'
+          ? {
+              textFont: payload.textFont || (base as any).textFont,
+              textSize: payload.textSize ?? (base as any).textSize,
+              textColor: payload.textColor || (base as any).textColor,
+              textBg: payload.textBg ?? (base as any).textBg,
+              textBgColor: payload.textBgColor || (base as any).textBgColor,
+              textBoxWidth: (base as any).textBoxWidth,
+              textBoxHeight: (base as any).textBoxHeight
+            }
+          : {}),
+        ...(base?.type === 'image'
+          ? {
+              imageUrl: payload.imageUrl || (base as any).imageUrl,
+              imageWidth: payload.imageWidth ?? (base as any).imageWidth,
+              imageHeight: payload.imageHeight ?? (base as any).imageHeight
+            }
           : {})
       };
+      const layerIds =
+        base?.type === 'quote'
+          ? ['quotes']
+          : (payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(base?.type || 'user', layerIdSet));
       const id = addObject(
         plan.id,
         base?.type || 'user',
@@ -5167,14 +5615,16 @@ const PlanView = ({ planId }: Props) => {
         modalState.coords.x,
         modalState.coords.y,
         Math.max(0.2, Math.min(2.4, scale || 1)),
-        base?.type === 'quote' ? ['quotes'] : (payload.layerIds?.length ? payload.layerIds : inferDefaultLayerIds(base?.type || 'user', layerIdSet)),
+        layerIds,
         Object.keys(extra).length ? extra : undefined
       );
+      ensureObjectLayerVisible(layerIds, payload.name, base?.type || 'user');
       if (base?.type === 'quote') {
         setLastQuoteScale(Math.max(0.5, Math.min(1.6, scale || 1)));
         if (payload.strokeColor) setLastQuoteColor(payload.strokeColor);
         if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
-        if (payload.quoteLabelBg !== undefined) setLastQuoteLabelBg(payload.quoteLabelBg);
+        if (resolvedDupLabelBg !== undefined) setLastQuoteLabelBg(resolvedDupLabelBg);
+        if (payload.quoteLabelColor) setLastQuoteLabelColor(payload.quoteLabelColor);
         if (payload.quoteLabelPos) {
           const orientation = getQuoteOrientation((base as any)?.points);
           if (orientation === 'vertical') setLastQuoteLabelPosV(payload.quoteLabelPos as any);
@@ -5248,10 +5698,20 @@ const PlanView = ({ planId }: Props) => {
     scale?: number;
     quoteLabelScale?: number;
     quoteLabelBg?: boolean;
+    quoteLabelColor?: string;
+    quoteLabelOffset?: number;
     quoteLabelPos?: 'center' | 'above' | 'below' | 'left' | 'right';
     quoteDashed?: boolean;
     quoteEndpoint?: 'arrows' | 'dots' | 'none';
     strokeColor?: string;
+    textFont?: string;
+    textSize?: number;
+    textColor?: string;
+    textBg?: boolean;
+    textBgColor?: string;
+    imageUrl?: string;
+    imageWidth?: number;
+    imageHeight?: number;
     wifiDb?: number;
     wifiStandard?: string;
     wifiBand24?: boolean;
@@ -5268,6 +5728,7 @@ const PlanView = ({ planId }: Props) => {
     markTouched();
     const obj = plan?.objects?.find((o) => o.id === modalState.objectId);
     const isQuote = obj?.type === 'quote';
+    const resolvedQuoteLabelBg = payload.quoteLabelBg;
     const wifiUpdates =
       obj?.type === 'wifi'
         ? {
@@ -5284,25 +5745,50 @@ const PlanView = ({ planId }: Props) => {
             wifiShowRange: payload.wifiShowRange
           }
         : {};
+    const textUpdates =
+      obj?.type === 'text'
+        ? {
+            ...(payload.textFont ? { textFont: payload.textFont } : {}),
+            ...(payload.textSize !== undefined ? { textSize: payload.textSize } : {}),
+            ...(payload.textColor ? { textColor: payload.textColor } : {}),
+            ...(payload.textBg !== undefined ? { textBg: payload.textBg } : {}),
+            ...(payload.textBgColor ? { textBgColor: payload.textBgColor } : {})
+          }
+        : {};
+    const imageUpdates =
+      obj?.type === 'image'
+        ? {
+            ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {}),
+            ...(payload.imageWidth !== undefined ? { imageWidth: payload.imageWidth } : {}),
+            ...(payload.imageHeight !== undefined ? { imageHeight: payload.imageHeight } : {})
+          }
+        : {};
     updateObject(modalState.objectId, {
       name: payload.name,
       description: payload.description,
-      layerIds: isQuote ? ['quotes'] : payload.layerIds,
+      layerIds: isQuote ? ['quotes'] : (payload.layerIds ?? obj?.layerIds),
       ...(payload.scale !== undefined ? { scale: Math.max(0.2, Math.min(2.4, Number(payload.scale) || 1)) } : {}),
       ...(isQuote && payload.quoteLabelScale !== undefined
         ? { quoteLabelScale: Math.max(0.6, Math.min(2, Number(payload.quoteLabelScale) || 1)) }
         : {}),
-      ...(isQuote && payload.quoteLabelBg !== undefined ? { quoteLabelBg: payload.quoteLabelBg } : {}),
+      ...(isQuote && resolvedQuoteLabelBg !== undefined ? { quoteLabelBg: resolvedQuoteLabelBg } : {}),
+      ...(isQuote && payload.quoteLabelColor ? { quoteLabelColor: payload.quoteLabelColor } : {}),
+      ...(isQuote && payload.quoteLabelOffset !== undefined
+        ? { quoteLabelOffset: Math.max(0.5, Math.min(2, Number(payload.quoteLabelOffset) || 1)) }
+        : {}),
       ...(isQuote && payload.quoteLabelPos ? { quoteLabelPos: payload.quoteLabelPos } : {}),
       ...(isQuote && payload.quoteDashed !== undefined ? { quoteDashed: payload.quoteDashed } : {}),
       ...(isQuote && payload.quoteEndpoint ? { quoteEndpoint: payload.quoteEndpoint } : {}),
       ...(isQuote && payload.strokeColor ? { strokeColor: payload.strokeColor } : {}),
-      ...(wifiUpdates as any)
+      ...(wifiUpdates as any),
+      ...(textUpdates as any),
+      ...(imageUpdates as any)
     });
       if (isQuote) {
         if (payload.scale !== undefined) setLastQuoteScale(Math.max(0.5, Math.min(1.6, Number(payload.scale) || 1)));
         if (payload.quoteLabelScale !== undefined) setLastQuoteLabelScale(payload.quoteLabelScale);
-        if (payload.quoteLabelBg !== undefined) setLastQuoteLabelBg(payload.quoteLabelBg);
+        if (resolvedQuoteLabelBg !== undefined) setLastQuoteLabelBg(resolvedQuoteLabelBg);
+        if (payload.quoteLabelColor) setLastQuoteLabelColor(payload.quoteLabelColor);
         if (payload.quoteLabelPos) {
           const orientation = getQuoteOrientation(obj?.points);
           if (orientation === 'vertical') setLastQuoteLabelPosV(payload.quoteLabelPos as any);
@@ -5590,7 +6076,14 @@ const PlanView = ({ planId }: Props) => {
               quoteLabelPos: lastQuoteLabelPosH,
               quoteDashed: lastQuoteDashed,
               quoteEndpoint: lastQuoteEndpoint,
-              quoteColor: lastQuoteColor
+              quoteColor: lastQuoteColor,
+              quoteLabelColor: lastQuoteLabelColor
+            }
+          : {}),
+        ...(modalState.type === 'text'
+          ? {
+              textBg: false,
+              textBgColor: '#ffffff'
             }
           : {}),
         ...(modalState.type === 'wifi'
@@ -5618,12 +6111,22 @@ const PlanView = ({ planId }: Props) => {
       scale: Number.isFinite(obj.scale as number) ? Number(obj.scale) : defaultObjectScale,
       quoteLabelScale: Number.isFinite((obj as any).quoteLabelScale) ? Number((obj as any).quoteLabelScale) : lastQuoteLabelScale,
       quoteLabelBg: (obj as any).quoteLabelBg ?? lastQuoteLabelBg,
+      quoteLabelColor: (obj as any).quoteLabelColor ?? lastQuoteLabelColor,
+      quoteLabelOffset: (obj as any).quoteLabelOffset,
       quoteLabelPos: (obj as any).quoteLabelPos,
       quoteDashed: !!(obj as any).quoteDashed,
       quoteEndpoint: (obj as any).quoteEndpoint,
       quoteColor: obj.strokeColor,
       quoteLengthLabel: quoteLabel,
       quotePoints: obj.points,
+      textFont: (obj as any).textFont,
+      textSize: (obj as any).textSize,
+      textColor: (obj as any).textColor,
+      textBg: (obj as any).textBg,
+      textBgColor: (obj as any).textBgColor,
+      imageUrl: (obj as any).imageUrl,
+      imageWidth: (obj as any).imageWidth,
+      imageHeight: (obj as any).imageHeight,
         ...(obj.type === 'wifi'
           ? {
             wifiDb: (obj as any).wifiDb,
@@ -6861,6 +7364,98 @@ const PlanView = ({ planId }: Props) => {
             ) : null}
 		          {!isReadOnly ? (
 		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-[9rem] shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+                <div className="rounded-xl bg-slate-50/80 p-2">
+                  <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
+                    <button
+                      onClick={() => setAnnotationsOpen((prev) => !prev)}
+                      className="flex items-center gap-1 rounded-md px-1 py-0.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                      title={
+                        annotationsOpen
+                          ? t({ it: 'Nascondi annotazioni', en: 'Collapse annotations' })
+                          : t({ it: 'Mostra annotazioni', en: 'Expand annotations' })
+                      }
+                    >
+                      {annotationsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      <span>{t({ it: 'Annotazioni', en: 'Annotations' })}</span>
+                    </button>
+                  </div>
+                  {annotationsOpen ? (
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <button
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/deskly-type', 'text');
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onClick={() => {
+                          setWallDrawMode(false);
+                          setMeasureMode(false);
+                          setScaleMode(false);
+                          setRoomDrawMode(null);
+                          setPanToolActive(false);
+                          setPendingType('text');
+                          setPaletteSection('objects');
+                        }}
+                        title={t({ it: 'Aggiungi testo', en: 'Add text' })}
+                        className={`flex h-9 w-9 items-center justify-center rounded-lg border ${
+                          pendingType === 'text'
+                            ? 'border-sky-300 bg-sky-100 text-sky-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <TypeIcon size={16} />
+                      </button>
+                      <button
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/deskly-type', 'image');
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onClick={() => {
+                          setWallDrawMode(false);
+                          setMeasureMode(false);
+                          setScaleMode(false);
+                          setRoomDrawMode(null);
+                          setPanToolActive(false);
+                          setPendingType('image');
+                          setPaletteSection('objects');
+                        }}
+                        title={t({ it: 'Aggiungi immagine', en: 'Add image' })}
+                        className={`flex h-9 w-9 items-center justify-center rounded-lg border ${
+                          pendingType === 'image'
+                            ? 'border-sky-300 bg-sky-100 text-sky-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <ImageIcon size={16} />
+                      </button>
+                      <button
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/deskly-type', 'postit');
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onClick={() => {
+                          setWallDrawMode(false);
+                          setMeasureMode(false);
+                          setScaleMode(false);
+                          setRoomDrawMode(null);
+                          setPanToolActive(false);
+                          setPendingType('postit');
+                          setPaletteSection('objects');
+                        }}
+                        title={t({ it: 'Aggiungi post-it', en: 'Add post-it' })}
+                        className={`flex h-9 w-9 items-center justify-center rounded-lg border ${
+                          pendingType === 'postit'
+                            ? 'border-amber-300 bg-amber-100 text-amber-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <StickyNote size={16} />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 {planLayers.length ? (
                   <div className="mt-3 rounded-xl bg-sky-50/80 p-2">
                     <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
@@ -8057,6 +8652,54 @@ const PlanView = ({ planId }: Props) => {
                 >
                   <LayoutGrid size={14} className="text-slate-500" /> {t({ it: 'Catalogo oggetti', en: 'Object catalog' })}
                 </button>
+                <button
+                  onClick={() => {
+                    setWallDrawMode(false);
+                    setMeasureMode(false);
+                    setScaleMode(false);
+                    setRoomDrawMode(null);
+                    setPanToolActive(false);
+                    setPendingType('text');
+                    setPaletteSection('objects');
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Aggiungi testo', en: 'Add text' })}
+                >
+                  <TypeIcon size={14} className="text-slate-500" /> {t({ it: 'Aggiungi testo', en: 'Add text' })}
+                </button>
+                <button
+                  onClick={() => {
+                    setWallDrawMode(false);
+                    setMeasureMode(false);
+                    setScaleMode(false);
+                    setRoomDrawMode(null);
+                    setPanToolActive(false);
+                    setPendingType('image');
+                    setPaletteSection('objects');
+                    setContextMenu(null);
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Aggiungi immagine', en: 'Add image' })}
+                >
+                  <ImageIcon size={14} className="text-slate-500" /> {t({ it: 'Aggiungi immagine', en: 'Add image' })}
+                </button>
+                <button
+                  onClick={() => {
+                    setWallDrawMode(false);
+                    setMeasureMode(false);
+                    setScaleMode(false);
+                    setRoomDrawMode(null);
+                    setPanToolActive(false);
+                    setPendingType('postit');
+                    setPaletteSection('objects');
+                    setContextMenu(null);
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Aggiungi post-it', en: 'Add post-it' })}
+                >
+                  <StickyNote size={14} className="text-slate-500" /> {t({ it: 'Aggiungi post-it', en: 'Add post-it' })}
+                </button>
                 <div className="my-2 h-px bg-slate-100" />
                 <div className="px-2 text-[11px] font-semibold text-slate-500">{t({ it: 'Scrivanie', en: 'Desks' })}</div>
                 <button
@@ -8507,12 +9150,22 @@ const PlanView = ({ planId }: Props) => {
             initialScale={(modalInitials as any)?.scale}
             initialQuoteLabelScale={(modalInitials as any)?.quoteLabelScale}
             initialQuoteLabelBg={(modalInitials as any)?.quoteLabelBg}
+            initialQuoteLabelColor={(modalInitials as any)?.quoteLabelColor}
+            initialQuoteLabelOffset={(modalInitials as any)?.quoteLabelOffset}
             initialQuoteLabelPos={(modalInitials as any)?.quoteLabelPos}
             initialQuoteDashed={(modalInitials as any)?.quoteDashed}
             initialQuoteEndpoint={(modalInitials as any)?.quoteEndpoint}
             initialQuoteColor={(modalInitials as any)?.quoteColor}
             initialQuoteLengthLabel={(modalInitials as any)?.quoteLengthLabel}
             initialQuotePoints={(modalInitials as any)?.quotePoints}
+            initialTextFont={(modalInitials as any)?.textFont}
+            initialTextSize={(modalInitials as any)?.textSize}
+            initialTextColor={(modalInitials as any)?.textColor}
+            initialTextBg={(modalInitials as any)?.textBg}
+            initialTextBgColor={(modalInitials as any)?.textBgColor}
+            initialImageUrl={(modalInitials as any)?.imageUrl}
+            initialImageWidth={(modalInitials as any)?.imageWidth}
+            initialImageHeight={(modalInitials as any)?.imageHeight}
             typeLabel={
               modalState?.mode === 'create'
                 ? `${t({ it: 'Nuovo', en: 'New' })} ${modalInitials?.type ? getTypeLabel(modalInitials.type) : ''} (${Math.round((modalState as any)?.coords?.x || 0)}, ${Math.round(
@@ -8627,6 +9280,7 @@ const PlanView = ({ planId }: Props) => {
               externalIsExternal: u.isExternal
             }
           );
+          ensureObjectLayerVisible(['users'], name, 'real_user');
           lastInsertedRef.current = { id, name };
           const roomId = getRoomIdAt((plan as FloorPlan).rooms, realUserPicker.x, realUserPicker.y);
           if (roomId) updateObject(id, { roomId });

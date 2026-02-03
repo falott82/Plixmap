@@ -7,7 +7,9 @@ import {
   DEFAULT_CCTV_TYPES,
   DEFAULT_DESK_TYPES,
   DEFAULT_DEVICE_TYPES,
+  DEFAULT_IMAGE_TYPES,
   DEFAULT_RACK_TYPES,
+  DEFAULT_TEXT_TYPES,
   DEFAULT_USER_TYPES,
   DEFAULT_WIFI_ANTENNA_MODELS,
   DEFAULT_WIFI_TYPES,
@@ -99,8 +101,21 @@ interface DataState {
         | 'quoteLabelPos'
         | 'quoteLabelScale'
         | 'quoteLabelBg'
+        | 'quoteLabelColor'
+        | 'quoteLabelOffset'
         | 'quoteDashed'
         | 'quoteEndpoint'
+        | 'textFont'
+        | 'textSize'
+        | 'textColor'
+        | 'textBg'
+        | 'textBgColor'
+        | 'textBoxWidth'
+        | 'textBoxHeight'
+        | 'imageUrl'
+        | 'imageWidth'
+        | 'imageHeight'
+        | 'postitCompact'
         | 'wifiDb'
         | 'wifiStandard'
         | 'wifiBand24'
@@ -152,8 +167,21 @@ interface DataState {
         | 'quoteLabelPos'
         | 'quoteLabelScale'
         | 'quoteLabelBg'
+        | 'quoteLabelColor'
+        | 'quoteLabelOffset'
         | 'quoteDashed'
         | 'quoteEndpoint'
+        | 'textFont'
+        | 'textSize'
+        | 'textColor'
+        | 'textBg'
+        | 'textBgColor'
+        | 'textBoxWidth'
+        | 'textBoxHeight'
+        | 'imageUrl'
+        | 'imageWidth'
+        | 'imageHeight'
+        | 'postitCompact'
         | 'wifiDb'
         | 'wifiStandard'
         | 'wifiBand24'
@@ -401,7 +429,9 @@ const defaultLayers = (): LayerDefinition[] => [
   { id: 'walls', name: { it: 'Mura', en: 'Walls' }, color: WALL_LAYER_COLOR, order: 8, typeIds: DEFAULT_WALL_TYPES },
   { id: 'quotes', name: { it: 'Quote', en: 'Quotes' }, color: QUOTE_LAYER_COLOR, order: 9 },
   { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 10 },
-  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 11, typeIds: DEFAULT_RACK_TYPES }
+  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 11, typeIds: DEFAULT_RACK_TYPES },
+  { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 12, typeIds: DEFAULT_TEXT_TYPES },
+  { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 13, typeIds: DEFAULT_IMAGE_TYPES }
 ];
 
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling', 'quotes']);
@@ -431,6 +461,8 @@ const ensureLayerTypes = (layer: LayerDefinition): LayerDefinition => {
   if (layer.id === 'wifi') return { ...layer, typeIds: DEFAULT_WIFI_TYPES };
   if (layer.id === 'cctv') return { ...layer, typeIds: DEFAULT_CCTV_TYPES };
   if (layer.id === 'desks') return { ...layer, typeIds: DEFAULT_DESK_TYPES };
+  if (layer.id === 'text') return { ...layer, typeIds: DEFAULT_TEXT_TYPES };
+  if (layer.id === 'images') return { ...layer, typeIds: DEFAULT_IMAGE_TYPES };
   if (layer.id === 'walls') return { ...layer, typeIds: DEFAULT_WALL_TYPES };
   if (layer.id === 'racks') return { ...layer, typeIds: DEFAULT_RACK_TYPES };
   return layer;
@@ -531,6 +563,21 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
         const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
         if (layerIds.includes('quotes')) return obj;
         return { ...obj, layerIds: [...layerIds, 'quotes'] };
+      }
+      if (obj?.type === 'text') {
+        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
+        if (layerIds.includes('text')) return obj;
+        return { ...obj, layerIds: [...layerIds, 'text'] };
+      }
+      if (obj?.type === 'postit') {
+        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
+        if (layerIds.includes('text')) return obj;
+        return { ...obj, layerIds: [...layerIds, 'text'] };
+      }
+      if (obj?.type === 'image') {
+        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
+        if (layerIds.includes('images')) return obj;
+        return { ...obj, layerIds: [...layerIds, 'images'] };
       }
       return obj;
     });

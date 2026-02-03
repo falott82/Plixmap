@@ -81,7 +81,12 @@ interface Props {
 	  onSelectRooms?: (ids: string[]) => void;
 	  onMoveStart?: (id: string, x: number, y: number, roomId?: string) => void;
 	  onMove: (id: string, x: number, y: number) => boolean | void;
-	  onPlaceNew: (type: MapObjectType, x: number, y: number) => void;
+  onPlaceNew: (
+    type: MapObjectType,
+    x: number,
+    y: number,
+    options?: { textBoxWidth?: number; textBoxHeight?: number }
+  ) => void;
 	  onEdit: (id: string) => void;
   onContextMenu: (payload: { id: string; clientX: number; clientY: number; wallSegmentLengthPx?: number }) => void;
   onScaleContextMenu?: (payload: { clientX: number; clientY: number }) => void;
@@ -111,7 +116,12 @@ interface Props {
       points?: { x: number; y: number }[];
     }
   ) => void;
-  onUpdateObject?: (id: string, changes: Partial<Pick<MapObject, 'scaleX' | 'scaleY' | 'rotation'>>) => void;
+  onUpdateObject?: (
+    id: string,
+    changes: Partial<
+      Pick<MapObject, 'scaleX' | 'scaleY' | 'rotation' | 'postitCompact' | 'textBoxWidth' | 'textBoxHeight' | 'textBg'>
+    >
+  ) => void;
   onMoveWall?: (id: string, dx: number, dy: number, batchId?: string, movedRoomIds?: string[]) => void;
   onSetPrintArea?: (rect: { x: number; y: number; width: number; height: number }) => void;
   wallAttenuationByType?: Map<string, number>;
@@ -140,6 +150,12 @@ const formatMeasure = (value: number) => {
   return rounded.toFixed(2).replace(/\.00$/, '');
 };
 
+const TEXT_BOX_MIN_WIDTH = 80;
+const TEXT_BOX_MIN_HEIGHT = 32;
+const TEXT_BOX_DEFAULT_WIDTH = 160;
+const TEXT_BOX_DEFAULT_HEIGHT = 56;
+const SELECTION_STROKE_SCALE = 0.6;
+
 const getDeskBounds = (
   type: string,
   dims: {
@@ -160,6 +176,42 @@ const getDeskBounds = (
   if (type === 'desk_long') return { width: dims.deskLongW, height: dims.deskLongH };
   if (type === 'desk_trap') return { width: dims.deskTrapBottom, height: dims.deskTrapHeight };
   return { width: dims.deskSize, height: dims.deskSize };
+};
+
+const getRotatedRectBounds = (centerX: number, centerY: number, width: number, height: number, rotation: number) => {
+  const w = Math.max(0, Number(width) || 0);
+  const h = Math.max(0, Number(height) || 0);
+  if (!w || !h) return null;
+  const angle = Number(rotation) || 0;
+  if (!angle) {
+    const halfW = w / 2;
+    const halfH = h / 2;
+    return { minX: centerX - halfW, minY: centerY - halfH, maxX: centerX + halfW, maxY: centerY + halfH };
+  }
+  const rad = (angle * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const halfW = w / 2;
+  const halfH = h / 2;
+  const points = [
+    { x: -halfW, y: -halfH },
+    { x: halfW, y: -halfH },
+    { x: halfW, y: halfH },
+    { x: -halfW, y: halfH }
+  ];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    const rx = p.x * cos - p.y * sin + centerX;
+    const ry = p.x * sin + p.y * cos + centerY;
+    minX = Math.min(minX, rx);
+    minY = Math.min(minY, ry);
+    maxX = Math.max(maxX, rx);
+    maxY = Math.max(maxY, ry);
+  }
+  return { minX, minY, maxX, maxY };
 };
 
 const intersectRaySegment = (
@@ -288,6 +340,10 @@ const CanvasStageImpl = (
   const [roomHighlightNow, setRoomHighlightNow] = useState(Date.now());
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftOrigin = useRef<{ x: number; y: number } | null>(null);
+  const [textDraftRect, setTextDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(
+    null
+  );
+  const textDraftOrigin = useRef<{ x: number; y: number } | null>(null);
   const [draftPrintRect, setDraftPrintRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const printOrigin = useRef<{ x: number; y: number } | null>(null);
   const [draftPolyPoints, setDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
@@ -301,12 +357,21 @@ const CanvasStageImpl = (
   const lastSelectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftRectRaf = useRef<number | null>(null);
   const pendingDraftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const textDraftRaf = useRef<number | null>(null);
+  const pendingTextDraftRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftPrintRectRaf = useRef<number | null>(null);
   const pendingDraftPrintRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const textTransformRaf = useRef<number | null>(null);
+  const pendingTextTransformRef = useRef<{ id: string; width: number; height: number } | null>(null);
   const [cameraRotateId, setCameraRotateId] = useState<string | null>(null);
   const cameraRotateRef = useRef<{ id: string; origin: { x: number; y: number } } | null>(null);
   const cameraRotateRaf = useRef<number | null>(null);
   const cameraRotatePendingRef = useRef<{ x: number; y: number } | null>(null);
+  const cameraRotateSnapRef = useRef<boolean>(false);
+  const quoteResizeRef = useRef<{ id: string; index: number; points: { x: number; y: number }[]; node?: any } | null>(null);
+  const [quoteResizePreview, setQuoteResizePreview] = useState<{ id: string; points: { x: number; y: number }[] } | null>(
+    null
+  );
 
   useEffect(() => {
     if (!perfEnabled) return;
@@ -340,6 +405,7 @@ const CanvasStageImpl = (
 
   const transformerRef = useRef<any>(null);
   const deskTransformerRef = useRef<any>(null);
+  const freeTransformerRef = useRef<any>(null);
   const selectedRoomNodeRef = useRef<any>(null);
   const roomNodeRefs = useRef<Record<string, any>>({});
   const polyLineRefs = useRef<Record<string, any>>({});
@@ -357,6 +423,7 @@ const CanvasStageImpl = (
     cancelled: boolean;
   } | null>(null);
   const [iconImages, setIconImages] = useState<Record<string, HTMLImageElement | null>>({});
+  const [imageObjects, setImageObjects] = useState<Record<string, HTMLImageElement | null>>({});
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(
     null
   );
@@ -935,12 +1002,45 @@ const getRoomBounds = (room: any) => {
   }, [plan.objects, readOnly, selectedId, selectedIds]);
 
   useEffect(() => {
+    if (!freeTransformerRef.current) return;
+    if (readOnly) {
+      freeTransformerRef.current.nodes([]);
+      freeTransformerRef.current.getLayer()?.batchDraw?.();
+      return;
+    }
+    const ids = selectedIds?.length ? selectedIds : selectedId ? [selectedId] : [];
+    if (ids.length !== 1) {
+      freeTransformerRef.current.nodes([]);
+      freeTransformerRef.current.getLayer()?.batchDraw?.();
+      return;
+    }
+    const obj = plan.objects.find((o) => o.id === ids[0]);
+    if (!obj || (obj.type !== 'text' && obj.type !== 'image')) {
+      freeTransformerRef.current.nodes([]);
+      freeTransformerRef.current.getLayer()?.batchDraw?.();
+      return;
+    }
+    const node = objectNodeRefs.current[obj.id];
+    if (!node) {
+      freeTransformerRef.current.nodes([]);
+      freeTransformerRef.current.getLayer()?.batchDraw?.();
+      return;
+    }
+    freeTransformerRef.current.nodes([node]);
+    freeTransformerRef.current.getLayer()?.batchDraw?.();
+  }, [plan.objects, readOnly, selectedId, selectedIds]);
+
+  useEffect(() => {
     return () => {
       if (wheelCommitTimer.current) window.clearTimeout(wheelCommitTimer.current);
       if (panRaf.current) cancelAnimationFrame(panRaf.current);
       if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
       if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
+      if (textDraftRaf.current) cancelAnimationFrame(textDraftRaf.current);
       if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
+      if (textTransformRaf.current) cancelAnimationFrame(textTransformRaf.current);
+      textTransformRaf.current = null;
+      pendingTextTransformRef.current = null;
     };
   }, []);
 
@@ -970,6 +1070,45 @@ const getRoomBounds = (room: any) => {
       for (const img of imgs) img.onload = null;
     };
   }, [objectTypeIcons]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pending: HTMLImageElement[] = [];
+    const entries = (plan.objects || [])
+      .filter((o) => o.type === 'image' && (o as any).imageUrl)
+      .map((o) => ({ id: o.id, src: String((o as any).imageUrl || '') }));
+    setImageObjects((prev) => {
+      const next: Record<string, HTMLImageElement | null> = {};
+      for (const entry of entries) {
+        const cached = prev[entry.id];
+        if (cached && cached.src === entry.src) {
+          next[entry.id] = cached;
+          continue;
+        }
+        if (!entry.src) continue;
+        const img = new window.Image();
+        pending.push(img);
+        img.onload = () => {
+          if (cancelled) return;
+          setImageObjects((current) => ({ ...current, [entry.id]: img }));
+        };
+        img.onerror = () => {
+          if (cancelled) return;
+          setImageObjects((current) => ({ ...current, [entry.id]: null }));
+        };
+        img.src = entry.src;
+        next[entry.id] = null;
+      }
+      return next;
+    });
+    return () => {
+      cancelled = true;
+      for (const img of pending) {
+        img.onload = null;
+        img.onerror = null;
+      }
+    };
+  }, [plan.objects]);
 
   const commitViewport = useCallback(
     (nextZoom: number, nextPan: { x: number; y: number }) => {
@@ -1128,6 +1267,39 @@ const getRoomBounds = (room: any) => {
     y: (localY - viewportRef.current.pan.y) / viewportRef.current.zoom
   });
 
+  const updateQuoteResizePreview = useCallback((shiftKey?: boolean) => {
+    if (!quoteResizeRef.current) return;
+    const stage = stageRef.current;
+    const pos = stage?.getPointerPosition?.();
+    if (!pos) return;
+    const world = pointerToWorld(pos.x, pos.y);
+    const { id, index, points } = quoteResizeRef.current;
+    let nextX = world.x;
+    let nextY = world.y;
+    if (shiftKey) {
+      const fixed = points[index === 0 ? points.length - 1 : 0];
+      const dx = nextX - fixed.x;
+      const dy = nextY - fixed.y;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        nextY = fixed.y;
+      } else {
+        nextX = fixed.x;
+      }
+    }
+    const next = points.map((p, i) => (i === index ? { x: nextX, y: nextY } : p));
+    setQuoteResizePreview({ id, points: next });
+  }, []);
+
+  const commitQuoteResize = useCallback(() => {
+    const ref = quoteResizeRef.current;
+    if (!ref || !onUpdateQuotePoints) return;
+    const preview = quoteResizePreview && quoteResizePreview.id === ref.id ? quoteResizePreview.points : ref.points;
+    onUpdateQuotePoints(ref.id, preview);
+    ref.node?.draggable?.(true);
+    quoteResizeRef.current = null;
+    setQuoteResizePreview(null);
+  }, [onUpdateQuotePoints, quoteResizePreview]);
+
   const commitCameraRotation = useCallback(() => {
     const active = cameraRotateRef.current;
     const pending = cameraRotatePendingRef.current;
@@ -1137,12 +1309,16 @@ const getRoomBounds = (room: any) => {
     if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return;
     const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
     if (!Number.isFinite(angle)) return;
-    const normalized = angle < 0 ? angle + 360 : angle;
+    let normalized = angle < 0 ? angle + 360 : angle;
+    if (cameraRotateSnapRef.current) {
+      normalized = Math.round(normalized / 90) * 90;
+    }
     onUpdateObject(active.id, { rotation: normalized });
   }, [onUpdateObject, readOnly]);
 
   const scheduleCameraRotation = useCallback(
-    (world: { x: number; y: number }) => {
+    (world: { x: number; y: number }, shiftKey?: boolean) => {
+      cameraRotateSnapRef.current = !!shiftKey;
       cameraRotatePendingRef.current = world;
       if (cameraRotateRaf.current) return;
       cameraRotateRaf.current = requestAnimationFrame(() => {
@@ -1161,9 +1337,31 @@ const getRoomBounds = (room: any) => {
       cancelAnimationFrame(cameraRotateRaf.current);
       cameraRotateRaf.current = null;
     }
+    cameraRotateSnapRef.current = false;
     setCameraRotateId(null);
     return true;
   }, []);
+
+  const scheduleTextTransform = useCallback(
+    (payload: { id: string; width: number; height: number }) => {
+      if (!onUpdateObject) return;
+      pendingTextTransformRef.current = payload;
+      if (textTransformRaf.current) return;
+      textTransformRaf.current = requestAnimationFrame(() => {
+        textTransformRaf.current = null;
+        const next = pendingTextTransformRef.current;
+        pendingTextTransformRef.current = null;
+        if (!next) return;
+        onUpdateObject(next.id, {
+          textBoxWidth: next.width,
+          textBoxHeight: next.height,
+          scaleX: 1,
+          scaleY: 1
+        });
+      });
+    },
+    [onUpdateObject]
+  );
 
   const isBoxSelecting = () => !!selectionOrigin.current;
 
@@ -1278,6 +1476,127 @@ const getRoomBounds = (room: any) => {
   // Box select: left-drag on empty area (desktop-like).
   const isBoxSelectGesture = (evt: any) => evt?.button === 0;
 
+  const getNodeBounds = (obj: MapObject) => {
+    const node = objectNodeRefs.current[obj.id];
+    const stage = stageRef.current;
+    if (!node || !stage) return null;
+    try {
+      const rect = node.getClientRect({ skipTransform: false, skipStroke: true, skipShadow: true });
+      if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+      const transform = stage.getAbsoluteTransform().copy();
+      transform.invert();
+      const p1 = transform.point({ x: rect.x, y: rect.y });
+      const p2 = transform.point({ x: rect.x + rect.width, y: rect.y + rect.height });
+      const minX = Math.min(p1.x, p2.x);
+      const minY = Math.min(p1.y, p2.y);
+      const maxX = Math.max(p1.x, p2.x);
+      const maxY = Math.max(p1.y, p2.y);
+      if (![minX, minY, maxX, maxY].every(Number.isFinite)) return null;
+      return { minX, minY, maxX, maxY };
+    } catch {
+      return null;
+    }
+  };
+
+  const getObjectBounds = (obj: MapObject) => {
+    const type = obj.type;
+    if (wallTypeIdSet.has(type) || type === 'quote') {
+      const pts = obj.points || [];
+      if (pts.length < 2) return null;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const p of pts) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+      return { minX, minY, maxX, maxY };
+    }
+    const x = Number(obj.x);
+    const y = Number(obj.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    if (type === 'text') {
+      const nodeBounds = getNodeBounds(obj);
+      if (nodeBounds) return nodeBounds;
+      const textSize = clamp(Number((obj as any).textSize ?? 18) || 18, 6, 160);
+      const textValue = String(obj.name || '');
+      const textLines = textValue ? textValue.split('\n') : [''];
+      const textLineHeight = 1.2;
+      const textNaturalWidth = Math.max(40, ...textLines.map((line) => estimateTextWidth(line || ' ', textSize)));
+      const textNaturalHeight = Math.max(textSize, textLines.length * textSize * textLineHeight);
+      const textPadding = Math.max(4, Math.round(textSize * 0.35));
+      const baseTextBoxWidth = Number((obj as any).textBoxWidth || 0);
+      const baseTextBoxHeight = Number((obj as any).textBoxHeight || 0);
+      const fallbackTextBoxWidth = Math.max(TEXT_BOX_DEFAULT_WIDTH, textNaturalWidth + textPadding * 2);
+      const fallbackTextBoxHeight = Math.max(TEXT_BOX_DEFAULT_HEIGHT, textNaturalHeight + textPadding * 2);
+      const rawTextBoxWidth =
+        Number.isFinite(baseTextBoxWidth) && baseTextBoxWidth > 0 ? baseTextBoxWidth : fallbackTextBoxWidth;
+      const rawTextBoxHeight =
+        Number.isFinite(baseTextBoxHeight) && baseTextBoxHeight > 0 ? baseTextBoxHeight : fallbackTextBoxHeight;
+      const freeScaleX = clamp(Number((obj as any).scaleX ?? 1) || 1, 0.2, 6);
+      const freeScaleY = clamp(Number((obj as any).scaleY ?? 1) || 1, 0.2, 6);
+      const width = Math.max(TEXT_BOX_MIN_WIDTH, rawTextBoxWidth * freeScaleX);
+      const height = Math.max(TEXT_BOX_MIN_HEIGHT, rawTextBoxHeight * freeScaleY);
+      const rotation = Number((obj as any).rotation || 0);
+      return getRotatedRectBounds(x, y, width, height, rotation);
+    }
+
+    if (type === 'image') {
+      const baseW = Math.max(40, Number((obj as any).imageWidth ?? 160) || 160);
+      const baseH = Math.max(30, Number((obj as any).imageHeight ?? 120) || 120);
+      const scaleX = clamp(Number((obj as any).scaleX ?? 1) || 1, 0.2, 6);
+      const scaleY = clamp(Number((obj as any).scaleY ?? 1) || 1, 0.2, 6);
+      const rotation = Number((obj as any).rotation || 0);
+      return getRotatedRectBounds(x, y, baseW * scaleX, baseH * scaleY, rotation);
+    }
+
+    const baseScale = clamp(Number(obj.scale ?? 1) || 1, 0.2, 6);
+
+    if (type === 'postit') {
+      const postItCompact = !!(obj as any).postitCompact;
+      const size = (postItCompact ? 26 : 36) * baseScale;
+      return getRotatedRectBounds(x, y, size, size, 0);
+    }
+
+    if (isDeskType(type)) {
+      const deskScaleX = clamp(Number(obj.scaleX ?? 1) || 1, 0.4, 4);
+      const deskScaleY = clamp(Number(obj.scaleY ?? 1) || 1, 0.4, 4);
+      const deskSize = 38 * baseScale;
+      const deskRectW = deskSize * 1.45;
+      const deskRectH = deskSize * 0.75;
+      const deskLongW = deskSize * 1.85;
+      const deskLongH = deskSize * 0.6;
+      const deskDoubleW = deskSize * 0.7;
+      const deskDoubleH = deskSize * 0.95;
+      const deskDoubleGap = 4 * baseScale;
+      const deskTrapBottom = deskSize * 1.15;
+      const deskTrapHeight = deskSize * 0.75;
+      const bounds = getDeskBounds(type, {
+        deskSize,
+        deskRectW,
+        deskRectH,
+        deskLongW,
+        deskLongH,
+        deskDoubleW,
+        deskDoubleH,
+        deskDoubleGap,
+        deskTrapBottom,
+        deskTrapHeight
+      });
+      const rotation = Number(obj.rotation || 0);
+      return getRotatedRectBounds(x, y, bounds.width * deskScaleX, bounds.height * deskScaleY, rotation);
+    }
+
+    const size = 36 * baseScale;
+    const rotation = type === 'camera' ? Number(obj.rotation || 0) : 0;
+    return getRotatedRectBounds(x, y, size, size, rotation);
+  };
+
   const updateSelectionBox = (event: any) => {
     if (!selectionOrigin.current) return false;
     const stage = event.target.getStage();
@@ -1330,7 +1649,18 @@ const getRoomBounds = (room: any) => {
     const minY = rect.y;
     const maxY = rect.y + rect.height;
     const ids = (plan.objects || [])
-      .filter((o) => o.x >= minX && o.x <= maxX && o.y >= minY && o.y <= maxY)
+      .filter((o) => {
+        const bounds = getObjectBounds(o);
+        const x = Number(o.x);
+        const y = Number(o.y);
+        const pointInside =
+          Number.isFinite(x) && Number.isFinite(y) && x >= minX && x <= maxX && y >= minY && y <= maxY;
+        if (bounds) {
+          const boundsHit = bounds.maxX >= minX && bounds.minX <= maxX && bounds.maxY >= minY && bounds.minY <= maxY;
+          return boundsHit || pointInside;
+        }
+        return pointInside;
+      })
       .map((o) => o.id);
     const roomIds = (plan.rooms || [])
       .filter((room) => {
@@ -1358,6 +1688,64 @@ const getRoomBounds = (room: any) => {
     if (!type) return;
     const { x, y } = toStageCoords(event.clientX, event.clientY);
     onPlaceNew(type, x, y);
+  };
+
+  const updateTextDraftRect = (event: any) => {
+    const origin = textDraftOrigin.current;
+    if (!origin) return false;
+    const stage = event.target.getStage();
+    const pos = stage?.getPointerPosition();
+    if (!pos) return true;
+    const world = pointerToWorld(pos.x, pos.y);
+    const x1 = origin.x;
+    const y1 = origin.y;
+    const x2 = world.x;
+    const y2 = world.y;
+    const x = Math.min(x1, x2);
+    const y = Math.min(y1, y2);
+    const width = Math.abs(x2 - x1);
+    const height = Math.abs(y2 - y1);
+    pendingTextDraftRef.current = { x, y, width, height };
+    if (textDraftRaf.current) return true;
+    textDraftRaf.current = requestAnimationFrame(() => {
+      textDraftRaf.current = null;
+      const next = pendingTextDraftRef.current;
+      pendingTextDraftRef.current = null;
+      if (!next) return;
+      setTextDraftRect(next);
+    });
+    return true;
+  };
+
+  const finalizeTextDraftRect = () => {
+    if (!textDraftOrigin.current) return null;
+    const origin = textDraftOrigin.current;
+    const rect = textDraftRect || { x: origin.x, y: origin.y, width: 0, height: 0 };
+    let { x, y, width, height } = rect;
+    const isClick = width < 3 && height < 3;
+    if (isClick) {
+      width = TEXT_BOX_DEFAULT_WIDTH;
+      height = TEXT_BOX_DEFAULT_HEIGHT;
+      x = origin.x - width / 2;
+      y = origin.y - height / 2;
+    } else {
+      const draggedLeft = rect.x < origin.x;
+      const draggedUp = rect.y < origin.y;
+      if (width < TEXT_BOX_MIN_WIDTH) {
+        width = TEXT_BOX_MIN_WIDTH;
+        x = draggedLeft ? origin.x - width : origin.x;
+      }
+      if (height < TEXT_BOX_MIN_HEIGHT) {
+        height = TEXT_BOX_MIN_HEIGHT;
+        y = draggedUp ? origin.y - height : origin.y;
+      }
+    }
+    textDraftOrigin.current = null;
+    if (textDraftRaf.current) cancelAnimationFrame(textDraftRaf.current);
+    textDraftRaf.current = null;
+    pendingTextDraftRef.current = null;
+    setTextDraftRect(null);
+    return { x, y, width, height };
   };
 
   const updateDraftRect = (event: any) => {
@@ -1728,44 +2116,56 @@ const getRoomBounds = (room: any) => {
       onDragOver={(e) => e.preventDefault()}
     >
       {hoverCard ? (
-        <div
-          className="pointer-events-none fixed z-50 w-[280px] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-card backdrop-blur"
-          style={{ left: hoverCard.clientX, top: hoverCard.clientY + 14 }}
-        >
-          <div className="text-sm font-semibold text-ink">
-            {(hoverCard.obj.firstName || hoverCard.obj.name || '').toString()} {(hoverCard.obj.lastName || '').toString()}
+        hoverCard.obj?.type === 'postit' ? (
+          <div
+            className="pointer-events-none fixed z-50 w-[320px] -translate-x-1/2 rounded-2xl border border-amber-200 bg-[#fde68a]/95 p-3 text-xs text-amber-900 shadow-card backdrop-blur"
+            style={{ left: hoverCard.clientX, top: hoverCard.clientY + 14 }}
+          >
+            <div className="text-xs font-semibold uppercase text-amber-700">{t({ it: 'Post-it', en: 'Post-it' })}</div>
+            <div className="mt-2 whitespace-pre-wrap text-sm">
+              {String(hoverCard.obj.name || '').trim() || t({ it: 'Nota vuota', en: 'Empty note' })}
+            </div>
           </div>
-          <div className="mt-1 space-y-1">
-            {hoverCard.obj.externalRole ? (
-              <div>
-                <span className="font-semibold text-slate-600">{t({ it: 'Ruolo', en: 'Role' })}:</span> {hoverCard.obj.externalRole}
-              </div>
-            ) : null}
-            {[hoverCard.obj.externalDept1, hoverCard.obj.externalDept2, hoverCard.obj.externalDept3].filter(Boolean).length ? (
-              <div>
-                <span className="font-semibold text-slate-600">{t({ it: 'Reparto', en: 'Department' })}:</span>{' '}
-                {[hoverCard.obj.externalDept1, hoverCard.obj.externalDept2, hoverCard.obj.externalDept3].filter(Boolean).join(' / ')}
-              </div>
-            ) : null}
-            {hoverCard.obj.externalEmail ? (
-              <div>
-                <span className="font-semibold text-slate-600">{t({ it: 'Email', en: 'Email' })}:</span> {hoverCard.obj.externalEmail}
-              </div>
-            ) : null}
-            {[hoverCard.obj.externalExt1, hoverCard.obj.externalExt2, hoverCard.obj.externalExt3].filter(Boolean).length ? (
-              <div>
-                <span className="font-semibold text-slate-600">{t({ it: 'Interni', en: 'Extensions' })}:</span>{' '}
-                {[hoverCard.obj.externalExt1, hoverCard.obj.externalExt2, hoverCard.obj.externalExt3].filter(Boolean).join(', ')}
-              </div>
-            ) : null}
-            {hoverCard.obj.externalUserId ? (
-              <div className="text-[11px] text-slate-500">
-                ID: <span className="font-mono">{hoverCard.obj.externalUserId}</span>
-                {hoverCard.obj.externalIsExternal ? ` · ${t({ it: 'Esterno', en: 'External' })}` : ''}
-              </div>
-            ) : null}
+        ) : (
+          <div
+            className="pointer-events-none fixed z-50 w-[280px] -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-card backdrop-blur"
+            style={{ left: hoverCard.clientX, top: hoverCard.clientY + 14 }}
+          >
+            <div className="text-sm font-semibold text-ink">
+              {(hoverCard.obj.firstName || hoverCard.obj.name || '').toString()} {(hoverCard.obj.lastName || '').toString()}
+            </div>
+            <div className="mt-1 space-y-1">
+              {hoverCard.obj.externalRole ? (
+                <div>
+                  <span className="font-semibold text-slate-600">{t({ it: 'Ruolo', en: 'Role' })}:</span> {hoverCard.obj.externalRole}
+                </div>
+              ) : null}
+              {[hoverCard.obj.externalDept1, hoverCard.obj.externalDept2, hoverCard.obj.externalDept3].filter(Boolean).length ? (
+                <div>
+                  <span className="font-semibold text-slate-600">{t({ it: 'Reparto', en: 'Department' })}:</span>{' '}
+                  {[hoverCard.obj.externalDept1, hoverCard.obj.externalDept2, hoverCard.obj.externalDept3].filter(Boolean).join(' / ')}
+                </div>
+              ) : null}
+              {hoverCard.obj.externalEmail ? (
+                <div>
+                  <span className="font-semibold text-slate-600">{t({ it: 'Email', en: 'Email' })}:</span> {hoverCard.obj.externalEmail}
+                </div>
+              ) : null}
+              {[hoverCard.obj.externalExt1, hoverCard.obj.externalExt2, hoverCard.obj.externalExt3].filter(Boolean).length ? (
+                <div>
+                  <span className="font-semibold text-slate-600">{t({ it: 'Interni', en: 'Extensions' })}:</span>{' '}
+                  {[hoverCard.obj.externalExt1, hoverCard.obj.externalExt2, hoverCard.obj.externalExt3].filter(Boolean).join(', ')}
+                </div>
+              ) : null}
+              {hoverCard.obj.externalUserId ? (
+                <div className="text-[11px] text-slate-500">
+                  ID: <span className="font-mono">{hoverCard.obj.externalUserId}</span>
+                  {hoverCard.obj.externalIsExternal ? ` · ${t({ it: 'Esterno', en: 'External' })}` : ''}
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
+        )
       ) : null}
       <Stage
         ref={stageRef}
@@ -1775,6 +2175,11 @@ const getRoomBounds = (room: any) => {
         onWheel={handleWheel}
         onMouseDown={(e) => {
           const isEmptyTarget = e.target === e.target.getStage() || e.target?.attrs?.name === 'bg-rect';
+          if (toolMode === 'wall' && isContextClick(e.evt)) {
+            e.evt.preventDefault();
+            onWallDraftContextMenu?.();
+            return;
+          }
           if (isPanGesture(e.evt)) {
             e.evt.preventDefault();
             startPan(e);
@@ -1793,6 +2198,12 @@ const getRoomBounds = (room: any) => {
             const pos = stage?.getPointerPosition();
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
+            if (pendingType === 'text') {
+              textDraftOrigin.current = { x: world.x, y: world.y };
+              pendingTextDraftRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
+              setTextDraftRect(pendingTextDraftRef.current);
+              return;
+            }
             onPlaceNew(pendingType, world.x, world.y);
             return;
           }
@@ -1877,12 +2288,21 @@ const getRoomBounds = (room: any) => {
           onToolDoubleClick?.(world);
         }}
         onMouseMove={(e) => {
+          if (quoteResizeRef.current) {
+            e.evt.preventDefault();
+            updateQuoteResizePreview(!!e.evt.shiftKey);
+            return;
+          }
+          if (textDraftOrigin.current) {
+            updateTextDraftRect(e);
+            return;
+          }
           if (cameraRotateRef.current) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
             if (pos) {
               const world = pointerToWorld(pos.x, pos.y);
-              scheduleCameraRotation(world);
+              scheduleCameraRotation(world, !!e.evt.shiftKey);
             }
             return;
           }
@@ -1934,6 +2354,20 @@ const getRoomBounds = (room: any) => {
           movePan(e);
         }}
         onMouseUp={(e) => {
+          if (quoteResizeRef.current) {
+            e.evt.preventDefault();
+            commitQuoteResize();
+            return;
+          }
+          if (textDraftOrigin.current) {
+            const rect = finalizeTextDraftRect();
+            if (rect && pendingType === 'text' && !readOnly) {
+              const centerX = rect.x + rect.width / 2;
+              const centerY = rect.y + rect.height / 2;
+              onPlaceNew('text', centerX, centerY, { textBoxWidth: rect.width, textBoxHeight: rect.height });
+            }
+            return;
+          }
           if (stopCameraRotation()) return;
           if (finalizeSelectionBox()) return;
           if (isContextClick(e.evt)) return;
@@ -1942,6 +2376,19 @@ const getRoomBounds = (room: any) => {
           endPan();
         }}
         onMouseLeave={() => {
+          if (quoteResizeRef.current) {
+            commitQuoteResize();
+            return;
+          }
+          if (textDraftOrigin.current) {
+            const rect = finalizeTextDraftRect();
+            if (rect && pendingType === 'text' && !readOnly) {
+              const centerX = rect.x + rect.width / 2;
+              const centerY = rect.y + rect.height / 2;
+              onPlaceNew('text', centerX, centerY, { textBoxWidth: rect.width, textBoxHeight: rect.height });
+            }
+            return;
+          }
           if (stopCameraRotation()) return;
           if (finalizeSelectionBox()) return;
           if (finalizeDraftPrintRect()) return;
@@ -2306,6 +2753,20 @@ const getRoomBounds = (room: any) => {
               cornerRadius={8}
             />
           ) : null}
+          {textDraftRect ? (
+            <Rect
+              x={textDraftRect.x}
+              y={textDraftRect.y}
+              width={textDraftRect.width}
+              height={textDraftRect.height}
+              fill="rgba(37,99,235,0.08)"
+              stroke="#2563eb"
+              strokeWidth={1.5}
+              dash={[6, 4]}
+              listening={false}
+              cornerRadius={6}
+            />
+          ) : null}
           {draftRect ? (
             <Rect
               x={draftRect.x}
@@ -2449,8 +2910,10 @@ const getRoomBounds = (room: any) => {
           {quoteObjects.map((obj) => {
             const pts = obj.points || [];
             if (pts.length < 2) return null;
-            const start = pts[0];
-            const end = pts[pts.length - 1];
+            const displayPts = quoteResizePreview?.id === obj.id ? quoteResizePreview.points : pts;
+            if (displayPts.length < 2) return null;
+            const start = displayPts[0];
+            const end = displayPts[displayPts.length - 1];
             const isSelected = !!selectedIds?.includes(obj.id);
             const baseStroke = typeof obj.strokeColor === 'string' && obj.strokeColor.trim() ? obj.strokeColor.trim() : '#f97316';
             const stroke = isSelected ? '#2563eb' : baseStroke;
@@ -2461,7 +2924,16 @@ const getRoomBounds = (room: any) => {
             const pointerSize = Math.max(4, Math.round(5 * scale));
             const labelFontSize = Math.max(8, Math.round(9 * labelScale));
             const labelPadding = Math.max(6, Math.round(8 * labelScale));
-            const label = quoteLabels?.[obj.id];
+            const computedLabel = (() => {
+              const lengthPx = Math.hypot(end.x - start.x, end.y - start.y);
+              const lengthLabel =
+                Number.isFinite(metersPerPixel) && (metersPerPixel as number) > 0
+                  ? `${(lengthPx * (metersPerPixel as number)).toFixed(2)} m`
+                  : `${Math.round(lengthPx)} px`;
+              const name = String(obj.name || '').trim();
+              return name && lengthLabel ? `${name} · ${lengthLabel}` : name || lengthLabel;
+            })();
+            const label = quoteLabels?.[obj.id] || computedLabel;
             const midX = (start.x + end.x) / 2;
             const midY = (start.y + end.y) / 2;
             const textW = label ? estimateTextWidth(label, labelFontSize) + labelPadding : 0;
@@ -2470,8 +2942,18 @@ const getRoomBounds = (room: any) => {
             const dy = end.y - start.y;
             const orientation = Math.abs(dy) > Math.abs(dx) ? 'vertical' : 'horizontal';
             const labelPos = (obj as any).quoteLabelPos || 'center';
-            const labelBg = (obj as any).quoteLabelBg !== false;
-            const offsetDist = Math.max(6, Math.round(6 * labelScale)) + textH / 2;
+            const labelBg = labelPos === 'center' || (obj as any).quoteLabelBg === true;
+            const labelColor = String((obj as any).quoteLabelColor || '#0f172a');
+            const labelOffset = Number((obj as any).quoteLabelOffset);
+            const labelOffsetFactor = Number.isFinite(labelOffset) && labelOffset > 0 ? labelOffset : null;
+            const baseOffset = Math.max(6, Math.round(6 * labelScale));
+            const perpSize = orientation === 'vertical' ? textW : textH;
+            const sideFactor = orientation === 'vertical' && (labelPos === 'left' || labelPos === 'right') ? 0.2 : 0.5;
+            const defaultFactor =
+              orientation === 'horizontal' && labelPos === 'below'
+                ? 1.15
+                : 1;
+            const offsetDist = (baseOffset + perpSize / 2) * sideFactor * (labelOffsetFactor ?? defaultFactor);
             let offsetX = 0;
             let offsetY = 0;
             if (orientation === 'vertical') {
@@ -2484,10 +2966,11 @@ const getRoomBounds = (room: any) => {
             const endpoint = (obj as any).quoteEndpoint || 'arrows';
             const dashed = !!(obj as any).quoteDashed;
             const dash = dashed ? [8 * scale, 6 * scale] : undefined;
+            const isResizing = quoteResizePreview?.id === obj.id;
             return (
               <Group
                 key={obj.id}
-                draggable={isSelected && !readOnly && !panToolActive && !toolMode}
+                draggable={isSelected && !readOnly && !panToolActive && !toolMode && !isResizing}
                 onDragStart={() => {
                   if (!isSelected || !onMoveStart) return;
                   onMoveStart(obj.id, obj.x ?? start.x, obj.y ?? start.y, obj.roomId);
@@ -2634,11 +3117,11 @@ const getRoomBounds = (room: any) => {
                       align="center"
                       fontSize={labelFontSize}
                       fontStyle="bold"
-                      fill={isSelected ? stroke : '#0f172a'}
+                      fill={isSelected ? stroke : labelColor}
                     />
                   </Group>
                 ) : null}
-                {isSelected && !readOnly && !panToolActive && !toolMode ? (
+                {isSelected && !readOnly && !panToolActive && !toolMode && !!onUpdateQuotePoints ? (
                   <>
                     <Circle
                       x={start.x}
@@ -2647,12 +3130,15 @@ const getRoomBounds = (room: any) => {
                       fill="#ffffff"
                       stroke={stroke}
                       strokeWidth={2}
-                      draggable
-                      onDragEnd={(e) => {
+                      onMouseDown={(e) => {
                         if (!onUpdateQuotePoints) return;
-                        const next = [...pts];
-                        next[0] = { x: e.target.x(), y: e.target.y() };
-                        onUpdateQuotePoints(obj.id, next);
+                        e.cancelBubble = true;
+                        const basePoints = pts.map((p) => ({ x: p.x, y: p.y }));
+                        const group = e.target.getParent();
+                        group?.stopDrag?.();
+                        group?.draggable?.(false);
+                        quoteResizeRef.current = { id: obj.id, index: 0, points: basePoints, node: group };
+                        setQuoteResizePreview({ id: obj.id, points: basePoints });
                       }}
                     />
                     <Circle
@@ -2662,12 +3148,15 @@ const getRoomBounds = (room: any) => {
                       fill="#ffffff"
                       stroke={stroke}
                       strokeWidth={2}
-                      draggable
-                      onDragEnd={(e) => {
+                      onMouseDown={(e) => {
                         if (!onUpdateQuotePoints) return;
-                        const next = [...pts];
-                        next[next.length - 1] = { x: e.target.x(), y: e.target.y() };
-                        onUpdateQuotePoints(obj.id, next);
+                        e.cancelBubble = true;
+                        const basePoints = pts.map((p) => ({ x: p.x, y: p.y }));
+                        const group = e.target.getParent();
+                        group?.stopDrag?.();
+                        group?.draggable?.(false);
+                        quoteResizeRef.current = { id: obj.id, index: basePoints.length - 1, points: basePoints, node: group };
+                        setQuoteResizePreview({ id: obj.id, points: basePoints });
                       }}
                     />
                   </>
@@ -2687,6 +3176,9 @@ const getRoomBounds = (room: any) => {
             const stroke = isSelected ? '#2563eb' : link.color || '#94a3b8';
             const widthRaw = Number((link as any).width);
             const width = Number.isFinite(widthRaw) && widthRaw > 0 ? widthRaw : 1;
+            const selectedWidthDeltaRaw = Number((link as any).selectedWidthDelta);
+            const selectedWidthDelta =
+              Number.isFinite(selectedWidthDeltaRaw) && selectedWidthDeltaRaw > 0 ? selectedWidthDeltaRaw : 1;
             const dash = (link as any).dashed ? [8, 6] : undefined;
             const route = ((link as any).route || 'vh') as 'vh' | 'hv';
 
@@ -2743,8 +3235,8 @@ const getRoomBounds = (room: any) => {
                   <Line
                     points={points}
                     stroke={stroke}
-                    strokeWidth={isSelected ? width + 1 : width}
-                    hitStrokeWidth={Math.max(14, (isSelected ? width + 1 : width) + 10)}
+                    strokeWidth={isSelected ? width + selectedWidthDelta : width}
+                    hitStrokeWidth={Math.max(14, (isSelected ? width + selectedWidthDelta : width) + 10)}
                     dash={dash as any}
                     lineCap="round"
                     lineJoin="round"
@@ -2796,8 +3288,8 @@ const getRoomBounds = (room: any) => {
                   pointerWidth={arrowStart || arrowEnd ? 8 : 0}
                   pointerAtBeginning={arrowStart}
                   pointerAtEnding={arrowEnd}
-                  strokeWidth={isSelected ? width + 1 : width}
-                  hitStrokeWidth={Math.max(14, (isSelected ? width + 1 : width) + 10)}
+                  strokeWidth={isSelected ? width + selectedWidthDelta : width}
+                  hitStrokeWidth={Math.max(14, (isSelected ? width + selectedWidthDelta : width) + 10)}
                   opacity={0.85}
                   onClick={(e) => {
                     e.cancelBubble = true;
@@ -2843,12 +3335,19 @@ const getRoomBounds = (room: any) => {
             const isSelected = selectedIds ? selectedIds.includes(obj.id) : selectedId === obj.id;
             const highlightActive = !!(highlightId && highlightUntil && highlightId === obj.id && highlightUntil > highlightNow);
             const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(highlightNow / 80) : 0;
-            const scale = obj.scale ?? 1;
             const isDesk = isDeskType(obj.type);
+            const isText = obj.type === 'text';
+            const isImage = obj.type === 'image';
+            const isPostIt = obj.type === 'postit';
+            const baseScale = Number(obj.scale ?? 1) || 1;
+            const scale = isText || isImage ? 1 : baseScale;
             const isCamera = obj.type === 'camera';
             const isWifi = obj.type === 'wifi';
             const deskScaleX = isDesk ? clamp(Number(obj.scaleX ?? 1) || 1, 0.4, 4) : 1;
             const deskScaleY = isDesk ? clamp(Number(obj.scaleY ?? 1) || 1, 0.4, 4) : 1;
+            const freeScaleX = isText || isImage ? clamp(Number(obj.scaleX ?? 1) || 1, 0.2, 6) : 1;
+            const freeScaleY = isText || isImage ? clamp(Number(obj.scaleY ?? 1) || 1, 0.2, 6) : 1;
+            const freeRotation = isText || isImage ? Number(obj.rotation || 0) : 0;
             const objectOpacity = typeof obj.opacity === 'number' ? Math.max(0.2, Math.min(1, obj.opacity)) : 1;
             const iconImg = iconImages[obj.type];
             const labelText =
@@ -2862,20 +3361,61 @@ const getRoomBounds = (room: any) => {
             const labelHeight = labelLines * labelFontSize * labelLineHeight;
             const labelGap = 6;
             const labelY = -(18 * scale) - labelGap - labelHeight;
+            const showLabel = !!labelValue && !isText && !isImage && !isPostIt;
             const outline = highlightActive ? '#22d3ee' : isSelected ? '#2563eb' : '#cbd5e1';
-            const outlineWidth = highlightActive ? 3 + 2 * pulse : isSelected ? 3 : 2;
+            const outlineWidth = highlightActive
+              ? (3 + 2 * pulse) * SELECTION_STROKE_SCALE
+              : isSelected
+                ? 3 * SELECTION_STROKE_SCALE
+                : 2;
             const deskStrokeColor =
               typeof (obj as any).strokeColor === 'string' && String((obj as any).strokeColor).trim()
                 ? String((obj as any).strokeColor).trim()
                 : '#cbd5e1';
             const baseDeskStrokeWidth = clamp(Number((obj as any).strokeWidth ?? 2) || 2, 0.5, 6);
             const deskStroke = highlightActive ? '#22d3ee' : isSelected ? '#2563eb' : deskStrokeColor;
-            const deskStrokeWidth = highlightActive ? baseDeskStrokeWidth + 1 + 2 * pulse : isSelected ? baseDeskStrokeWidth + 1 : baseDeskStrokeWidth;
+            const deskStrokeWidth = highlightActive
+              ? baseDeskStrokeWidth + (1 + 2 * pulse) * SELECTION_STROKE_SCALE
+              : isSelected
+                ? baseDeskStrokeWidth + 1 * SELECTION_STROKE_SCALE
+                : baseDeskStrokeWidth;
             const deskSize = 38 * scale;
             const deskHalf = deskSize / 2;
             const deskThickness = 12 * scale;
             const deskRotation = isDesk ? Number(obj.rotation || 0) : 0;
             const cameraRotation = isCamera ? Number(obj.rotation || 0) : 0;
+            const textFont = (obj as any).textFont || 'Arial, sans-serif';
+            const textSize = clamp(Number((obj as any).textSize ?? 18) || 18, 6, 160);
+            const textColor = (obj as any).textColor || '#000000';
+            const textBg = !!(obj as any).textBg;
+            const textBgColor = (obj as any).textBgColor || '#ffffff';
+            const textValue = isText ? String(obj.name || '') : '';
+            const textLines = textValue ? textValue.split('\n') : [''];
+            const textLineHeight = 1.2;
+            const textNaturalWidth = isText
+              ? Math.max(40, ...textLines.map((line) => estimateTextWidth(line || ' ', textSize)))
+              : 0;
+            const textNaturalHeight = isText ? Math.max(textSize, textLines.length * textSize * textLineHeight) : 0;
+            const textPadding = Math.max(4, Math.round(textSize * 0.35));
+            const baseTextBoxWidth = Number((obj as any).textBoxWidth || 0);
+            const baseTextBoxHeight = Number((obj as any).textBoxHeight || 0);
+            const fallbackTextBoxWidth = Math.max(TEXT_BOX_DEFAULT_WIDTH, textNaturalWidth + textPadding * 2);
+            const fallbackTextBoxHeight = Math.max(TEXT_BOX_DEFAULT_HEIGHT, textNaturalHeight + textPadding * 2);
+            const rawTextBoxWidth =
+              Number.isFinite(baseTextBoxWidth) && baseTextBoxWidth > 0 ? baseTextBoxWidth : fallbackTextBoxWidth;
+            const rawTextBoxHeight =
+              Number.isFinite(baseTextBoxHeight) && baseTextBoxHeight > 0 ? baseTextBoxHeight : fallbackTextBoxHeight;
+            const textBoxWidth = isText ? Math.max(TEXT_BOX_MIN_WIDTH, rawTextBoxWidth * freeScaleX) : 0;
+            const textBoxHeight = isText ? Math.max(TEXT_BOX_MIN_HEIGHT, rawTextBoxHeight * freeScaleY) : 0;
+            const textAreaWidth = Math.max(10, textBoxWidth - textPadding * 2);
+            const textAreaHeight = Math.max(10, textBoxHeight - textPadding * 2);
+            const imageW = Math.max(40, Number((obj as any).imageWidth ?? 160) || 160) * scale;
+            const imageH = Math.max(30, Number((obj as any).imageHeight ?? 120) || 120) * scale;
+            const postItCompact = !!(obj as any).postitCompact;
+            const postItSize = (postItCompact ? 26 : 36) * scale;
+            const postItHalf = postItSize / 2;
+            const postItFold = postItSize * 0.28;
+            const imageNode = isImage ? imageObjects[obj.id] : null;
             const cameraRange = isCamera ? clamp(Number((obj as any).cctvRange ?? 160) || 160, 60, 600) : 0;
             const cameraAngle = isCamera ? clamp(Number((obj as any).cctvAngle ?? 70) || 70, 20, 160) : 0;
             const cameraOpacity = isCamera ? clamp(Number((obj as any).cctvOpacity ?? 0.6) || 0.6, 0.1, 0.9) : 0;
@@ -2934,8 +3474,9 @@ const getRoomBounds = (room: any) => {
                 }}
                 x={obj.x}
                 y={obj.y}
-                scaleX={isDesk ? deskScaleX : 1}
-                scaleY={isDesk ? deskScaleY : 1}
+                scaleX={isDesk ? deskScaleX : isImage ? freeScaleX : 1}
+                scaleY={isDesk ? deskScaleY : isImage ? freeScaleY : 1}
+                rotation={isText || isImage ? freeRotation : 0}
                 draggable={!readOnly && !panToolActive && !toolMode && !(isCamera && cameraRotateId === obj.id)}
                 onDragStart={(e) => {
                   if (cameraRotateRef.current?.id === obj.id) {
@@ -2948,12 +3489,12 @@ const getRoomBounds = (room: any) => {
                   onSelect(obj.id, { multi: !!(e?.evt?.ctrlKey || e?.evt?.metaKey) });
                 }}
                 onMouseEnter={(e) => {
-                  if (obj.type !== 'real_user') return;
+                  if (obj.type !== 'real_user' && obj.type !== 'postit') return;
                   if (perfEnabled) perfMetrics.hoverUpdates += 1;
                   setHoverCard({ clientX: e.evt.clientX, clientY: e.evt.clientY, obj });
                 }}
                 onMouseMove={(e) => {
-                  if (obj.type !== 'real_user') return;
+                  if (obj.type !== 'real_user' && obj.type !== 'postit') return;
                   if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
                   const cx = e.evt.clientX;
                   const cy = e.evt.clientY;
@@ -3001,18 +3542,66 @@ const getRoomBounds = (room: any) => {
                   }
                   dragStartRef.current.delete(obj.id);
                 }}
-                onTransformEnd={(e) => {
-                  if (readOnly || !isDesk || !onUpdateObject) return;
+                onTransform={(e) => {
+                  if (readOnly || !onUpdateObject) return;
+                  if (!isText) return;
+                  const activeAnchor = freeTransformerRef.current?.getActiveAnchor?.();
+                  if (activeAnchor === 'rotater') return;
                   const node = e.target as any;
-                  const nextScaleX = clamp(node.scaleX(), 0.4, 4);
-                  const nextScaleY = clamp(node.scaleY(), 0.4, 4);
+                  const baseWidth = textBoxWidth || TEXT_BOX_DEFAULT_WIDTH;
+                  const baseHeight = textBoxHeight || TEXT_BOX_DEFAULT_HEIGHT;
+                  const nextWidth = Math.max(TEXT_BOX_MIN_WIDTH, baseWidth * node.scaleX());
+                  const nextHeight = Math.max(TEXT_BOX_MIN_HEIGHT, baseHeight * node.scaleY());
                   node.scaleX(1);
                   node.scaleY(1);
-                  onUpdateObject(obj.id, { scaleX: nextScaleX, scaleY: nextScaleY });
+                  scheduleTextTransform({ id: obj.id, width: nextWidth, height: nextHeight });
+                }}
+                onTransformEnd={(e) => {
+                  if (readOnly || !onUpdateObject) return;
+                  if (!isDesk && !isText && !isImage) return;
+                  const node = e.target as any;
+                  if (isDesk) {
+                    const nextScaleX = clamp(node.scaleX(), 0.4, 4);
+                    const nextScaleY = clamp(node.scaleY(), 0.4, 4);
+                    node.scaleX(1);
+                    node.scaleY(1);
+                    onUpdateObject(obj.id, { scaleX: nextScaleX, scaleY: nextScaleY });
+                    return;
+                  }
+                  let nextRotation = Number.isFinite(node.rotation()) ? node.rotation() : 0;
+                  if ((e.evt as any)?.shiftKey) {
+                    nextRotation = Math.round(nextRotation / 90) * 90;
+                    node.rotation(nextRotation);
+                  }
+                  if (isText) {
+                    const scaleX = node.scaleX();
+                    const scaleY = node.scaleY();
+                    const baseWidth = textBoxWidth || TEXT_BOX_DEFAULT_WIDTH;
+                    const baseHeight = textBoxHeight || TEXT_BOX_DEFAULT_HEIGHT;
+                    const nextWidth =
+                      scaleX !== 1 ? Math.max(TEXT_BOX_MIN_WIDTH, baseWidth * scaleX) : undefined;
+                    const nextHeight =
+                      scaleY !== 1 ? Math.max(TEXT_BOX_MIN_HEIGHT, baseHeight * scaleY) : undefined;
+                    node.scaleX(1);
+                    node.scaleY(1);
+                    const payload: any = { scaleX: 1, scaleY: 1, rotation: nextRotation };
+                    if (nextWidth) payload.textBoxWidth = nextWidth;
+                    if (nextHeight) payload.textBoxHeight = nextHeight;
+                    onUpdateObject(obj.id, payload);
+                    return;
+                  }
+                  const nextScaleX = clamp(node.scaleX(), 0.2, 6);
+                  const nextScaleY = clamp(node.scaleY(), 0.2, 6);
+                  node.scaleX(1);
+                  node.scaleY(1);
+                  onUpdateObject(obj.id, { scaleX: nextScaleX, scaleY: nextScaleY, rotation: nextRotation });
                 }}
                 onClick={(e) => {
                   e.cancelBubble = true;
                   if (e.evt?.button !== 0) return;
+                  if (isPostIt && isSelected && !readOnly) {
+                    onUpdateObject?.(obj.id, { postitCompact: !(obj as any).postitCompact });
+                  }
                   onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
                 }}
                 onDblClick={(e) => {
@@ -3074,7 +3663,7 @@ const getRoomBounds = (room: any) => {
                       const pos = stage?.getPointerPosition();
                       if (pos) {
                         const world = pointerToWorld(pos.x, pos.y);
-                        scheduleCameraRotation(world);
+                        scheduleCameraRotation(world, !!e.evt.shiftKey);
                       }
                     }}
                   />
@@ -3262,6 +3851,147 @@ const getRoomBounds = (room: any) => {
                       </>
                     )}
                   </Group>
+                ) : isText ? (
+                  <>
+                    {isSelected ? (
+                      <Rect
+                        x={-textBoxWidth / 2}
+                        y={-textBoxHeight / 2}
+                        width={textBoxWidth}
+                        height={textBoxHeight}
+                        stroke="rgba(37,99,235,0.6)"
+                        strokeWidth={Math.max(0.6, 1 * SELECTION_STROKE_SCALE)}
+                        dash={[6, 6]}
+                        listening={false}
+                      />
+                    ) : null}
+                    <Group
+                      opacity={objectOpacity}
+                      clipX={-textBoxWidth / 2}
+                      clipY={-textBoxHeight / 2}
+                      clipWidth={textBoxWidth}
+                      clipHeight={textBoxHeight}
+                    >
+                      <Rect
+                        x={-textBoxWidth / 2}
+                        y={-textBoxHeight / 2}
+                        width={textBoxWidth}
+                        height={textBoxHeight}
+                        fill={textBg ? textBgColor : 'transparent'}
+                        cornerRadius={Math.max(4, Math.round(textSize * 0.25))}
+                        shadowBlur={0}
+                        shadowColor="transparent"
+                      />
+                      <Text
+                        text={textValue}
+                        x={-textBoxWidth / 2 + textPadding}
+                        y={-textBoxHeight / 2 + textPadding}
+                        width={textAreaWidth}
+                        height={textAreaHeight}
+                        align="left"
+                        verticalAlign="middle"
+                        wrap="char"
+                        lineHeight={textLineHeight}
+                        fontSize={textSize}
+                        fontFamily={textFont}
+                        fill={textColor}
+                        shadowBlur={0}
+                        shadowColor="transparent"
+                      />
+                    </Group>
+                  </>
+                ) : isImage ? (
+                  <Group opacity={objectOpacity}>
+                    {imageNode ? (
+                      <KonvaImage
+                        image={imageNode}
+                        x={-imageW / 2}
+                        y={-imageH / 2}
+                        width={imageW}
+                        height={imageH}
+                      />
+                    ) : (
+                      <>
+                        <Rect
+                          x={-imageW / 2}
+                          y={-imageH / 2}
+                          width={imageW}
+                          height={imageH}
+                          stroke="#94a3b8"
+                          strokeWidth={1.5}
+                          dash={[6, 4]}
+                          fill="#ffffff"
+                          shadowBlur={0}
+                          shadowColor="transparent"
+                        />
+                        <Text
+                          text="IMG"
+                          x={-imageW / 2}
+                          y={-8}
+                          width={imageW}
+                          align="center"
+                          fontSize={12}
+                          fontStyle="bold"
+                          fill="#94a3b8"
+                        />
+                      </>
+                    )}
+                  </Group>
+                ) : isPostIt ? (
+                  <Group opacity={objectOpacity}>
+                    <Rect
+                      x={-postItHalf}
+                      y={-postItHalf}
+                      width={postItSize}
+                      height={postItSize}
+                      cornerRadius={6 * scale}
+                      fill="#fde047"
+                      stroke={outline}
+                      strokeWidth={outlineWidth}
+                      strokeScaleEnabled={false}
+                      shadowBlur={0}
+                      shadowColor="transparent"
+                    />
+                    <Line
+                      points={[
+                        postItHalf - postItFold,
+                        -postItHalf,
+                        postItHalf,
+                        -postItHalf,
+                        postItHalf,
+                        -postItHalf + postItFold
+                      ]}
+                      closed
+                      fill="#fef08a"
+                      stroke={outline}
+                      strokeWidth={Math.max(1, outlineWidth * 0.6)}
+                      strokeScaleEnabled={false}
+                    />
+                    <Line
+                      points={[
+                        -postItHalf + 6 * scale,
+                        -postItHalf + postItSize * 0.45,
+                        postItHalf - 8 * scale,
+                        -postItHalf + postItSize * 0.45
+                      ]}
+                      stroke="#b45309"
+                      strokeWidth={Math.max(1, 1.6 * scale)}
+                      strokeLinecap="round"
+                      strokeScaleEnabled={false}
+                    />
+                    <Line
+                      points={[
+                        -postItHalf + 6 * scale,
+                        -postItHalf + postItSize * 0.62,
+                        postItHalf - 12 * scale,
+                        -postItHalf + postItSize * 0.62
+                      ]}
+                      stroke="#b45309"
+                      strokeWidth={Math.max(1, 1.6 * scale)}
+                      strokeLinecap="round"
+                      strokeScaleEnabled={false}
+                    />
+                  </Group>
                 ) : (
                   <Group rotation={isCamera ? cameraRotation : 0} opacity={isCamera ? objectOpacity : 1}>
                     <Rect
@@ -3335,7 +4065,7 @@ const getRoomBounds = (room: any) => {
                   </Group>
                 ) : null}
               </Group>
-              {labelValue ? (
+              {showLabel ? (
                 <Text
                   text={labelValue}
                   x={obj.x - 80}
@@ -3355,15 +4085,26 @@ const getRoomBounds = (room: any) => {
             );
           })}
           {!readOnly ? (
-            <Transformer
-              ref={deskTransformerRef}
-              rotateEnabled={false}
-              keepRatio={false}
-              boundBoxFunc={(oldBox: any, newBox: any) => {
-                if (newBox.width < 20 || newBox.height < 20) return oldBox;
-                return newBox;
-              }}
-            />
+            <>
+              <Transformer
+                ref={deskTransformerRef}
+                rotateEnabled={false}
+                keepRatio={false}
+                boundBoxFunc={(oldBox: any, newBox: any) => {
+                  if (newBox.width < 20 || newBox.height < 20) return oldBox;
+                  return newBox;
+                }}
+              />
+              <Transformer
+                ref={freeTransformerRef}
+                rotateEnabled
+                keepRatio={false}
+                boundBoxFunc={(oldBox: any, newBox: any) => {
+                  if (newBox.width < 20 || newBox.height < 20) return oldBox;
+                  return newBox;
+                }}
+              />
+            </>
           ) : null}
         </Layer>
 
@@ -3616,7 +4357,7 @@ const getRoomBounds = (room: any) => {
                 );
               })() : null}
 
-              {pendingType && pendingPreview ? (
+              {pendingType && pendingPreview && !(pendingType === 'text' && textDraftRect) ? (
                 <Group x={pendingPreview.x} y={pendingPreview.y} opacity={0.7}>
                   {pendingType === 'camera' ? (
                     <Wedge
@@ -3650,7 +4391,31 @@ const getRoomBounds = (room: any) => {
                     shadowColor="transparent"
                   />
                   {pendingType ? (
-                    iconImages[pendingType] ? (
+                    pendingType === 'text' ? (
+                      <Text
+                        text={'T'}
+                        x={-18}
+                        y={-14}
+                        width={36}
+                        align="center"
+                        fontSize={15}
+                        fontStyle="bold"
+                        fill={'#2563eb'}
+                        opacity={0.9}
+                      />
+                    ) : pendingType === 'image' ? (
+                      <Text
+                        text={'IMG'}
+                        x={-18}
+                        y={-8}
+                        width={36}
+                        align="center"
+                        fontSize={10}
+                        fontStyle="bold"
+                        fill={'#2563eb'}
+                        opacity={0.9}
+                      />
+                    ) : iconImages[pendingType] ? (
                       <KonvaImage
                         image={iconImages[pendingType] as HTMLImageElement}
                         x={-9}
@@ -3687,7 +4452,7 @@ const getRoomBounds = (room: any) => {
               height={selectionBox.height}
               fill="rgba(37,99,235,0.08)"
               stroke="#2563eb"
-              strokeWidth={2}
+              strokeWidth={1}
               dash={[6, 6]}
               listening={false}
               cornerRadius={8}
@@ -3812,7 +4577,7 @@ const getRoomBounds = (room: any) => {
                 height={selectedBounds.maxY - selectedBounds.minY + 24}
                 fill="rgba(0,0,0,0.001)"
                 stroke="rgba(37,99,235,0.55)"
-                strokeWidth={2}
+                strokeWidth={1}
                 dash={[6, 6]}
                 cornerRadius={12}
                 listening={true}
