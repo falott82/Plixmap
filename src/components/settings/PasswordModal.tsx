@@ -74,12 +74,12 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">{title}</Dialog.Title>
+              <Dialog.Panel className="w-full max-w-md modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">{title}</Dialog.Title>
                   <button
                     onClick={onClose}
-                    className="text-slate-500 hover:text-ink"
+                    className="icon-button"
                     title={t({ it: 'Chiudi', en: 'Close' })}
                   >
                     <X size={18} />
@@ -140,11 +140,11 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
                       en: 'Changing the password invalidates previous sessions.'
                     })}
                   </div>
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       type="button"
                       onClick={onClose}
-                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      className="btn-secondary"
                       title={t({ it: 'Chiudi senza cambiare password', en: 'Close without changing password' })}
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
@@ -152,7 +152,7 @@ const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: P
                     <button
                       type="submit"
                       disabled={!isStrong || newPassword !== confirm || (requireOld && !oldPassword)}
-                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                      className="btn-primary disabled:opacity-60"
                       title={t({ it: 'Salva la nuova password', en: 'Save the new password' })}
                     >
                       {t({ it: 'Salva', en: 'Save' })}

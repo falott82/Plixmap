@@ -185,17 +185,17 @@ const RoomModal = ({
               leaveTo="opacity-0 scale-95"
             >
               <Dialog.Panel
-                className={`flex w-full flex-col rounded-2xl bg-white p-6 shadow-card ${
+                className={`flex w-full flex-col modal-panel ${
                   shouldShowContents ? 'max-w-5xl max-h-[94vh]' : 'max-w-3xl max-h-[94vh]'
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">
                     {initialName ? t({ it: 'Modifica stanza', en: 'Edit room' }) : t({ it: 'Nuova stanza', en: 'New room' })}
                   </Dialog.Title>
                   <button
                     onClick={onClose}
-                    className="text-slate-500 hover:text-ink"
+                    className="icon-button"
                     title={t({ it: 'Chiudi', en: 'Close' })}
                   >
                     <X size={18} />
@@ -527,7 +527,7 @@ const RoomModal = ({
                     </div>
                   ) : null}
                 </div>
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="modal-footer">
                   <button
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -537,7 +537,7 @@ const RoomModal = ({
                   </button>
                   <button
                     onClick={submit}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    className="btn-primary"
                     title={t({ it: 'Salva', en: 'Save' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}

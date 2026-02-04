@@ -127,12 +127,12 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+              <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">
                     {initial ? t({ it: 'Modifica cliente', en: 'Edit client' }) : t({ it: 'Nuovo cliente', en: 'New client' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -414,10 +414,10 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                   </div>
                 </div>
 
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="modal-footer">
                   <button
                     onClick={onClose}
-                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    className="btn-secondary"
                     title={t({ it: 'Chiudi senza salvare le modifiche', en: 'Close without saving changes' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
@@ -425,7 +425,7 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                   <button
                     onClick={submit}
                     disabled={!canSubmit}
-                    className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                    className="btn-primary disabled:opacity-60"
                     title={t({ it: 'Salva le modifiche del cliente', en: 'Save client changes' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}

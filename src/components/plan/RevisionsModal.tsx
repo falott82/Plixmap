@@ -185,13 +185,13 @@ const RevisionsModal = ({
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between">
+              <Dialog.Panel className="w-full max-w-2xl modal-panel">
+                <div className="modal-header items-center">
                   <Dialog.Title className="flex items-center gap-2 text-lg font-semibold text-ink">
                     <History size={18} className="text-primary" />
                     {t({ it: 'Time machine', en: 'Time machine' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -458,21 +458,21 @@ const RevisionsModal = ({
                           leaveFrom="opacity-100 scale-100"
                           leaveTo="opacity-0 scale-95"
                         >
-                          <Dialog.Panel className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-card">
-                            <div className="flex items-center justify-between">
+                          <Dialog.Panel className="w-full max-w-xl modal-panel">
+                            <div className="modal-header items-center">
                               <Dialog.Title className="flex items-center gap-2 text-lg font-semibold text-ink">
                                 <Diff size={18} className="text-primary" />
                                 {t({ it: 'Confronta revisioni', en: 'Compare revisions' })}
                               </Dialog.Title>
                               <button
                                 onClick={() => setComparePickOpen(false)}
-                                className="text-slate-500 hover:text-ink"
+                                className="icon-button"
                                 title={t({ it: 'Chiudi', en: 'Close' })}
                               >
                                 <X size={18} />
                               </button>
                             </div>
-                            <div className="mt-1 text-sm text-slate-600">
+                            <div className="modal-description">
                               {t({ it: 'Seleziona due revisioni (massimo 2).', en: 'Select two revisions (max 2).' })}
                             </div>
 
@@ -568,15 +568,15 @@ const RevisionsModal = ({
                             leaveFrom="opacity-100 scale-100"
                             leaveTo="opacity-0 scale-95"
                           >
-                            <Dialog.Panel className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-card">
-                              <div className="flex items-center justify-between">
+                            <Dialog.Panel className="w-full max-w-5xl modal-panel">
+                              <div className="modal-header items-center">
                                 <Dialog.Title className="flex items-center gap-2 text-lg font-semibold text-ink">
                                   <Diff size={18} className="text-primary" />
                                   {t({ it: 'Confronto revisioni', en: 'Revision compare' })}
                                 </Dialog.Title>
                                 <button
                                   onClick={() => setCompareOpen(false)}
-                                  className="text-slate-500 hover:text-ink"
+                                  className="icon-button"
                                   title={t({ it: 'Chiudi', en: 'Close' })}
                                 >
                                   <X size={18} />

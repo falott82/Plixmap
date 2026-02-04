@@ -776,18 +776,23 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center px-4 py-8">
               <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
-                  <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Richieste in attesa', en: 'Pending requests' })}</Dialog.Title>
-                  <div className="mt-2 text-sm text-slate-600">
+                <Dialog.Panel className="w-full max-w-md modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">{t({ it: 'Richieste in attesa', en: 'Pending requests' })}</Dialog.Title>
+                    <button onClick={() => setPendingPromptOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="modal-description">
                     {t({
                       it: 'Sono presenti richieste oggetto in pending. Vuoi aprire la gestione?',
                       en: 'There are pending object requests. Do you want to open the management view?'
                     })}
                   </div>
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setPendingPromptOpen(false)}
-                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      className="btn-secondary"
                       title={t({ it: 'Chiudi la finestra di avviso', en: 'Close the notice dialog' })}
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}
@@ -799,7 +804,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                         setRequestsTab(canManageRequests ? 'manage' : 'mine');
                         if (!requestsLoading) reloadRequests();
                       }}
-                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                      className="btn-primary"
                       title={t({ it: 'Apri la gestione delle richieste', en: 'Open requests management' })}
                     >
                       {t({ it: 'Apri gestione', en: 'Open management' })}
@@ -1345,10 +1350,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center px-4 py-8">
               <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-center justify-between">
+                <Dialog.Panel className="w-full max-w-5xl modal-panel">
+                  <div className="modal-header items-center">
                     <div className="flex items-center gap-2">
-                      <Dialog.Title className="text-lg font-semibold text-ink">
+                      <Dialog.Title className="modal-title">
                         {t(canManageRequests ? { it: 'Richieste utenti', en: 'User requests' } : { it: 'Richieste oggetti', en: 'Object requests' })}
                       </Dialog.Title>
                       <button
@@ -1361,7 +1366,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                         <Info size={14} />
                       </button>
                     </div>
-                    <button onClick={() => setRequestsOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                    <button onClick={() => setRequestsOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>
@@ -1498,7 +1503,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                                 </select>
                                 <button
                                   onClick={() => removeDraftField(idx)}
-                                  className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-rose-700 hover:bg-rose-100"
+                                  className="btn-inline-danger"
                                   title={t({ it: 'Rimuovi campo', en: 'Remove field' })}
                                 >
                                   <Trash2 size={14} />
@@ -1514,17 +1519,17 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                   ) : null}
 
                   {requestsTab === 'new' && canRequestObjects ? (
-                    <div className="mt-6 flex justify-end gap-2">
+                    <div className="modal-footer">
                       <button
                         onClick={() => setRequestsOpen(false)}
-                        className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        className="btn-secondary"
                         title={t({ it: 'Chiudi senza inviare la richiesta', en: 'Close without sending the request' })}
                       >
                         {t({ it: 'Annulla', en: 'Cancel' })}
                       </button>
                       <button
                         onClick={submitRequest}
-                        className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                        className="btn-primary"
                         title={t({ it: 'Invia o aggiorna la richiesta', en: 'Send or update the request' })}
                       >
                         {editRequestId ? t({ it: 'Aggiorna richiesta', en: 'Update request' }) : t({ it: 'Invia richiesta', en: 'Send request' })}
@@ -1595,7 +1600,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                                         push(t({ it: 'Eliminazione non riuscita', en: 'Failed to delete request' }), 'danger');
                                       }
                                     }}
-                                    className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                    className="btn-inline-danger gap-2 px-3 py-1.5"
                                     title={t({ it: 'Elimina la richiesta', en: 'Delete the request' })}
                                   >
                                     <Trash2 size={14} /> {t({ it: 'Elimina', en: 'Delete' })}
@@ -1616,7 +1621,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                           <div className="text-sm font-semibold text-ink">{t({ it: 'Richieste', en: 'Requests' })}</div>
                           <button
                             onClick={reloadRequests}
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            className="btn-inline gap-2 px-2 py-1"
                             title={t({ it: 'Aggiorna la lista richieste', en: 'Refresh the requests list' })}
                           >
                             <RefreshCw size={12} /> {t({ it: 'Aggiorna', en: 'Refresh' })}
@@ -1813,10 +1818,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center px-4 py-8">
               <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Nuovo oggetto', en: 'New object' })}</Dialog.Title>
-                    <button onClick={() => setCustomOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">{t({ it: 'Nuovo oggetto', en: 'New object' })}</Dialog.Title>
+                    <button onClick={() => setCustomOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>
@@ -1901,7 +1906,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                             </select>
                             <button
                               onClick={() => removeDraftField(idx)}
-                              className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 text-rose-700 hover:bg-rose-100"
+                              className="btn-inline-danger"
                               title={t({ it: 'Rimuovi campo', en: 'Remove field' })}
                             >
                               <Trash2 size={14} />
@@ -1913,17 +1918,17 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                       )}
                     </div>
                   </div>
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setCustomOpen(false)}
-                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      className="btn-secondary"
                       title={t({ it: 'Chiudi senza creare l’oggetto', en: 'Close without creating the object' })}
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
                     </button>
                     <button
                       onClick={submitCustomObject}
-                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                      className="btn-primary"
                       title={t({ it: 'Crea il nuovo oggetto', en: 'Create the new object' })}
                     >
                       {t({ it: 'Crea', en: 'Create' })}
@@ -1944,13 +1949,18 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center px-4 py-8">
               <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
-                    {t({
-                      it: wifiModal?.mode === 'edit' ? 'Modifica modello WiFi' : 'Nuovo modello WiFi',
-                      en: wifiModal?.mode === 'edit' ? 'Edit WiFi model' : 'New WiFi model'
-                    })}
-                  </Dialog.Title>
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">
+                      {t({
+                        it: wifiModal?.mode === 'edit' ? 'Modifica modello WiFi' : 'Nuovo modello WiFi',
+                        en: wifiModal?.mode === 'edit' ? 'Edit WiFi model' : 'New WiFi model'
+                      })}
+                    </Dialog.Title>
+                    <button onClick={() => setWifiModal(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
                   <div className="mt-4 grid grid-cols-1 gap-3">
                     <label className="block text-sm font-medium text-slate-700">
                       {t({ it: 'Marca', en: 'Brand' })}
@@ -2043,17 +2053,17 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                       </div>
                     ) : null}
                   </div>
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setWifiModal(null)}
-                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      className="btn-secondary"
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
                     </button>
                     <button
                       onClick={saveWifiModel}
                       disabled={!wifiDraftValid}
-                      className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${wifiDraftValid ? 'bg-primary hover:bg-primary/90' : 'bg-slate-300 cursor-not-allowed'}`}
+                      className={`btn-primary ${wifiDraftValid ? '' : 'cursor-not-allowed opacity-60'}`}
                     >
                       {t({ it: 'Salva', en: 'Save' })}
                     </button>

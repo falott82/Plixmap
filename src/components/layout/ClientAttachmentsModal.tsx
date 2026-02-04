@@ -39,18 +39,18 @@ const ClientAttachmentsModal = ({ open, client, onClose }: Props) => {
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-start justify-between gap-3">
+              <Dialog.Panel className="w-full max-w-2xl modal-panel">
+                <div className="modal-header items-center">
                   <div className="min-w-0">
-                    <Dialog.Title className="flex items-center gap-2 text-lg font-semibold text-ink">
+                    <Dialog.Title className="modal-title flex items-center gap-2">
                       <Paperclip size={18} className="text-slate-600" />
                       {t({ it: 'Allegati cliente', en: 'Client attachments' })}
                     </Dialog.Title>
-                    <Dialog.Description className="mt-1 text-sm text-slate-600">
+                    <Dialog.Description className="modal-description">
                       {client ? <span className="font-semibold text-slate-700">{client.shortName || client.name}</span> : null}
                     </Dialog.Description>
                   </div>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -111,4 +111,3 @@ const ClientAttachmentsModal = ({ open, client, onClose }: Props) => {
 };
 
 export default ClientAttachmentsModal;
-

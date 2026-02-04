@@ -106,10 +106,10 @@ const HelpPanel = () => {
               leaveFrom="opacity-100 translate-y-0"
               leaveTo="opacity-0 translate-y-4"
             >
-              <Dialog.Panel className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-start justify-between gap-3">
+              <Dialog.Panel className="w-full max-w-xl modal-panel">
+                <div className="modal-header items-center">
                   <div>
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                    <Dialog.Title className="modal-title">
                       {t({ it: 'Aiuto rapido', en: 'Quick help' })}
                     </Dialog.Title>
                     <div className="text-xs font-semibold text-slate-500">v{latestVersion}</div>
@@ -118,13 +118,13 @@ const HelpPanel = () => {
                     <button
                       onClick={handleExportPdf}
                       disabled={exporting}
-                      className="flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="btn-inline h-8 gap-1 px-2"
                       title={t({ it: 'Scarica quick help in PDF', en: 'Download quick help as PDF' })}
                     >
                       <FileDown size={14} />
                       PDF
                     </button>
-                    <button onClick={closeHelp} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                    <button onClick={closeHelp} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>

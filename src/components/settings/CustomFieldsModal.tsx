@@ -71,15 +71,15 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
         <div className="fixed inset-0 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center px-4 py-8">
             <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-              <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Campi personalizzati', en: 'Custom fields' })}</Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+              <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">{t({ it: 'Campi personalizzati', en: 'Custom fields' })}</Dialog.Title>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
 
-                <div className="mt-2 text-sm text-slate-600">
+                <div className="modal-description">
                   {t({
                     it: 'Crea campi per arricchire gli oggetti (es. IP, seriale, note tecniche). Sono per-utente e non modificano i dati degli altri utenti.',
                     en: 'Create fields to enrich objects (e.g. IP, serial, technical notes). They are per-user and do not change other users’ data.'
@@ -174,7 +174,7 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
                                   push(t({ it: 'Aggiornamento non riuscito', en: 'Update failed' }), 'danger');
                                 }
                               }}
-                              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              className="btn-inline"
                               title={t({ it: 'Rinomina il campo', en: 'Rename the field' })}
                             >
                               {t({ it: 'Rinomina', en: 'Rename' })}

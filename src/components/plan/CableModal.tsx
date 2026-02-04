@@ -58,10 +58,10 @@ const CableModal = ({ open, initial, onClose, onSubmit }: Props) => {
         <div className="fixed inset-0 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center px-4 py-8">
             <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-              <Dialog.Panel className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between gap-3">
-                  <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Collegamento', en: 'Link' })}</Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+              <Dialog.Panel className="w-full max-w-xl modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">{t({ it: 'Collegamento', en: 'Link' })}</Dialog.Title>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -161,7 +161,7 @@ const CableModal = ({ open, initial, onClose, onSubmit }: Props) => {
                   </label>
                 </div>
 
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="modal-footer">
                   <button
                     onClick={onClose}
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"

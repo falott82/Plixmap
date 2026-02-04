@@ -57,7 +57,7 @@ const ConfirmDialog = ({
             leaveTo="opacity-0 scale-95"
           >
             <Dialog.Panel
-              className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-card transition-all"
+              className="modal-panel w-full max-w-md transform overflow-hidden text-left align-middle transition-all"
               onKeyDown={(e) => {
                 if (!confirmOnEnter) return;
                 if (e.key !== 'Enter') return;
@@ -65,27 +65,25 @@ const ConfirmDialog = ({
                 onConfirm();
               }}
             >
-              <div className="flex items-center justify-between">
-                <Dialog.Title className="text-lg font-semibold text-ink">{title}</Dialog.Title>
+              <div className="modal-header">
+                <Dialog.Title className="modal-title">{title}</Dialog.Title>
                 <button
                   onClick={onCancel}
-                  className="text-slate-400 hover:text-ink"
+                  className="icon-button"
                   title={t({ it: 'Chiudi', en: 'Close' })}
                 >
                   <X size={18} />
                 </button>
               </div>
               {description ? (
-                <Dialog.Description className="mt-2 text-sm text-slate-600">
-                  {description}
-                </Dialog.Description>
+                <Dialog.Description className="modal-description">{description}</Dialog.Description>
               ) : null}
-              <div className="mt-6 flex justify-end gap-2">
+              <div className="modal-footer">
                 {cancelLabel === null ? null : (
                   <button
                     ref={cancelRef}
                     onClick={onCancel}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="btn-secondary"
                   >
                     {noLabel}
                   </button>
@@ -93,7 +91,7 @@ const ConfirmDialog = ({
                 <button
                   ref={confirmRef}
                   onClick={onConfirm}
-                  className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                  className="btn-primary"
                 >
                   {okLabel}
                 </button>

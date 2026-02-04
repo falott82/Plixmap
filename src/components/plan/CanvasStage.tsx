@@ -16,6 +16,7 @@ interface Props {
   plan: FloorPlan;
   selectedId?: string;
   selectedIds?: string[];
+  hideMultiSelectionBox?: boolean;
   selectedRoomId?: string;
   selectedRoomIds?: string[];
   selectedLinkId?: string | null;
@@ -156,6 +157,10 @@ const TEXT_BOX_MIN_HEIGHT = 32;
 const TEXT_BOX_DEFAULT_WIDTH = 160;
 const TEXT_BOX_DEFAULT_HEIGHT = 56;
 const SELECTION_STROKE_SCALE = 0.6;
+const SELECTION_COLOR = '#2563eb';
+const SELECTION_FILL = 'rgba(37,99,235,0.1)';
+const SELECTION_GLOW = 'rgba(37,99,235,0.18)';
+const SELECTION_DASH = [6, 6];
 
 const getDeskBounds = (
   type: string,
@@ -237,6 +242,7 @@ const CanvasStageImpl = (
   plan,
   selectedId,
   selectedIds,
+  hideMultiSelectionBox = false,
   selectedRoomId,
   selectedRoomIds,
   selectedLinkId = null,
@@ -328,6 +334,7 @@ const CanvasStageImpl = (
   const [bgImage] = useImage(plan.imageUrl, plan.imageUrl.startsWith('http') ? 'anonymous' : undefined);
   const baseWidth = plan.width || bgImage?.width || dimensions.width;
   const baseHeight = plan.height || bgImage?.height || dimensions.height;
+  const objects = plan.objects || [];
   const viewportRef = useRef({ zoom, pan });
   const fitViewRef = useRef<() => void>(() => undefined);
   const wheelCommitTimer = useRef<number | null>(null);
@@ -431,8 +438,16 @@ const CanvasStageImpl = (
   const [pendingPreview, setPendingPreview] = useState<{ x: number; y: number } | null>(null);
   const pendingPreviewRef = useRef<{ x: number; y: number } | null>(null);
   const pendingPreviewRaf = useRef<number | null>(null);
-  const objectById = useMemo(() => new Map(plan.objects.map((o) => [o.id, o])), [plan.objects]);
+  const objectById = useMemo(() => new Map(objects.map((o) => [o.id, o])), [objects]);
   const selectionOrigin = useRef<{ x: number; y: number } | null>(null);
+  const boundsVersionRef = useRef(0);
+  const boundsCacheRef = useRef<Map<string, { version: number; bounds: { minX: number; minY: number; maxX: number; maxY: number } | null }>>(
+    new Map()
+  );
+  const spatialIndexRef = useRef<{ version: number; cellSize: number; cells: Map<string, string[]> } | null>(null);
+  const pendingHoverRef = useRef<{ clientX: number; clientY: number; obj: any } | null>(null);
+  const lastObjectsRef = useRef<MapObject[] | null>(null);
+  const lastWallTypeIdSetRef = useRef<Set<string> | null>(null);
   const selectionDragRef = useRef<{
     startX: number;
     startY: number;
@@ -444,6 +459,8 @@ const CanvasStageImpl = (
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     return Math.min(1.5, Math.max(1, dpr));
   }, []);
+  const wallTypeIdSet = useMemo(() => wallTypeIds || new Set<string>(), [wallTypeIds]);
+  const wallAttenuationMap = useMemo(() => wallAttenuationByType || new Map<string, number>(), [wallAttenuationByType]);
 
   const applyStageTransform = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
     const stage = stageRef.current;
@@ -489,7 +506,7 @@ const CanvasStageImpl = (
     return lines;
   }, [baseHeight, baseWidth, gridSize, showGrid]);
 
-  const estimateTextWidth = (text: string, fontSize: number) => text.length * fontSize * 0.6;
+  const estimateTextWidth = useCallback((text: string, fontSize: number) => text.length * fontSize * 0.6, []);
 
   const pointInPolygon = (x: number, y: number, points: { x: number; y: number }[]) => {
     let inside = false;
@@ -986,7 +1003,7 @@ const getRoomBounds = (room: any) => {
       deskTransformerRef.current.getLayer()?.batchDraw?.();
       return;
     }
-    const obj = plan.objects.find((o) => o.id === ids[0]);
+    const obj = objectById.get(ids[0]);
     if (!obj || !isDeskType(obj.type)) {
       deskTransformerRef.current.nodes([]);
       deskTransformerRef.current.getLayer()?.batchDraw?.();
@@ -1000,7 +1017,7 @@ const getRoomBounds = (room: any) => {
     }
     deskTransformerRef.current.nodes([node]);
     deskTransformerRef.current.getLayer()?.batchDraw?.();
-  }, [plan.objects, readOnly, selectedId, selectedIds]);
+  }, [objectById, readOnly, selectedId, selectedIds]);
 
   useEffect(() => {
     if (!freeTransformerRef.current) return;
@@ -1015,7 +1032,7 @@ const getRoomBounds = (room: any) => {
       freeTransformerRef.current.getLayer()?.batchDraw?.();
       return;
     }
-    const obj = plan.objects.find((o) => o.id === ids[0]);
+    const obj = objectById.get(ids[0]);
     if (!obj || (obj.type !== 'text' && obj.type !== 'image')) {
       freeTransformerRef.current.nodes([]);
       freeTransformerRef.current.getLayer()?.batchDraw?.();
@@ -1029,7 +1046,7 @@ const getRoomBounds = (room: any) => {
     }
     freeTransformerRef.current.nodes([node]);
     freeTransformerRef.current.getLayer()?.batchDraw?.();
-  }, [plan.objects, readOnly, selectedId, selectedIds]);
+  }, [objectById, readOnly, selectedId, selectedIds]);
 
   useEffect(() => {
     return () => {
@@ -1039,6 +1056,7 @@ const getRoomBounds = (room: any) => {
       if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
       if (textDraftRaf.current) cancelAnimationFrame(textDraftRaf.current);
       if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
+      if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
       if (textTransformRaf.current) cancelAnimationFrame(textTransformRaf.current);
       textTransformRaf.current = null;
       pendingTextTransformRef.current = null;
@@ -1075,7 +1093,7 @@ const getRoomBounds = (room: any) => {
   useEffect(() => {
     let cancelled = false;
     const pending: HTMLImageElement[] = [];
-    const entries = (plan.objects || [])
+    const entries = objects
       .filter((o) => o.type === 'image' && (o as any).imageUrl)
       .map((o) => ({ id: o.id, src: String((o as any).imageUrl || '') }));
     setImageObjects((prev) => {
@@ -1109,7 +1127,7 @@ const getRoomBounds = (room: any) => {
         img.onerror = null;
       }
     };
-  }, [plan.objects]);
+  }, [objects]);
 
   const commitViewport = useCallback(
     (nextZoom: number, nextPan: { x: number; y: number }) => {
@@ -1171,50 +1189,6 @@ const getRoomBounds = (room: any) => {
   useEffect(() => {
     fitViewRef.current = fitView;
   }, [fitView]);
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      getSize: () => ({ width: dimensions.width, height: dimensions.height }),
-      exportDataUrl: (options) => {
-        const stage = stageRef.current;
-        const pixelRatio = Math.max(1, Number(options?.pixelRatio || 1));
-        const mimeType = options?.mimeType || 'image/jpeg';
-        const quality = typeof options?.quality === 'number' ? options.quality : 0.82;
-        const width = Math.round(dimensions.width * pixelRatio);
-        const height = Math.round(dimensions.height * pixelRatio);
-        if (!stage) return { dataUrl: '', width, height };
-        try {
-          // Konva JPEG export fills transparency with black. Render to canvas, then composite on white.
-          const rawCanvas: HTMLCanvasElement | null = stage.toCanvas ? stage.toCanvas({ pixelRatio }) : null;
-          if (!rawCanvas) {
-            if (!stage.toDataURL) return { dataUrl: '', width, height };
-            const dataUrl = stage.toDataURL({ pixelRatio, mimeType, quality });
-            return { dataUrl, width, height };
-          }
-          const out = document.createElement('canvas');
-          out.width = rawCanvas.width;
-          out.height = rawCanvas.height;
-          const ctx = out.getContext('2d');
-          if (!ctx) return { dataUrl: '', width, height };
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, out.width, out.height);
-          ctx.drawImage(rawCanvas, 0, 0);
-          const dataUrl = out.toDataURL(mimeType, quality);
-          return { dataUrl, width: out.width, height: out.height };
-        } catch {
-          return { dataUrl: '', width, height };
-        }
-      },
-      fitView: () => fitViewRef.current(),
-      getObjectBounds: (id: string) => {
-        const obj = plan.objects.find((o) => o.id === id);
-        if (!obj) return null;
-        return getObjectBounds(obj);
-      }
-    }),
-    [dimensions.height, dimensions.width, getObjectBounds, plan.objects]
-  );
 
   useEffect(() => {
     if (!autoFit) return;
@@ -1482,7 +1456,7 @@ const getRoomBounds = (room: any) => {
   // Box select: left-drag on empty area (desktop-like).
   const isBoxSelectGesture = (evt: any) => evt?.button === 0;
 
-  const getNodeBounds = (obj: MapObject) => {
+  const getNodeBounds = useCallback((obj: MapObject) => {
     const node = objectNodeRefs.current[obj.id];
     const stage = stageRef.current;
     if (!node || !stage) return null;
@@ -1502,9 +1476,10 @@ const getRoomBounds = (room: any) => {
     } catch {
       return null;
     }
-  };
+  }, []);
 
-  function getObjectBounds(obj: MapObject) {
+  const computeObjectBounds = useCallback(
+    (obj: MapObject) => {
     const type = obj.type;
     if (wallTypeIdSet.has(type) || type === 'quote') {
       const pts = obj.points || [];
@@ -1601,7 +1576,140 @@ const getRoomBounds = (room: any) => {
     const size = 36 * baseScale;
     const rotation = type === 'camera' ? Number(obj.rotation || 0) : 0;
     return getRotatedRectBounds(x, y, size, size, rotation);
-  }
+    },
+    [estimateTextWidth, getNodeBounds, wallTypeIdSet]
+  );
+
+  const getObjectBounds = useCallback(
+    (obj: MapObject) => {
+      const version = boundsVersionRef.current;
+      const cached = boundsCacheRef.current.get(obj.id);
+      if (cached && cached.version === version) return cached.bounds;
+      const bounds = computeObjectBounds(obj);
+      boundsCacheRef.current.set(obj.id, { version, bounds });
+      return bounds;
+    },
+    [computeObjectBounds]
+  );
+
+  const getSpatialCellSize = useCallback(() => {
+    const minDim = Math.min(baseWidth || 0, baseHeight || 0);
+    return Math.max(140, Math.min(520, minDim ? minDim / 12 : 320));
+  }, [baseHeight, baseWidth]);
+
+  const buildSpatialIndex = useCallback(() => {
+    const version = boundsVersionRef.current;
+    const cellSize = getSpatialCellSize();
+    const cells = new Map<string, string[]>();
+    for (const obj of objects) {
+      const bounds = getObjectBounds(obj);
+      const x = Number(obj.x);
+      const y = Number(obj.y);
+      const minX = bounds?.minX ?? x;
+      const minY = bounds?.minY ?? y;
+      const maxX = bounds?.maxX ?? x;
+      const maxY = bounds?.maxY ?? y;
+      if (![minX, minY, maxX, maxY].every(Number.isFinite)) continue;
+      const minCellX = Math.floor(minX / cellSize);
+      const maxCellX = Math.floor(maxX / cellSize);
+      const minCellY = Math.floor(minY / cellSize);
+      const maxCellY = Math.floor(maxY / cellSize);
+      for (let cx = minCellX; cx <= maxCellX; cx += 1) {
+        for (let cy = minCellY; cy <= maxCellY; cy += 1) {
+          const key = `${cx},${cy}`;
+          const bucket = cells.get(key);
+          if (bucket) bucket.push(obj.id);
+          else cells.set(key, [obj.id]);
+        }
+      }
+    }
+    const next = { version, cellSize, cells };
+    spatialIndexRef.current = next;
+    return next;
+  }, [getObjectBounds, getSpatialCellSize, objects]);
+
+  const getSpatialIndex = useCallback(() => {
+    const cached = spatialIndexRef.current;
+    const version = boundsVersionRef.current;
+    const cellSize = getSpatialCellSize();
+    if (cached && cached.version === version && Math.abs(cached.cellSize - cellSize) < 0.5) return cached;
+    return buildSpatialIndex();
+  }, [buildSpatialIndex, getSpatialCellSize]);
+
+  const getSelectionCandidates = useCallback(
+    (rect: { x: number; y: number; width: number; height: number }) => {
+      if (objects.length < 250) return objects;
+      const index = getSpatialIndex();
+      const minX = rect.x;
+      const minY = rect.y;
+      const maxX = rect.x + rect.width;
+      const maxY = rect.y + rect.height;
+      const minCellX = Math.floor(minX / index.cellSize);
+      const maxCellX = Math.floor(maxX / index.cellSize);
+      const minCellY = Math.floor(minY / index.cellSize);
+      const maxCellY = Math.floor(maxY / index.cellSize);
+      const ids = new Set<string>();
+      for (let cx = minCellX; cx <= maxCellX; cx += 1) {
+        for (let cy = minCellY; cy <= maxCellY; cy += 1) {
+          const bucket = index.cells.get(`${cx},${cy}`);
+          if (!bucket) continue;
+          for (const id of bucket) ids.add(id);
+        }
+      }
+      if (!ids.size) return [];
+      const list: MapObject[] = [];
+      ids.forEach((id) => {
+        const obj = objectById.get(id);
+        if (obj) list.push(obj);
+      });
+      return list;
+    },
+    [getSpatialIndex, objectById, objects]
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getSize: () => ({ width: dimensions.width, height: dimensions.height }),
+      exportDataUrl: (options) => {
+        const stage = stageRef.current;
+        const pixelRatio = Math.max(1, Number(options?.pixelRatio || 1));
+        const mimeType = options?.mimeType || 'image/jpeg';
+        const quality = typeof options?.quality === 'number' ? options.quality : 0.82;
+        const width = Math.round(dimensions.width * pixelRatio);
+        const height = Math.round(dimensions.height * pixelRatio);
+        if (!stage) return { dataUrl: '', width, height };
+        try {
+          // Konva JPEG export fills transparency with black. Render to canvas, then composite on white.
+          const rawCanvas: HTMLCanvasElement | null = stage.toCanvas ? stage.toCanvas({ pixelRatio }) : null;
+          if (!rawCanvas) {
+            if (!stage.toDataURL) return { dataUrl: '', width, height };
+            const dataUrl = stage.toDataURL({ pixelRatio, mimeType, quality });
+            return { dataUrl, width, height };
+          }
+          const out = document.createElement('canvas');
+          out.width = rawCanvas.width;
+          out.height = rawCanvas.height;
+          const ctx = out.getContext('2d');
+          if (!ctx) return { dataUrl: '', width, height };
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, out.width, out.height);
+          ctx.drawImage(rawCanvas, 0, 0);
+          const dataUrl = out.toDataURL(mimeType, quality);
+          return { dataUrl, width: out.width, height: out.height };
+        } catch {
+          return { dataUrl: '', width, height };
+        }
+      },
+      fitView: () => fitViewRef.current(),
+      getObjectBounds: (id: string) => {
+        const obj = objectById.get(id);
+        if (!obj) return null;
+        return getObjectBounds(obj);
+      }
+    }),
+    [dimensions.height, dimensions.width, getObjectBounds, objectById]
+  );
 
   const updateSelectionBox = (event: any) => {
     if (!selectionOrigin.current) return false;
@@ -1654,7 +1762,8 @@ const getRoomBounds = (room: any) => {
     const maxX = rect.x + rect.width;
     const minY = rect.y;
     const maxY = rect.y + rect.height;
-    const ids = (plan.objects || [])
+    const candidates = getSelectionCandidates(rect);
+    const ids = candidates
       .filter((o) => {
         const bounds = getObjectBounds(o);
         const x = Number(o.x);
@@ -1933,24 +2042,29 @@ const getRoomBounds = (room: any) => {
     pendingDraftPrintRectRef.current = null;
   }, [perfEnabled, printAreaMode]);
 
-  const wallTypeIdSet = useMemo(() => wallTypeIds || new Set<string>(), [wallTypeIds]);
-  const wallAttenuationMap = useMemo(() => wallAttenuationByType || new Map<string, number>(), [wallAttenuationByType]);
+  if (lastObjectsRef.current !== objects || lastWallTypeIdSetRef.current !== wallTypeIdSet) {
+    boundsVersionRef.current += 1;
+    boundsCacheRef.current.clear();
+    spatialIndexRef.current = null;
+    lastObjectsRef.current = objects;
+    lastWallTypeIdSetRef.current = wallTypeIdSet;
+  }
   const [wallObjects, quoteObjects, regularObjects] = useMemo(() => {
     if (!wallTypeIdSet.size) {
-      const quotes = plan.objects.filter((obj) => obj.type === 'quote');
-      const others = plan.objects.filter((obj) => obj.type !== 'quote');
+      const quotes = objects.filter((obj) => obj.type === 'quote');
+      const others = objects.filter((obj) => obj.type !== 'quote');
       return [[], quotes, others];
     }
     const walls: MapObject[] = [];
     const quotes: MapObject[] = [];
     const others: MapObject[] = [];
-    for (const obj of plan.objects) {
+    for (const obj of objects) {
       if (wallTypeIdSet.has(obj.type)) walls.push(obj);
       else if (obj.type === 'quote') quotes.push(obj);
       else others.push(obj);
     }
     return [walls, quotes, others];
-  }, [plan.objects, wallTypeIdSet]);
+  }, [objects, wallTypeIdSet]);
   const wallSegments = useMemo(() => {
     if (!wallObjects.length) return [] as Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }>;
     const segments: Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }> = [];
@@ -2058,32 +2172,23 @@ const getRoomBounds = (room: any) => {
   const selectedBounds = useMemo(() => {
     const idsArr = selectedIds || (selectedId ? [selectedId] : []);
     if (!idsArr.length) return null;
-    const ids = new Set(idsArr);
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const obj of plan.objects) {
-      if (!ids.has(obj.id)) continue;
-      const isWall = wallTypeIdSet.has(obj.type);
-      const pts = isWall ? obj.points || [] : [];
-      if (isWall && pts.length) {
-        for (const pt of pts) {
-          minX = Math.min(minX, pt.x);
-          minY = Math.min(minY, pt.y);
-          maxX = Math.max(maxX, pt.x);
-          maxY = Math.max(maxY, pt.y);
-        }
-        continue;
-      }
-      minX = Math.min(minX, obj.x);
-      minY = Math.min(minY, obj.y);
-      maxX = Math.max(maxX, obj.x);
-      maxY = Math.max(maxY, obj.y);
+    for (const id of idsArr) {
+      const obj = objectById.get(id);
+      if (!obj) continue;
+      const bounds = getObjectBounds(obj);
+      if (!bounds) continue;
+      minX = Math.min(minX, bounds.minX);
+      minY = Math.min(minY, bounds.minY);
+      maxX = Math.max(maxX, bounds.maxX);
+      maxY = Math.max(maxY, bounds.maxY);
     }
     if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
     return { minX, minY, maxX, maxY };
-  }, [plan.objects, selectedId, selectedIds, wallTypeIdSet]);
+  }, [getObjectBounds, objectById, selectedId, selectedIds]);
 
   useEffect(() => {
     if (boxSelectionActiveRef.current) {
@@ -2951,15 +3056,11 @@ const getRoomBounds = (room: any) => {
             const labelBg = labelPos === 'center' || (obj as any).quoteLabelBg === true;
             const labelColor = String((obj as any).quoteLabelColor || '#0f172a');
             const labelOffset = Number((obj as any).quoteLabelOffset);
-            const labelOffsetFactor = Number.isFinite(labelOffset) && labelOffset > 0 ? labelOffset : null;
+            const labelOffsetFactor = Number.isFinite(labelOffset) && labelOffset > 0 ? labelOffset : 1;
+            const normalizedOffsetFactor = Math.abs(labelOffsetFactor - 1.15) < 0.001 ? 1 : labelOffsetFactor;
             const baseOffset = Math.max(6, Math.round(6 * labelScale));
-            const perpSize = orientation === 'vertical' ? textW : textH;
-            const sideFactor = orientation === 'vertical' && (labelPos === 'left' || labelPos === 'right') ? 0.2 : 0.5;
-            const defaultFactor =
-              orientation === 'horizontal' && labelPos === 'below'
-                ? 1.15
-                : 1;
-            const offsetDist = (baseOffset + perpSize / 2) * sideFactor * (labelOffsetFactor ?? defaultFactor);
+            const perpSize = textH;
+            const offsetDist = (baseOffset + perpSize / 2) * normalizedOffsetFactor;
             let offsetX = 0;
             let offsetY = 0;
             if (orientation === 'vertical') {
@@ -3345,6 +3446,7 @@ const getRoomBounds = (room: any) => {
             const isText = obj.type === 'text';
             const isImage = obj.type === 'image';
             const isPostIt = obj.type === 'postit';
+            const multiSelected = (selectedIds || []).length > 1;
             const baseScale = Number(obj.scale ?? 1) || 1;
             const scale = isText || isImage ? 1 : baseScale;
             const isCamera = obj.type === 'camera';
@@ -3501,7 +3603,9 @@ const getRoomBounds = (room: any) => {
                   }
                   dragStartRef.current.set(obj.id, { x: obj.x, y: obj.y });
                   onMoveStart?.(obj.id, obj.x, obj.y, obj.roomId);
-                  onSelect(obj.id, { multi: !!(e?.evt?.ctrlKey || e?.evt?.metaKey) });
+                  if (!isSelected) {
+                    onSelect(obj.id, { multi: !!(e?.evt?.ctrlKey || e?.evt?.metaKey) });
+                  }
                 }}
                 onMouseEnter={(e) => {
                   if (obj.type !== 'real_user' && obj.type !== 'postit') return;
@@ -3510,17 +3614,22 @@ const getRoomBounds = (room: any) => {
                 }}
                 onMouseMove={(e) => {
                   if (obj.type !== 'real_user' && obj.type !== 'postit') return;
-                  if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
-                  const cx = e.evt.clientX;
-                  const cy = e.evt.clientY;
+                  pendingHoverRef.current = { clientX: e.evt.clientX, clientY: e.evt.clientY, obj };
+                  if (hoverRaf.current) return;
                   hoverRaf.current = requestAnimationFrame(() => {
+                    hoverRaf.current = null;
+                    const pending = pendingHoverRef.current;
+                    if (!pending) return;
                     if (perfEnabled) perfMetrics.hoverUpdates += 1;
-                    setHoverCard((prev) => (prev ? { ...prev, clientX: cx, clientY: cy } : { clientX: cx, clientY: cy, obj }));
+                    setHoverCard((prev) =>
+                      prev ? { ...prev, clientX: pending.clientX, clientY: pending.clientY } : pending
+                    );
                   });
                 }}
                 onMouseLeave={() => {
                   if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
                   hoverRaf.current = null;
+                  pendingHoverRef.current = null;
                   if (perfEnabled) perfMetrics.hoverUpdates += 1;
                   setHoverCard(null);
                 }}
@@ -4164,7 +4273,7 @@ const getRoomBounds = (room: any) => {
                     )}
                   </Group>
                 )}
-                {isDesk && isSelected && !readOnly && deskBounds ? (
+                {isDesk && isSelected && !readOnly && deskBounds && !multiSelected ? (
                   <Group
                     x={deskBounds.width / 2 + rotateHandleOffset}
                     y={-(deskBounds.height / 2 + rotateHandleOffset)}
@@ -4581,12 +4690,12 @@ const getRoomBounds = (room: any) => {
               y={selectionBox.y}
               width={selectionBox.width}
               height={selectionBox.height}
-              fill="rgba(37,99,235,0.08)"
-              stroke="#2563eb"
-              strokeWidth={1}
-              dash={[6, 6]}
+              fill={SELECTION_FILL}
+              stroke={SELECTION_COLOR}
+              strokeWidth={1.2}
+              dash={SELECTION_DASH}
               listening={false}
-              cornerRadius={8}
+              cornerRadius={10}
             />
           ) : null}
 
@@ -4701,23 +4810,49 @@ const getRoomBounds = (room: any) => {
                 }
               }}
             >
-              <Rect
-                x={-12}
-                y={-12}
-                width={selectedBounds.maxX - selectedBounds.minX + 24}
-                height={selectedBounds.maxY - selectedBounds.minY + 24}
-                fill="rgba(0,0,0,0.001)"
-                stroke="rgba(37,99,235,0.55)"
-                strokeWidth={1}
-                dash={[6, 6]}
-                cornerRadius={12}
-                listening={true}
-              />
+              {hideMultiSelectionBox ? (
+                <Rect
+                  x={-12}
+                  y={-12}
+                  width={selectedBounds.maxX - selectedBounds.minX + 24}
+                  height={selectedBounds.maxY - selectedBounds.minY + 24}
+                  fill="rgba(0,0,0,0.001)"
+                  strokeWidth={0}
+                  listening={false}
+                />
+              ) : (
+                <>
+                  <Rect
+                    x={-14}
+                    y={-14}
+                    width={selectedBounds.maxX - selectedBounds.minX + 28}
+                    height={selectedBounds.maxY - selectedBounds.minY + 28}
+                    fill="rgba(0,0,0,0.001)"
+                    stroke={SELECTION_GLOW}
+                    strokeWidth={4}
+                    dash={SELECTION_DASH}
+                    cornerRadius={14}
+                    listening={false}
+                  />
+                  <Rect
+                    x={-12}
+                    y={-12}
+                    width={selectedBounds.maxX - selectedBounds.minX + 24}
+                    height={selectedBounds.maxY - selectedBounds.minY + 24}
+                    fill="rgba(0,0,0,0.001)"
+                    stroke="rgba(37,99,235,0.75)"
+                    strokeWidth={1.2}
+                    dash={SELECTION_DASH}
+                    cornerRadius={12}
+                    listening={true}
+                  />
+                </>
+              )}
             </Group>
           ) : null}
         </Layer>
       </Stage>
-      <div className="absolute right-4 top-4 flex flex-col gap-2 rounded-xl bg-white/90 p-2 shadow-card backdrop-blur">
+      <div className="absolute right-4 top-4 flex flex-col gap-2 rounded-xl border border-slate-200/70 bg-white/95 p-2 shadow-card backdrop-blur">
         <button
           title={t({ it: 'Modalità pan', en: 'Pan tool' })}
           aria-pressed={panToolActive}

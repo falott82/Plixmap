@@ -31,7 +31,7 @@ const EmptyWorkspace = () => {
 
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
-          <div className="text-lg font-semibold text-ink">{t({ it: 'Nessuna planimetria disponibile', en: 'No floor plans available' })}</div>
+          <div className="modal-title">{t({ it: 'Nessuna planimetria disponibile', en: 'No floor plans available' })}</div>
           <div className="mt-2 text-sm text-slate-600">
             {canManage
               ? t({

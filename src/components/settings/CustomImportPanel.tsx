@@ -353,7 +353,7 @@ const CustomImportPanel = () => {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-sm font-semibold text-ink">{t({ it: 'Import WebAPI / CSV (Utenti reali)', en: 'WebAPI / CSV Import (Real users)' })}</div>
-            <div className="mt-1 text-sm text-slate-600">
+            <div className="modal-description">
               {t({
                 it: 'Ogni cliente ha la propria rubrica utenti: scegli la fonte e sincronizza da qui.',
                 en: 'Each client has its own user directory: choose the source and sync from here.'
@@ -485,13 +485,13 @@ const CustomImportPanel = () => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-start justify-between gap-3">
+                <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <div className="modal-header">
                     <div>
-                      <Dialog.Title className="text-lg font-semibold text-ink">
+                      <Dialog.Title className="modal-title">
                         {t({ it: 'Configurazione importazione', en: 'Import configuration' })}
                       </Dialog.Title>
-                      <div className="mt-1 text-sm text-slate-600">
+                      <div className="modal-description">
                         {activeClient ? activeClient.name : t({ it: 'Nessun cliente selezionato', en: 'No client selected' })}
                       </div>
                     </div>
@@ -505,7 +505,7 @@ const CustomImportPanel = () => {
                           <Settings2 size={16} />
                         </button>
                       ) : null}
-                      <button onClick={() => setConfigOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <button onClick={() => setConfigOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                         <X size={18} />
                       </button>
                     </div>
@@ -670,7 +670,7 @@ const CustomImportPanel = () => {
                         <button
                           onClick={saveConfig}
                           disabled={savingCfg || !activeClientId}
-                          className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+                          className="btn-primary disabled:opacity-60"
                           title={t({ it: 'Salva configurazione WebAPI', en: 'Save WebAPI configuration' })}
                         >
                           {savingCfg ? t({ it: 'Salvataggio…', en: 'Saving…' }) : t({ it: 'Salva impostazioni', en: 'Save settings' })}
@@ -678,7 +678,7 @@ const CustomImportPanel = () => {
                         <button
                           onClick={runTest}
                           disabled={testing || !activeClientId}
-                          className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                          className="flex items-center gap-2 btn-secondary disabled:opacity-60"
                           title={t({ it: 'Verifica connessione WebAPI', en: 'Test WebAPI connection' })}
                         >
                           <TestTube size={16} /> {testing ? t({ it: 'Test…', en: 'Testing…' }) : t({ it: 'Test WebAPI', en: 'Test WebAPI' })}
@@ -687,7 +687,7 @@ const CustomImportPanel = () => {
                           <button
                             onClick={() => activeClientId && runSync(activeClientId)}
                             disabled={!activeClientId || syncingClientId === activeClientId}
-                            className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                            className="flex items-center gap-2 btn-secondary disabled:opacity-60"
                             title={t({ it: 'Aggiorna importazione da WebAPI', en: 'Sync import from WebAPI' })}
                           >
                             <RefreshCw size={16} className={syncingClientId === activeClientId ? 'animate-spin' : ''} />
@@ -699,7 +699,7 @@ const CustomImportPanel = () => {
                     {activeSummary?.total || syncResult?.ok ? (
                       <button
                         onClick={() => activeClientId && openUsers(activeClientId)}
-                        className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        className="flex items-center gap-2 btn-secondary"
                         title={t({ it: 'Apri utenti importati', en: 'Open imported users' })}
                       >
                         <Users size={16} /> {t({ it: 'Utenti importati', en: 'Imported users' })}
@@ -771,13 +771,13 @@ const CustomImportPanel = () => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-start justify-between gap-3">
+                <Dialog.Panel className="w-full max-w-4xl modal-panel">
+                  <div className="modal-header">
                     <div>
-                      <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Utenti importati', en: 'Imported users' })}</Dialog.Title>
-                      <div className="mt-1 text-sm text-slate-600">{activeClient ? activeClient.name : ''}</div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Utenti importati', en: 'Imported users' })}</Dialog.Title>
+                      <div className="modal-description">{activeClient ? activeClient.name : ''}</div>
                     </div>
-                    <button onClick={() => setUsersOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                    <button onClick={() => setUsersOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>
@@ -868,7 +868,7 @@ const CustomImportPanel = () => {
                                     push(t({ it: 'Errore', en: 'Error' }), 'danger');
                                   }
                                 }}
-                                className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-ink hover:bg-white"
+                                className="btn-inline"
                                 title={r.hidden ? t({ it: 'Mostra utente', en: 'Unhide user' }) : t({ it: 'Nascondi utente', en: 'Hide user' })}
                               >
                                 {r.hidden ? t({ it: 'Mostra', en: 'Show' }) : t({ it: 'Nascondi', en: 'Hide' })}
@@ -880,10 +880,10 @@ const CustomImportPanel = () => {
                     </div>
                   </div>
 
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setUsersOpen(false)}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      className="btn-secondary"
                       title={t({ it: 'Chiudi la lista utenti importati', en: 'Close imported users list' })}
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}
@@ -892,7 +892,7 @@ const CustomImportPanel = () => {
                       <button
                         onClick={() => activeClientId && runSync(activeClientId)}
                         disabled={!activeClientId || syncingClientId === activeClientId}
-                        className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        className="btn-primary inline-flex items-center gap-2 disabled:opacity-60"
                         title={t({ it: 'Aggiorna importazione WebAPI', en: 'Sync WebAPI import' })}
                       >
                         <RefreshCw size={16} className={syncingClientId === activeClientId ? 'animate-spin' : ''} />
@@ -931,24 +931,24 @@ const CustomImportPanel = () => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Import CSV', en: 'CSV import' })}</Dialog.Title>
-                    <button onClick={() => setCsvConfirmOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">{t({ it: 'Import CSV', en: 'CSV import' })}</Dialog.Title>
+                    <button onClick={() => setCsvConfirmOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>
-                  <div className="mt-3 text-sm text-slate-600">
+                  <div className="modal-description">
                     {t({
                       it: 'Come vuoi gestire gli utenti del CSV? Puoi sommarli agli esistenti oppure sostituire tutto (rimuove anche gli utenti reali dalla mappa).',
                       en: 'How do you want to handle CSV users? You can append to existing users or replace everything (also removes real users from the map).'
                     })}
                   </div>
                   {csvFile ? <div className="mt-3 text-xs text-slate-500">{csvFile.name}</div> : null}
-                  <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setCsvConfirmOpen(false)}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      className="btn-secondary"
                       title={t({ it: 'Annulla import CSV', en: 'Cancel CSV import' })}
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
@@ -956,7 +956,7 @@ const CustomImportPanel = () => {
                     <button
                       onClick={() => runCsvImport('append')}
                       disabled={csvImporting}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                      className="btn-secondary disabled:opacity-60"
                       title={t({ it: 'Somma utenti del CSV', en: 'Append CSV users' })}
                     >
                       {t({ it: 'Somma utenti', en: 'Append users' })}
@@ -1001,10 +1001,10 @@ const CustomImportPanel = () => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Info cliente', en: 'Client info' })}</Dialog.Title>
-                    <button onClick={() => setInfoOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">{t({ it: 'Info cliente', en: 'Client info' })}</Dialog.Title>
+                    <button onClick={() => setInfoOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>
@@ -1032,10 +1032,10 @@ const CustomImportPanel = () => {
                       <div className="text-slate-600">{formatDate(infoSummary?.lastImportAt)}</div>
                     </div>
                   </div>
-                  <div className="mt-5 flex justify-end">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setInfoOpen(false)}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      className="btn-secondary"
                       title={t({ it: 'Chiudi le info cliente', en: 'Close client info' })}
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}

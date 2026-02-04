@@ -46,18 +46,18 @@ const LinksModal = ({ open, readOnly = false, objectName, rows, onClose, onSelec
         <div className="fixed inset-0 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center px-4 py-8">
             <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-              <Dialog.Panel className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-start justify-between gap-3">
+              <Dialog.Panel className="w-full max-w-4xl modal-panel">
+                <div className="modal-header">
                   <div>
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Collegamenti', en: 'Links' })}</Dialog.Title>
-                    <Dialog.Description className="mt-1 text-sm text-slate-600">
+                    <Dialog.Title className="modal-title">{t({ it: 'Collegamenti', en: 'Links' })}</Dialog.Title>
+                    <Dialog.Description className="modal-description">
                       {t({
                         it: `Collegamenti associati all’oggetto “${objectName}”.`,
                         en: `Links attached to “${objectName}”.`
                       })}
                     </Dialog.Description>
                   </div>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>

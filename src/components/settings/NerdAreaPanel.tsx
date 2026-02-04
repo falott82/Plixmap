@@ -131,7 +131,7 @@ const NerdAreaPanel = () => {
     <div className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
         <div className="text-sm font-semibold text-ink">{t({ it: 'Nerd Area (superadmin)', en: 'Nerd Area (superadmin)' })}</div>
-        <div className="mt-1 text-sm text-slate-600">
+        <div className="modal-description">
           {t({
             it: 'Stack e dipendenze usate per sviluppare Deskly, con versione e scopo. Include anche strumenti di integrazione avanzata.',
             en: 'Stack and dependencies used to build Deskly, with version and purpose. Includes advanced integration tools.'

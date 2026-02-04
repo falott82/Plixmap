@@ -8,6 +8,26 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.1.5',
+    date: '2026-02-04',
+    type: 'fix',
+    notes: [
+      n('Testo: selezione resta visibile durante lo spostamento', 'Text: selection remains visible while dragging'),
+      n('Seleziona tutti: niente box esterno e click vuoto annulla la selezione', 'Select all: no outer box and empty click clears selection')
+    ]
+  },
+  {
+    version: '2.1.4',
+    date: '2026-02-04',
+    type: 'fix',
+    notes: [
+      n('Wi-Fi: modale antenna ottimizzata su due colonne per ridurre lo scroll', 'Wi-Fi: antenna modal optimized in two columns to reduce scrolling'),
+      n('Menu contestuale: selezione di tutti gli oggetti dello stesso tipo', 'Context menu: select all objects of the same type'),
+      n('Selezione utenti reali: niente collegamenti automatici', 'Real users selection: no auto-included links'),
+      n('Quote: distanza etichetta uniforme sopra/sotto e sinistra/destra', 'Quotes: uniform label distance above/below and left/right')
+    ]
+  },
+  {
     version: '2.1.3',
     date: '2026-02-03',
     type: 'fix',

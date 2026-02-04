@@ -104,18 +104,18 @@ export default function MfaModal({
         <div className="fixed inset-0 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center px-4 py-8">
             <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-              <Dialog.Panel className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-card">
-                <div className="flex items-start justify-between gap-3">
-                  <Dialog.Title className="flex items-center gap-2 text-lg font-semibold text-ink">
+              <Dialog.Panel className="w-full max-w-lg modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title flex items-center gap-2">
                     <Shield size={18} /> {enabled ? t({ it: 'Disattiva MFA', en: 'Disable MFA' }) : t({ it: 'Attiva MFA', en: 'Enable MFA' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-50 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button rounded-xl p-2" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
 
                 <form className="mt-2" onSubmit={handleSubmit}>
-                  <div className="text-sm text-slate-600">
+                  <div className="modal-description">
                     {enabled
                       ? t({ it: 'Per disattivare MFA conferma password e codice.', en: 'To disable MFA, confirm password and code.' })
                       : t({ it: 'Configura un’app di autenticazione (TOTP) e conferma il codice.', en: 'Set up an authenticator app (TOTP) and confirm the code.' })}
@@ -173,11 +173,11 @@ export default function MfaModal({
                   ) : null}
                 </div>
 
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       type="button"
                       onClick={onClose}
-                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                      className="btn-secondary"
                       title={t({ it: 'Chiudi senza modificare MFA', en: 'Close without changing MFA' })}
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
@@ -185,7 +185,7 @@ export default function MfaModal({
                     <button
                       type="submit"
                       disabled={loading || !canSubmit}
-                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90 disabled:opacity-60"
+                      className="btn-primary disabled:opacity-60"
                       title={
                         enabled
                           ? t({ it: 'Disattiva MFA', en: 'Disable MFA' })

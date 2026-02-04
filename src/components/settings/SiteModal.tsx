@@ -72,12 +72,12 @@ const SiteModal = ({ open, initialName = '', initialCoords = '', title, onClose,
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">{title}</Dialog.Title>
+              <Dialog.Panel className="w-full max-w-md modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">{title}</Dialog.Title>
                   <button
                     onClick={onClose}
-                    className="text-slate-500 hover:text-ink"
+                    className="icon-button"
                     title={t({ it: 'Chiudi', en: 'Close' })}
                   >
                     <X size={18} />
@@ -129,10 +129,10 @@ const SiteModal = ({ open, initialName = '', initialCoords = '', title, onClose,
                     </div>
                   </label>
                 </div>
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="modal-footer">
                   <button
                     onClick={onClose}
-                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    className="btn-secondary"
                     title={t({ it: 'Chiudi senza salvare le modifiche', en: 'Close without saving changes' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
@@ -140,7 +140,7 @@ const SiteModal = ({ open, initialName = '', initialCoords = '', title, onClose,
                   <button
                     onClick={submit}
                     disabled={!canSubmit}
-                    className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                    className="btn-primary disabled:opacity-60"
                     title={t({ it: 'Salva la sede', en: 'Save the site' })}
                   >
                     {t({ it: 'Salva', en: 'Save' })}

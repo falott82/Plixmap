@@ -204,12 +204,12 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+              <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">
                     {mode === 'create' ? t({ it: 'Nuovo utente', en: 'New user' }) : t({ it: 'Modifica utente', en: 'Edit user' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -412,11 +412,11 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                       <PermissionsEditor clients={clients} value={permMap} onChange={setPermMap} />
                     )}
                   </div>
-                  <div className="mt-6 flex justify-end gap-2 lg:col-span-2">
+                  <div className="modal-footer lg:col-span-2">
                     <button
                       type="button"
                       onClick={onClose}
-                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      className="btn-secondary"
                       title={t({ it: 'Chiudi senza salvare l’utente', en: 'Close without saving the user' })}
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
@@ -424,7 +424,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                     <button
                       type="submit"
                       disabled={!canSubmit}
-                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                      className="btn-primary disabled:opacity-60"
                       title={t({ it: 'Salva l’utente', en: 'Save the user' })}
                     >
                       {t({ it: 'Salva', en: 'Save' })}

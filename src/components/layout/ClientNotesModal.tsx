@@ -364,7 +364,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                         </div>
                         <button
                           onClick={requestClose}
-                          className="text-slate-500 hover:text-ink"
+                          className="icon-button"
                           title={t({ it: 'Chiudi', en: 'Close' })}
                         >
                           <X size={18} />
@@ -469,7 +469,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                     <div className="flex flex-1 flex-col p-6 min-h-0">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <Dialog.Title className="text-lg font-semibold text-ink">
+                          <Dialog.Title className="modal-title">
                             {selected ? selected.title : t({ it: 'Seleziona una nota', en: 'Select a note' })}
                           </Dialog.Title>
                           <div className="mt-1 text-xs text-slate-500">{selected ? lastSavedLabel : null}</div>
@@ -677,11 +677,11 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
                       <div className="relative flex min-h-full items-center justify-center p-4">
                         <div
-                          className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card"
+                          className="w-full max-w-lg modal-panel"
                           onMouseDown={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="text-lg font-semibold text-ink">{t({ it: 'Copia nota', en: 'Copy note' })}</div>
+                            <div className="modal-title">{t({ it: 'Copia nota', en: 'Copy note' })}</div>
                             <button
                               onClick={() => setCopyOpen(false)}
                               className="text-slate-500 hover:text-ink"
@@ -690,7 +690,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                               <X size={18} />
                             </button>
                           </div>
-                          <div className="mt-1 text-sm text-slate-600">
+                          <div className="modal-description">
                             {t({
                               it: 'Scegli il cliente di destinazione. La nota verrà copiata come nuova nota.',
                               en: 'Choose the destination client. The note will be copied as a new note.'
@@ -756,11 +756,11 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
                       <div className="relative flex min-h-full items-center justify-center p-4">
                         <div
-                          className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card"
+                          className="w-full max-w-md modal-panel"
                           onMouseDown={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="text-lg font-semibold text-ink">
+                            <div className="modal-title">
                               {confirmAction.kind === 'delete'
                                 ? t({ it: 'Eliminare la nota?', en: 'Delete note?' })
                                 : t({ it: 'Modifiche non salvate', en: 'Unsaved changes' })}
@@ -787,7 +787,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
                             <button
                               onClick={() => setConfirmAction(null)}
-                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                              className="btn-secondary"
                             >
                               {t({ it: 'Annulla', en: 'Cancel' })}
                             </button>
@@ -816,7 +816,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                                     if (action.kind === 'close') onClose();
                                     if (action.kind === 'switch' && action.nextId) setSelectedId(action.nextId);
                                   }}
-                                  className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                                  className="btn-primary"
                                 >
                                   {t({ it: 'Salva', en: 'Save' })}
                                 </button>
@@ -852,11 +852,11 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
                       <div className="relative flex min-h-full items-center justify-center p-4">
                         <div
-                          className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card"
+                          className="w-full max-w-md modal-panel"
                           onMouseDown={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="text-lg font-semibold text-ink">{t({ it: 'Nuova nota', en: 'New note' })}</div>
+                            <div className="modal-title">{t({ it: 'Nuova nota', en: 'New note' })}</div>
                             <button
                               onClick={() => setCreateOpen(false)}
                               className="text-slate-500 hover:text-ink"
@@ -890,7 +890,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                             />
                           </div>
 
-                          <div className="mt-6 flex justify-end gap-2">
+                          <div className="modal-footer">
                             <button
                               onClick={() => setCreateOpen(false)}
                               className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
