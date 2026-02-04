@@ -38,15 +38,15 @@ const ClientInfoModal = ({ open, client, onClose }: Props) => {
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-start justify-between gap-4">
+              <Dialog.Panel className="w-full max-w-xl modal-panel">
+                <div className="modal-header items-center">
                   <div className="min-w-0">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                    <Dialog.Title className="modal-title">
                       {t({ it: 'Info cliente', en: 'Client info' })}
                     </Dialog.Title>
-                    <div className="mt-1 truncate text-sm text-slate-600">{client?.shortName || client?.name || ''}</div>
+                    <div className="modal-description truncate">{client?.shortName || client?.name || ''}</div>
                   </div>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -95,4 +95,3 @@ const ClientInfoModal = ({ open, client, onClose }: Props) => {
 };
 
 export default ClientInfoModal;
-

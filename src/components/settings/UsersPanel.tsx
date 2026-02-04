@@ -335,20 +335,20 @@ const UsersPanel = () => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                <Dialog.Panel className="w-full max-w-2xl modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">
                       {t({ it: 'Guida pulsanti', en: 'Buttons guide' })}
                     </Dialog.Title>
                     <button
                       onClick={() => setHelpOpen(false)}
-                      className="text-slate-500 hover:text-ink"
+                      className="icon-button"
                       title={t({ it: 'Chiudi', en: 'Close' })}
                     >
                       <X size={18} />
                     </button>
                   </div>
-                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                  <Dialog.Description className="modal-description">
                     {t({
                       it: 'Queste azioni possono richiedere permessi admin o superadmin.',
                       en: 'These actions may require admin or superadmin permissions.'

@@ -913,11 +913,11 @@ const RackPortsModal = ({
       <div className="flex items-center justify-between gap-3">
         <div>
           {useDialogTitle ? (
-            <Dialog.Title className="text-lg font-semibold text-ink">
+            <Dialog.Title className="modal-title">
               {t({ it: 'Configurazione porte', en: 'Port configuration' })}
             </Dialog.Title>
           ) : (
-            <div className="text-lg font-semibold text-ink">{t({ it: 'Configurazione porte', en: 'Port configuration' })}</div>
+            <div className="modal-title">{t({ it: 'Configurazione porte', en: 'Port configuration' })}</div>
           )}
           <div className="text-xs text-slate-500">
             {getDeviceLabel(item)}
@@ -962,7 +962,7 @@ const RackPortsModal = ({
             <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" />
             <div className="fixed inset-0 overflow-y-auto">
               <div className="flex min-h-full items-center justify-center px-4 py-6">
-                <Dialog.Panel className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">
+                <Dialog.Panel className="w-full max-w-4xl modal-panel">
                   {renderPortsPanel(true)}
                 </Dialog.Panel>
               </div>
@@ -979,7 +979,7 @@ const RackPortsModal = ({
           >
             <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" onMouseDown={handleBackdropClose} />
             <div className="relative flex min-h-full items-center justify-center px-4 py-6" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">{renderPortsPanel(false)}</div>
+              <div className="w-full max-w-4xl modal-panel">{renderPortsPanel(false)}</div>
             </div>
           </div>
         )
@@ -989,7 +989,7 @@ const RackPortsModal = ({
         {linkPrompt ? (
           <>
             <div className="flex items-center justify-between gap-3">
-              <div className="text-lg font-semibold text-ink">{t({ it: 'Collega porta', en: 'Link port' })}</div>
+              <div className="modal-title">{t({ it: 'Collega porta', en: 'Link port' })}</div>
               <button onClick={() => setLinkPrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                 <X size={18} />
               </button>
@@ -1119,7 +1119,7 @@ const RackPortsModal = ({
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setLinkPrompt(null)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                className="btn-secondary"
                 title={t({ it: 'Annulla', en: 'Cancel' })}
               >
                 {t({ it: 'Annulla', en: 'Cancel' })}
@@ -1139,7 +1139,7 @@ const RackPortsModal = ({
               <button
                 onClick={handleSaveLink}
                 disabled={!canSaveLink}
-                className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+                className="btn-primary disabled:opacity-60"
                 title={t({ it: 'Salva collegamento', en: 'Save link' })}
               >
                 {t({ it: 'Salva collegamento', en: 'Save link' })}
@@ -1158,7 +1158,7 @@ const RackPortsModal = ({
         {renamePrompt ? (
           <>
             <div className="flex items-center justify-between gap-3">
-              <div className="text-lg font-semibold text-ink">{t({ it: 'Rinomina porta', en: 'Rename port' })}</div>
+              <div className="modal-title">{t({ it: 'Rinomina porta', en: 'Rename port' })}</div>
               <button onClick={() => setRenamePrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                 <X size={18} />
               </button>
@@ -1179,14 +1179,14 @@ const RackPortsModal = ({
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setRenamePrompt(null)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                className="btn-secondary"
                 title={t({ it: 'Annulla', en: 'Cancel' })}
               >
                 {t({ it: 'Annulla', en: 'Cancel' })}
               </button>
               <button
                 onClick={handleRenameSave}
-                className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                className="btn-primary"
                 title={t({ it: 'Salva', en: 'Save' })}
               >
                 {t({ it: 'Salva', en: 'Save' })}
@@ -1197,7 +1197,7 @@ const RackPortsModal = ({
       </SimpleModal>
       <SimpleModal open={connectionsOpen} onClose={() => setConnectionsOpen(false)} zIndexClassName="z-[110]" panelClassName="max-w-3xl p-6">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-lg font-semibold text-ink">{t({ it: 'Collegamenti apparati', en: 'Device links' })}</div>
+          <div className="modal-title">{t({ it: 'Collegamenti apparati', en: 'Device links' })}</div>
           <button onClick={() => setConnectionsOpen(false)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
             <X size={18} />
           </button>
@@ -1341,7 +1341,7 @@ const RackPortsModal = ({
         {overwritePrompt ? (
           <>
             <div className="flex items-center justify-between gap-3">
-              <div className="text-lg font-semibold text-ink">{t({ it: 'Porta già collegata', en: 'Port already linked' })}</div>
+              <div className="modal-title">{t({ it: 'Porta già collegata', en: 'Port already linked' })}</div>
               <button onClick={() => setOverwritePrompt(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
                 <X size={18} />
               </button>
@@ -1355,7 +1355,7 @@ const RackPortsModal = ({
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setOverwritePrompt(null)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                className="btn-secondary"
                 title={t({ it: 'Annulla', en: 'Cancel' })}
               >
                 {t({ it: 'Annulla', en: 'Cancel' })}

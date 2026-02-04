@@ -94,13 +94,13 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
             leaveFrom="opacity-100 scale-100"
             leaveTo="opacity-0 scale-95"
           >
-            <Dialog.Panel className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-card">
-              <div className="flex items-center justify-between">
+            <Dialog.Panel className="w-full max-w-xl modal-panel">
+              <div className="modal-header items-center">
                 <div>
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+                  <Dialog.Title className="modal-title">
                     {t({ it: 'Risultati ricerca', en: 'Search results' })}
                   </Dialog.Title>
-                  <Dialog.Description className="mt-1 text-sm text-slate-600">
+                  <Dialog.Description className="modal-description">
                     {t({
                       it: `Seleziona un risultato per evidenziare “${term}”.`,
                       en: `Select a result to highlight “${term}”.`
@@ -113,7 +113,7 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
                     </span>
                   </Dialog.Description>
                 </div>
-                <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                   <X size={18} />
                 </button>
               </div>

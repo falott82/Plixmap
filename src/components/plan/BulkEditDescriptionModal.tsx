@@ -51,9 +51,9 @@ const BulkEditDescriptionModal = ({ open, count, onClose, onSubmit }: Props) => 
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
+              <Dialog.Panel className="w-full max-w-md modal-panel">
                 <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+                  <Dialog.Title className="modal-title">
                     {t({ it: 'Modifica descrizione', en: 'Edit description' })}
                   </Dialog.Title>
                   <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
@@ -98,7 +98,7 @@ const BulkEditDescriptionModal = ({ open, count, onClose, onSubmit }: Props) => 
                   </button>
                   <button
                     onClick={save}
-                    className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    className="btn-primary"
                     title={t({ it: 'Applica', en: 'Apply' })}
                   >
                     {t({ it: 'Applica', en: 'Apply' })}

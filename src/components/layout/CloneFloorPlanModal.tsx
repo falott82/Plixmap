@@ -41,7 +41,7 @@ export default function CloneFloorPlanModal({
             <div className="flex items-center gap-2 text-lg font-semibold text-ink">
               <Copy size={18} /> {t({ it: 'Duplica planimetria', en: 'Duplicate floor plan' })}
             </div>
-            <div className="mt-1 text-sm text-slate-600">
+            <div className="modal-description">
               {t({
                 it: 'Crea una nuova planimetria nello stesso edificio, usando questa come template.',
                 en: 'Create a new floor plan in the same site using this one as a template.'

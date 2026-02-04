@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
 import {
@@ -72,6 +73,7 @@ import CableModal from './CableModal';
 import LinksModal from './LinksModal';
 import LinkEditModal from './LinkEditModal';
 import RealUserDetailsModal from './RealUserDetailsModal';
+import { useClipboard } from './useClipboard';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
 import { shallow } from 'zustand/shallow';
@@ -95,23 +97,6 @@ interface Props {
 
 const isRackLinkId = (id?: string | null) => typeof id === 'string' && id.startsWith('racklink:');
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling', 'quotes']);
-type ClipboardPayload = {
-  token: number;
-  items: MapObject[];
-  customValues: Record<string, Record<string, any>>;
-  sourcePlanId?: string;
-  sourcePlanName?: string;
-  sourceClientId?: string;
-  sourceClientName?: string;
-};
-
-type PasteConfirmPayload = {
-  title: string;
-  description: string;
-  clipboard: ClipboardPayload;
-  targetPlanId: string;
-};
-
 const PlanView = ({ planId }: Props) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasStageRef = useRef<CanvasStageHandle | null>(null);
@@ -432,7 +417,7 @@ const PlanView = ({ planId }: Props) => {
     shallow
   );
 
-  const push = useToastStore((s) => s.push);
+  const { push, pushStack } = useToastStore((s) => ({ push: s.push, pushStack: (s as any).pushStack }));
   const saveCustomValues = useCustomFieldsStore((s) => s.saveObjectValues);
   const loadCustomValues = useCustomFieldsStore((s) => s.loadObjectValues);
   const dataVersion = useDataStore((s) => s.version);
@@ -449,7 +434,6 @@ const PlanView = ({ planId }: Props) => {
   const [confirmDeleteViewId, setConfirmDeleteViewId] = useState<string | null>(null);
   const [confirmSetDefaultViewId, setConfirmSetDefaultViewId] = useState<string | null>(null);
   const [confirmClearObjects, setConfirmClearObjects] = useState(false);
-  const [pasteConfirm, setPasteConfirm] = useState<PasteConfirmPayload | null>(null);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkEditSelectionOpen, setBulkEditSelectionOpen] = useState(false);
   const [selectedObjectsModalOpen, setSelectedObjectsModalOpen] = useState(false);
@@ -499,6 +483,8 @@ const PlanView = ({ planId }: Props) => {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const returnToSelectionListRef = useRef(false);
   const lastInsertedRef = useRef<{ id: string; name: string } | null>(null);
+  const lastPointerClientRef = useRef<{ x: number; y: number } | null>(null);
+  const lastPointerClickRef = useRef<{ x: number; y: number } | null>(null);
   const dragStartRef = useRef<Map<string, { x: number; y: number; roomId?: string }>>(new Map());
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewsMenuOpen, setViewsMenuOpen] = useState(false);
@@ -520,6 +506,8 @@ const PlanView = ({ planId }: Props) => {
   const [presenceOpen, setPresenceOpen] = useState(false);
   const [layersPopoverOpen, setLayersPopoverOpen] = useState(false);
   const [layersQuickMenu, setLayersQuickMenu] = useState<{ x: number; y: number } | null>(null);
+  const [suppressMultiSelectionBox, setSuppressMultiSelectionBox] = useState(false);
+  const suppressSelectionKeyRef = useRef<string>('');
   const [layerRevealPrompt, setLayerRevealPrompt] = useState<{
     objectId: string;
     objectName: string;
@@ -648,8 +636,6 @@ const PlanView = ({ planId }: Props) => {
   const confirmDeleteRef = useRef<string[] | null>(confirmDelete);
   const pendingRoomDeletesRef = useRef<string[]>(pendingRoomDeletes);
   const skipRoomWallTypesRef = useRef(false);
-  const clipboardRef = useRef<ClipboardPayload | null>(null);
-  const pasteCountRef = useRef(0);
   const deskToastKeyRef = useRef<string>('');
   const deskToastIdRef = useRef<string | number | null>(null);
   const wallMoveBatchRef = useRef<{ id: string | null; movedGroups: Set<string>; movedWalls: Set<string>; movedRooms: Set<string> }>({
@@ -674,6 +660,28 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
+  const panRef = useRef(pan);
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+  const handleMapMouseMove = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
+  }, []);
+  const handleMapMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
+    lastPointerClickRef.current = { x: event.clientX, y: event.clientY };
+  }, []);
+  const getPastePoint = useCallback(() => {
+    const last = lastPointerClickRef.current;
+    const el = mapRef.current;
+    if (!last || !el) return null;
+    const rect = el.getBoundingClientRect();
+    const localX = last.x - rect.left;
+    const localY = last.y - rect.top;
+    const z = zoomRef.current || 1;
+    const p = panRef.current || { x: 0, y: 0 };
+    return { x: (localX - p.x) / z, y: (localY - p.y) / z };
+  }, []);
   useEffect(() => {
     wallDraftPointsRef.current = wallDraftPoints;
   }, [wallDraftPoints]);
@@ -1802,152 +1810,6 @@ const PlanView = ({ planId }: Props) => {
     [getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan, selectedObjectIds, updateObject]
   );
 
-  const getRealUserPasteDuplicates = useCallback(
-    (clipboard: ClipboardPayload, targetClientId: string) => {
-      if (!client || !targetClientId) return [];
-      const users = clipboard.items.filter((obj) => obj.type === 'real_user');
-      if (!users.length) return [];
-      const wanted = new Map<string, { name: string }>();
-      for (const obj of users) {
-        const externalUserId = String((obj as any).externalUserId || '').trim();
-        const externalClientId = String((obj as any).externalClientId || targetClientId).trim();
-        if (!externalUserId || !externalClientId) continue;
-        const key = `${externalClientId}:${externalUserId}`;
-        if (!wanted.has(key)) {
-          const fallbackName = `${String((obj as any).firstName || '').trim()} ${String((obj as any).lastName || '').trim()}`.trim();
-          const name = String(obj.name || fallbackName || externalUserId);
-          wanted.set(key, { name });
-        }
-      }
-      if (!wanted.size) return [];
-      const matches: { name: string; planName: string }[] = [];
-      for (const s of client.sites || []) {
-        for (const p of s.floorPlans || []) {
-          for (const o of p.objects || []) {
-            if (o.type !== 'real_user') continue;
-            const ocid = String((o as any).externalClientId || '').trim();
-            const oeid = String((o as any).externalUserId || '').trim();
-            if (!ocid || !oeid) continue;
-            const key = `${ocid}:${oeid}`;
-            const entry = wanted.get(key);
-            if (!entry) continue;
-            const planName = String(p.name || '') || t({ it: 'Planimetria', en: 'Floor plan' });
-            matches.push({ name: entry.name, planName });
-            wanted.delete(key);
-            if (!wanted.size) return matches;
-          }
-        }
-      }
-      return matches;
-    },
-    [client, t]
-  );
-
-  const performPaste = useCallback(
-    (clipboard: ClipboardPayload, currentPlan: FloorPlan) => {
-      if (isReadOnlyRef.current) return;
-      if (!clipboard?.items?.length) return;
-      markTouched();
-      pasteCountRef.current += 1;
-      const offset = 24 * pasteCountRef.current;
-      const newIds: string[] = [];
-      for (const obj of clipboard.items) {
-        const nextX = obj.x + offset;
-        const nextY = obj.y + offset * 0.6;
-        const layerIds =
-          Array.isArray(obj.layerIds) && obj.layerIds.length ? obj.layerIds : inferDefaultLayerIds(obj.type, layerIdSet);
-        const extra: Partial<MapObject> = {
-          opacity: obj.opacity,
-          rotation: obj.rotation,
-          strokeWidth: obj.strokeWidth,
-          strokeColor: obj.strokeColor,
-          scaleX: obj.scaleX,
-          scaleY: obj.scaleY,
-          points: obj.points ? obj.points.map((p) => ({ ...p })) : undefined,
-          wallGroupId: obj.wallGroupId,
-          wallGroupIndex: obj.wallGroupIndex,
-          wifiDb: obj.wifiDb,
-          wifiStandard: obj.wifiStandard,
-          wifiBand24: obj.wifiBand24,
-          wifiBand5: obj.wifiBand5,
-          wifiBand6: obj.wifiBand6,
-          wifiBrand: obj.wifiBrand,
-          wifiModel: obj.wifiModel,
-          wifiModelCode: obj.wifiModelCode,
-          wifiCoverageSqm: obj.wifiCoverageSqm,
-          wifiCatalogId: obj.wifiCatalogId,
-          wifiShowRange: obj.wifiShowRange,
-          cctvAngle: obj.cctvAngle,
-          cctvRange: obj.cctvRange,
-          cctvOpacity: obj.cctvOpacity,
-          externalClientId: obj.externalClientId,
-          externalUserId: obj.externalUserId,
-          firstName: obj.firstName,
-          lastName: obj.lastName,
-          externalRole: obj.externalRole,
-          externalDept1: obj.externalDept1,
-          externalDept2: obj.externalDept2,
-          externalDept3: obj.externalDept3,
-          externalEmail: obj.externalEmail,
-          externalExt1: obj.externalExt1,
-          externalExt2: obj.externalExt2,
-          externalExt3: obj.externalExt3,
-          externalIsExternal: obj.externalIsExternal
-        };
-        const id = addObject(
-          currentPlan.id,
-          obj.type,
-          obj.name,
-          obj.description,
-          nextX,
-          nextY,
-          obj.scale ?? 1,
-          layerIds,
-          extra
-        );
-        ensureObjectLayerVisible(layerIds, obj.name, obj.type);
-        const nextRoomId = getRoomIdAt(currentPlan.rooms, nextX, nextY);
-        if (nextRoomId) updateObject(id, { roomId: nextRoomId });
-        const customValues = clipboard.customValues?.[obj.id];
-        if (customValues && Object.keys(customValues).length) {
-          saveCustomValues(id, obj.type, customValues).catch(() => {});
-        }
-        newIds.push(id);
-      }
-      if (newIds.length) {
-        const last = newIds[newIds.length - 1];
-        const label =
-          newIds.length === 1
-            ? String(clipboard.items[0]?.name || getTypeLabel(clipboard.items[0]?.type || ''))
-            : t({ it: `${newIds.length} oggetti`, en: `${newIds.length} objects` });
-        lastInsertedRef.current = { id: last, name: label };
-        setSelection(newIds);
-        setContextMenu(null);
-        push(
-          newIds.length === 1
-            ? t({ it: `Oggetto duplicato: ${label}`, en: `Object duplicated: ${label}` })
-            : t({ it: `Duplicati ${newIds.length} oggetti`, en: `Duplicated ${newIds.length} objects` }),
-          'success'
-        );
-      }
-    },
-    [
-      addObject,
-      ensureObjectLayerVisible,
-      getRoomIdAt,
-      getTypeLabel,
-      inferDefaultLayerIds,
-      layerIdSet,
-      markTouched,
-      push,
-      saveCustomValues,
-      setContextMenu,
-      setSelection,
-      t,
-      updateObject
-    ]
-  );
-
   const toSnapshot = useCallback((p: any) => {
     return {
       imageUrl: p?.imageUrl || '',
@@ -2517,6 +2379,10 @@ const PlanView = ({ planId }: Props) => {
     if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return undefined;
     return renderPlan.objects.find((o) => o.id === contextMenu.id);
   }, [renderPlan, contextMenu]);
+  const contextObjectTypeLabel = useMemo(() => {
+    if (!contextObject) return '';
+    return objectTypeLabels[contextObject.type] || contextObject.type;
+  }, [contextObject, objectTypeLabels]);
 
   const realUserDetails = useMemo(() => {
     if (!realUserDetailsId || !renderPlan) return null;
@@ -2630,6 +2496,13 @@ const PlanView = ({ planId }: Props) => {
       return !!obj && isDeskType(obj.type);
     });
   }, [renderPlan, selectedObjectIds]);
+  const selectionAllRealUsers = useMemo(() => {
+    if (!renderPlan) return false;
+    if (!selectedObjectIds?.length) return false;
+    return selectedObjectIds.every((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'real_user');
+  }, [renderPlan, selectedObjectIds]);
+
+  const selectionKeyForIds = useCallback((ids: string[]) => ids.slice().sort().join('|'), []);
 
   useEffect(() => {
     planRef.current = renderPlan;
@@ -2640,6 +2513,20 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     selectedObjectIdsRef.current = selectedObjectIds;
   }, [selectedObjectIds]);
+  useEffect(() => {
+    if (!suppressMultiSelectionBox) return;
+    const ids = selectedObjectIds || [];
+    if (ids.length < 2) {
+      suppressSelectionKeyRef.current = '';
+      setSuppressMultiSelectionBox(false);
+      return;
+    }
+    const key = selectionKeyForIds(ids);
+    if (key !== suppressSelectionKeyRef.current) {
+      suppressSelectionKeyRef.current = '';
+      setSuppressMultiSelectionBox(false);
+    }
+  }, [selectedObjectIds, selectionKeyForIds, suppressMultiSelectionBox]);
   useEffect(() => {
     if (!renderPlan || selectedObjectIds.length < 2) {
       multiToastKeyRef.current = '';
@@ -3443,6 +3330,31 @@ const PlanView = ({ planId }: Props) => {
     return undefined;
   }
 
+  const { copySelection, requestPaste, pasteConfirm, confirmPaste, cancelPaste } = useClipboard({
+    t,
+    client,
+    planId,
+    planRef,
+    isReadOnlyRef,
+    inferDefaultLayerIds,
+    layerIdSet,
+    addObject,
+    updateObject,
+    ensureObjectLayerVisible,
+    getRoomIdAt,
+    saveCustomValues,
+    loadCustomValues,
+    markTouched,
+    push,
+    pushStack,
+    getTypeLabel,
+    setSelection,
+    setContextMenu,
+    lastInsertedRef,
+    triggerHighlight,
+    getPastePoint
+  });
+
   const getRoomPolygon = (room: any) => {
     const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
     if (kind === 'poly') {
@@ -4224,7 +4136,7 @@ const PlanView = ({ planId }: Props) => {
       const quoteLabelScale = Math.max(0.6, Math.min(2, Number(lastQuoteLabelScale) || 1));
       const quoteLabelBg = quoteLabelPos === 'center' || lastQuoteLabelBg === true;
       const quoteLabelColor = lastQuoteLabelColor || '#0f172a';
-      const quoteLabelOffset = orientation === 'horizontal' && quoteLabelPos === 'below' ? 1.15 : 1;
+      const quoteLabelOffset = 1;
       const quoteDashed = !!lastQuoteDashed;
       const quoteEndpoint = lastQuoteEndpoint || 'arrows';
       markTouched();
@@ -4716,111 +4628,16 @@ const PlanView = ({ planId }: Props) => {
       const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
       if (!isTyping && isCopy) {
         if (!currentPlan) return;
-        const source = currentSelectedIds
-          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
-          .filter((obj): obj is MapObject => !!obj && !isWallType(obj.type));
-        if (!source.length) return;
-        e.preventDefault();
-        const token = Date.now();
-        const sourcePlanName =
-          String((currentPlan as FloorPlan).name || '') || t({ it: 'Planimetria', en: 'Floor plan' });
-        clipboardRef.current = {
-          token,
-          items: source.map((obj) => ({
-            ...obj,
-            points: obj.points ? obj.points.map((p) => ({ ...p })) : undefined
-          })),
-          customValues: {},
-          sourcePlanId: (currentPlan as FloorPlan).id,
-          sourcePlanName,
-          sourceClientId: client?.id,
-          sourceClientName: client?.shortName || client?.name || ''
-        };
-        pasteCountRef.current = 0;
-        Promise.all(
-          source.map(async (obj) => {
-            try {
-              const values = await loadCustomValues(obj.id);
-              return { id: obj.id, values };
-            } catch {
-              return { id: obj.id, values: {} };
-            }
-          })
-        ).then((results) => {
-          if (!clipboardRef.current || clipboardRef.current.token !== token) return;
-          const next: Record<string, Record<string, any>> = {};
-          results.forEach(({ id, values }) => {
-            next[id] = values || {};
-          });
-          clipboardRef.current = { ...clipboardRef.current, customValues: next };
-        });
-        push(
-          source.length === 1
-            ? t({ it: 'Oggetto copiato', en: 'Object copied' })
-            : t({ it: `Copiati ${source.length} oggetti`, en: `Copied ${source.length} objects` }),
-          'success'
-        );
+        const didCopy = copySelection(currentPlan as FloorPlan, currentSelectedIds, isWallType);
+        if (didCopy) e.preventDefault();
         return;
       }
 
       const isPaste = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
       if (!isTyping && isPaste) {
         if (!currentPlan || isReadOnlyRef.current) return;
-        const clipboard = clipboardRef.current;
-        if (!clipboard?.items?.length) return;
-        e.preventDefault();
-        if (pasteConfirm) return;
-        const targetClientId = client?.id || '';
-        const hasRealUsers = clipboard.items.some((obj) => obj.type === 'real_user');
-        if (hasRealUsers && targetClientId && clipboard.sourceClientId && clipboard.sourceClientId !== targetClientId) {
-          push(
-            t({
-              it: 'Non puoi copiare utenti reali su un altro cliente.',
-              en: 'You cannot copy real users to another client.'
-            }),
-            'danger'
-          );
-          return;
-        }
-        const crossPlan = !!(clipboard.sourcePlanId && clipboard.sourcePlanId !== (currentPlan as FloorPlan).id);
-        const duplicates = hasRealUsers && targetClientId ? getRealUserPasteDuplicates(clipboard, targetClientId) : [];
-        if (crossPlan || duplicates.length) {
-          const fromName =
-            String(clipboard.sourcePlanName || '') || t({ it: 'Planimetria', en: 'Floor plan' });
-          const toName = String((currentPlan as FloorPlan).name || '') || t({ it: 'Planimetria', en: 'Floor plan' });
-          const parts: string[] = [];
-          if (crossPlan) {
-            parts.push(
-              t({
-                it: `Stai incollando oggetti dalla planimetria "${fromName}" alla planimetria "${toName}".`,
-                en: `You are pasting objects from "${fromName}" into "${toName}".`
-              })
-            );
-          }
-          if (duplicates.length) {
-            const list = duplicates.map((d) => `${d.name} (${d.planName})`).join(', ');
-            parts.push(
-              duplicates.length === 1
-                ? t({
-                    it: `L'utente reale ${list} è già presente nel cliente.`,
-                    en: `The real user ${list} is already present in this client.`
-                  })
-                : t({
-                    it: `Gli utenti reali ${list} sono già presenti nel cliente.`,
-                    en: `The real users ${list} are already present in this client.`
-                  })
-            );
-          }
-          parts.push(t({ it: 'Vuoi procedere comunque?', en: 'Do you want to proceed anyway?' }));
-          setPasteConfirm({
-            title: t({ it: 'Conferma incolla', en: 'Confirm paste' }),
-            description: parts.join(' '),
-            clipboard,
-            targetPlanId: (currentPlan as FloorPlan).id
-          });
-          return;
-        }
-        performPaste(clipboard, currentPlan as FloorPlan);
+        const handled = requestPaste(currentPlan as FloorPlan);
+        if (handled) e.preventDefault();
         return;
       }
 
@@ -5232,26 +5049,24 @@ const PlanView = ({ planId }: Props) => {
     addLink,
     cancelScaleMode,
     clearSelection,
-    client,
+    copySelection,
     deleteLink,
     deleteObject,
     finishWallDraw,
     getPlanUnsavedChanges,
     getQuoteOrientation,
-    getRealUserPasteDuplicates,
     isDeskType,
     isWallType,
     linkFromId,
     markTouched,
     measureMode,
     moveObject,
-    pasteConfirm,
-    performPaste,
     performRedo,
     performUndo,
     postAuditEvent,
     push,
     quoteMode,
+    requestPaste,
     resetTouched,
     roomDrawMode,
     saveRevisionOpen,
@@ -5294,15 +5109,29 @@ const PlanView = ({ planId }: Props) => {
     [getTypeLabel, objectTypeDefs, objectsByType]
   );
 
+  const suppressMultiSelectionFor = useCallback(
+    (ids: string[]) => {
+      if (ids.length < 2) {
+        suppressSelectionKeyRef.current = '';
+        setSuppressMultiSelectionBox(false);
+        return;
+      }
+      suppressSelectionKeyRef.current = selectionKeyForIds(ids);
+      setSuppressMultiSelectionBox(true);
+    },
+    [selectionKeyForIds]
+  );
+
   const handleSelectType = useCallback(
     (typeId: string) => {
       const ids = (objectsByType.get(typeId) || []).map((o) => o.id);
       if (!ids.length) return;
       setSelection(ids);
+      suppressMultiSelectionFor(ids);
       setCountsOpen(false);
       setTypeMenu(null);
     },
-    [objectsByType, setSelection]
+    [objectsByType, setSelection, suppressMultiSelectionFor]
   );
 
   const handleDeleteType = useCallback(
@@ -6806,10 +6635,11 @@ const PlanView = ({ planId }: Props) => {
     const seen = new Set<string>();
     const out: PlanLink[] = [];
     const inSel = new Set(ids);
+    const allowBetween = !selectionAllRealUsers;
     for (const l of planLinks) {
       if (seen.has(l.id)) continue;
       const includeSelected = !!selectedLinkId && l.id === selectedLinkId;
-      const includeBetween = ids.length > 1 && inSel.has(l.fromId) && inSel.has(l.toId);
+      const includeBetween = allowBetween && ids.length > 1 && inSel.has(l.fromId) && inSel.has(l.toId);
       if (!includeSelected && !includeBetween) continue;
       seen.add(l.id);
       out.push(l);
@@ -6817,7 +6647,7 @@ const PlanView = ({ planId }: Props) => {
     // Put explicitly selected link first (if present).
     if (selectedLinkId) out.sort((a, b) => (a.id === selectedLinkId ? -1 : b.id === selectedLinkId ? 1 : 0));
     return out;
-  }, [basePlan, selectedLinkId, selectedObjectIds]);
+  }, [basePlan, selectedLinkId, selectedObjectIds, selectionAllRealUsers]);
 
   const getObjectNameById = useCallback(
     (id: string) => renderPlan.objects.find((o) => o.id === id)?.name || id,
@@ -7635,7 +7465,7 @@ const PlanView = ({ planId }: Props) => {
 	                      setViewsMenuOpen(false);
 	                      setViewModalOpen(true);
 	                    }}
-	                    className="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+	                    className="w-full btn-primary"
 	                    title={t({ it: 'Salva nuova vista', en: 'Save new view' })}
 	                  >
                     {t({ it: 'Salva nuova vista', en: 'Save new view' })}
@@ -7757,7 +7587,12 @@ const PlanView = ({ planId }: Props) => {
       <div className="flex-1 min-h-0">
         <div className="relative flex h-full min-h-0 gap-4 overflow-hidden">
 	        <div className="flex-1 min-w-0 min-h-0">
-	            <div className={`relative h-full min-h-0 w-full ${panToolActive ? 'cursor-grab active:cursor-grabbing' : ''}`} ref={mapRef}>
+	            <div
+                className={`relative h-full min-h-0 w-full ${panToolActive ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                ref={mapRef}
+                onMouseMove={handleMapMouseMove}
+                onMouseDown={handleMapMouseDown}
+              >
                 {!planScale?.metersPerPixel && !scalePromptDismissed ? (
                   <div className="pointer-events-none absolute left-1/2 top-4 z-30 -translate-x-1/2">
                     <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-100 shadow-lg">
@@ -7789,6 +7624,7 @@ const PlanView = ({ planId }: Props) => {
                         plan={(canvasPlan || renderPlan) as any}
                         selectedId={selectedObjectId}
                         selectedIds={selectedObjectIds}
+                        hideMultiSelectionBox={suppressMultiSelectionBox}
 	                    selectedRoomId={selectedRoomId}
                       selectedRoomIds={selectedRoomIds}
 	                    selectedLinkId={selectedLinkId}
@@ -8281,7 +8117,7 @@ const PlanView = ({ planId }: Props) => {
       {typeMenu ? (
         <div
           ref={typeMenuRef}
-          className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+          className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
           style={{ top: typeMenu.y, left: typeMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -8330,7 +8166,7 @@ const PlanView = ({ planId }: Props) => {
 
       {wallQuickMenu ? (
         <div
-          className="fixed z-50 flex items-center gap-2 rounded-xl bg-slate-900/90 px-2 py-1.5 text-white shadow-card"
+          className="context-menu-panel fixed z-50 flex items-center gap-2 rounded-xl bg-slate-900/90 px-2 py-1.5 text-white shadow-card"
           style={{ top: wallQuickMenu.y - 52, left: wallQuickMenu.x - 42 }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -8382,7 +8218,7 @@ const PlanView = ({ planId }: Props) => {
       {layersQuickMenu ? (
         <div
           ref={layersQuickMenuRef}
-          className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-xs shadow-card"
+          className="context-menu-panel fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-xs shadow-card"
           style={{ top: layersQuickMenu.y, left: layersQuickMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -8412,7 +8248,7 @@ const PlanView = ({ planId }: Props) => {
 
       {wallTypeMenu ? (
         <div
-          className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+          className="context-menu-panel fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
           style={{ top: wallTypeMenu.y, left: wallTypeMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -8453,7 +8289,7 @@ const PlanView = ({ planId }: Props) => {
         <>
         <div
           ref={contextMenuRef}
-          className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+          className="context-menu-panel fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -8470,10 +8306,10 @@ const PlanView = ({ planId }: Props) => {
 
 	          {contextMenu.kind === 'link' ? (
               <>
-                <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600">
-                  {t({ it: 'Collegamento selezionato', en: 'Selected link' })}
+                <div className="mt-2 rounded-lg border border-slate-200 bg-white px-2 py-2">
+                  <span className="badge badge-selected">{t({ it: 'Collegamento selezionato', en: 'Selected link' })}</span>
                   {contextLink ? (
-                    <div className="mt-1 text-[11px] font-normal text-slate-600">
+                    <div className="mt-1 text-[11px] text-slate-600">
                       {(() => {
                         const from = renderPlan.objects.find((o) => o.id === contextLink.fromId);
                         const to = renderPlan.objects.find((o) => o.id === contextLink.toId);
@@ -8532,9 +8368,19 @@ const PlanView = ({ planId }: Props) => {
               <>
                 {contextIsQuote ? (
                   <>
-                    <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600">
-                      {t({ it: 'Quota selezionata', en: 'Selected quote' })}
+                    <div className="mt-2 rounded-lg border border-slate-200 bg-white px-2 py-2">
+                      <span className="badge badge-selected">{t({ it: 'Quota selezionata', en: 'Selected quote' })}</span>
                     </div>
+                    <button
+                      onClick={() => {
+                        handleEdit(contextMenu.id);
+                        setContextMenu(null);
+                      }}
+                      className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                      title={t({ it: 'Dettagli quota', en: 'Quote details' })}
+                    >
+                      <Pencil size={14} /> {t({ it: 'Dettagli', en: 'Details' })}
+                    </button>
                     <button
                       onClick={() => {
                         const ids =
@@ -8552,11 +8398,13 @@ const PlanView = ({ planId }: Props) => {
                 ) : (
                   <>
                     {contextIsMulti ? (
-                      <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs font-semibold text-slate-600">
-                        {t({
-                          it: `${selectedObjectIds.length} oggetti selezionati`,
-                          en: `${selectedObjectIds.length} objects selected`
-                        })}
+                      <div className="mt-2 rounded-lg border border-slate-200 bg-white px-2 py-2">
+                        <span className="badge badge-selected">
+                          {t({
+                            it: `${selectedObjectIds.length} oggetti selezionati`,
+                            en: `${selectedObjectIds.length} objects selected`
+                          })}
+                        </span>
                       </div>
                     ) : (
                       <>
@@ -8570,6 +8418,37 @@ const PlanView = ({ planId }: Props) => {
                             title={t({ it: 'Modifica', en: 'Edit' })}
                           >
                             <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
+                          </button>
+                        ) : null}
+                        {contextObject ? (
+                          <button
+                            onClick={() => {
+                              if (!renderPlan) return;
+                              const typeId = contextObject.type;
+                              const ids = (renderPlan.objects || []).filter((o) => o.type === typeId).map((o) => o.id);
+                              if (!ids.length) return;
+                              setSelection(ids);
+                              suppressMultiSelectionFor(ids);
+                              setSelectedRoomId(undefined);
+                              setSelectedRoomIds([]);
+                              setSelectedLinkId(null);
+                              push(
+                                t({
+                                  it: `Selezionati ${ids.length} oggetti di tipo ${contextObjectTypeLabel}.`,
+                                  en: `Selected ${ids.length} ${contextObjectTypeLabel} objects.`
+                                }),
+                                'info'
+                              );
+                              setContextMenu(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                            title={t({ it: 'Seleziona tutti gli oggetti di questo tipo', en: 'Select all objects of this type' })}
+                          >
+                            <LayoutGrid size={14} className="text-slate-500" />
+                            {t({
+                              it: `Seleziona tutti: ${contextObjectTypeLabel}`,
+                              en: `Select all: ${contextObjectTypeLabel}`
+                            })}
                           </button>
                         ) : null}
                         {contextIsWifi ? (
@@ -9214,7 +9093,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'view' ? (
           <div
-            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9246,7 +9125,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'measure' ? (
           <div
-            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9306,7 +9185,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'create' ? (
           <div
-            className="fixed z-50 w-80 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="context-menu-panel fixed z-50 w-80 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(320)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9432,7 +9311,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'print' ? (
           <div
-            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9495,7 +9374,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'manage' ? (
           <div
-            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9573,8 +9452,8 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+                <Dialog.Panel className="w-full max-w-md modal-panel">
+                  <Dialog.Title className="modal-title">
                     {t({ it: 'Imposta scala', en: 'Set scale' })}
                   </Dialog.Title>
                   <div className="mt-2 text-sm text-slate-600">
@@ -9645,8 +9524,8 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+                <Dialog.Panel className="w-full max-w-md modal-panel">
+                  <Dialog.Title className="modal-title">
                     {t({ it: 'Tipo muro', en: 'Wall type' })}
                   </Dialog.Title>
                   <div className="mt-2 text-sm text-slate-600">
@@ -9725,8 +9604,8 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-card">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+                <Dialog.Panel className="w-full max-w-5xl modal-panel">
+                  <Dialog.Title className="modal-title">
                     {t({ it: 'Muri stanza', en: 'Room walls' })}
                   </Dialog.Title>
                   <div className="mt-2 text-sm text-slate-600">
@@ -10025,9 +9904,9 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
                   <div className="flex items-center justify-between gap-3">
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Crea layer per tipologia', en: 'Create type layer' })}</Dialog.Title>
+                    <Dialog.Title className="modal-title">{t({ it: 'Crea layer per tipologia', en: 'Create type layer' })}</Dialog.Title>
                     <button
                       onClick={() => setTypeLayerModal(null)}
                       className="text-slate-500 hover:text-ink"
@@ -10077,7 +9956,7 @@ const PlanView = ({ planId }: Props) => {
                       </div>
                     </label>
                   </div>
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setTypeLayerModal(null)}
                       className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
@@ -10123,9 +10002,9 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
                   <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Import utenti richiesto', en: 'User import required' })}</Dialog.Title>
+                    <Dialog.Title className="modal-title">{t({ it: 'Import utenti richiesto', en: 'User import required' })}</Dialog.Title>
                     <button
                       onClick={() => setRealUserImportMissing(false)}
                       className="text-slate-500 hover:text-ink"
@@ -10180,9 +10059,9 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
                   <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                    <Dialog.Title className="modal-title">
                       {t({ it: 'Catalogo stanze', en: 'Room catalog' })}
                     </Dialog.Title>
                     <button
@@ -10254,9 +10133,9 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
+                <Dialog.Panel className="w-full max-w-md modal-panel">
                   <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                    <Dialog.Title className="modal-title">
                       {t({ it: 'Catalogo mura', en: 'Wall catalog' })}
                     </Dialog.Title>
                     <button
@@ -10550,7 +10429,7 @@ const PlanView = ({ planId }: Props) => {
               >
                 <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-card transition-all">
                   <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                    <Dialog.Title className="modal-title">
                       {t({ it: 'Scala planimetria', en: 'Floor plan scale' })}
                     </Dialog.Title>
                     <button
@@ -10613,7 +10492,7 @@ const PlanView = ({ planId }: Props) => {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setScaleActionsOpen(false)}
                       className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -10625,7 +10504,7 @@ const PlanView = ({ planId }: Props) => {
                         setScaleActionsOpen(false);
                         openScaleEdit();
                       }}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      className="btn-secondary"
                     >
                       {t({ it: 'Ricalibra scala', en: 'Recalibrate scale' })}
                     </button>
@@ -10738,17 +10617,8 @@ const PlanView = ({ planId }: Props) => {
         description={pasteConfirm?.description}
         confirmLabel={t({ it: 'Incolla', en: 'Paste' })}
         cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
-        onCancel={() => setPasteConfirm(null)}
-        onConfirm={() => {
-          if (!pasteConfirm) return;
-          const currentPlan = planRef.current;
-          if (!currentPlan || currentPlan.id !== pasteConfirm.targetPlanId) {
-            setPasteConfirm(null);
-            return;
-          }
-          performPaste(pasteConfirm.clipboard, currentPlan);
-          setPasteConfirm(null);
-        }}
+        onCancel={cancelPaste}
+        onConfirm={confirmPaste}
       />
 
       <RoomAllocationModal

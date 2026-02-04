@@ -17,3 +17,13 @@ Version: 1.9.2
   - Pattern: errors only appear after `npm run build` because of minification/ordering.
   - Risk: runtime crashes in production.
   - Prevention: run a production build locally before release and keep a small static check for TDZ-like patterns.
+
+- Clipboard validation based only on source metadata
+  - Pattern: paste authorization relies on clipboard-level fields (e.g. `sourceClientId`) without verifying ownership on each item.
+  - Risk: cross-client data leakage when metadata is missing/stale or items carry a different `externalClientId`.
+  - Prevention: validate every pasted item against the target context (client/plan) and block or prompt if any mismatch.
+
+- Missing dependencies in long key handlers
+  - Pattern: a large `useEffect`/keydown handler uses store functions (e.g. `loadCustomValues`) that are omitted from dependency arrays.
+  - Risk: stale closures after HMR/store rebinds; behavior diverges silently.
+  - Prevention: keep handlers small or extract helpers; include all referenced functions in dependency arrays (or memoize with stable refs).

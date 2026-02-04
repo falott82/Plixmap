@@ -134,10 +134,10 @@ const RealUserPickerModal = ({ open, clientId, clientName, assignedCounts, onClo
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Seleziona un utente reale', en: 'Select a real user' })}</Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+              <Dialog.Panel className="w-full max-w-2xl modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">{t({ it: 'Seleziona un utente reale', en: 'Select a real user' })}</Dialog.Title>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -330,7 +330,7 @@ const RealUserPickerModal = ({ open, clientId, clientName, assignedCounts, onClo
                   </div>
                 </div>
 
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="modal-footer">
                   <button
                     onClick={onClose}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"

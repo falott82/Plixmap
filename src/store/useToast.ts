@@ -5,6 +5,7 @@ export type ToastTone = 'success' | 'info' | 'danger';
 
 interface ToastState {
   push: (message: string, tone?: ToastTone) => void;
+  pushStack: (message: string, tone?: ToastTone, options?: { duration?: number }) => void;
 }
 
 export const useToastStore = create<ToastState>(() => ({
@@ -18,5 +19,17 @@ export const useToastStore = create<ToastState>(() => ({
       return;
     }
     toast.info(message);
+  },
+  pushStack: (message, tone = 'info', options) => {
+    const duration = options?.duration;
+    if (tone === 'success') {
+      toast.success(message, { duration });
+      return;
+    }
+    if (tone === 'danger') {
+      toast.error(message, { duration });
+      return;
+    }
+    toast.info(message, { duration });
   }
 }));

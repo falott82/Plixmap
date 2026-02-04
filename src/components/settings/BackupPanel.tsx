@@ -458,7 +458,7 @@ const BackupPanel = () => {
           </div>
           <div>
             <div className="text-sm font-semibold text-ink">{t({ it: 'Backup & Import/Export', en: 'Backup & Import/Export' })}</div>
-            <div className="mt-1 text-sm text-slate-600">{infoBox}</div>
+            <div className="modal-description">{infoBox}</div>
           </div>
         </div>
       </div>
@@ -469,7 +469,7 @@ const BackupPanel = () => {
             <div className="flex items-center gap-2 text-sm font-semibold text-ink">
               <Info size={16} /> {t({ it: 'Selezione export', en: 'Export selection' })}
             </div>
-            <div className="mt-1 text-sm text-slate-600">
+            <div className="modal-description">
               {t({
                 it: 'Scegli quali planimetrie includere. Verranno esportate anche le sedi e i clienti necessari.',
                 en: 'Choose which floor plans to include. Related sites and clients are exported automatically.'

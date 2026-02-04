@@ -93,8 +93,8 @@ const CrossPlanSearchModal = ({ open, currentPlanId, term, results, objectTypeIc
               <Dialog.Panel className="w-full max-w-3xl transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-card transition-all">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Risultati ricerca', en: 'Search results' })}</Dialog.Title>
-                    <Dialog.Description className="mt-1 text-sm text-slate-600">
+                    <Dialog.Title className="modal-title">{t({ it: 'Risultati ricerca', en: 'Search results' })}</Dialog.Title>
+                    <Dialog.Description className="modal-description">
                       {t({
                         it: `Trovati ${results.length} risultati per “${term}”. Seleziona la planimetria da aprire.`,
                         en: `Found ${results.length} results for “${term}”. Choose which floor plan to open.`

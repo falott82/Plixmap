@@ -36,7 +36,7 @@ import {
 } from '@lexical/table';
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { AlignCenter, AlignLeft, AlignRight, Bold, ChevronDown, Eraser, Image as ImageIcon, Link as LinkIcon, List, ListOrdered, ListX, Plus, Table2, Underline, Italic, Undo2, Redo2, Minus } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Bold, ChevronDown, Eraser, Image as ImageIcon, Link as LinkIcon, List, ListOrdered, ListX, Plus, Table2, Underline, Italic, Undo2, Redo2, Minus, X } from 'lucide-react';
 import { useT } from '../../../i18n/useT';
 import { formatBytes, uploadLimits, uploadMimes, validateFile } from '../../../utils/files';
 import { useToastStore } from '../../../store/useToast';
@@ -125,9 +125,14 @@ const LinkInsertModal = ({
     >
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
       <div className="relative flex min-h-full items-center justify-center p-4">
-        <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card" onMouseDown={(e) => e.stopPropagation()}>
-          <div className="text-lg font-semibold text-ink">{t({ it: 'Inserisci link', en: 'Insert link' })}</div>
-          <div className="mt-1 text-sm text-slate-600">
+        <div className="w-full max-w-lg modal-panel" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="modal-header items-center">
+            <div className="modal-title">{t({ it: 'Inserisci link', en: 'Insert link' })}</div>
+            <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+              <X size={18} />
+            </button>
+          </div>
+          <div className="modal-description">
             {t({
               it: 'Inserisci un URL completo (es. https://...). Suggerimento: Cmd/Ctrl+Click sul link per aprirlo in una nuova tab.',
               en: 'Enter a full URL (e.g. https://...). Tip: Cmd/Ctrl+Click a link to open it in a new tab.'
@@ -149,11 +154,11 @@ const LinkInsertModal = ({
             </div>
           </div>
 
-          <div className="mt-6 flex justify-end gap-2">
+          <div className="modal-footer">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+              className="btn-secondary"
             >
               {t({ it: 'Annulla', en: 'Cancel' })}
             </button>
@@ -161,7 +166,7 @@ const LinkInsertModal = ({
               type="button"
               onClick={commit}
               disabled={!String(url || '').trim() || !isSafeHref(url)}
-              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+              className="btn-primary disabled:opacity-60"
             >
               {t({ it: 'Applica', en: 'Apply' })}
             </button>
@@ -220,9 +225,14 @@ const TableInsertModal = ({
     >
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
       <div className="relative flex min-h-full items-center justify-center p-4">
-        <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card" onMouseDown={(e) => e.stopPropagation()}>
-          <div className="text-lg font-semibold text-ink">{t({ it: 'Inserisci tabella', en: 'Insert table' })}</div>
-          <div className="mt-1 text-sm text-slate-600">
+        <div className="w-full max-w-lg modal-panel" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="modal-header items-center">
+            <div className="modal-title">{t({ it: 'Inserisci tabella', en: 'Insert table' })}</div>
+            <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+              <X size={18} />
+            </button>
+          </div>
+          <div className="modal-description">
             {t({
               it: 'Scegli righe e colonne. Puoi anche evidenziare la prima riga e/o la prima colonna.',
               en: 'Choose rows and columns. You can also highlight the first row and/or the first column.'
@@ -319,18 +329,18 @@ const TableInsertModal = ({
             </div>
           </div>
 
-          <div className="mt-6 flex justify-end gap-2">
+          <div className="modal-footer">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+              className="btn-secondary"
             >
               {t({ it: 'Annulla', en: 'Cancel' })}
             </button>
             <button
               type="button"
               onClick={commit}
-              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+              className="btn-primary"
             >
               {t({ it: 'Inserisci', en: 'Insert' })}
             </button>
@@ -360,11 +370,11 @@ const TableManageModal = ({
     <div className="fixed inset-0 z-[60]" onMouseDown={onClose} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
       <div className="relative flex min-h-full items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card" onMouseDown={(e) => e.stopPropagation()}>
-          <div className="flex items-start justify-between gap-3">
+        <div className="w-full max-w-md modal-panel" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="modal-header items-center">
             <div>
-              <div className="text-lg font-semibold text-ink">{t({ it: 'Gestisci tabella', en: 'Manage table' })}</div>
-              <div className="mt-1 text-sm text-slate-600">
+              <div className="modal-title">{t({ it: 'Gestisci tabella', en: 'Manage table' })}</div>
+              <div className="modal-description">
                 {disabled
                   ? t({
                       it: 'Posiziona il cursore dentro una tabella per abilitare queste azioni.',
@@ -376,8 +386,8 @@ const TableManageModal = ({
                     })}
               </div>
             </div>
-            <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
-              ×
+            <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+              <X size={18} />
             </button>
           </div>
 
@@ -406,11 +416,8 @@ const TableManageModal = ({
             </button>
           </div>
 
-          <div className="mt-6 flex justify-end">
-            <button
-              onClick={onClose}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
-            >
+          <div className="modal-footer">
+            <button onClick={onClose} className="btn-secondary">
               {t({ it: 'Chiudi', en: 'Close' })}
             </button>
           </div>

@@ -69,12 +69,12 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+              <Dialog.Panel className="w-full max-w-lg modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">
                     {t({ it: 'Salva revisione', en: 'Save revision' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -175,7 +175,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                   </label>
                 </div>
 
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="modal-footer">
                   {onDiscard ? (
                     <button
                       onClick={onDiscard}
@@ -197,7 +197,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                       onConfirm({ bump, note: note.trim() || undefined });
                       onClose();
                     }}
-                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    className="inline-flex items-center gap-2 btn-primary"
                     title={t({ it: 'Salva', en: 'Save' })}
                   >
                     <Check size={16} />

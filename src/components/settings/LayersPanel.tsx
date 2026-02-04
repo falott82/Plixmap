@@ -636,12 +636,12 @@ const LayersPanel = () => {
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center px-4 py-8">
               <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-center justify-between gap-3">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">
                       {layerModal?.mode === 'edit' ? t({ it: 'Modifica layer', en: 'Edit layer' }) : t({ it: 'Nuovo layer', en: 'New layer' })}
                     </Dialog.Title>
-                    <button onClick={() => setLayerModal(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                    <button onClick={() => setLayerModal(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>
@@ -704,17 +704,17 @@ const LayersPanel = () => {
                       />
                     </label>
                   </div>
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setLayerModal(null)}
-                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                      className="btn-secondary"
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
                     </button>
                     <button
                       onClick={layerModal?.mode === 'edit' ? handleUpdateLayer : handleCreateLayer}
                       disabled={!draftNameIt.trim() && !draftNameEn.trim()}
-                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {layerModal?.mode === 'edit' ? t({ it: 'Salva', en: 'Save' }) : t({ it: 'Crea layer', en: 'Create layer' })}
                     </button>
@@ -734,16 +734,16 @@ const LayersPanel = () => {
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center px-4 py-8">
               <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-center justify-between gap-3">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">
                       {t({ it: 'Tipi per layer', en: 'Layer types' })}
                     </Dialog.Title>
-                    <button onClick={() => setTypeEditor(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                    <button onClick={() => setTypeEditor(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>
-                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                  <Dialog.Description className="modal-description">
                     {t({
                       it: 'Seleziona le tipologie di oggetti che fanno parte del layer. Gli oggetti esistenti con layer espliciti verranno aggiornati.',
                       en: 'Select which object types belong to this layer. Existing objects with explicit layers will be updated.'
@@ -762,13 +762,13 @@ const LayersPanel = () => {
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => setTypeEditor((prev) => (prev ? { ...prev, typeIds: typeOptions.map((o) => o.id) } : prev))}
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        className="btn-inline"
                       >
                         {t({ it: 'Seleziona tutti', en: 'Select all' })}
                       </button>
                       <button
                         onClick={() => setTypeEditor((prev) => (prev ? { ...prev, typeIds: [] } : prev))}
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        className="btn-inline"
                       >
                         {t({ it: 'Svuota', en: 'Clear' })}
                       </button>
@@ -799,7 +799,7 @@ const LayersPanel = () => {
                         );
                       })}
                   </div>
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setTypeEditor(null)}
                       className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
@@ -828,23 +828,23 @@ const LayersPanel = () => {
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center px-4 py-8">
               <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
-                  <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Eliminare layer?', en: 'Delete layer?' })}</Dialog.Title>
-                    <button onClick={() => setConfirmDelete(null)} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                <Dialog.Panel className="w-full max-w-md modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">{t({ it: 'Eliminare layer?', en: 'Delete layer?' })}</Dialog.Title>
+                    <button onClick={() => setConfirmDelete(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
                     </button>
                   </div>
-                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                  <Dialog.Description className="modal-description">
                     {t({
                       it: `Stai per eliminare il layer "${confirmDelete ? resolveLayerLabel(confirmDelete) : ''}". Gli oggetti assegnati verranno aggiornati.`,
                       en: `You are about to delete the layer "${confirmDelete ? resolveLayerLabel(confirmDelete) : ''}". Assigned objects will be updated.`
                     })}
                   </Dialog.Description>
-                  <div className="mt-6 flex justify-end gap-2">
+                  <div className="modal-footer">
                     <button
                       onClick={() => setConfirmDelete(null)}
-                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                      className="btn-secondary"
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
                     </button>

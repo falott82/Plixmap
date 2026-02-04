@@ -1103,10 +1103,10 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" aria-hidden="true" />
         <div className="fixed inset-0 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center px-4 py-6">
-            <Dialog.Panel className="w-full max-w-6xl rounded-2xl bg-white p-6 shadow-card">
+            <Dialog.Panel className="w-full max-w-6xl modal-panel">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Gestione rack', en: 'Rack editor' })}</Dialog.Title>
+                    <Dialog.Title className="modal-title">{t({ it: 'Gestione rack', en: 'Rack editor' })}</Dialog.Title>
                     <div className="text-xs text-slate-500">
                       {t({ it: 'Inserisci apparati ed imposta la posizione nel rack', en: 'Add devices and set their position in the rack.' })}
                     </div>
@@ -1166,7 +1166,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       </button>
                       <button
                         onClick={handleExportRackPdf}
-                        className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        className="mt-2 w-full btn-secondary"
                         title={t({ it: 'Esporta PDF rack', en: 'Export rack PDF' })}
                       >
                         {t({ it: 'Esporta PDF rack', en: 'Export rack PDF' })}
@@ -1763,7 +1763,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-5 shadow-card"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="text-lg font-semibold text-ink">
+                      <div className="modal-title">
                         {t({ it: 'Unità apparato', en: 'Device units' })}
                       </div>
                       {addPrompt ? (
@@ -2218,14 +2218,14 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       <div className="mt-4 flex justify-end gap-2">
                         <button
                           onClick={() => setAddPrompt(null)}
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                          className="btn-secondary"
                           title={t({ it: 'Annulla', en: 'Cancel' })}
                         >
                           {t({ it: 'Annulla', en: 'Cancel' })}
                         </button>
                         <button
                           onClick={handleConfirmAdd}
-                          className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                          className="btn-primary"
                           title={addActionLabel}
                         >
                           {addActionLabel}
@@ -2254,7 +2254,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-5 shadow-card"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="text-lg font-semibold text-ink">
+                      <div className="modal-title">
                         {t({ it: 'Configura apparato', en: 'Configure device' })}
                       </div>
                       <div className="mt-2 text-sm text-slate-600">
@@ -2714,14 +2714,14 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                         <div className="flex gap-2">
                           <button
                             onClick={() => setEditPrompt(null)}
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            className="btn-secondary"
                             title={t({ it: 'Annulla', en: 'Cancel' })}
                           >
                             {t({ it: 'Annulla', en: 'Cancel' })}
                           </button>
                           <button
                             onClick={handleConfirmEdit}
-                            className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                            className="btn-primary"
                             title={t({ it: 'Salva', en: 'Save' })}
                           >
                             {t({ it: 'Salva', en: 'Save' })}
@@ -2751,7 +2751,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-5 shadow-card"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="text-lg font-semibold text-ink">
+                      <div className="modal-title">
                         {t({ it: 'Conferma eliminazione', en: 'Confirm deletion' })}
                       </div>
                       <div className="mt-2 text-sm text-slate-600">
@@ -2785,7 +2785,7 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                       <div className="mt-4 flex justify-end gap-2">
                         <button
                           onClick={() => setDeletePrompt(null)}
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                          className="btn-secondary"
                           title={t({ it: 'Annulla', en: 'Cancel' })}
                         >
                           {t({ it: 'Annulla', en: 'Cancel' })}

@@ -265,10 +265,7 @@ const ObjectModal = ({
     }
     return quoteLabelPos === 'above' || quoteLabelPos === 'below' || quoteLabelPos === 'center' ? quoteLabelPos : 'center';
   }, [isQuote, quoteLabelPos, quoteOrientation]);
-  const defaultQuoteLabelOffset = useMemo(() => {
-    if (quoteOrientation === 'horizontal' && quoteLabelPosEffective === 'below') return 1.15;
-    return 1;
-  }, [quoteLabelPosEffective, quoteOrientation]);
+  const defaultQuoteLabelOffset = useMemo(() => 1, []);
   const quotePreview = (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
       <div className="text-xs font-semibold text-slate-600">{t({ it: 'Anteprima', en: 'Preview' })}</div>
@@ -738,9 +735,9 @@ const ObjectModal = ({
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-md rounded-2xl bg-white p-6 shadow-card">
+                <Dialog.Panel className={`w-full ${isWifi ? 'max-w-4xl' : 'max-w-md'} modal-panel`}>
                   <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                    <Dialog.Title className="modal-title">
                       {isEdit
                         ? (isQuote ? t({ it: 'Modifica quota', en: 'Edit quote' }) : t({ it: 'Modifica oggetto', en: 'Edit object' }))
                         : (isQuote ? t({ it: 'Nuova quota', en: 'New quote' }) : t({ it: 'Nuovo oggetto', en: 'New object' }))}
@@ -1048,149 +1045,158 @@ const ObjectModal = ({
                           </button>
                         </div>
                       </div>
-                      <div className="mt-3 grid gap-3">
-                        {wifiSource === 'catalog' ? (
-                          <>
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="text-sm font-medium text-slate-700">
-                                {t({ it: 'Catalogo antenna', en: 'Antenna catalog' })}
+                      <div className="mt-3 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                        <div className="space-y-3">
+                          {wifiSource === 'catalog' ? (
+                            <>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-sm font-medium text-slate-700">
+                                  {t({ it: 'Catalogo antenna', en: 'Antenna catalog' })}
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={readOnly || !hasWifiCatalog}
+                                  onClick={() => setWifiCatalogSearchOpen(true)}
+                                  className={`rounded-lg border px-2 py-1 text-xs font-semibold ${
+                                    wifiCatalogId ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                                  } ${readOnly || !hasWifiCatalog ? 'cursor-not-allowed opacity-60' : ''}`}
+                                >
+                                  {t({ it: 'Search from catalog', en: 'Search from catalog' })}
+                                </button>
                               </div>
-                              <button
-                                type="button"
-                                disabled={readOnly || !hasWifiCatalog}
-                                onClick={() => setWifiCatalogSearchOpen(true)}
-                                className={`rounded-lg border px-2 py-1 text-xs font-semibold ${
-                                  wifiCatalogId ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                                } ${readOnly || !hasWifiCatalog ? 'cursor-not-allowed opacity-60' : ''}`}
+                              <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                                {wifiCatalogId
+                                  ? t({
+                                      it: `Selezionato: ${wifiBrand} ${wifiModel} (${wifiModelCode})`,
+                                      en: `Selected: ${wifiBrand} ${wifiModel} (${wifiModelCode})`
+                                    })
+                                  : t({ it: 'Nessun modello selezionato.', en: 'No model selected.' })}
+                              </div>
+                            </>
+                          ) : null}
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <label className="block text-sm font-medium text-slate-700">
+                              {t({ it: 'Marca', en: 'Brand' })}
+                              <input
+                                value={wifiBrand}
+                                disabled={readOnly || wifiSource === 'catalog'}
+                                onChange={(e) => setWifiBrand(e.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                placeholder={t({ it: 'Es. Ubiquiti', en: 'e.g. Ubiquiti' })}
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              {t({ it: 'Modello', en: 'Model' })}
+                              <input
+                                value={wifiModel}
+                                disabled={readOnly || wifiSource === 'catalog'}
+                                onChange={(e) => setWifiModel(e.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                placeholder={t({ it: 'Es. U7 Pro', en: 'e.g. U7 Pro' })}
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              {t({ it: 'Codice modello', en: 'Model code' })}
+                              <input
+                                value={wifiModelCode}
+                                disabled={readOnly || wifiSource === 'catalog'}
+                                onChange={(e) => setWifiModelCode(e.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                placeholder={t({ it: 'Es. U7-Pro', en: 'e.g. U7-Pro' })}
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              {t({ it: 'Standard', en: 'Standard' })}
+                              <select
+                                value={wifiStandard}
+                                disabled={readOnly || wifiSource === 'catalog'}
+                                onChange={(e) => setWifiStandard(e.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                               >
-                                {t({ it: 'Search from catalog', en: 'Search from catalog' })}
-                              </button>
-                            </div>
-                            <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
-                              {wifiCatalogId
-                                ? t({
-                                    it: `Selezionato: ${wifiBrand} ${wifiModel} (${wifiModelCode})`,
-                                    en: `Selected: ${wifiBrand} ${wifiModel} (${wifiModelCode})`
-                                  })
-                                : t({ it: 'Nessun modello selezionato.', en: 'No model selected.' })}
-                            </div>
-                          </>
-                        ) : null}
-                        <label className="block text-sm font-medium text-slate-700">
-                          {t({ it: 'Marca', en: 'Brand' })}
-                          <input
-                            value={wifiBrand}
-                            disabled={readOnly || wifiSource === 'catalog'}
-                            onChange={(e) => setWifiBrand(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            placeholder={t({ it: 'Es. Ubiquiti', en: 'e.g. Ubiquiti' })}
-                          />
-                        </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                          {t({ it: 'Modello', en: 'Model' })}
-                          <input
-                            value={wifiModel}
-                            disabled={readOnly || wifiSource === 'catalog'}
-                            onChange={(e) => setWifiModel(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            placeholder={t({ it: 'Es. U7 Pro', en: 'e.g. U7 Pro' })}
-                          />
-                        </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                          {t({ it: 'Codice modello', en: 'Model code' })}
-                          <input
-                            value={wifiModelCode}
-                            disabled={readOnly || wifiSource === 'catalog'}
-                            onChange={(e) => setWifiModelCode(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            placeholder={t({ it: 'Es. U7-Pro', en: 'e.g. U7-Pro' })}
-                          />
-                        </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                          {t({ it: 'Standard', en: 'Standard' })}
-                          <select
-                            value={wifiStandard}
-                            disabled={readOnly || wifiSource === 'catalog'}
-                            onChange={(e) => setWifiStandard(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                          >
-                            <option value="">{t({ it: 'Seleziona...', en: 'Select...' })}</option>
-                            {WIFI_STANDARD_OPTIONS.map((opt) => (
-                              <option key={opt.id} value={opt.id}>
-                                {t({ it: opt.it, en: opt.en })}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <div className="grid grid-cols-3 gap-2">
-                          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={wifiBand24}
-                              disabled={readOnly || wifiSource === 'catalog'}
-                              onChange={(e) => setWifiBand24(e.target.checked)}
-                            />
-                            2.4 GHz
-                          </label>
-                          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={wifiBand5}
-                              disabled={readOnly || wifiSource === 'catalog'}
-                              onChange={(e) => setWifiBand5(e.target.checked)}
-                            />
-                            5 GHz
-                          </label>
-                          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={wifiBand6}
-                              disabled={readOnly || wifiSource === 'catalog'}
-                              onChange={(e) => setWifiBand6(e.target.checked)}
-                            />
-                            6 GHz
-                          </label>
-                        </div>
-                        <label className="block text-sm font-medium text-slate-700">
-                          <span className="flex items-center justify-between">
-                            <span>{t({ it: 'Copertura (m2)', en: 'Coverage (m2)' })}</span>
-                            {wifiCoverageRadius && wifiCoverageDiameter ? (
-                              <span className="text-xs text-slate-500">
-                                {t({
-                                  it: `Raggio ${formatCoverage(wifiCoverageRadius)} m · Diametro ${formatCoverage(wifiCoverageDiameter)} m`,
-                                  en: `Radius ${formatCoverage(wifiCoverageRadius)} m · Diameter ${formatCoverage(wifiCoverageDiameter)} m`
-                                })}
-                              </span>
-                            ) : null}
-                          </span>
-                          <input
-                            value={wifiCoverageSqm}
-                            disabled={readOnly || wifiSource === 'catalog'}
-                            onChange={(e) => setWifiCoverageSqm(e.target.value)}
-                            inputMode="decimal"
-                            type="number"
-                            min={1}
-                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            placeholder={t({ it: 'Es. 185', en: 'e.g. 185' })}
-                          />
-                        </label>
-                        <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={wifiShowRange}
-                            disabled={readOnly}
-                            onChange={(e) => setWifiShowRange(e.target.checked)}
-                          />
-                          {t({ it: 'Mostra range access point', en: 'Show access point range' })}
-                        </label>
-                        {!wifiFormValid ? (
-                          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                            {t({
-                              it: 'Completa tutti i campi dell’antenna.',
-                              en: 'Complete all antenna fields.'
-                            })}
+                                <option value="">{t({ it: 'Seleziona...', en: 'Select...' })}</option>
+                                {WIFI_STANDARD_OPTIONS.map((opt) => (
+                                  <option key={opt.id} value={opt.id}>
+                                    {t({ it: opt.it, en: opt.en })}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
                           </div>
-                        ) : null}
+                        </div>
+                        <div className="space-y-3">
+                          <div>
+                            <div className="text-sm font-medium text-slate-700">{t({ it: 'Bande', en: 'Bands' })}</div>
+                            <div className="mt-2 grid grid-cols-3 gap-2">
+                              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={wifiBand24}
+                                  disabled={readOnly || wifiSource === 'catalog'}
+                                  onChange={(e) => setWifiBand24(e.target.checked)}
+                                />
+                                2.4 GHz
+                              </label>
+                              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={wifiBand5}
+                                  disabled={readOnly || wifiSource === 'catalog'}
+                                  onChange={(e) => setWifiBand5(e.target.checked)}
+                                />
+                                5 GHz
+                              </label>
+                              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={wifiBand6}
+                                  disabled={readOnly || wifiSource === 'catalog'}
+                                  onChange={(e) => setWifiBand6(e.target.checked)}
+                                />
+                                6 GHz
+                              </label>
+                            </div>
+                          </div>
+                          <label className="block text-sm font-medium text-slate-700">
+                            <span className="flex items-center justify-between gap-2">
+                              <span>{t({ it: 'Copertura (m2)', en: 'Coverage (m2)' })}</span>
+                              {wifiCoverageRadius && wifiCoverageDiameter ? (
+                                <span className="text-xs text-slate-500">
+                                  {t({
+                                    it: `Raggio ${formatCoverage(wifiCoverageRadius)} m · Diametro ${formatCoverage(wifiCoverageDiameter)} m`,
+                                    en: `Radius ${formatCoverage(wifiCoverageRadius)} m · Diameter ${formatCoverage(wifiCoverageDiameter)} m`
+                                  })}
+                                </span>
+                              ) : null}
+                            </span>
+                            <input
+                              value={wifiCoverageSqm}
+                              disabled={readOnly || wifiSource === 'catalog'}
+                              onChange={(e) => setWifiCoverageSqm(e.target.value)}
+                              inputMode="decimal"
+                              type="number"
+                              min={1}
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              placeholder={t({ it: 'Es. 185', en: 'e.g. 185' })}
+                            />
+                          </label>
+                          <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={wifiShowRange}
+                              disabled={readOnly}
+                              onChange={(e) => setWifiShowRange(e.target.checked)}
+                            />
+                            {t({ it: 'Mostra range access point', en: 'Show access point range' })}
+                          </label>
+                          {!wifiFormValid ? (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                              {t({
+                                it: 'Completa tutti i campi dell’antenna.',
+                                en: 'Complete all antenna fields.'
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   ) : null}
@@ -1507,11 +1513,11 @@ const ObjectModal = ({
                 leaveTo="opacity-0 scale-95"
               >
                 <Dialog.Panel
-                  className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card"
+                  className="w-full max-w-4xl modal-panel"
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                    <Dialog.Title className="modal-title">
                       {t({ it: 'Cerca nel catalogo', en: 'Search catalog' })}
                     </Dialog.Title>
                     <button

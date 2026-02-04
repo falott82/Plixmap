@@ -45,17 +45,17 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-center justify-between">
-                  <Dialog.Title className="text-lg font-semibold text-ink">
+              <Dialog.Panel className="w-full max-w-lg modal-panel">
+                <div className="modal-header items-center">
+                  <Dialog.Title className="modal-title">
                     {t({ it: 'Aggiorna planimetria', en: 'Update floor plan' })}
                   </Dialog.Title>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
 
-                <Dialog.Description className="mt-2 text-sm text-slate-600">
+                <Dialog.Description className="modal-description">
                   {t({ it: 'Stai aggiornando l’immagine di', en: 'You are updating the image for' })}{' '}
                   <span className="font-semibold text-ink">{planName}</span>.{' '}
                   {t({ it: 'La planimetria precedente verrà archiviata come revisione.', en: 'The previous floor plan will be archived as a revision.' })}
@@ -99,10 +99,10 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
                   )}
                 </div>
 
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="modal-footer">
                   <button
                     onClick={onClose}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="btn-secondary"
                     title={t({ it: 'Chiudi senza cambiare immagine', en: 'Close without changing image' })}
                   >
                     {t({ it: 'Annulla', en: 'Cancel' })}
@@ -112,7 +112,7 @@ const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm 
                       onConfirm({ carryObjects });
                       onClose();
                     }}
-                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                    className="inline-flex items-center gap-2 btn-primary"
                     title={t({ it: 'Conferma sostituzione planimetria', en: 'Confirm floor plan replacement' })}
                   >
                     <Check size={16} />

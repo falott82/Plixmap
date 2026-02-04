@@ -77,7 +77,7 @@ const FirstRunView = () => {
             <KeyRound size={16} className="text-primary" />
             {t({ it: 'È richiesto un cambio password', en: 'Password change required' })}
           </div>
-          <div className="mt-1 text-sm text-slate-600">
+          <div className="modal-description">
             {t({
               it: `Benvenuto${user?.username ? `, ${user.username}` : ''}. Scegli una nuova password e la lingua.`,
               en: `Welcome${user?.username ? `, ${user.username}` : ''}. Choose a new password and your language.`

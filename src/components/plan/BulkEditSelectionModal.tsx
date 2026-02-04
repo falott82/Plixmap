@@ -104,20 +104,20 @@ const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onCl
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-4xl rounded-2xl bg-white p-6 shadow-card">
-                <div className="flex items-start justify-between gap-4">
+              <Dialog.Panel className="w-full max-w-4xl modal-panel">
+                <div className="modal-header">
                   <div className="min-w-0">
-                    <Dialog.Title className="text-lg font-semibold text-ink">
+                    <Dialog.Title className="modal-title">
                       {t({ it: 'Modifica selezione', en: 'Edit selection' })}
                     </Dialog.Title>
-                    <div className="mt-1 text-sm text-slate-600">
+                    <div className="modal-description">
                       {t({
                         it: `Stai modificando ${rows.length} oggetti selezionati.`,
                         en: `You are editing ${rows.length} selected objects.`
                       })}
                     </div>
                   </div>
-                  <button onClick={onClose} className="text-slate-500 hover:text-ink" title={t({ it: 'Chiudi', en: 'Close' })}>
+                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                     <X size={18} />
                   </button>
                 </div>
@@ -148,7 +148,7 @@ const BulkEditSelectionModal = ({ open, objects, getTypeLabel, getTypeIcon, onCl
                           // Persist as default for newly created objects (requested behavior).
                           useUIStore.getState().setLastObjectScale(next);
                         }}
-                        className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+                        className="btn-primary"
                         title={t({
                           it: 'Usa questa scala come default per i nuovi oggetti trascinati/inseriti.',
                           en: 'Use this scale as the default for newly created objects.'
