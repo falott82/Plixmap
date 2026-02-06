@@ -50,6 +50,7 @@ import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
+import { fetchState, saveState } from '../../api/state';
 import VersionBadge from '../ui/VersionBadge';
 import UserMenu from '../layout/UserMenu';
 import ViewModal from './ViewModal';
@@ -137,6 +138,7 @@ const PlanView = ({ planId }: Props) => {
     deleteRoom,
     addRevision,
     restoreRevision,
+    updateRevision,
     deleteRevision,
     clearRevisions,
     addLink,
@@ -164,6 +166,7 @@ const PlanView = ({ planId }: Props) => {
       deleteRoom: s.deleteRoom,
       addRevision: s.addRevision,
       restoreRevision: (s as any).restoreRevision,
+      updateRevision: (s as any).updateRevision,
       deleteRevision: s.deleteRevision,
       clearRevisions: s.clearRevisions,
       addLink: (s as any).addLink,
@@ -272,8 +275,10 @@ const PlanView = ({ planId }: Props) => {
                     ? ['quotes']
                     : typeId === 'text'
                       ? ['text']
-                    : typeId === 'image' || typeId === 'photo'
+                    : typeId === 'image'
                       ? ['images']
+                      : typeId === 'photo'
+                        ? ['photos']
                       : typeId === 'postit'
                         ? ['text']
                     : isWallType(typeId)
@@ -348,6 +353,7 @@ const PlanView = ({ planId }: Props) => {
     perfOverlayEnabled,
     hiddenLayersByPlan,
     setHideAllLayers,
+    setLockedPlans,
     setPlanDirty,
     requestSaveAndNavigate,
     pendingSaveNavigateTo,
@@ -409,6 +415,7 @@ const PlanView = ({ planId }: Props) => {
       perfOverlayEnabled: (s as any).perfOverlayEnabled,
       hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
       setHideAllLayers: (s as any).setHideAllLayers,
+      setLockedPlans: (s as any).setLockedPlans,
       setPlanDirty: (s as any).setPlanDirty,
       requestSaveAndNavigate: (s as any).requestSaveAndNavigate,
       pendingSaveNavigateTo: (s as any).pendingSaveNavigateTo,
@@ -808,20 +815,98 @@ const PlanView = ({ planId }: Props) => {
   }, [client?.id, permissions, planId, site?.id, user]);
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
 
-  const [lockState, setLockState] = useState<{ lockedBy: { userId: string; username: string } | null; mine: boolean }>(
-    { lockedBy: null, mine: false }
-  );
-  const [presenceUsers, setPresenceUsers] = useState<{ userId: string; username: string }[]>([]);
+  const LOCK_TTL_MS = 60_000;
+  const LOCK_RENEW_MS = 20_000;
+  const LOCK_IDLE_MS = 5 * 60_000;
+  const LOCK_REQUEST_THROTTLE_MS = 5_000;
+  const LOCK_TOAST_MS = 5_000;
+
+  type PresenceUser = {
+    userId: string;
+    username: string;
+    connectedAt?: number | null;
+    ip?: string;
+    lock?: { planId: string; clientName?: string; siteName?: string; planName?: string } | null;
+    locks?: { planId: string; clientName?: string; siteName?: string; planName?: string }[];
+  };
+
+  const [lockState, setLockState] = useState<{
+    lockedBy: { userId: string; username: string } | null;
+    mine: boolean;
+    expiresAt?: number | null;
+    ttlMs?: number | null;
+  }>({ lockedBy: null, mine: false, expiresAt: null, ttlMs: LOCK_TTL_MS });
+  const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
+  const [globalPresenceUsers, setGlobalPresenceUsers] = useState<PresenceUser[]>([]);
   const [realtimeDisabled, setRealtimeDisabled] = useState(false);
   const realtimeDisabledRef = useRef(false);
-  const presenceList = useMemo(() => {
-    const byId = new Map<string, string>();
-    presenceUsers.forEach((u) => {
-      if (!u?.userId) return;
-      if (!byId.has(u.userId)) byId.set(u.userId, u.username || 'user');
-    });
-    return Array.from(byId.values());
-  }, [presenceUsers]);
+  const wsRef = useRef<WebSocket | null>(null);
+  const lastActiveAtRef = useRef(Date.now());
+  const lockRequestAtRef = useRef(0);
+  const [lockIdle, setLockIdle] = useState(false);
+  const [presenceMenu, setPresenceMenu] = useState<{ x: number; y: number; user: PresenceUser } | null>(null);
+  const presenceMenuRef = useRef<HTMLDivElement | null>(null);
+  const [unlockPrompt, setUnlockPrompt] = useState<{
+    requestId: string;
+    planId: string;
+    planName: string;
+    clientName?: string;
+    siteName?: string;
+    requestedBy: { userId: string; username: string };
+  } | null>(null);
+  const [unlockBusy, setUnlockBusy] = useState(false);
+  const formatPresenceDate = useCallback(
+    (value?: number | null) => {
+      if (!value) return '—';
+      try {
+        return new Date(value).toLocaleString();
+      } catch {
+        return '—';
+      }
+    },
+    []
+  );
+
+  const formatPresenceLock = useCallback(
+    (
+      lock?: { planId: string; clientName?: string; siteName?: string; planName?: string } | null,
+      locks?: { planId: string; clientName?: string; siteName?: string; planName?: string }[]
+    ) => {
+      const list = Array.isArray(locks) && locks.length ? locks : lock ? [lock] : [];
+      if (!list.length) return t({ it: 'Nessun lock', en: 'No lock' });
+      if (list.length > 1) {
+        return t({ it: `Lock attivi: ${list.length}`, en: `Active locks: ${list.length}` });
+      }
+      const entry = list[0];
+      const parts = [entry.clientName, entry.siteName, entry.planName].filter((v) => v && String(v).trim().length);
+      if (parts.length) return parts.join(' / ');
+      return entry.planId || t({ it: 'Lock attivo', en: 'Lock active' });
+    },
+    [t]
+  );
+
+  const lockActiveTitle = t({
+    it: 'Lock esclusivo: finché è attivo, solo tu puoi modificare questa planimetria. Si rinnova con attività (mouse/tastiera). Se resti inattivo per 5 minuti, smette di rinnovarsi e scade dopo ~60s.',
+    en: 'Exclusive lock: while active, only you can edit this floor plan. It auto-renews on activity (mouse/keyboard). If you stay idle for 5 minutes, it stops renewing and expires after ~60s.'
+  });
+  const lockedByTitle = t({
+    it: `Lock esclusivo detenuto da ${lockState.lockedBy?.username || 'utente'}. Finché è attivo, la planimetria è in sola lettura. Puoi acquisire il lock quando torna libero.`,
+    en: `Exclusive lock held by ${lockState.lockedBy?.username || 'user'}. While active, this floor plan is read-only. You can acquire the lock when it becomes available.`
+  });
+
+  const globalPresenceFallback = globalPresenceUsers.length ? globalPresenceUsers : presenceUsers;
+  const presenceEntries = isSuperAdmin ? globalPresenceFallback : presenceUsers;
+  const presenceCount = isSuperAdmin ? presenceEntries.length : globalPresenceFallback.length;
+
+  const sendWs = useCallback((payload: any) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  }, []);
 
   useEffect(() => {
     if (!user?.id || realtimeDisabledRef.current || realtimeDisabled) return;
@@ -829,6 +914,7 @@ const PlanView = ({ planId }: Props) => {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const wsUrl = `${proto}://${window.location.host}/ws`;
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
     let closed = false;
     let opened = false;
 
@@ -854,15 +940,108 @@ const PlanView = ({ planId }: Props) => {
       }
       if (msg?.type === 'lock_state' && msg.planId === planId) {
         const lockedBy = msg.lockedBy || null;
-        setLockState({ lockedBy, mine: !!lockedBy && lockedBy.userId === user.id });
+        setLockState({
+          lockedBy,
+          mine: !!lockedBy && lockedBy.userId === user.id,
+          expiresAt: typeof msg.expiresAt === 'number' ? msg.expiresAt : null,
+          ttlMs: typeof msg.ttlMs === 'number' ? msg.ttlMs : LOCK_TTL_MS
+        });
+        updateLockedPlans(lockedBy, planId);
+      }
+      if (msg?.type === 'lock_renewed' && msg.planId === planId) {
+        setLockState((prev) => ({
+          lockedBy: prev.lockedBy,
+          mine: true,
+          expiresAt: typeof msg.expiresAt === 'number' ? msg.expiresAt : prev.expiresAt ?? null,
+          ttlMs: typeof msg.ttlMs === 'number' ? msg.ttlMs : prev.ttlMs ?? LOCK_TTL_MS
+        }));
       }
       if (msg?.type === 'lock_denied' && msg.planId === planId) {
         const lockedBy = msg.lockedBy || null;
-        setLockState({ lockedBy, mine: false });
+        setLockState({
+          lockedBy,
+          mine: false,
+          expiresAt: null,
+          ttlMs: LOCK_TTL_MS
+        });
+        updateLockedPlans(lockedBy, planId);
       }
       if (msg?.type === 'presence' && msg.planId === planId) {
         if (perfEnabled) perfMetrics.presenceUpdates += 1;
         setPresenceUsers(Array.isArray(msg.users) ? msg.users : []);
+      }
+      if (msg?.type === 'global_presence') {
+        setGlobalPresenceUsers(Array.isArray(msg.users) ? msg.users : []);
+        if (msg.lockedPlans && typeof msg.lockedPlans === 'object') {
+          setLockedPlans(msg.lockedPlans);
+        }
+      }
+      if (msg?.type === 'unlock_request' && msg.planId === planId) {
+        if (isReadOnlyRef.current || !lockMineRef.current) return;
+        setUnlockPrompt({
+          requestId: String(msg.requestId || ''),
+          planId: String(msg.planId || planId),
+          planName: String(msg.planName || planRef.current?.name || ''),
+          clientName: String(msg.clientName || ''),
+          siteName: String(msg.siteName || ''),
+          requestedBy: {
+            userId: String(msg.requestedBy?.userId || ''),
+            username: String(msg.requestedBy?.username || 'admin')
+          }
+        });
+      }
+      if (msg?.type === 'unlock_sent') {
+        pushStack(
+          t({
+            it: 'Richiesta di unlock inviata.',
+            en: 'Unlock request sent.'
+          }),
+          'info',
+          { duration: LOCK_TOAST_MS }
+        );
+      }
+      if (msg?.type === 'unlock_denied') {
+        pushStack(
+          t({
+            it: 'Impossibile inviare la richiesta di unlock.',
+            en: 'Unable to send unlock request.'
+          }),
+          'danger',
+          { duration: LOCK_TOAST_MS }
+        );
+      }
+      if (msg?.type === 'unlock_result') {
+        const granted = msg.action === 'grant' || msg.action === 'grant_save' || msg.action === 'grant_discard';
+        if (granted && msg.released) {
+          pushStack(
+            t({
+              it: 'Unlock concesso. Lock rilasciato.',
+              en: 'Unlock granted. Lock released.'
+            }),
+            'success',
+            { duration: LOCK_TOAST_MS }
+          );
+          if (isSuperAdmin) void refreshStateFromServer();
+        } else if (granted) {
+          pushStack(
+            t({
+              it: 'Unlock concesso, ma il lock era già stato rilasciato.',
+              en: 'Unlock granted, but the lock was already released.'
+            }),
+            'info',
+            { duration: LOCK_TOAST_MS }
+          );
+          if (isSuperAdmin) void refreshStateFromServer();
+        } else {
+          pushStack(
+            t({
+              it: 'Unlock non concesso dall’utente.',
+              en: 'Unlock request denied by the user.'
+            }),
+            'danger',
+            { duration: LOCK_TOAST_MS }
+          );
+        }
       }
     };
     ws.onclose = () => {
@@ -873,32 +1052,123 @@ const PlanView = ({ planId }: Props) => {
         setRealtimeDisabled(true);
       }
       setPresenceUsers([]);
-      setLockState({ lockedBy: null, mine: false });
+      setGlobalPresenceUsers([]);
+      setLockedPlans({});
+      setLockState({ lockedBy: null, mine: false, expiresAt: null, ttlMs: LOCK_TTL_MS });
+      wsRef.current = null;
     };
     ws.onerror = () => {
       if (!opened) {
         realtimeDisabledRef.current = true;
         setRealtimeDisabled(true);
       }
+      wsRef.current = null;
     };
 
     return () => {
       closed = true;
       try {
-        if (ws.readyState === WebSocket.OPEN) send({ type: 'leave', planId });
+        if (ws.readyState === WebSocket.OPEN) {
+          if (lockMineRef.current) send({ type: 'release_lock', planId });
+          send({ type: 'leave', planId });
+        }
         ws.close();
       } catch {
         // ignore
+      } finally {
+        wsRef.current = null;
       }
     };
-  }, [activeRevision, planAccess, planId, realtimeDisabled, user?.id]);
+  }, [LOCK_TTL_MS, activeRevision, planAccess, planId, realtimeDisabled, user?.id]);
 
-  const lockedByOther = !!lockState.lockedBy && !lockState.mine;
-  const isReadOnly = !!activeRevision || planAccess !== 'rw' || lockedByOther;
+  const lockRequired = !realtimeDisabled && planAccess === 'rw' && !activeRevision;
+  const lockedByOther = lockRequired && !!lockState.lockedBy && !lockState.mine;
+  const lockAvailable = lockRequired && !lockState.lockedBy;
+  const isReadOnly = !!activeRevision || planAccess !== 'rw' || (lockRequired && !lockState.mine);
   const isReadOnlyRef = useRef(isReadOnly);
+  const lockMineRef = useRef(lockState.mine);
   useEffect(() => {
     isReadOnlyRef.current = isReadOnly;
   }, [isReadOnly]);
+  useEffect(() => {
+    lockMineRef.current = lockState.mine;
+  }, [lockState.mine]);
+
+  const requestPlanLock = useCallback(() => {
+    if (!lockRequired) return;
+    if (lockState.mine) return;
+    if (lockState.lockedBy) return;
+    const now = Date.now();
+    if (now - lockRequestAtRef.current < LOCK_REQUEST_THROTTLE_MS) return;
+    lockRequestAtRef.current = now;
+    sendWs({ type: 'request_lock', planId });
+  }, [LOCK_REQUEST_THROTTLE_MS, lockRequired, lockState.lockedBy, lockState.mine, planId, sendWs]);
+
+  const updateLockedPlans = useCallback(
+    (lockedBy: { userId: string; username: string } | null, targetPlanId: string) => {
+      const prev = (useUIStore.getState() as any)?.lockedPlans || {};
+      const next = { ...prev };
+      if (lockedBy) next[targetPlanId] = lockedBy;
+      else delete next[targetPlanId];
+      setLockedPlans(next);
+    },
+    [setLockedPlans]
+  );
+
+  useEffect(() => {
+    const markActive = () => {
+      const now = Date.now();
+      lastActiveAtRef.current = now;
+      if (lockIdle) {
+        setLockIdle(false);
+        if (lockState.mine) {
+          sendWs({ type: 'renew_lock', planId });
+        }
+      }
+      if (lockAvailable && !lockState.mine) {
+        requestPlanLock();
+      }
+    };
+    window.addEventListener('mousemove', markActive, { passive: true });
+    window.addEventListener('mousedown', markActive);
+    window.addEventListener('keydown', markActive);
+    window.addEventListener('touchstart', markActive, { passive: true });
+    return () => {
+      window.removeEventListener('mousemove', markActive);
+      window.removeEventListener('mousedown', markActive);
+      window.removeEventListener('keydown', markActive);
+      window.removeEventListener('touchstart', markActive);
+    };
+  }, [lockAvailable, lockIdle, lockState.mine, planId, requestPlanLock, sendWs]);
+
+  useEffect(() => {
+    if (!lockRequired || !lockState.mine) {
+      if (lockIdle) setLockIdle(false);
+      return;
+    }
+    const interval = window.setInterval(() => {
+      const idle = Date.now() - lastActiveAtRef.current > LOCK_IDLE_MS;
+      setLockIdle(idle);
+      if (idle) return;
+      sendWs({ type: 'renew_lock', planId });
+    }, LOCK_RENEW_MS);
+    return () => window.clearInterval(interval);
+  }, [LOCK_IDLE_MS, LOCK_RENEW_MS, lockRequired, lockState.mine, lockIdle, planId, sendWs]);
+
+  const prevMineRef = useRef(false);
+  useEffect(() => {
+    if (prevMineRef.current && !lockState.mine && lockRequired) {
+      pushStack(
+        t({
+          it: 'Lock perso: la planimetria è ora in sola lettura. Interagisci per riacquisirlo.',
+          en: 'Lock lost: the floor plan is now read-only. Interact to reacquire it.'
+        }),
+        'info',
+        { duration: LOCK_TOAST_MS }
+      );
+    }
+    prevMineRef.current = lockState.mine;
+  }, [LOCK_TOAST_MS, lockRequired, lockState.mine, pushStack, t]);
   const renderPlan = useMemo<FloorPlan | undefined>(() => {
     if (!plan) return undefined;
     if (!activeRevision) return plan;
@@ -2307,6 +2577,158 @@ const PlanView = ({ planId }: Props) => {
       rackLinks: base.rackLinks
     });
   }, [plan, restoreRevision, setFloorPlanContent]);
+
+  const forceSaveNow = useCallback(async () => {
+    try {
+      const store = useDataStore.getState() as any;
+      const res = await saveState(store.clients, store.objectTypes);
+      if (Array.isArray(res.clients)) {
+        store.setServerState({ clients: res.clients, objectTypes: res.objectTypes });
+      } else if (typeof store.markSaved === 'function') {
+        store.markSaved();
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const saveRevisionForUnlock = useCallback(async () => {
+    if (!plan || !hasNavigationEdits) return true;
+    const bump = hasAnyRevision ? 'minor' : 'minor';
+    const next = !hasAnyRevision
+      ? { major: 1, minor: 0 }
+      : { major: latestRev.major, minor: latestRev.minor + 1 };
+    addRevision(plan.id, {
+      bump,
+      name: 'Salvataggio',
+      description: 'Unlock request'
+    });
+    push(
+      t({
+        it: `Revisione salvata: Rev ${next.major}.${next.minor}`,
+        en: `Revision saved: Rev ${next.major}.${next.minor}`
+      }),
+      'success'
+    );
+    postAuditEvent({
+      event: 'revision_save',
+      scopeType: 'plan',
+      scopeId: plan.id,
+      details: { bump, rev: `${next.major}.${next.minor}`, note: 'Unlock request' }
+    });
+    resetTouched();
+    entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+    return forceSaveNow();
+  }, [addRevision, forceSaveNow, hasAnyRevision, hasNavigationEdits, latestRev.major, latestRev.minor, plan, postAuditEvent, push, resetTouched, t, toSnapshot]);
+
+  const handleUnlockResponse = useCallback(
+    async (action: 'grant' | 'grant_save' | 'grant_discard' | 'deny') => {
+      if (!unlockPrompt) return;
+      if (unlockBusy) return;
+      setUnlockBusy(true);
+      if (action === 'grant_save') {
+        const ok = await saveRevisionForUnlock();
+        if (!ok) {
+          push(
+            t({ it: 'Salvataggio non riuscito. Riprova.', en: 'Save failed. Please try again.' }),
+            'danger'
+          );
+          setUnlockBusy(false);
+          return;
+        }
+      }
+      if (action === 'grant_discard') {
+        if (hasNavigationEdits) {
+          revertUnsavedChanges();
+          resetTouched();
+          entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+        }
+      }
+      sendWs({ type: 'unlock_response', requestId: unlockPrompt.requestId, planId: unlockPrompt.planId, action });
+      setUnlockPrompt(null);
+      setUnlockBusy(false);
+      if (action === 'deny') {
+        pushStack(t({ it: 'Richiesta rifiutata.', en: 'Request denied.' }), 'info', { duration: LOCK_TOAST_MS });
+      } else {
+        pushStack(t({ it: 'Lock rilasciato.', en: 'Lock released.' }), 'success', { duration: LOCK_TOAST_MS });
+      }
+    },
+    [
+      LOCK_TOAST_MS,
+      hasNavigationEdits,
+      plan,
+      push,
+      pushStack,
+      resetTouched,
+      revertUnsavedChanges,
+      saveRevisionForUnlock,
+      sendWs,
+      t,
+      toSnapshot,
+      unlockBusy,
+      unlockPrompt
+    ]
+  );
+
+  const toggleRevisionImmutable = useCallback(
+    (revisionId: string, nextValue: boolean) => {
+      if (!isSuperAdmin) return;
+      const actorId = String(user?.id || '');
+      const actorName = String(user?.username || '');
+      updateRevision(planId, revisionId, {
+        immutable: !!nextValue,
+        immutableBy: nextValue && actorId ? { id: actorId, username: actorName } : undefined
+      });
+      postAuditEvent({
+        event: nextValue ? 'revision_immutable_set' : 'revision_immutable_clear',
+        scopeType: 'plan',
+        scopeId: planId,
+        details: { id: revisionId, by: actorName || undefined }
+      });
+      push(
+        t({
+          it: nextValue ? 'Revisione resa immutabile' : 'Revisione sbloccata',
+          en: nextValue ? 'Revision set to immutable' : 'Revision unlocked'
+        }),
+        'info'
+      );
+    },
+    [isSuperAdmin, planId, postAuditEvent, push, t, updateRevision, user?.id, user?.username]
+  );
+
+  const refreshStateFromServer = useCallback(async () => {
+    try {
+      const res = await fetchState();
+      if (Array.isArray(res.clients)) {
+        useDataStore.getState().setServerState({ clients: res.clients, objectTypes: res.objectTypes });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const requestUnlockForUser = useCallback(
+    (userEntry: PresenceUser, lockEntry: { planId: string }) => {
+      if (!userEntry?.userId || !lockEntry?.planId) return;
+      sendWs({ type: 'unlock_request', targetUserId: userEntry.userId, planId: lockEntry.planId });
+      setPresenceMenu(null);
+    },
+    [sendWs]
+  );
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      if (!isSuperAdmin) return;
+      const detail = (event as CustomEvent).detail || {};
+      const planId = String(detail.planId || '').trim();
+      const userId = String(detail.userId || '').trim();
+      if (!planId || !userId) return;
+      sendWs({ type: 'unlock_request', targetUserId: userId, planId });
+    };
+    window.addEventListener('deskly_unlock_request', handler as EventListener);
+    return () => window.removeEventListener('deskly_unlock_request', handler as EventListener);
+  }, [isSuperAdmin, sendWs]);
 
   useEffect(() => {
     setPlanDirty?.(planId, !!hasNavigationEdits);
@@ -5371,6 +5793,17 @@ const PlanView = ({ planId }: Props) => {
     return () => window.removeEventListener('mousedown', onDown);
   }, [gridMenuOpen]);
 
+  useEffect(() => {
+    if (!presenceMenu) return;
+    const onDown = (event: globalThis.MouseEvent) => {
+      if (!presenceMenuRef.current) return;
+      if (presenceMenuRef.current.contains(event.target as Node)) return;
+      setPresenceMenu(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [presenceMenu]);
+
   const roomStatsCacheRef = useRef<{
     key: string;
     value: Map<string, { items: MapObject[]; userCount: number; otherCount: number; totalCount: number }>;
@@ -6853,8 +7286,30 @@ const PlanView = ({ planId }: Props) => {
                 ) : null}
               </div>
             ) : null}
+            {lockRequired && lockState.mine ? (
+              <span
+                className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800"
+                title={lockActiveTitle}
+              >
+                {t({ it: 'Lock attivo', en: 'Lock active' })}
+              </span>
+            ) : null}
+            {lockRequired && lockState.mine && lockIdle ? (
+              <span
+                className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
+                title={t({
+                  it: 'Se resti inattivo, il lock scade automaticamente.',
+                  en: 'If you stay idle, the lock expires automatically.'
+                })}
+              >
+                {t({ it: 'Lock in pausa (inattivo)', en: 'Lock paused (idle)' })}
+              </span>
+            ) : null}
             {isReadOnly ? (
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+              <span
+                className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
+                title={lockedByOther ? lockedByTitle : undefined}
+              >
                 {activeRevision
                   ? t({ it: `Sola lettura: ${activeRevision.name}`, en: `Read-only: ${activeRevision.name}` })
                   : planAccess !== 'rw'
@@ -6864,10 +7319,21 @@ const PlanView = ({ planId }: Props) => {
                           it: `Bloccata da ${lockState.lockedBy?.username || 'utente'}`,
                           en: `Locked by ${lockState.lockedBy?.username || 'user'}`
                         })
-                      : t({ it: 'Sola lettura', en: 'Read-only' })}
+                      : lockRequired
+                        ? t({ it: 'Lock non acquisito', en: 'Lock not acquired' })
+                        : t({ it: 'Sola lettura', en: 'Read-only' })}
               </span>
             ) : null}
-            {presenceUsers.length ? (
+            {lockRequired && !lockState.mine && lockAvailable ? (
+              <button
+                onClick={requestPlanLock}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                title={t({ it: 'Richiedi il lock per modificare', en: 'Request the lock to edit' })}
+              >
+                {t({ it: 'Prendi lock', en: 'Acquire lock' })}
+              </button>
+            ) : null}
+            {presenceCount ? (
               isSuperAdmin ? (
                 <div ref={presenceRef} className="relative">
                   <button
@@ -6875,7 +7341,7 @@ const PlanView = ({ planId }: Props) => {
                     className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                     title={t({ it: 'Mostra utenti online', en: 'Show online users' })}
                   >
-                    {t({ it: `${presenceUsers.length} utenti online`, en: `${presenceUsers.length} users online` })}
+                    {t({ it: `${presenceCount} utenti online`, en: `${presenceCount} users online` })}
                   </button>
                   {presenceOpen ? (
                     <div className="absolute left-0 z-50 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-card">
@@ -6889,10 +7355,27 @@ const PlanView = ({ planId }: Props) => {
                           <X size={14} />
                         </button>
                       </div>
-                      <div className="max-h-40 space-y-1 overflow-y-auto px-1 pb-1">
-                        {presenceList.map((name, index) => (
-                          <div key={`${name}-${index}`} className="rounded-lg px-2 py-1 text-slate-700">
-                            {name}
+                      <div className="max-h-48 space-y-2 overflow-y-auto px-1 pb-1">
+                        {presenceEntries.map((user) => (
+                          <div
+                            key={user.userId}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setPresenceMenu({ x: e.clientX, y: e.clientY, user });
+                            }}
+                            className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5"
+                          >
+                            <div className="text-xs font-semibold text-ink">{user.username || 'user'}</div>
+                            <div className="text-[11px] text-slate-500">
+                              {t({ it: 'Connesso', en: 'Connected' })}: {formatPresenceDate(user.connectedAt)}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {t({ it: 'IP', en: 'IP' })}: {user.ip || '—'}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {t({ it: 'Lock', en: 'Lock' })}: {formatPresenceLock(user.lock, user.locks)}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -6902,9 +7385,9 @@ const PlanView = ({ planId }: Props) => {
               ) : (
                 <span
                   className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                  title={presenceUsers.map((u) => u.username).join(', ')}
+                  title={globalPresenceFallback.map((u) => u.username).join(', ')}
                 >
-                  {t({ it: `${presenceUsers.length} utenti online`, en: `${presenceUsers.length} users online` })}
+                  {t({ it: `${presenceCount} utenti online`, en: `${presenceCount} users online` })}
                 </span>
               )
             ) : null}
@@ -8461,6 +8944,60 @@ const PlanView = ({ planId }: Props) => {
                 </button>
               );
             })}
+          </div>
+        </div>
+      ) : null}
+
+      {presenceMenu ? (
+        <div
+          ref={presenceMenuRef}
+          className="context-menu-panel fixed z-50 w-64 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+          style={{ top: presenceMenu.y, left: presenceMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <span className="font-semibold text-ink">{t({ it: 'Utente online', en: 'Online user' })}</span>
+            <button
+              onClick={() => setPresenceMenu(null)}
+              className="text-slate-400 hover:text-ink"
+              title={t({ it: 'Chiudi', en: 'Close' })}
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="px-2 pt-2 text-sm font-semibold text-ink">{presenceMenu.user.username || 'user'}</div>
+          <div className="px-2 text-xs text-slate-500">
+            {t({ it: 'IP', en: 'IP' })}: {presenceMenu.user.ip || '—'}
+          </div>
+          <div className="mt-2 border-t border-slate-100 pt-2">
+            <div className="px-2 pb-1 text-xs font-semibold uppercase text-slate-500">
+              {t({ it: 'Chiedi unlock', en: 'Request unlock' })}
+            </div>
+            {(() => {
+              const locks =
+                Array.isArray(presenceMenu.user.locks) && presenceMenu.user.locks.length
+                  ? presenceMenu.user.locks
+                  : presenceMenu.user.lock
+                    ? [presenceMenu.user.lock]
+                    : [];
+              if (!locks.length) {
+                return <div className="px-2 py-1 text-xs text-slate-400">{t({ it: 'Nessun lock attivo', en: 'No active lock' })}</div>;
+              }
+              return locks.map((lock) => {
+                const path = [lock.clientName, lock.siteName, lock.planName].filter((v) => v && String(v).trim().length).join(' / ');
+                return (
+                  <button
+                    key={lock.planId}
+                    onClick={() => requestUnlockForUser(presenceMenu.user, lock)}
+                    className="flex w-full flex-col items-start gap-0.5 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+                    title={t({ it: 'Chiedi unlock per questa planimetria', en: 'Request unlock for this floor plan' })}
+                  >
+                    <span className="text-sm text-ink">{t({ it: 'Chiedi unlock', en: 'Request unlock' })}</span>
+                    <span className="text-[11px] text-slate-500">{path || lock.planId}</span>
+                  </button>
+                );
+              });
+            })()}
           </div>
         </div>
       ) : null}
@@ -11370,6 +11907,133 @@ const PlanView = ({ planId }: Props) => {
         onClose={() => setRealUserDetailsId(null)}
       />
 
+      <Transition show={!!unlockPrompt} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-50"
+          onClose={() => {
+            if (unlockBusy) return;
+            setUnlockPrompt(null);
+          }}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <div className="modal-header items-center">
+                    <div className="min-w-0">
+                      <Dialog.Title className="modal-title">
+                        {t({ it: 'Richiesta di unlock', en: 'Unlock request' })}
+                      </Dialog.Title>
+                      <div className="modal-description">
+                        {t({
+                          it: `L'amministratore del sistema chiede la possibilità di modificare la planimetria ${
+                            unlockPrompt?.planName || ''
+                          }.`,
+                          en: `The system administrator requests permission to edit floor plan ${unlockPrompt?.planName || ''}.`
+                        })}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {[unlockPrompt?.clientName, unlockPrompt?.siteName].filter(Boolean).join(' / ')}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (unlockBusy) return;
+                        setUnlockPrompt(null);
+                      }}
+                      className="icon-button"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+	                  </div>
+	                  <div className="mt-4 text-sm text-slate-600">
+	                    {hasNavigationEdits
+	                      ? t({
+	                          it: 'Puoi salvare le modifiche e concedere il lock, oppure annullare le modifiche e concederlo.',
+	                          en: 'You can save your changes and grant the lock, or discard changes and grant it.'
+	                        })
+	                      : t({
+	                          it: 'Non hai modifiche da salvare. Vuoi concedere l’unlock?',
+	                          en: 'No changes to save. Do you want to grant the unlock?'
+	                        })}
+	                  </div>
+	                  <div className="mt-6 flex flex-wrap gap-2">
+	                    {hasNavigationEdits ? (
+	                      <>
+	                        <button
+	                          onClick={() => handleUnlockResponse('grant_save')}
+	                          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+	                          disabled={unlockBusy}
+	                          title={t({ it: 'Salva le modifiche e concede il lock', en: 'Save changes and grant the lock' })}
+	                        >
+	                          {t({ it: 'Salva e concedi', en: 'Save and grant' })}
+	                        </button>
+	                        <button
+	                          onClick={() => handleUnlockResponse('grant_discard')}
+	                          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+	                          disabled={unlockBusy}
+	                          title={t({ it: 'Annulla le modifiche e concede il lock', en: 'Discard changes and grant the lock' })}
+	                        >
+	                          {t({ it: 'Non salvare e concedi', en: 'Discard and grant' })}
+	                        </button>
+	                        <button
+	                          onClick={() => handleUnlockResponse('deny')}
+	                          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+	                          disabled={unlockBusy}
+	                          title={t({ it: 'Non concedere il lock', en: 'Do not grant the lock' })}
+	                        >
+	                          {t({ it: 'Non concedere', en: 'Do not grant' })}
+	                        </button>
+	                      </>
+	                    ) : (
+	                      <>
+	                        <button
+	                          onClick={() => handleUnlockResponse('grant')}
+	                          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+	                          disabled={unlockBusy}
+	                          title={t({ it: 'Concedi l’unlock', en: 'Grant unlock' })}
+	                        >
+	                          {t({ it: 'Concedi', en: 'Grant' })}
+	                        </button>
+	                        <button
+	                          onClick={() => handleUnlockResponse('deny')}
+	                          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+	                          disabled={unlockBusy}
+	                          title={t({ it: 'Nega l’unlock', en: 'Deny unlock' })}
+	                        >
+	                          {t({ it: 'Nega', en: 'Deny' })}
+	                        </button>
+	                      </>
+	                    )}
+	                  </div>
+	                </Dialog.Panel>
+	              </Transition.Child>
+	            </div>
+	          </div>
+	        </Dialog>
+      </Transition>
+
       <PhotoViewerModal
         open={!!photoViewer}
         photos={photoViewer?.photos || []}
@@ -11431,16 +12095,38 @@ const PlanView = ({ planId }: Props) => {
           push(t({ it: 'Tornato al presente', en: 'Back to present' }), 'info');
         }}
         onDelete={(revisionId) => {
+          const rev = (basePlan.revisions || []).find((r) => r.id === revisionId);
+          if (rev?.immutable && !isSuperAdmin) {
+            push(t({ it: 'Revisione immutabile: non puoi eliminarla.', en: 'Immutable revision: you cannot delete it.' }), 'danger');
+            return;
+          }
           deleteRevision(basePlan.id, revisionId);
           if (selectedRevisionId === revisionId) {
             setSelectedRevision(planId, null);
           }
           push(t({ it: 'Revisione eliminata', en: 'Revision deleted' }), 'info');
+          postAuditEvent({
+            event: rev?.immutable ? 'revision_delete_immutable' : 'revision_delete',
+            scopeType: 'plan',
+            scopeId: basePlan.id,
+            details: { id: revisionId, immutable: !!rev?.immutable }
+          });
         }}
         onClearAll={() => {
+          const hasImmutable = (basePlan.revisions || []).some((r) => r.immutable);
+          if (hasImmutable && !isSuperAdmin) {
+            push(t({ it: 'Impossibile eliminare le revisioni immutabili.', en: 'Immutable revisions cannot be deleted.' }), 'danger');
+            return;
+          }
           clearRevisions(basePlan.id);
           setSelectedRevision(planId, null);
           push(t({ it: 'Revisioni eliminate', en: 'Revisions deleted' }), 'info');
+          postAuditEvent({
+            event: 'revision_clear_all',
+            scopeType: 'plan',
+            scopeId: basePlan.id,
+            details: { immutableIncluded: hasImmutable }
+          });
         }}
         canRestore={planAccess === 'rw'}
         onRestore={(revisionId) => {
@@ -11451,7 +12137,10 @@ const PlanView = ({ planId }: Props) => {
             t({ it: 'Revisione ripristinata (stato attuale aggiornato)', en: 'Revision restored (current state updated)' }),
             'success'
           );
+          postAuditEvent({ event: 'revision_restore', scopeType: 'plan', scopeId: basePlan.id, details: { id: revisionId } });
         }}
+        isSuperAdmin={isSuperAdmin}
+        onToggleImmutable={toggleRevisionImmutable}
       />
 
       <SaveRevisionModal

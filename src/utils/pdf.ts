@@ -1309,7 +1309,7 @@ export const exportClientIpMapToPdf = (params: {
     { key: 'url', label: 'URL', ratio: 0.21 }
   ];
   const colWidths = cols.map((c) => Math.floor(c.ratio * tableWidth));
-  const colX = colWidths.reduce<number[]>((acc, w, idx) => {
+  const colX = colWidths.reduce<number[]>((acc, _w, idx) => {
     if (idx === 0) return [margin];
     acc.push(acc[idx - 1] + colWidths[idx - 1]);
     return acc;
@@ -1414,7 +1414,7 @@ export const exportClientDirectoryToPdf = (params: {
     { key: 'ext', label: 'Interno', ratio: 0.04 }
   ];
   const colWidths = cols.map((c) => Math.floor(c.ratio * tableWidth));
-  const colX = colWidths.reduce<number[]>((acc, w, idx) => {
+  const colX = colWidths.reduce<number[]>((acc, _w, idx) => {
     if (idx === 0) return [margin];
     acc.push(acc[idx - 1] + colWidths[idx - 1]);
     return acc;

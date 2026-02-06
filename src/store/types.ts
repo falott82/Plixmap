@@ -330,6 +330,8 @@ export interface FloorPlanRevision {
   id: string;
   createdAt: number;
   createdBy?: { id: string; username: string; firstName: string; lastName: string };
+  immutable?: boolean;
+  immutableBy?: { id: string; username: string };
   revMajor?: number;
   revMinor?: number;
   name: string;

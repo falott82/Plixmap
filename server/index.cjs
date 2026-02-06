@@ -274,8 +274,35 @@ const markLogsCleared = (kind, userId, username) => {
 
 // --- Realtime (WebSocket): plan presence + plan locking (exclusive editor) ---
 const wsPlanMembers = new Map(); // planId -> Set<ws>
-const wsClientInfo = new Map(); // ws -> { userId, username, plans:Set<string> }
-const planLocks = new Map(); // planId -> { userId, username, ts }
+const wsClientInfo = new Map(); // ws -> { userId, username, ip, connectedAt, isSuperAdmin, plans: Map<planId, joinedAt> }
+const unlockRequests = new Map(); // requestId -> { requestedById, requestedByName, targetUserId, planId, createdAt }
+const planLocks = new Map(); // planId -> { userId, username, ts, expiresAt }
+const LOCK_TTL_MS = (() => {
+  const raw = Number(process.env.DESKLY_PLAN_LOCK_TTL_MS || '');
+  return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
+})();
+const LOCK_CLEANUP_MS = 5_000;
+
+const purgeExpiredLocks = () => {
+  const now = Date.now();
+  const expired = [];
+  for (const [planId, lock] of planLocks.entries()) {
+    if (!lock?.expiresAt || lock.expiresAt > now) continue;
+    planLocks.delete(planId);
+    expired.push({ planId, lock });
+  }
+  return expired;
+};
+
+const getValidLock = (planId) => {
+  const lock = planLocks.get(planId);
+  if (!lock) return null;
+  if (lock.expiresAt && lock.expiresAt <= Date.now()) {
+    planLocks.delete(planId);
+    return null;
+  }
+  return lock;
+};
 
 const jsonSend = (ws, obj) => {
   try {
@@ -285,27 +312,144 @@ const jsonSend = (ws, obj) => {
   }
 };
 
+const broadcastToAll = (obj) => {
+  for (const ws of wss.clients || []) jsonSend(ws, obj);
+};
+
+const sendToUser = (userId, obj) => {
+  let sent = 0;
+  for (const [ws, info] of wsClientInfo.entries()) {
+    if (info?.userId !== userId) continue;
+    jsonSend(ws, obj);
+    sent += 1;
+  }
+  return sent;
+};
+
 const broadcastToPlan = (planId, obj) => {
   const members = wsPlanMembers.get(planId);
   if (!members) return;
   for (const ws of members) jsonSend(ws, obj);
 };
 
+const buildPlanPathMap = (clients) => {
+  const map = new Map();
+  for (const c of clients || []) {
+    const clientName = c?.shortName || c?.name || '';
+    for (const s of c?.sites || []) {
+      const siteName = s?.name || '';
+      for (const p of s?.floorPlans || []) {
+        if (!p?.id) continue;
+        map.set(p.id, { clientName, siteName, planName: p?.name || '' });
+      }
+    }
+  }
+  return map;
+};
+
 const computePresence = (planId) => {
   const members = wsPlanMembers.get(planId);
-  const users = [];
+  const users = new Map();
+  const state = readState();
+  const planPathMap = buildPlanPathMap(state.clients || []);
+  const lockByUser = new Map();
+  for (const [lockPlanId, lock] of planLocks.entries()) {
+    if (!lock?.userId) continue;
+    if (lock.expiresAt && lock.expiresAt <= Date.now()) continue;
+    const path = planPathMap.get(lockPlanId);
+    const entry = { planId: lockPlanId, clientName: path?.clientName || '', siteName: path?.siteName || '', planName: path?.planName || '' };
+    const existing = lockByUser.get(lock.userId);
+    if (!existing || (lock.ts || 0) > (existing.ts || 0)) {
+      lockByUser.set(lock.userId, { ...entry, ts: lock.ts || 0 });
+    }
+  }
   if (members) {
-    const seen = new Set();
     for (const ws of members) {
       const info = wsClientInfo.get(ws);
       if (!info) continue;
       const key = info.userId;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      users.push({ userId: info.userId, username: info.username });
+      const joinedAt = info.plans?.get?.(planId) || null;
+      const existing = users.get(key);
+      const lock = lockByUser.get(key);
+      if (!existing) {
+        users.set(key, {
+          userId: info.userId,
+          username: info.username,
+          connectedAt: joinedAt,
+          ip: info.ip || '',
+          lock: lock
+            ? { planId: lock.planId, clientName: lock.clientName, siteName: lock.siteName, planName: lock.planName }
+            : null
+        });
+      } else {
+        if (joinedAt && (!existing.connectedAt || joinedAt < existing.connectedAt)) existing.connectedAt = joinedAt;
+        if (lock && !existing.lock) {
+          existing.lock = { planId: lock.planId, clientName: lock.clientName, siteName: lock.siteName, planName: lock.planName };
+        }
+      }
     }
   }
-  return users;
+  return Array.from(users.values());
+};
+
+const computeGlobalPresence = () => {
+  const state = readState();
+  const planPathMap = buildPlanPathMap(state.clients || []);
+  const locksByUser = new Map();
+  for (const [lockPlanId, lock] of planLocks.entries()) {
+    if (!lock?.userId) continue;
+    if (lock.expiresAt && lock.expiresAt <= Date.now()) continue;
+    const path = planPathMap.get(lockPlanId);
+    const entry = {
+      planId: lockPlanId,
+      clientName: path?.clientName || '',
+      siteName: path?.siteName || '',
+      planName: path?.planName || ''
+    };
+    const existing = locksByUser.get(lock.userId);
+    if (!existing) {
+      locksByUser.set(lock.userId, [entry]);
+    } else {
+      existing.push(entry);
+    }
+  }
+  const usersById = new Map();
+  for (const info of wsClientInfo.values()) {
+    const entry = usersById.get(info.userId);
+    const lockList = locksByUser.get(info.userId) || [];
+    if (!entry) {
+      usersById.set(info.userId, {
+        userId: info.userId,
+        username: info.username,
+        connectedAt: info.connectedAt || null,
+        ip: info.ip || '',
+        locks: lockList
+      });
+    } else {
+      if (info.connectedAt && (!entry.connectedAt || info.connectedAt < entry.connectedAt)) entry.connectedAt = info.connectedAt;
+      if (!entry.ip && info.ip) entry.ip = info.ip;
+      if (lockList.length && (!entry.locks || !entry.locks.length)) entry.locks = lockList;
+    }
+  }
+  return Array.from(usersById.values());
+};
+
+const getLockedPlansSnapshot = () => {
+  const out = {};
+  for (const [planId, lock] of planLocks.entries()) {
+    if (!lock?.userId) continue;
+    if (lock.expiresAt && lock.expiresAt <= Date.now()) continue;
+    out[planId] = { userId: lock.userId, username: lock.username };
+  }
+  return out;
+};
+
+const emitGlobalPresence = () => {
+  broadcastToAll({
+    type: 'global_presence',
+    users: computeGlobalPresence(),
+    lockedPlans: getLockedPlansSnapshot()
+  });
 };
 
 const emitPresence = (planId) => {
@@ -313,14 +457,22 @@ const emitPresence = (planId) => {
 };
 
 const emitLockState = (planId) => {
-  const lock = planLocks.get(planId) || null;
-  broadcastToPlan(planId, { type: 'lock_state', planId, lockedBy: lock ? { userId: lock.userId, username: lock.username } : null });
+  const lock = getValidLock(planId) || null;
+  broadcastToPlan(planId, {
+    type: 'lock_state',
+    planId,
+    lockedBy: lock ? { userId: lock.userId, username: lock.username } : null,
+    expiresAt: lock?.expiresAt || null,
+    ttlMs: LOCK_TTL_MS
+  });
+  emitPresence(planId);
+  emitGlobalPresence();
 };
 
 const releaseLocksForWs = (ws) => {
   const info = wsClientInfo.get(ws);
   if (!info) return;
-  for (const planId of info.plans) {
+  for (const planId of info.plans.keys()) {
     const members = wsPlanMembers.get(planId);
     if (members) {
       members.delete(ws);
@@ -696,11 +848,16 @@ const getWsAuthContext = (req) => {
   const session = verifySession(authSecret, token);
   if (!session?.userId || !session?.tokenVersion || !session?.sid) return null;
   if (session.sid !== serverInstanceId) return null;
-  const row = db.prepare('SELECT id, username, disabled FROM users WHERE id = ?').get(session.userId);
+  const row = db.prepare('SELECT id, username, isSuperAdmin, disabled FROM users WHERE id = ?').get(session.userId);
   if (!row) return null;
   if (Number(row.disabled) === 1) return null;
-  return { userId: row.id, username: String(row.username || '').toLowerCase() };
+  const normalizedUsername = String(row.username || '').toLowerCase();
+  const isSuperAdmin = !!row.isSuperAdmin && normalizedUsername === 'superadmin';
+  return { userId: row.id, username: normalizedUsername, isSuperAdmin };
 };
+
+const getWsClientIp = (req) =>
+  normalizeIp(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.connection?.remoteAddress || '');
 
 // Public: used by the login UI to decide whether to show first-run credentials.
 app.get('/api/auth/bootstrap-status', (_req, res) => {
@@ -2202,6 +2359,7 @@ app.put('/api/state', requireAuth, rateByUser('state_save', 60 * 1000, 240), (re
   }
   const serverState = readState();
   const lockedByOthers = new Set();
+  purgeExpiredLocks();
   for (const [planId, lock] of planLocks.entries()) {
     if (!lock) continue;
     if (lock.userId && lock.userId !== req.userId) lockedByOthers.add(planId);
@@ -2935,8 +3093,16 @@ wss.on('connection', (ws, req) => {
     } catch {}
     return;
   }
-  wsClientInfo.set(ws, { userId: auth.userId, username: auth.username, plans: new Set() });
+  wsClientInfo.set(ws, {
+    userId: auth.userId,
+    username: auth.username,
+    ip: getWsClientIp(req),
+    connectedAt: Date.now(),
+    isSuperAdmin: !!auth.isSuperAdmin,
+    plans: new Map()
+  });
   jsonSend(ws, { type: 'hello', userId: auth.userId, username: auth.username });
+  emitGlobalPresence();
 
   ws.on('message', (raw) => {
     let msg;
@@ -2958,10 +3124,16 @@ wss.on('connection', (ws, req) => {
       }
       if (!wsPlanMembers.has(planId)) wsPlanMembers.set(planId, new Set());
       wsPlanMembers.get(planId).add(ws);
-      info.plans.add(planId);
+      info.plans.set(planId, Date.now());
 
-      const lock = planLocks.get(planId) || null;
-      jsonSend(ws, { type: 'lock_state', planId, lockedBy: lock ? { userId: lock.userId, username: lock.username } : null });
+      const lock = getValidLock(planId) || null;
+      jsonSend(ws, {
+        type: 'lock_state',
+        planId,
+        lockedBy: lock ? { userId: lock.userId, username: lock.username } : null,
+        expiresAt: lock?.expiresAt || null,
+        ttlMs: LOCK_TTL_MS
+      });
       jsonSend(ws, { type: 'presence', planId, users: computePresence(planId) });
 
       if (!!msg.wantLock) {
@@ -2970,9 +3142,10 @@ wss.on('connection', (ws, req) => {
           emitPresence(planId);
           return;
         }
-        const existing = planLocks.get(planId);
+        const existing = getValidLock(planId);
         if (!existing || existing.userId === info.userId) {
-          planLocks.set(planId, { userId: info.userId, username: info.username, ts: Date.now() });
+          const now = Date.now();
+          planLocks.set(planId, { userId: info.userId, username: info.username, ts: now, expiresAt: now + LOCK_TTL_MS });
           writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
           emitLockState(planId);
         } else {
@@ -2989,6 +3162,43 @@ wss.on('connection', (ws, req) => {
         }
       }
       emitPresence(planId);
+      emitGlobalPresence();
+      return;
+    }
+
+    if (msg?.type === 'request_lock') {
+      const planId = String(msg.planId || '').trim();
+      if (!planId) return;
+      const access = getPlanAccessForUser(info.userId, planId);
+      if (access !== 'rw') {
+        jsonSend(ws, { type: 'lock_denied', planId, lockedBy: null });
+        return;
+      }
+      const existing = getValidLock(planId);
+      if (!existing || existing.userId === info.userId) {
+        const now = Date.now();
+        planLocks.set(planId, { userId: info.userId, username: info.username, ts: now, expiresAt: now + LOCK_TTL_MS });
+        writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
+        emitLockState(planId);
+      } else {
+        jsonSend(ws, { type: 'lock_denied', planId, lockedBy: { userId: existing.userId, username: existing.username } });
+      }
+      return;
+    }
+
+    if (msg?.type === 'renew_lock') {
+      const planId = String(msg.planId || '').trim();
+      if (!planId) return;
+      const lock = getValidLock(planId);
+      if (!lock || lock.userId !== info.userId) {
+        jsonSend(ws, { type: 'lock_denied', planId, lockedBy: lock ? { userId: lock.userId, username: lock.username } : null });
+        return;
+      }
+      const now = Date.now();
+      lock.ts = now;
+      lock.expiresAt = now + LOCK_TTL_MS;
+      planLocks.set(planId, lock);
+      jsonSend(ws, { type: 'lock_renewed', planId, expiresAt: lock.expiresAt, ttlMs: LOCK_TTL_MS });
       return;
     }
 
@@ -3021,6 +3231,7 @@ wss.on('connection', (ws, req) => {
         }
       }
       emitPresence(planId);
+      emitGlobalPresence();
       return;
     }
 
@@ -3032,6 +3243,109 @@ wss.on('connection', (ws, req) => {
         writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'release' } });
         emitLockState(planId);
       }
+      return;
+    }
+
+    if (msg?.type === 'unlock_request') {
+      const planId = String(msg.planId || '').trim();
+      const targetUserId = String(msg.targetUserId || '').trim();
+      if (!planId || !targetUserId) return;
+      if (!info?.isSuperAdmin) {
+        jsonSend(ws, { type: 'unlock_denied', planId, targetUserId, reason: 'forbidden' });
+        return;
+      }
+      const lock = getValidLock(planId);
+      if (!lock || lock.userId !== targetUserId) {
+        jsonSend(ws, { type: 'unlock_denied', planId, targetUserId, reason: 'no_lock' });
+        return;
+      }
+      const requestId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex');
+      const state = readState();
+      const planPathMap = buildPlanPathMap(state.clients || []);
+      const path = planPathMap.get(planId);
+      const payload = {
+        type: 'unlock_request',
+        requestId,
+        planId,
+        clientName: path?.clientName || '',
+        siteName: path?.siteName || '',
+        planName: path?.planName || '',
+        requestedBy: { userId: info.userId, username: info.username }
+      };
+      const sent = sendToUser(targetUserId, payload);
+      if (!sent) {
+        jsonSend(ws, { type: 'unlock_denied', planId, targetUserId, reason: 'offline' });
+        return;
+      }
+      unlockRequests.set(requestId, {
+        requestedById: info.userId,
+        requestedByName: info.username,
+        targetUserId,
+        planId,
+        createdAt: Date.now()
+      });
+      writeAuditLog(db, {
+        level: 'important',
+        event: 'plan_unlock_requested',
+        userId: info.userId,
+        username: info.username,
+        scopeType: 'plan',
+        scopeId: planId,
+        details: { targetUserId }
+      });
+      jsonSend(ws, { type: 'unlock_sent', requestId, planId, targetUserId });
+      return;
+    }
+
+    if (msg?.type === 'unlock_response') {
+      const requestId = String(msg.requestId || '').trim();
+      const planId = String(msg.planId || '').trim();
+      const action = String(msg.action || '').trim();
+      if (!requestId || !planId) return;
+      const request = unlockRequests.get(requestId);
+      if (!request) return;
+      if (request.targetUserId !== info.userId) return;
+      unlockRequests.delete(requestId);
+      let released = false;
+      if (action === 'grant' || action === 'grant_save' || action === 'grant_discard') {
+        const lock = getValidLock(planId);
+        if (lock && lock.userId === info.userId) {
+          planLocks.delete(planId);
+          writeAuditLog(db, {
+            level: 'important',
+            event: 'plan_lock_released',
+            userId: info.userId,
+            username: info.username,
+            scopeType: 'plan',
+            scopeId: planId,
+            details: { reason: 'unlock_request', action }
+          });
+          emitLockState(planId);
+          released = true;
+        }
+      }
+      writeAuditLog(db, {
+        level: 'important',
+        event: 'plan_unlock_response',
+        userId: info.userId,
+        username: info.username,
+        scopeType: 'plan',
+        scopeId: planId,
+        details: {
+          action,
+          released,
+          requestedById: request.requestedById
+        }
+      });
+      sendToUser(request.requestedById, {
+        type: 'unlock_result',
+        requestId,
+        planId,
+        targetUserId: info.userId,
+        action,
+        released
+      });
+      return;
     }
   });
 
@@ -3042,6 +3356,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('close', () => {
     releaseLocksForWs(ws);
+    emitGlobalPresence();
   });
 });
 
@@ -3060,7 +3375,32 @@ const heartbeatTimer = setInterval(() => {
   }
 }, 30_000);
 
-wss.on('close', () => clearInterval(heartbeatTimer));
+const lockCleanupTimer = setInterval(() => {
+  const expired = purgeExpiredLocks();
+  if (expired.length) {
+    for (const entry of expired) {
+      writeAuditLog(db, {
+        level: 'important',
+        event: 'plan_lock_released',
+        userId: entry.lock.userId,
+        username: entry.lock.username,
+        scopeType: 'plan',
+        scopeId: entry.planId,
+        details: { reason: 'ttl' }
+      });
+      emitLockState(entry.planId);
+    }
+  }
+  const now = Date.now();
+  for (const [requestId, req] of unlockRequests.entries()) {
+    if (now - (req.createdAt || 0) > 5 * 60_000) unlockRequests.delete(requestId);
+  }
+}, LOCK_CLEANUP_MS);
+
+wss.on('close', () => {
+  clearInterval(heartbeatTimer);
+  clearInterval(lockCleanupTimer);
+});
 
 server.listen(PORT, HOST, () => {
 });
