@@ -33,6 +33,7 @@ Usa sempre queste traduzioni quando scrivi nuove stringhe UI o documentazione.
 | Misura | Measure | Strumento di misura.
 | Quota | Dimension | Linea di quota/misura.
 | Post-it | Sticky note | Nota adesiva.
+| Foto | Photo | Oggetto foto in planimetria.
 | Annotazioni | Annotations | Testi e note.
 | Scrivania | Desk | Elemento scrivania.
 | Utente reale | Real user | Persona sincronizzata.

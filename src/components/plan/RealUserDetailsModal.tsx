@@ -8,6 +8,7 @@ type RealUserDetails = {
   firstName?: string;
   lastName?: string;
   externalEmail?: string;
+  externalMobile?: string;
   externalRole?: string;
   externalDept1?: string;
   externalDept2?: string;
@@ -36,6 +37,7 @@ const RealUserDetailsModal = ({ open, userName, details, onClose }: Props) => {
       { label: t({ it: 'ID', en: 'ID' }), value: details.externalUserId },
       { label: t({ it: 'Nome', en: 'Name' }), value: [details.firstName, details.lastName].filter(Boolean).join(' ').trim() || userName },
       { label: t({ it: 'Email', en: 'Email' }), value: details.externalEmail, icon: details.externalEmail ? <Mail size={14} className="text-slate-500" /> : null },
+      { label: t({ it: 'Cellulare', en: 'Mobile' }), value: details.externalMobile, icon: details.externalMobile ? <Phone size={14} className="text-slate-500" /> : null },
       { label: t({ it: 'Ruolo', en: 'Role' }), value: details.externalRole },
       { label: t({ it: 'Reparto', en: 'Department' }), value: dept || undefined },
       { label: t({ it: 'Interni', en: 'Extensions' }), value: exts || undefined, icon: exts ? <Phone size={14} className="text-slate-500" /> : null },

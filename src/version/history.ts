@@ -8,6 +8,80 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.2.6',
+    date: '2026-02-06',
+    type: 'fix',
+    notes: [
+      n('Foto: scala corretta con +/- sulla selezione', 'Photos: scale now updates correctly with +/- on selection'),
+      n('Palette annotazioni: spaziatura icone migliorata', 'Annotations palette: improved icon spacing')
+    ]
+  },
+  {
+    version: '2.2.5',
+    date: '2026-02-05',
+    type: 'fix',
+    notes: [
+      n('Foto: mirino disponibile solo nella vista singola e in fullscreen', 'Photos: locate button shown only in single view and fullscreen'),
+      n('Foto: galleria accessibile dal menu planimetria e dal tasto destro sulla mappa', 'Photos: gallery available from floor plan menu and map context menu'),
+      n('Foto: tab dedicata nella modale stanza con galleria delle foto della room', 'Photos: dedicated tab in the room modal with the room gallery'),
+      n('Collegamenti: disabilitati per le foto (menu e scorciatoie)', 'Links: disabled for photos (menu and shortcuts)')
+    ]
+  },
+  {
+    version: '2.2.1',
+    date: '2026-02-05',
+    type: 'fix',
+    notes: [
+      n(
+        'Foto: doppio click apre la galleria e “Vedi foto” mostra tutte le foto selezionate',
+        'Photos: double click opens the gallery and “View photo” shows all selected photos'
+      ),
+      n(
+        'Modifica rapida: pulsante anteprima per immagini e foto',
+        'Quick edit: preview button for images and photos'
+      ),
+      n('Menu contestuale: rimosso “Collega oggetti”', 'Context menu: removed “Link objects”')
+    ]
+  },
+  {
+    version: '2.2.0',
+    date: '2026-02-05',
+    type: 'minor',
+    notes: [
+      n('Nuovo oggetto Foto con upload, nome e descrizione', 'New Photo object with upload, name, and description'),
+      n(
+        'Foto: click sull’icona apre la modale; selezione multipla = galleria con download e fullscreen',
+        'Photos: click icon opens the modal; multi-selection shows a gallery with download and fullscreen'
+      ),
+      n('Palette oggetti: Foto aggiunta accanto a testo/immagine/post-it', 'Object palette: Photo added next to text/image/post-it'),
+      n('Clipboard: copia/incolla mantiene immagini e foto', 'Clipboard: copy/paste preserves images and photos')
+    ]
+  },
+  {
+    version: '2.1.7',
+    date: '2026-02-05',
+    type: 'minor',
+    notes: [
+      n('Rubrica utenti importati: disponibile dal menu cliente e con Cmd/Ctrl+R', 'Imported users directory: available from client menu and with Cmd/Ctrl+R'),
+      n('Rubrica: focus ricerca, navigazione con frecce e tasto M per aprire l’email', 'Directory: search focus, arrow navigation, and M to open email'),
+      n('Rubrica: visibile solo se l’importazione è già stata eseguita', 'Directory: shown only after an import has been executed'),
+      n('IP Map: focus ricerca, navigazione con frecce e tasto U per aprire l’URL', 'IP Map: search focus, arrow navigation, and U to open URL'),
+      n('IP Map: raggruppamento per rete /24 con sezioni comprimibili', 'IP Map: /24 network grouping with collapsible sections')
+    ]
+  },
+  {
+    version: '2.1.6',
+    date: '2026-02-04',
+    type: 'fix',
+    notes: [
+      n('Catalogo oggetti: tab Tutti predefinita, ricerca con frecce/Invio e focus automatico', 'Object catalog: default All tab, search with arrows/Enter and auto focus'),
+      n('Scorciatoia A: apre il catalogo oggetti dalla planimetria', 'Shortcut A: opens the object catalog from the plan'),
+      n('Rack: nome unico per planimetria con validazione e sync tra impostazioni e planimetria', 'Racks: unique name per floor plan with validation and sync between settings and plan'),
+      n('Rack: copia/incolla aggiunge suffisso (Copia/Copy)', 'Racks: copy/paste adds (Copy) suffix'),
+      n('Scorciatoia N: rinomina l’oggetto selezionato con modale rapida', 'Shortcut N: rename selected object with a quick modal')
+    ]
+  },
+  {
     version: '2.1.5',
     date: '2026-02-04',
     type: 'fix',

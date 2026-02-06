@@ -1233,6 +1233,12 @@ const parseCsvEmployees = (text) => {
     dept2: 'dept2',
     dept3: 'dept3',
     email: 'email',
+    mobile: 'mobile',
+    cell: 'mobile',
+    cellulare: 'mobile',
+    phone: 'mobile',
+    telefono: 'mobile',
+    numero_cellulare: 'mobile',
     ext1: 'ext1',
     ext2: 'ext2',
     ext3: 'ext3',
@@ -1265,6 +1271,7 @@ const parseCsvEmployees = (text) => {
       dept2: get('dept2'),
       dept3: get('dept3'),
       email: get('email'),
+      mobile: get('mobile'),
       ext1: get('ext1'),
       ext2: get('ext2'),
       ext3: get('ext3'),
@@ -1509,7 +1516,7 @@ app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 1
   const remote = result.employees || [];
   const existing = db
     .prepare(
-      'SELECT externalId, firstName, lastName, role, dept1, dept2, dept3, email, ext1, ext2, ext3, isExternal, present FROM external_users WHERE clientId = ?'
+      'SELECT externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, present FROM external_users WHERE clientId = ?'
     )
     .all(cid);
   const byId = new Map(existing.map((r) => [String(r.externalId), r]));
@@ -1537,6 +1544,7 @@ app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 1
       norm(prev.dept2) !== norm(e.dept2) ||
       norm(prev.dept3) !== norm(e.dept3) ||
       norm(prev.email) !== norm(e.email) ||
+      norm(prev.mobile) !== norm(e.mobile) ||
       norm(prev.ext1) !== norm(e.ext1) ||
       norm(prev.ext2) !== norm(e.ext2) ||
       norm(prev.ext3) !== norm(e.ext3) ||

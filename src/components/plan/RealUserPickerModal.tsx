@@ -83,7 +83,7 @@ const RealUserPickerModal = ({ open, clientId, clientName, assignedCounts, onClo
     }
     if (!query) return list;
     return list.filter((r) => {
-      const hay = `${r.externalId} ${r.firstName} ${r.lastName} ${r.role} ${r.dept1} ${r.dept2} ${r.dept3} ${r.email}`.toLowerCase();
+      const hay = `${r.externalId} ${r.firstName} ${r.lastName} ${r.role} ${r.dept1} ${r.dept2} ${r.dept3} ${r.email} ${r.mobile}`.toLowerCase();
       return hay.includes(query);
     });
   }, [assignedCounts, onlyUnassigned, q, rows, showHidden, showMissing]);

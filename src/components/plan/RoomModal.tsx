@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { HelpCircle, Trash2, X } from 'lucide-react';
+import { HelpCircle, Image as ImageIcon, Trash2, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import RoomShapePreview from './RoomShapePreview';
 import Icon from '../ui/Icon';
@@ -34,6 +34,7 @@ interface Props {
   canCreateWalls?: boolean;
   onCreateWalls?: () => void;
   onDeleteObject?: (id: string) => void;
+  onOpenPhotos?: (payload: { id: string; selectionIds?: string[] }) => void;
   onClose: () => void;
   onSubmit: (payload: {
     name: string;
@@ -69,6 +70,7 @@ const RoomModal = ({
   canCreateWalls = false,
   onCreateWalls,
   onDeleteObject,
+  onOpenPhotos,
   onClose,
   onSubmit
 }: Props) => {
@@ -82,13 +84,20 @@ const RoomModal = ({
   const [labelScale, setLabelScale] = useState(1);
   const [logical, setLogical] = useState(initialLogical);
   const [nameError, setNameError] = useState('');
-  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'objects' | 'notes'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'objects' | 'photos' | 'notes'>('info');
   const nameRef = useRef<HTMLInputElement | null>(null);
   const roomObjects = objects || [];
   const shouldShowContents = typeof objects !== 'undefined';
   const resolveIsUser = (typeId: string) => (isUserObject ? isUserObject(typeId) : typeId === 'user' || typeId === 'real_user');
   const users = roomObjects.filter((o) => resolveIsUser(o.type));
   const otherObjects = roomObjects.filter((o) => !resolveIsUser(o.type));
+  const roomPhotos = roomObjects.filter((o) => o.type === 'photo' && Boolean((o as any).imageUrl));
+  const canOpenRoomPhotos = roomPhotos.length > 0 && !!onOpenPhotos;
+  const openRoomPhotos = (id?: string) => {
+    if (!onOpenPhotos || !roomPhotos.length) return;
+    const ids = roomPhotos.map((photo) => photo.id);
+    onOpenPhotos({ id: id || ids[0], selectionIds: ids });
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -208,7 +217,8 @@ const RoomModal = ({
                       ...(shouldShowContents
                         ? [
                             { id: 'users', label: t({ it: 'Utenti', en: 'Users' }) },
-                            { id: 'objects', label: t({ it: 'Oggetti', en: 'Objects' }) }
+                            { id: 'objects', label: t({ it: 'Oggetti', en: 'Objects' }) },
+                            { id: 'photos', label: t({ it: 'Foto', en: 'Photos' }) }
                           ]
                         : []),
                       { id: 'notes', label: t({ it: 'Note', en: 'Notes' }) }
@@ -522,6 +532,58 @@ const RoomModal = ({
                       ) : (
                         <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
                           {t({ it: 'Nessun oggetto in questa stanza.', en: 'No objects in this room.' })}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {activeTab === 'photos' && shouldShowContents ? (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold text-ink">{t({ it: 'Foto nella stanza', en: 'Photos in room' })}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs font-semibold text-slate-500">
+                            {t({ it: `Totale ${roomPhotos.length}`, en: `Total ${roomPhotos.length}` })}
+                          </div>
+                          {canOpenRoomPhotos ? (
+                            <button
+                              type="button"
+                              onClick={() => openRoomPhotos()}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              title={t({ it: 'Vedi galleria', en: 'View gallery' })}
+                            >
+                              <ImageIcon size={12} />
+                              {t({ it: 'Vedi galleria', en: 'View gallery' })}
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                      {roomPhotos.length ? (
+                        <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+                          {roomPhotos.map((photo) => (
+                            <button
+                              key={photo.id}
+                              type="button"
+                              onClick={() => openRoomPhotos(photo.id)}
+                              className="group rounded-xl border border-slate-200 bg-white p-2 text-left shadow-sm transition hover:border-sky-200 hover:shadow-md"
+                              title={photo.name || t({ it: 'Foto', en: 'Photo' })}
+                            >
+                              <div className="relative h-24 w-full overflow-hidden rounded-lg bg-slate-100">
+                                <img src={String((photo as any).imageUrl || '')} alt={photo.name || 'photo'} className="h-full w-full object-cover" />
+                                <div className="absolute inset-0 bg-black/0 transition group-hover:bg-black/10" />
+                              </div>
+                              <div className="mt-2">
+                                <div className="truncate text-sm font-semibold text-ink">
+                                  {photo.name || t({ it: 'Foto', en: 'Photo' })}
+                                </div>
+                                {photo.description ? <div className="mt-0.5 line-clamp-2 text-xs text-slate-500">{photo.description}</div> : null}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+                          {t({ it: 'Nessuna foto in questa stanza.', en: 'No photos in this room.' })}
                         </div>
                       )}
                     </div>

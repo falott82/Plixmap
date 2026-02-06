@@ -181,6 +181,13 @@ const normalizeEmployeesResponse = (payload) => {
       const externalId = get('Id');
       if (!externalId) return null;
       const isExternal = get('Esterno') === '1';
+      const mobile =
+        get('Cellulare') ||
+        get('NumeroCellulare') ||
+        get('TelefonoCellulare') ||
+        get('Mobile') ||
+        get('Cell') ||
+        '';
       return {
         externalId,
         firstName: get('Nome'),
@@ -190,6 +197,7 @@ const normalizeEmployeesResponse = (payload) => {
         dept2: get('Reparto2'),
         dept3: get('Reparto3'),
         email: get('Email'),
+        mobile,
         ext1: get('NumeroInterno1'),
         ext2: get('NumeroInterno2'),
         ext3: get('NumeroInterno3'),
@@ -310,18 +318,20 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   const now = Date.now();
   const shouldMarkMissing = options.markMissing !== false;
   const existing = db
-    .prepare('SELECT externalId, firstName, lastName, role, dept1, dept2, dept3, email, ext1, ext2, ext3, isExternal, hidden, present FROM external_users WHERE clientId = ?')
+    .prepare(
+      'SELECT externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present FROM external_users WHERE clientId = ?'
+    )
     .all(clientId);
   const existingById = new Map(existing.map((r) => [String(r.externalId), r]));
   const incomingIds = new Set(employees.map((e) => String(e.externalId)));
 
   const insert = db.prepare(
-    `INSERT INTO external_users (clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)`
+    `INSERT INTO external_users (clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)`
   );
   const update = db.prepare(
     `UPDATE external_users
-     SET firstName=?, lastName=?, role=?, dept1=?, dept2=?, dept3=?, email=?, ext1=?, ext2=?, ext3=?, isExternal=?, present=1, lastSeenAt=?, updatedAt=?
+     SET firstName=?, lastName=?, role=?, dept1=?, dept2=?, dept3=?, email=?, mobile=?, ext1=?, ext2=?, ext3=?, isExternal=?, present=1, lastSeenAt=?, updatedAt=?
      WHERE clientId=? AND externalId=?`
   );
   const markMissingStmt = db.prepare(`UPDATE external_users SET present=0, updatedAt=? WHERE clientId=? AND externalId=?`);
@@ -344,6 +354,7 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
         e.dept2 || '',
         e.dept3 || '',
         e.email || '',
+        e.mobile || '',
         e.ext1 || '',
         e.ext2 || '',
         e.ext3 || '',
@@ -363,6 +374,7 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
       String(prev.dept2 || '') !== String(e.dept2 || '') ||
       String(prev.dept3 || '') !== String(e.dept3 || '') ||
       String(prev.email || '') !== String(e.email || '') ||
+      String(prev.mobile || '') !== String(e.mobile || '') ||
       String(prev.ext1 || '') !== String(e.ext1 || '') ||
       String(prev.ext2 || '') !== String(e.ext2 || '') ||
       String(prev.ext3 || '') !== String(e.ext3 || '') ||
@@ -377,6 +389,7 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
         e.dept2 || '',
         e.dept3 || '',
         e.email || '',
+        e.mobile || '',
         e.ext1 || '',
         e.ext2 || '',
         e.ext3 || '',
@@ -425,11 +438,11 @@ const listExternalUsers = (db, params) => {
     const escaped = q.replace(/[%_]/g, '\\$&');
     const like = `%${escaped}%`;
     where.push(
-      '(lower(externalId) LIKE ? ESCAPE \'\\\\\' OR lower(firstName) LIKE ? ESCAPE \'\\\\\' OR lower(lastName) LIKE ? ESCAPE \'\\\\\' OR lower(role) LIKE ? ESCAPE \'\\\\\' OR lower(dept1) LIKE ? ESCAPE \'\\\\\' OR lower(dept2) LIKE ? ESCAPE \'\\\\\' OR lower(dept3) LIKE ? ESCAPE \'\\\\\' OR lower(email) LIKE ? ESCAPE \'\\\\\')'
+      '(lower(externalId) LIKE ? ESCAPE \'\\\\\' OR lower(firstName) LIKE ? ESCAPE \'\\\\\' OR lower(lastName) LIKE ? ESCAPE \'\\\\\' OR lower(role) LIKE ? ESCAPE \'\\\\\' OR lower(dept1) LIKE ? ESCAPE \'\\\\\' OR lower(dept2) LIKE ? ESCAPE \'\\\\\' OR lower(dept3) LIKE ? ESCAPE \'\\\\\' OR lower(email) LIKE ? ESCAPE \'\\\\\' OR lower(mobile) LIKE ? ESCAPE \'\\\\\')'
     );
-    values.push(like, like, like, like, like, like, like, like);
+    values.push(like, like, like, like, like, like, like, like, like);
   }
-  let sql = `SELECT clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt
+  let sql = `SELECT clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt
        FROM external_users
        WHERE ${where.join(' AND ')}`;
   if (limit !== null) {
@@ -453,6 +466,7 @@ const listExternalUsers = (db, params) => {
       dept2: r.dept2 || '',
       dept3: r.dept3 || '',
       email: r.email || '',
+      mobile: r.mobile || '',
       ext1: r.ext1 || '',
       ext2: r.ext2 || '',
       ext3: r.ext3 || '',

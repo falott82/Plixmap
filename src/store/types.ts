@@ -176,6 +176,7 @@ export interface MapObject {
   externalDept2?: string;
   externalDept3?: string;
   externalEmail?: string;
+  externalMobile?: string;
   externalExt1?: string;
   externalExt2?: string;
   externalExt3?: string;
@@ -206,6 +207,8 @@ export interface MapObject {
   imageUrl?: string;
   imageWidth?: number;
   imageHeight?: number;
+  ip?: string;
+  url?: string;
   postitCompact?: boolean;
   points?: { x: number; y: number }[];
   wallGroupId?: string;

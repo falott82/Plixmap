@@ -123,6 +123,7 @@ interface Props {
       Pick<MapObject, 'scaleX' | 'scaleY' | 'rotation' | 'postitCompact' | 'textBoxWidth' | 'textBoxHeight' | 'textBg'>
     >
   ) => void;
+  onOpenPhoto?: (payload: { id: string; selectionIds?: string[] }) => void;
   onMoveWall?: (id: string, dx: number, dy: number, batchId?: string, movedRoomIds?: string[]) => void;
   onSetPrintArea?: (rect: { x: number; y: number; width: number; height: number }) => void;
   wallAttenuationByType?: Map<string, number>;
@@ -156,6 +157,7 @@ const TEXT_BOX_MIN_WIDTH = 80;
 const TEXT_BOX_MIN_HEIGHT = 32;
 const TEXT_BOX_DEFAULT_WIDTH = 160;
 const TEXT_BOX_DEFAULT_HEIGHT = 56;
+const PHOTO_ICON_BASE_SIZE = 34;
 const SELECTION_STROKE_SCALE = 0.6;
 const SELECTION_COLOR = '#2563eb';
 const SELECTION_FILL = 'rgba(37,99,235,0.1)';
@@ -307,6 +309,7 @@ const CanvasStageImpl = (
   onCreateRoom,
   onUpdateRoom,
   onUpdateObject,
+  onOpenPhoto,
   onMoveWall,
   onRoomContextMenu,
   onSetPrintArea,
@@ -420,6 +423,7 @@ const CanvasStageImpl = (
   const polyVertexRefs = useRef<Record<string, Record<number, any>>>({});
   const objectsLayerRef = useRef<any>(null);
   const objectNodeRefs = useRef<Record<string, any>>({});
+  const lastPhotoOpenAtRef = useRef(0);
   const selectedRoomIdsRef = useRef<string[]>([]);
   const boxSelectionActiveRef = useRef(false);
   const roomDragRef = useRef<{
@@ -461,6 +465,22 @@ const CanvasStageImpl = (
   }, []);
   const wallTypeIdSet = useMemo(() => wallTypeIds || new Set<string>(), [wallTypeIds]);
   const wallAttenuationMap = useMemo(() => wallAttenuationByType || new Map<string, number>(), [wallAttenuationByType]);
+  const findPhotoAtPoint = useCallback(
+    (x: number, y: number) => {
+      for (let i = objects.length - 1; i >= 0; i -= 1) {
+        const obj = objects[i];
+        if (!obj || obj.type !== 'photo') continue;
+        const scale = Number(obj.scale ?? 1) || 1;
+        const size = PHOTO_ICON_BASE_SIZE * scale;
+        const half = size / 2;
+        if (x >= obj.x - half && x <= obj.x + half && y >= obj.y - half && y <= obj.y + half) {
+          return obj;
+        }
+      }
+      return null;
+    },
+    [objects]
+  );
 
   const applyStageTransform = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
     const stage = stageRef.current;
@@ -2262,6 +2282,11 @@ const getRoomBounds = (room: any) => {
                   <span className="font-semibold text-slate-600">{t({ it: 'Email', en: 'Email' })}:</span> {hoverCard.obj.externalEmail}
                 </div>
               ) : null}
+              {hoverCard.obj.externalMobile ? (
+                <div>
+                  <span className="font-semibold text-slate-600">{t({ it: 'Cellulare', en: 'Mobile' })}:</span> {hoverCard.obj.externalMobile}
+                </div>
+              ) : null}
               {[hoverCard.obj.externalExt1, hoverCard.obj.externalExt2, hoverCard.obj.externalExt3].filter(Boolean).length ? (
                 <div>
                   <span className="font-semibold text-slate-600">{t({ it: 'Interni', en: 'Extensions' })}:</span>{' '}
@@ -2389,13 +2414,27 @@ const getRoomBounds = (room: any) => {
           if (!pendingType && !toolMode && isEmptyTarget && e.evt.button === 0) onSelect(undefined);
         }}
         onDblClick={(e) => {
-          if (!allowTool) return;
-          e.cancelBubble = true;
-          if (e.evt?.button !== 0) return;
+          if (typeof e.evt?.button === 'number' && e.evt.button !== 0) return;
           const stage = e.target.getStage();
           const pos = stage?.getPointerPosition();
           if (!pos) return;
           const world = pointerToWorld(pos.x, pos.y);
+          if (onOpenPhoto) {
+            const hit = findPhotoAtPoint(world.x, world.y);
+            if (hit) {
+              const selectionSnapshot = selectedIds ? [...selectedIds] : selectedId ? [selectedId] : [];
+              if (!selectionSnapshot.includes(hit.id)) selectionSnapshot.push(hit.id);
+              const now = Date.now();
+              if (now - lastPhotoOpenAtRef.current > 200) {
+                lastPhotoOpenAtRef.current = now;
+                onOpenPhoto({ id: hit.id, selectionIds: selectionSnapshot });
+              }
+              e.cancelBubble = true;
+              return;
+            }
+          }
+          if (!allowTool) return;
+          e.cancelBubble = true;
           onToolDoubleClick?.(world);
         }}
         onMouseMove={(e) => {
@@ -3445,6 +3484,7 @@ const getRoomBounds = (room: any) => {
             const isDesk = isDeskType(obj.type);
             const isText = obj.type === 'text';
             const isImage = obj.type === 'image';
+            const isPhoto = obj.type === 'photo';
             const isPostIt = obj.type === 'postit';
             const multiSelected = (selectedIds || []).length > 1;
             const baseScale = Number(obj.scale ?? 1) || 1;
@@ -3469,8 +3509,8 @@ const getRoomBounds = (room: any) => {
             const labelHeight = labelLines * labelFontSize * labelLineHeight;
             const labelGap = 6;
             const labelY = -(18 * scale) - labelGap - labelHeight;
-            const showLabel = !!labelValue && !isText && !isImage && !isPostIt;
-            const outline = highlightActive ? '#22d3ee' : isSelected ? '#2563eb' : '#cbd5e1';
+            const showLabel = !!labelValue && !isText && !isImage && !isPhoto && !isPostIt;
+            const outline = highlightActive ? '#22d3ee' : isSelected ? (isPhoto ? '#16a34a' : '#2563eb') : '#cbd5e1';
             const outlineWidth = highlightActive
               ? (3 + 2 * pulse) * SELECTION_STROKE_SCALE
               : isSelected
@@ -3524,6 +3564,14 @@ const getRoomBounds = (room: any) => {
             const postItHalf = postItSize / 2;
             const postItFold = postItSize * 0.28;
             const imageNode = isImage ? imageObjects[obj.id] : null;
+            const photoSize = 34 * scale;
+            const photoHalf = photoSize / 2;
+            const photoRadius = Math.max(6, 7 * scale);
+            const photoGradient = {
+              fillLinearGradientStartPoint: { x: -photoHalf, y: -photoHalf },
+              fillLinearGradientEndPoint: { x: photoHalf, y: photoHalf },
+              fillLinearGradientColorStops: [0, '#f97316', 0.45, '#22d3ee', 1, '#6366f1']
+            };
             const cameraRange = isCamera ? clamp(Number((obj as any).cctvRange ?? 160) || 160, 60, 600) : 0;
             const cameraAngle = isCamera ? clamp(Number((obj as any).cctvAngle ?? 70) || 70, 20, 160) : 0;
             const cameraOpacity = isCamera ? clamp(Number((obj as any).cctvOpacity ?? 0.6) || 0.6, 0.1, 0.9) : 0;
@@ -3722,15 +3770,20 @@ const getRoomBounds = (room: any) => {
                 }}
                 onClick={(e) => {
                   e.cancelBubble = true;
-                  if (e.evt?.button !== 0) return;
+                  if (typeof e.evt?.button === 'number' && e.evt.button !== 0) return;
+                  const multiSelectionActive = (selectedIds || []).length > 1 && (selectedIds || []).includes(obj.id);
+                  if (isPhoto && multiSelectionActive && !(e.evt.ctrlKey || e.evt.metaKey)) {
+                    return;
+                  }
                   if (isPostIt && isSelected && !readOnly) {
                     onUpdateObject?.(obj.id, { postitCompact: !(obj as any).postitCompact });
                   }
                   onSelect(obj.id, { multi: !!(e.evt.ctrlKey || e.evt.metaKey) });
                 }}
                 onDblClick={(e) => {
+                  if (isPhoto) return;
                   e.cancelBubble = true;
-                  if (e.evt?.button !== 0) return;
+                  if (typeof e.evt?.button === 'number' && e.evt.button !== 0) return;
                   if (readOnly) return;
                   onEdit(obj.id);
                 }}
@@ -4140,6 +4193,36 @@ const getRoomBounds = (room: any) => {
                       />
                     </Group>
                   </>
+                ) : isPhoto ? (
+                  <Group opacity={objectOpacity}>
+                    <Rect
+                      x={-photoHalf}
+                      y={-photoHalf}
+                      width={photoSize}
+                      height={photoSize}
+                      cornerRadius={photoRadius}
+                      stroke={outline}
+                      strokeWidth={outlineWidth}
+                      strokeScaleEnabled={false}
+                      {...photoGradient}
+                    />
+                    <Circle x={-photoHalf + photoSize * 0.28} y={-photoHalf + photoSize * 0.28} radius={Math.max(2.2, 2.8 * scale)} fill="rgba(255,255,255,0.9)" />
+                    <Line
+                      points={[
+                        -photoHalf + photoSize * 0.2,
+                        photoHalf - photoSize * 0.28,
+                        -photoHalf + photoSize * 0.42,
+                        photoHalf - photoSize * 0.46,
+                        -photoHalf + photoSize * 0.64,
+                        photoHalf - photoSize * 0.3
+                      ]}
+                      stroke="#ffffff"
+                      strokeWidth={Math.max(1.2, 1.6 * scale)}
+                      lineCap="round"
+                      lineJoin="round"
+                      strokeScaleEnabled={false}
+                    />
+                  </Group>
                 ) : isImage ? (
                   <Group opacity={objectOpacity}>
                     {imageNode ? (

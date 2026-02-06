@@ -18,6 +18,7 @@ export interface ExternalUserRow {
   dept2: string;
   dept3: string;
   email: string;
+  mobile: string;
   ext1: string;
   ext2: string;
   ext3: string;

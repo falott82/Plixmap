@@ -1277,3 +1277,302 @@ export const exportClientNotesToPdf = async (params: {
     wrapper.remove();
   }
 };
+
+export const exportClientIpMapToPdf = (params: {
+  clientName: string;
+  entries: Array<{
+    ip: string;
+    name: string;
+    type: string;
+    url?: string;
+    site: string;
+    plan: string;
+  }>;
+  filename?: string;
+}) => {
+  const filename = params.filename || `deskly_ip_map_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const pdf = new jsPDF({ orientation: 'l', unit: 'pt', format: 'a4', compress: true });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 28;
+  const tableWidth = pageWidth - margin * 2;
+  const headerHeight = 22;
+  const rowPadding = 5;
+  const lineHeight = 12;
+
+  const cols = [
+    { key: 'ip', label: 'IP', ratio: 0.12 },
+    { key: 'name', label: 'Device', ratio: 0.22 },
+    { key: 'type', label: 'Type', ratio: 0.13 },
+    { key: 'site', label: 'Site', ratio: 0.16 },
+    { key: 'plan', label: 'Floor plan', ratio: 0.16 },
+    { key: 'url', label: 'URL', ratio: 0.21 }
+  ];
+  const colWidths = cols.map((c) => Math.floor(c.ratio * tableWidth));
+  const colX = colWidths.reduce<number[]>((acc, w, idx) => {
+    if (idx === 0) return [margin];
+    acc.push(acc[idx - 1] + colWidths[idx - 1]);
+    return acc;
+  }, []);
+
+  let y = margin;
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(16);
+  pdf.text(`Deskly — IP Map`, margin, y + 12);
+  pdf.setFontSize(11);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(90);
+  pdf.text(params.clientName || '', margin, y + 28);
+  pdf.setTextColor(0);
+  y += 42;
+
+  const drawHeader = () => {
+    pdf.setFillColor(248, 250, 252);
+    pdf.rect(margin, y, tableWidth, headerHeight, 'F');
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(9);
+    for (let i = 0; i < cols.length; i += 1) {
+      const x = colX[i] + rowPadding;
+      pdf.text(cols[i].label, x, y + 14);
+    }
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+    pdf.setDrawColor(226, 232, 240);
+    pdf.rect(margin, y, tableWidth, headerHeight);
+    y += headerHeight;
+  };
+
+  const ensureSpace = (height: number) => {
+    if (y + height <= pageHeight - margin) return;
+    pdf.addPage();
+    y = margin;
+    drawHeader();
+  };
+
+  drawHeader();
+
+  const rows = params.entries || [];
+  for (const row of rows) {
+    const cells = [row.ip, row.name, row.type, row.site, row.plan, row.url || ''];
+    const linesByCol = cells.map((cell, i) => {
+      const safe = String(cell || '');
+      const maxWidth = Math.max(10, colWidths[i] - rowPadding * 2);
+      return pdf.splitTextToSize(safe, maxWidth);
+    });
+    const rowHeight = Math.max(...linesByCol.map((lines) => lines.length)) * lineHeight + rowPadding * 2;
+    ensureSpace(rowHeight);
+
+    for (let i = 0; i < cols.length; i += 1) {
+      const lines = linesByCol[i];
+      const x = colX[i] + rowPadding;
+      let textY = y + rowPadding + lineHeight;
+      for (const line of lines) {
+        pdf.text(line, x, textY);
+        textY += lineHeight;
+      }
+    }
+    pdf.setDrawColor(226, 232, 240);
+    pdf.line(margin, y + rowHeight, margin + tableWidth, y + rowHeight);
+    y += rowHeight;
+  }
+
+  pdf.save(filename);
+};
+
+export const exportClientDirectoryToPdf = (params: {
+  clientName: string;
+  groupBy: 'dept' | 'surname';
+  rows: Array<{
+    lastName: string;
+    firstName: string;
+    role: string;
+    dept: string;
+    email: string;
+    mobile: string;
+    ext: string;
+  }>;
+  filename?: string;
+}) => {
+  const filename = params.filename || `deskly_rubrica_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const pdf = new jsPDF({ orientation: 'l', unit: 'pt', format: 'a4', compress: true });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 28;
+  const tableWidth = pageWidth - margin * 2;
+  const headerHeight = 18;
+  const groupHeight = 18;
+  const rowPadding = 5;
+  const lineHeight = 9;
+
+  const cols = [
+    { key: 'lastName', label: 'Cognome', ratio: 0.16 },
+    { key: 'firstName', label: 'Nome', ratio: 0.14 },
+    { key: 'role', label: 'Ruolo', ratio: 0.18 },
+    { key: 'dept', label: 'Reparto', ratio: 0.18 },
+    { key: 'email', label: 'Email', ratio: 0.2 },
+    { key: 'mobile', label: 'Cellulare', ratio: 0.1 },
+    { key: 'ext', label: 'Interno', ratio: 0.04 }
+  ];
+  const colWidths = cols.map((c) => Math.floor(c.ratio * tableWidth));
+  const colX = colWidths.reduce<number[]>((acc, w, idx) => {
+    if (idx === 0) return [margin];
+    acc.push(acc[idx - 1] + colWidths[idx - 1]);
+    return acc;
+  }, []);
+
+  const normalize = (value: string) => String(value || '').trim();
+  const rows = (params.rows || [])
+    .map((r) => ({
+      lastName: normalize(r.lastName),
+      firstName: normalize(r.firstName),
+      role: normalize(r.role),
+      dept: normalize(r.dept),
+      email: normalize(r.email),
+      mobile: normalize(r.mobile),
+      ext: normalize(r.ext)
+    }))
+    .filter((r) => r.lastName || r.firstName || r.email || r.mobile || r.role || r.dept || r.ext);
+
+  const groupKey = (row: (typeof rows)[number]) => {
+    if (params.groupBy === 'dept') return row.dept || 'Senza reparto';
+    const base = row.lastName || row.firstName || '#';
+    const letter = base.trim().charAt(0).toUpperCase();
+    return letter || '#';
+  };
+
+  const groups = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const key = groupKey(row);
+    const list = groups.get(key) || [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  const groupKeys = Array.from(groups.keys()).sort((a, b) => {
+    if (a === 'Senza reparto') return 1;
+    if (b === 'Senza reparto') return -1;
+    return a.localeCompare(b, 'it', { sensitivity: 'base' });
+  });
+
+  for (const key of groupKeys) {
+    groups.get(key)?.sort((a, b) => {
+      const ln = a.lastName.localeCompare(b.lastName, 'it', { sensitivity: 'base' });
+      if (ln !== 0) return ln;
+      return a.firstName.localeCompare(b.firstName, 'it', { sensitivity: 'base' });
+    });
+  }
+
+  const printedAt = new Date();
+  const printedLabel = `Stampato il ${printedAt.toLocaleString('it-IT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })}`;
+  let y = margin;
+  const drawPageHeader = (isFirst: boolean) => {
+    const clientLabel = params.clientName || '';
+    const title = clientLabel ? `${clientLabel} - Rubrica aziendale` : 'Rubrica aziendale';
+    if (isFirst) {
+      pdf.setFillColor(224, 242, 254);
+      pdf.roundedRect(margin, y - 4, tableWidth, 46, 12, 12, 'F');
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(13.5);
+      pdf.setTextColor(15, 23, 42);
+      pdf.text(title, margin + 14, y + 18);
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(71, 85, 105);
+      pdf.text(printedLabel, margin + tableWidth - pdf.getTextWidth(printedLabel) - 14, y + 18);
+      pdf.setTextColor(0);
+      y += 54;
+    } else {
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8.25);
+      pdf.setTextColor(30);
+      if (clientLabel) pdf.text(clientLabel, margin, y + 12);
+      pdf.text(printedLabel, margin + tableWidth - pdf.getTextWidth(printedLabel), y + 12);
+      pdf.setTextColor(0);
+      y += 28;
+    }
+  };
+
+  const drawTableHeader = () => {
+    pdf.setFillColor(219, 234, 254);
+    pdf.rect(margin, y, tableWidth, headerHeight, 'F');
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(6.75);
+    for (let i = 0; i < cols.length; i += 1) {
+      const x = colX[i] + rowPadding;
+      pdf.text(cols[i].label, x, y + 14);
+    }
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(6.75);
+    pdf.setDrawColor(226, 232, 240);
+    pdf.rect(margin, y, tableWidth, headerHeight);
+    y += headerHeight;
+  };
+
+  const ensureSpace = (height: number) => {
+    if (y + height <= pageHeight - margin) return;
+    pdf.addPage();
+    y = margin;
+    drawPageHeader(false);
+    drawTableHeader();
+  };
+
+  drawPageHeader(true);
+  drawTableHeader();
+
+  for (const key of groupKeys) {
+    const list = groups.get(key) || [];
+    ensureSpace(groupHeight);
+    pdf.setFillColor(220, 252, 231);
+    pdf.roundedRect(margin, y + 1, tableWidth, groupHeight - 2, 8, 8, 'F');
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(22, 101, 52);
+    pdf.text(`${key} (${list.length})`, margin + 10, y + 13);
+    pdf.setTextColor(0);
+    y += groupHeight;
+
+    for (const row of list) {
+      const cells = [row.lastName, row.firstName, row.role, row.dept, row.email, row.mobile, row.ext];
+      const linesByCol = cells.map((cell, i) => {
+        const safe = String(cell || '');
+        const maxWidth = Math.max(10, colWidths[i] - rowPadding * 2);
+        return pdf.splitTextToSize(safe, maxWidth);
+      });
+      const rowHeight = Math.max(...linesByCol.map((lines) => lines.length)) * lineHeight + rowPadding * 2;
+      ensureSpace(rowHeight);
+      for (let i = 0; i < cols.length; i += 1) {
+        const lines = linesByCol[i];
+        const x = colX[i] + rowPadding;
+        let textY = y + rowPadding + lineHeight;
+        const isNameCol = cols[i].key === 'lastName' || cols[i].key === 'firstName';
+        pdf.setFont('helvetica', isNameCol ? 'bold' : 'normal');
+        pdf.setFontSize(6.75);
+        for (const line of lines) {
+          pdf.text(line, x, textY);
+          textY += lineHeight;
+        }
+      }
+      pdf.setDrawColor(226, 232, 240);
+      pdf.line(margin, y + rowHeight, margin + tableWidth, y + rowHeight);
+      y += rowHeight;
+    }
+  }
+
+  const totalPages = pdf.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p += 1) {
+    pdf.setPage(p);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(100);
+    const label = `${p}/${totalPages}`;
+    pdf.text(label, pageWidth - margin - pdf.getTextWidth(label), pageHeight - margin + 8);
+    pdf.setTextColor(0);
+  }
+
+  pdf.save(filename);
+};

@@ -28,6 +28,8 @@ type ScaleStats = {
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const normalizeName = (value: string) => value.trim().toLowerCase();
+const stripCopySuffix = (value: string) => value.trim().replace(/\s*\((copia|copy)(\s*\d+)?\)\s*$/i, '').trim();
 
 const getScaleFactor = (obj: MapObject) => {
   if (obj.type === 'text' || obj.type === 'image') {
@@ -224,6 +226,19 @@ export const useClipboard = ({
       const crossPlan = !!(clipboard.sourcePlanId && clipboard.sourcePlanId !== currentPlan.id);
       const scaleStats = crossPlan ? buildScaleStats(currentPlan.objects || []) : null;
       const adjustScale = !!(scaleStats && scaleStats.hasData);
+      const rackCopySuffix = t({ it: ' (Copia)', en: ' (Copy)' });
+      const rackCopySuffixFor = (count: number) =>
+        count <= 1
+          ? rackCopySuffix
+          : t({ it: ` (Copia ${count})`, en: ` (Copy ${count})` });
+      const existingRackNames = new Set(
+        [
+          ...(currentPlan.objects || []).filter((obj) => obj.type === 'rack').map((obj) => String(obj.name || '')),
+          ...((currentPlan as any).racks || []).map((rack: any) => String(rack?.name || ''))
+        ]
+          .map((name) => normalizeName(name))
+          .filter(Boolean)
+      );
       pasteCountRef.current += 1;
       const offset = 24 * pasteCountRef.current;
       const usePoint = crossPlan && !!pastePoint;
@@ -245,9 +260,23 @@ export const useClipboard = ({
       const shiftX = usePoint && anchor ? (pastePoint as any).x - anchor.x : offset;
       const shiftY = usePoint && anchor ? (pastePoint as any).y - anchor.y : offset * 0.6;
       const newIds: string[] = [];
+      const newNames: string[] = [];
       for (const obj of clipboard.items) {
         const nextX = obj.x + shiftX;
         const nextY = obj.y + shiftY;
+        const baseName = String(obj.name || getTypeLabel(obj.type) || '').trim();
+        let nextName = obj.name;
+        if (obj.type === 'rack') {
+          const cleanBase = stripCopySuffix(baseName || getTypeLabel(obj.type) || '').trim() || getTypeLabel(obj.type);
+          let count = 1;
+          let candidate = `${cleanBase}${rackCopySuffixFor(count)}`;
+          while (existingRackNames.has(normalizeName(candidate))) {
+            count += 1;
+            candidate = `${cleanBase}${rackCopySuffixFor(count)}`;
+          }
+          nextName = candidate;
+          existingRackNames.add(normalizeName(candidate));
+        }
         const targetScale = adjustScale
           ? scaleStats?.byType.get(obj.type) ?? scaleStats?.fallback ?? 1
           : Number((obj as any).scale ?? 1) || 1;
@@ -266,6 +295,13 @@ export const useClipboard = ({
             adjustScale && (obj.type === 'text' || obj.type === 'image')
               ? clamp(Number(targetScale) || 1, 0.2, 6)
               : obj.scaleY,
+          ...(obj.type === 'image' || obj.type === 'photo'
+            ? {
+                imageUrl: (obj as any).imageUrl,
+                imageWidth: (obj as any).imageWidth,
+                imageHeight: (obj as any).imageHeight
+              }
+            : {}),
           points: obj.points ? obj.points.map((p) => ({ ...p })) : undefined,
           wallGroupId: obj.wallGroupId,
           wallGroupIndex: obj.wallGroupIndex,
@@ -292,6 +328,7 @@ export const useClipboard = ({
           externalDept2: (obj as any).externalDept2,
           externalDept3: (obj as any).externalDept3,
           externalEmail: (obj as any).externalEmail,
+          externalMobile: (obj as any).externalMobile,
           externalExt1: (obj as any).externalExt1,
           externalExt2: (obj as any).externalExt2,
           externalExt3: (obj as any).externalExt3,
@@ -300,7 +337,7 @@ export const useClipboard = ({
         const id = addObject(
           currentPlan.id,
           obj.type,
-          obj.name,
+          (nextName as string) || obj.name,
           obj.description,
           nextX,
           nextY,
@@ -310,7 +347,7 @@ export const useClipboard = ({
           layerIds,
           extra
         );
-        ensureObjectLayerVisible(layerIds, obj.name, obj.type);
+        ensureObjectLayerVisible(layerIds, nextName || obj.name, obj.type);
         const nextRoomId = getRoomIdAt(currentPlan.rooms, nextX, nextY);
         if (nextRoomId) updateObject(id, { roomId: nextRoomId });
         const customValues = clipboard.customValues?.[obj.id];
@@ -318,12 +355,13 @@ export const useClipboard = ({
           saveCustomValues(id, obj.type, customValues).catch(() => {});
         }
         newIds.push(id);
+        newNames.push(String(nextName || obj.name || getTypeLabel(obj.type)));
       }
       if (newIds.length) {
         const last = newIds[newIds.length - 1];
         const label =
           newIds.length === 1
-            ? String(clipboard.items[0]?.name || getTypeLabel(clipboard.items[0]?.type || ''))
+            ? String(newNames[0] || clipboard.items[0]?.name || getTypeLabel(clipboard.items[0]?.type || ''))
             : t({ it: `${newIds.length} oggetti`, en: `${newIds.length} objects` });
         lastInsertedRef.current = { id: last, name: label };
         setSelection(newIds);
