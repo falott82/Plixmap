@@ -27,7 +27,6 @@ const LayersPanel = () => {
   const { push } = useToastStore();
   const t = useT();
   const lang = useLang();
-  const [planId, setPlanId] = useState<string | undefined>(selectedPlanId);
   const [clientId, setClientId] = useState<string | undefined>(undefined);
   const [layerModal, setLayerModal] = useState<{ mode: 'create' } | { mode: 'edit'; layerId: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<LayerDefinition | null>(null);
@@ -78,38 +77,12 @@ const LayersPanel = () => {
     const layers = (currentClient?.layers || []) as LayerDefinition[];
     return [...layers].sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   }, [currentClient?.layers]);
-  const planOptions = useMemo(() => {
-    const list: Array<{ id: string; label: string }> = [];
-    if (!currentClient) return list;
-    for (const site of currentClient.sites || []) {
-      const plans = [...(site.floorPlans || [])].sort((a, b) => Number((a as any).order || 0) - Number((b as any).order || 0));
-      for (const plan of plans) {
-        const label = site.name ? `${site.name} · ${plan.name}` : plan.name;
-        list.push({ id: plan.id, label });
-      }
-    }
-    return list;
+
+  const clientPlans = useMemo(() => {
+    if (!currentClient) return [];
+    return (currentClient.sites || []).flatMap((s) => s.floorPlans || []);
   }, [currentClient]);
-
-  useEffect(() => {
-    if (!planOptions.length) {
-      if (planId !== undefined) setPlanId(undefined);
-      return;
-    }
-    if (planId && planOptions.some((opt) => opt.id === planId)) return;
-    const fallback =
-      (selectedPlanId && planOptions.some((opt) => opt.id === selectedPlanId) ? selectedPlanId : undefined) || planOptions[0]?.id;
-    if (fallback && fallback !== planId) setPlanId(fallback);
-  }, [planId, planOptions, selectedPlanId]);
-
-  const currentPlan = useMemo(() => {
-    if (!currentClient || !planId) return undefined;
-    for (const site of currentClient.sites || []) {
-      const plan = (site.floorPlans || []).find((p) => p.id === planId);
-      if (plan) return plan;
-    }
-    return undefined;
-  }, [currentClient, planId]);
+  const clientObjects = useMemo(() => clientPlans.flatMap((p) => p.objects || []), [clientPlans]);
   const editableLayers = useMemo(
     () => planLayers.filter((layer) => !SPECIAL_LAYER_IDS.has(String(layer.id))),
     [planLayers]
@@ -158,14 +131,14 @@ const LayersPanel = () => {
   const typeOptions = useMemo(() => {
     const ids = new Set<string>();
     for (const def of objectTypes || []) ids.add(def.id);
-    for (const obj of currentPlan?.objects || []) ids.add(obj.type);
+    for (const obj of clientObjects) ids.add(obj.type);
     const list = Array.from(ids).map((id) => {
       const def = objectTypeById.get(id);
       const label = (def?.name?.[lang] as string) || (def?.name?.it as string) || id;
       return { id, label, icon: def?.icon };
     });
     return list.sort((a, b) => a.label.localeCompare(b.label));
-  }, [currentPlan?.objects, lang, objectTypeById, objectTypes]);
+  }, [clientObjects, lang, objectTypeById, objectTypes]);
 
   const resolveTypeLabel = (typeId: string) => {
     const def = objectTypeById.get(typeId);
@@ -204,7 +177,7 @@ const LayersPanel = () => {
     }
     const allTypeIds = new Set<string>();
     for (const def of objectTypes || []) allTypeIds.add(def.id);
-    for (const obj of currentPlan?.objects || []) allTypeIds.add(obj.type);
+    for (const obj of clientObjects) allTypeIds.add(obj.type);
     const effectiveLayerIdsByType = new Map<string, string[]>();
     for (const typeId of allTypeIds) {
       const explicit = explicitLayerIdsByType.get(typeId);
@@ -224,12 +197,12 @@ const LayersPanel = () => {
       }
     }
     return { explicitLayerIdsByType, effectiveLayerIdsByType, typesByLayerId };
-  }, [currentPlan?.objects, objectTypes, planLayers]);
+  }, [clientObjects, objectTypes, planLayers]);
 
   const objectCountsByLayer = useMemo(() => {
     const counts = new Map<string, Map<string, number>>();
     for (const layer of planLayers) counts.set(String(layer.id), new Map());
-    for (const obj of currentPlan?.objects || []) {
+    for (const obj of clientObjects) {
       const explicitLayers = Array.isArray(obj.layerIds) && obj.layerIds.length ? obj.layerIds.map(String) : null;
       const layerIds = explicitLayers || typeMapping.effectiveLayerIdsByType.get(obj.type) || [];
       for (const layerId of layerIds) {
@@ -239,7 +212,7 @@ const LayersPanel = () => {
       }
     }
     return counts;
-  }, [currentPlan?.objects, planLayers, typeMapping.effectiveLayerIdsByType]);
+  }, [clientObjects, planLayers, typeMapping.effectiveLayerIdsByType]);
 
   useEffect(() => {
     if (!layerModal) return;
@@ -420,10 +393,10 @@ const LayersPanel = () => {
     });
   };
 
-  if (!planOptions.length) {
+  if (!currentClient) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-card">
-        {t({ it: 'Nessuna planimetria disponibile.', en: 'No floor plans available.' })}
+        {t({ it: 'Nessun cliente disponibile.', en: 'No clients available.' })}
       </div>
     );
   }
@@ -440,33 +413,36 @@ const LayersPanel = () => {
             })}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-            <Search size={14} />
-            <input
-              value={layerQuery}
-              onChange={(e) => setLayerQuery(e.target.value)}
-              placeholder={t({ it: 'Cerca layer…', en: 'Search layers…' })}
-              className="w-40 bg-transparent text-sm outline-none"
-            />
-          </div>
-          <select
-            value={planId}
-            onChange={(e) => setPlanId(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink"
-            title={t({ it: 'Seleziona planimetria', en: 'Select floor plan' })}
-          >
-            {planOptions.map((opt) => (
-              <option key={opt.id} value={opt.id}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => setLayerModal({ mode: 'create' })}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
-            title={t({ it: 'Aggiungi layer', en: 'Add layer' })}
-          >
+	        <div className="flex flex-wrap items-center gap-2">
+	          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+	            <Search size={14} />
+	            <input
+	              value={layerQuery}
+	              onChange={(e) => setLayerQuery(e.target.value)}
+	              placeholder={t({ it: 'Cerca layer…', en: 'Search layers…' })}
+	              className="w-40 bg-transparent text-sm outline-none"
+	            />
+	          </div>
+	          <select
+	            value={clientId}
+	            onChange={(e) => {
+	              setClientId(e.target.value);
+	              setTypeEditor(null);
+	            }}
+	            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink"
+	            title={t({ it: 'Seleziona cliente', en: 'Select client' })}
+	          >
+	            {clientOptions.map((opt) => (
+	              <option key={opt.id} value={opt.id}>
+	                {opt.label}
+	              </option>
+	            ))}
+	          </select>
+	          <button
+	            onClick={() => setLayerModal({ mode: 'create' })}
+	            className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+	            title={t({ it: 'Aggiungi layer', en: 'Add layer' })}
+	          >
             <Plus size={16} />
             {t({ it: 'Nuovo layer', en: 'New layer' })}
           </button>
