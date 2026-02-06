@@ -13,17 +13,29 @@ interface Props {
   onPick: (typeId: string) => void;
   paletteTypeIds?: string[];
   onAddToPalette?: (typeId: string) => void;
-  defaultTab?: 'objects' | 'desks' | 'walls' | 'text' | 'notes';
+  defaultTab?: 'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes';
 }
 
-const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAddToPalette, defaultTab = 'objects' }: Props) => {
+const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAddToPalette, defaultTab = 'all' }: Props) => {
   const t = useT();
   const lang = useLang();
   const [q, setQ] = useState('');
-  const [tab, setTab] = useState<'objects' | 'desks' | 'walls' | 'text' | 'notes'>(defaultTab);
+  const [tab, setTab] = useState<'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes'>(defaultTab);
+  const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [context, setContext] = useState<{ x: number; y: number; typeId: string } | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
+
+  const categoryStyles = useMemo(
+    () => ({
+      desks: { border: '#a78bfa', bg: 'rgba(167, 139, 250, 0.14)', text: '#6d28d9' },
+      walls: { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', text: '#b45309' },
+      text: { border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.16)', text: '#0284c7' },
+      notes: { border: '#facc15', bg: 'rgba(250, 204, 21, 0.18)', text: '#a16207' },
+      objects: { border: '#e2e8f0', bg: '#ffffff', text: '#475569' }
+    }),
+    []
+  );
 
   const paletteSet = useMemo(() => new Set(Array.isArray(paletteTypeIds) ? paletteTypeIds : []), [paletteTypeIds]);
 
@@ -38,16 +50,39 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
     return () => window.removeEventListener('mousedown', onDown);
   }, [context]);
 
-  const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
+  const sortedDefs = useMemo(() => {
     const list = (defs || []).slice();
     list.sort((a, b) => ((a?.name?.[lang] || a.id) as string).localeCompare((b?.name?.[lang] || b.id) as string));
-    if (!query) return list;
-    return list.filter((d) => {
+    return list;
+  }, [defs, lang]);
+
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return sortedDefs;
+    return sortedDefs.filter((d) => {
       const label = ((d?.name?.[lang] as string) || (d?.name?.it as string) || d.id).toLowerCase();
       return label.includes(query) || d.id.toLowerCase().includes(query);
     });
-  }, [defs, lang, q]);
+  }, [lang, q, sortedDefs]);
+
+  const allDeskDefs = useMemo(() => sortedDefs.filter((d) => isDeskType(d.id)), [sortedDefs]);
+  const allWallDefs = useMemo(
+    () => sortedDefs.filter((d) => d.category === 'wall' || String(d.id).startsWith('wall_')),
+    [sortedDefs]
+  );
+  const allTextDefs = useMemo(() => sortedDefs.filter((d) => d.id === 'text'), [sortedDefs]);
+  const allNoteDefs = useMemo(() => sortedDefs.filter((d) => d.id === 'postit'), [sortedDefs]);
+  const allOtherDefs = useMemo(
+    () =>
+      sortedDefs.filter(
+        (d) =>
+          !isDeskType(d.id) &&
+          !(d.category === 'wall' || String(d.id).startsWith('wall_')) &&
+          d.id !== 'text' &&
+          d.id !== 'postit'
+      ),
+    [sortedDefs]
+  );
 
   const deskDefs = useMemo(() => filtered.filter((d) => isDeskType(d.id)), [filtered]);
   const wallDefs = useMemo(
@@ -56,6 +91,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
   );
   const textDefs = useMemo(() => filtered.filter((d) => d.id === 'text'), [filtered]);
   const noteDefs = useMemo(() => filtered.filter((d) => d.id === 'postit'), [filtered]);
+  const allDefs = useMemo(() => filtered, [filtered]);
   const otherDefs = useMemo(
     () =>
       filtered.filter(
@@ -68,7 +104,9 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
     [filtered]
   );
   const activeDefs =
-    tab === 'desks'
+    tab === 'all'
+      ? allDefs
+      : tab === 'desks'
       ? deskDefs
       : tab === 'walls'
         ? wallDefs
@@ -83,24 +121,59 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
     setQ('');
     setContext(null);
     const fallbackTab =
-      (defaultTab === 'desks' && deskDefs.length) ||
-      (defaultTab === 'walls' && wallDefs.length) ||
-      (defaultTab === 'text' && textDefs.length) ||
-      (defaultTab === 'notes' && noteDefs.length) ||
-      (defaultTab === 'objects' && otherDefs.length)
-        ? defaultTab
-        : deskDefs.length
-          ? 'desks'
-          : wallDefs.length
-            ? 'walls'
-            : textDefs.length
-              ? 'text'
-              : noteDefs.length
-                ? 'notes'
-                : 'objects';
+      defaultTab === 'all'
+        ? 'all'
+        : (defaultTab === 'desks' && allDeskDefs.length) ||
+            (defaultTab === 'walls' && allWallDefs.length) ||
+            (defaultTab === 'text' && allTextDefs.length) ||
+            (defaultTab === 'notes' && allNoteDefs.length) ||
+            (defaultTab === 'objects' && allOtherDefs.length)
+          ? defaultTab
+          : allDeskDefs.length
+            ? 'desks'
+            : allWallDefs.length
+              ? 'walls'
+              : allTextDefs.length
+                ? 'text'
+                : allNoteDefs.length
+                  ? 'notes'
+                  : 'all';
     setTab(fallbackTab);
+    setActiveIndex(0);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [defaultTab, deskDefs.length, noteDefs.length, open, otherDefs.length, textDefs.length, wallDefs.length]);
+  }, [allDeskDefs.length, allNoteDefs.length, allOtherDefs.length, allTextDefs.length, allWallDefs.length, defaultTab, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setActiveIndex(activeDefs.length ? 0 : -1);
+  }, [activeDefs.length, open, q, tab]);
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!activeDefs.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex((prev) => {
+        const next = prev < 0 ? 0 : (prev + 1) % activeDefs.length;
+        return next;
+      });
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex((prev) => {
+        const next = prev < 0 ? activeDefs.length - 1 : (prev - 1 + activeDefs.length) % activeDefs.length;
+        return next;
+      });
+      return;
+    }
+    if (e.key === 'Enter') {
+      const def = activeDefs[Math.max(0, activeIndex)];
+      if (!def) return;
+      e.preventDefault();
+      onPick(def.id);
+      onClose();
+    }
+  };
 
   return (
     <Transition show={open} as={Fragment}>
@@ -125,6 +198,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                     ref={inputRef}
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
+                    onKeyDown={handleInputKeyDown}
                     className="w-full bg-transparent text-sm outline-none"
                     placeholder={t({ it: 'Cerca oggetto…', en: 'Search object…' })}
                   />
@@ -132,62 +206,118 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
-                    onClick={() => setTab('desks')}
-                    disabled={!deskDefs.length}
+                    onClick={() => setTab('all')}
                     className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
-                      tab === 'desks'
+                      tab === 'all'
                         ? 'border-primary bg-primary/10 text-primary'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                    title={t({ it: 'Tutti', en: 'All' })}
+                  >
+                    {t({ it: 'Tutti', en: 'All' })}
+                  </button>
+                  <button
+                    onClick={() => setTab('desks')}
+                    disabled={!allDeskDefs.length}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      tab === 'desks'
+                        ? 'bg-primary/10'
+                        : 'hover:bg-slate-50'
                     } disabled:cursor-not-allowed disabled:opacity-50`}
                     title={t({ it: 'Scrivanie', en: 'Desks' })}
+                    style={
+                      tab === 'desks'
+                        ? {
+                            borderColor: categoryStyles.desks.border,
+                            color: categoryStyles.desks.text,
+                            backgroundColor: categoryStyles.desks.bg
+                          }
+                        : { borderColor: categoryStyles.desks.border, color: categoryStyles.desks.text }
+                    }
                   >
                     {t({ it: 'Scrivanie', en: 'Desks' })}
                   </button>
                   <button
                     onClick={() => setTab('walls')}
-                    disabled={!wallDefs.length}
+                    disabled={!allWallDefs.length}
                     className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
                       tab === 'walls'
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        ? 'bg-primary/10'
+                        : 'hover:bg-slate-50'
                     } disabled:cursor-not-allowed disabled:opacity-50`}
                     title={t({ it: 'Mura', en: 'Walls' })}
+                    style={
+                      tab === 'walls'
+                        ? {
+                            borderColor: categoryStyles.walls.border,
+                            color: categoryStyles.walls.text,
+                            backgroundColor: categoryStyles.walls.bg
+                          }
+                        : { borderColor: categoryStyles.walls.border, color: categoryStyles.walls.text }
+                    }
                   >
                     {t({ it: 'Mura', en: 'Walls' })}
                   </button>
                   <button
                     onClick={() => setTab('text')}
-                    disabled={!textDefs.length}
+                    disabled={!allTextDefs.length}
                     className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
                       tab === 'text'
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        ? 'bg-primary/10'
+                        : 'hover:bg-slate-50'
                     } disabled:cursor-not-allowed disabled:opacity-50`}
                     title={t({ it: 'Testo', en: 'Text' })}
+                    style={
+                      tab === 'text'
+                        ? {
+                            borderColor: categoryStyles.text.border,
+                            color: categoryStyles.text.text,
+                            backgroundColor: categoryStyles.text.bg
+                          }
+                        : { borderColor: categoryStyles.text.border, color: categoryStyles.text.text }
+                    }
                   >
                     {t({ it: 'Testo', en: 'Text' })}
                   </button>
                   <button
                     onClick={() => setTab('notes')}
-                    disabled={!noteDefs.length}
+                    disabled={!allNoteDefs.length}
                     className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
                       tab === 'notes'
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        ? 'bg-primary/10'
+                        : 'hover:bg-slate-50'
                     } disabled:cursor-not-allowed disabled:opacity-50`}
                     title={t({ it: 'Scritte', en: 'Notes' })}
+                    style={
+                      tab === 'notes'
+                        ? {
+                            borderColor: categoryStyles.notes.border,
+                            color: categoryStyles.notes.text,
+                            backgroundColor: categoryStyles.notes.bg
+                          }
+                        : { borderColor: categoryStyles.notes.border, color: categoryStyles.notes.text }
+                    }
                   >
                     {t({ it: 'Scritte', en: 'Notes' })}
                   </button>
                   <button
                     onClick={() => setTab('objects')}
-                    disabled={!otherDefs.length}
+                    disabled={!allOtherDefs.length}
                     className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
                       tab === 'objects'
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        ? 'bg-primary/10'
+                        : 'hover:bg-slate-50'
                     } disabled:cursor-not-allowed disabled:opacity-50`}
                     title={t({ it: 'Oggetti', en: 'Objects' })}
+                    style={
+                      tab === 'objects'
+                        ? {
+                            borderColor: categoryStyles.objects.border,
+                            color: categoryStyles.objects.text,
+                            backgroundColor: categoryStyles.objects.bg
+                          }
+                        : { borderColor: categoryStyles.objects.border, color: categoryStyles.objects.text }
+                    }
                   >
                     {t({ it: 'Oggetti', en: 'Objects' })}
                   </button>
@@ -195,9 +325,21 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
 
                 <div className="mt-4 grid max-h-[580px] grid-cols-2 gap-3 overflow-auto sm:grid-cols-4">
                   {activeDefs.length ? (
-                    activeDefs.map((d) => {
+                    activeDefs.map((d, index) => {
                       const label = (d?.name?.[lang] as string) || (d?.name?.it as string) || d.id;
                       const inPalette = paletteSet.has(d.id);
+                      const isActive = index === activeIndex;
+                      const category = isDeskType(d.id)
+                        ? 'desks'
+                        : d.category === 'wall' || String(d.id).startsWith('wall_')
+                          ? 'walls'
+                          : d.id === 'text'
+                            ? 'text'
+                            : d.id === 'postit'
+                              ? 'notes'
+                              : 'objects';
+                      const categoryStyle = categoryStyles[category];
+                      const showCategoryTint = tab === 'all' && category !== 'objects';
                       return (
                         <button
                           key={d.id}
@@ -205,16 +347,29 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                             onPick(d.id);
                             onClose();
                           }}
+                          onMouseEnter={() => setActiveIndex(index)}
                           onContextMenu={(e) => {
                             if (!onAddToPalette) return;
                             e.preventDefault();
                             e.stopPropagation();
                             setContext({ x: e.clientX, y: e.clientY, typeId: d.id });
                           }}
-                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-left hover:bg-slate-50"
+                          className={`flex items-center gap-3 rounded-2xl border px-3 py-3 text-left hover:bg-slate-50 ${
+                            isActive ? 'ring-2 ring-primary/20' : ''
+                          }`}
+                          style={{
+                            backgroundColor: showCategoryTint ? categoryStyle.bg : '#ffffff',
+                            borderColor: isActive ? '#38bdf8' : showCategoryTint ? categoryStyle.border : '#e2e8f0'
+                          }}
                           title={label}
                         >
-                          <div className="grid h-11 w-11 place-items-center rounded-2xl border border-slate-200 bg-white text-primary">
+                          <div
+                            className="grid h-11 w-11 place-items-center rounded-2xl border bg-white text-primary"
+                            style={{
+                              borderColor: showCategoryTint ? categoryStyle.border : '#e2e8f0',
+                              backgroundColor: showCategoryTint ? 'rgba(255,255,255,0.85)' : '#ffffff'
+                            }}
+                          >
                             <Icon name={d.icon} />
                           </div>
                           <div className="min-w-0">

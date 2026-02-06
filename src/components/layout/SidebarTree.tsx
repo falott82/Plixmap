@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, Copy, Crop, FileText, History, Info, Map as MapIcon, MapPinned, Paperclip, Search, Star, Trash } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, FileText, History, Image as ImageIcon, Info, Map as MapIcon, MapPinned, Network, Paperclip, Search, Star, Trash, Users } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -11,10 +11,13 @@ import { updateMyProfile } from '../../api/auth';
 import ClientInfoModal from './ClientInfoModal';
 import ClientAttachmentsModal from './ClientAttachmentsModal';
 import ClientNotesModal from './ClientNotesModal';
+import ClientIpMapModal from './ClientIpMapModal';
+import ClientDirectoryModal from './ClientDirectoryModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import CloneFloorPlanModal from './CloneFloorPlanModal';
 import { useToastStore } from '../../store/useToast';
 import { SEED_CLIENT_ID } from '../../store/data';
+import { fetchImportSummary, ImportSummaryRow } from '../../api/customImport';
 
 type TreeClient = {
   id: string;
@@ -142,6 +145,9 @@ const SidebarTree = () => {
   const [clientInfoId, setClientInfoId] = useState<string | null>(null);
   const [clientNotesId, setClientNotesId] = useState<string | null>(null);
   const [clientAttachmentsId, setClientAttachmentsId] = useState<string | null>(null);
+  const [clientIpMapId, setClientIpMapId] = useState<string | null>(null);
+  const [clientDirectoryId, setClientDirectoryId] = useState<string | null>(null);
+  const [importSummaryByClient, setImportSummaryByClient] = useState<Record<string, ImportSummaryRow>>({});
   const [confirmDelete, setConfirmDelete] = useState<{ kind: 'client' | 'plan'; id: string; label: string } | null>(null);
   const [missingPlansNotice, setMissingPlansNotice] = useState<{ clientName: string } | null>(null);
   const [clonePlan, setClonePlan] = useState<{ planId: string; name: string } | null>(null);
@@ -167,7 +173,37 @@ const SidebarTree = () => {
       [clientAttachmentsId]
     )
   );
+  const ipMapClient = useDataStore(
+    useMemo(
+      () => (s: any) => (clientIpMapId ? s.clients.find((c: any) => c.id === clientIpMapId) : null),
+      [clientIpMapId]
+    )
+  );
+  const directoryClient = useDataStore(
+    useMemo(
+      () => (s: any) => (clientDirectoryId ? s.clients.find((c: any) => c.id === clientDirectoryId) : null),
+      [clientDirectoryId]
+    )
+  );
   const updateClient = useDataStore((s: any) => s.updateClient);
+  const planPhotoCountById = useDataStore(
+    useMemo(
+      () => (s: any) => {
+        const out: Record<string, number> = {};
+        for (const client of s.clients || []) {
+          for (const site of client.sites || []) {
+            for (const plan of site.floorPlans || []) {
+              const count = (plan.objects || []).filter((o: any) => o?.type === 'photo').length;
+              if (count) out[plan.id] = count;
+            }
+          }
+        }
+        return out;
+      },
+      []
+    )
+  );
+  const planMenuPhotoCount = planMenu ? planPhotoCountById[planMenu.planId] || 0 : 0;
 
   const canEditClientNotes = useMemo(() => {
     if (!clientNotesId) return false;
@@ -192,6 +228,26 @@ const SidebarTree = () => {
     };
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetchImportSummary()
+      .then((res) => {
+        if (!active) return;
+        const next: Record<string, ImportSummaryRow> = {};
+        for (const row of res.rows || []) {
+          next[row.clientId] = row;
+        }
+        setImportSummaryByClient(next);
+      })
+      .catch(() => {
+        if (!active) return;
+        setImportSummaryByClient({});
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const orderedClients = useMemo(() => {
@@ -305,17 +361,17 @@ const SidebarTree = () => {
       <div className="flex items-center gap-2 px-4 pb-2">
         <button
           onClick={handleCollapseAll}
-          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
           title={t({ it: 'Compatta tutti i clienti e le sedi', en: 'Collapse all clients and sites' })}
         >
-          {t({ it: 'Compatta tutto', en: 'Collapse all' })}
+          <ChevronsUp size={14} />
         </button>
         <button
           onClick={handleExpandAll}
-          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
           title={t({ it: 'Espandi tutti i clienti e le sedi', en: 'Expand all clients and sites' })}
         >
-          {t({ it: 'Scompatta tutto', en: 'Expand all' })}
+          <ChevronsDown size={14} />
         </button>
       </div>
       <div className="px-4 pb-3 text-xs font-semibold uppercase text-slate-500">
@@ -557,6 +613,24 @@ const SidebarTree = () => {
                   {t({ it: 'Apri su Google Maps', en: 'View in Google Maps' })}
                 </a>
               ) : null}
+              {planMenuPhotoCount ? (
+                <button
+                  onClick={() => {
+                    const to = `/plan/${planMenu.planId}?pg=1`;
+                    setPlanMenu(null);
+                    if (selectedPlanId && selectedPlanId !== planMenu.planId && dirtyByPlan[selectedPlanId]) {
+                      requestSaveAndNavigate?.(to);
+                      return;
+                    }
+                    setSelectedPlan(planMenu.planId);
+                    navigate(to);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                >
+                  <ImageIcon size={14} className="text-slate-600" />
+                  {t({ it: 'Vedi galleria foto', en: 'View photo gallery' })}
+                </button>
+              ) : null}
               <button
                 onClick={async () => {
                   const next = defaultPlanId === planMenu.planId ? null : planMenu.planId;
@@ -693,6 +767,30 @@ const SidebarTree = () => {
               </button>
               <button
                 onClick={() => {
+                  setClientIpMapId(clientMenu.clientId);
+                  setClientMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({ it: 'Apri la mappa IP del cliente', en: 'Open the client IP map' })}
+              >
+                <Network size={14} className="text-slate-500" />
+                {t({ it: 'IP Map', en: 'IP Map' })}
+              </button>
+              {importSummaryByClient[clientMenu.clientId]?.lastImportAt ? (
+                <button
+                  onClick={() => {
+                    setClientDirectoryId(clientMenu.clientId);
+                    setClientMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                  title={t({ it: 'Apri la rubrica utenti importati', en: 'Open the imported users directory' })}
+                >
+                  <Users size={14} className="text-slate-500" />
+                  {t({ it: 'Rubrica utenti', en: 'User directory' })}
+                </button>
+              ) : null}
+              <button
+                onClick={() => {
                   setClientNotesId(clientMenu.clientId);
                   setClientMenu(null);
                 }}
@@ -758,6 +856,8 @@ const SidebarTree = () => {
           updateClient(clientNotesId, payload);
         }}
       />
+      <ClientIpMapModal open={!!clientIpMapId} client={ipMapClient || undefined} onClose={() => setClientIpMapId(null)} />
+      <ClientDirectoryModal open={!!clientDirectoryId} client={directoryClient || undefined} onClose={() => setClientDirectoryId(null)} />
 
       <CloneFloorPlanModal
         open={!!clonePlan}

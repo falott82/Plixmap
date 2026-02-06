@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ChevronRight, Link2, LocateFixed, MinusCircle, Search, Trash2, X } from 'lucide-react';
+import { ChevronRight, Eye, Link2, LocateFixed, MinusCircle, Search, Trash2, X } from 'lucide-react';
 import { IconName, MapObject, PlanLink } from '../../store/types';
+import { TEXT_FONT_OPTIONS } from '../../store/data';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
 
@@ -14,7 +15,9 @@ interface Props {
   getObjectName: (objectId: string) => string;
   onPickObject: (objectId: string) => void;
   onPickLink: (linkId: string) => void;
+  onPreviewObject?: (objectId: string) => void;
   onSetScaleAll?: (scale: number) => void;
+  onSetTextAll?: (payload: { textFont?: string; textSize?: number; textColor?: string }) => void;
   onRemoveFromSelection?: (objectId: string) => void;
   onFocusObject?: (objectId: string) => void;
   onRequestDeleteObject?: (objectId: string) => void;
@@ -31,7 +34,9 @@ const SelectedObjectsModal = ({
   getObjectName,
   onPickObject,
   onPickLink,
+  onPreviewObject,
   onSetScaleAll,
+  onSetTextAll,
   onRemoveFromSelection,
   onFocusObject,
   onRequestDeleteObject,
@@ -41,13 +46,23 @@ const SelectedObjectsModal = ({
   const t = useT();
   const [q, setQ] = useState('');
   const [scaleAll, setScaleAll] = useState<number>(1);
+  const [textFontAll, setTextFontAll] = useState<string>(TEXT_FONT_OPTIONS[0]?.value || 'Arial, sans-serif');
+  const [textSizeAll, setTextSizeAll] = useState<number>(18);
+  const [textColorAll, setTextColorAll] = useState<string>('#000000');
+  const allText = useMemo(() => objects.length > 0 && objects.every((o) => o.type === 'text'), [objects]);
 
   useEffect(() => {
     if (!open) return;
     setQ('');
     const first = objects[0];
     setScaleAll(Number(first?.scale ?? 1) || 1);
-  }, [open]);
+    if (allText) {
+      const fontFallback = TEXT_FONT_OPTIONS[0]?.value || 'Arial, sans-serif';
+      setTextFontAll(String((first as any)?.textFont || fontFallback));
+      setTextSizeAll(Number((first as any)?.textSize ?? 18) || 18);
+      setTextColorAll(String((first as any)?.textColor || '#000000'));
+    }
+  }, [allText, objects, open]);
 
   type Row =
     | { kind: 'object'; obj: MapObject; hay: string }
@@ -127,7 +142,67 @@ const SelectedObjectsModal = ({
                   </button>
                 </div>
 
-                {!readOnly && objects.length && onSetScaleAll ? (
+                {!readOnly && objects.length && allText && onSetTextAll ? (
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="text-sm font-semibold text-ink">{t({ it: 'Stile testo per tutti', en: 'Text style for all' })}</div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-3">
+                      <label className="text-xs font-semibold text-slate-600">
+                        {t({ it: 'Font', en: 'Font' })}
+                        <select
+                          value={textFontAll}
+                          onChange={(e) => setTextFontAll(e.target.value)}
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-700"
+                        >
+                          {TEXT_FONT_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          {t({ it: 'Dimensione', en: 'Size' })}
+                          <span className="ml-auto text-xs font-mono text-slate-500 tabular-nums">{Math.round(textSizeAll)}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={8}
+                          max={96}
+                          step={1}
+                          value={textSizeAll}
+                          onChange={(e) => setTextSizeAll(Number(e.target.value))}
+                          className="mt-1 w-full"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-600">
+                        <span>{t({ it: 'Colore testo', en: 'Text color' })}</span>
+                        <input
+                          type="color"
+                          value={textColorAll}
+                          onChange={(e) => setTextColorAll(e.target.value)}
+                          className="h-7 w-9 rounded border border-slate-200 bg-white"
+                          title={t({ it: 'Colore testo', en: 'Text color' })}
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        onClick={() =>
+                          onSetTextAll({
+                            textFont: textFontAll,
+                            textSize: Number(textSizeAll) || 18,
+                            textColor: textColorAll
+                          })
+                        }
+                        className="shrink-0 btn-primary"
+                        title={t({ it: 'Applica a tutti i testi selezionati', en: 'Apply to all selected texts' })}
+                      >
+                        {t({ it: 'Applica', en: 'Apply' })}
+                      </button>
+                    </div>
+                  </div>
+                ) : !readOnly && objects.length && onSetScaleAll ? (
                   <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-sm font-semibold text-ink">{t({ it: 'Scala uguale per tutti', en: 'Set same scale for all' })}</div>
@@ -200,6 +275,11 @@ const SelectedObjectsModal = ({
                         const o = row.obj;
                         const label = getTypeLabel(o.type);
                         const icon = getTypeIcon(o.type);
+                        const canPreview = (o.type === 'image' || o.type === 'photo') && !!(o as any).imageUrl;
+                        const previewLabel =
+                          o.type === 'photo'
+                            ? t({ it: 'Vedi foto', en: 'View photo' })
+                            : t({ it: 'Vedi immagine', en: 'View image' });
                         return (
                           <div key={o.id} className="flex items-center gap-2 px-2 py-2 hover:bg-slate-50">
                             <button
@@ -216,6 +296,15 @@ const SelectedObjectsModal = ({
                               </div>
                               <ChevronRight size={18} className="text-slate-400" />
                             </button>
+                            {canPreview && onPreviewObject ? (
+                              <button
+                                onClick={() => onPreviewObject(o.id)}
+                                className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                title={previewLabel}
+                              >
+                                <Eye size={16} />
+                              </button>
+                            ) : null}
                             {showMultiActions && onFocusObject ? (
                               <button
                                 onClick={() => onFocusObject(o.id)}

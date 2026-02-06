@@ -91,6 +91,15 @@ const migrations = [
         db.exec("ALTER TABLE client_user_import ADD COLUMN method TEXT NOT NULL DEFAULT 'POST'");
       }
     }
+  },
+  {
+    version: 5,
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info('external_users')").all().map((c) => c.name);
+      if (!cols.includes('mobile')) {
+        db.exec("ALTER TABLE external_users ADD COLUMN mobile TEXT NOT NULL DEFAULT ''");
+      }
+    }
   }
 ];
 
@@ -214,6 +223,7 @@ const openDb = () => {
       dept2 TEXT NOT NULL DEFAULT '',
       dept3 TEXT NOT NULL DEFAULT '',
       email TEXT NOT NULL DEFAULT '',
+      mobile TEXT NOT NULL DEFAULT '',
       ext1 TEXT NOT NULL DEFAULT '',
       ext2 TEXT NOT NULL DEFAULT '',
       ext3 TEXT NOT NULL DEFAULT '',

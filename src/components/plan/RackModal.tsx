@@ -69,6 +69,8 @@ const typeColors: Record<RackItemType, string> = {
   misc: '#64748b'
 };
 
+const normalizeRackName = (value: string) => value.trim().toLowerCase();
+
 const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false, onClose }: Props) => {
   const t = useT();
   const getTypeLabel = (type: RackItemType) => {
@@ -93,6 +95,21 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
   const [totalUnits, setTotalUnits] = useState(rack?.totalUnits || 42);
   const [rackNotes, setRackNotes] = useState(rack?.notes || '');
   const [rackSearch, setRackSearch] = useState('');
+  const rackNameCandidate = (name || '').trim() || t({ it: 'Rack', en: 'Rack' });
+  const rackNameKey = normalizeRackName(rackNameCandidate);
+  const duplicateRackName = useMemo(() => {
+    if (!rackNameKey) return false;
+    const rackEntries =
+      (plan.racks || []).length > 0
+        ? plan.racks || []
+        : (plan.objects || []).filter((obj) => obj.type === 'rack').map((obj) => ({ id: obj.id, name: obj.name || '' }));
+    return rackEntries.some((entry) => entry.id !== rackObjectId && normalizeRackName(String(entry.name || '')) === rackNameKey);
+  }, [plan.objects, plan.racks, rackNameKey, rackObjectId]);
+  const rackNameInputClass = rackNameKey
+    ? duplicateRackName
+      ? 'border-rose-300 bg-rose-50 text-rose-700 focus:ring-rose-200'
+      : 'border-emerald-200 bg-emerald-50 text-slate-800 focus:ring-emerald-200'
+    : 'border-slate-200';
   const [addPrompt, setAddPrompt] = useState<{
     type: RackItemType;
     step: 'units' | 'place';
@@ -512,6 +529,20 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
   const handleSaveRack = () => {
     if (readOnly) return;
     const trimmed = name.trim() || t({ it: 'Rack', en: 'Rack' });
+    if (!normalizeRackName(trimmed)) {
+      push(t({ it: 'Inserisci un nome rack valido.', en: 'Enter a valid rack name.' }), 'info');
+      return;
+    }
+    if (duplicateRackName) {
+      push(
+        t({
+          it: 'Esiste già un rack con questo nome nella planimetria. Scegli un nome diverso.',
+          en: 'A rack with this name already exists in this floor plan. Choose a different name.'
+        }),
+        'info'
+      );
+      return;
+    }
     updateRack(plan.id, rackObjectId, { name: trimmed, totalUnits, notes: rackNotes.trim() });
     updateObject(rackObjectId, { name: trimmed });
     rackNotesDirtyRef.current = false;
@@ -1130,8 +1161,16 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                         <input
                           value={name}
                           onChange={(e) => setName(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 ${rackNameInputClass}`}
                         />
+                        {duplicateRackName ? (
+                          <div className="mt-1 text-xs font-semibold text-rose-600">
+                            {t({
+                              it: 'Nome già usato nella planimetria.',
+                              en: 'Name already used in this floor plan.'
+                            })}
+                          </div>
+                        ) : null}
                       </label>
                       <label className="mt-2 block text-sm font-medium text-slate-700">
                         {t({ it: 'Unità totali (U)', en: 'Total units (U)' })}

@@ -1,12 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { X } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
 import { IconName, MapObjectType, WifiAntennaModel } from '../../store/types';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { TEXT_FONT_OPTIONS, WIFI_DEFAULT_STANDARD, WIFI_STANDARD_OPTIONS } from '../../store/data';
 import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
+import { isDeskType } from './deskTypes';
 
 interface Props {
   open: boolean;
@@ -44,6 +45,8 @@ interface Props {
     wifiCoverageSqm?: number;
     wifiCatalogId?: string;
     wifiShowRange?: boolean;
+    ip?: string;
+    url?: string;
   }) => void;
   initialName?: string;
   initialDescription?: string;
@@ -85,8 +88,13 @@ interface Props {
   initialWifiCoverageSqm?: number;
   initialWifiCatalogId?: string;
   initialWifiShowRange?: boolean;
+  initialIp?: string;
+  initialUrl?: string;
   wifiModels?: WifiAntennaModel[];
+  existingRackObjects?: { id: string; name: string }[];
 }
+
+const normalizeRackName = (value: string) => value.trim().toLowerCase();
 
 const ObjectModal = ({
   open,
@@ -132,7 +140,10 @@ const ObjectModal = ({
   initialWifiCoverageSqm,
   initialWifiCatalogId,
   initialWifiShowRange,
-  wifiModels = []
+  initialIp,
+  initialUrl,
+  wifiModels = [],
+  existingRackObjects = []
 }: Props) => {
   const t = useT();
   const [name, setName] = useState(initialName);
@@ -168,6 +179,8 @@ const ObjectModal = ({
   const [wifiCatalogQuery, setWifiCatalogQuery] = useState('');
   const [wifiCatalogSearchOpen, setWifiCatalogSearchOpen] = useState(false);
   const [wifiCatalogSelectedId, setWifiCatalogSelectedId] = useState('');
+  const [ipAddress, setIpAddress] = useState(initialIp || '');
+  const [urlValue, setUrlValue] = useState(initialUrl || '');
   const [wifiBrand, setWifiBrand] = useState('');
   const [wifiModel, setWifiModel] = useState('');
   const [wifiModelCode, setWifiModelCode] = useState('');
@@ -181,7 +194,24 @@ const ObjectModal = ({
   const isQuote = type === 'quote';
   const isText = type === 'text';
   const isImage = type === 'image';
+  const isPhoto = type === 'photo';
+  const isImageLike = isImage || isPhoto;
   const isPostIt = type === 'postit';
+  const isDesk = type ? isDeskType(type) : false;
+  const isWall = typeof type === 'string' && String(type).startsWith('wall_');
+  const canHaveNetworkFields =
+    !!type && !isQuote && !isText && !isImageLike && !isPostIt && !isDesk && !isWall && type !== 'user' && type !== 'real_user';
+  const ipIsValid = useMemo(() => {
+    const raw = ipAddress.trim();
+    if (!raw) return true;
+    const parts = raw.split('.');
+    if (parts.length !== 4) return false;
+    return parts.every((part) => {
+      if (!part || !/^\d+$/.test(part)) return false;
+      const value = Number(part);
+      return Number.isInteger(value) && value >= 0 && value <= 255;
+    });
+  }, [ipAddress]);
   const isEdit = !!objectId;
   const wifiModelsById = useMemo(() => {
     const map = new Map<string, WifiAntennaModel>();
@@ -212,6 +242,24 @@ const ObjectModal = ({
     wifiSource,
     wifiStandard
   ]);
+  const isRack = type === 'rack';
+  const rackNameCandidate = (name || '').trim();
+  const rackNameKey = rackNameCandidate ? normalizeRackName(rackNameCandidate) : '';
+  const duplicateRackName = useMemo(() => {
+    if (!isRack || !rackNameKey) return false;
+    for (const entry of existingRackObjects) {
+      if (!entry?.name || entry.id === objectId) continue;
+      if (normalizeRackName(entry.name) === rackNameKey) return true;
+    }
+    return false;
+  }, [existingRackObjects, isRack, objectId, rackNameKey]);
+  const rackNameInputClass = isRack
+    ? rackNameKey
+      ? duplicateRackName
+        ? 'border-rose-300 bg-rose-50 text-rose-700 focus:ring-rose-200'
+        : 'border-emerald-200 bg-emerald-50 text-slate-800 focus:ring-emerald-200'
+      : 'border-slate-200'
+    : 'border-slate-200';
   const wifiCoverageValue = useMemo(() => {
     const coverageRaw = wifiCoverageSqm.trim().replace(',', '.');
     const coverageValue = coverageRaw ? Number(coverageRaw) : NaN;
@@ -244,10 +292,12 @@ const ObjectModal = ({
   const hasWifiCatalog = wifiModels.length > 0;
   const canSave = useMemo(() => {
     if (readOnly) return false;
-    if (type !== 'quote' && type !== 'image' && !name.trim()) return false;
-    if (isImage && !imageUrl) return false;
+    if (type !== 'quote' && type !== 'image' && type !== 'photo' && !name.trim()) return false;
+    if (isImageLike && !imageUrl) return false;
+    if (isRack && duplicateRackName) return false;
+    if (canHaveNetworkFields && !ipIsValid) return false;
     return wifiFormValid;
-  }, [imageUrl, isImage, name, readOnly, type, wifiFormValid]);
+  }, [canHaveNetworkFields, duplicateRackName, imageUrl, ipIsValid, isImageLike, isRack, name, readOnly, type, wifiFormValid]);
   const customFields = useMemo(() => (type ? getFieldsForType(type) : []), [getFieldsForType, type]);
   const quoteOrientation = useMemo(() => {
     if (!initialQuotePoints || initialQuotePoints.length < 2) return 'horizontal' as const;
@@ -455,6 +505,8 @@ const ObjectModal = ({
       setWifiCatalogQuery('');
       setWifiCatalogSearchOpen(false);
       setWifiCatalogSelectedId('');
+      setIpAddress(initialIp || '');
+      setUrlValue(initialUrl || '');
       window.setTimeout(() => nameRef.current?.focus(), 0);
     }
   }, [
@@ -489,6 +541,8 @@ const ObjectModal = ({
     initialWifiCoverageSqm,
     initialWifiCatalogId,
     initialWifiShowRange,
+    initialIp,
+    initialUrl,
     open,
     wifiModels,
     wifiModelsById
@@ -556,7 +610,7 @@ const ObjectModal = ({
   }, [wifiCatalogSearchOpen, wifiCatalogSelectedId]);
 
   useEffect(() => {
-    if (!open || !isImage) return;
+    if (!open || !isImageLike) return;
     if (!imageUrl) return;
     if (imageWidth > 0 && imageHeight > 0) return;
     const img = new Image();
@@ -566,7 +620,7 @@ const ObjectModal = ({
       setImageHeight(fitted.height);
     };
     img.src = imageUrl;
-  }, [imageHeight, imageUrl, imageWidth, isImage, open]);
+  }, [imageHeight, imageUrl, imageWidth, isImageLike, open]);
 
   useEffect(() => {
     if (!open || !isWifi) return;
@@ -644,8 +698,17 @@ const ObjectModal = ({
   }, [closeWifiCatalogSearch, open]);
 
   const handleSave = () => {
-    if (type !== 'quote' && type !== 'image' && !name.trim()) return;
-    if (isImage && !imageUrl) return;
+    if (type !== 'quote' && type !== 'image' && type !== 'photo' && !name.trim()) return;
+    if (isImageLike && !imageUrl) return;
+    if (isRack && duplicateRackName) {
+      nameRef.current?.focus();
+      return;
+    }
+    if (canHaveNetworkFields && !ipIsValid) {
+      return;
+    }
+    const trimmedIp = ipAddress.trim();
+    const trimmedUrl = urlValue.trim();
     const dbRaw = wifiDb.trim().replace(',', '.');
     const dbValue = dbRaw ? Number(dbRaw) : undefined;
     const coverageRaw = wifiCoverageSqm.trim().replace(',', '.');
@@ -683,7 +746,13 @@ const ObjectModal = ({
             textBgColor: textBgColor || '#ffffff'
           }
         : {}),
-      ...(isImage
+      ...(canHaveNetworkFields
+        ? {
+            ip: trimmedIp,
+            url: trimmedUrl
+          }
+        : {}),
+      ...(isImageLike
         ? {
             imageUrl: imageUrl || undefined,
             imageWidth: Number.isFinite(imageWidth) && imageWidth > 0 ? imageWidth : undefined,
@@ -761,13 +830,13 @@ const ObjectModal = ({
                       : isWifi
                         ? t({ it: 'Device Name', en: 'Device Name' })
                         : t({ it: 'Nome', en: 'Name' })}{' '}
-                    {!isQuote && !isImage ? <span className="text-rose-600">*</span> : null}
+                    {!isQuote && !isImage && !isPhoto ? <span className="text-rose-600">*</span> : null}
                     {isText || isPostIt ? (
                       <textarea
                         ref={nameRef as any}
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${rackNameInputClass}`}
                         placeholder={
                           isPostIt
                             ? t({ it: 'Scrivi una nota...', en: 'Write a note...' })
@@ -786,14 +855,24 @@ const ObjectModal = ({
                             handleSave();
                           }
                         }}
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${rackNameInputClass}`}
                         placeholder={
                           isImage
                             ? t({ it: 'Es. Logo ufficio', en: 'e.g. Office logo' })
-                            : t({ it: 'Es. Stampante HR', en: 'e.g. HR Printer' })
+                            : isPhoto
+                              ? t({ it: 'Es. Foto sala riunioni', en: 'e.g. Meeting room photo' })
+                              : t({ it: 'Es. Stampante HR', en: 'e.g. HR Printer' })
                         }
                       />
                     )}
+                    {isRack && duplicateRackName ? (
+                      <div className="mt-1 text-xs font-semibold text-rose-600">
+                        {t({
+                          it: 'Esiste già un rack con questo nome nella planimetria. Scegli un nome diverso.',
+                          en: 'A rack with this name already exists in this floor plan. Choose a different name.'
+                        })}
+                      </div>
+                    ) : null}
                   </label>
                   {!isText && !isImage && !isPostIt ? (
                     <label className="block text-sm font-medium text-slate-700">
@@ -806,6 +885,51 @@ const ObjectModal = ({
                         rows={3}
                       />
                     </label>
+                  ) : null}
+                  {canHaveNetworkFields ? (
+                    <div className="space-y-3">
+                      <label className="block text-sm font-medium text-slate-700">
+                        {t({ it: 'IP', en: 'IP address' })}
+                        <input
+                          value={ipAddress}
+                          onChange={(e) => setIpAddress(e.target.value)}
+                          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${
+                            ipIsValid ? 'border-slate-200' : 'border-rose-300 bg-rose-50 text-rose-700 focus:ring-rose-200'
+                          }`}
+                          placeholder={t({ it: 'Es. 192.168.1.10', en: 'e.g. 192.168.1.10' })}
+                        />
+                        {!ipIsValid ? (
+                          <div className="mt-1 text-xs font-semibold text-rose-600">
+                            {t({ it: 'Formato IP non valido.', en: 'Invalid IP format.' })}
+                          </div>
+                        ) : null}
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        {t({ it: 'URL', en: 'URL' })}
+                        <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:ring-2 focus-within:ring-primary/30">
+                          <input
+                            value={urlValue}
+                            onChange={(e) => setUrlValue(e.target.value)}
+                            className="w-full bg-transparent text-sm outline-none"
+                            placeholder={t({ it: 'Es. https://device.local', en: 'e.g. https://device.local' })}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const raw = urlValue.trim();
+                              if (!raw) return;
+                              const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+                              window.open(normalized, '_blank', 'noopener,noreferrer');
+                            }}
+                            disabled={!urlValue.trim()}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={t({ it: 'Apri URL', en: 'Open URL' })}
+                          >
+                            <ExternalLink size={14} />
+                          </button>
+                        </div>
+                      </label>
+                    </div>
                   ) : null}
                   {isText ? (
                     <div className="rounded-xl border border-slate-200 bg-slate-50/40 px-3 py-3">
@@ -913,7 +1037,7 @@ const ObjectModal = ({
                       </div>
                     </div>
                   ) : null}
-                  {isImage ? (
+                  {isImageLike ? (
                     <div className="rounded-xl border border-slate-200 bg-slate-50/40 px-3 py-3">
                       <div className="text-sm font-semibold text-ink">{t({ it: 'Immagine', en: 'Image' })}</div>
                       <div className="mt-2 flex flex-col gap-2 text-xs text-slate-600">
@@ -1200,7 +1324,7 @@ const ObjectModal = ({
                       </div>
                     </div>
                   ) : null}
-                  {!isQuote && !isText && !isImage && !isPostIt && layers.length ? (
+                  {!isQuote && !isText && !isImageLike && !isPostIt && layers.length ? (
                     <div>
                       <div className="text-sm font-medium text-slate-700">{t({ it: 'Livelli', en: 'Layers' })}</div>
                       <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1232,7 +1356,7 @@ const ObjectModal = ({
                       </div>
                     </div>
                   ) : null}
-                  {!isQuote && !isText && !isImage && !isPostIt ? (
+                  {!isQuote && !isText && !isImageLike && !isPostIt ? (
                     <div>
                       <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
                         {t({ it: 'Scala oggetto', en: 'Object scale' })}
@@ -1400,7 +1524,7 @@ const ObjectModal = ({
                         </div>
                   ) : null}
 
-                  {!isText && !isImage && !isPostIt && customFields.length ? (
+                  {!isText && !isImageLike && !isPostIt && customFields.length ? (
                     <div>
                       <div className="text-sm font-medium text-slate-700">{t({ it: 'Campi personalizzati', en: 'Custom fields' })}</div>
                       <div className="mt-2 space-y-2">

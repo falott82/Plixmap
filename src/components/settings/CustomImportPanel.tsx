@@ -157,9 +157,9 @@ const CustomImportPanel = () => {
     }
     if (!query) return list;
     return list.filter((r) => {
-      const hay = `${r.externalId} ${r.firstName} ${r.lastName} ${r.role} ${r.dept1} ${r.dept2} ${r.dept3} ${r.email}`.toLowerCase();
-      return hay.includes(query);
-    });
+    const hay = `${r.externalId} ${r.firstName} ${r.lastName} ${r.role} ${r.dept1} ${r.dept2} ${r.dept3} ${r.email} ${r.mobile}`.toLowerCase();
+    return hay.includes(query);
+  });
   }, [assignedCounts, includeHidden, includeMissing, onlyUnassigned, usersQuery, usersRows]);
 
   const formatDate = (ts: number | null | undefined) => {
@@ -306,8 +306,8 @@ const CustomImportPanel = () => {
 
   const downloadCsvTemplate = () => {
     const template = [
-      'externalId,firstName,lastName,role,dept1,dept2,dept3,email,ext1,ext2,ext3,isExternal',
-      'u-001,Mario,Rossi,HR,People,,,mario.rossi@example.com,101,,,"0"'
+      'externalId,firstName,lastName,role,dept1,dept2,dept3,email,mobile,ext1,ext2,ext3,isExternal',
+      'u-001,Mario,Rossi,HR,People,,,mario.rossi@example.com,+39 333 1234567,101,,,"0"'
     ].join('\n');
     const blob = new Blob([template], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -789,7 +789,7 @@ const CustomImportPanel = () => {
                         value={usersQuery}
                         onChange={(e) => setUsersQuery(e.target.value)}
                         className="h-10 w-full rounded-xl border border-slate-200 pl-9 pr-3 text-sm outline-none focus:border-primary"
-                        placeholder={t({ it: 'Cerca per nome, reparto, email…', en: 'Search by name, dept, email…' })}
+                        placeholder={t({ it: 'Cerca per nome, reparto, email, cellulare…', en: 'Search by name, dept, email, mobile…' })}
                         autoFocus
                       />
                     </div>
@@ -832,6 +832,7 @@ const CustomImportPanel = () => {
                       {filteredUsers.map((r) => {
                         const count = assignedCounts.get(`${r.clientId}:${r.externalId}`) || 0;
                         const displayName = `${String(r.firstName || '').trim()} ${String(r.lastName || '').trim()}`.trim() || r.email || r.externalId;
+                        const contact = [r.email, r.mobile].filter(Boolean).join(' · ');
                         return (
                           <div key={r.externalId} className="grid grid-cols-12 gap-2 border-t border-slate-200 px-4 py-3 text-sm">
                             <div className="col-span-4 min-w-0">
@@ -848,7 +849,7 @@ const CustomImportPanel = () => {
                                   </span>
                                 ) : null}
                               </div>
-                              <div className="truncate text-xs text-slate-500">{r.email || ''}</div>
+                              <div className="truncate text-xs text-slate-500">{contact}</div>
                             </div>
                             <div className="col-span-2 font-mono text-[12px] text-slate-700">{r.externalId}</div>
                             <div className="col-span-4 min-w-0">

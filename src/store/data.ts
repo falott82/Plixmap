@@ -14,7 +14,7 @@ export const DEFAULT_CCTV_TYPES = ['camera'];
 export const DEFAULT_RACK_TYPES = ['rack'];
 export const DEFAULT_WIFI_TYPES = ['wifi'];
 export const DEFAULT_TEXT_TYPES = ['text', 'postit'];
-export const DEFAULT_IMAGE_TYPES = ['image'];
+export const DEFAULT_IMAGE_TYPES = ['image', 'photo'];
 export const WIFI_STANDARD_OPTIONS = [
   { id: '802.11', it: 'WiFi 1 (802.11)', en: 'WiFi 1 (802.11)' },
   { id: '802.11b', it: 'WiFi 2 (802.11b)', en: 'WiFi 2 (802.11b)' },
@@ -110,6 +110,7 @@ export const DEFAULT_DEVICE_TYPES = [
   'video_intercom',
   'router',
   'switch',
+  'ups',
   'printer',
   'scanner',
   'dect',
@@ -371,6 +372,7 @@ export const defaultObjectTypes: ObjectTypeDefinition[] = [
   { id: 'rack', name: { it: 'Rack rete', en: 'Network rack' }, icon: 'server', builtin: true },
   { id: 'router', name: { it: 'Router', en: 'Router' }, icon: 'router', builtin: true },
   { id: 'switch', name: { it: 'Switch', en: 'Switch' }, icon: 'switch', builtin: true },
+  { id: 'ups', name: { it: 'UPS', en: 'UPS' }, icon: 'battery', builtin: true },
   { id: 'printer', name: { it: 'Stampante', en: 'Printer' }, icon: 'printer', builtin: true },
   { id: 'scanner', name: { it: 'Scanner', en: 'Scanner' }, icon: 'scanner', builtin: true },
   { id: 'dect', name: { it: 'Antenna DECT', en: 'DECT antenna' }, icon: 'radio', builtin: true },
@@ -391,6 +393,7 @@ export const defaultObjectTypes: ObjectTypeDefinition[] = [
   { id: 'laptop', name: { it: 'Portatile', en: 'Laptop' }, icon: 'laptop', builtin: true },
   { id: 'text', name: { it: 'Testo', en: 'Text' }, icon: 'text', builtin: true },
   { id: 'image', name: { it: 'Immagine', en: 'Image' }, icon: 'image', builtin: true },
+  { id: 'photo', name: { it: 'Foto', en: 'Photo' }, icon: 'image', builtin: true },
   { id: 'postit', name: { it: 'Post-it', en: 'Post-it' }, icon: 'postit', builtin: true },
   { id: 'wall_concrete', name: { it: 'Cemento', en: 'Concrete' }, icon: 'cable', builtin: true, attenuationDb: 15, category: 'wall' },
   { id: 'wall_drywall_standard', name: { it: 'Cartongesso (Standard)', en: 'Drywall (Standard)' }, icon: 'cable', builtin: true, attenuationDb: 3, category: 'wall' },

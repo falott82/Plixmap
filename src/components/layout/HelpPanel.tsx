@@ -279,7 +279,18 @@ const HelpPanel = () => {
                           en: 'Real user: if import is configured, you can drag “Real user” and pick an employee from a searchable list (with “only unassigned” filter).'
                         })}
                       </li>
-                      <li>{t({ it: 'Alla creazione inserisci nome (obbligatorio) e descrizione (opzionale).', en: 'On creation, enter a name (required) and a description (optional).' })}</li>
+                      <li>
+                        {t({
+                          it: 'Alla creazione inserisci nome (obbligatorio; tranne immagini/foto/quote) e descrizione (opzionale).',
+                          en: 'On creation, enter a name (required; except images/photos/quotes) and a description (optional).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Foto: l’oggetto mostra un’icona; doppio click per aprire la foto. Con più foto selezionate si apre la galleria con download.',
+                          en: 'Photos: the object shows an icon; double click to open the photo. With multiple photos selected, a gallery opens with download.'
+                        })}
+                      </li>
                       <li>{t({ it: 'Tasto destro su un oggetto: modifica/duplica/scala/elimina.', en: 'Right-click an object: edit/duplicate/scale/delete.' })}</li>
                       <li>
                         {t({
@@ -505,6 +516,30 @@ const HelpPanel = () => {
                         {t({
                           it: 'L: collega 2 oggetti selezionati (se compatibili).',
                           en: 'L: link 2 selected objects (if compatible).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'N: rinomina l’oggetto selezionato (se ha un nome).',
+                          en: 'N: rename the selected object (if it has a name).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Ctrl+R / Cmd+R: apre la rubrica utenti importati del cliente corrente (se disponibile).',
+                          en: 'Ctrl+R / Cmd+R: opens the current client user directory (if available).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Rubrica utenti: Frecce per navigare e Cmd+M per aprire l’email selezionata.',
+                          en: 'User directory: use arrows to navigate and Cmd+M to open the selected email.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'IP Map: Frecce per navigare e U per aprire l’URL selezionato.',
+                          en: 'IP Map: use arrows to navigate and U to open the selected URL.'
                         })}
                       </li>
                       <li>

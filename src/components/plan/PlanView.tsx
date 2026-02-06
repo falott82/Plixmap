@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
 import {
@@ -34,6 +34,7 @@ import {
   Redo2,
   Type as TypeIcon,
   Image as ImageIcon,
+  Camera,
   StickyNote
 } from 'lucide-react';
 import Toolbar from './Toolbar';
@@ -73,6 +74,7 @@ import CableModal from './CableModal';
 import LinksModal from './LinksModal';
 import LinkEditModal from './LinkEditModal';
 import RealUserDetailsModal from './RealUserDetailsModal';
+import PhotoViewerModal, { PhotoItem } from './PhotoViewerModal';
 import { useClipboard } from './useClipboard';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
@@ -270,10 +272,10 @@ const PlanView = ({ planId }: Props) => {
                     ? ['quotes']
                     : typeId === 'text'
                       ? ['text']
-                      : typeId === 'image'
-                        ? ['images']
-                        : typeId === 'postit'
-                          ? ['text']
+                    : typeId === 'image' || typeId === 'photo'
+                      ? ['images']
+                      : typeId === 'postit'
+                        ? ['text']
                     : isWallType(typeId)
                       ? ['walls']
                       : ['devices'];
@@ -436,6 +438,7 @@ const PlanView = ({ planId }: Props) => {
   const [confirmClearObjects, setConfirmClearObjects] = useState(false);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkEditSelectionOpen, setBulkEditSelectionOpen] = useState(false);
+  const returnToBulkEditRef = useRef(false);
   const [selectedObjectsModalOpen, setSelectedObjectsModalOpen] = useState(false);
   const [chooseDefaultModal, setChooseDefaultModal] = useState<{ deletingViewId: string } | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -506,8 +509,6 @@ const PlanView = ({ planId }: Props) => {
   const [presenceOpen, setPresenceOpen] = useState(false);
   const [layersPopoverOpen, setLayersPopoverOpen] = useState(false);
   const [layersQuickMenu, setLayersQuickMenu] = useState<{ x: number; y: number } | null>(null);
-  const [suppressMultiSelectionBox, setSuppressMultiSelectionBox] = useState(false);
-  const suppressSelectionKeyRef = useRef<string>('');
   const [layerRevealPrompt, setLayerRevealPrompt] = useState<{
     objectId: string;
     objectName: string;
@@ -551,6 +552,14 @@ const PlanView = ({ planId }: Props) => {
   const [linksModalObjectId, setLinksModalObjectId] = useState<string | null>(null);
   const [linkEditId, setLinkEditId] = useState<string | null>(null);
   const [realUserDetailsId, setRealUserDetailsId] = useState<string | null>(null);
+  const [photoViewer, setPhotoViewer] = useState<{
+    photos: PhotoItem[];
+    initialId?: string;
+    title?: { it: string; en: string };
+    countLabel?: { it: string; en: string };
+    itemLabel?: { it: string; en: string };
+    emptyLabel?: { it: string; en: string };
+  } | null>(null);
   const [roomDrawMode, setRoomDrawMode] = useState<'rect' | 'poly' | null>(null);
   const [wallDrawMode, setWallDrawMode] = useState(false);
   const [wallDrawType, setWallDrawType] = useState<MapObjectType | null>(null);
@@ -664,10 +673,10 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     panRef.current = pan;
   }, [pan]);
-  const handleMapMouseMove = useCallback((event: MouseEvent<HTMLDivElement>) => {
+  const handleMapMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
   }, []);
-  const handleMapMouseDown = useCallback((event: MouseEvent<HTMLDivElement>) => {
+  const handleMapMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
     lastPointerClickRef.current = { x: event.clientX, y: event.clientY };
   }, []);
@@ -2439,6 +2448,22 @@ const PlanView = ({ planId }: Props) => {
   const contextIsWall = contextObject ? isWallType(contextObject.type) : false;
   const contextIsQuote = contextObject?.type === 'quote';
   const contextIsWifi = contextObject?.type === 'wifi';
+  const contextIsPhoto = contextObject?.type === 'photo';
+  const contextPhotoSelectionIds = useMemo(() => {
+    if (!contextIsPhoto || !renderPlan) return [];
+    const ids =
+      contextIsMulti && selectedObjectIds.length
+        ? selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'photo')
+        : contextMenu && contextMenu.kind === 'object'
+          ? [contextMenu.id]
+          : [];
+    return ids;
+  }, [contextIsMulti, contextIsPhoto, contextMenu, renderPlan, selectedObjectIds]);
+  const contextPhotoMulti = contextPhotoSelectionIds.length > 1;
+  const planPhotoIds = useMemo(() => {
+    if (!renderPlan) return [];
+    return renderPlan.objects.filter((o) => o.type === 'photo').map((o) => o.id);
+  }, [renderPlan]);
   const contextWifiRangeOn = contextIsWifi ? (contextObject as any)?.wifiShowRange !== false : false;
   const contextWallPolygon = useMemo(() => {
     if (!contextIsWall || !contextMenu || contextMenu.kind !== 'object') return null;
@@ -2496,13 +2521,20 @@ const PlanView = ({ planId }: Props) => {
       return !!obj && isDeskType(obj.type);
     });
   }, [renderPlan, selectedObjectIds]);
+  const selectionHasPhoto = useMemo(() => {
+    if (!renderPlan) return false;
+    if (!selectedObjectIds?.length) return false;
+    return selectedObjectIds.some((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'photo');
+  }, [renderPlan, selectedObjectIds]);
+  const selectionPhotoIds = useMemo(() => {
+    if (!renderPlan || !selectedObjectIds?.length) return [];
+    return selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'photo');
+  }, [renderPlan, selectedObjectIds]);
   const selectionAllRealUsers = useMemo(() => {
     if (!renderPlan) return false;
     if (!selectedObjectIds?.length) return false;
     return selectedObjectIds.every((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'real_user');
   }, [renderPlan, selectedObjectIds]);
-
-  const selectionKeyForIds = useCallback((ids: string[]) => ids.slice().sort().join('|'), []);
 
   useEffect(() => {
     planRef.current = renderPlan;
@@ -2513,20 +2545,6 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     selectedObjectIdsRef.current = selectedObjectIds;
   }, [selectedObjectIds]);
-  useEffect(() => {
-    if (!suppressMultiSelectionBox) return;
-    const ids = selectedObjectIds || [];
-    if (ids.length < 2) {
-      suppressSelectionKeyRef.current = '';
-      setSuppressMultiSelectionBox(false);
-      return;
-    }
-    const key = selectionKeyForIds(ids);
-    if (key !== suppressSelectionKeyRef.current) {
-      suppressSelectionKeyRef.current = '';
-      setSuppressMultiSelectionBox(false);
-    }
-  }, [selectedObjectIds, selectionKeyForIds, suppressMultiSelectionBox]);
   useEffect(() => {
     if (!renderPlan || selectedObjectIds.length < 2) {
       multiToastKeyRef.current = '';
@@ -2664,8 +2682,9 @@ const PlanView = ({ planId }: Props) => {
     }
     const textIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'text');
     const imageIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'image');
+    const photoIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'photo');
     const postitIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'postit');
-    if (!textIds.length && !imageIds.length && !postitIds.length) {
+    if (!textIds.length && !imageIds.length && !photoIds.length && !postitIds.length) {
       mediaToastKeyRef.current = '';
       if (mediaToastIdRef.current != null) {
         toast.dismiss(mediaToastIdRef.current);
@@ -2673,7 +2692,10 @@ const PlanView = ({ planId }: Props) => {
       }
       return;
     }
-    const key = `t:${textIds.slice().sort().join(',')}|i:${imageIds.slice().sort().join(',')}|p:${postitIds
+    const key = `t:${textIds.slice().sort().join(',')}|i:${imageIds.slice().sort().join(',')}|ph:${photoIds
+      .slice()
+      .sort()
+      .join(',')}|p:${postitIds
       .slice()
       .sort()
       .join(',')}`;
@@ -2683,7 +2705,7 @@ const PlanView = ({ planId }: Props) => {
       toast.dismiss(mediaToastIdRef.current);
     }
     const message =
-      textIds.length && !imageIds.length && !postitIds.length
+      textIds.length && !imageIds.length && !photoIds.length && !postitIds.length
         ? renderKeybindToast(
             { it: 'Testo selezionato', en: 'Text selected' },
             [
@@ -2701,7 +2723,7 @@ const PlanView = ({ planId }: Props) => {
               { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
             ]
           )
-        : imageIds.length && !textIds.length && !postitIds.length
+        : imageIds.length && !textIds.length && !photoIds.length && !postitIds.length
           ? renderKeybindToast(
               { it: 'Immagine selezionata', en: 'Image selected' },
               [
@@ -2714,9 +2736,20 @@ const PlanView = ({ planId }: Props) => {
                 { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
               ]
             )
-          : postitIds.length && !textIds.length && !imageIds.length
-            ? renderKeybindToast(
-                { it: 'Post-it selezionato', en: 'Post-it selected' },
+            : photoIds.length && !textIds.length && !imageIds.length && !postitIds.length
+              ? renderKeybindToast(
+                  { it: 'Foto selezionata', en: 'Photo selected' },
+                  [
+                    { cmd: 'Trascina', it: 'sposta', en: 'move' },
+                    { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
+                    { cmd: '+ / −', it: 'scala', en: 'scale' },
+                    { cmd: 'Doppio click', it: 'apri foto', en: 'open photo' },
+                    { cmd: 'E', it: 'modifica', en: 'edit' }
+                  ]
+                )
+              : postitIds.length && !textIds.length && !imageIds.length && !photoIds.length
+                ? renderKeybindToast(
+                    { it: 'Post-it selezionato', en: 'Post-it selected' },
                 [
                   { cmd: 'Trascina', it: 'sposta', en: 'move' },
                   { cmd: 'Click icona', it: 'compatta/espandi', en: 'compact/expand' },
@@ -2725,18 +2758,26 @@ const PlanView = ({ planId }: Props) => {
                   { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
                 ]
               )
-            : renderKeybindToast(
-                { it: 'Annotazioni selezionate', en: 'Annotations selected' },
-                [
+            : (() => {
+                const base = [
                   { cmd: 'Trascina', it: 'sposta', en: 'move' },
                   { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
                   { cmd: 'Maniglie', it: 'ridimensiona/ruota', en: 'resize/rotate' },
                   { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
                   { cmd: '+ / −', it: 'scala', en: 'scale' },
-                  { cmd: 'E', it: 'modifica', en: 'edit' },
-                  { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
-                ]
-              );
+                  { cmd: 'E', it: 'modifica', en: 'edit' }
+                ];
+                if (!textIds.length && !imageIds.length) {
+                  const rotateIdx = base.findIndex((item) => item.cmd === 'Ctrl/Cmd + ←/→');
+                  if (rotateIdx >= 0) base.splice(rotateIdx, 1);
+                  const handleIdx = base.findIndex((item) => item.cmd === 'Maniglie');
+                  if (handleIdx >= 0) base.splice(handleIdx, 1);
+                }
+                if (!photoIds.length) {
+                  base.push({ cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' });
+                }
+                return renderKeybindToast({ it: 'Annotazioni selezionate', en: 'Annotations selected' }, base);
+              })();
     mediaToastIdRef.current = toast.info(message, { duration: Infinity });
   }, [renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
@@ -2751,7 +2792,14 @@ const PlanView = ({ planId }: Props) => {
     const id = selectedObjectIds[0];
     const obj = renderPlan.objects.find((o) => o.id === id);
     if (!obj) return;
-    if (isDeskType(obj.type) || obj.type === 'quote' || obj.type === 'text' || obj.type === 'image' || obj.type === 'postit') {
+    if (
+      isDeskType(obj.type) ||
+      obj.type === 'quote' ||
+      obj.type === 'text' ||
+      obj.type === 'image' ||
+      obj.type === 'photo' ||
+      obj.type === 'postit'
+    ) {
       selectionToastKeyRef.current = '';
       if (selectionToastIdRef.current != null) {
         toast.dismiss(selectionToastIdRef.current);
@@ -2980,6 +3028,11 @@ const PlanView = ({ planId }: Props) => {
 	        if (id !== linkFromId) {
             const fromObj = (planRef.current as any).objects?.find((o: any) => o.id === linkFromId);
             const toObj = (planRef.current as any).objects?.find((o: any) => o.id === id);
+            if (fromObj?.type === 'photo' || toObj?.type === 'photo') {
+              push(t({ it: 'Le foto non possono essere collegate', en: 'Photos cannot be linked' }), 'info');
+              setLinkFromId(null);
+              return;
+            }
             if ((fromObj && isDeskType(fromObj.type)) || (toObj && isDeskType(toObj.type))) {
               push(t({ it: 'Le scrivanie non possono essere collegate', en: 'Desks cannot be linked' }), 'info');
               setLinkFromId(null);
@@ -4752,7 +4805,8 @@ const PlanView = ({ planId }: Props) => {
           .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
           .filter(
             (obj): obj is MapObject =>
-              !!obj && (isDeskType(obj.type) || isCameraType(obj.type) || obj.type === 'text' || obj.type === 'image')
+              !!obj &&
+              (isDeskType(obj.type) || isCameraType(obj.type) || obj.type === 'text' || obj.type === 'image' || obj.type === 'photo')
           );
         if (!rotatable.length) return;
         e.preventDefault();
@@ -4856,6 +4910,10 @@ const PlanView = ({ planId }: Props) => {
         const objA = (currentPlan as FloorPlan).objects?.find((o) => o.id === a);
         const objB = (currentPlan as FloorPlan).objects?.find((o) => o.id === b);
         if (!objA || !objB) return;
+        if (objA.type === 'photo' || objB.type === 'photo') {
+          push(t({ it: 'Le foto non possono essere collegate', en: 'Photos cannot be linked' }), 'info');
+          return;
+        }
         if (objA.type === 'rack' || objB.type === 'rack' || isDeskType(objA.type) || isDeskType(objB.type)) {
           push(t({ it: 'Questi oggetti non possono essere collegati', en: 'These objects cannot be linked' }), 'info');
           return;
@@ -4903,10 +4961,15 @@ const PlanView = ({ planId }: Props) => {
             updateObject(id, { textSize: nextSize });
             continue;
           }
-          if (obj.type === 'text' || obj.type === 'image') {
+          if (obj.type === 'image') {
             const nextScaleX = Math.max(0.2, Math.min(6, Number(obj.scaleX ?? 1) + delta));
             const nextScaleY = Math.max(0.2, Math.min(6, Number(obj.scaleY ?? 1) + delta));
             updateObject(id, { scaleX: nextScaleX, scaleY: nextScaleY });
+            continue;
+          }
+          if (obj.type === 'photo') {
+            const nextScale = Math.max(0.2, Math.min(2.4, Number(obj.scale ?? 1) + delta));
+            updateObject(id, { scale: nextScale });
             continue;
           }
           const min = obj.type === 'quote' ? 0.5 : 0.2;
@@ -4968,6 +5031,9 @@ const PlanView = ({ planId }: Props) => {
       }
 
       if (e.key === 'Escape') {
+        if (photoViewer) {
+          return;
+        }
         if (currentSelectedIds.length || selectedRoomId || selectedRoomIds.length) {
           e.preventDefault();
           setContextMenu(null);
@@ -5082,7 +5148,8 @@ const PlanView = ({ planId }: Props) => {
     t,
     toSnapshot,
     updateObject,
-    updateQuoteLabelPos
+    updateQuoteLabelPos,
+    photoViewer
   ]);
 
   const objectsByType = useMemo(() => {
@@ -5109,29 +5176,15 @@ const PlanView = ({ planId }: Props) => {
     [getTypeLabel, objectTypeDefs, objectsByType]
   );
 
-  const suppressMultiSelectionFor = useCallback(
-    (ids: string[]) => {
-      if (ids.length < 2) {
-        suppressSelectionKeyRef.current = '';
-        setSuppressMultiSelectionBox(false);
-        return;
-      }
-      suppressSelectionKeyRef.current = selectionKeyForIds(ids);
-      setSuppressMultiSelectionBox(true);
-    },
-    [selectionKeyForIds]
-  );
-
   const handleSelectType = useCallback(
     (typeId: string) => {
       const ids = (objectsByType.get(typeId) || []).map((o) => o.id);
       if (!ids.length) return;
       setSelection(ids);
-      suppressMultiSelectionFor(ids);
       setCountsOpen(false);
       setTypeMenu(null);
     },
-    [objectsByType, setSelection, suppressMultiSelectionFor]
+    [objectsByType, setSelection]
   );
 
   const handleDeleteType = useCallback(
@@ -5310,7 +5363,7 @@ const PlanView = ({ planId }: Props) => {
 
   useEffect(() => {
     if (!gridMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: globalThis.MouseEvent) => {
       if (!gridMenuRef.current) return;
       if (!gridMenuRef.current.contains(e.target as any)) setGridMenuOpen(false);
     };
@@ -5486,7 +5539,7 @@ const PlanView = ({ planId }: Props) => {
 
   useEffect(() => {
     if (!typeMenu) return;
-    const handleClick = (event: MouseEvent) => {
+    const handleClick = (event: globalThis.MouseEvent) => {
       if (!typeMenuRef.current) return;
       if (typeMenuRef.current.contains(event.target as Node)) return;
       setTypeMenu(null);
@@ -5504,7 +5557,7 @@ const PlanView = ({ planId }: Props) => {
 
   useEffect(() => {
     if (!presenceOpen) return;
-    const handleClick = (event: MouseEvent) => {
+    const handleClick = (event: globalThis.MouseEvent) => {
       if (!presenceRef.current) return;
       if (presenceRef.current.contains(event.target as Node)) return;
       setPresenceOpen(false);
@@ -5515,7 +5568,7 @@ const PlanView = ({ planId }: Props) => {
 
   useEffect(() => {
     if (!layersPopoverOpen) return;
-    const handleClick = (event: MouseEvent) => {
+    const handleClick = (event: globalThis.MouseEvent) => {
       if (!layersPopoverRef.current) return;
       if (layersPopoverRef.current.contains(event.target as Node)) return;
       setLayersPopoverOpen(false);
@@ -5526,7 +5579,7 @@ const PlanView = ({ planId }: Props) => {
 
   useEffect(() => {
     if (!layersQuickMenu) return;
-    const handleClick = (event: MouseEvent) => {
+    const handleClick = (event: globalThis.MouseEvent) => {
       if (layersQuickMenuRef.current?.contains(event.target as Node)) return;
       setLayersQuickMenu(null);
     };
@@ -5892,7 +5945,7 @@ const PlanView = ({ planId }: Props) => {
               ...(resolvedTextBoxHeight ? { textBoxHeight: resolvedTextBoxHeight } : {})
             }
           : {}),
-        ...(modalState.type === 'image'
+        ...(modalState.type === 'image' || modalState.type === 'photo'
           ? {
               imageUrl: payload.imageUrl,
               imageWidth: payload.imageWidth,
@@ -6006,7 +6059,7 @@ const PlanView = ({ planId }: Props) => {
               textBoxHeight: (base as any).textBoxHeight
             }
           : {}),
-        ...(base?.type === 'image'
+        ...(base?.type === 'image' || base?.type === 'photo'
           ? {
               imageUrl: payload.imageUrl || (base as any).imageUrl,
               imageWidth: payload.imageWidth ?? (base as any).imageWidth,
@@ -6097,6 +6150,109 @@ const PlanView = ({ planId }: Props) => {
     setLinkEditId(linkId);
   };
 
+  const openMediaViewer = useCallback(
+    (payload: {
+      id: string;
+      selectionIds?: string[];
+      types: string[];
+      title: { it: string; en: string };
+      countLabel: { it: string; en: string };
+      itemLabel: { it: string; en: string };
+      emptyToast: { it: string; en: string };
+      emptyLabel?: { it: string; en: string };
+    }) => {
+      if (!renderPlan) return;
+      const selection =
+        Array.isArray(payload.selectionIds) && payload.selectionIds.length > 0 ? payload.selectionIds : [payload.id];
+      const roomNameById = new Map<string, string>();
+      for (const room of renderPlan.rooms || []) {
+        if (!room?.id) continue;
+        roomNameById.set(String(room.id), String(room.name || '').trim());
+      }
+      const items = selection
+        .map((id) => renderPlan.objects.find((o) => o.id === id))
+        .filter((obj): obj is MapObject => !!obj && payload.types.includes(obj.type) && !!(obj as any).imageUrl)
+        .map((obj) => ({
+          id: obj.id,
+          name: String(obj.name || '').trim(),
+          description: String(obj.description || '').trim(),
+          url: String((obj as any).imageUrl || ''),
+          roomName: obj.roomId ? roomNameById.get(String(obj.roomId)) || '' : ''
+        }))
+        .filter((p) => !!p.url);
+      if (!items.length) {
+        push(t(payload.emptyToast), 'info');
+        return;
+      }
+      setPhotoViewer({
+        photos: items,
+        initialId: payload.id,
+        title: payload.title,
+        countLabel: payload.countLabel,
+        itemLabel: payload.itemLabel,
+        emptyLabel: payload.emptyLabel
+      });
+    },
+    [push, renderPlan, t]
+  );
+
+  const openPhotoViewer = useCallback(
+    (payload: { id: string; selectionIds?: string[] }) => {
+      openMediaViewer({
+        ...payload,
+        types: ['photo'],
+        title: { it: 'Foto', en: 'Photos' },
+        countLabel: { it: 'foto', en: 'photos' },
+        itemLabel: { it: 'Foto', en: 'Photo' },
+        emptyToast: { it: 'Nessuna foto disponibile per la selezione.', en: 'No photos available for this selection.' },
+        emptyLabel: { it: 'Nessuna foto disponibile', en: 'No photos available' }
+      });
+    },
+    [openMediaViewer]
+  );
+
+  const openImageViewer = useCallback(
+    (payload: { id: string; selectionIds?: string[] }) => {
+      openMediaViewer({
+        ...payload,
+        types: ['image'],
+        title: { it: 'Immagini', en: 'Images' },
+        countLabel: { it: 'immagini', en: 'images' },
+        itemLabel: { it: 'Immagine', en: 'Image' },
+        emptyToast: { it: 'Nessuna immagine disponibile per la selezione.', en: 'No images available for this selection.' },
+        emptyLabel: { it: 'Nessuna immagine disponibile', en: 'No images available' }
+      });
+    },
+    [openMediaViewer]
+  );
+
+  const focusPhotoFromGallery = useCallback(
+    (id: string) => {
+      if (!renderPlan) return;
+      returnToBulkEditRef.current = false;
+      const obj = renderPlan.objects.find((o) => o.id === id);
+      if (!obj) return;
+      setSelection([id]);
+      setSelectedObject(id);
+      setSelectedRoomId(undefined);
+      setSelectedRoomIds([]);
+      setSelectedLinkId(null);
+      triggerHighlight(id);
+    },
+    [renderPlan, setSelectedLinkId, setSelectedObject, setSelectedRoomId, setSelectedRoomIds, setSelection, triggerHighlight]
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('pg') !== '1') return;
+    if (planPhotoIds.length) {
+      openPhotoViewer({ id: planPhotoIds[0], selectionIds: planPhotoIds });
+    }
+    params.delete('pg');
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  }, [location.pathname, location.search, navigate, openPhotoViewer, planPhotoIds]);
+
   const closeReturnToSelectionList = () => {
     if (!returnToSelectionListRef.current) return;
     returnToSelectionListRef.current = false;
@@ -6169,7 +6325,7 @@ const PlanView = ({ planId }: Props) => {
           }
         : {};
     const imageUpdates =
-      obj?.type === 'image'
+      obj?.type === 'image' || obj?.type === 'photo'
         ? {
             ...(payload.imageUrl ? { imageUrl: payload.imageUrl } : {}),
             ...(payload.imageWidth !== undefined ? { imageWidth: payload.imageWidth } : {}),
@@ -7624,7 +7780,6 @@ const PlanView = ({ planId }: Props) => {
                         plan={(canvasPlan || renderPlan) as any}
                         selectedId={selectedObjectId}
                         selectedIds={selectedObjectIds}
-                        hideMultiSelectionBox={suppressMultiSelectionBox}
 	                    selectedRoomId={selectedRoomId}
                       selectedRoomIds={selectedRoomIds}
 	                    selectedLinkId={selectedLinkId}
@@ -7779,6 +7934,7 @@ const PlanView = ({ planId }: Props) => {
                       markTouched();
                       updateObject(id, changes);
                     }}
+                    onOpenPhoto={openPhotoViewer}
                     onMoveWall={handleWallMove}
 	              />
 	            </div>
@@ -7809,7 +7965,7 @@ const PlanView = ({ planId }: Props) => {
                     </button>
                   </div>
                   {annotationsOpen ? (
-                    <div className="mt-2 grid grid-cols-3 gap-2">
+                    <div className="mt-2 grid grid-cols-4 justify-items-center gap-3">
                       <button
                         draggable
                         onDragStart={(e) => {
@@ -7857,6 +8013,30 @@ const PlanView = ({ planId }: Props) => {
                         }`}
                       >
                         <ImageIcon size={16} />
+                      </button>
+                      <button
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('application/deskly-type', 'photo');
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onClick={() => {
+                          setWallDrawMode(false);
+                          setMeasureMode(false);
+                          setScaleMode(false);
+                          setRoomDrawMode(null);
+                          setPanToolActive(false);
+                          setPendingType('photo');
+                          setPaletteSection('objects');
+                        }}
+                        title={t({ it: 'Aggiungi foto', en: 'Add photo' })}
+                        className={`flex h-9 w-9 items-center justify-center rounded-lg border ${
+                          pendingType === 'photo'
+                            ? 'border-emerald-300 bg-emerald-100 text-emerald-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Camera size={16} />
                       </button>
                       <button
                         draggable
@@ -8420,6 +8600,29 @@ const PlanView = ({ planId }: Props) => {
                             <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
                           </button>
                         ) : null}
+                        {contextIsPhoto ? (
+                          <button
+                            onClick={() => {
+                              const ids =
+                                contextIsMulti && selectedObjectIds.length ? [...selectedObjectIds] : [contextMenu.id];
+                              openPhotoViewer({ id: contextMenu.id, selectionIds: ids });
+                              setContextMenu(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                            title={t(
+                              contextPhotoMulti
+                                ? { it: 'Vedi galleria', en: 'View gallery' }
+                                : { it: 'Vedi foto', en: 'View photo' }
+                            )}
+                          >
+                            <ImageIcon size={14} className="text-slate-500" />{' '}
+                            {t(
+                              contextPhotoMulti
+                                ? { it: 'Vedi galleria', en: 'View gallery' }
+                                : { it: 'Vedi foto', en: 'View photo' }
+                            )}
+                          </button>
+                        ) : null}
                         {contextObject ? (
                           <button
                             onClick={() => {
@@ -8428,7 +8631,6 @@ const PlanView = ({ planId }: Props) => {
                               const ids = (renderPlan.objects || []).filter((o) => o.type === typeId).map((o) => o.id);
                               if (!ids.length) return;
                               setSelection(ids);
-                              suppressMultiSelectionFor(ids);
                               setSelectedRoomId(undefined);
                               setSelectedRoomIds([]);
                               setSelectedLinkId(null);
@@ -8518,7 +8720,7 @@ const PlanView = ({ planId }: Props) => {
                             <User size={14} className="text-slate-500" /> {t({ it: 'Dettagli utente', en: 'User details' })}
                           </button>
                         ) : null}
-                        {contextObjectLinkCount ? (
+                        {contextObjectLinkCount && !contextIsPhoto ? (
                           <button
                             onClick={() => {
                               setLinksModalObjectId(contextMenu.id);
@@ -8537,7 +8739,7 @@ const PlanView = ({ planId }: Props) => {
                             })}
                           </button>
                         ) : null}
-                        {!contextIsRack && !contextIsDesk && !contextIsWall ? (
+                        {!contextIsRack && !contextIsDesk && !contextIsWall && !contextIsPhoto ? (
                           <>
                             <div className="my-2 h-px bg-slate-100" />
                             <button
@@ -8887,8 +9089,25 @@ const PlanView = ({ planId }: Props) => {
                         ) : null}
                       </div>
                     ) : null}
+                    {contextIsMulti && selectionPhotoIds.length > 1 ? (
+                      <button
+                        onClick={() => {
+                          if (!selectionPhotoIds.length) return;
+                          openPhotoViewer({ id: selectionPhotoIds[0], selectionIds: selectionPhotoIds });
+                          setContextMenu(null);
+                        }}
+                        className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                        title={t({ it: 'Vedi galleria', en: 'View gallery' })}
+                      >
+                        <ImageIcon size={14} className="text-slate-500" /> {t({ it: 'Vedi galleria', en: 'View gallery' })}
+                      </button>
+                    ) : null}
                     {contextIsMulti ? (
-                      !isReadOnly && selectedObjectIds.length === 2 && !selectionHasRack && !selectionHasDesk ? (
+                      !isReadOnly &&
+                      selectedObjectIds.length === 2 &&
+                      !selectionHasRack &&
+                      !selectionHasDesk &&
+                      !selectionHasPhoto ? (
                         <button
                           onClick={() => {
                             const [a, b] = selectedObjectIds;
@@ -9047,6 +9266,18 @@ const PlanView = ({ planId }: Props) => {
             </>
           ) : (
             <>
+              {planPhotoIds.length ? (
+                <button
+                  onClick={() => {
+                    openPhotoViewer({ id: planPhotoIds[0], selectionIds: planPhotoIds });
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Vedi galleria foto', en: 'View photo gallery' })}
+                >
+                  <ImageIcon size={14} className="text-slate-500" /> {t({ it: 'Vedi galleria foto', en: 'View photo gallery' })}
+                </button>
+              ) : null}
               <button
                 onClick={() => toggleMapSubmenu('view')}
                 className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
@@ -9093,7 +9324,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'view' ? (
           <div
-            className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9125,7 +9356,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'measure' ? (
           <div
-            className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9185,7 +9416,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'create' ? (
           <div
-            className="context-menu-panel fixed z-50 w-80 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="fixed z-50 w-80 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(320)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9255,6 +9486,22 @@ const PlanView = ({ planId }: Props) => {
                     setScaleMode(false);
                     setRoomDrawMode(null);
                     setPanToolActive(false);
+                    setPendingType('photo');
+                    setPaletteSection('objects');
+                    setContextMenu(null);
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Aggiungi foto', en: 'Add photo' })}
+                >
+                  <Camera size={14} className="text-slate-500" /> {t({ it: 'Aggiungi foto', en: 'Add photo' })}
+                </button>
+                <button
+                  onClick={() => {
+                    setWallDrawMode(false);
+                    setMeasureMode(false);
+                    setScaleMode(false);
+                    setRoomDrawMode(null);
+                    setPanToolActive(false);
                     setPendingType('postit');
                     setPaletteSection('objects');
                     setContextMenu(null);
@@ -9311,7 +9558,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'print' ? (
           <div
-            className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9374,7 +9621,7 @@ const PlanView = ({ planId }: Props) => {
 
         {contextMenu.kind === 'map' && mapSubmenu === 'manage' ? (
           <div
-            className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
             style={getSubmenuStyle(240)}
             onClick={(e) => e.stopPropagation()}
           >
@@ -9795,6 +10042,19 @@ const PlanView = ({ planId }: Props) => {
         getObjectName={getObjectNameById}
         onPickObject={openEditFromSelectionList}
         onPickLink={openLinkEditFromSelectionList}
+        onPreviewObject={(objectId) => {
+          if (!renderPlan) return;
+          const obj = renderPlan.objects.find((o) => o.id === objectId);
+          if (!obj) return;
+          if (obj.type !== 'photo' && obj.type !== 'image') return;
+          returnToSelectionListRef.current = true;
+          setSelectedObjectsModalOpen(false);
+          if (obj.type === 'photo') {
+            openPhotoViewer({ id: objectId, selectionIds: [objectId] });
+          } else {
+            openImageViewer({ id: objectId, selectionIds: [objectId] });
+          }
+        }}
         onRemoveFromSelection={(objectId) => {
           const next = selectedObjectIds.filter((id) => id !== objectId);
           setSelection(next);
@@ -10227,6 +10487,7 @@ const PlanView = ({ planId }: Props) => {
         getTypeLabel={getTypeLabel}
         getTypeIcon={getTypeIcon}
         isUserObject={isUserObject}
+        onOpenPhotos={openPhotoViewer}
         canCreateWalls={roomModal?.mode === 'edit' && !roomHasWalls && !isReadOnly}
         onCreateWalls={handleCreateWallsForRoom}
         onDeleteObject={
@@ -10668,6 +10929,19 @@ const PlanView = ({ planId }: Props) => {
         objects={(renderPlan?.objects || []).filter((o) => selectedObjectIds.includes(o.id))}
         getTypeLabel={getTypeLabel}
         getTypeIcon={getTypeIcon}
+        onPreviewObject={(objectId) => {
+          if (!renderPlan) return;
+          const obj = renderPlan.objects.find((o) => o.id === objectId);
+          if (!obj) return;
+          if (obj.type !== 'photo' && obj.type !== 'image') return;
+          returnToBulkEditRef.current = true;
+          setBulkEditSelectionOpen(false);
+          if (obj.type === 'photo') {
+            openPhotoViewer({ id: objectId, selectionIds: [objectId] });
+          } else {
+            openImageViewer({ id: objectId, selectionIds: [objectId] });
+          }
+        }}
         onClose={() => setBulkEditSelectionOpen(false)}
         onApply={(changesById) => {
           if (isReadOnly) return;
@@ -11094,6 +11368,27 @@ const PlanView = ({ planId }: Props) => {
         userName={realUserDetailsName}
         details={realUserDetails}
         onClose={() => setRealUserDetailsId(null)}
+      />
+
+      <PhotoViewerModal
+        open={!!photoViewer}
+        photos={photoViewer?.photos || []}
+        initialId={photoViewer?.initialId}
+        title={photoViewer?.title}
+        countLabel={photoViewer?.countLabel}
+        itemLabel={photoViewer?.itemLabel}
+        emptyLabel={photoViewer?.emptyLabel}
+        onFocus={focusPhotoFromGallery}
+        onClose={() => {
+          setPhotoViewer(null);
+          if (returnToBulkEditRef.current) {
+            returnToBulkEditRef.current = false;
+            window.setTimeout(() => {
+              setBulkEditSelectionOpen(true);
+            }, 0);
+          }
+          closeReturnToSelectionList();
+        }}
       />
 
       <AllObjectTypesModal

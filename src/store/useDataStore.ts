@@ -88,6 +88,7 @@ interface DataState {
         | 'externalDept2'
         | 'externalDept3'
         | 'externalEmail'
+        | 'externalMobile'
         | 'externalExt1'
         | 'externalExt2'
         | 'externalExt3'
@@ -154,6 +155,7 @@ interface DataState {
         | 'externalDept2'
         | 'externalDept3'
         | 'externalEmail'
+        | 'externalMobile'
         | 'externalExt1'
         | 'externalExt2'
         | 'externalExt3'
@@ -579,6 +581,11 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
         if (layerIds.includes('images')) return obj;
         return { ...obj, layerIds: [...layerIds, 'images'] };
       }
+      if (obj?.type === 'photo') {
+        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
+        if (layerIds.includes('images')) return obj;
+        return { ...obj, layerIds: [...layerIds, 'images'] };
+      }
       return obj;
     });
   }
@@ -860,7 +867,36 @@ export const useDataStore = create<DataState>()(
       },
       updateObject: (id, changes) => {
         set((state) => ({
-          clients: updateObjectById(state.clients, id, (obj) => ({ ...obj, ...changes })),
+          clients: (() => {
+            const nextClients = updateObjectById(state.clients, id, (obj) => ({ ...obj, ...changes }));
+            if (typeof (changes as any)?.name !== 'string') return nextClients;
+            const nextName = String((changes as any).name || '');
+            for (let ci = 0; ci < nextClients.length; ci++) {
+              const client = nextClients[ci];
+              for (let si = 0; si < client.sites.length; si++) {
+                const site = client.sites[si];
+                for (let pi = 0; pi < site.floorPlans.length; pi++) {
+                  const plan = site.floorPlans[pi];
+                  const obj = plan.objects.find((o) => o.id === id);
+                  if (!obj || obj.type !== 'rack') continue;
+                  const racks = Array.isArray((plan as any).racks) ? (plan as any).racks : [];
+                  if (!racks.length) return nextClients;
+                  const nextRacks = racks.map((r: RackDefinition) => (r.id === id ? { ...r, name: nextName } : r));
+                  const nextPlan: FloorPlan = { ...plan, racks: nextRacks };
+                  const nextPlans = site.floorPlans.slice();
+                  nextPlans[pi] = nextPlan;
+                  const nextSite: Site = { ...site, floorPlans: nextPlans };
+                  const nextSites = client.sites.slice();
+                  nextSites[si] = nextSite;
+                  const nextClient: Client = { ...client, sites: nextSites };
+                  const patched = nextClients.slice();
+                  patched[ci] = nextClient;
+                  return patched;
+                }
+              }
+            }
+            return nextClients;
+          })(),
           version: state.version + 1
         }));
       },
