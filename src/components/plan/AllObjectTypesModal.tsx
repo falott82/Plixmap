@@ -342,7 +342,6 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                   {activeDefs.length ? (
                     activeDefs.map((d, index) => {
                       const label = (d?.name?.[lang] as string) || (d?.name?.it as string) || d.id;
-                      const inPalette = paletteSet.has(d.id);
                       const isActive = index === activeIndex;
                       const category = isDeskType(d.id)
                         ? 'desks'
@@ -389,14 +388,8 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                             <Icon name={d.icon} />
                           </div>
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-ink">{label}</div>
-                            <div className="truncate text-xs text-slate-500">{d.id}</div>
+                            <div className="whitespace-normal break-words text-sm font-semibold leading-snug text-ink">{label}</div>
                           </div>
-                          {onAddToPalette ? (
-                            <div className="ml-auto text-[10px] font-semibold uppercase text-slate-400">
-                              {inPalette ? t({ it: 'In palette', en: 'In palette' }) : t({ it: 'Extra', en: 'Extra' })}
-                            </div>
-                          ) : null}
                         </button>
                       );
                     })
