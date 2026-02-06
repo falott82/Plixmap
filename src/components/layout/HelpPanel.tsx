@@ -243,8 +243,32 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
-                          it: 'Se un altro utente sta modificando la stessa planimetria, viene applicato un lock: tu la vedrai in sola lettura finché non viene sbloccata.',
-                          en: 'If another user is editing the same floor plan, an exclusive lock is applied: you will see it in read-only until it is released.'
+                          it: 'Lock planimetrie: quando apri una planimetria con permessi di modifica, Deskly prova a prendere un lock esclusivo (durata 60s).',
+                          en: 'Floor plan lock: when you open a floor plan with edit permissions, Deskly tries to acquire an exclusive lock (60s TTL).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Il lock si rinnova automaticamente finché usi mouse/tastiera. Se resti inattivo per 5 minuti il lock non si rinnova e scade dopo ~60s.',
+                          en: 'The lock auto-renews while you use mouse/keyboard. If you are idle for 5 minutes, it stops renewing and expires after ~60s.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Gli altri utenti vedono la planimetria in sola lettura e possono prendere il lock quando torna libero.',
+                          en: 'Other users see the floor plan in read-only and can acquire the lock when it becomes available.'
+                        })}
+                      </li>
+	                      <li>
+	                        {t({
+	                          it: 'Superadmin: puoi chiedere l’unlock a un utente attivo; se non ha modifiche può concedere o negare. Se ha modifiche può salvare e concedere, annullare e concedere, o rifiutare.',
+	                          en: 'Superadmin: you can request unlock from an active user; if they have no changes they can grant or deny. If they have changes they can save and grant, discard and grant, or deny.'
+	                        })}
+	                      </li>
+                      <li>
+                        {t({
+                          it: 'Revisione immutabile: il superadmin può bloccare una revisione per impedirne la cancellazione da parte di altri utenti.',
+                          en: 'Immutable revision: the superadmin can lock a revision to prevent deletion by other users.'
                         })}
                       </li>
                       <li>

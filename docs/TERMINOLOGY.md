@@ -15,6 +15,8 @@ Usa sempre queste traduzioni quando scrivi nuove stringhe UI o documentazione.
 | Cliente | Client | Entita' principale nel tree.
 | Sede | Site | Raggruppa planimetrie.
 | Planimetria | Floor plan | Vista principale della mappa.
+| Lock planimetria | Floor plan lock | Lock esclusivo per la modifica.
+| Sola lettura | Read-only | Modalita' solo lettura.
 | Stanza | Room | Area chiusa nella planimetria.
 | Muro | Wall | Segmento o lato della stanza.
 | Poligono muri | Wall polygon | Modale di modifica muri collegati.
@@ -32,6 +34,7 @@ Usa sempre queste traduzioni quando scrivi nuove stringhe UI o documentazione.
 | Scala | Scale | Rapporto di misura.
 | Misura | Measure | Strumento di misura.
 | Quota | Dimension | Linea di quota/misura.
+| Revisione immutabile | Immutable revision | Revisione non eliminabile se non da superadmin.
 | Post-it | Sticky note | Nota adesiva.
 | Foto | Photo | Oggetto foto in planimetria.
 | Annotazioni | Annotations | Testi e note.

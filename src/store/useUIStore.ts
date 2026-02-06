@@ -23,6 +23,7 @@ interface UIState {
   showGrid: boolean;
   showPrintAreaByPlan: Record<string, boolean>;
   roomCapacityStateByPlan: Record<string, Record<string, { userCount: number; capacity?: number }>>;
+  lockedPlans: Record<string, { userId: string; username: string }>;
   perfOverlayEnabled: boolean;
   hiddenLayersByPlan: Record<string, boolean>;
   expandedClients: Record<string, boolean>;
@@ -63,6 +64,7 @@ interface UIState {
   setShowGrid: (show: boolean) => void;
   toggleShowPrintArea: (planId: string) => void;
   setRoomCapacityState: (planId: string, state: Record<string, { userCount: number; capacity?: number }>) => void;
+  setLockedPlans: (payload: Record<string, { userId: string; username: string }>) => void;
   togglePerfOverlay: () => void;
   setHideAllLayers: (planId: string, hidden: boolean) => void;
   setExpandedClients: (expanded: Record<string, boolean>) => void;
@@ -101,6 +103,7 @@ export const useUIStore = create<UIState>()(
       showGrid: false,
       showPrintAreaByPlan: {},
       roomCapacityStateByPlan: {},
+      lockedPlans: {},
       perfOverlayEnabled: false,
       hiddenLayersByPlan: {},
       expandedClients: {},
@@ -189,6 +192,7 @@ export const useUIStore = create<UIState>()(
         set((state) => ({
           roomCapacityStateByPlan: { ...state.roomCapacityStateByPlan, [planId]: stateByRoom }
         })),
+      setLockedPlans: (payload) => set({ lockedPlans: { ...(payload || {}) } }),
       togglePerfOverlay: () => set((state) => ({ perfOverlayEnabled: !state.perfOverlayEnabled })),
       setHideAllLayers: (planId, hidden) =>
         set((state) => ({ hiddenLayersByPlan: { ...state.hiddenLayersByPlan, [planId]: !!hidden } })),

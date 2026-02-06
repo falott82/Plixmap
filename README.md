@@ -1,20 +1,21 @@
 # Deskly - Floor Plan Management
 
-Current version: **2.2.6**
+Current version: **2.3.1**
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
 Note: This README was refreshed with a small formatting update.
 
-- UI supports **Italian and English** (language switch refreshes the app)
-- Drag & drop objects with layers, rooms, and grids
-- Walls with materials/attenuation, scale-based measurements, and quotes
-- CCTV cones and Wi-Fi coverage with wall occlusion
-- Text, image, photo, and Post-it annotations with custom styling
-- Keyboard shortcuts for scaling (+/−), rotation (Cmd/Ctrl+arrows), rename (N), directory (Cmd/Ctrl+R), text font/color (F/C), and quick linking (L)
-- Client directory for imported users (available after import) + IP map grouped by /24 with searchable lists and keyboard navigation (M/U)
+- UI supports **Italian and English** (language switch forces a full refresh for consistency)
+- Drag & drop editor with objects, rooms, layers, and snap grid
+- Walls with per-material attenuation (used for Wi-Fi range), scale calibration, measurements, and dimensions (quotes)
+- CCTV field-of-view cones blocked by walls (glass/windows excluded), and Wi-Fi range rings affected by wall attenuation
+- Annotations: text (fonts/colors/background), images, photos (gallery), and Post-it
+- Keyboard shortcuts: move (arrows, Shift for bigger steps), rotate 90° (Ctrl/Cmd+Left/Right), scale (+/-), edit (E), link 2 selected (L), copy/paste (Ctrl/Cmd+C/V), undo/redo (Ctrl/Cmd+Z/Y)
+- Client tools: imported "Real users" directory (place "Real user" objects; Ctrl/Cmd+M to email), plus an IP map grouped by /24 (U to open URL) with searchable lists and PDF export
 - Rack editor with ports, links, and PDF export
-- Saved views, revisions, search/highlight
+- Saved views, revisions (restore/immutable), and search/highlight
+- Exclusive floor plan lock with auto-renew (idle expires after ~60s), unlock requests, and immutable revisions
 - Multi-user roles with per-plan permissions
 
 ## Screenshots

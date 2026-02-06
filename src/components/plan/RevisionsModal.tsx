@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { History, Trash, X, Diff, Eraser, RotateCcw } from 'lucide-react';
+import { History, Trash, X, Diff, Eraser, RotateCcw, Lock } from 'lucide-react';
 import { FloorPlanRevision } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import ConfirmDialog from '../ui/ConfirmDialog';
@@ -19,6 +19,8 @@ interface Props {
   onClearAll: () => void;
   onRestore?: (revisionId: string) => void;
   canRestore?: boolean;
+  isSuperAdmin?: boolean;
+  onToggleImmutable?: (revisionId: string, nextValue: boolean) => void;
 }
 
 const formatDate = (ts: number) => {
@@ -40,13 +42,16 @@ const RevisionsModal = ({
   onDelete,
   onClearAll,
   onRestore,
-  canRestore = false
+  canRestore = false,
+  isSuperAdmin = false,
+  onToggleImmutable
 }: Props) => {
   const t = useT();
   const defs = useDataStore((s) => s.objectTypes);
   const [term, setTerm] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [confirmDeleteImmutableId, setConfirmDeleteImmutableId] = useState<string | null>(null);
   const [diffOpenId, setDiffOpenId] = useState<string | null>(null);
   const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
   const [comparePickOpen, setComparePickOpen] = useState(false);
@@ -124,6 +129,8 @@ const RevisionsModal = ({
     const older = newer.id === a.id ? b : a;
     return { newer, older };
   }, [compareIds, revisions]);
+
+  const hasImmutable = useMemo(() => revisions.some((r) => r.immutable), [revisions]);
 
   const RevisionPreview = ({ rev }: { rev: FloorPlanRevision }) => {
     const w = Number(rev.width || 0);
@@ -227,8 +234,13 @@ const RevisionsModal = ({
                   </button>
                   <button
                     onClick={() => setConfirmClearAll(true)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
-                    title={t({ it: 'Elimina tutte le revisioni', en: 'Delete all revisions' })}
+                    className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                    title={
+                      !isSuperAdmin && hasImmutable
+                        ? t({ it: 'Non puoi eliminare revisioni immutabili', en: 'Immutable revisions cannot be deleted' })
+                        : t({ it: 'Elimina tutte le revisioni', en: 'Delete all revisions' })
+                    }
+                    disabled={!isSuperAdmin && hasImmutable}
                   >
                     <Eraser size={16} />
                     {t({ it: 'Elimina tutte', en: 'Delete all' })}
@@ -261,6 +273,12 @@ const RevisionsModal = ({
                               <div className="truncate text-sm font-semibold text-ink">
                                 {t({ it: 'Rev', en: 'Rev' })}: {formatRev(r)} · {r.name}
                               </div>
+                              {r.immutable ? (
+                                <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                                  <Lock size={12} />
+                                  {t({ it: 'Immutabile', en: 'Immutable' })}
+                                </div>
+                              ) : null}
                               <div className="mt-0.5 text-xs text-slate-500">{formatDate(r.createdAt)}</div>
                               {formatAuthor(r) ? (
                                 <div className="mt-0.5 text-xs text-slate-500">
@@ -276,6 +294,21 @@ const RevisionsModal = ({
                             <div className="text-right text-xs font-semibold text-slate-600">
                               {r.objects.length} {t({ it: 'ogg.', en: 'obj.' })}
                             </div>
+                            {isSuperAdmin && onToggleImmutable ? (
+                              <button
+                                title={
+                                  r.immutable
+                                    ? t({ it: 'Rendi modificabile', en: 'Make editable' })
+                                    : t({ it: 'Rendi immutabile', en: 'Make immutable' })
+                                }
+                                onClick={() => onToggleImmutable(r.id, !r.immutable)}
+                                className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
+                                  r.immutable ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-white text-slate-700'
+                                } hover:bg-slate-50`}
+                              >
+                                <Lock size={14} />
+                              </button>
+                            ) : null}
                             {onRestore && canRestore ? (
                               <button
                                 title={t({ it: 'Ripristina come attuale', en: 'Restore as current' })}
@@ -293,9 +326,21 @@ const RevisionsModal = ({
                               <Diff size={14} />
                             </button>
                             <button
-                              title={t({ it: 'Elimina revisione', en: 'Delete revision' })}
-                              onClick={() => setConfirmDeleteId(r.id)}
-                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                              title={
+                                r.immutable && !isSuperAdmin
+                                  ? t({ it: 'Revisione immutabile', en: 'Immutable revision' })
+                                  : t({ it: 'Elimina revisione', en: 'Delete revision' })
+                              }
+                              onClick={() => {
+                                if (r.immutable && !isSuperAdmin) return;
+                                if (r.immutable && isSuperAdmin) {
+                                  setConfirmDeleteImmutableId(r.id);
+                                  return;
+                                }
+                                setConfirmDeleteId(r.id);
+                              }}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                              disabled={r.immutable && !isSuperAdmin}
                             >
                               <Trash size={14} />
                             </button>
@@ -380,6 +425,24 @@ const RevisionsModal = ({
                 </div>
 
                 <ConfirmDialog
+                  open={!!confirmDeleteImmutableId}
+                  title={t({ it: 'Eliminare revisione immutabile?', en: 'Delete immutable revision?' })}
+                  description={t({
+                    it: 'Si sta per eliminare una revisione immutabile. Procedo?',
+                    en: 'You are about to delete an immutable revision. Proceed?'
+                  })}
+                  onCancel={() => setConfirmDeleteImmutableId(null)}
+                  onConfirm={() => {
+                    if (!confirmDeleteImmutableId) return;
+                    onDelete(confirmDeleteImmutableId);
+                    setConfirmDeleteImmutableId(null);
+                  }}
+                  confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+                  cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+                  confirmOnEnter
+                />
+
+                <ConfirmDialog
                   open={!!confirmDeleteId}
                   title={t({ it: 'Eliminare la revisione?', en: 'Delete this revision?' })}
                   description={
@@ -404,8 +467,12 @@ const RevisionsModal = ({
                   open={confirmClearAll}
                   title={t({ it: 'Eliminare tutte le revisioni?', en: 'Delete all revisions?' })}
                   description={t({
-                    it: 'Tutte le revisioni verranno eliminate. Operazione non annullabile.',
-                    en: 'All revisions will be deleted. This cannot be undone.'
+                    it: hasImmutable
+                      ? 'Tutte le revisioni (incluse le immutabili) verranno eliminate. Operazione non annullabile.'
+                      : 'Tutte le revisioni verranno eliminate. Operazione non annullabile.',
+                    en: hasImmutable
+                      ? 'All revisions (including immutable ones) will be deleted. This cannot be undone.'
+                      : 'All revisions will be deleted. This cannot be undone.'
                   })}
                   onCancel={() => setConfirmClearAll(false)}
                   onConfirm={() => {

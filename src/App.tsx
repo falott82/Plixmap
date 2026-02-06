@@ -127,6 +127,53 @@ const App = () => {
   const unsubscribeUnsavedRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    const applyTooltip = (el: HTMLElement) => {
+      if (!el) return;
+      const existing = el.getAttribute('title');
+      if (existing && existing.trim().length) return;
+      const aria = el.getAttribute('aria-label') || el.getAttribute('data-tooltip') || el.getAttribute('data-title');
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      const label = (aria || text || '').trim();
+      if (!label) return;
+      el.setAttribute('title', label);
+    };
+    const scan = (root: ParentNode) => {
+      (root as ParentNode).querySelectorAll?.('button, [role="button"]').forEach((node) => {
+        if (node instanceof HTMLElement) applyTooltip(node);
+      });
+    };
+    if (document?.body) scan(document.body);
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'childList') {
+          m.addedNodes.forEach((node) => {
+            if (!(node instanceof HTMLElement)) return;
+            if (node.matches?.('button, [role="button"]')) applyTooltip(node);
+            scan(node);
+          });
+        } else if (m.type === 'attributes') {
+          const target = m.target as HTMLElement;
+          if (target?.matches?.('button, [role="button"]')) applyTooltip(target);
+        } else if (m.type === 'characterData') {
+          const parent = (m.target as any)?.parentElement as HTMLElement | null;
+          const btn = parent?.closest?.('button, [role="button"]') as HTMLElement | null;
+          if (btn) applyTooltip(btn);
+        }
+      }
+    });
+    if (document?.body) {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+        attributeFilter: ['aria-label', 'data-tooltip', 'data-title', 'title']
+      });
+    }
+    return () => observer.disconnect();
+  }, [(user as any)?.language]);
+
+  useEffect(() => {
     hydrateAuth();
   }, [hydrateAuth]);
 

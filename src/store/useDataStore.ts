@@ -8,6 +8,7 @@ import {
   DEFAULT_DESK_TYPES,
   DEFAULT_DEVICE_TYPES,
   DEFAULT_IMAGE_TYPES,
+  DEFAULT_PHOTO_TYPES,
   DEFAULT_RACK_TYPES,
   DEFAULT_TEXT_TYPES,
   DEFAULT_USER_TYPES,
@@ -219,6 +220,7 @@ interface DataState {
   deleteRoom: (floorPlanId: string, roomId: string) => void;
   addRevision: (floorPlanId: string, payload?: { name?: string; description?: string; bump?: 'major' | 'minor' }) => string;
   restoreRevision: (floorPlanId: string, revisionId: string) => void;
+  updateRevision: (floorPlanId: string, revisionId: string, changes: Partial<FloorPlanRevision>) => void;
   deleteRevision: (floorPlanId: string, revisionId: string) => void;
   clearRevisions: (floorPlanId: string) => void;
   findFloorPlan: (id: string) => FloorPlan | undefined;
@@ -433,7 +435,8 @@ const defaultLayers = (): LayerDefinition[] => [
   { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 10 },
   { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 11, typeIds: DEFAULT_RACK_TYPES },
   { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 12, typeIds: DEFAULT_TEXT_TYPES },
-  { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 13, typeIds: DEFAULT_IMAGE_TYPES }
+  { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 13, typeIds: DEFAULT_IMAGE_TYPES },
+  { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 14, typeIds: DEFAULT_PHOTO_TYPES }
 ];
 
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling', 'quotes']);
@@ -465,6 +468,7 @@ const ensureLayerTypes = (layer: LayerDefinition): LayerDefinition => {
   if (layer.id === 'desks') return { ...layer, typeIds: DEFAULT_DESK_TYPES };
   if (layer.id === 'text') return { ...layer, typeIds: DEFAULT_TEXT_TYPES };
   if (layer.id === 'images') return { ...layer, typeIds: DEFAULT_IMAGE_TYPES };
+  if (layer.id === 'photos') return { ...layer, typeIds: DEFAULT_PHOTO_TYPES };
   if (layer.id === 'walls') return { ...layer, typeIds: DEFAULT_WALL_TYPES };
   if (layer.id === 'racks') return { ...layer, typeIds: DEFAULT_RACK_TYPES };
   return layer;
@@ -517,6 +521,14 @@ const normalizeClientLayers = (client: Client): LayerDefinition[] => {
       delete (next as any).typeIds;
     } else {
       next.typeIds = ensureLayerTypes(next).typeIds;
+    }
+    if (id === 'images' && Array.isArray(next.typeIds)) {
+      const filtered = next.typeIds.filter((typeId) => String(typeId) !== 'photo');
+      next.typeIds = filtered.length ? filtered : DEFAULT_IMAGE_TYPES;
+    }
+    if (id === 'photos' && Array.isArray(next.typeIds)) {
+      const hasPhoto = next.typeIds.some((typeId) => String(typeId) === 'photo');
+      next.typeIds = hasPhoto ? next.typeIds : [...next.typeIds, ...DEFAULT_PHOTO_TYPES];
     }
     byId.set(id, next);
   }
@@ -583,8 +595,11 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
       }
       if (obj?.type === 'photo') {
         const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
-        if (layerIds.includes('images')) return obj;
-        return { ...obj, layerIds: [...layerIds, 'images'] };
+        if (layerIds.includes('photos')) return obj;
+        const nextLayerIds = new Set(layerIds);
+        nextLayerIds.delete('images');
+        nextLayerIds.add('photos');
+        return { ...obj, layerIds: Array.from(nextLayerIds) };
       }
       return obj;
     });
@@ -1086,6 +1101,15 @@ export const useDataStore = create<DataState>()(
               rackLinks: Array.isArray((rev as any).rackLinks) ? (rev as any).rackLinks : (plan as any).rackLinks
             };
           }),
+          version: state.version + 1
+        }));
+      },
+      updateRevision: (floorPlanId, revisionId, changes) => {
+        set((state) => ({
+          clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            revisions: (plan.revisions || []).map((r) => (r.id === revisionId ? { ...r, ...changes } : r))
+          })),
           version: state.version + 1
         }));
       },

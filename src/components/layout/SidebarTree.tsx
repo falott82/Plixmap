@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, FileText, History, Image as ImageIcon, Info, Map as MapIcon, MapPinned, Network, Paperclip, Search, Star, Trash, Users } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, FileText, History, Image as ImageIcon, Info, Lock, Map as MapIcon, MapPinned, Network, Paperclip, Search, Star, Trash, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -111,7 +111,8 @@ const SidebarTree = () => {
     setExpandedClients,
     setExpandedSites,
     toggleClientExpanded,
-    toggleSiteExpanded
+    toggleSiteExpanded,
+    lockedPlans
   } = useUIStore(
     (s) => ({
       selectedPlanId: s.selectedPlanId,
@@ -123,7 +124,8 @@ const SidebarTree = () => {
       setExpandedClients: s.setExpandedClients,
       setExpandedSites: s.setExpandedSites,
       toggleClientExpanded: s.toggleClientExpanded,
-      toggleSiteExpanded: s.toggleSiteExpanded
+      toggleSiteExpanded: s.toggleSiteExpanded,
+      lockedPlans: (s as any).lockedPlans || {}
     }),
     shallow
   );
@@ -151,7 +153,18 @@ const SidebarTree = () => {
   const [confirmDelete, setConfirmDelete] = useState<{ kind: 'client' | 'plan'; id: string; label: string } | null>(null);
   const [missingPlansNotice, setMissingPlansNotice] = useState<{ clientName: string } | null>(null);
   const [clonePlan, setClonePlan] = useState<{ planId: string; name: string } | null>(null);
+  const [lockMenu, setLockMenu] = useState<{
+    planId: string;
+    planName: string;
+    clientName: string;
+    siteName: string;
+    userId: string;
+    username: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const lockMenuRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ siteId: string; planId: string } | null>(null);
   const clientDragRef = useRef<string | null>(null);
 
@@ -229,6 +242,16 @@ const SidebarTree = () => {
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
   }, []);
+
+  useEffect(() => {
+    if (!lockMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (!lockMenuRef.current) return;
+      if (!lockMenuRef.current.contains(e.target as any)) setLockMenu(null);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [lockMenu]);
 
   useEffect(() => {
     let active = true;
@@ -515,6 +538,7 @@ const SidebarTree = () => {
                               const active = selectedPlanId === plan.id || location.pathname.includes(plan.id);
                               const isDefault = !!defaultPlanId && defaultPlanId === plan.id;
                               const hasPrintArea = !!plan.printArea;
+                              const lockInfo = (lockedPlans as any)?.[plan.id];
                               return (
                                 <button
                                   key={plan.id}
@@ -553,6 +577,33 @@ const SidebarTree = () => {
                                 >
                                   <MapIcon size={16} className="text-primary" />
                                   <span className="truncate">{plan.name}</span>
+                                  {lockInfo ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (!user?.isSuperAdmin || user?.username !== 'superadmin') return;
+                                        setLockMenu({
+                                          planId: plan.id,
+                                          planName: plan.name,
+                                          clientName: client.shortName || client.name,
+                                          siteName: site.name,
+                                          userId: lockInfo.userId,
+                                          username: lockInfo.username,
+                                          x: e.clientX,
+                                          y: e.clientY
+                                        });
+                                      }}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                      title={t({
+                                        it: `Lock attivo: ${lockInfo.username || 'utente'}`,
+                                        en: `Lock active: ${lockInfo.username || 'user'}`
+                                      })}
+                                    >
+                                      <Lock size={14} />
+                                    </button>
+                                  ) : null}
                                   {isDefault ? (
                                     <span
                                       title={t({
@@ -841,6 +892,44 @@ const SidebarTree = () => {
               )}
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {lockMenu ? (
+        <div
+          ref={lockMenuRef}
+          className="fixed z-50 w-64 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+          style={{ top: lockMenu.y, left: lockMenu.x }}
+        >
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <span className="font-semibold text-ink">{t({ it: 'Lock planimetria', en: 'Floor plan lock' })}</span>
+            <button
+              onClick={() => setLockMenu(null)}
+              className="text-slate-400 hover:text-ink"
+              title={t({ it: 'Chiudi', en: 'Close' })}
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="px-2 pt-2 text-sm font-semibold text-ink">{lockMenu.planName}</div>
+          <div className="px-2 text-xs text-slate-500">{lockMenu.clientName} / {lockMenu.siteName}</div>
+          <div className="mt-2 px-2 text-xs text-slate-600">
+            {t({ it: 'Lock attivo da', en: 'Locked by' })}: {lockMenu.username || 'user'}
+          </div>
+          <button
+            onClick={() => {
+              window.dispatchEvent(
+                new CustomEvent('deskly_unlock_request', {
+                  detail: { planId: lockMenu.planId, userId: lockMenu.userId }
+                })
+              );
+              setLockMenu(null);
+            }}
+            className="mt-3 flex w-full items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+            title={t({ it: 'Chiedi unlock', en: 'Request unlock' })}
+          >
+            {t({ it: 'Chiedi unlock', en: 'Request unlock' })}
+          </button>
         </div>
       ) : null}
 

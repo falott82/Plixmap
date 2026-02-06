@@ -8,6 +8,31 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.3.1',
+    date: '2026-02-06',
+    type: 'minor',
+    notes: [
+      n('Lock: richiesta unlock dal superadmin con feedback e rilascio guidato', 'Lock: superadmin unlock request with feedback and guided release'),
+      n('Presenza: utenti online globali, IP visibile al superadmin', 'Presence: global online users, IP visible to superadmin'),
+      n('UI: lucchetto cliccabile in sidebar con richiesta unlock', 'UI: clickable lock in sidebar with unlock request'),
+      n('Revisioni: flag immutabile gestito dal superadmin con conferma eliminazione', 'Revisions: immutable flag handled by superadmin with delete confirmation')
+    ]
+  },
+  {
+    version: '2.3.0',
+    date: '2026-02-06',
+    type: 'minor',
+    notes: [
+      n('Lock planimetrie: TTL 60s con rinnovo automatico', 'Floor plan locks: 60s TTL with auto-renew'),
+      n('Lock: idle timeout 5 minuti con scadenza automatica', 'Locks: 5-minute idle timeout with automatic expiry'),
+      n('UI: badge stato lock e pulsante per acquisire il lock', 'UI: lock status badge and acquire lock button'),
+      n('Realtime: rinnovo lock via WebSocket e cleanup scadenze lato server', 'Realtime: lock renew via WebSocket and server-side expiry cleanup'),
+      n('Presenza: dettagli utenti online con data di connessione, IP e lock attivo', 'Presence: online user details with connection time, IP, and active lock'),
+      n('Lock: richiesta unlock dal superadmin con esito e rilascio guidato', 'Lock: superadmin unlock request with feedback and guided release'),
+      n('UI: lucchetto sulle planimetrie bloccate', 'UI: lock icon on locked floor plans')
+    ]
+  },
+  {
     version: '2.2.6',
     date: '2026-02-06',
     type: 'fix',

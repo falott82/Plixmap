@@ -14,7 +14,8 @@ export const DEFAULT_CCTV_TYPES = ['camera'];
 export const DEFAULT_RACK_TYPES = ['rack'];
 export const DEFAULT_WIFI_TYPES = ['wifi'];
 export const DEFAULT_TEXT_TYPES = ['text', 'postit'];
-export const DEFAULT_IMAGE_TYPES = ['image', 'photo'];
+export const DEFAULT_IMAGE_TYPES = ['image'];
+export const DEFAULT_PHOTO_TYPES = ['photo'];
 export const WIFI_STANDARD_OPTIONS = [
   { id: '802.11', it: 'WiFi 1 (802.11)', en: 'WiFi 1 (802.11)' },
   { id: '802.11b', it: 'WiFi 2 (802.11b)', en: 'WiFi 2 (802.11b)' },
@@ -322,7 +323,8 @@ export const defaultData = (): Client[] => {
         { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 10 },
         { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 11, typeIds: DEFAULT_RACK_TYPES },
         { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 12, typeIds: DEFAULT_TEXT_TYPES },
-        { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 13, typeIds: DEFAULT_IMAGE_TYPES }
+        { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 13, typeIds: DEFAULT_IMAGE_TYPES },
+        { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 14, typeIds: DEFAULT_PHOTO_TYPES }
       ],
       sites: [
         {
