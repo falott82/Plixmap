@@ -23,6 +23,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
   const [tab, setTab] = useState<'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes'>(defaultTab);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
   const [context, setContext] = useState<{ x: number; y: number; typeId: string } | null>(null);
   const contextRef = useRef<HTMLDivElement | null>(null);
 
@@ -148,21 +149,35 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
     setActiveIndex(activeDefs.length ? 0 : -1);
   }, [activeDefs.length, open, q, tab]);
 
+  useEffect(() => {
+    if (!open) return;
+    if (activeIndex < 0) return;
+    const el = gridRef.current?.querySelector?.(`[data-def-index="${activeIndex}"]`) as HTMLElement | null;
+    el?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex, open]);
+
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!activeDefs.length) return;
-    if (e.key === 'ArrowDown') {
+    const cols =
+      typeof window !== 'undefined' && window.matchMedia
+        ? window.matchMedia('(min-width: 640px)').matches
+          ? 4
+          : 2
+        : 4;
+    const clampIndex = (value: number) => Math.max(0, Math.min(activeDefs.length - 1, value));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
       setActiveIndex((prev) => {
-        const next = prev < 0 ? 0 : (prev + 1) % activeDefs.length;
-        return next;
-      });
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setActiveIndex((prev) => {
-        const next = prev < 0 ? activeDefs.length - 1 : (prev - 1 + activeDefs.length) % activeDefs.length;
-        return next;
+        const base = prev < 0 ? 0 : prev;
+        const delta =
+          e.key === 'ArrowRight'
+            ? 1
+            : e.key === 'ArrowLeft'
+              ? -1
+              : e.key === 'ArrowDown'
+                ? cols
+                : -cols;
+        return clampIndex(base + delta);
       });
       return;
     }
@@ -323,7 +338,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                   </button>
                 </div>
 
-                <div className="mt-4 grid max-h-[580px] grid-cols-2 gap-3 overflow-auto sm:grid-cols-4">
+                <div ref={gridRef} className="mt-4 grid max-h-[580px] grid-cols-2 gap-3 overflow-auto sm:grid-cols-4">
                   {activeDefs.length ? (
                     activeDefs.map((d, index) => {
                       const label = (d?.name?.[lang] as string) || (d?.name?.it as string) || d.id;
@@ -343,6 +358,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                       return (
                         <button
                           key={d.id}
+                          data-def-index={index}
                           onClick={() => {
                             onPick(d.id);
                             onClose();
