@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ChevronDown, ChevronUp, Info, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Cog, Info, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { useDataStore } from '../../store/useDataStore';
 import { WALL_TYPE_IDS } from '../../store/data';
 import { useToastStore } from '../../store/useToast';
@@ -511,35 +511,42 @@ const LayersPanel = () => {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleMoveLayer(layerId, 'up')}
-                    disabled={index === 0}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                    title={t({ it: 'Sposta su', en: 'Move up' })}
-                  >
-                    <ChevronUp size={14} />
-                  </button>
-                  <button
-                    onClick={() => handleMoveLayer(layerId, 'down')}
-                    disabled={index === filteredEditableLayers.length - 1}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                    title={t({ it: 'Sposta giù', en: 'Move down' })}
-                  >
-                    <ChevronDown size={14} />
-                  </button>
-                  <button
-                    onClick={() => setLayerModal({ mode: 'edit', layerId })}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Modifica layer', en: 'Edit layer' })}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    onClick={() => setConfirmDelete(layer)}
-                    disabled={isLockedDelete}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-40"
-                    title={
+	                <div className="flex items-center gap-2">
+	                  <button
+	                    onClick={() => handleMoveLayer(layerId, 'up')}
+	                    disabled={index === 0}
+	                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+	                    title={t({ it: 'Sposta su', en: 'Move up' })}
+	                  >
+	                    <ChevronUp size={14} />
+	                  </button>
+	                  <button
+	                    onClick={() => handleMoveLayer(layerId, 'down')}
+	                    disabled={index === filteredEditableLayers.length - 1}
+	                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+	                    title={t({ it: 'Sposta giù', en: 'Move down' })}
+	                  >
+	                    <ChevronDown size={14} />
+	                  </button>
+	                  <button
+	                    onClick={() => setLayerModal({ mode: 'edit', layerId })}
+	                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+	                    title={t({ it: 'Modifica layer', en: 'Edit layer' })}
+	                  >
+	                    <Pencil size={14} />
+	                  </button>
+	                  <button
+	                    onClick={() => openTypeEditor(layer)}
+	                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+	                    title={t({ it: 'Gestisci tipi', en: 'Manage types' })}
+	                  >
+	                    <Cog size={14} />
+	                  </button>
+	                  <button
+	                    onClick={() => setConfirmDelete(layer)}
+	                    disabled={isLockedDelete}
+	                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-40"
+	                    title={
                       isLockedDelete
                         ? t({ it: 'Layer di sistema non eliminabile', en: 'System layer cannot be deleted' })
                         : t({ it: 'Elimina layer', en: 'Delete layer' })
@@ -550,28 +557,10 @@ const LayersPanel = () => {
                 </div>
               </div>
 
-              <div className="mt-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Tipi oggetti', en: 'Object types' })}</div>
-                  {!isSpecial ? (
-                    <button
-                      onClick={() => openTypeEditor(layer)}
-                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      title={t({ it: 'Gestisci tipi', en: 'Manage types' })}
-                    >
-                      <Pencil size={12} /> {t({ it: 'Gestisci', en: 'Manage' })}
-                    </button>
-                  ) : (
-                    <span className="text-xs text-slate-400">
-                      {layerId === 'rooms'
-                        ? t({ it: 'Layer dedicato alle stanze.', en: 'Dedicated to rooms.' })
-                        : t({ it: 'Layer dedicato ai collegamenti.', en: 'Dedicated to links.' })}
-                    </span>
-                  )}
-                </div>
-                {typeIds.length ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {typeIds.map((typeId) => {
+	              <div className="mt-4">
+	                {typeIds.length ? (
+	                  <div className="mt-2 flex flex-wrap gap-2">
+	                    {typeIds.map((typeId) => {
                       const label = resolveTypeLabel(typeId);
                       const count = counts.get(typeId) || 0;
                       const isExplicit = explicitSet.has(typeId);
@@ -591,13 +580,13 @@ const LayersPanel = () => {
                         </span>
                       );
                     })}
-                  </div>
-                ) : (
-                  <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                    {t({ it: 'Nessun tipo assegnato.', en: 'No types assigned.' })}
-                  </div>
-                )}
-              </div>
+	                  </div>
+	                ) : (
+	                  <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+	                    {t({ it: 'Nessun tipo assegnato.', en: 'No types assigned.' })}
+	                  </div>
+	                )}
+	              </div>
             </div>
           );
         })}

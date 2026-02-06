@@ -8573,22 +8573,22 @@ const PlanView = ({ planId }: Props) => {
                         >
                           {hideAllLayers ? <Eye size={12} /> : <EyeOff size={12} />}
                         </button>
-                        <button
-                          onClick={() => {
-                            const url = '/settings?tab=layers';
-                            if (hasNavigationEdits && !isReadOnly) {
-                              requestSaveAndNavigate(url);
-                              return;
-                            }
-                            navigate(url);
-                          }}
-                          className="flex h-6 w-6 items-center justify-center rounded-md text-slate-600 hover:bg-slate-50"
-                          title={t({ it: 'Gestisci layers', en: 'Manage layers' })}
-                        >
-                          <Pencil size={14} />
-                        </button>
-                      </div>
-                    </div>
+	                        <button
+	                          onClick={() => {
+	                            const url = '/settings?tab=layers';
+	                            if (hasNavigationEdits && !isReadOnly) {
+	                              requestSaveAndNavigate(url);
+	                              return;
+	                            }
+	                            navigate(url);
+	                          }}
+	                          className="flex h-6 w-6 items-center justify-center rounded-md text-slate-600 hover:bg-slate-50"
+	                          title={t({ it: 'Gestisci layers', en: 'Manage layers' })}
+	                        >
+	                          <Cog size={14} />
+	                        </button>
+	                      </div>
+	                    </div>
                     {layersOpen ? (
                       <div className="mt-2 flex flex-col gap-2">
                         {orderedPlanLayers.map((l: any) => {
