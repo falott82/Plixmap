@@ -229,13 +229,16 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
     case 'wall':
       return (
         <svg {...svgProps}>
-          <rect x="4" y="5" width="16" height="14" rx="2" />
-          <path d="M4 9h16" />
-          <path d="M4 14h16" />
-          <path d="M12 5v4" />
-          <path d="M8 9v5" />
-          <path d="M16 9v5" />
-          <path d="M12 14v5" />
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="M3 10h18" />
+          <path d="M3 15h18" />
+          <path d="M9 5v5" />
+          <path d="M15 5v5" />
+          <path d="M6 10v5" />
+          <path d="M12 10v5" />
+          <path d="M18 10v5" />
+          <path d="M9 15v4" />
+          <path d="M15 15v4" />
         </svg>
       );
     case 'lockKeyhole':
