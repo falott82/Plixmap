@@ -642,6 +642,19 @@ export const useDataStore = create<DataState>()(
             byId.set('rack', { ...rackType, name: { it: 'Rack rete', en: 'Network rack' } });
           }
         }
+
+        // Migration: older DBs stored wall materials with the generic "cable" icon.
+        // Force a dedicated wall icon so walls are recognizable across the UI.
+        for (const [id, def] of byId.entries()) {
+          if (!def) continue;
+          const isWall = (def as any)?.category === 'wall' || String(id).startsWith('wall_');
+          if (!isWall) continue;
+          if ((def as any).icon === 'wall') continue;
+          if (!(def as any).icon || (def as any).icon === 'cable') {
+            byId.set(id, { ...(def as any), icon: 'wall' } as any);
+          }
+        }
+
         const mergedTypes = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
         return {
           clients: (clients || []).map((c) => ({
