@@ -230,10 +230,11 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
       return (
         <svg {...svgProps}>
           <rect x="4" y="5" width="16" height="14" rx="2" />
-          <path d="M4 10h16" />
+          <path d="M4 9h16" />
           <path d="M4 14h16" />
-          <path d="M8 5v5" />
-          <path d="M16 10v4" />
+          <path d="M12 5v4" />
+          <path d="M8 9v5" />
+          <path d="M16 9v5" />
           <path d="M12 14v5" />
         </svg>
       );

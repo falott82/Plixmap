@@ -477,7 +477,7 @@ const PlanView = ({ planId }: Props) => {
   const roomOverlapNoticeRef = useRef(0);
   const roomLayerNoticeRef = useRef(0);
   const [allTypesOpen, setAllTypesOpen] = useState(false);
-  const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'objects' | 'desks' | 'walls' | 'text' | 'notes'>('objects');
+  const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes'>('objects');
   const [roomCatalogOpen, setRoomCatalogOpen] = useState(false);
   const [wallCatalogOpen, setWallCatalogOpen] = useState(false);
   const [deskCatalogOpen, setDeskCatalogOpen] = useState(false);
@@ -4998,15 +4998,22 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
-      if (!isTyping && e.key.toLowerCase() === 'q') {
-        e.preventDefault();
-        if (quoteMode) {
-          stopQuote();
-        } else {
-          startQuote();
-        }
-        return;
-      }
+	      if (!isTyping && e.key.toLowerCase() === 'q') {
+	        e.preventDefault();
+	        if (quoteMode) {
+	          stopQuote();
+	        } else {
+	          startQuote();
+	        }
+	        return;
+	      }
+
+	      if (!isTyping && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'a') {
+	        e.preventDefault();
+	        setAllTypesDefaultTab('all');
+	        setAllTypesOpen(true);
+	        return;
+	      }
 
       if (!isTyping && e.key.toLowerCase() === 'w') {
         e.preventDefault();
