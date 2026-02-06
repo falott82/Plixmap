@@ -53,6 +53,30 @@ const Toolbar = ({ defs, order, onSelectType, onRemoveFromPalette, activeType, a
     return base.slice().sort((a, b) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
   }, [defs, lang, order]);
 
+  type GroupId = 'desks' | 'notes' | 'people' | 'network' | 'walls' | 'other';
+  const grouped = useMemo(() => {
+    const resolveGroup = (def: ObjectTypeDefinition): GroupId => {
+      const id = String(def.id || '');
+      if (id.startsWith('desk_')) return 'desks';
+      if (id === 'user') return 'people';
+      if (id === 'text' || id === 'image' || id === 'photo' || id === 'postit') return 'notes';
+      if (def.category === 'wall' || id.startsWith('wall_')) return 'walls';
+      if (id === 'wifi' || id === 'camera' || id === 'router' || id === 'switch' || id === 'server') return 'network';
+      return 'other';
+    };
+    const buckets = new Map<GroupId, ObjectTypeDefinition[]>();
+    for (const def of list) {
+      const key = resolveGroup(def);
+      const prev = buckets.get(key) || [];
+      prev.push(def);
+      buckets.set(key, prev);
+    }
+    const order: GroupId[] = ['desks', 'people', 'notes', 'network', 'walls', 'other'];
+    return order
+      .map((id) => ({ id, items: buckets.get(id) || [] }))
+      .filter((g) => g.items.length);
+  }, [list]);
+
   useEffect(() => {
     if (!context) return;
     const onDown = (e: MouseEvent) => {
@@ -64,33 +88,58 @@ const Toolbar = ({ defs, order, onSelectType, onRemoveFromPalette, activeType, a
   }, [context]);
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      {list.map((def) => {
-        const active = activeType === def.id;
-        const label = def.name[lang] || def.id;
+    <div className="flex flex-col items-center gap-3">
+      {grouped.map((group) => {
+        const groupLabel =
+          group.id === 'desks'
+            ? t({ it: 'Scrivanie', en: 'Desks' })
+            : group.id === 'people'
+              ? t({ it: 'Persone', en: 'People' })
+              : group.id === 'notes'
+                ? t({ it: 'Note', en: 'Notes' })
+                : group.id === 'network'
+                  ? t({ it: 'Rete', en: 'Network' })
+                  : group.id === 'walls'
+                    ? t({ it: 'Muri', en: 'Walls' })
+                    : t({ it: 'Altro', en: 'Other' });
         return (
-          <div key={def.id} className="flex flex-col items-center">
-            <button
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData('application/deskly-type', def.id);
-                e.dataTransfer.effectAllowed = 'copy';
-              }}
-              onClick={() => onSelectType(def.id)}
-              onContextMenu={(e) => {
-                if (!canOpenContext) return;
-                e.preventDefault();
-                e.stopPropagation();
-                setContext({ x: e.clientX, y: e.clientY, type: def.id });
-              }}
-              className={`flex h-12 w-12 items-center justify-center rounded-xl border text-primary shadow-sm transition hover:-translate-y-0.5 hover:shadow-card ${
-                active ? 'border-primary bg-primary/10' : 'border-slate-200 bg-white'
-              }`}
-              title={t({ it: label, en: label })}
-            >
-              <Icon name={def.icon} />
-            </button>
-            <span className="mt-0.5 text-[11px] text-slate-600 text-center leading-tight">{label}</span>
+          <div key={group.id} className="flex w-full flex-col items-center gap-2">
+            <div className="w-full px-1">
+              <div className="flex items-center gap-2 py-1">
+                <div className="h-px flex-1 bg-slate-200/70" />
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{groupLabel}</div>
+                <div className="h-px flex-1 bg-slate-200/70" />
+              </div>
+            </div>
+            {group.items.map((def) => {
+              const active = activeType === def.id;
+              const label = def.name[lang] || def.id;
+              return (
+                <div key={def.id} className="flex flex-col items-center">
+                  <button
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/deskly-type', def.id);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    onClick={() => onSelectType(def.id)}
+                    onContextMenu={(e) => {
+                      if (!canOpenContext) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setContext({ x: e.clientX, y: e.clientY, type: def.id });
+                    }}
+                    className={`flex h-12 w-12 items-center justify-center rounded-xl border text-primary shadow-sm transition hover:-translate-y-0.5 hover:shadow-card ${
+                      active ? 'border-primary bg-primary/10' : 'border-slate-200 bg-white'
+                    }`}
+                    title={t({ it: label, en: label })}
+                  >
+                    <Icon name={def.icon} />
+                  </button>
+                  <span className="mt-0.5 text-[11px] text-slate-600 text-center leading-tight">{label}</span>
+                </div>
+              );
+            })}
           </div>
         );
       })}
