@@ -122,6 +122,7 @@ export type IconName =
   | 'network'
   | 'wifiOff'
   | 'cable'
+  | 'wall'
   | 'lockKeyhole'
   | 'badgeCheck'
   | 'shieldCheck'
