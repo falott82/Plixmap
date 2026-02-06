@@ -4,13 +4,18 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: '#0f172a',
-        mist: '#f5f7fb',
-        primary: '#2563eb',
-        accent: '#22d3ee'
+        ink: 'rgb(var(--c-ink) / <alpha-value>)',
+        mist: 'rgb(var(--c-mist) / <alpha-value>)',
+        primary: 'rgb(var(--c-primary) / <alpha-value>)',
+        accent: 'rgb(var(--c-accent) / <alpha-value>)'
+      },
+      fontFamily: {
+        sans: ['var(--font-sans)'],
+        display: ['var(--font-display)']
       },
       boxShadow: {
-        card: '0 10px 40px rgba(15, 23, 42, 0.08)'
+        card: 'var(--shadow-card)',
+        pop: 'var(--shadow-pop)'
       }
     }
   },
