@@ -573,9 +573,13 @@ const SidebarTree = () => {
                                     const before = e.clientY < rect.top + rect.height / 2;
                                     reorderFloorPlans(site.id, drag.planId, plan.id, before);
                                   }}
-                                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition hover:bg-slate-100 ${active ? 'bg-slate-200 font-semibold' : ''}`}
+                                  className={`group relative flex w-full items-center gap-2 rounded-lg pr-2 py-2 text-left text-sm transition ${
+                                    active
+                                      ? "bg-white font-semibold text-ink shadow-sm ring-1 ring-primary/15 before:content-[''] before:absolute before:left-0 before:top-1 before:bottom-1 before:w-1 before:rounded-r-full before:bg-primary pl-3"
+                                      : 'text-slate-700 hover:bg-white/70 pl-2'
+                                  }`}
                                 >
-                                  <MapIcon size={16} className="text-primary" />
+                                  <MapIcon size={16} className={active ? 'text-primary' : 'text-slate-500 group-hover:text-primary'} />
                                   <span className="truncate">{plan.name}</span>
                                   {lockInfo ? (
                                     <button
@@ -622,7 +626,7 @@ const SidebarTree = () => {
                                   >
                                     <Crop size={14} />
                                   </span>
-                                  <ChevronRight size={14} className="text-slate-400" />
+                                  <ChevronRight size={14} className={active ? 'text-primary/70' : 'text-slate-400'} />
                                 </button>
                               );
                             })}
