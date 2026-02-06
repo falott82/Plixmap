@@ -1,8 +1,8 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Dialog, Transition } from '@headlessui/react';
-import { Star, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Star } from 'lucide-react';
 import { FloorPlanView } from '../../store/types';
 import { useT } from '../../i18n/useT';
+import ModalShell from '../ui/ModalShell';
 
 interface Props {
   open: boolean;
@@ -22,105 +22,63 @@ const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
   }, [firstId, open]);
 
   return (
-    <Transition show={open} as={Fragment}>
-      <Dialog as="div" className="relative z-50" onClose={onClose}>
-        <Transition.Child
-          as={Fragment}
-          enter="ease-out duration-150"
-          enterFrom="opacity-0"
-          enterTo="opacity-100"
-          leave="ease-in duration-100"
-          leaveFrom="opacity-100"
-          leaveTo="opacity-0"
-        >
-          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
-        </Transition.Child>
-        <div className="fixed inset-0 overflow-y-auto">
-          <div className="flex min-h-full items-center justify-center px-4 py-8">
-            <Transition.Child
-              as={Fragment}
-              enter="ease-out duration-150"
-              enterFrom="opacity-0 scale-95"
-              enterTo="opacity-100 scale-100"
-              leave="ease-in duration-100"
-              leaveFrom="opacity-100 scale-100"
-              leaveTo="opacity-0 scale-95"
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      sizeClassName="max-w-md"
+      title={t({ it: 'Scegli la nuova vista predefinita', en: 'Choose the new default view' })}
+      description={t({
+        it: 'Stai eliminando la vista predefinita: seleziona quale vista impostare come nuova predefinita.',
+        en: 'You are deleting the default view: choose which view should become the new default.'
+      })}
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary" title={t({ it: 'Annulla', en: 'Cancel' })}>
+            {t({ it: 'Annulla', en: 'Cancel' })}
+          </button>
+          <button
+            disabled={!selectedId}
+            onClick={() => {
+              if (!selectedId) return;
+              onConfirm(selectedId);
+            }}
+            className="inline-flex items-center gap-2 btn-primary disabled:opacity-50"
+            title={t({ it: 'Imposta predefinita', en: 'Set default' })}
+          >
+            <Star size={16} className="text-amber-300" />
+            {t({ it: 'Imposta predefinita', en: 'Set default' })}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-2">
+        {views.length ? (
+          views.map((v) => (
+            <label
+              key={v.id}
+              className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-left transition ${
+                selectedId === v.id ? 'border-primary bg-primary/5' : 'border-slate-200 hover:bg-slate-50'
+              }`}
             >
-              <Dialog.Panel className="w-full max-w-md modal-panel">
-                <div className="modal-header items-center">
-                  <Dialog.Title className="modal-title">
-                    {t({ it: 'Scegli la nuova vista predefinita', en: 'Choose the new default view' })}
-                  </Dialog.Title>
-                  <button onClick={onClose} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
-                    <X size={18} />
-                  </button>
-                </div>
-                <Dialog.Description className="modal-description">
-                  {t({
-                    it: 'Stai eliminando la vista predefinita: seleziona quale vista impostare come nuova predefinita.',
-                    en: 'You are deleting the default view: choose which view should become the new default.'
-                  })}
-                </Dialog.Description>
-
-                <div className="mt-4 space-y-2">
-                  {views.length ? (
-                    views.map((v) => (
-                      <label
-                        key={v.id}
-                        className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-left transition ${
-                          selectedId === v.id ? 'border-primary bg-primary/5' : 'border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="default-view"
-                          value={v.id}
-                          checked={selectedId === v.id}
-                          onChange={() => setSelectedId(v.id)}
-                          className="mt-1 h-4 w-4 text-primary"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate font-semibold text-ink">{v.name}</div>
-                          {v.description ? (
-                            <div className="truncate text-xs text-slate-500">{v.description}</div>
-                          ) : null}
-                        </div>
-                      </label>
-                    ))
-                  ) : (
-                    <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-                      {t({ it: 'Nessuna vista disponibile.', en: 'No views available.' })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="modal-footer">
-                  <button
-                    onClick={onClose}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Annulla', en: 'Cancel' })}
-                  >
-                    {t({ it: 'Annulla', en: 'Cancel' })}
-                  </button>
-                  <button
-                    disabled={!selectedId}
-                    onClick={() => {
-                      if (!selectedId) return;
-                      onConfirm(selectedId);
-                    }}
-                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-50"
-                    title={t({ it: 'Imposta predefinita', en: 'Set default' })}
-                  >
-                    <Star size={16} className="text-amber-300" />
-                    {t({ it: 'Imposta predefinita', en: 'Set default' })}
-                  </button>
-                </div>
-              </Dialog.Panel>
-            </Transition.Child>
-          </div>
-        </div>
-      </Dialog>
-    </Transition>
+              <input
+                type="radio"
+                name="default-view"
+                value={v.id}
+                checked={selectedId === v.id}
+                onChange={() => setSelectedId(v.id)}
+                className="mt-1 h-4 w-4 text-primary"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-semibold text-ink">{v.name}</div>
+                {v.description ? <div className="truncate text-xs text-slate-500">{v.description}</div> : null}
+              </div>
+            </label>
+          ))
+        ) : (
+          <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{t({ it: 'Nessuna vista disponibile.', en: 'No views available.' })}</div>
+        )}
+      </div>
+    </ModalShell>
   );
 };
 
