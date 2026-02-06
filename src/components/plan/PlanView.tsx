@@ -7244,17 +7244,17 @@ const PlanView = ({ planId }: Props) => {
   );
 
   return (
-    <div className="flex h-screen flex-col gap-4 overflow-hidden p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase text-slate-500">
-            {client?.shortName || client?.name} → {site?.name}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-3">
-            <h1 className="truncate text-2xl font-semibold text-ink">{renderPlan.name}</h1>
-            {!isReadOnly ? (
-              <div className="flex items-center gap-1">
-                <button
+	    <div className="flex h-screen flex-col gap-4 overflow-hidden p-6">
+	      <div className="flex flex-nowrap items-center justify-between gap-2">
+	        <div className="min-w-0">
+	          <div className="text-[11px] font-semibold uppercase text-slate-500">
+	            {client?.shortName || client?.name} → {site?.name}
+	          </div>
+	          <div className="mt-1 flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto whitespace-nowrap">
+	            <h1 className="truncate text-xl font-semibold text-ink">{renderPlan.name}</h1>
+	            {!isReadOnly ? (
+	              <div className="flex items-center gap-1">
+	                <button
                   onClick={() => {
                     setPrintAreaMode(true);
                     push(
@@ -7264,53 +7264,53 @@ const PlanView = ({ planId }: Props) => {
                       }),
                       'info'
                     );
-                  }}
-                  title={t({ it: 'Imposta area di stampa', en: 'Set print area' })}
-                  className={`flex h-9 w-9 items-center justify-center rounded-xl border shadow-sm hover:bg-slate-50 ${
-                    (basePlan as any)?.printArea ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-700'
-                  }`}
-                >
-                  <Crop size={16} />
-                </button>
-                {(basePlan as any)?.printArea ? (
-                  <button
+	                  }}
+	                  title={t({ it: 'Imposta area di stampa', en: 'Set print area' })}
+	                  className={`flex h-8 w-8 items-center justify-center rounded-xl border shadow-sm hover:bg-slate-50 ${
+	                    (basePlan as any)?.printArea ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-700'
+	                  }`}
+	                >
+	                  <Crop size={14} />
+	                </button>
+	                {(basePlan as any)?.printArea ? (
+	                  <button
                     onClick={() => {
                       updateFloorPlan(basePlan.id, { printArea: undefined });
-                      push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
-                    }}
-                    title={t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })}
-                    className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
-                  >
-                    <X size={16} />
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-            {lockRequired && lockState.mine ? (
-              <span
-                className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800"
-                title={lockActiveTitle}
-              >
-                {t({ it: 'Lock attivo', en: 'Lock active' })}
-              </span>
-            ) : null}
-            {lockRequired && lockState.mine && lockIdle ? (
-              <span
-                className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
-                title={t({
-                  it: 'Se resti inattivo, il lock scade automaticamente.',
-                  en: 'If you stay idle, the lock expires automatically.'
-                })}
+	                      push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
+	                    }}
+	                    title={t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })}
+	                    className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+	                  >
+	                    <X size={14} />
+	                  </button>
+	                ) : null}
+	              </div>
+	            ) : null}
+	            {lockRequired && lockState.mine ? (
+	              <span
+	                className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800"
+	                title={lockActiveTitle}
+	              >
+	                {t({ it: 'Lock attivo', en: 'Lock active' })}
+	              </span>
+	            ) : null}
+	            {lockRequired && lockState.mine && lockIdle ? (
+	              <span
+	                className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800"
+	                title={t({
+	                  it: 'Se resti inattivo, il lock scade automaticamente.',
+	                  en: 'If you stay idle, the lock expires automatically.'
+	                })}
               >
                 {t({ it: 'Lock in pausa (inattivo)', en: 'Lock paused (idle)' })}
               </span>
             ) : null}
-            {isReadOnly ? (
-              <span
-                className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
-                title={lockedByOther ? lockedByTitle : undefined}
-              >
-                {activeRevision
+	            {isReadOnly ? (
+	              <span
+	                className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800"
+	                title={lockedByOther ? lockedByTitle : undefined}
+	              >
+	                {activeRevision
                   ? t({ it: `Sola lettura: ${activeRevision.name}`, en: `Read-only: ${activeRevision.name}` })
                   : planAccess !== 'rw'
                     ? t({ it: 'Sola lettura (permessi)', en: 'Read-only (permissions)' })
@@ -7324,24 +7324,24 @@ const PlanView = ({ planId }: Props) => {
                         : t({ it: 'Sola lettura', en: 'Read-only' })}
               </span>
             ) : null}
-            {lockRequired && !lockState.mine && lockAvailable ? (
-              <button
-                onClick={requestPlanLock}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                title={t({ it: 'Richiedi il lock per modificare', en: 'Request the lock to edit' })}
-              >
-                {t({ it: 'Prendi lock', en: 'Acquire lock' })}
-              </button>
-            ) : null}
+	            {lockRequired && !lockState.mine && lockAvailable ? (
+	              <button
+	                onClick={requestPlanLock}
+	                className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+	                title={t({ it: 'Richiedi il lock per modificare', en: 'Request the lock to edit' })}
+	              >
+	                {t({ it: 'Prendi lock', en: 'Acquire lock' })}
+	              </button>
+	            ) : null}
             {presenceCount ? (
               isSuperAdmin ? (
                 <div ref={presenceRef} className="relative">
-                  <button
-                    onClick={() => setPresenceOpen((v) => !v)}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Mostra utenti online', en: 'Show online users' })}
-                  >
-                    {t({ it: `${presenceCount} utenti online`, en: `${presenceCount} users online` })}
+	                  <button
+	                    onClick={() => setPresenceOpen((v) => !v)}
+	                    className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+	                    title={t({ it: 'Mostra utenti online', en: 'Show online users' })}
+	                  >
+	                    {t({ it: `${presenceCount} utenti online`, en: `${presenceCount} users online` })}
                   </button>
                   {presenceOpen ? (
                     <div className="absolute left-0 z-50 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-card">
@@ -7383,27 +7383,27 @@ const PlanView = ({ planId }: Props) => {
                   ) : null}
                 </div>
               ) : (
-                <span
-                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                  title={globalPresenceFallback.map((u) => u.username).join(', ')}
-                >
-                  {t({ it: `${presenceCount} utenti online`, en: `${presenceCount} users online` })}
+	                <span
+	                  className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
+	                  title={globalPresenceFallback.map((u) => u.username).join(', ')}
+	                >
+	                  {t({ it: `${presenceCount} utenti online`, en: `${presenceCount} users online` })}
                 </span>
               )
             ) : null}
             {totalLayerCount ? (
               <div ref={layersPopoverRef} className="relative">
-                <button
-                  onClick={() => setLayersPopoverOpen((v) => !v)}
+	                <button
+	                  onClick={() => setLayersPopoverOpen((v) => !v)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setLayersQuickMenu({ x: e.clientX, y: e.clientY });
                     setLayersPopoverOpen(false);
                   }}
-                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                  title={t({ it: 'Layers visibili', en: 'Visible layers' })}
-                >
-                  {t({ it: `${visibleLayerCount}/${totalLayerCount} livelli`, en: `${visibleLayerCount}/${totalLayerCount} layers` })}
+	                  className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+	                  title={t({ it: 'Layers visibili', en: 'Visible layers' })}
+	                >
+	                  {t({ it: `${visibleLayerCount}/${totalLayerCount} livelli`, en: `${visibleLayerCount}/${totalLayerCount} layers` })}
                 </button>
                 {layersPopoverOpen ? (
                   <div className="absolute left-0 z-50 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-card">
@@ -7490,12 +7490,12 @@ const PlanView = ({ planId }: Props) => {
               </div>
             ) : null}
             <div className="relative">
-              <button
-                onClick={() => setCountsOpen((v) => !v)}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                title={t({ it: 'Numero oggetti', en: 'Object count' })}
-              >
-                {t({ it: `${renderPlan.objects.length} oggetti`, en: `${renderPlan.objects.length} objects` })}
+	              <button
+	                onClick={() => setCountsOpen((v) => !v)}
+	                className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+	                title={t({ it: 'Numero oggetti', en: 'Object count' })}
+	              >
+	                {t({ it: `${renderPlan.objects.length} oggetti`, en: `${renderPlan.objects.length} objects` })}
               </button>
 	              {countsOpen ? (
 	                <div className="absolute left-0 z-50 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
@@ -7605,13 +7605,13 @@ const PlanView = ({ planId }: Props) => {
 	              ) : null}
 	            </div>
             <div className="relative">
-              <button
-                onClick={() => setRoomsOpen((v) => !v)}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                title={t({ it: 'Stanze', en: 'Rooms' })}
-              >
-                {rooms.length} {t({ it: 'stanze', en: 'rooms' })}
-              </button>
+	              <button
+	                onClick={() => setRoomsOpen((v) => !v)}
+	                className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+	                title={t({ it: 'Stanze', en: 'Rooms' })}
+	              >
+	                {rooms.length} {t({ it: 'stanze', en: 'rooms' })}
+	              </button>
               {roomsOpen ? (
                 <div className="absolute left-0 z-50 mt-2 w-[420px] rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
                   <div className="flex items-center justify-between px-2 pb-2">
@@ -7826,13 +7826,13 @@ const PlanView = ({ planId }: Props) => {
                 </div>
               ) : null}
             </div>
-            <div className="ml-1 flex h-9 items-center gap-2">
-              {selectedObjectId ? (
-                <>
-                  <span className="text-sm font-semibold text-slate-600">
-                    {t({ it: 'Selezionato:', en: 'Selected:' })}
-                  </span>
-	                  <span className="inline-flex min-w-0 max-w-[220px] items-center truncate rounded-full bg-primary/10 px-2 py-1 text-sm font-semibold text-primary">
+	            <div className="ml-1 flex h-8 items-center gap-1.5">
+	              {selectedObjectId ? (
+	                <>
+	                  <span className="text-xs font-semibold text-slate-600">
+	                    {t({ it: 'Selezionato:', en: 'Selected:' })}
+	                  </span>
+	                  <span className="inline-flex min-w-0 max-w-[220px] items-center truncate rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
 	                    {selectedObjectIds.length > 1 || linksInSelection.length
 	                      ? t({
 	                          it: `${selectedObjectIds.length + linksInSelection.length} elementi`,
@@ -7847,29 +7847,29 @@ const PlanView = ({ planId }: Props) => {
                         return;
                       }
                       handleEdit(selectedObjectId);
-                    }}
-                    disabled={isReadOnly}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Modifica', en: 'Edit' })}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    onClick={() => setConfirmDelete([...selectedObjectIds])}
-                    disabled={isReadOnly}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                    title={t({ it: 'Elimina', en: 'Delete' })}
-                  >
-                    <Trash size={14} />
-                  </button>
-                </>
-              ) : selectedLinkId ? (
-                isRackLinkId(selectedLinkId) ? (
-                  <>
-                    <span className="text-sm font-semibold text-slate-600">
-                      {t({ it: 'Collegamento rack:', en: 'Rack link:' })}
-                    </span>
-	                    <span className="inline-flex min-w-0 max-w-[320px] items-center truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
+	                    }}
+	                    disabled={isReadOnly}
+	                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+	                    title={t({ it: 'Modifica', en: 'Edit' })}
+	                  >
+	                    <Pencil size={12} />
+	                  </button>
+	                  <button
+	                    onClick={() => setConfirmDelete([...selectedObjectIds])}
+	                    disabled={isReadOnly}
+	                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+	                    title={t({ it: 'Elimina', en: 'Delete' })}
+	                  >
+	                    <Trash size={12} />
+	                  </button>
+	                </>
+	              ) : selectedLinkId ? (
+	                isRackLinkId(selectedLinkId) ? (
+	                  <>
+	                    <span className="text-xs font-semibold text-slate-600">
+	                      {t({ it: 'Collegamento rack:', en: 'Rack link:' })}
+	                    </span>
+	                    <span className="inline-flex min-w-0 max-w-[320px] items-center truncate rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-ink">
 	                      {(() => {
 	                        const l = rackOverlayById.get(selectedLinkId);
 	                        const a = l ? getObjectNameById(String(l.rackFromRackId)) : '';
@@ -7879,10 +7879,10 @@ const PlanView = ({ planId }: Props) => {
                       })()}
                     </span>
                   </>
-                ) : (
-                  <>
-                    <span className="text-sm font-semibold text-slate-600">{t({ it: 'Collegamento:', en: 'Link:' })}</span>
-	                    <span className="inline-flex min-w-0 max-w-[320px] items-center truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
+	                ) : (
+	                  <>
+	                    <span className="text-xs font-semibold text-slate-600">{t({ it: 'Collegamento:', en: 'Link:' })}</span>
+	                    <span className="inline-flex min-w-0 max-w-[320px] items-center truncate rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-ink">
 	                      {(() => {
 	                        const l = ((basePlan as any).links || []).find((x: any) => x.id === selectedLinkId);
 	                        const a = l ? getObjectNameById(String(l.fromId)) : '';
@@ -7891,34 +7891,34 @@ const PlanView = ({ planId }: Props) => {
                         return `${label}: ${a} → ${b}`;
                       })()}
                     </span>
-                    <button
-                      onClick={() => setLinkEditId(selectedLinkId)}
-                      disabled={isReadOnly}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
-                      title={t({ it: 'Modifica', en: 'Edit' })}
-                    >
-                      <Pencil size={14} />
-                    </button>
-                  </>
-                )
-              ) : (
-                selectedRoomId ? (
-                  <>
-                    <span className="text-sm font-semibold text-slate-600">{t({ it: 'Stanza:', en: 'Room:' })}</span>
-	                    <span className="inline-flex min-w-0 max-w-[220px] items-center truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
+	                    <button
+	                      onClick={() => setLinkEditId(selectedLinkId)}
+	                      disabled={isReadOnly}
+	                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+	                      title={t({ it: 'Modifica', en: 'Edit' })}
+	                    >
+	                      <Pencil size={12} />
+	                    </button>
+	                  </>
+	                )
+	              ) : (
+	                selectedRoomId ? (
+	                  <>
+	                    <span className="text-xs font-semibold text-slate-600">{t({ it: 'Stanza:', en: 'Room:' })}</span>
+	                    <span className="inline-flex min-w-0 max-w-[220px] items-center truncate rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-ink">
 	                      {rooms.find((r) => r.id === selectedRoomId)?.name || t({ it: 'Stanza', en: 'Room' })}
 	                    </span>
-                    {!isReadOnly ? (
-                      <>
-                        <button
-                          onClick={() => openEditRoom(selectedRoomId)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
-                          title={t({ it: 'Rinomina stanza', en: 'Rename room' })}
-                        >
-                          <Pencil size={14} />
-                        </button>
-                      </>
-                    ) : null}
+	                    {!isReadOnly ? (
+	                      <>
+	                        <button
+	                          onClick={() => openEditRoom(selectedRoomId)}
+	                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+	                          title={t({ it: 'Rinomina stanza', en: 'Rename room' })}
+	                        >
+	                          <Pencil size={12} />
+	                        </button>
+	                      </>
+	                    ) : null}
                   </>
                 ) : (
                   <span className="text-sm text-slate-400">{t({ it: 'Nessuna selezione', en: 'No selection' })}</span>
