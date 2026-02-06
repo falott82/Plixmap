@@ -8,20 +8,27 @@ interface ToastState {
   pushStack: (message: string, tone?: ToastTone, options?: { duration?: number }) => void;
 }
 
+const UPDATE_TOAST_MS = 5_000;
+const isUpdateToast = (message: string) => /aggiornat|updated/i.test(String(message || ''));
+
 export const useToastStore = create<ToastState>(() => ({
   push: (message, tone = 'info') => {
+    const duration = isUpdateToast(message) ? UPDATE_TOAST_MS : undefined;
     if (tone === 'success') {
-      toast.success(message);
+      if (duration) toast.success(message, { duration });
+      else toast.success(message);
       return;
     }
     if (tone === 'danger') {
-      toast.error(message);
+      if (duration) toast.error(message, { duration });
+      else toast.error(message);
       return;
     }
-    toast.info(message);
+    if (duration) toast.info(message, { duration });
+    else toast.info(message);
   },
   pushStack: (message, tone = 'info', options) => {
-    const duration = options?.duration;
+    const duration = options?.duration ?? (isUpdateToast(message) ? UPDATE_TOAST_MS : undefined);
     if (tone === 'success') {
       toast.success(message, { duration });
       return;
