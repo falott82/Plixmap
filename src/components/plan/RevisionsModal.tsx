@@ -274,7 +274,13 @@ const RevisionsModal = ({
                                 {t({ it: 'Rev', en: 'Rev' })}: {formatRev(r)} · {r.name}
                               </div>
                               {r.immutable ? (
-                                <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                                <div
+                                  className="mt-1 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                                  title={t({
+                                    it: 'Revisione immutabile = snapshot in sola lettura dello stato della planimetria in quel momento (immagine, oggetti, stanze e viste). Non puo essere modificata o sovrascritta; puo solo essere ripristinata o eliminata (solo Super Admin).',
+                                    en: 'Immutable revision = read-only snapshot of the floor plan state at that time (image, objects, rooms, and views). It cannot be edited or overwritten; it can only be restored or deleted (Super Admin only).'
+                                  })}
+                                >
                                   <Lock size={12} />
                                   {t({ it: 'Immutabile', en: 'Immutable' })}
                                 </div>
@@ -428,8 +434,8 @@ const RevisionsModal = ({
                   open={!!confirmDeleteImmutableId}
                   title={t({ it: 'Eliminare revisione immutabile?', en: 'Delete immutable revision?' })}
                   description={t({
-                    it: 'Si sta per eliminare una revisione immutabile. Procedo?',
-                    en: 'You are about to delete an immutable revision. Proceed?'
+                    it: 'Si sta per eliminare una revisione immutabile. Operazione non annullabile. Per confermare, scrivi "DELETE".',
+                    en: 'You are about to delete an immutable revision. This cannot be undone. To confirm, type "DELETE".'
                   })}
                   onCancel={() => setConfirmDeleteImmutableId(null)}
                   onConfirm={() => {
@@ -439,6 +445,13 @@ const RevisionsModal = ({
                   }}
                   confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
                   cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+                  confirmPhrase="DELETE"
+                  confirmPhraseLabel={t({ it: 'Conferma digitando', en: 'Confirm by typing' })}
+                  confirmPhrasePlaceholder="DELETE"
+                  confirmPhraseHint={t({
+                    it: 'La parola deve essere esatta (maiuscole/minuscole).',
+                    en: 'The word must match exactly (case-sensitive).'
+                  })}
                   confirmOnEnter
                 />
 
