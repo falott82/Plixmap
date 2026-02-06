@@ -1,14 +1,23 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;600&family=DM+Sans:wght@400;600&family=Dosis:wght@400;600&family=Fira+Sans:wght@400;600&family=Inconsolata:wght@400;600&family=Inter:wght@400;600&family=Jost:wght@400;600&family=Lato:wght@400;700&family=Manrope:wght@400;600&family=Merriweather:wght@400;700&family=Montserrat:wght@400;600&family=Nunito:wght@400;700&family=Open+Sans:wght@400;600&family=Oswald:wght@400;600&family=Playfair+Display:wght@400;600&family=Poppins:wght@400;600&family=PT+Sans:wght@400;700&family=Quicksand:wght@400;600&family=Raleway:wght@400;600&family=Roboto:wght@400;700&family=Source+Sans+3:wght@400;600&family=Ubuntu:wght@400;700&family=Work+Sans:wght@400;600&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
-  color: #0f172a;
-  background-color: #f5f7fb;
+  /* Theme tokens (used by Tailwind via CSS variables). */
+  --c-ink: 15 23 42;
+  --c-mist: 245 247 251;
+  --c-primary: 37 99 235;
+  --c-accent: 34 211 238;
+
+  --font-sans: Inter, system-ui, -apple-system, sans-serif;
+  --font-display: "Space Grotesk", var(--font-sans);
+
+  --shadow-card: 0 10px 40px rgba(15, 23, 42, 0.08);
+  --shadow-pop: 0 24px 70px rgba(15, 23, 42, 0.14);
+
+  font-family: var(--font-sans);
+  color: rgb(var(--c-ink));
+  background-color: rgb(var(--c-mist));
 }
 
 @layer components {
@@ -19,7 +28,7 @@
     @apply flex items-start justify-between gap-4 border-b border-slate-200/70 pb-3;
   }
   .modal-title {
-    @apply text-lg font-semibold text-ink;
+    @apply font-display text-lg font-semibold text-ink;
   }
   .modal-description {
     @apply mt-1 text-sm text-slate-600;
