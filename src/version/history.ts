@@ -8,6 +8,15 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.3.2',
+    date: '2026-02-06',
+    type: 'fix',
+    notes: [
+      n('Revisioni: eliminazione immutabile richiede digitare "DELETE" (Super Admin)', 'Revisions: immutable deletion requires typing "DELETE" (Super Admin)'),
+      n('UI: tooltip "Immutabile" con definizione e implicazioni (snapshot in sola lettura)', 'UI: “Immutable” tooltip explains definition and implications (read-only snapshot)')
+    ]
+  },
+  {
     version: '2.3.1',
     date: '2026-02-06',
     type: 'minor',
