@@ -7832,11 +7832,11 @@ const PlanView = ({ planId }: Props) => {
                   <span className="text-sm font-semibold text-slate-600">
                     {t({ it: 'Selezionato:', en: 'Selected:' })}
                   </span>
-                  <span className="max-w-[220px] truncate rounded-full bg-primary/10 px-2 py-1 text-sm font-semibold text-primary">
-                    {selectedObjectIds.length > 1 || linksInSelection.length
-                      ? t({
-                          it: `${selectedObjectIds.length + linksInSelection.length} elementi`,
-                          en: `${selectedObjectIds.length + linksInSelection.length} items`
+	                  <span className="inline-flex min-w-0 max-w-[220px] items-center truncate rounded-full bg-primary/10 px-2 py-1 text-sm font-semibold text-primary">
+	                    {selectedObjectIds.length > 1 || linksInSelection.length
+	                      ? t({
+	                          it: `${selectedObjectIds.length + linksInSelection.length} elementi`,
+	                          en: `${selectedObjectIds.length + linksInSelection.length} items`
                         })
                       : renderPlan.objects.find((o) => o.id === selectedObjectId)?.name}
                   </span>
@@ -7869,11 +7869,11 @@ const PlanView = ({ planId }: Props) => {
                     <span className="text-sm font-semibold text-slate-600">
                       {t({ it: 'Collegamento rack:', en: 'Rack link:' })}
                     </span>
-                    <span className="max-w-[320px] truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
-                      {(() => {
-                        const l = rackOverlayById.get(selectedLinkId);
-                        const a = l ? getObjectNameById(String(l.rackFromRackId)) : '';
-                        const b = l ? getObjectNameById(String(l.rackToRackId)) : '';
+	                    <span className="inline-flex min-w-0 max-w-[320px] items-center truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
+	                      {(() => {
+	                        const l = rackOverlayById.get(selectedLinkId);
+	                        const a = l ? getObjectNameById(String(l.rackFromRackId)) : '';
+	                        const b = l ? getObjectNameById(String(l.rackToRackId)) : '';
                         const kindLabel = l?.rackKind === 'fiber' ? t({ it: 'Fibra', en: 'Fiber' }) : t({ it: 'Rame', en: 'Copper' });
                         return `${kindLabel}: ${a} → ${b}`;
                       })()}
@@ -7882,11 +7882,11 @@ const PlanView = ({ planId }: Props) => {
                 ) : (
                   <>
                     <span className="text-sm font-semibold text-slate-600">{t({ it: 'Collegamento:', en: 'Link:' })}</span>
-                    <span className="max-w-[320px] truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
-                      {(() => {
-                        const l = ((basePlan as any).links || []).find((x: any) => x.id === selectedLinkId);
-                        const a = l ? getObjectNameById(String(l.fromId)) : '';
-                        const b = l ? getObjectNameById(String(l.toId)) : '';
+	                    <span className="inline-flex min-w-0 max-w-[320px] items-center truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
+	                      {(() => {
+	                        const l = ((basePlan as any).links || []).find((x: any) => x.id === selectedLinkId);
+	                        const a = l ? getObjectNameById(String(l.fromId)) : '';
+	                        const b = l ? getObjectNameById(String(l.toId)) : '';
                         const label = l ? String(l.name || l.label || t({ it: 'Collegamento', en: 'Link' })) : t({ it: 'Collegamento', en: 'Link' });
                         return `${label}: ${a} → ${b}`;
                       })()}
@@ -7905,9 +7905,9 @@ const PlanView = ({ planId }: Props) => {
                 selectedRoomId ? (
                   <>
                     <span className="text-sm font-semibold text-slate-600">{t({ it: 'Stanza:', en: 'Room:' })}</span>
-                    <span className="max-w-[220px] truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
-                      {rooms.find((r) => r.id === selectedRoomId)?.name || t({ it: 'Stanza', en: 'Room' })}
-                    </span>
+	                    <span className="inline-flex min-w-0 max-w-[220px] items-center truncate rounded-full bg-slate-100 px-2 py-1 text-sm font-semibold text-ink">
+	                      {rooms.find((r) => r.id === selectedRoomId)?.name || t({ it: 'Stanza', en: 'Room' })}
+	                    </span>
                     {!isReadOnly ? (
                       <>
                         <button
