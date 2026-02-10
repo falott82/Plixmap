@@ -66,7 +66,11 @@ async function createHandLandmarker(mod: HandLandmarkerModule): Promise<HandLand
         'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
     },
     runningMode: 'VIDEO',
-    numHands: 1
+    numHands: 1,
+    // Be permissive: presentation rooms can have bad lighting/webcams.
+    minHandDetectionConfidence: 0.25,
+    minHandPresenceConfidence: 0.25,
+    minTrackingConfidence: 0.25
   });
 }
 
@@ -213,7 +217,8 @@ export function usePresentationWebcamHands(opts: {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        // Lower resolution = lower latency + fewer long rAF frames.
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false
       });
       if (destroyedRef.current || token !== startTokenRef.current) {
@@ -254,7 +259,7 @@ export function usePresentationWebcamHands(opts: {
 
         // Throttle inference to reduce long frames.
         const now = performance.now();
-        const minIntervalMs = 1000 / 12; // ~12 FPS is enough for pan/zoom.
+        const minIntervalMs = 1000 / 8; // ~8 FPS is enough for pan/zoom and lighter on CPU.
         if (now - lastInferAtRef.current < minIntervalMs) {
           if (handDetectedRef.current && lastHandSeenAtRef.current && now - lastHandSeenAtRef.current > 700) {
             handDetectedRef.current = false;
@@ -277,7 +282,7 @@ export function usePresentationWebcamHands(opts: {
             handDetectedRef.current = false;
             setHandDetected(false);
           }
-        if (calibratingRef.current && now - lastNoHandHintAtRef.current > 1800) {
+        if (calibratingRef.current && now - lastNoHandHintAtRef.current > 6000) {
           lastNoHandHintAtRef.current = now;
           onInfo({
             it: 'Calibrazione: inquadra una mano e fai un pinch (pollice + indice).',
