@@ -365,6 +365,8 @@ const PlanView = ({ planId }: Props) => {
 	    setPresentationWebcamCalib,
 	    presentationEnterRequested,
 	    clearPresentationEnterRequest,
+      cameraPermissionState,
+      setCameraPermissionState,
 	    hiddenLayersByPlan,
 	    setHideAllLayers,
 	    setLockedPlans,
@@ -434,6 +436,8 @@ const PlanView = ({ planId }: Props) => {
 	      setPresentationWebcamCalib: (s as any).setPresentationWebcamCalib,
 	      presentationEnterRequested: (s as any).presentationEnterRequested,
 	      clearPresentationEnterRequest: (s as any).clearPresentationEnterRequest,
+        cameraPermissionState: (s as any).cameraPermissionState,
+        setCameraPermissionState: (s as any).setCameraPermissionState,
 	      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
 	      setHideAllLayers: (s as any).setHideAllLayers,
 	      setLockedPlans: (s as any).setLockedPlans,
@@ -2746,7 +2750,6 @@ const PlanView = ({ planId }: Props) => {
 
   const [presentationEnterModalOpen, setPresentationEnterModalOpen] = useState(false);
   const [presentationEnterBusy, setPresentationEnterBusy] = useState(false);
-  const [cameraPermissionState, setCameraPermissionState] = useState<'granted' | 'denied' | 'prompt' | 'unknown'>('unknown');
 
   const enterFullscreenFromGesture = useCallback(() => {
     try {
@@ -2777,32 +2780,43 @@ const PlanView = ({ planId }: Props) => {
     }
   }, []);
 
-  const requestEnterPresentation = useCallback(async () => {
+  const requestEnterPresentation = useCallback(() => {
     if (presentationEnterBusy) return;
-    const perm = await queryCameraPermission();
-    if (perm === 'granted') {
+    if (cameraPermissionState === 'granted') {
       enterFullscreenFromGesture();
       togglePresentationMode?.();
       return;
     }
-    setCameraPermissionState(perm);
     setPresentationEnterModalOpen(true);
-  }, [enterFullscreenFromGesture, presentationEnterBusy, queryCameraPermission, togglePresentationMode]);
+  }, [cameraPermissionState, enterFullscreenFromGesture, presentationEnterBusy, togglePresentationMode]);
 
   const handleTogglePresentation = useCallback(() => {
     if (presentationMode) {
       togglePresentationMode?.();
       return;
     }
-    void requestEnterPresentation();
+    requestEnterPresentation();
   }, [presentationMode, requestEnterPresentation, togglePresentationMode]);
 
   useEffect(() => {
     if (!presentationEnterRequested) return;
     clearPresentationEnterRequest?.();
     if (presentationMode) return;
-    void requestEnterPresentation();
+    requestEnterPresentation();
   }, [clearPresentationEnterRequest, presentationEnterRequested, presentationMode, requestEnterPresentation]);
+
+  useEffect(() => {
+    if (!presentationEnterModalOpen) return;
+    let cancelled = false;
+    void (async () => {
+      const perm = await queryCameraPermission();
+      if (cancelled) return;
+      setCameraPermissionState?.(perm);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [presentationEnterModalOpen, queryCameraPermission, setCameraPermissionState]);
 
   const requestCameraPermissionOnce = useCallback(async () => {
     try {
@@ -13513,27 +13527,30 @@ const PlanView = ({ planId }: Props) => {
                       {t({ it: 'Procedi senza webcam', en: 'Proceed without webcam' })}
                     </button>
                     <button
-                      onClick={async () => {
+                      onClick={() => {
                         if (presentationEnterBusy) return;
                         setPresentationEnterBusy(true);
-                        const perm = await queryCameraPermission();
-                        setCameraPermissionState(perm);
                         setPresentationWebcamEnabled(false);
                         setPresentationWebcamCalib(null);
                         setPresentationEnterModalOpen(false);
                         enterFullscreenFromGesture();
                         togglePresentationMode?.();
-                        const ok = await requestCameraPermissionOnce();
-                        if (!ok) {
-                          push(
-                            t({
-                              it: 'Accesso alla webcam non concesso. Puoi usare la presentazione senza webcam.',
-                              en: 'Webcam access was not granted. You can still use presentation mode without the webcam.'
-                            }),
-                            'danger'
-                          );
-                        }
-                        setPresentationEnterBusy(false);
+                        const p = requestCameraPermissionOnce();
+                        void p
+                          .then(async (ok) => {
+                            const perm = await queryCameraPermission();
+                            setCameraPermissionState?.(perm);
+                            if (!ok) {
+                              push(
+                                t({
+                                  it: 'Accesso alla webcam non concesso. Puoi usare la presentazione senza webcam.',
+                                  en: 'Webcam access was not granted. You can still use presentation mode without the webcam.'
+                                }),
+                                'danger'
+                              );
+                            }
+                          })
+                          .finally(() => setPresentationEnterBusy(false));
                       }}
                       className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={presentationEnterBusy}

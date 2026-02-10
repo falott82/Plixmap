@@ -127,7 +127,9 @@ app.use((req, res, next) => {
   res.setHeader(
     'Content-Security-Policy',
     // Allow MediaPipe Tasks (webcam gestures) runtime assets.
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://storage.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:; frame-ancestors 'none'"
+    // NOTE: MediaPipe Tasks uses WebAssembly; Chrome may require `unsafe-eval` / `wasm-unsafe-eval` to instantiate it.
+    // We keep the allowance scoped to `script-src` only (other directives remain strict).
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://storage.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob: https://cdn.jsdelivr.net; frame-ancestors 'none'"
   );
   if (resolveSecureCookie(req)) {
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
