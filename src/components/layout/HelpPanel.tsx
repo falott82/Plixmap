@@ -388,6 +388,12 @@ const HelpPanel = () => {
                           en: 'Layout: the chat panel is resizable and the divider between list and conversation is draggable. Preferences are saved on your account.'
                         })}
                       </li>
+                      <li>
+                        {t({
+                          it: 'Scorciatoie: Cmd+K (macOS) / Ctrl+K (Windows/Linux) apre e chiude la chat. Esc chiude la chat quando e aperta.',
+                          en: 'Shortcuts: Cmd+K (macOS) / Ctrl+K (Windows/Linux) toggles the chat. Esc closes the chat when it is open.'
+                        })}
+                      </li>
                     </ul>
                   </div>
                   <div data-help-block id="help-objects" className="rounded-xl bg-mist p-3">
@@ -569,10 +575,10 @@ const HelpPanel = () => {
                     </div>
                     <ul className="ml-5 list-disc space-y-1 pt-2">
                       <li>
-                        <KeyHint>C</KeyHint>{' '}
+                        <KeyHint>Cmd+K</KeyHint> / <KeyHint>Ctrl+K</KeyHint>{' '}
                         {t({
-                          it: 'mostra o nasconde la chat (se un testo e selezionato, C continua a cambiare il colore del testo).',
-                          en: 'shows or hides the chat (if a text object is selected, C still changes the text color).'
+                          it: 'mostra o nasconde la chat (Esc chiude la chat se e aperta).',
+                          en: 'shows or hides the chat (Esc closes the chat if it is open).'
                         })}
                       </li>
                       <li>
