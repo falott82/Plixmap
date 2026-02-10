@@ -250,7 +250,6 @@ const App = () => {
   const forcedPresentationRef = useRef(false);
   useEffect(() => {
     const doc: any = document as any;
-    const root: any = document.documentElement as any;
     const want = !!useUIStore.getState().presentationMode;
     const inFs = !!doc.fullscreenElement;
     if (want) {
@@ -259,13 +258,6 @@ const App = () => {
         forcedPresentationRef.current = true;
       }
       useUIStore.setState({ sidebarCollapsed: true } as any);
-      if (!inFs) {
-        try {
-          root?.requestFullscreen?.();
-        } catch {
-          // ignore
-        }
-      }
       return;
     }
     if (forcedPresentationRef.current) {

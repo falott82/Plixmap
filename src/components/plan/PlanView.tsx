@@ -2748,6 +2748,22 @@ const PlanView = ({ planId }: Props) => {
   const [presentationEnterBusy, setPresentationEnterBusy] = useState(false);
   const [cameraPermissionState, setCameraPermissionState] = useState<'granted' | 'denied' | 'prompt' | 'unknown'>('unknown');
 
+  const enterFullscreenFromGesture = useCallback(() => {
+    try {
+      const doc: any = document as any;
+      const root: any = document.documentElement as any;
+      if (!!doc.fullscreenElement) return;
+      const p = root?.requestFullscreen?.();
+      if (p && typeof p.then === 'function') {
+        p.catch(() => {
+          // ignore: fullscreen may be blocked or already active
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const queryCameraPermission = useCallback(async () => {
     try {
       const p: any = (navigator as any)?.permissions;
@@ -2765,12 +2781,13 @@ const PlanView = ({ planId }: Props) => {
     if (presentationEnterBusy) return;
     const perm = await queryCameraPermission();
     if (perm === 'granted') {
+      enterFullscreenFromGesture();
       togglePresentationMode?.();
       return;
     }
     setCameraPermissionState(perm);
     setPresentationEnterModalOpen(true);
-  }, [presentationEnterBusy, queryCameraPermission, togglePresentationMode]);
+  }, [enterFullscreenFromGesture, presentationEnterBusy, queryCameraPermission, togglePresentationMode]);
 
   const handleTogglePresentation = useCallback(() => {
     if (presentationMode) {
@@ -13487,6 +13504,7 @@ const PlanView = ({ planId }: Props) => {
                         setPresentationWebcamEnabled(false);
                         setPresentationWebcamCalib(null);
                         setPresentationEnterModalOpen(false);
+                        enterFullscreenFromGesture();
                         togglePresentationMode?.();
                       }}
                       className="btn-secondary"
@@ -13498,25 +13516,24 @@ const PlanView = ({ planId }: Props) => {
                       onClick={async () => {
                         if (presentationEnterBusy) return;
                         setPresentationEnterBusy(true);
-                        const ok = await requestCameraPermissionOnce();
                         const perm = await queryCameraPermission();
                         setCameraPermissionState(perm);
-                        if (!ok) {
-                          push(
-                            t({
-                              it: 'Accesso alla webcam non concesso. Puoi procedere senza webcam oppure abilitare la camera dalle impostazioni del browser.',
-                              en: 'Webcam access was not granted. You can proceed without the webcam or allow the camera from your browser settings.'
-                            }),
-                            'danger'
-                          );
-                          setPresentationEnterBusy(false);
-                          return;
-                        }
                         setPresentationWebcamEnabled(false);
                         setPresentationWebcamCalib(null);
                         setPresentationEnterModalOpen(false);
-                        setPresentationEnterBusy(false);
+                        enterFullscreenFromGesture();
                         togglePresentationMode?.();
+                        const ok = await requestCameraPermissionOnce();
+                        if (!ok) {
+                          push(
+                            t({
+                              it: 'Accesso alla webcam non concesso. Puoi usare la presentazione senza webcam.',
+                              en: 'Webcam access was not granted. You can still use presentation mode without the webcam.'
+                            }),
+                            'danger'
+                          );
+                        }
+                        setPresentationEnterBusy(false);
                       }}
                       className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={presentationEnterBusy}

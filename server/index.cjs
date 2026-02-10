@@ -126,7 +126,8 @@ app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; connect-src 'self' ws: wss:; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:; frame-ancestors 'none'"
+    // Allow MediaPipe Tasks (webcam gestures) runtime assets.
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://storage.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:; frame-ancestors 'none'"
   );
   if (resolveSecureCookie(req)) {
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
