@@ -88,12 +88,14 @@ export function usePresentationWebcamHands(opts: {
 
   const [webcamReady, setWebcamReady] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
+  const [starting, setStarting] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const landmarkerRef = useRef<HandLandmarkerInstance | null>(null);
   const rafRef = useRef<number | null>(null);
   const destroyedRef = useRef(false);
+  const startTokenRef = useRef(0);
 
   const calibrateFramesRef = useRef(0);
   const calibrateSumRef = useRef(0);
@@ -113,20 +115,29 @@ export function usePresentationWebcamHands(opts: {
   }, []);
 
   const requestCalibrate = useCallback(() => {
-    if (!webcamEnabled) return;
+    if (!webcamEnabled) {
+      onInfo({ it: 'Attiva prima la webcam.', en: 'Enable the webcam first.' });
+      return;
+    }
+    if (!webcamReady) {
+      onInfo({ it: 'Webcam in avvio: attendi un attimo e riprova.', en: 'Webcam is starting: wait a moment and try again.' });
+      return;
+    }
     setCalibrating(true);
     calibrateFramesRef.current = 0;
     calibrateSumRef.current = 0;
     onInfo({ it: 'Calibrazione: fai un pinch e tienilo fermo per 1 secondo.', en: 'Calibration: pinch and hold still for 1 second.' });
-  }, [onInfo, webcamEnabled]);
+  }, [onInfo, webcamEnabled, webcamReady]);
 
   const stop = useCallback(() => {
+    startTokenRef.current += 1;
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
     setWebcamReady(false);
     setCalibrating(false);
+    setStarting(false);
     calibrateFramesRef.current = 0;
     calibrateSumRef.current = 0;
     pinchSessionRef.current.active = false;
@@ -163,160 +174,197 @@ export function usePresentationWebcamHands(opts: {
     };
   }, [stop]);
 
-  useEffect(() => {
-    if (!active) {
-      stop();
-      return;
-    }
-    if (!webcamEnabled) {
-      stop();
-      return;
-    }
+  const enableWebcam = useCallback(async () => {
+    if (!active) return false;
     if (!canUseWebcam) {
       onError({ it: 'Webcam non supportata dal browser.', en: 'Webcam not supported by the browser.' });
-      setWebcamEnabled(false);
-      return;
+      return false;
+    }
+    if (starting) return false;
+    if (streamRef.current && landmarkerRef.current) {
+      setWebcamEnabled(true);
+      return true;
     }
 
-    let cancelled = false;
+    setStarting(true);
+    const token = ++startTokenRef.current;
 
-    const start = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false
-        });
-        if (cancelled || destroyedRef.current) {
-          try {
-            stream.getTracks().forEach((t) => t.stop());
-          } catch {}
-          return;
-        }
-        streamRef.current = stream;
-        const video = document.createElement('video');
-        video.playsInline = true;
-        video.muted = true;
-        (video as any).srcObject = stream;
-        videoRef.current = video;
-        await video.play();
-
-        const mod = await loadTasksVision();
-        if (cancelled || destroyedRef.current) return;
-        const landmarker = await createHandLandmarker(mod);
-        if (cancelled || destroyedRef.current) {
-          try {
-            landmarker?.close?.();
-          } catch {}
-          return;
-        }
-        landmarkerRef.current = landmarker;
-        onInfo({ it: 'Webcam attiva. Premi Calibra per iniziare.', en: 'Webcam enabled. Press Calibrate to start.' });
-
-        const tick = () => {
-          rafRef.current = requestAnimationFrame(tick);
-          const lmkr = landmarkerRef.current as any;
-          const v = videoRef.current;
-          if (!lmkr || !v) return;
-          if (v.readyState < 2) return;
-
-          let res: any = null;
-          try {
-            res = lmkr.detectForVideo(v, performance.now());
-          } catch {
-            return;
-          }
-
-          const lms = (res as any)?.landmarks?.[0] || null;
-          if (!Array.isArray(lms)) return;
-
-          const pinchRatio = computePinchRatio(lms);
-          const center = computeHandCenter(lms);
-          if (!center || pinchRatio == null) return;
-
-          setWebcamReady(true);
-
-          if (calibrating) {
-            // Require a reasonably closed pinch to calibrate.
-            const isPinch = pinchRatio <= 0.65;
-            if (isPinch) {
-              calibrateFramesRef.current += 1;
-              calibrateSumRef.current += pinchRatio;
-              if (calibrateFramesRef.current >= 30) {
-                const avg = calibrateSumRef.current / Math.max(1, calibrateFramesRef.current);
-                setCalib({ pinchRatio: avg });
-                setCalibrating(false);
-                onInfo({ it: 'Calibrazione completata. Pinch per pan e zoom.', en: 'Calibration completed. Pinch to pan and zoom.' });
-              }
-            } else {
-              // reset if the user releases the pinch
-              calibrateFramesRef.current = 0;
-              calibrateSumRef.current = 0;
-            }
-            return;
-          }
-
-          if (!calib) return;
-
-          const pinchActive = pinchRatio <= calib.pinchRatio * 1.35;
-          const mapEl = mapRef.current;
-          const cw = mapEl?.clientWidth || 0;
-          const ch = mapEl?.clientHeight || 0;
-          if (cw <= 0 || ch <= 0) return;
-
-          const session = pinchSessionRef.current;
-          if (pinchActive && !session.active) {
-            const { zoom, pan } = getViewport();
-            session.active = true;
-            session.startCenter = center;
-            session.startPan = pan;
-            session.startZoom = zoom;
-            session.startPinchRatio = pinchRatio;
-            smoothedRef.current = { pan, zoom };
-          } else if (!pinchActive && session.active) {
-            session.active = false;
-            session.startCenter = null;
-          }
-
-          if (!session.active || !session.startCenter) return;
-
-          const panGain = 1.25;
-          const zoomGain = 2.2;
-
-          const dx = (center.x - session.startCenter.x) * cw * panGain;
-          const dy = (center.y - session.startCenter.y) * ch * panGain;
-          const targetPan = { x: session.startPan.x + dx, y: session.startPan.y + dy };
-
-          const pinchDelta = pinchRatio - session.startPinchRatio;
-          const factor = clamp(1 + pinchDelta * zoomGain, 0.6, 1.6);
-          const targetZoom = clamp(session.startZoom * factor, 0.2, 3);
-
-          const smooth = smoothedRef.current || { pan: getViewport().pan, zoom: getViewport().zoom };
-          const next = {
-            pan: { x: lerp(smooth.pan.x, targetPan.x, 0.22), y: lerp(smooth.pan.y, targetPan.y, 0.22) },
-            zoom: lerp(smooth.zoom, targetZoom, 0.22)
-          };
-          smoothedRef.current = next;
-          setPan(next.pan);
-          setZoom(next.zoom);
-        };
-
-        rafRef.current = requestAnimationFrame(tick);
-      } catch (e: any) {
-        onError({
-          it: 'Impossibile attivare la webcam (permesso negato o errore).',
-          en: 'Unable to enable the webcam (permission denied or error).'
-        });
-        setWebcamEnabled(false);
-        stop();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      if (destroyedRef.current || token !== startTokenRef.current) {
+        try {
+          stream.getTracks().forEach((t) => t.stop());
+        } catch {}
+        return false;
       }
-    };
 
-    start();
-    return () => {
-      cancelled = true;
+      streamRef.current = stream;
+      const video = document.createElement('video');
+      video.playsInline = true;
+      video.muted = true;
+      (video as any).srcObject = stream;
+      videoRef.current = video;
+      await video.play();
+
+      const mod = await loadTasksVision();
+      if (destroyedRef.current || token !== startTokenRef.current) return false;
+      const landmarker = await createHandLandmarker(mod);
+      if (destroyedRef.current || token !== startTokenRef.current) {
+        try {
+          landmarker?.close?.();
+        } catch {}
+        return false;
+      }
+      landmarkerRef.current = landmarker;
+      setWebcamEnabled(true);
+      onInfo({ it: 'Webcam attiva. Premi Calibra per iniziare.', en: 'Webcam enabled. Press Calibrate to start.' });
+
+      const tick = () => {
+        rafRef.current = requestAnimationFrame(tick);
+        const lmkr = landmarkerRef.current as any;
+        const v = videoRef.current;
+        if (!lmkr || !v) return;
+        if (v.readyState < 2) return;
+
+        let res: any = null;
+        try {
+          res = lmkr.detectForVideo(v, performance.now());
+        } catch {
+          return;
+        }
+
+        const lms = (res as any)?.landmarks?.[0] || null;
+        if (!Array.isArray(lms)) return;
+
+        const pinchRatio = computePinchRatio(lms);
+        const center = computeHandCenter(lms);
+        if (!center || pinchRatio == null) return;
+
+        setWebcamReady(true);
+
+        if (calibrating) {
+          // Require a reasonably closed pinch to calibrate.
+          const isPinch = pinchRatio <= 0.65;
+          if (isPinch) {
+            calibrateFramesRef.current += 1;
+            calibrateSumRef.current += pinchRatio;
+            if (calibrateFramesRef.current >= 30) {
+              const avg = calibrateSumRef.current / Math.max(1, calibrateFramesRef.current);
+              setCalib({ pinchRatio: avg });
+              setCalibrating(false);
+              onInfo({ it: 'Calibrazione completata. Pinch per pan e zoom.', en: 'Calibration completed. Pinch to pan and zoom.' });
+            }
+          } else {
+            // reset if the user releases the pinch
+            calibrateFramesRef.current = 0;
+            calibrateSumRef.current = 0;
+          }
+          return;
+        }
+
+        if (!calib) return;
+
+        const pinchActive = pinchRatio <= calib.pinchRatio * 1.35;
+        const mapEl = mapRef.current;
+        const cw = mapEl?.clientWidth || 0;
+        const ch = mapEl?.clientHeight || 0;
+        if (cw <= 0 || ch <= 0) return;
+
+        const session = pinchSessionRef.current;
+        if (pinchActive && !session.active) {
+          const { zoom, pan } = getViewport();
+          session.active = true;
+          session.startCenter = center;
+          session.startPan = pan;
+          session.startZoom = zoom;
+          session.startPinchRatio = pinchRatio;
+          smoothedRef.current = { pan, zoom };
+        } else if (!pinchActive && session.active) {
+          session.active = false;
+          session.startCenter = null;
+        }
+
+        if (!session.active || !session.startCenter) return;
+
+        const panGain = 1.25;
+        const zoomGain = 2.2;
+
+        const dx = (center.x - session.startCenter.x) * cw * panGain;
+        const dy = (center.y - session.startCenter.y) * ch * panGain;
+        const targetPan = { x: session.startPan.x + dx, y: session.startPan.y + dy };
+
+        const pinchDelta = pinchRatio - session.startPinchRatio;
+        const factor = clamp(1 + pinchDelta * zoomGain, 0.6, 1.6);
+        const targetZoom = clamp(session.startZoom * factor, 0.2, 3);
+
+        const smooth = smoothedRef.current || { pan: getViewport().pan, zoom: getViewport().zoom };
+        const next = {
+          pan: { x: lerp(smooth.pan.x, targetPan.x, 0.22), y: lerp(smooth.pan.y, targetPan.y, 0.22) },
+          zoom: lerp(smooth.zoom, targetZoom, 0.22)
+        };
+        smoothedRef.current = next;
+        setPan(next.pan);
+        setZoom(next.zoom);
+      };
+
+      rafRef.current = requestAnimationFrame(tick);
+      return true;
+    } catch (e: any) {
+      const name = String(e?.name || '');
+      const itHint =
+        name === 'NotAllowedError'
+          ? 'Consenti la camera e riprova. Se sei in fullscreen, clicca di nuovo il bottone.'
+          : name === 'NotFoundError'
+            ? 'Nessuna camera trovata.'
+            : name === 'NotReadableError'
+              ? 'La camera e gia in uso da un’altra app.'
+              : name === 'SecurityError'
+                ? 'Richiede HTTPS o localhost.'
+                : 'Riprova.';
+      const enHint =
+        name === 'NotAllowedError'
+          ? 'Allow camera access and try again. If you are in fullscreen, click the button again.'
+          : name === 'NotFoundError'
+            ? 'No camera was found.'
+            : name === 'NotReadableError'
+              ? 'The camera is already in use by another app.'
+              : name === 'SecurityError'
+                ? 'Requires HTTPS or localhost.'
+                : 'Please try again.';
+      onError({
+        it: `Impossibile attivare la webcam${name ? ` (${name})` : ''}. ${itHint}`,
+        en: `Unable to enable the webcam${name ? ` (${name})` : ''}. ${enHint}`
+      });
+      setWebcamEnabled(false);
       stop();
-    };
-  }, [active, calib, calibrating, canUseWebcam, getViewport, mapRef, onError, onInfo, setCalib, setPan, setWebcamEnabled, setZoom, stop, webcamEnabled]);
+      return false;
+    } finally {
+      if (token === startTokenRef.current) setStarting(false);
+    }
+  }, [active, calib, calibrating, canUseWebcam, getViewport, mapRef, onError, onInfo, setCalib, setPan, setWebcamEnabled, setZoom, starting, stop]);
 
-  return { webcamReady, calibrating, requestCalibrate };
+  const disableWebcam = useCallback(() => {
+    setWebcamEnabled(false);
+    stop();
+  }, [setWebcamEnabled, stop]);
+
+  const toggleWebcam = useCallback(() => {
+    if (starting) return;
+    if (webcamEnabled) {
+      disableWebcam();
+      return;
+    }
+    // Start from the click handler (user gesture) to avoid NotAllowedError in fullscreen.
+    void enableWebcam();
+  }, [disableWebcam, enableWebcam, starting, webcamEnabled]);
+
+  useEffect(() => {
+    if (active) return;
+    disableWebcam();
+  }, [active, disableWebcam]);
+
+  return { webcamReady, calibrating, starting, requestCalibrate, toggleWebcam };
 }
