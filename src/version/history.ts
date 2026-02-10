@@ -8,6 +8,17 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.5.1',
+    date: '2026-02-10',
+    type: 'fix',
+    notes: [
+      n('Presentazione: pulsante dedicato vicino al salvataggio + ESC per uscire; UI ridotta a sola planimetria in fullscreen', 'Presentation: dedicated button near Save + ESC to exit; fullscreen shows only the floor plan'),
+      n('Menu tasto destro: aggiunto sottomenu Livelli per mostrare/nascondere rapidamente i layer', 'Right-click menu: added a Layers submenu to quickly show/hide layers'),
+      n('Duplica planimetria: vietato creare una planimetria con lo stesso nome di un’altra nella stessa sede', 'Duplicate floor plan: cannot create a floor plan with the same name as another one in the same site'),
+      n('Quick help: aggiunte spiegazioni Rack designer e migliorati dettagli su collegamenti/lock', 'Quick help: added Rack designer explanation and improved details for links/locks')
+    ]
+  },
+  {
     version: '2.5.0',
     date: '2026-02-10',
     type: 'major',

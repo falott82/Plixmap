@@ -15,6 +15,7 @@ interface UIState {
   helpOpen: boolean;
   changelogOpen: boolean;
   sidebarCollapsed: boolean;
+  presentationMode: boolean;
   lastObjectScale: number;
   dirtyByPlan: Record<string, boolean>;
   pendingSaveNavigateTo?: string | null;
@@ -89,6 +90,8 @@ interface UIState {
   closeChangelog: () => void;
   triggerHighlight: (objectId: string, durationMs?: number) => void;
   toggleSidebar: () => void;
+  setPresentationMode: (enabled: boolean) => void;
+  togglePresentationMode: () => void;
   setPlanDirty: (planId: string, dirty: boolean) => void;
   requestSaveAndNavigate: (to: string) => void;
   clearPendingSaveNavigate: () => void;
@@ -162,6 +165,7 @@ export const useUIStore = create<UIState>()(
       helpOpen: false,
       changelogOpen: false,
       sidebarCollapsed: false,
+      presentationMode: false,
       lastObjectScale: 1,
       dirtyByPlan: {},
       pendingSaveNavigateTo: null,
@@ -239,6 +243,8 @@ export const useUIStore = create<UIState>()(
         set({ highlight: { objectId, until: Date.now() + durationMs } }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed }))
       ,
+      setPresentationMode: (enabled) => set({ presentationMode: !!enabled }),
+      togglePresentationMode: () => set((state) => ({ presentationMode: !state.presentationMode })),
       setPlanDirty: (planId, dirty) =>
         set((state) => ({
           dirtyByPlan: { ...state.dirtyByPlan, [planId]: dirty }

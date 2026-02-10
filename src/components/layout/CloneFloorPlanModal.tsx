@@ -5,11 +5,13 @@ import { useT } from '../../i18n/useT';
 export default function CloneFloorPlanModal({
   open,
   sourceName,
+  existingNames,
   onClose,
   onConfirm
 }: {
   open: boolean;
   sourceName: string;
+  existingNames?: string[];
   onClose: () => void;
   onConfirm: (payload: { name: string; includeRooms: boolean; includeObjects: boolean; includeViews: boolean; includeLayers: boolean }) => void;
 }) {
@@ -27,9 +29,17 @@ export default function CloneFloorPlanModal({
 
   if (!open) return null;
 
+  const normalizeName = (v: string) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const duplicateName = useMemo(() => {
+    const wanted = normalizeName(name);
+    if (!wanted) return false;
+    return (existingNames || []).some((n) => normalizeName(String(n || '')) === wanted);
+  }, [existingNames, name]);
+
   const submit = () => {
     const n = name.trim();
     if (!n) return;
+    if (duplicateName) return;
     onConfirm({ name: n, includeRooms, includeObjects, includeViews, includeLayers });
   };
 
@@ -67,6 +77,14 @@ export default function CloneFloorPlanModal({
                 if (e.key === 'Escape') onClose();
               }}
             />
+            {duplicateName ? (
+              <div className="mt-2 text-xs font-semibold text-rose-700">
+                {t({
+                  it: 'Esiste gia una planimetria con questo nome nella stessa sede. Scegli un nome diverso.',
+                  en: 'A floor plan with this name already exists in the same site. Please choose a different name.'
+                })}
+              </div>
+            ) : null}
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
@@ -103,7 +121,7 @@ export default function CloneFloorPlanModal({
             </button>
             <button
               onClick={submit}
-              disabled={!name.trim()}
+              disabled={!name.trim() || duplicateName}
               className="rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-card hover:bg-primary/90 disabled:opacity-50"
             >
               {t({ it: 'Crea copia', en: 'Create copy' })}
@@ -114,4 +132,3 @@ export default function CloneFloorPlanModal({
     </div>
   );
 }
-

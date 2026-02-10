@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  Layers,
 	LayoutGrid,
 	Trash,
 	Copy,
@@ -22,6 +23,7 @@ import {
   History,
 	Save,
 	Cog,
+  MonitorPlay,
   EyeOff,
   CornerDownRight,
   Link2,
@@ -353,6 +355,8 @@ const PlanView = ({ planId }: Props) => {
     roomCapacityStateByPlan,
     setRoomCapacityState,
     perfOverlayEnabled,
+    presentationMode,
+    togglePresentationMode,
     hiddenLayersByPlan,
     setHideAllLayers,
     setLockedPlans,
@@ -414,6 +418,8 @@ const PlanView = ({ planId }: Props) => {
       roomCapacityStateByPlan: (s as any).roomCapacityStateByPlan,
       setRoomCapacityState: (s as any).setRoomCapacityState,
       perfOverlayEnabled: (s as any).perfOverlayEnabled,
+      presentationMode: (s as any).presentationMode,
+      togglePresentationMode: (s as any).togglePresentationMode,
       hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
       setHideAllLayers: (s as any).setHideAllLayers,
       setLockedPlans: (s as any).setLockedPlans,
@@ -490,6 +496,7 @@ const PlanView = ({ planId }: Props) => {
     | { kind: 'map'; x: number; y: number; worldX: number; worldY: number }
     | null
   >(null);
+  const [layersContextMenu, setLayersContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [alignMenuOpen, setAlignMenuOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const returnToSelectionListRef = useRef(false);
@@ -527,6 +534,7 @@ const PlanView = ({ planId }: Props) => {
   const [typeMenu, setTypeMenu] = useState<{ typeId: string; label: string; icon?: IconName; x: number; y: number } | null>(null);
   const typeMenuRef = useRef<HTMLDivElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const layersContextMenuRef = useRef<HTMLDivElement | null>(null);
   const [typeLayerModal, setTypeLayerModal] = useState<{ typeId: string; label: string } | null>(null);
   const [typeLayerName, setTypeLayerName] = useState('');
   const [typeLayerColor, setTypeLayerColor] = useState('#0ea5e9');
@@ -784,6 +792,7 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     // Close any open context menus when switching plans.
     setContextMenu(null);
+    setLayersContextMenu(null);
     setLinksModalObjectId(null);
     setWallQuickMenu(null);
     setWallTypeMenu(null);
@@ -3597,9 +3606,15 @@ const PlanView = ({ planId }: Props) => {
     setWallQuickMenu(null);
     setWallTypeMenu(null);
     setAlignMenuOpen(false);
+    setLayersContextMenu(null);
     if (contextMenu.kind === 'map') {
       setMapSubmenu(null);
     }
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (contextMenu) return;
+    setLayersContextMenu(null);
   }, [contextMenu]);
 
   useEffect(() => {
@@ -7578,8 +7593,22 @@ const PlanView = ({ planId }: Props) => {
   );
 
   return (
-	    <div className="flex h-screen flex-col gap-4 overflow-hidden p-6">
-	      <div className="flex flex-nowrap items-center justify-between gap-2">
+	    <div className={`relative flex h-screen flex-col overflow-hidden ${presentationMode ? '' : 'gap-4 p-6'}`}>
+        {presentationMode ? (
+          <div className="pointer-events-none absolute right-4 top-4 z-50">
+            <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 p-2 shadow-card backdrop-blur">
+              <button
+                onClick={() => togglePresentationMode?.()}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink hover:bg-slate-50"
+                title={t({ it: 'Esci da presentazione (Esc)', en: 'Exit presentation (Esc)' })}
+                aria-label={t({ it: 'Esci da presentazione', en: 'Exit presentation' })}
+              >
+                <MonitorPlay size={18} />
+              </button>
+            </div>
+          </div>
+	        ) : null}
+          <div className={`flex flex-nowrap items-center justify-between gap-2 ${presentationMode ? 'hidden' : ''}`}>
 	        <div className="min-w-0">
 	          <div className="text-[11px] font-semibold uppercase text-slate-500">
 	            {client?.shortName || client?.name} → {site?.name}
@@ -8444,6 +8473,15 @@ const PlanView = ({ planId }: Props) => {
             </button>
           ) : null}
           <button
+            onClick={() => togglePresentationMode?.()}
+            title={t({ it: 'Presentazione (P)', en: 'Presentation (P)' })}
+            className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-card ${
+              presentationMode ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+            }`}
+          >
+            <MonitorPlay size={18} />
+          </button>
+          <button
             onClick={() => setRevisionsOpen(true)}
             title={t({ it: 'Time machine', en: 'Time machine' })}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
@@ -8649,15 +8687,15 @@ const PlanView = ({ planId }: Props) => {
 	                updateFloorPlan(basePlan.id, { printArea: undefined });
 	                push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
 	              }}
-	              onExportPdf={() => setExportModalOpen(true)}
-	            />
-	            <UserMenu />
-	          </div>
-	        </div>
-	      </div>
+		              onExportPdf={() => setExportModalOpen(true)}
+		            />
+		            <UserMenu />
+		          </div>
+		        </div>
+		      </div>
 
-      <div className="flex-1 min-h-0">
-        <div className="relative flex h-full min-h-0 gap-4 overflow-hidden">
+	      <div className="flex-1 min-h-0">
+	        <div className="relative flex h-full min-h-0 gap-4 overflow-hidden">
 	        <div className="flex-1 min-w-0 min-h-0">
 	            <div
                 className={`relative h-full min-h-0 w-full ${panToolActive ? 'cursor-grab active:cursor-grabbing' : ''}`}
@@ -8665,7 +8703,7 @@ const PlanView = ({ planId }: Props) => {
                 onMouseMove={handleMapMouseMove}
                 onMouseDown={handleMapMouseDown}
               >
-                {!planScale?.metersPerPixel && !scalePromptDismissed ? (
+                {!presentationMode && !planScale?.metersPerPixel && !scalePromptDismissed ? (
                   <div className="pointer-events-none absolute left-1/2 top-4 z-30 -translate-x-1/2">
                     <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-100 shadow-lg">
                       <span>
@@ -8855,7 +8893,7 @@ const PlanView = ({ planId }: Props) => {
 	              />
 	            </div>
 	          </div>
-            {linkCreateHint ? (
+            {!presentationMode && linkCreateHint ? (
               <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
                 <div className="max-w-[720px] rounded-2xl bg-slate-900/90 px-4 py-3 text-white shadow-card backdrop-blur">
                   <div className="text-sm font-semibold">{linkCreateHint.title}</div>
@@ -8863,7 +8901,7 @@ const PlanView = ({ planId }: Props) => {
                 </div>
               </div>
             ) : null}
-		          {!isReadOnly ? (
+		          {!isReadOnly && !presentationMode ? (
 		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-[9rem] shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
                 <div className="rounded-xl bg-slate-50/80 p-2">
                   <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
@@ -9414,6 +9452,24 @@ const PlanView = ({ planId }: Props) => {
               <X size={14} />
             </button>
           </div>
+
+          {planLayers.length ? (
+            <button
+              onClick={() => setLayersContextMenu((prev) => (prev ? null : { x: contextMenu.x, y: contextMenu.y }))}
+              className="mt-2 flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+              title={t({ it: 'Livelli (mostra/nascondi)', en: 'Layers (show/hide)' })}
+            >
+              <span className="flex items-center gap-2">
+                <Layers size={14} className="text-slate-500" /> {t({ it: 'Livelli', en: 'Layers' })}
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold text-slate-500 tabular-nums">
+                  {hideAllLayers ? '0' : String(visibleLayerCount)}/{String(totalLayerCount)}
+                </span>
+                <ChevronRight size={14} className={`text-slate-400 ${layersContextMenu ? 'rotate-90' : ''}`} />
+              </span>
+            </button>
+          ) : null}
 
 	          {contextMenu.kind === 'link' ? (
               <>
@@ -10301,6 +10357,89 @@ const PlanView = ({ planId }: Props) => {
             </>
           )}
         </div>
+
+        {layersContextMenu ? (
+          <div
+            ref={layersContextMenuRef}
+            className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+            style={getSubmenuStyle(240)}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <span className="font-semibold text-ink">{t({ it: 'Livelli', en: 'Layers' })}</span>
+              <button
+                onClick={() => setLayersContextMenu(null)}
+                className="text-slate-400 hover:text-ink"
+                title={t({ it: 'Chiudi', en: 'Close' })}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="mt-2 space-y-1">
+              <button
+                onClick={() => {
+                  setHideAllLayers(planId, false);
+                  setVisibleLayerIds(planId, layerIds);
+                  setLayersContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+                title={t({ it: 'Mostra tutti i livelli', en: 'Show all layers' })}
+              >
+                <Eye size={14} className="text-slate-500" /> {t({ it: 'Mostra tutti', en: 'Show all' })}
+              </button>
+              <button
+                onClick={() => {
+                  setHideAllLayers(planId, true);
+                  setLayersContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+                title={t({ it: 'Nascondi tutti i livelli', en: 'Hide all layers' })}
+              >
+                <EyeOff size={14} className="text-slate-500" /> {t({ it: 'Nascondi tutti', en: 'Hide all' })}
+              </button>
+              <div className="my-2 h-px bg-slate-100" />
+              <div className="max-h-64 overflow-y-auto">
+                {orderedPlanLayers
+                  .filter((l: any) => String(l.id) !== ALL_ITEMS_LAYER_ID)
+                  .map((l: any) => {
+                    const layerId = String(l.id);
+                    const isOn = !hideAllLayers && (allItemsSelected ? true : effectiveVisibleLayerIds.includes(layerId));
+                    const label = getLayerLabel(layerId);
+                    return (
+                      <button
+                        key={layerId}
+                        onClick={() => {
+                          if (hideAllLayers) setHideAllLayers(planId, false);
+                          const cur = visibleLayerIds;
+                          const nextRaw = cur.includes(layerId) ? cur.filter((x) => x !== layerId) : [...cur, layerId];
+                          const next = normalizeLayerSelection(nextRaw);
+                          setVisibleLayerIds(planId, next);
+                        }}
+                        className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+                        title={label}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span
+                            className="inline-flex h-3 w-3 shrink-0 rounded-full border border-slate-200"
+                            style={{ background: String((l as any).color || '#94a3b8') }}
+                          />
+                          <span className="min-w-0 truncate text-sm text-slate-700">{label}</span>
+                        </span>
+                        <span
+                          className={`inline-flex h-5 w-5 items-center justify-center rounded-md border ${
+                            isOn ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-400'
+                          }`}
+                          title={isOn ? t({ it: 'Visibile', en: 'Visible' }) : t({ it: 'Nascosto', en: 'Hidden' })}
+                        >
+                          {isOn ? <Eye size={12} /> : <EyeOff size={12} />}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {contextMenu.kind === 'map' && mapSubmenu === 'view' ? (
           <div
