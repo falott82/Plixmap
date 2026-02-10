@@ -19,6 +19,7 @@ interface UIState {
   presentationWebcamEnabled: boolean;
   presentationWebcamCalib: { pinchRatio: number } | null;
   presentationEnterRequested: boolean;
+  cameraPermissionState: 'granted' | 'denied' | 'prompt' | 'unknown';
   lastObjectScale: number;
   dirtyByPlan: Record<string, boolean>;
   pendingSaveNavigateTo?: string | null;
@@ -99,6 +100,7 @@ interface UIState {
   setPresentationWebcamCalib: (calib: { pinchRatio: number } | null) => void;
   requestPresentationEnter: () => void;
   clearPresentationEnterRequest: () => void;
+  setCameraPermissionState: (state: 'granted' | 'denied' | 'prompt' | 'unknown') => void;
   setPlanDirty: (planId: string, dirty: boolean) => void;
   requestSaveAndNavigate: (to: string) => void;
   clearPendingSaveNavigate: () => void;
@@ -176,6 +178,7 @@ export const useUIStore = create<UIState>()(
       presentationWebcamEnabled: false,
       presentationWebcamCalib: null,
       presentationEnterRequested: false,
+      cameraPermissionState: 'unknown',
       lastObjectScale: 1,
       dirtyByPlan: {},
       pendingSaveNavigateTo: null,
@@ -260,6 +263,7 @@ export const useUIStore = create<UIState>()(
         set(() => ({ presentationWebcamCalib: calib && Number.isFinite((calib as any).pinchRatio) ? calib : null })),
       requestPresentationEnter: () => set({ presentationEnterRequested: true }),
       clearPresentationEnterRequest: () => set({ presentationEnterRequested: false }),
+      setCameraPermissionState: (state) => set({ cameraPermissionState: state || 'unknown' }),
       setPlanDirty: (planId, dirty) =>
         set((state) => ({
           dirtyByPlan: { ...state.dirtyByPlan, [planId]: dirty }
