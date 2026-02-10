@@ -2,7 +2,7 @@ import { Fragment, forwardRef, memo, useCallback, useEffect, useImperativeHandle
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
-import { Hand, MonitorPlay } from 'lucide-react';
+import { Crosshair, Hand, MonitorPlay, Video } from 'lucide-react';
 import { FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
 import { WALL_LAYER_COLOR, WIFI_RANGE_SCALE_MAX } from '../../store/data';
 import { useUIStore } from '../../store/useUIStore';
@@ -77,6 +77,10 @@ interface Props {
   onGoDefaultView?: () => void;
   presentationMode?: boolean;
   onTogglePresentation?: () => void;
+  webcamEnabled?: boolean;
+  webcamReady?: boolean;
+  onToggleWebcam?: () => void;
+  onCalibrateWebcam?: () => void;
   perfEnabled?: boolean;
   onZoomChange: (zoom: number) => void;
   onPanChange: (pan: { x: number; y: number }) => void;
@@ -290,6 +294,10 @@ const CanvasStageImpl = (
   onGoDefaultView,
   presentationMode = false,
   onTogglePresentation,
+  webcamEnabled = false,
+  webcamReady = false,
+  onToggleWebcam,
+  onCalibrateWebcam,
   perfEnabled = false,
   onZoomChange,
   onPanChange,
@@ -1200,8 +1208,10 @@ const getRoomBounds = (room: any) => {
     const ch = containerRef.current.clientHeight;
     const iw = baseWidth;
     const ih = baseHeight;
-    // Don't upscale small images by default (keeps markers proportional and avoids giant UI).
-    const scale = clamp(Math.min(cw / iw, ch / ih, 1), 0.2, 3);
+    // Default: do not upscale small images (keeps markers proportional and avoids giant UI).
+    // Presentation mode: allow upscaling to make the map fill the screen.
+    const fitScale = presentationMode ? Math.min(cw / iw, ch / ih) : Math.min(cw / iw, ch / ih, 1);
+    const scale = clamp(fitScale, 0.2, 3);
     const panX = (cw - iw * scale) / 2;
     const panY = (ch - ih * scale) / 2;
     const clampedPan = clampPan(scale, { x: panX, y: panY });
@@ -1209,7 +1219,7 @@ const getRoomBounds = (room: any) => {
     applyStageTransform(scale, clampedPan);
     commitViewport(scale, clampedPan);
     fitApplied.current = plan.id;
-  }, [applyStageTransform, baseHeight, baseWidth, clampPan, commitViewport, containerRef, plan.id]);
+  }, [applyStageTransform, baseHeight, baseWidth, clampPan, commitViewport, containerRef, plan.id, presentationMode]);
 
   useEffect(() => {
     fitViewRef.current = fitView;
@@ -4985,6 +4995,33 @@ const getRoomBounds = (room: any) => {
         >
           VD
         </button>
+        {presentationMode && onToggleWebcam ? (
+          <button
+            title={
+              webcamEnabled
+                ? t({ it: 'Webcam attiva', en: 'Webcam enabled' })
+                : t({ it: 'Attiva webcam (per gesti)', en: 'Enable webcam (for gestures)' })
+            }
+            aria-pressed={webcamEnabled}
+            onClick={() => onToggleWebcam?.()}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg border hover:bg-slate-50 ${
+              webcamEnabled ? 'border-primary text-primary' : 'border-slate-200 text-ink'
+            }`}
+          >
+            <Video size={16} />
+            {webcamEnabled && webcamReady ? <span className="sr-only">{t({ it: 'Tracking attivo', en: 'Tracking active' })}</span> : null}
+          </button>
+        ) : null}
+        {presentationMode && onCalibrateWebcam ? (
+          <button
+            title={t({ it: 'Calibra (pinch)', en: 'Calibrate (pinch)' })}
+            onClick={() => onCalibrateWebcam?.()}
+            disabled={!webcamEnabled}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Crosshair size={16} />
+          </button>
+        ) : null}
         {onTogglePresentation ? (
           <button
             title={

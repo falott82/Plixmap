@@ -97,6 +97,7 @@ import {
   WIFI_RANGE_SCALE_MAX
 } from '../../store/data';
 import { getWallTypeColor } from '../../utils/wallColors';
+import { usePresentationWebcamHands } from './presentation/usePresentationWebcamHands';
 
 interface Props {
   planId: string;
@@ -126,6 +127,7 @@ const PlanView = ({ planId }: Props) => {
   );
   const [autoFitEnabled, setAutoFitEnabled] = useState(true);
   const presentationViewportRef = useRef<{ zoom: number; pan: { x: number; y: number }; autoFitEnabled: boolean } | null>(null);
+  const viewportLiveRef = useRef<{ zoom: number; pan: { x: number; y: number } }>({ zoom: 1, pan: { x: 0, y: 0 } });
   const {
     addObject,
     updateObject,
@@ -354,12 +356,16 @@ const PlanView = ({ planId }: Props) => {
     toggleShowPrintArea,
     roomCapacityStateByPlan,
     setRoomCapacityState,
-    perfOverlayEnabled,
-    presentationMode,
-    togglePresentationMode,
-    hiddenLayersByPlan,
-    setHideAllLayers,
-    setLockedPlans,
+	    perfOverlayEnabled,
+	    presentationMode,
+	    togglePresentationMode,
+	    presentationWebcamEnabled,
+	    setPresentationWebcamEnabled,
+	    presentationWebcamCalib,
+	    setPresentationWebcamCalib,
+	    hiddenLayersByPlan,
+	    setHideAllLayers,
+	    setLockedPlans,
     setPlanDirty,
     requestSaveAndNavigate,
     pendingSaveNavigateTo,
@@ -417,12 +423,16 @@ const PlanView = ({ planId }: Props) => {
       toggleShowPrintArea: (s as any).toggleShowPrintArea,
       roomCapacityStateByPlan: (s as any).roomCapacityStateByPlan,
       setRoomCapacityState: (s as any).setRoomCapacityState,
-      perfOverlayEnabled: (s as any).perfOverlayEnabled,
-      presentationMode: (s as any).presentationMode,
-      togglePresentationMode: (s as any).togglePresentationMode,
-      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
-      setHideAllLayers: (s as any).setHideAllLayers,
-      setLockedPlans: (s as any).setLockedPlans,
+	      perfOverlayEnabled: (s as any).perfOverlayEnabled,
+	      presentationMode: (s as any).presentationMode,
+	      togglePresentationMode: (s as any).togglePresentationMode,
+	      presentationWebcamEnabled: (s as any).presentationWebcamEnabled,
+	      setPresentationWebcamEnabled: (s as any).setPresentationWebcamEnabled,
+	      presentationWebcamCalib: (s as any).presentationWebcamCalib,
+	      setPresentationWebcamCalib: (s as any).setPresentationWebcamCalib,
+	      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
+	      setHideAllLayers: (s as any).setHideAllLayers,
+	      setLockedPlans: (s as any).setLockedPlans,
       setPlanDirty: (s as any).setPlanDirty,
       requestSaveAndNavigate: (s as any).requestSaveAndNavigate,
       pendingSaveNavigateTo: (s as any).pendingSaveNavigateTo,
@@ -2723,6 +2733,26 @@ const PlanView = ({ planId }: Props) => {
   }, [plan, samePlanSnapshotIgnoringDims, toSnapshot]);
 
   const pendingNavigateRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    viewportLiveRef.current = { zoom, pan };
+  }, [pan, zoom]);
+
+  const getViewport = useCallback(() => viewportLiveRef.current, []);
+
+  const { webcamReady, calibrating: webcamCalibrating, requestCalibrate } = usePresentationWebcamHands({
+    active: presentationMode,
+    webcamEnabled: presentationWebcamEnabled,
+    setWebcamEnabled: setPresentationWebcamEnabled,
+    calib: presentationWebcamCalib,
+    setCalib: setPresentationWebcamCalib,
+    mapRef,
+    getViewport,
+    setZoom,
+    setPan,
+    onInfo: (msg) => push(t(msg), 'info'),
+    onError: (msg) => push(t(msg), 'danger')
+  });
 
   useEffect(() => {
     const sp = new URLSearchParams(location.search || '');
@@ -8703,7 +8733,7 @@ const PlanView = ({ planId }: Props) => {
 		      </div>
 
 	      <div className="flex-1 min-h-0">
-	        <div className="relative flex h-full min-h-0 gap-4 overflow-hidden">
+	        <div className={`relative flex h-full min-h-0 overflow-hidden ${presentationMode ? 'gap-0' : 'gap-4'}`}>
 	        <div className="flex-1 min-w-0 min-h-0">
 	            <div
                 className={`relative h-full min-h-0 w-full ${panToolActive ? 'cursor-grab active:cursor-grabbing' : ''}`}
@@ -8741,6 +8771,10 @@ const PlanView = ({ planId }: Props) => {
 	                        containerRef={mapRef}
 	                        presentationMode={presentationMode}
 	                        onTogglePresentation={() => togglePresentationMode?.()}
+	                        webcamEnabled={presentationWebcamEnabled}
+	                        webcamReady={webcamReady && !!presentationWebcamCalib && !webcamCalibrating}
+	                        onToggleWebcam={() => setPresentationWebcamEnabled(!presentationWebcamEnabled)}
+	                        onCalibrateWebcam={() => requestCalibrate()}
 	                        plan={(canvasPlan || renderPlan) as any}
 	                        selectedId={selectedObjectId}
 	                        selectedIds={selectedObjectIds}
