@@ -312,8 +312,8 @@ const HelpPanel = () => {
 	                      </li>
 		                      <li>
 		                        {t({
-		                          it: 'Force unlock (solo Superadmin): puoi avviare uno sblocco forzato con countdown (0..60 minuti). Durante il countdown il detentore del lock vede un avviso non chiudibile e puo solo scegliere “Salva e rilascia” oppure “Scarta e rilascia”. Il superadmin puo anche annullare la richiesta.',
-		                          en: 'Force unlock (Superadmin only): you can start a forced unlock with a countdown (0..60 minutes). During the countdown, the lock owner sees a non-dismissible warning and can only choose “Save and release” or “Discard and release”. The superadmin can also cancel the request.'
+		                          it: 'Force unlock (solo Superadmin): puoi avviare uno sblocco forzato impostando un tempo (0..60 minuti) con timer in secondi. Finché il timer non scade, i pulsanti di sblocco restano disattivati; allo scadere parte una finestra di 5 minuti (timer in secondi) in cui puoi scegliere “Salva e sblocca”, “Scarta e sblocca” oppure annullare la richiesta. Se non scegli entro i 5 minuti, la richiesta scade.',
+		                          en: 'Force unlock (Superadmin only): you can start a forced unlock by setting a time (0..60 minutes) with a seconds countdown. While the timer is running, the unlock buttons stay disabled; once it ends, a 5-minute decision window (seconds countdown) starts where you can choose “Save and unlock”, “Discard and unlock”, or cancel the request. If you do not choose within 5 minutes, the request expires.'
 		                        })}
 		                      </li>
 		                      <li>
