@@ -687,6 +687,7 @@ const emitLockState = (planId) => {
 const releaseLocksForWs = (ws) => {
   const info = wsClientInfo.get(ws);
   if (!info) return;
+  const userId = info.userId;
   for (const planId of info.plans.keys()) {
     const members = wsPlanMembers.get(planId);
     if (members) {
@@ -718,6 +719,19 @@ const releaseLocksForWs = (ws) => {
     emitPresence(planId);
   }
   wsClientInfo.delete(ws);
+  // Update "last online" only when the user has no more active sockets.
+  let stillConnected = false;
+  for (const other of wsClientInfo.values()) {
+    if (other?.userId === userId) {
+      stillConnected = true;
+      break;
+    }
+  }
+  if (!stillConnected) {
+    try {
+      db.prepare('UPDATE users SET lastOnlineAt = ? WHERE id = ?').run(Date.now(), userId);
+    } catch {}
+  }
 };
 
 const parseDataUrl = (value) => {
@@ -2395,7 +2409,7 @@ app.post('/api/auth/first-run', requireAuth, (req, res) => {
 });
 
 app.put('/api/auth/me', requireAuth, (req, res) => {
-  const { language, defaultPlanId, clientOrder, paletteFavorites, visibleLayerIdsByPlan, avatarUrl } = req.body || {};
+  const { language, defaultPlanId, clientOrder, paletteFavorites, visibleLayerIdsByPlan, avatarUrl, chatLayout } = req.body || {};
   const nextLanguage = language === 'en' ? 'en' : language === 'it' ? 'it' : undefined;
   const nextDefaultPlanId =
     typeof defaultPlanId === 'string' ? defaultPlanId : defaultPlanId === null ? null : undefined;
@@ -2432,6 +2446,20 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
     if (s.startsWith('/uploads/')) return s;
     return { error: 'Invalid avatarUrl' };
   })();
+  const nextChatLayout = (() => {
+    if (chatLayout === null) return {};
+    if (!chatLayout || typeof chatLayout !== 'object' || Array.isArray(chatLayout)) return undefined;
+    // Keep it permissive (forward compatible), but prevent huge payloads.
+    const keys = Object.keys(chatLayout);
+    if (keys.length > 50) return undefined;
+    try {
+      const json = JSON.stringify(chatLayout);
+      if (json.length > 6000) return undefined;
+      return chatLayout;
+    } catch {
+      return undefined;
+    }
+  })();
 
   if (
     nextLanguage === undefined &&
@@ -2439,7 +2467,8 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
     nextClientOrder === undefined &&
     nextPaletteFavorites === undefined &&
     nextVisibleLayerIdsByPlan === undefined &&
-    nextAvatarUrl === undefined
+    nextAvatarUrl === undefined &&
+    nextChatLayout === undefined
   ) {
     res.status(400).json({ error: 'Invalid payload' });
     return;
@@ -2532,6 +2561,10 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
   if (nextAvatarUrl !== undefined) {
     sets.push('avatarUrl = ?');
     params.push(String(nextAvatarUrl || ''));
+  }
+  if (nextChatLayout !== undefined) {
+    sets.push('chatLayoutJson = ?');
+    params.push(JSON.stringify(nextChatLayout || {}));
   }
   sets.push('updatedAt = ?');
   params.push(now);
@@ -3094,10 +3127,16 @@ app.get('/api/users/:id/profile', requireAuth, (req, res) => {
     return;
   }
   const target = db
-    .prepare('SELECT id, username, firstName, lastName, email, avatarUrl, isAdmin, isSuperAdmin, disabled FROM users WHERE id = ?')
+    .prepare('SELECT id, username, firstName, lastName, email, avatarUrl, isAdmin, isSuperAdmin, lastOnlineAt, disabled FROM users WHERE id = ?')
     .get(targetId);
   if (!target || Number(target.disabled) === 1) {
     res.status(404).json({ error: 'Not found' });
+    return;
+  }
+
+  // WhatsApp-like: a blocked user can't see the blocker profile.
+  if (userHasBlocked(String(target.id), req.userId)) {
+    res.status(403).json({ error: 'Forbidden' });
     return;
   }
 
@@ -3130,6 +3169,7 @@ app.get('/api/users/:id/profile', requireAuth, (req, res) => {
     lastName: String(target.lastName || ''),
     email: String(target.email || ''),
     avatarUrl: String(target.avatarUrl || ''),
+    lastOnlineAt: target.lastOnlineAt ? Number(target.lastOnlineAt) : null,
     clientsCommon
   });
 });
@@ -3660,6 +3700,112 @@ const normalizeChatMessageRow = (r) => {
   };
 };
 
+const dmThreadIdForUsers = (a, b) => {
+  const x = String(a || '').trim();
+  const y = String(b || '').trim();
+  if (!x || !y) return null;
+  const [u1, u2] = x < y ? [x, y] : [y, x];
+  return `dm:${u1}:${u2}`;
+};
+
+const parseDmThreadId = (threadId) => {
+  const s = String(threadId || '').trim();
+  if (!s.startsWith('dm:')) return null;
+  const parts = s.slice(3).split(':').map((p) => String(p || '').trim()).filter(Boolean);
+  if (parts.length !== 2) return null;
+  const [a, b] = parts[0] < parts[1] ? [parts[0], parts[1]] : [parts[1], parts[0]];
+  return { a, b, pairKey: `${a}:${b}`, threadId: `dm:${a}:${b}` };
+};
+
+const userHasBlocked = (blockerId, blockedId) => {
+  try {
+    const row = db.prepare('SELECT 1 FROM user_blocks WHERE blockerId = ? AND blockedId = ?').get(blockerId, blockedId);
+    return !!row;
+  } catch {
+    return false;
+  }
+};
+
+const normalizeDmChatMessageRow = (r) => {
+  if (!r) return null;
+  const base = normalizeChatMessageRow({
+    ...r,
+    clientId: `dm:${String(r.pairKey || '').trim()}`,
+    userId: String(r.fromUserId || '')
+  });
+  if (!base) return null;
+  return {
+    ...base,
+    clientId: `dm:${String(r.pairKey || '').trim()}`,
+    userId: String(r.fromUserId || ''),
+    toUserId: String(r.toUserId || ''),
+    deliveredAt: r.deliveredAt ? Number(r.deliveredAt) : null,
+    readAt: r.readAt ? Number(r.readAt) : null
+  };
+};
+
+const findChatMessageById = (id) => {
+  const mid = String(id || '').trim();
+  if (!mid) return null;
+  const clientRow = db
+    .prepare('SELECT id, clientId, userId, deleted, createdAt FROM client_chat_messages WHERE id = ?')
+    .get(mid);
+  if (clientRow) return { kind: 'client', row: clientRow };
+  const dmRow = db
+    .prepare('SELECT id, pairKey, fromUserId, toUserId, deleted, createdAt FROM dm_chat_messages WHERE id = ?')
+    .get(mid);
+  if (dmRow) return { kind: 'dm', row: dmRow };
+  return null;
+};
+
+const deliverPendingDmMessagesToUser = (userId) => {
+  const uid = String(userId || '').trim();
+  if (!uid) return 0;
+  const now = Date.now();
+  let delivered = 0;
+  let rows = [];
+  try {
+    rows = db
+      .prepare(
+        `SELECT id, pairKey, fromUserId, toUserId
+         FROM dm_chat_messages
+         WHERE toUserId = ? AND deleted = 0 AND deliveredAt IS NULL
+         ORDER BY createdAt ASC
+         LIMIT 200`
+      )
+      .all(uid);
+  } catch {
+    return 0;
+  }
+  for (const r of rows || []) {
+    const fromUserId = String(r.fromUserId || '').trim();
+    const toUserId = String(r.toUserId || '').trim();
+    const pairKey = String(r.pairKey || '').trim();
+    if (!fromUserId || !toUserId || !pairKey) continue;
+    if (toUserId !== uid) continue;
+    // If the recipient blocked the sender, keep it undelivered forever (1 gray tick on sender).
+    if (userHasBlocked(toUserId, fromUserId)) continue;
+    try {
+      db.prepare('UPDATE dm_chat_messages SET deliveredAt = ?, updatedAt = ? WHERE id = ? AND deliveredAt IS NULL').run(now, now, String(r.id));
+      const updated = db
+        .prepare(
+          `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+           FROM dm_chat_messages
+           WHERE id = ?`
+        )
+        .get(String(r.id));
+      const message = normalizeDmChatMessageRow(updated);
+      const threadId = `dm:${pairKey}`;
+      sendToUser(toUserId, { type: 'dm_chat_new', threadId, message, backfill: true });
+      sendToUser(fromUserId, { type: 'dm_chat_update', threadId, message, receipt: true });
+      delivered += 1;
+    } catch {
+      // ignore single row
+    }
+  }
+  return delivered;
+};
+
 const getClientNameById = (clientId) => {
   const state = readState();
   const c = (state.clients || []).find((x) => x?.id === clientId);
@@ -3678,7 +3824,203 @@ app.get('/api/chat/unread', requireAuth, (req, res) => {
     const lastReadAt = lastReadAtByClient.get(clientId) || 0;
     out[clientId] = Number(countStmt.get(clientId, lastReadAt)?.c || 0);
   }
+
+  // DM unread (per threadId).
+  try {
+    const dmRows = db
+      .prepare(
+        `SELECT pairKey, COUNT(1) as c
+         FROM dm_chat_messages
+         WHERE toUserId = ? AND deleted = 0 AND deliveredAt IS NOT NULL AND readAt IS NULL
+         GROUP BY pairKey`
+      )
+      .all(req.userId);
+    for (const r of dmRows || []) {
+      const key = String(r.pairKey || '').trim();
+      if (!key) continue;
+      out[`dm:${key}`] = Number(r.c || 0);
+    }
+  } catch {
+    // ignore: table may not exist yet on older DBs
+  }
   res.json({ unreadByClientId: out });
+});
+
+app.get('/api/chat/unread-senders', requireAuth, (req, res) => {
+  const senderIds = new Set();
+  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+
+  // Group chats (client).
+  try {
+    const allowedClientIds = Array.from(getChatClientIdsForUser(req.userId, isAdmin));
+    const reads = db.prepare('SELECT clientId, lastReadAt FROM client_chat_reads WHERE userId = ?').all(req.userId);
+    const lastReadAtByClient = new Map();
+    for (const r of reads || []) lastReadAtByClient.set(String(r.clientId), Number(r.lastReadAt) || 0);
+    const stmt = db.prepare(
+      `SELECT DISTINCT userId
+       FROM client_chat_messages
+       WHERE clientId = ? AND deleted = 0 AND createdAt > ? AND userId != ?`
+    );
+    for (const clientId of allowedClientIds) {
+      const lastReadAt = lastReadAtByClient.get(clientId) || 0;
+      const rows = stmt.all(clientId, lastReadAt, req.userId);
+      for (const r of rows || []) {
+        if (!r?.userId) continue;
+        senderIds.add(String(r.userId));
+      }
+    }
+  } catch {}
+
+  // DMs (only messages that were actually delivered).
+  try {
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT fromUserId
+         FROM dm_chat_messages
+         WHERE toUserId = ? AND deleted = 0 AND deliveredAt IS NOT NULL AND readAt IS NULL`
+      )
+      .all(req.userId);
+    for (const r of rows || []) {
+      if (!r?.fromUserId) continue;
+      senderIds.add(String(r.fromUserId));
+    }
+  } catch {}
+
+  res.json({ count: senderIds.size, senderIds: Array.from(senderIds) });
+});
+
+app.get('/api/chat/dm/contacts', requireAuth, (req, res) => {
+  const meId = req.userId;
+  const meIsAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  const meClients = getChatClientIdsForUser(meId, meIsAdmin);
+
+  const onlineIds = new Set();
+  for (const info of wsClientInfo.values()) {
+    if (info?.userId) onlineIds.add(String(info.userId));
+  }
+
+  const blockedByMe = new Set();
+  const blockedMe = new Set();
+  try {
+    const rows = db.prepare('SELECT blockerId, blockedId FROM user_blocks WHERE blockerId = ? OR blockedId = ?').all(meId, meId);
+    for (const r of rows || []) {
+      if (String(r.blockerId) === meId && r.blockedId) blockedByMe.add(String(r.blockedId));
+      if (String(r.blockedId) === meId && r.blockerId) blockedMe.add(String(r.blockerId));
+    }
+  } catch {}
+
+  const dmHistoryOtherIds = new Set();
+  try {
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT
+           CASE WHEN fromUserId = ? THEN toUserId ELSE fromUserId END as otherId
+         FROM dm_chat_messages
+         WHERE fromUserId = ? OR toUserId = ?`
+      )
+      .all(meId, meId, meId);
+    for (const r of rows || []) {
+      const id = String(r.otherId || '').trim();
+      if (id && id !== meId) dmHistoryOtherIds.add(id);
+    }
+  } catch {}
+
+  const state = readState();
+  const clientById = new Map();
+  for (const c of state?.clients || []) {
+    if (!c?.id) continue;
+    clientById.set(String(c.id), { id: String(c.id), name: c.shortName || c.name || String(c.id), logoUrl: String(c.logoUrl || '') });
+  }
+
+  const users = db
+    .prepare('SELECT id, username, firstName, lastName, avatarUrl, isAdmin, isSuperAdmin, lastOnlineAt, disabled FROM users ORDER BY username ASC')
+    .all()
+    .filter((u) => Number(u.disabled) !== 1)
+    .map((u) => {
+      const id = String(u.id);
+      const normalizedUsername = String(u.username || '').toLowerCase();
+      return {
+        id,
+        username: normalizedUsername,
+        firstName: String(u.firstName || ''),
+        lastName: String(u.lastName || ''),
+        avatarUrl: String(u.avatarUrl || ''),
+        isAdmin: !!u.isAdmin,
+        isSuperAdmin: !!u.isSuperAdmin && normalizedUsername === 'superadmin',
+        lastOnlineAt: u.lastOnlineAt ? Number(u.lastOnlineAt) : null
+      };
+    })
+    .filter((u) => u.id !== meId)
+    .map((u) => {
+      const targetClients = getChatClientIdsForUser(u.id, !!u.isAdmin || !!u.isSuperAdmin);
+      const common = [];
+      for (const id of meClients) {
+        if (!targetClients.has(id)) continue;
+        const meta = clientById.get(String(id));
+        if (meta) common.push(meta);
+      }
+      common.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+      const hasCommon = common.length > 0;
+      const hasHistory = dmHistoryOtherIds.has(u.id);
+      return {
+        ...u,
+        online: onlineIds.has(u.id),
+        commonClients: common,
+        canChat: hasCommon,
+        readOnly: !hasCommon && hasHistory,
+        hasHistory,
+        blockedByMe: blockedByMe.has(u.id),
+        blockedMe: blockedMe.has(u.id)
+      };
+    })
+    // Only show users with common customers, plus existing DMs (read-only).
+    .filter((u) => u.canChat || u.hasHistory);
+
+  res.json({ users });
+});
+
+app.post('/api/chat/blocks/:id', requireAuth, (req, res) => {
+  const targetId = String(req.params.id || '').trim();
+  if (!targetId) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  if (targetId === req.userId) {
+    res.status(400).json({ error: 'Invalid id' });
+    return;
+  }
+  const now = Date.now();
+  try {
+    db.prepare(
+      `INSERT INTO user_blocks (blockerId, blockedId, createdAt)
+       VALUES (?, ?, ?)
+       ON CONFLICT(blockerId, blockedId) DO UPDATE SET createdAt = excluded.createdAt`
+    ).run(req.userId, targetId, now);
+  } catch {
+    res.status(500).json({ error: 'Failed' });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.delete('/api/chat/blocks/:id', requireAuth, (req, res) => {
+  const targetId = String(req.params.id || '').trim();
+  if (!targetId) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  if (targetId === req.userId) {
+    res.status(400).json({ error: 'Invalid id' });
+    return;
+  }
+  try {
+    db.prepare('DELETE FROM user_blocks WHERE blockerId = ? AND blockedId = ?').run(req.userId, targetId);
+  } catch {
+    res.status(500).json({ error: 'Failed' });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 app.get('/api/chat/:clientId/messages', requireAuth, (req, res) => {
@@ -3687,6 +4029,98 @@ app.get('/api/chat/:clientId/messages', requireAuth, (req, res) => {
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
+
+  const dm = parseDmThreadId(clientId);
+  if (dm) {
+    if (req.userId !== dm.a && req.userId !== dm.b) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const otherUserId = req.userId === dm.a ? dm.b : dm.a;
+    const other = db
+      .prepare('SELECT id, username, firstName, lastName, avatarUrl, isAdmin, isSuperAdmin, lastOnlineAt, disabled FROM users WHERE id = ?')
+      .get(otherUserId);
+    if (!other || Number(other.disabled) === 1) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+
+    const meIsAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+    const otherIsAdmin = !!other.isAdmin || !!other.isSuperAdmin;
+    const myClients = getChatClientIdsForUser(req.userId, meIsAdmin);
+    const otherClients = getChatClientIdsForUser(String(other.id), otherIsAdmin);
+    const commonIds = [];
+    for (const id of myClients) if (otherClients.has(id)) commonIds.push(String(id));
+    const canChat = commonIds.length > 0 || meIsAdmin;
+
+    const hasHistory = (() => {
+      try {
+        const row = db
+          .prepare('SELECT 1 FROM dm_chat_messages WHERE pairKey = ? AND (fromUserId = ? OR toUserId = ?) LIMIT 1')
+          .get(dm.pairKey, req.userId, req.userId);
+        return !!row;
+      } catch {
+        return false;
+      }
+    })();
+
+    if (!canChat && !hasHistory) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const state = readState();
+    const nameByClientId = new Map();
+    const logoByClientId = new Map();
+    for (const c of state?.clients || []) {
+      if (!c?.id) continue;
+      nameByClientId.set(String(c.id), c.shortName || c.name || String(c.id));
+      logoByClientId.set(String(c.id), String(c.logoUrl || ''));
+    }
+    const commonClients = commonIds
+      .map((id) => ({ id, name: nameByClientId.get(id) || id, logoUrl: logoByClientId.get(id) || '' }))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
+    const rows = db
+      .prepare(
+        `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+         FROM dm_chat_messages
+         WHERE pairKey = ?
+         ORDER BY createdAt ASC
+         LIMIT ?`
+      )
+      .all(dm.pairKey, limit)
+      .map(normalizeDmChatMessageRow)
+      .filter(Boolean);
+
+    const normalizedUsername = String(other.username || '').toLowerCase();
+    const displayName = `${String(other.firstName || '').trim()} ${String(other.lastName || '').trim()}`.trim() || normalizedUsername;
+    res.json({
+      clientId: dm.threadId,
+      clientName: displayName,
+      lastReadAt: 0,
+      messages: rows,
+      dm: {
+        otherUserId,
+        other: {
+          id: String(other.id),
+          username: normalizedUsername,
+          firstName: String(other.firstName || ''),
+          lastName: String(other.lastName || ''),
+          avatarUrl: String(other.avatarUrl || ''),
+          lastOnlineAt: other.lastOnlineAt ? Number(other.lastOnlineAt) : null
+        },
+        commonClients,
+        canChat: !!canChat,
+        readOnly: !canChat,
+        blockedByMe: userHasBlocked(req.userId, otherUserId),
+        blockedMe: userHasBlocked(otherUserId, req.userId)
+      }
+    });
+    return;
+  }
+
   const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
   if (!userCanChatClient(req.userId, isAdmin, clientId)) {
     res.status(403).json({ error: 'Forbidden' });
@@ -3713,6 +4147,64 @@ app.get('/api/chat/:clientId/members', requireAuth, (req, res) => {
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
+
+  const dm = parseDmThreadId(clientId);
+  if (dm) {
+    if (req.userId !== dm.a && req.userId !== dm.b) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const otherUserId = req.userId === dm.a ? dm.b : dm.a;
+    const other = db
+      .prepare('SELECT id, username, firstName, lastName, avatarUrl, isAdmin, isSuperAdmin, lastOnlineAt, disabled FROM users WHERE id = ?')
+      .get(otherUserId);
+    if (!other || Number(other.disabled) === 1) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+
+    const meIsAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+    const otherIsAdmin = !!other.isAdmin || !!other.isSuperAdmin;
+    const myClients = getChatClientIdsForUser(req.userId, meIsAdmin);
+    const otherClients = getChatClientIdsForUser(String(other.id), otherIsAdmin);
+    let hasCommon = false;
+    for (const id of myClients) {
+      if (otherClients.has(id)) {
+        hasCommon = true;
+        break;
+      }
+    }
+    const readOnly = !hasCommon && !meIsAdmin;
+
+    const onlineIds = new Set();
+    for (const info of wsClientInfo.values()) {
+      if (info?.userId) onlineIds.add(String(info.userId));
+    }
+
+    const normalize = (u) => {
+      const normalizedUsername = String(u.username || '').toLowerCase();
+      return {
+        id: String(u.id),
+        username: normalizedUsername,
+        firstName: String(u.firstName || ''),
+        lastName: String(u.lastName || ''),
+        avatarUrl: String(u.avatarUrl || ''),
+        online: readOnly ? false : onlineIds.has(String(u.id)),
+        lastOnlineAt: readOnly ? null : u.lastOnlineAt ? Number(u.lastOnlineAt) : null,
+        lastReadAt: 0
+      };
+    };
+
+    const meRow = db.prepare('SELECT id, username, firstName, lastName, avatarUrl, lastOnlineAt FROM users WHERE id = ?').get(req.userId);
+    res.json({
+      clientId: dm.threadId,
+      kind: 'dm',
+      readOnly,
+      users: [meRow ? normalize(meRow) : { id: req.userId, username: req.username, firstName: '', lastName: '', avatarUrl: '', online: true, lastOnlineAt: Date.now(), lastReadAt: 0 }, normalize(other)]
+    });
+    return;
+  }
+
   const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
   if (!userCanChatClient(req.userId, isAdmin, clientId)) {
     res.status(403).json({ error: 'Forbidden' });
@@ -3762,7 +4254,7 @@ app.get('/api/chat/:clientId/members', requireAuth, (req, res) => {
   }
 
   const users = db
-    .prepare('SELECT id, username, firstName, lastName, avatarUrl, isAdmin, isSuperAdmin, disabled FROM users')
+    .prepare('SELECT id, username, firstName, lastName, avatarUrl, isAdmin, isSuperAdmin, lastOnlineAt, disabled FROM users')
     .all()
     .filter((u) => Number(u.disabled) !== 1)
     .map((u) => {
@@ -3775,7 +4267,8 @@ app.get('/api/chat/:clientId/members', requireAuth, (req, res) => {
         avatarUrl: String(u.avatarUrl || ''),
         isAdmin: !!u.isAdmin,
         isSuperAdmin: !!u.isSuperAdmin && normalizedUsername === 'superadmin',
-        online: onlineIds.has(String(u.id))
+        online: onlineIds.has(String(u.id)),
+        lastOnlineAt: u.lastOnlineAt ? Number(u.lastOnlineAt) : null
       };
     })
     .filter((u) => memberUserIds.has(u.id))
@@ -3795,6 +4288,43 @@ app.post('/api/chat/:clientId/read', requireAuth, rateByUser('chat_read', 60 * 1
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
+
+  const dm = parseDmThreadId(clientId);
+  if (dm) {
+    if (req.userId !== dm.a && req.userId !== dm.b) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const otherUserId = req.userId === dm.a ? dm.b : dm.a;
+    const now = Date.now();
+    let ids = [];
+    try {
+      ids = db
+        .prepare(
+          `SELECT id
+           FROM dm_chat_messages
+           WHERE pairKey = ? AND toUserId = ? AND deleted = 0 AND deliveredAt IS NOT NULL AND readAt IS NULL
+           ORDER BY createdAt ASC
+           LIMIT 800`
+        )
+        .all(dm.pairKey, req.userId)
+        .map((r) => String(r.id));
+      db.prepare(
+        `UPDATE dm_chat_messages
+         SET readAt = ?, updatedAt = ?
+         WHERE pairKey = ? AND toUserId = ? AND deleted = 0 AND deliveredAt IS NOT NULL AND readAt IS NULL`
+      ).run(now, now, dm.pairKey, req.userId);
+    } catch {
+      res.status(500).json({ error: 'Failed' });
+      return;
+    }
+    if (ids.length) {
+      sendToUser(otherUserId, { type: 'dm_chat_read', threadId: dm.threadId, messageIds: ids, readAt: now });
+    }
+    res.json({ ok: true, lastReadAt: now });
+    return;
+  }
+
   const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
   if (!userCanChatClient(req.userId, isAdmin, clientId)) {
     res.status(403).json({ error: 'Forbidden' });
@@ -3816,6 +4346,143 @@ app.post('/api/chat/:clientId/messages', requireAuth, rateByUser('chat_send', 60
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
+
+  const dm = parseDmThreadId(clientId);
+  if (dm) {
+    if (req.userId !== dm.a && req.userId !== dm.b) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const otherUserId = req.userId === dm.a ? dm.b : dm.a;
+    const other = db.prepare('SELECT id, username, avatarUrl, isAdmin, isSuperAdmin, disabled FROM users WHERE id = ?').get(otherUserId);
+    if (!other || Number(other.disabled) === 1) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+
+    const meIsAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+    const otherIsAdmin = !!other.isAdmin || !!other.isSuperAdmin;
+    const myClients = getChatClientIdsForUser(req.userId, meIsAdmin);
+    const otherClients = getChatClientIdsForUser(String(other.id), otherIsAdmin);
+    let hasCommon = false;
+    for (const id of myClients) {
+      if (otherClients.has(id)) {
+        hasCommon = true;
+        break;
+      }
+    }
+    if (!hasCommon && !meIsAdmin) {
+      res.status(403).json({ error: 'Read-only' });
+      return;
+    }
+
+    // Optional: if I blocked the other user, require unblock to send.
+    if (userHasBlocked(req.userId, otherUserId)) {
+      res.status(403).json({ error: 'Blocked' });
+      return;
+    }
+
+    const text = typeof req.body?.text === 'string' ? String(req.body.text) : '';
+    const trimmed = text.replace(/\r\n/g, '\n').trim();
+    if (trimmed.length > 4000) {
+      res.status(400).json({ error: 'Message too long' });
+      return;
+    }
+    const attachmentsIn = Array.isArray(req.body?.attachments) ? req.body.attachments : [];
+    const replyToId = typeof req.body?.replyToId === 'string' ? String(req.body.replyToId).trim() : '';
+    if (!trimmed && (!attachmentsIn || !attachmentsIn.length)) {
+      res.status(400).json({ error: 'Empty message' });
+      return;
+    }
+    if (attachmentsIn.length > CHAT_MAX_ATTACHMENTS) {
+      res.status(400).json({ error: 'Too many attachments' });
+      return;
+    }
+
+    const attachments = [];
+    let totalOtherBytes = 0;
+    let totalVoiceBytes = 0;
+    for (const a of attachmentsIn) {
+      const v = validateChatAttachmentInput(a);
+      if (!v.ok) {
+        res.status(400).json({ error: 'Invalid attachment', ...v });
+        return;
+      }
+      if (v.isVoice) totalVoiceBytes += Number(v.sizeBytes) || 0;
+      else totalOtherBytes += Number(v.sizeBytes) || 0;
+      if (totalOtherBytes > CHAT_MAX_TOTAL_ATTACHMENT_BYTES) {
+        res.status(400).json({ error: 'Attachments too large', reason: 'total_size', maxBytes: CHAT_MAX_TOTAL_ATTACHMENT_BYTES, sizeBytes: totalOtherBytes });
+        return;
+      }
+      if (totalVoiceBytes > CHAT_VOICE_MAX_TOTAL_ATTACHMENT_BYTES) {
+        res.status(400).json({ error: 'Voice note too large', reason: 'voice_total_size', maxBytes: CHAT_VOICE_MAX_TOTAL_ATTACHMENT_BYTES, sizeBytes: totalVoiceBytes });
+        return;
+      }
+      const url = externalizeChatAttachmentDataUrl(v.name, v.dataUrl, v.ext);
+      if (!url) {
+        res.status(400).json({ error: 'Failed to store attachment' });
+        return;
+      }
+      attachments.push({ name: v.name.slice(0, 200), url, mime: v.mime, sizeBytes: v.sizeBytes });
+    }
+
+    const me = db.prepare('SELECT username, avatarUrl FROM users WHERE id = ?').get(req.userId);
+    const now = Date.now();
+    const id = crypto.randomUUID();
+    if (replyToId) {
+      const ok = db.prepare('SELECT id FROM dm_chat_messages WHERE id = ? AND pairKey = ?').get(replyToId, dm.pairKey);
+      if (!ok) {
+        res.status(400).json({ error: 'Invalid replyToId' });
+        return;
+      }
+    }
+
+    const recipientHasBlockedSender = userHasBlocked(otherUserId, req.userId);
+    const recipientOnline = (() => {
+      for (const info of wsClientInfo.values()) {
+        if (info?.userId === otherUserId) return true;
+      }
+      return false;
+    })();
+    const deliveredAt = !recipientHasBlockedSender && recipientOnline ? now : null;
+
+    db.prepare(
+      `INSERT INTO dm_chat_messages (id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deliveredAt, readAt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', '{}', ?, 0, ?, NULL, ?, ?)`
+    ).run(
+      id,
+      dm.pairKey,
+      req.userId,
+      otherUserId,
+      String(me?.username || req.username || ''),
+      String(me?.avatarUrl || ''),
+      replyToId || null,
+      JSON.stringify(attachments),
+      trimmed,
+      deliveredAt,
+      now,
+      now
+    );
+
+    const row = db
+      .prepare(
+        `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+         FROM dm_chat_messages
+         WHERE id = ?`
+      )
+      .get(id);
+    const message = normalizeDmChatMessageRow(row);
+
+    // Always notify the sender (all active sockets).
+    sendToUser(req.userId, { type: 'dm_chat_new', threadId: dm.threadId, message });
+    // Notify recipient only if not blocked by them.
+    if (!recipientHasBlockedSender) {
+      if (deliveredAt) sendToUser(otherUserId, { type: 'dm_chat_new', threadId: dm.threadId, message });
+    }
+    res.json({ ok: true, message });
+    return;
+  }
+
   const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
   if (!userCanChatClient(req.userId, isAdmin, clientId)) {
     res.status(403).json({ error: 'Forbidden' });
@@ -3924,18 +4591,18 @@ app.put('/api/chat/messages/:id', requireAuth, rateByUser('chat_edit', 60 * 1000
     res.status(400).json({ error: 'Message too long' });
     return;
   }
-  const row = db
-    .prepare('SELECT id, clientId, userId, deleted, createdAt FROM client_chat_messages WHERE id = ?')
-    .get(id);
-  if (!row) {
+  const hit = findChatMessageById(id);
+  if (!hit) {
     res.status(404).json({ error: 'Not found' });
     return;
   }
+  const row = hit.row;
   if (Number(row.deleted) === 1) {
     res.status(400).json({ error: 'Deleted' });
     return;
   }
-  if (String(row.userId) !== req.userId) {
+  const ownerId = hit.kind === 'client' ? String(row.userId) : String(row.fromUserId);
+  if (ownerId !== req.userId) {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
@@ -3945,16 +4612,35 @@ app.put('/api/chat/messages/:id', requireAuth, rateByUser('chat_edit', 60 * 1000
     res.status(400).json({ error: 'Edit window expired' });
     return;
   }
-  db.prepare('UPDATE client_chat_messages SET text = ?, editedAt = ?, updatedAt = ? WHERE id = ?').run(trimmed, now, now, id);
+  if (hit.kind === 'client') {
+    db.prepare('UPDATE client_chat_messages SET text = ?, editedAt = ?, updatedAt = ? WHERE id = ?').run(trimmed, now, now, id);
+    const updated = db
+      .prepare(
+        `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+         FROM client_chat_messages
+         WHERE id = ?`
+      )
+      .get(id);
+    const message = normalizeChatMessageRow(updated);
+    broadcastToChatClient(String(row.clientId), { type: 'client_chat_update', clientId: String(row.clientId), message });
+    res.json({ ok: true, message });
+    return;
+  }
+
+  db.prepare('UPDATE dm_chat_messages SET text = ?, editedAt = ?, updatedAt = ? WHERE id = ?').run(trimmed, now, now, id);
   const updated = db
     .prepare(
-      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
-       FROM client_chat_messages
+      `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+       FROM dm_chat_messages
        WHERE id = ?`
     )
     .get(id);
-  const message = normalizeChatMessageRow(updated);
-  broadcastToChatClient(String(row.clientId), { type: 'client_chat_update', clientId: String(row.clientId), message });
+  const message = normalizeDmChatMessageRow(updated);
+  const threadId = `dm:${String(row.pairKey || '').trim()}`;
+  sendToUser(String(row.fromUserId), { type: 'dm_chat_update', threadId, message });
+  if (message?.deliveredAt && !userHasBlocked(String(row.toUserId), String(row.fromUserId))) {
+    sendToUser(String(row.toUserId), { type: 'dm_chat_update', threadId, message });
+  }
   res.json({ ok: true, message });
 });
 
@@ -3964,38 +4650,56 @@ app.delete('/api/chat/messages/:id', requireAuth, rateByUser('chat_delete', 60 *
     res.status(400).json({ error: 'Missing id' });
     return;
   }
-  const row = db
-    .prepare('SELECT id, clientId, userId, deleted FROM client_chat_messages WHERE id = ?')
-    .get(id);
-  if (!row) {
+  const hit = findChatMessageById(id);
+  if (!hit) {
     res.status(404).json({ error: 'Not found' });
     return;
   }
+  const row = hit.row;
   if (Number(row.deleted) === 1) {
     res.json({ ok: true });
     return;
   }
-  const isOwner = String(row.userId) === req.userId;
+  const isOwner = (hit.kind === 'client' ? String(row.userId) : String(row.fromUserId)) === req.userId;
   if (!isOwner && !req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
   const now = Date.now();
-  db.prepare('UPDATE client_chat_messages SET deleted = 1, deletedAt = ?, deletedById = ?, updatedAt = ? WHERE id = ?').run(
-    now,
-    req.userId,
-    now,
-    id
-  );
+  if (hit.kind === 'client') {
+    db.prepare('UPDATE client_chat_messages SET deleted = 1, deletedAt = ?, deletedById = ?, updatedAt = ? WHERE id = ?').run(
+      now,
+      req.userId,
+      now,
+      id
+    );
+    const updated = db
+      .prepare(
+        `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+         FROM client_chat_messages
+         WHERE id = ?`
+      )
+      .get(id);
+    const message = normalizeChatMessageRow(updated);
+    broadcastToChatClient(String(row.clientId), { type: 'client_chat_update', clientId: String(row.clientId), message });
+    res.json({ ok: true });
+    return;
+  }
+
+  db.prepare('UPDATE dm_chat_messages SET deleted = 1, deletedAt = ?, deletedById = ?, updatedAt = ? WHERE id = ?').run(now, req.userId, now, id);
   const updated = db
     .prepare(
-      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
-       FROM client_chat_messages
+      `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+       FROM dm_chat_messages
        WHERE id = ?`
     )
     .get(id);
-  const message = normalizeChatMessageRow(updated);
-  broadcastToChatClient(String(row.clientId), { type: 'client_chat_update', clientId: String(row.clientId), message });
+  const message = normalizeDmChatMessageRow(updated);
+  const threadId = `dm:${String(row.pairKey || '').trim()}`;
+  sendToUser(String(row.fromUserId), { type: 'dm_chat_update', threadId, message });
+  if (message?.deliveredAt && !userHasBlocked(String(row.toUserId), String(row.fromUserId))) {
+    sendToUser(String(row.toUserId), { type: 'dm_chat_update', threadId, message });
+  }
   res.json({ ok: true });
 });
 
@@ -4005,9 +4709,12 @@ app.post('/api/chat/messages/:id/star', requireAuth, rateByUser('chat_star', 60 
     res.status(400).json({ error: 'Missing id' });
     return;
   }
-  const row = db
-    .prepare('SELECT id, clientId, deleted, starredByJson FROM client_chat_messages WHERE id = ?')
-    .get(id);
+  let kind = 'client';
+  let row = db.prepare('SELECT id, clientId, deleted, starredByJson FROM client_chat_messages WHERE id = ?').get(id);
+  if (!row) {
+    kind = 'dm';
+    row = db.prepare('SELECT id, pairKey, fromUserId, toUserId, deleted, deliveredAt, starredByJson FROM dm_chat_messages WHERE id = ?').get(id);
+  }
   if (!row) {
     res.status(404).json({ error: 'Not found' });
     return;
@@ -4016,11 +4723,19 @@ app.post('/api/chat/messages/:id/star', requireAuth, rateByUser('chat_star', 60 
     res.status(400).json({ error: 'Deleted' });
     return;
   }
-  const clientId = String(row.clientId);
-  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
-  if (!userCanChatClient(req.userId, isAdmin, clientId)) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
+  if (kind === 'client') {
+    const clientId = String(row.clientId);
+    const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+    if (!userCanChatClient(req.userId, isAdmin, clientId)) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+  } else {
+    const isParticipant = String(row.fromUserId) === req.userId || String(row.toUserId) === req.userId;
+    if (!isParticipant) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
   }
   let list = [];
   try {
@@ -4032,16 +4747,36 @@ app.post('/api/chat/messages/:id/star', requireAuth, rateByUser('chat_star', 60 
   if (wantStar) uniq.add(req.userId);
   else uniq.delete(req.userId);
   const now = Date.now();
-  db.prepare('UPDATE client_chat_messages SET starredByJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(Array.from(uniq)), now, id);
+  if (kind === 'client') {
+    const clientId = String(row.clientId);
+    db.prepare('UPDATE client_chat_messages SET starredByJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(Array.from(uniq)), now, id);
+    const updated = db
+      .prepare(
+        `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+         FROM client_chat_messages
+         WHERE id = ?`
+      )
+      .get(id);
+    const message = normalizeChatMessageRow(updated);
+    broadcastToChatClient(clientId, { type: 'client_chat_update', clientId, message });
+    res.json({ ok: true, message });
+    return;
+  }
+
+  db.prepare('UPDATE dm_chat_messages SET starredByJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(Array.from(uniq)), now, id);
   const updated = db
     .prepare(
-      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
-       FROM client_chat_messages
+      `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+       FROM dm_chat_messages
        WHERE id = ?`
     )
     .get(id);
-  const message = normalizeChatMessageRow(updated);
-  broadcastToChatClient(clientId, { type: 'client_chat_update', clientId, message });
+  const message = normalizeDmChatMessageRow(updated);
+  const threadId = `dm:${String(row.pairKey || '').trim()}`;
+  sendToUser(String(row.fromUserId), { type: 'dm_chat_update', threadId, message });
+  if (message?.deliveredAt && !userHasBlocked(String(row.toUserId), String(row.fromUserId))) {
+    sendToUser(String(row.toUserId), { type: 'dm_chat_update', threadId, message });
+  }
   res.json({ ok: true, message });
 });
 
@@ -4056,9 +4791,12 @@ app.post('/api/chat/messages/:id/react', requireAuth, rateByUser('chat_react', 6
     res.status(400).json({ error: 'Invalid emoji' });
     return;
   }
-  const row = db
-    .prepare('SELECT id, clientId, deleted, reactionsJson FROM client_chat_messages WHERE id = ?')
-    .get(id);
+  let kind = 'client';
+  let row = db.prepare('SELECT id, clientId, deleted, reactionsJson FROM client_chat_messages WHERE id = ?').get(id);
+  if (!row) {
+    kind = 'dm';
+    row = db.prepare('SELECT id, pairKey, fromUserId, toUserId, deleted, deliveredAt, reactionsJson FROM dm_chat_messages WHERE id = ?').get(id);
+  }
   if (!row) {
     res.status(404).json({ error: 'Not found' });
     return;
@@ -4067,11 +4805,19 @@ app.post('/api/chat/messages/:id/react', requireAuth, rateByUser('chat_react', 6
     res.status(400).json({ error: 'Deleted' });
     return;
   }
-  const clientId = String(row.clientId);
-  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
-  if (!userCanChatClient(req.userId, isAdmin, clientId)) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
+  if (kind === 'client') {
+    const clientId = String(row.clientId);
+    const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+    if (!userCanChatClient(req.userId, isAdmin, clientId)) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+  } else {
+    const isParticipant = String(row.fromUserId) === req.userId || String(row.toUserId) === req.userId;
+    if (!isParticipant) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
   }
   let parsed = {};
   try {
@@ -4104,16 +4850,36 @@ app.post('/api/chat/messages/:id/react', requireAuth, rateByUser('chat_react', 6
   }
 
   const now = Date.now();
-  db.prepare('UPDATE client_chat_messages SET reactionsJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(parsed), now, id);
+  if (kind === 'client') {
+    const clientId = String(row.clientId);
+    db.prepare('UPDATE client_chat_messages SET reactionsJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(parsed), now, id);
+    const updated = db
+      .prepare(
+        `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+         FROM client_chat_messages
+         WHERE id = ?`
+      )
+      .get(id);
+    const message = normalizeChatMessageRow(updated);
+    broadcastToChatClient(clientId, { type: 'client_chat_update', clientId, message });
+    res.json({ ok: true, message });
+    return;
+  }
+
+  db.prepare('UPDATE dm_chat_messages SET reactionsJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(parsed), now, id);
   const updated = db
     .prepare(
-      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
-       FROM client_chat_messages
+      `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+       FROM dm_chat_messages
        WHERE id = ?`
     )
     .get(id);
-  const message = normalizeChatMessageRow(updated);
-  broadcastToChatClient(clientId, { type: 'client_chat_update', clientId, message });
+  const message = normalizeDmChatMessageRow(updated);
+  const threadId = `dm:${String(row.pairKey || '').trim()}`;
+  sendToUser(String(row.fromUserId), { type: 'dm_chat_update', threadId, message });
+  if (message?.deliveredAt && !userHasBlocked(String(row.toUserId), String(row.fromUserId))) {
+    sendToUser(String(row.toUserId), { type: 'dm_chat_update', threadId, message });
+  }
   res.json({ ok: true, message });
 });
 
@@ -4153,6 +4919,117 @@ app.get('/api/chat/:clientId/export', requireAuth, (req, res) => {
     res.status(400).send('Missing clientId');
     return;
   }
+
+  const dm = parseDmThreadId(clientId);
+  if (dm) {
+    if (req.userId !== dm.a && req.userId !== dm.b) {
+      res.status(403).send('Forbidden');
+      return;
+    }
+    const otherUserId = req.userId === dm.a ? dm.b : dm.a;
+    const other = db.prepare('SELECT id, username, firstName, lastName, disabled FROM users WHERE id = ?').get(otherUserId);
+    if (!other || Number(other.disabled) === 1) {
+      res.status(404).send('Not found');
+      return;
+    }
+    const normalizedUsername = String(other.username || '').toLowerCase();
+    const title = `${String(other.firstName || '').trim()} ${String(other.lastName || '').trim()}`.trim() || normalizedUsername;
+
+    const qf = String(req.query.format || 'txt').toLowerCase();
+    const format = qf === 'json' ? 'json' : qf === 'html' ? 'html' : 'txt';
+    const rows = db
+      .prepare(
+        `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+         FROM dm_chat_messages
+         WHERE pairKey = ?
+         ORDER BY createdAt ASC`
+      )
+      .all(dm.pairKey)
+      .map(normalizeDmChatMessageRow)
+      .filter(Boolean);
+
+    const safeName = String(title || 'dm')
+      .replace(/[^\w\- ]+/g, '')
+      .trim()
+      .slice(0, 40) || 'dm';
+    if (format === 'json') {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename=\"chat-${safeName}.json\"`);
+      res.send(JSON.stringify({ threadId: dm.threadId, title, exportedAt: Date.now(), messages: rows }, null, 2));
+      return;
+    }
+    if (format === 'html') {
+      const escapeHtml = (s) =>
+        String(s || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      const items = rows
+        .map((m) => {
+          const d = new Date(m.createdAt);
+          const ts = `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          const body = m.deleted ? '<em>Messaggio eliminato</em>' : escapeHtml(m.text).replace(/\n/g, '<br/>');
+          const edited = m.editedAt && !m.deleted ? ' <span class="edited">(modificato)</span>' : '';
+          const attachments = (m.attachments || []).length
+            ? `<div class="attachments">${m.attachments
+                .map((a) => `<a href="${escapeHtml(a.url)}" target="_blank" rel="noreferrer">${escapeHtml(a.name || a.url)}</a>`)
+                .join('')}</div>`
+            : '';
+          return `<div class="msg"><div class="meta"><span class="ts">[${escapeHtml(ts)}]</span> <strong>${escapeHtml(
+            m.username
+          )}</strong>${edited}</div><div class="body">${body}</div>${attachments}</div>`;
+        })
+        .join('\n');
+      const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Chat ${escapeHtml(title)}</title>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial; background:#0b1220; color:#e2e8f0; padding:24px;}
+    .wrap{max-width:900px;margin:0 auto;}
+    h1{font-size:18px;margin:0 0 8px 0;}
+    .sub{font-size:12px;color:#94a3b8;margin:0 0 18px 0;}
+    .msg{border:1px solid rgba(148,163,184,.22); background:rgba(15,23,42,.6); border-radius:14px; padding:12px 14px; margin:10px 0;}
+    .meta{font-size:12px;color:#cbd5e1;margin-bottom:6px;}
+    .ts{color:#94a3b8;}
+    .edited{font-weight:700;color:#a7f3d0;}
+    .body{font-size:14px;line-height:1.35;white-space:normal}
+    .attachments{margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;}
+    .attachments a{display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid rgba(148,163,184,.22); color:#e2e8f0; text-decoration:none;}
+    .attachments a:hover{background:rgba(148,163,184,.12);}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Chat: ${escapeHtml(title)}</h1>
+    <div class="sub">Export: ${escapeHtml(new Date().toISOString())}</div>
+    ${items}
+  </div>
+</body>
+</html>`;
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename=\"chat-${safeName}.html\"`);
+      res.send(html);
+      return;
+    }
+    const lines = [];
+    for (const m of rows) {
+      const d = new Date(m.createdAt);
+      const ts = `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const body = m.deleted ? '(messaggio eliminato)' : m.text.replace(/\n/g, ' ');
+      const edited = m.editedAt ? ' (modificato)' : '';
+      const att = (m.attachments || []).length ? ` [allegati: ${(m.attachments || []).map((a) => a?.name || a?.url).join(', ')}]` : '';
+      lines.push(`[${ts}] ${m.username}: ${body}${edited}${att}`);
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=\"chat-${safeName}.txt\"`);
+    res.send(lines.join('\n'));
+    return;
+  }
+
   const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
   if (!userCanChatClient(req.userId, isAdmin, clientId)) {
     res.status(403).send('Forbidden');
@@ -4311,6 +5188,9 @@ wss.on('connection', (ws, req) => {
     } catch {}
     return;
   }
+  try {
+    db.prepare('UPDATE users SET lastOnlineAt = ? WHERE id = ?').run(Date.now(), auth.userId);
+  } catch {}
   wsClientInfo.set(ws, {
     userId: auth.userId,
     username: auth.username,
@@ -4322,6 +5202,8 @@ wss.on('connection', (ws, req) => {
     plans: new Map()
   });
   jsonSend(ws, { type: 'hello', userId: auth.userId, username: auth.username, avatarUrl: auth.avatarUrl || '' });
+  // Deliver pending DM messages (turns 1 gray tick into 2 gray ticks when the recipient connects).
+  deliverPendingDmMessagesToUser(auth.userId);
   emitGlobalPresence();
 
   ws.on('message', (raw) => {

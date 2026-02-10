@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
-import { fetchChatUnread, markChatRead } from '../../api/chat';
+import { fetchChatUnread, fetchChatUnreadSenders, markChatRead } from '../../api/chat';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useChatStore } from '../../store/useChatStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -24,11 +24,19 @@ const ClientChatWs = () => {
     // Initial unread badge hydration.
     if (!user?.id) {
       useUIStore.getState().setChatUnreadByClientId({});
+      useUIStore.getState().setChatUnreadSenderIds([]);
       return;
     }
     fetchChatUnread()
       .then((payload) => {
         useUIStore.getState().setChatUnreadByClientId(payload.unreadByClientId || {});
+      })
+      .catch(() => {
+        // ignore
+      });
+    fetchChatUnreadSenders()
+      .then((payload) => {
+        useUIStore.getState().setChatUnreadSenderIds(payload.senderIds || []);
       })
       .catch(() => {
         // ignore
@@ -84,6 +92,7 @@ const ClientChatWs = () => {
             return;
           }
           ui.bumpChatUnread(clientId, 1);
+          ui.addChatUnreadSenderId(String(message.userId || ''));
 
           // Toast notification (throttled per client) to make it feel instant like WhatsApp.
           const now = Date.now();
@@ -103,6 +112,59 @@ const ClientChatWs = () => {
               }),
               { duration: 5000, id: `client-chat-new:${clientId}` }
             );
+          }
+          return;
+        }
+        if (msg?.type === 'dm_chat_new' && msg?.threadId && msg?.message?.id) {
+          const threadId = String(msg.threadId);
+          const message = msg.message;
+          useChatStore.getState().upsertMessage(threadId, message);
+
+          const ui = useUIStore.getState();
+          const me = useAuthStore.getState().user;
+          const fromMe = String(message.userId) === String(me?.id || '');
+          if (!fromMe) {
+            if (ui.clientChatOpen && ui.clientChatClientId === threadId) {
+              ui.clearChatUnread(threadId);
+              if (readDebounceRef.current[threadId]) window.clearTimeout(readDebounceRef.current[threadId]);
+              readDebounceRef.current[threadId] = window.setTimeout(() => {
+                markChatRead(threadId).catch(() => {});
+              }, 350);
+            } else {
+              ui.bumpChatUnread(threadId, 1);
+              ui.addChatUnreadSenderId(String(message.userId || ''));
+              // Avoid noisy toasts for backfill delivery.
+              if (!msg?.backfill) {
+                const now = Date.now();
+                const last = Number(lastToastAtByClientRef.current[threadId] || 0);
+                if (now - last > 1200) {
+                  lastToastAtByClientRef.current[threadId] = now;
+                  const from = String(message.username || '').trim() || t({ it: 'utente', en: 'user' });
+                  toast.info(
+                    t({
+                      it: `Nuovo messaggio in chat (da ${from})`,
+                      en: `New chat message (from ${from})`
+                    }),
+                    { duration: 5000, id: `dm-chat-new:${threadId}` }
+                  );
+                }
+              }
+            }
+          }
+          return;
+        }
+        if ((msg?.type === 'dm_chat_update' || msg?.type === 'dm_chat_receipt') && msg?.threadId && msg?.message?.id) {
+          const threadId = String(msg.threadId);
+          useChatStore.getState().upsertMessage(threadId, msg.message);
+          return;
+        }
+        if (msg?.type === 'dm_chat_read' && msg?.threadId && Array.isArray(msg.messageIds)) {
+          const threadId = String(msg.threadId);
+          const readAt = typeof msg.readAt === 'number' ? msg.readAt : Date.now();
+          for (const id of msg.messageIds) {
+            const mid = String(id || '').trim();
+            if (!mid) continue;
+            useChatStore.getState().patchMessage(threadId, mid, { readAt });
           }
           return;
         }

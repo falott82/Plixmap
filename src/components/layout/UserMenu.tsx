@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Cog, History, Info, LogOut } from 'lucide-react';
+import { Check, Cog, History, Info, LogOut, MessageSquare } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
@@ -14,14 +14,17 @@ const UserMenu = () => {
   const location = useLocation();
   const ref = useRef<HTMLDivElement | null>(null);
   const t = useT();
-  const { dirtyByPlan, setPendingPostSaveAction, requestSaveAndNavigate, openHelp, openChangelog } = useUIStore((s) => ({
+  const { dirtyByPlan, setPendingPostSaveAction, requestSaveAndNavigate, openHelp, openChangelog, toggleClientChat, chatUnreadSenderIds } = useUIStore((s) => ({
     dirtyByPlan: s.dirtyByPlan,
     setPendingPostSaveAction: s.setPendingPostSaveAction,
     requestSaveAndNavigate: s.requestSaveAndNavigate,
     openHelp: s.openHelp,
-    openChangelog: s.openChangelog
+    openChangelog: s.openChangelog,
+    toggleClientChat: (s as any).toggleClientChat,
+    chatUnreadSenderIds: (s as any).chatUnreadSenderIds || {}
   }));
   const hasDirtyPlans = useMemo(() => Object.values(dirtyByPlan || {}).some(Boolean), [dirtyByPlan]);
+  const unreadSendersCount = useMemo(() => Object.keys(chatUnreadSenderIds || {}).length, [chatUnreadSenderIds]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -42,20 +45,35 @@ const UserMenu = () => {
 
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink shadow-card hover:bg-slate-50"
-        title={t({ it: 'Account', en: 'Account' })}
-      >
-        <UserAvatar
-          src={(user as any).avatarUrl}
-          name={`${user.firstName} ${user.lastName}`.trim()}
-          username={user.username}
-          size={20}
-          className="border-slate-200"
-        />
-        <span className="max-w-[180px] truncate">{label}</span>
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => toggleClientChat()}
+          className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
+          title={t({ it: 'Chat (C)', en: 'Chat (C)' })}
+          aria-label={t({ it: 'Chat', en: 'Chat' })}
+        >
+          <MessageSquare size={18} className="text-slate-700" />
+          {unreadSendersCount > 0 ? (
+            <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+              {unreadSendersCount > 99 ? '99+' : String(unreadSendersCount)}
+            </span>
+          ) : null}
+        </button>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink shadow-card hover:bg-slate-50"
+          title={t({ it: 'Account', en: 'Account' })}
+        >
+          <UserAvatar
+            src={(user as any).avatarUrl}
+            name={`${user.firstName} ${user.lastName}`.trim()}
+            username={user.username}
+            size={20}
+            className="border-slate-200"
+          />
+          <span className="max-w-[180px] truncate">{label}</span>
+        </button>
+      </div>
       {open ? (
         <div className="absolute right-0 z-50 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
           <div className="px-3 pb-2 pt-1 text-xs font-semibold uppercase text-slate-500">

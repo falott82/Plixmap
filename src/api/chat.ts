@@ -6,6 +6,10 @@ export interface ChatMessage {
   userId: string;
   username: string;
   avatarUrl?: string;
+  // DM-only fields (WhatsApp-like checkmarks).
+  toUserId?: string;
+  deliveredAt?: number | null;
+  readAt?: number | null;
   replyToId?: string | null;
   attachments?: { name: string; url: string; mime?: string; sizeBytes?: number }[];
   starredBy?: string[];
@@ -42,7 +46,18 @@ export const fetchChatMembers = async (
   clientId: string
 ): Promise<{
   clientId: string;
-  users: { id: string; username: string; firstName: string; lastName: string; avatarUrl?: string; online: boolean; lastReadAt: number }[];
+  users: {
+    id: string;
+    username: string;
+    firstName: string;
+    lastName: string;
+    avatarUrl?: string;
+    online: boolean;
+    lastOnlineAt?: number | null;
+    lastReadAt: number;
+  }[];
+  kind?: 'dm' | 'client';
+  readOnly?: boolean;
 }> => {
   const res = await apiFetch(`/api/chat/${encodeURIComponent(clientId)}/members`, {
     credentials: 'include',
@@ -138,4 +153,48 @@ export const exportChat = async (clientId: string, format: 'txt' | 'json' | 'htm
   });
   if (!res.ok) throw new Error(`Failed to export chat (${res.status})`);
   return res.blob();
+};
+
+export const fetchChatUnreadSenders = async (): Promise<{ count: number; senderIds: string[] }> => {
+  const res = await apiFetch('/api/chat/unread-senders', { credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to fetch unread senders (${res.status})`);
+  return res.json();
+};
+
+export type DmContactRow = {
+  id: string;
+  username: string;
+  firstName: string;
+  lastName: string;
+  avatarUrl?: string;
+  online: boolean;
+  lastOnlineAt: number | null;
+  commonClients: { id: string; name: string; logoUrl?: string }[];
+  canChat: boolean;
+  readOnly: boolean;
+  hasHistory: boolean;
+  blockedByMe: boolean;
+  blockedMe: boolean;
+};
+
+export const fetchDmContacts = async (): Promise<{ users: DmContactRow[] }> => {
+  const res = await apiFetch('/api/chat/dm/contacts', { credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to fetch DM contacts (${res.status})`);
+  return res.json();
+};
+
+export const blockChatUser = async (userId: string): Promise<void> => {
+  const res = await apiFetch(`/api/chat/blocks/${encodeURIComponent(userId)}`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error(`Failed to block user (${res.status})`);
+};
+
+export const unblockChatUser = async (userId: string): Promise<void> => {
+  const res = await apiFetch(`/api/chat/blocks/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error(`Failed to unblock user (${res.status})`);
 };

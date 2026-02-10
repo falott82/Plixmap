@@ -1,12 +1,16 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Lock, Layers, History, Keyboard } from 'lucide-react';
+import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Lock, Layers, History, Keyboard, MessageSquare } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
 import { shallow } from 'zustand/shallow';
 import { useT } from '../../i18n/useT';
 import { releaseHistory } from '../../version/history';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+
+const KeyHint = ({ children }: { children: any }) => (
+  <span className="font-extrabold text-sky-700">{children}</span>
+);
 
 const HelpPanel = () => {
   const { helpOpen, closeHelp } = useUIStore((s) => ({ helpOpen: s.helpOpen, closeHelp: s.closeHelp }), shallow);
@@ -20,6 +24,7 @@ const HelpPanel = () => {
       { id: 'help-login', label: t({ it: 'Login & permessi', en: 'Login & permissions' }) },
       { id: 'help-navigation', label: t({ it: 'Navigazione & upload', en: 'Navigation & upload' }) },
       { id: 'help-lock', label: t({ it: 'Lock planimetrie', en: 'Floor plan lock' }) },
+      { id: 'help-customer-chat', label: t({ it: 'Customer Chat', en: 'Customer Chat' }) },
       { id: 'help-objects', label: t({ it: 'Oggetti sulla mappa', en: 'Objects on the map' }) },
       { id: 'help-rooms', label: t({ it: 'Stanze logiche', en: 'Logical rooms' }) },
       { id: 'help-layers', label: t({ it: 'Livelli, griglia e collegamenti', en: 'Layers, grid and links' }) },
@@ -257,7 +262,7 @@ const HelpPanel = () => {
                       <li>{t({ it: 'Il file caricato diventa lo sfondo della mappa.', en: 'The uploaded file becomes the map background.' })}</li>
                     </ul>
 	                  </div>
-	                  <div data-help-block id="help-lock" className="rounded-xl bg-mist p-3">
+                  <div data-help-block id="help-lock" className="rounded-xl bg-mist p-3">
 	                    <div className="flex items-center gap-2 font-semibold text-ink">
 	                      <Lock size={16} /> {t({ it: 'Lock planimetrie', en: 'Floor plan lock' })}
 	                    </div>
@@ -329,11 +334,48 @@ const HelpPanel = () => {
 		                        })}
 		                      </li>
 	                    </ul>
-	                  </div>
-	                  <div data-help-block id="help-objects" className="rounded-xl bg-mist p-3">
-	                    <div className="flex items-center gap-2 font-semibold text-ink">
-	                      <MousePointerClick size={16} /> {t({ it: 'Oggetti sulla mappa', en: 'Objects on the map' })}
-	                    </div>
+                  </div>
+                  <div data-help-block id="help-customer-chat" className="rounded-xl bg-mist p-3">
+                    <div className="flex items-center gap-2 font-semibold text-ink">
+                      <MessageSquare size={16} /> {t({ it: 'Customer Chat', en: 'Customer Chat' })}
+                    </div>
+                    <ul className="ml-5 list-disc space-y-1 pt-2">
+                      <li>
+                        {t({
+                          it: 'Ogni cliente ha una chat di gruppo dedicata. I gruppi sono in cima alla lista.',
+                          en: 'Each customer has a dedicated group chat. Groups are shown at the top of the list.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Sotto ai gruppi trovi gli utenti del portale con cui condividi almeno un cliente in comune. Se la condivisione viene rimossa, la chat resta visibile ma diventa in sola lettura e lo stato utente non e mostrato.',
+                          en: 'Under groups you see portal users that share at least one customer with you. If sharing is removed, the chat stays visible but becomes read-only and the user status is hidden.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Icona chat (in alto, vicino all’account): mostra un badge con il numero di mittenti diversi che hanno almeno un messaggio non letto.',
+                          en: 'Chat icon (top, next to the account): shows a badge with the number of distinct senders with at least one unread message.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'E possibile bloccare e sbloccare un utente. Quando un utente e bloccato non puo vedere il profilo di chi lo ha bloccato e i messaggi inviati restano con una sola spunta grigia finche il blocco e attivo.',
+                          en: 'You can block/unblock a user. When blocked, a user cannot see the blocker profile and sent messages stay with a single gray check while the block is active.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Layout: la chat e ridimensionabile e il divisorio tra lista e conversazione e trascinabile. Le preferenze vengono salvate sul tuo account.',
+                          en: 'Layout: the chat panel is resizable and the divider between list and conversation is draggable. Preferences are saved on your account.'
+                        })}
+                      </li>
+                    </ul>
+                  </div>
+                  <div data-help-block id="help-objects" className="rounded-xl bg-mist p-3">
+                    <div className="flex items-center gap-2 font-semibold text-ink">
+                      <MousePointerClick size={16} /> {t({ it: 'Oggetti sulla mappa', en: 'Objects on the map' })}
+                    </div>
                     <ul className="ml-5 list-disc space-y-1 pt-2">
                       <li>
                         {t({
@@ -509,178 +551,110 @@ const HelpPanel = () => {
                     </div>
                     <ul className="ml-5 list-disc space-y-1 pt-2">
                       <li>
+                        <KeyHint>C</KeyHint>{' '}
                         {t({
-                          it: 'Ctrl+F (Windows/Linux) o Cmd+F (macOS): focus sulla ricerca nella planimetria corrente.',
-                          en: 'Ctrl+F (Windows/Linux) or Cmd+F (macOS): focus the search input for the current floor plan.'
+                          it: 'mostra o nasconde la chat (se un testo e selezionato, C continua a cambiare il colore del testo).',
+                          en: 'shows or hides the chat (if a text object is selected, C still changes the text color).'
                         })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Invio (nella ricerca): esegue la ricerca e fa lampeggiare l’elemento trovato.',
-                          en: 'Enter (in search): runs the search and blinks the matched element.'
-                        })}
+                        <KeyHint>P</KeyHint> {t({ it: 'entra ed esce dalla modalita presentazione.', en: 'enter/exit presentation mode.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Ctrl/Cmd + click: selezione multipla (toggle).',
-                          en: 'Ctrl/Cmd + click: multi-select (toggle).'
-                        })}
+                        <KeyHint>Ctrl+P</KeyHint> {t({ it: 'apre l’export PDF.', en: 'opens the PDF export.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Trascina con il tasto sinistro su un’area vuota: selezione multipla con riquadro.',
-                          en: 'Left-drag on an empty area: box-select multiple objects.'
-                        })}
+                        <KeyHint>Ctrl+F</KeyHint> / <KeyHint>Cmd+F</KeyHint>{' '}
+                        {t({ it: 'focus sulla ricerca nella planimetria corrente.', en: 'focus the search input for the current floor plan.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Pan mappa: tasto centrale del mouse oppure Cmd+click destro (macOS) / Alt+click destro (Windows/Linux).',
-                          en: 'Pan: middle mouse button or Cmd+right-click (macOS) / Alt+right-click (Windows/Linux).'
-                        })}
+                        <KeyHint>Invio</KeyHint>{' '}
+                        {t({ it: '(nella ricerca) esegue la ricerca e fa lampeggiare l’elemento trovato.', en: '(in search) runs the search and blinks the matched element.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Touchpad: due dita per spostare la mappa, pinch per zoom. In alternativa usa l’icona mano per trascinare con il tasto sinistro.',
-                          en: 'Touchpad: two fingers to pan, pinch to zoom. Alternatively use the hand icon to drag with left click.'
-                        })}
+                        <KeyHint>Ctrl/Cmd + click</KeyHint> {t({ it: 'selezione multipla (toggle).', en: 'multi-select (toggle).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Frecce: spostamento fine degli oggetti selezionati (Shift = passo maggiore).',
-                          en: 'Arrow keys: fine movement for selected objects (Shift = larger step).'
-                        })}
+                        <KeyHint>Trascina</KeyHint>{' '}
+                        {t({ it: 'con il tasto sinistro su un’area vuota: selezione multipla con riquadro.', en: 'with left mouse on an empty area: box-select multiple objects.' })}
                       </li>
                       <li>
-                        {t({
-                          it: '+ / −: aumenta o riduce la scala degli oggetti selezionati (per il testo cambia la dimensione del font).',
-                          en: '+ / −: increase or decrease the scale of selected objects (for text it changes font size).'
-                        })}
+                        <KeyHint>Pan</KeyHint>{' '}
+                        {t({ it: 'tasto centrale del mouse oppure Cmd+click destro (macOS) / Alt+click destro (Windows/Linux).', en: 'middle mouse button or Cmd+right-click (macOS) / Alt+right-click (Windows/Linux).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Ctrl/Cmd + ←/→: ruota di 90° gli oggetti che supportano la rotazione.',
-                          en: 'Ctrl/Cmd + ←/→: rotate by 90° the objects that support rotation.'
-                        })}
+                        <KeyHint>Touchpad</KeyHint>{' '}
+                        {t({ it: 'due dita per spostare la mappa, pinch per zoom. In alternativa usa l’icona mano per trascinare con il tasto sinistro.', en: 'two fingers to pan, pinch to zoom. Alternatively use the hand icon to drag with left click.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'F: cambia il font del testo selezionato.',
-                          en: 'F: change the font of the selected text.'
-                        })}
+                        <KeyHint>Frecce</KeyHint>{' '}
+                        {t({ it: 'spostamento fine degli oggetti selezionati (Shift = passo maggiore).', en: 'fine movement for selected objects (Shift = larger step).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Shift+B: torna al font precedente del testo selezionato.',
-                          en: 'Shift+B: previous font for the selected text.'
-                        })}
+                        <KeyHint>+ / −</KeyHint>{' '}
+                        {t({ it: 'aumenta o riduce la scala degli oggetti selezionati (per il testo cambia la dimensione del font).', en: 'increase or decrease the scale of selected objects (for text it changes font size).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'C: cambia colore del testo selezionato (Shift+C colore precedente).',
-                          en: 'C: change selected text color (Shift+C previous color).'
-                        })}
+                        <KeyHint>Ctrl/Cmd + ←/→</KeyHint>{' '}
+                        {t({ it: 'ruota di 90° gli oggetti che supportano la rotazione.', en: 'rotate by 90° the objects that support rotation.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'B: mostra o nasconde il background del testo selezionato.',
-                          en: 'B: toggle background for the selected text.'
-                        })}
+                        <KeyHint>F</KeyHint> {t({ it: 'cambia il font del testo selezionato.', en: 'change the font of the selected text.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'L: collega 2 oggetti selezionati (se compatibili).',
-                          en: 'L: link 2 selected objects (if compatible).'
-                        })}
+                        <KeyHint>Shift+B</KeyHint> {t({ it: 'torna al font precedente del testo selezionato.', en: 'previous font for the selected text.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'N: rinomina l’oggetto selezionato (se ha un nome).',
-                          en: 'N: rename the selected object (if it has a name).'
-                        })}
+                        <KeyHint>C</KeyHint> {t({ it: 'cambia colore del testo selezionato (Shift+C colore precedente).', en: 'change selected text color (Shift+C previous color).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Ctrl+R / Cmd+R: apre la rubrica utenti importati del cliente corrente (se disponibile).',
-                          en: 'Ctrl+R / Cmd+R: opens the current client user directory (if available).'
-                        })}
+                        <KeyHint>B</KeyHint> {t({ it: 'mostra o nasconde il background del testo selezionato.', en: 'toggle background for the selected text.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Rubrica utenti: Frecce per navigare e Cmd+M per aprire l’email selezionata.',
-                          en: 'User directory: use arrows to navigate and Cmd+M to open the selected email.'
-                        })}
+                        <KeyHint>L</KeyHint> {t({ it: 'collega 2 oggetti selezionati (se compatibili).', en: 'link 2 selected objects (if compatible).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'IP Map: Frecce per navigare e U per aprire l’URL selezionato.',
-                          en: 'IP Map: use arrows to navigate and U to open the selected URL.'
-                        })}
+                        <KeyHint>N</KeyHint> {t({ it: 'rinomina l’oggetto selezionato (se ha un nome).', en: 'rename the selected object (if it has a name).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Ctrl+S / Cmd+S: salva un aggiornamento rapido (minor automatico).',
-                          en: 'Ctrl+S / Cmd+S: saves a quick update (automatic minor).'
-                        })}
+                        <KeyHint>Ctrl+R</KeyHint> / <KeyHint>Cmd+R</KeyHint>{' '}
+                        {t({ it: 'apre la rubrica utenti importati del cliente corrente (se disponibile).', en: 'opens the current client user directory (if available).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Ctrl+Z / Cmd+Z: annulla l’ultimo inserimento (con conferma).',
-                          en: 'Ctrl+Z / Cmd+Z: undo last placement (with confirmation).'
-                        })}
+                        <KeyHint>Ctrl+S</KeyHint> / <KeyHint>Cmd+S</KeyHint>{' '}
+                        {t({ it: 'salva un aggiornamento rapido (minor automatico).', en: 'saves a quick update (automatic minor).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Canc: elimina l’oggetto (o i multipli oggetti) selezionati dopo conferma.',
-                          en: 'Delete: removes the selected object(s) after confirmation.'
-                        })}
+                        <KeyHint>Ctrl+Z</KeyHint> / <KeyHint>Cmd+Z</KeyHint>{' '}
+                        {t({ it: 'annulla l’ultimo inserimento (con conferma).', en: 'undo last placement (with confirmation).' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Ctrl+A (Windows/Linux) o Cmd+A (macOS): seleziona tutti gli oggetti della planimetria (i collegamenti tra gli oggetti selezionati vengono inclusi nella lista “Modifica selezione”).',
-                          en: 'Ctrl+A (Windows/Linux) or Cmd+A (macOS): selects all objects in the floor plan (links between selected objects are included in the “Edit selection” list).'
-                        })}
+                        <KeyHint>Canc</KeyHint> {t({ it: 'elimina l’oggetto (o i multipli oggetti) selezionati dopo conferma.', en: 'removes the selected object(s) after confirmation.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Esc: annulla selezione e chiude modali/menu.',
-                          en: 'Esc: clears selection and closes modals/menus.'
-                        })}
+                        <KeyHint>Ctrl+A</KeyHint> / <KeyHint>Cmd+A</KeyHint> {t({ it: 'seleziona tutti gli oggetti della planimetria.', en: 'selects all objects in the floor plan.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Stanze poligono: Backspace rimuove l’ultimo punto, Invio chiude l’area.',
-                          en: 'Polygon rooms: Backspace removes the last point, Enter closes the area.'
-                        })}
+                        <KeyHint>Esc</KeyHint> {t({ it: 'annulla selezione e chiude modali/menu.', en: 'clears selection and closes modals/menus.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'W: avvia il disegno muro; premi di nuovo W (o doppio click) per chiudere.',
-                          en: 'W: start wall drawing; press W again (or double click) to finish.'
-                        })}
+                        <KeyHint>Backspace</KeyHint> / <KeyHint>Invio</KeyHint>{' '}
+                        {t({ it: '(stanze poligono) rimuove l’ultimo punto / chiude l’area.', en: '(polygon rooms) removes the last point / closes the area.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Shift (durante il disegno muro): vincola le linee a segmenti dritti.',
-                          en: 'Shift (while drawing walls): constrain to straight segments.'
-                        })}
+                        <KeyHint>W</KeyHint> {t({ it: 'avvia il disegno muro; premi di nuovo W (o doppio click) per chiudere.', en: 'start wall drawing; press W again (or double click) to finish.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'M: avvia la misura distanza; premi di nuovo M per interrompere.',
-                          en: 'M: start measuring distance; press M again to stop.'
-                        })}
+                        <KeyHint>Shift</KeyHint> {t({ it: '(durante il disegno muro) vincola le linee a segmenti dritti.', en: '(while drawing walls) constrain to straight segments.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Q: avvia la quota fissa; clicca due punti per creare una quota.',
-                          en: 'Q: start a fixed quote; click two points to create a quote.'
-                        })}
+                        <KeyHint>M</KeyHint> {t({ it: 'avvia la misura distanza; premi di nuovo M per interrompere.', en: 'start measuring distance; press M again to stop.' })}
                       </li>
                       <li>
-                        {t({
-                          it: 'Scala: nella finestra di impostazione puoi premere Invio per salvare.',
-                          en: 'Scale: in the set-scale dialog you can press Enter to save.'
-                        })}
+                        <KeyHint>Q</KeyHint> {t({ it: 'avvia la quota fissa; clicca due punti per creare una quota.', en: 'start a fixed quote; click two points to create a quote.' })}
+                      </li>
+                      <li>
+                        <KeyHint>Invio</KeyHint> {t({ it: '(dialog scala) salva la scala.', en: '(scale dialog) saves the scale.' })}
                       </li>
                     </ul>
                   </div>

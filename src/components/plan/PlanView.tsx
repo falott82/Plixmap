@@ -4063,11 +4063,22 @@ const PlanView = ({ planId }: Props) => {
 	  useEffect(() => {
 	    const handler = (e: KeyboardEvent) => {
 	      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName?.toLowerCase();
+        const isTyping = tag === 'input' || tag === 'textarea' || target?.isContentEditable;
+        if (isTyping) return;
+
 	      const isCmdF = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f';
 	      if (isCmdF) {
 	        e.preventDefault();
 	        searchInputRef.current?.focus();
 	      }
+
+        const isCmdP = (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p';
+        if (isCmdP) {
+          e.preventDefault();
+          setExportModalOpen(true);
+        }
 	    };
 	    window.addEventListener('keydown', handler);
 	    return () => window.removeEventListener('keydown', handler);

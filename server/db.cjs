@@ -176,6 +176,53 @@ const migrations = [
         db.exec("ALTER TABLE client_chat_messages ADD COLUMN reactionsJson TEXT NOT NULL DEFAULT '{}'");
       }
     }
+  },
+  {
+    version: 11,
+    up: (db) => {
+      const userCols = db.prepare("PRAGMA table_info('users')").all().map((c) => c.name);
+      if (!userCols.includes('lastOnlineAt')) {
+        db.exec('ALTER TABLE users ADD COLUMN lastOnlineAt INTEGER');
+      }
+      if (!userCols.includes('chatLayoutJson')) {
+        db.exec("ALTER TABLE users ADD COLUMN chatLayoutJson TEXT NOT NULL DEFAULT '{}'");
+      }
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_blocks (
+          blockerId TEXT NOT NULL,
+          blockedId TEXT NOT NULL,
+          createdAt INTEGER NOT NULL,
+          PRIMARY KEY(blockerId, blockedId)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_blocks_blockedId ON user_blocks(blockedId);
+
+        CREATE TABLE IF NOT EXISTS dm_chat_messages (
+          id TEXT PRIMARY KEY,
+          pairKey TEXT NOT NULL,
+          fromUserId TEXT NOT NULL,
+          toUserId TEXT NOT NULL,
+          username TEXT NOT NULL,
+          avatarUrl TEXT NOT NULL DEFAULT '',
+          replyToId TEXT,
+          attachmentsJson TEXT NOT NULL DEFAULT '[]',
+          starredByJson TEXT NOT NULL DEFAULT '[]',
+          reactionsJson TEXT NOT NULL DEFAULT '{}',
+          text TEXT NOT NULL,
+          deleted INTEGER NOT NULL DEFAULT 0,
+          deletedAt INTEGER,
+          deletedById TEXT,
+          editedAt INTEGER,
+          deliveredAt INTEGER,
+          readAt INTEGER,
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_dm_chat_messages_pair_createdAt ON dm_chat_messages(pairKey, createdAt);
+        CREATE INDEX IF NOT EXISTS idx_dm_chat_messages_toUser_readAt ON dm_chat_messages(toUserId, readAt);
+        CREATE INDEX IF NOT EXISTS idx_dm_chat_messages_toUser_deliveredAt ON dm_chat_messages(toUserId, deliveredAt);
+      `);
+    }
   }
 ];
 

@@ -206,6 +206,49 @@ const App = () => {
   }, [user]);
 
   useEffect(() => {
+    const prevSidebarCollapsedRef = { current: false };
+    const onKey = (e: KeyboardEvent) => {
+      if (!useAuthStore.getState().user) return;
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTyping = tag === 'input' || tag === 'textarea' || target?.isContentEditable;
+      if (isTyping) return;
+
+      // Toggle chat with `C` (bubble phase so PlanView can keep using `C` for text color when applicable).
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'c') {
+        useUIStore.getState().toggleClientChat?.();
+        return;
+      }
+
+      // Presentation mode with `P`: toggle fullscreen and collapse sidebar.
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        const doc: any = document as any;
+        const root: any = document.documentElement as any;
+        const inFs = !!doc.fullscreenElement;
+        if (!inFs) {
+          prevSidebarCollapsedRef.current = !!useUIStore.getState().sidebarCollapsed;
+          useUIStore.setState({ sidebarCollapsed: true } as any);
+          try {
+            root?.requestFullscreen?.();
+          } catch {
+            // ignore
+          }
+        } else {
+          useUIStore.setState({ sidebarCollapsed: prevSidebarCollapsedRef.current } as any);
+          try {
+            doc?.exitFullscreen?.();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey, false);
+    return () => window.removeEventListener('keydown', onKey, false);
+  }, []);
+
+  useEffect(() => {
     if (!authHydrated) return;
     if (!user) {
       setHydrated(true);
