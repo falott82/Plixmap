@@ -87,6 +87,7 @@ export function usePresentationWebcamHands(opts: {
     opts;
 
   const [webcamReady, setWebcamReady] = useState(false);
+  const [handDetected, setHandDetected] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
   const [starting, setStarting] = useState(false);
 
@@ -96,9 +97,15 @@ export function usePresentationWebcamHands(opts: {
   const rafRef = useRef<number | null>(null);
   const destroyedRef = useRef(false);
   const startTokenRef = useRef(0);
+  const handDetectedRef = useRef(false);
 
   const calibrateFramesRef = useRef(0);
   const calibrateSumRef = useRef(0);
+  const lastCalibrateInfoAtRef = useRef(0);
+  const lastCalibrateBucketRef = useRef(-1);
+  const lastInferAtRef = useRef(0);
+  const lastHandSeenAtRef = useRef(0);
+  const lastNoHandHintAtRef = useRef(0);
 
   const pinchSessionRef = useRef<{
     active: boolean;
@@ -119,15 +126,12 @@ export function usePresentationWebcamHands(opts: {
       onInfo({ it: 'Attiva prima la webcam.', en: 'Enable the webcam first.' });
       return;
     }
-    if (!webcamReady) {
-      onInfo({ it: 'Webcam in avvio: attendi un attimo e riprova.', en: 'Webcam is starting: wait a moment and try again.' });
-      return;
-    }
     setCalibrating(true);
     calibrateFramesRef.current = 0;
     calibrateSumRef.current = 0;
+    lastCalibrateInfoAtRef.current = performance.now();
     onInfo({ it: 'Calibrazione: fai un pinch e tienilo fermo per 1 secondo.', en: 'Calibration: pinch and hold still for 1 second.' });
-  }, [onInfo, webcamEnabled, webcamReady]);
+  }, [onInfo, webcamEnabled]);
 
   const stop = useCallback(() => {
     startTokenRef.current += 1;
@@ -136,12 +140,18 @@ export function usePresentationWebcamHands(opts: {
       rafRef.current = null;
     }
     setWebcamReady(false);
+    setHandDetected(false);
+    handDetectedRef.current = false;
     setCalibrating(false);
     setStarting(false);
     calibrateFramesRef.current = 0;
     calibrateSumRef.current = 0;
+    lastCalibrateBucketRef.current = -1;
     pinchSessionRef.current.active = false;
     pinchSessionRef.current.startCenter = null;
+    lastInferAtRef.current = 0;
+    lastHandSeenAtRef.current = 0;
+    lastNoHandHintAtRef.current = 0;
 
     const stream = streamRef.current;
     streamRef.current = null;
@@ -219,6 +229,7 @@ export function usePresentationWebcamHands(opts: {
         return false;
       }
       landmarkerRef.current = landmarker;
+      setWebcamReady(true);
       setWebcamEnabled(true);
       onInfo({ it: 'Webcam attiva. Premi Calibra per iniziare.', en: 'Webcam enabled. Press Calibrate to start.' });
 
@@ -229,38 +240,76 @@ export function usePresentationWebcamHands(opts: {
         if (!lmkr || !v) return;
         if (v.readyState < 2) return;
 
+        // Throttle inference to reduce long frames.
+        const now = performance.now();
+        const minIntervalMs = 1000 / 12; // ~12 FPS is enough for pan/zoom.
+        if (now - lastInferAtRef.current < minIntervalMs) {
+          if (handDetectedRef.current && lastHandSeenAtRef.current && now - lastHandSeenAtRef.current > 700) {
+            handDetectedRef.current = false;
+            setHandDetected(false);
+          }
+          return;
+        }
+        lastInferAtRef.current = now;
+
         let res: any = null;
         try {
-          res = lmkr.detectForVideo(v, performance.now());
+          res = lmkr.detectForVideo(v, now);
         } catch {
           return;
         }
 
         const lms = (res as any)?.landmarks?.[0] || null;
-        if (!Array.isArray(lms)) return;
+        if (!Array.isArray(lms)) {
+          if (handDetectedRef.current && lastHandSeenAtRef.current && now - lastHandSeenAtRef.current > 700) {
+            handDetectedRef.current = false;
+            setHandDetected(false);
+          }
+          if (calibrating && now - lastNoHandHintAtRef.current > 1800) {
+            lastNoHandHintAtRef.current = now;
+            onInfo({
+              it: 'Calibrazione: inquadra una mano e fai un pinch (pollice + indice).',
+              en: 'Calibration: show one hand and pinch (thumb + index).'
+            });
+          }
+          return;
+        }
 
         const pinchRatio = computePinchRatio(lms);
         const center = computeHandCenter(lms);
         if (!center || pinchRatio == null) return;
 
-        setWebcamReady(true);
+        lastHandSeenAtRef.current = now;
+        if (!handDetectedRef.current) {
+          handDetectedRef.current = true;
+          setHandDetected(true);
+        }
 
         if (calibrating) {
-          // Require a reasonably closed pinch to calibrate.
-          const isPinch = pinchRatio <= 0.65;
+          // Require a pinch, but keep it permissive to work across cameras/lighting.
+          const isPinch = pinchRatio <= 0.9;
           if (isPinch) {
             calibrateFramesRef.current += 1;
             calibrateSumRef.current += pinchRatio;
+            const bucket = Math.min(4, Math.floor((calibrateFramesRef.current / 30) * 4)); // 0..4
+            if (bucket !== lastCalibrateBucketRef.current && now - lastCalibrateInfoAtRef.current > 350) {
+              lastCalibrateBucketRef.current = bucket;
+              lastCalibrateInfoAtRef.current = now;
+              const pct = Math.min(100, Math.round((calibrateFramesRef.current / 30) * 100));
+              onInfo({ it: `Calibrazione in corso… ${pct}%`, en: `Calibrating… ${pct}%` });
+            }
             if (calibrateFramesRef.current >= 30) {
               const avg = calibrateSumRef.current / Math.max(1, calibrateFramesRef.current);
               setCalib({ pinchRatio: avg });
               setCalibrating(false);
+              lastCalibrateBucketRef.current = -1;
               onInfo({ it: 'Calibrazione completata. Pinch per pan e zoom.', en: 'Calibration completed. Pinch to pan and zoom.' });
             }
           } else {
             // reset if the user releases the pinch
             calibrateFramesRef.current = 0;
             calibrateSumRef.current = 0;
+            lastCalibrateBucketRef.current = -1;
           }
           return;
         }
@@ -366,5 +415,5 @@ export function usePresentationWebcamHands(opts: {
     disableWebcam();
   }, [active, disableWebcam]);
 
-  return { webcamReady, calibrating, starting, requestCalibrate, toggleWebcam };
+  return { webcamReady, handDetected, calibrating, starting, requestCalibrate, toggleWebcam };
 }

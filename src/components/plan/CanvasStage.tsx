@@ -79,6 +79,7 @@ interface Props {
   onTogglePresentation?: () => void;
   webcamEnabled?: boolean;
   webcamReady?: boolean;
+  webcamHandDetected?: boolean;
   onToggleWebcam?: () => void;
   onCalibrateWebcam?: () => void;
   perfEnabled?: boolean;
@@ -296,6 +297,7 @@ const CanvasStageImpl = (
   onTogglePresentation,
   webcamEnabled = false,
   webcamReady = false,
+  webcamHandDetected = false,
   onToggleWebcam,
   onCalibrateWebcam,
   perfEnabled = false,
@@ -5015,7 +5017,9 @@ const getRoomBounds = (room: any) => {
 	          <button
 	            title={
 	              webcamEnabled
-	                ? t({ it: 'Webcam attiva', en: 'Webcam enabled' })
+	                ? webcamHandDetected
+                    ? t({ it: 'Webcam attiva (mano rilevata)', en: 'Webcam enabled (hand detected)' })
+                    : t({ it: 'Webcam attiva (nessuna mano)', en: 'Webcam enabled (no hand detected)' })
 	                : t({ it: 'Attiva webcam (per gesti)', en: 'Enable webcam (for gestures)' })
 	            }
 	            aria-pressed={webcamEnabled}

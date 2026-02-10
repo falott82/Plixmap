@@ -2834,6 +2834,7 @@ const PlanView = ({ planId }: Props) => {
 
   const {
     webcamReady,
+    handDetected: webcamHandDetected,
     calibrating: webcamCalibrating,
     requestCalibrate,
     toggleWebcam
@@ -8870,6 +8871,7 @@ const PlanView = ({ planId }: Props) => {
 	                        onTogglePresentation={() => handleTogglePresentation()}
 	                        webcamEnabled={presentationWebcamEnabled}
 	                        webcamReady={webcamReady && !!presentationWebcamCalib && !webcamCalibrating}
+                          webcamHandDetected={webcamHandDetected}
 	                        onToggleWebcam={() => toggleWebcam()}
 	                        onCalibrateWebcam={() => requestCalibrate()}
 	                        plan={(canvasPlan || renderPlan) as any}
