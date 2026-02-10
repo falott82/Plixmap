@@ -279,7 +279,7 @@ const wsClientInfo = new Map(); // ws -> { userId, username, ip, connectedAt, is
 const unlockRequests = new Map(); // requestId -> { requestedById, requestedByName, requestedByAvatarUrl, targetUserId, planId, message, grantMinutes, createdAt }
 const planLocks = new Map(); // planId -> { userId, username, avatarUrl, acquiredAt, ts, lastActionAt, dirty }
 const planLockGrants = new Map(); // planId -> { userId, username, avatarUrl, grantedAt, expiresAt, minutes, grantedById, grantedByName, lastActionAt }
-const forceUnlocks = new Map(); // requestId -> { planId, targetUserId, requestedById, requestedByName, createdAt, deadlineAt, graceMinutes }
+const forceUnlocks = new Map(); // requestId -> { planId, targetUserId, requestedById, requestedByName, createdAt, graceEndsAt, decisionEndsAt, graceMinutes }
 const LOCK_CLEANUP_MS = 5_000;
 const FORCE_UNLOCK_TAKEOVER_MINUTES = 60;
 
@@ -307,7 +307,8 @@ const purgeExpiredForceUnlocks = () => {
   const now = Date.now();
   const expired = [];
   for (const [requestId, entry] of forceUnlocks.entries()) {
-    if (!entry?.deadlineAt || entry.deadlineAt > now) continue;
+    const exp = Number(entry?.decisionEndsAt ?? entry?.deadlineAt ?? 0) || 0;
+    if (!exp || exp > now) continue;
     forceUnlocks.delete(requestId);
     expired.push({ requestId, entry });
   }
@@ -4549,18 +4550,20 @@ wss.on('connection', (ws, req) => {
 		        jsonSend(ws, { type: 'force_unlock_denied', planId, targetUserId, reason: 'no_lock' });
 		        return;
 		      }
-	      const requestId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex');
-	      const now = Date.now();
-	      const deadlineAt = now + Math.round(graceMinutes * 60_000);
-	      forceUnlocks.set(requestId, {
-	        planId,
-	        targetUserId,
-	        requestedById: info.userId,
-	        requestedByName: info.username,
-	        createdAt: now,
-	        deadlineAt,
-	        graceMinutes
-	      });
+		      const requestId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex');
+		      const now = Date.now();
+		      const graceEndsAt = now + Math.round(graceMinutes * 60_000);
+		      const decisionEndsAt = graceEndsAt + 5 * 60_000;
+		      forceUnlocks.set(requestId, {
+		        planId,
+		        targetUserId,
+		        requestedById: info.userId,
+		        requestedByName: info.username,
+		        createdAt: now,
+		        graceEndsAt,
+		        decisionEndsAt,
+		        graceMinutes
+		      });
 	      const state = readState();
 	      const planPathMap = buildPlanPathMap(state.clients || []);
 	      const path = planPathMap.get(planId);
@@ -4572,12 +4575,26 @@ wss.on('connection', (ws, req) => {
 		        siteName: path?.siteName || '',
 		        planName: path?.planName || '',
 		        requestedBy: { userId: info.userId, username: info.username },
-		        deadlineAt,
+		        // keep legacy field name for older clients
+		        deadlineAt: graceEndsAt,
+		        graceEndsAt,
+		        decisionEndsAt,
 		        graceMinutes,
 		        hasUnsavedChanges: !!lock.dirty
 		      };
 		      sendToUser(targetUserId, payload);
-		      jsonSend(ws, { type: 'force_unlock_started', requestId, planId, targetUserId, deadlineAt, graceMinutes, hasUnsavedChanges: !!lock.dirty });
+		      jsonSend(ws, {
+		        type: 'force_unlock_started',
+		        requestId,
+		        planId,
+		        targetUserId,
+		        // keep legacy field name for older clients
+		        deadlineAt: graceEndsAt,
+		        graceEndsAt,
+		        decisionEndsAt,
+		        graceMinutes,
+		        hasUnsavedChanges: !!lock.dirty
+		      });
 		      writeAuditLog(db, {
 		        level: 'important',
 		        event: 'plan_force_unlock_started',
@@ -4597,6 +4614,8 @@ wss.on('connection', (ws, req) => {
 		      if (!entry) return;
 		      if (!info?.isSuperAdmin) return;
 		      if (entry.requestedById !== info.userId) return;
+		      // Cancel is only available after the grace window (decision phase).
+		      if (Number(entry.graceEndsAt || 0) > Date.now()) return;
 		      forceUnlocks.delete(requestId);
 		      sendToUser(entry.targetUserId, { type: 'force_unlock_cancelled', requestId, planId: entry.planId });
 		      jsonSend(ws, { type: 'force_unlock_cancelled', requestId, planId: entry.planId, targetUserId: entry.targetUserId });
@@ -4616,13 +4635,15 @@ wss.on('connection', (ws, req) => {
 		      const requestId = String(msg.requestId || '').trim();
 		      const action = String(msg.action || '').trim(); // save|discard
 		      if (!requestId) return;
-	      const entry = forceUnlocks.get(requestId);
-	      if (!entry) return;
-	      if (entry.requestedById !== info.userId) return;
-	      if (action !== 'save' && action !== 'discard') return;
-	      sendToUser(entry.targetUserId, { type: 'force_unlock_execute', requestId, planId: entry.planId, action });
-	      return;
-	    }
+		      const entry = forceUnlocks.get(requestId);
+		      if (!entry) return;
+		      if (entry.requestedById !== info.userId) return;
+		      if (action !== 'save' && action !== 'discard') return;
+		      // Execute is only available after the grace window (decision phase).
+		      if (Number(entry.graceEndsAt || 0) > Date.now()) return;
+		      sendToUser(entry.targetUserId, { type: 'force_unlock_execute', requestId, planId: entry.planId, action });
+		      return;
+		    }
 
 		    if (msg?.type === 'force_unlock_done') {
 		      const requestId = String(msg.requestId || '').trim();

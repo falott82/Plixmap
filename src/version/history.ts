@@ -23,6 +23,10 @@ export const releaseHistory: ReleaseNote[] = [
       n(
         'Force unlock: aggiunto pulsante “Annulla richiesta” per il superadmin; a scadenza/annullo il lock resta al detentore',
         'Force unlock: added “Cancel request” button for superadmin; on expiry/cancel the lock stays with the owner'
+      ),
+      n(
+        'Force unlock: introdotti 2 timer (grace + finestra decisione 5 minuti) mostrati in secondi; i pulsanti restano disattivati fino a fine grace',
+        'Force unlock: added 2 timers (grace + 5-minute decision window) shown in seconds; buttons stay disabled until grace ends'
       )
     ]
   },

@@ -896,18 +896,20 @@ const PlanView = ({ planId }: Props) => {
 			    planId: string;
 			    targetUserId: string;
 			    targetUsername: string;
-			    deadlineAt: number;
+			    graceEndsAt: number;
+			    decisionEndsAt: number;
 			    graceMinutes: number;
 			    hasUnsavedChanges?: boolean | null;
 			  } | null>(null);
 			  const [forceUnlockIncoming, setForceUnlockIncoming] = useState<{
 			    requestId: string;
 			    planId: string;
-		    clientName?: string;
-		    siteName?: string;
-		    planName?: string;
+			    clientName?: string;
+			    siteName?: string;
+			    planName?: string;
 			    requestedBy?: { userId: string; username: string } | null;
-			    deadlineAt: number;
+			    graceEndsAt: number;
+			    decisionEndsAt: number;
 			    graceMinutes: number;
 			    hasUnsavedChanges?: boolean | null;
 			  } | null>(null);
@@ -1164,11 +1166,12 @@ const PlanView = ({ planId }: Props) => {
 		        const requestId = String(msg.requestId || '').trim();
 		        const activePlanId = String(msg.planId || '').trim();
 		        const targetUserId = String(msg.targetUserId || '').trim();
-		        const deadlineAt = Number(msg.deadlineAt || 0) || Date.now();
+		        const graceEndsAt = Number(msg.graceEndsAt || msg.deadlineAt || 0) || Date.now();
+		        const decisionEndsAt = Number(msg.decisionEndsAt || 0) || graceEndsAt + 5 * 60_000;
 		        const graceMinutes = Number(msg.graceMinutes || 0) || 0;
 		        const hasUnsavedChanges = typeof msg.hasUnsavedChanges === 'boolean' ? msg.hasUnsavedChanges : null;
 		        const targetUsername = forceUnlockConfigRef.current?.username || 'user';
-		        setForceUnlockActive({ requestId, planId: activePlanId, targetUserId, targetUsername, deadlineAt, graceMinutes, hasUnsavedChanges });
+		        setForceUnlockActive({ requestId, planId: activePlanId, targetUserId, targetUsername, graceEndsAt, decisionEndsAt, graceMinutes, hasUnsavedChanges });
 		        setForceUnlockConfig(null);
 		        pushStack(t({ it: 'Force unlock avviato.', en: 'Force unlock started.' }), 'info', { duration: LOCK_TOAST_MS });
 		      }
@@ -1212,16 +1215,19 @@ const PlanView = ({ planId }: Props) => {
 		      }
 
 		      if (msg?.type === 'force_unlock' && msg.planId === planId) {
+		        const graceEndsAt = Number(msg.graceEndsAt || msg.deadlineAt || 0) || Date.now();
+		        const decisionEndsAt = Number(msg.decisionEndsAt || 0) || graceEndsAt + 5 * 60_000;
 		        setForceUnlockIncoming({
 		          requestId: String(msg.requestId || ''),
 		          planId: String(msg.planId || planId),
-	          clientName: String(msg.clientName || ''),
-	          siteName: String(msg.siteName || ''),
-	          planName: String(msg.planName || planRef.current?.name || ''),
-	          requestedBy: msg.requestedBy
-	            ? { userId: String(msg.requestedBy.userId || ''), username: String(msg.requestedBy.username || '') }
-	            : null,
-		          deadlineAt: Number(msg.deadlineAt || 0) || Date.now(),
+		          clientName: String(msg.clientName || ''),
+		          siteName: String(msg.siteName || ''),
+		          planName: String(msg.planName || planRef.current?.name || ''),
+		          requestedBy: msg.requestedBy
+		            ? { userId: String(msg.requestedBy.userId || ''), username: String(msg.requestedBy.username || '') }
+		            : null,
+		          graceEndsAt,
+		          decisionEndsAt,
 		          graceMinutes: Number(msg.graceMinutes || 0) || 0,
 		          hasUnsavedChanges: typeof msg.hasUnsavedChanges === 'boolean' ? msg.hasUnsavedChanges : null
 		        });
@@ -12716,15 +12722,24 @@ const PlanView = ({ planId }: Props) => {
 		                  <div className="mt-3 text-sm text-slate-700">
 		                    {(() => {
 		                      forceUnlockTick;
-		                      const deadlineAt = Number(forceUnlockActive?.deadlineAt || 0);
-	                      const remainingMs = deadlineAt - Date.now();
-	                      const remainingMin = Math.max(0, Math.ceil(remainingMs / 60_000));
-	                      return t({
-	                        it: `Countdown: ${remainingMin} minuti rimanenti.`,
-	                        en: `Countdown: ${remainingMin} minutes remaining.`
-	                      });
-		                    })()}
-		                  </div>
+	                      const graceEndsAt = Number(forceUnlockActive?.graceEndsAt || 0);
+	                      const decisionEndsAt = Number(forceUnlockActive?.decisionEndsAt || 0);
+	                      const now = Date.now();
+	                      const inGrace = graceEndsAt > now;
+	                      const targetAt = inGrace ? graceEndsAt : decisionEndsAt;
+	                      const remainingMs = targetAt - now;
+	                      const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+	                      return inGrace
+	                        ? t({
+	                            it: `Tempo concesso all’utente per salvare: ${remainingSec}s.`,
+	                            en: `Time granted to the user to save: ${remainingSec}s.`
+	                          })
+	                        : t({
+	                            it: `Finestra decisione (5 minuti): ${remainingSec}s rimanenti.`,
+	                            en: `Decision window (5 minutes): ${remainingSec}s remaining.`
+	                          });
+	                    })()}
+	                  </div>
 		                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
 		                    <div className="font-semibold text-ink">{t({ it: 'Modifiche non salvate', en: 'Unsaved changes' })}</div>
 		                    <div className="mt-1">
@@ -12741,7 +12756,8 @@ const PlanView = ({ planId }: Props) => {
 		                        if (!forceUnlockActive?.requestId) return;
 		                        sendWs({ type: 'force_unlock_execute', requestId: forceUnlockActive.requestId, action: 'save' });
 		                      }}
-		                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+		                      disabled={Date.now() < Number(forceUnlockActive?.graceEndsAt || 0)}
+		                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
 		                      title={t({
 		                        it: 'Chiede al proprietario del lock di salvare le modifiche (se presenti) e rilasciare il lock. Il lock passerà al superadmin.',
 		                        en: 'Asks the lock owner to save changes (if any) and release the lock. The lock will be taken by the superadmin.'
@@ -12754,7 +12770,8 @@ const PlanView = ({ planId }: Props) => {
 		                        if (!forceUnlockActive?.requestId) return;
 		                        sendWs({ type: 'force_unlock_execute', requestId: forceUnlockActive.requestId, action: 'discard' });
 		                      }}
-		                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+		                      disabled={Date.now() < Number(forceUnlockActive?.graceEndsAt || 0)}
+		                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
 		                      title={t({
 		                        it: 'Chiede al proprietario del lock di scartare le modifiche non salvate e rilasciare il lock. Il lock passerà al superadmin.',
 		                        en: 'Asks the lock owner to discard unsaved changes and release the lock. The lock will be taken by the superadmin.'
@@ -12769,7 +12786,8 @@ const PlanView = ({ planId }: Props) => {
 		                        setForceUnlockActive(null);
 		                        pushStack(t({ it: 'Force unlock annullato.', en: 'Force unlock cancelled.' }), 'info', { duration: LOCK_TOAST_MS });
 		                      }}
-		                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+		                      disabled={Date.now() < Number(forceUnlockActive?.graceEndsAt || 0)}
+		                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
 		                      title={t({
 		                        it: 'Annulla la richiesta: il lock resta all’utente e l’avviso si chiude.',
 		                        en: 'Cancel the request: the lock remains with the user and the warning closes.'
@@ -12821,15 +12839,24 @@ const PlanView = ({ planId }: Props) => {
 		                  <div className="mt-3 text-sm text-slate-700">
 		                    {(() => {
 	                      forceUnlockTick;
-	                      const deadlineAt = Number(forceUnlockIncoming?.deadlineAt || 0);
-	                      const remainingMs = deadlineAt - Date.now();
-	                      const remainingMin = Math.max(0, Math.ceil(remainingMs / 60_000));
-	                      return t({
-	                        it: `Il superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} ha avviato un force unlock. Tempo rimanente: ${remainingMin} minuti.`,
-	                        en: `Superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} started a force unlock. Remaining time: ${remainingMin} minutes.`
-	                      });
-		                    })()}
-		                  </div>
+	                      const graceEndsAt = Number(forceUnlockIncoming?.graceEndsAt || 0);
+	                      const decisionEndsAt = Number(forceUnlockIncoming?.decisionEndsAt || 0);
+	                      const now = Date.now();
+	                      const inGrace = graceEndsAt > now;
+	                      const targetAt = inGrace ? graceEndsAt : decisionEndsAt;
+	                      const remainingMs = targetAt - now;
+	                      const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+	                      return inGrace
+	                        ? t({
+	                            it: `Il superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} ha avviato un force unlock. Tempo concesso per salvare: ${remainingSec}s.`,
+	                            en: `Superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} started a force unlock. Time granted to save: ${remainingSec}s.`
+	                          })
+	                        : t({
+	                            it: `Il superadmin deve decidere entro ${remainingSec}s (finestra 5 minuti).`,
+	                            en: `The superadmin must decide within ${remainingSec}s (5-minute window).`
+	                          });
+	                    })()}
+	                  </div>
 		                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
 		                    <div className="font-semibold text-ink">{t({ it: 'Modifiche non salvate', en: 'Unsaved changes' })}</div>
 		                    <div className="mt-1">
@@ -12844,7 +12871,8 @@ const PlanView = ({ planId }: Props) => {
 		                        if (!forceUnlockIncoming?.requestId) return;
 		                        void executeForceUnlock(forceUnlockIncoming.requestId, 'save');
 		                      }}
-		                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+		                      disabled={Date.now() < Number(forceUnlockIncoming?.graceEndsAt || 0)}
+		                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
 		                      title={t({
 		                        it: 'Salva le modifiche (se presenti) e rilascia il lock.',
 		                        en: 'Saves changes (if any) and releases the lock.'
@@ -12857,7 +12885,8 @@ const PlanView = ({ planId }: Props) => {
 		                        if (!forceUnlockIncoming?.requestId) return;
 		                        void executeForceUnlock(forceUnlockIncoming.requestId, 'discard');
 		                      }}
-		                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+		                      disabled={Date.now() < Number(forceUnlockIncoming?.graceEndsAt || 0)}
+		                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
 		                      title={t({
 		                        it: 'Scarta le modifiche non salvate e rilascia il lock.',
 		                        en: 'Discards unsaved changes and releases the lock.'

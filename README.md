@@ -24,7 +24,7 @@ Note: This README was refreshed with a small formatting update.
 - A floor plan can be edited by only one user at a time (exclusive lock).
 - The lock does not expire due to inactivity: it stays active until the owner saves or grants an unlock.
 - Any user can request an unlock from the lock owner (optional message + takeover window 0.5..60 minutes). When granted, the lock is released immediately and reserved for the requester for the selected time.
-- Superadmins can start a force unlock with a countdown (0..60 minutes). During the countdown, the lock owner sees a non-dismissible warning and can only choose Save+release or Discard+release. The superadmin can cancel the request; if it expires/cancels, the lock remains with the owner. If it completes, the superadmin takes the lock (or gets an hourglass reservation).
+- Superadmins can start a force unlock by setting a grace time (0..60 minutes). While the grace timer is running, the unlock buttons are disabled. When it ends, a 5-minute decision window starts where the superadmin can choose Save+unlock, Discard+unlock, or cancel the request. If it expires/cancels, the lock remains with the owner. If it completes, the superadmin takes the lock (or gets an hourglass reservation). Timers are shown as a seconds countdown.
 
 ## Client chat
 - Each client can have a dedicated chat (permissions control who can access it for that client).
