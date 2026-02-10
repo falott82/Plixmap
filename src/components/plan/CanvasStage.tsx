@@ -4988,45 +4988,18 @@ const getRoomBounds = (room: any) => {
 	        >
 	          -
 	        </button>
-        <button
-          title={t({ it: 'Vai alla vista predefinita', en: 'Go to default view' })}
-          onClick={() => onGoDefaultView?.()}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-xs font-semibold text-ink hover:bg-slate-50"
-        >
-          VD
-        </button>
-        {presentationMode && onToggleWebcam ? (
-          <button
-            title={
-              webcamEnabled
-                ? t({ it: 'Webcam attiva', en: 'Webcam enabled' })
-                : t({ it: 'Attiva webcam (per gesti)', en: 'Enable webcam (for gestures)' })
-            }
-            aria-pressed={webcamEnabled}
-            onClick={() => onToggleWebcam?.()}
-            className={`flex h-8 w-8 items-center justify-center rounded-lg border hover:bg-slate-50 ${
-              webcamEnabled ? 'border-primary text-primary' : 'border-slate-200 text-ink'
-            }`}
-          >
-            <Video size={16} />
-            {webcamEnabled && webcamReady ? <span className="sr-only">{t({ it: 'Tracking attivo', en: 'Tracking active' })}</span> : null}
-          </button>
-        ) : null}
-        {presentationMode && onCalibrateWebcam ? (
-          <button
-            title={t({ it: 'Calibra (pinch)', en: 'Calibrate (pinch)' })}
-            onClick={() => onCalibrateWebcam?.()}
-            disabled={!webcamEnabled}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Crosshair size={16} />
-          </button>
-        ) : null}
-        {onTogglePresentation ? (
-          <button
-            title={
-              presentationMode
-                ? t({ it: 'Esci da presentazione (Esc)', en: 'Exit presentation (Esc)' })
+	        <button
+	          title={t({ it: 'Vai alla vista predefinita', en: 'Go to default view' })}
+	          onClick={() => onGoDefaultView?.()}
+	          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-xs font-semibold text-ink hover:bg-slate-50"
+	        >
+	          VD
+	        </button>
+	        {onTogglePresentation ? (
+	          <button
+	            title={
+	              presentationMode
+	                ? t({ it: 'Esci da presentazione (Esc)', en: 'Exit presentation (Esc)' })
                 : t({ it: 'Presentazione (P)', en: 'Presentation (P)' })
             }
             aria-pressed={presentationMode}
@@ -5034,10 +5007,37 @@ const getRoomBounds = (room: any) => {
             className={`flex h-8 w-8 items-center justify-center rounded-lg border hover:bg-slate-50 ${
               presentationMode ? 'border-primary text-primary' : 'border-slate-200 text-ink'
             }`}
-          >
-            <MonitorPlay size={16} />
-          </button>
-        ) : null}
+	          >
+	            <MonitorPlay size={16} />
+	          </button>
+	        ) : null}
+	        {presentationMode && onToggleWebcam ? (
+	          <button
+	            title={
+	              webcamEnabled
+	                ? t({ it: 'Webcam attiva', en: 'Webcam enabled' })
+	                : t({ it: 'Attiva webcam (per gesti)', en: 'Enable webcam (for gestures)' })
+	            }
+	            aria-pressed={webcamEnabled}
+	            onClick={() => onToggleWebcam?.()}
+	            className={`flex h-8 w-8 items-center justify-center rounded-lg border hover:bg-slate-50 ${
+	              webcamEnabled ? 'border-primary text-primary' : 'border-slate-200 text-ink'
+	            }`}
+	          >
+	            <Video size={16} />
+	            {webcamEnabled && webcamReady ? <span className="sr-only">{t({ it: 'Tracking attivo', en: 'Tracking active' })}</span> : null}
+	          </button>
+	        ) : null}
+	        {presentationMode && onCalibrateWebcam ? (
+	          <button
+	            title={t({ it: 'Calibra (pinch)', en: 'Calibrate (pinch)' })}
+	            onClick={() => onCalibrateWebcam?.()}
+	            disabled={!webcamEnabled}
+	            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+	          >
+	            <Crosshair size={16} />
+	          </button>
+	        ) : null}
       </div>
     </div>
   );
