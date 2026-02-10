@@ -21,12 +21,11 @@ import {
   Crop,
   Home,
   History,
-	Save,
-	Cog,
-  MonitorPlay,
-  EyeOff,
-  CornerDownRight,
-  Link2,
+		Save,
+		Cog,
+	  EyeOff,
+	  CornerDownRight,
+	  Link2,
   User,
   LocateFixed,
   Users,
@@ -126,6 +125,7 @@ const PlanView = ({ planId }: Props) => {
     [t]
   );
   const [autoFitEnabled, setAutoFitEnabled] = useState(true);
+  const presentationViewportRef = useRef<{ zoom: number; pan: { x: number; y: number }; autoFitEnabled: boolean } | null>(null);
   const {
     addObject,
     updateObject,
@@ -3735,6 +3735,35 @@ const PlanView = ({ planId }: Props) => {
     }, 80);
     return () => window.clearTimeout(timer);
   }, [pan?.x, pan?.y, planId, renderPlan, renderPlan?.height, renderPlan?.width, selectedRevisionId, zoom]);
+
+  useEffect(() => {
+    const stage = canvasStageRef.current;
+    if (!stage?.fitView) return;
+
+    if (presentationMode) {
+      // Entering fullscreen changes the map container size. Explicitly re-fit to use all available space.
+      if (!presentationViewportRef.current) {
+        presentationViewportRef.current = { zoom, pan, autoFitEnabled };
+      }
+
+      const t1 = window.setTimeout(() => stage.fitView?.(), 200);
+      const t2 = window.setTimeout(() => stage.fitView?.(), 700);
+      return () => {
+        window.clearTimeout(t1);
+        window.clearTimeout(t2);
+      };
+    }
+
+    const prev = presentationViewportRef.current;
+    if (!prev) return;
+    presentationViewportRef.current = null;
+
+    // Restore the previous viewport when leaving presentation.
+    setAutoFitEnabled(prev.autoFitEnabled);
+    setZoom(prev.zoom);
+    setPan(prev.pan);
+    saveViewport(planId, prev.zoom, prev.pan);
+  }, [planId, presentationMode, saveViewport, setAutoFitEnabled, setPan, setZoom]);
 
   useEffect(() => {
     // entering/leaving read-only mode clears pending placement and context menu
@@ -7594,20 +7623,7 @@ const PlanView = ({ planId }: Props) => {
 
   return (
 	    <div className={`relative flex h-screen flex-col overflow-hidden ${presentationMode ? '' : 'gap-4 p-6'}`}>
-        {presentationMode ? (
-          <div className="pointer-events-none absolute right-4 top-4 z-50">
-            <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 p-2 shadow-card backdrop-blur">
-              <button
-                onClick={() => togglePresentationMode?.()}
-                className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink hover:bg-slate-50"
-                title={t({ it: 'Esci da presentazione (Esc)', en: 'Exit presentation (Esc)' })}
-                aria-label={t({ it: 'Esci da presentazione', en: 'Exit presentation' })}
-              >
-                <MonitorPlay size={18} />
-              </button>
-            </div>
-          </div>
-	        ) : null}
+	        {/* Presentation mode uses the in-canvas toolbar button (under "VD") + Esc. */}
           <div className={`flex flex-nowrap items-center justify-between gap-2 ${presentationMode ? 'hidden' : ''}`}>
 	        <div className="min-w-0">
 	          <div className="text-[11px] font-semibold uppercase text-slate-500">
@@ -8472,15 +8488,7 @@ const PlanView = ({ planId }: Props) => {
               <Save size={18} />
             </button>
           ) : null}
-          <button
-            onClick={() => togglePresentationMode?.()}
-            title={t({ it: 'Presentazione (P)', en: 'Presentation (P)' })}
-            className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-card ${
-              presentationMode ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
-            }`}
-          >
-            <MonitorPlay size={18} />
-          </button>
+	          {/* Presentation button moved to the in-canvas toolbar (under "VD"). */}
           <button
             onClick={() => setRevisionsOpen(true)}
             title={t({ it: 'Time machine', en: 'Time machine' })}
@@ -8728,12 +8736,14 @@ const PlanView = ({ planId }: Props) => {
                     </div>
                   </div>
                 ) : null}
-                        <CanvasStage
-                        ref={canvasStageRef}
-                        containerRef={mapRef}
-                        plan={(canvasPlan || renderPlan) as any}
-                        selectedId={selectedObjectId}
-                        selectedIds={selectedObjectIds}
+	                        <CanvasStage
+	                        ref={canvasStageRef}
+	                        containerRef={mapRef}
+	                        presentationMode={presentationMode}
+	                        onTogglePresentation={() => togglePresentationMode?.()}
+	                        plan={(canvasPlan || renderPlan) as any}
+	                        selectedId={selectedObjectId}
+	                        selectedIds={selectedObjectIds}
 	                    selectedRoomId={selectedRoomId}
                       selectedRoomIds={selectedRoomIds}
 	                    selectedLinkId={selectedLinkId}
@@ -9033,11 +9043,18 @@ const PlanView = ({ planId }: Props) => {
                         <span>{t({ it: 'Livelli', en: 'Layers' })}</span>
                       </button>
                       <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setHideAllLayers(planId, !hideAllLayers)}
-                          className="flex h-6 w-6 items-center justify-center rounded-md text-slate-600 hover:bg-slate-50"
-                          title={
-                            hideAllLayers
+	                        <button
+	                          onClick={() => {
+	                            const nextHidden = !hideAllLayers;
+	                            setHideAllLayers(planId, nextHidden);
+	                            if (nextHidden) {
+	                              // Ensure the next layer click starts from an empty selection.
+	                              setVisibleLayerIds(planId, []);
+	                            }
+	                          }}
+	                          className="flex h-6 w-6 items-center justify-center rounded-md text-slate-600 hover:bg-slate-50"
+	                          title={
+	                            hideAllLayers
                               ? t({ it: 'Mostra livelli', en: 'Show layers' })
                               : t({ it: 'Nascondi livelli', en: 'Hide layers' })
                           }
@@ -10387,13 +10404,14 @@ const PlanView = ({ planId }: Props) => {
               >
                 <Eye size={14} className="text-slate-500" /> {t({ it: 'Mostra tutti', en: 'Show all' })}
               </button>
-              <button
-                onClick={() => {
-                  setHideAllLayers(planId, true);
-                  setLayersContextMenu(null);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
-                title={t({ it: 'Nascondi tutti i livelli', en: 'Hide all layers' })}
+	              <button
+	                onClick={() => {
+	                  setHideAllLayers(planId, true);
+	                  setVisibleLayerIds(planId, []);
+	                  setLayersContextMenu(null);
+	                }}
+	                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+	                title={t({ it: 'Nascondi tutti i livelli', en: 'Hide all layers' })}
               >
                 <EyeOff size={14} className="text-slate-500" /> {t({ it: 'Nascondi tutti', en: 'Hide all' })}
               </button>
@@ -10406,17 +10424,17 @@ const PlanView = ({ planId }: Props) => {
                     const isOn = !hideAllLayers && (allItemsSelected ? true : effectiveVisibleLayerIds.includes(layerId));
                     const label = getLayerLabel(layerId);
                     return (
-                      <button
-                        key={layerId}
-                        onClick={() => {
-                          if (hideAllLayers) setHideAllLayers(planId, false);
-                          const cur = visibleLayerIds;
-                          const nextRaw = cur.includes(layerId) ? cur.filter((x) => x !== layerId) : [...cur, layerId];
-                          const next = normalizeLayerSelection(nextRaw);
-                          setVisibleLayerIds(planId, next);
-                        }}
-                        className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
-                        title={label}
+	                      <button
+	                        key={layerId}
+	                        onClick={() => {
+	                          const base = hideAllLayers ? [] : visibleLayerIds;
+	                          if (hideAllLayers) setHideAllLayers(planId, false);
+	                          const nextRaw = base.includes(layerId) ? base.filter((x) => x !== layerId) : [...base, layerId];
+	                          const next = normalizeLayerSelection(nextRaw);
+	                          setVisibleLayerIds(planId, next);
+	                        }}
+	                        className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+	                        title={label}
                       >
                         <span className="flex min-w-0 items-center gap-2">
                           <span
