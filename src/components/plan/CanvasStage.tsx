@@ -2,7 +2,7 @@ import { Fragment, forwardRef, memo, useCallback, useEffect, useImperativeHandle
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
-import { Hand } from 'lucide-react';
+import { Hand, MonitorPlay } from 'lucide-react';
 import { FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
 import { WALL_LAYER_COLOR, WIFI_RANGE_SCALE_MAX } from '../../store/data';
 import { useUIStore } from '../../store/useUIStore';
@@ -75,6 +75,8 @@ interface Props {
   containerRef: React.RefObject<HTMLDivElement>;
   autoFit?: boolean;
   onGoDefaultView?: () => void;
+  presentationMode?: boolean;
+  onTogglePresentation?: () => void;
   perfEnabled?: boolean;
   onZoomChange: (zoom: number) => void;
   onPanChange: (pan: { x: number; y: number }) => void;
@@ -286,10 +288,12 @@ const CanvasStageImpl = (
   containerRef,
   autoFit = true,
   onGoDefaultView,
+  presentationMode = false,
+  onTogglePresentation,
   perfEnabled = false,
   onZoomChange,
   onPanChange,
-	  onSelect,
+		  onSelect,
 	  onSelectMany,
   onSelectRooms,
 	  onMoveStart,
@@ -4981,6 +4985,22 @@ const getRoomBounds = (room: any) => {
         >
           VD
         </button>
+        {onTogglePresentation ? (
+          <button
+            title={
+              presentationMode
+                ? t({ it: 'Esci da presentazione (Esc)', en: 'Exit presentation (Esc)' })
+                : t({ it: 'Presentazione (P)', en: 'Presentation (P)' })
+            }
+            aria-pressed={presentationMode}
+            onClick={() => onTogglePresentation?.()}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg border hover:bg-slate-50 ${
+              presentationMode ? 'border-primary text-primary' : 'border-slate-200 text-ink'
+            }`}
+          >
+            <MonitorPlay size={16} />
+          </button>
+        ) : null}
       </div>
     </div>
   );
