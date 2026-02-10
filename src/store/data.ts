@@ -27,6 +27,7 @@ export const WIFI_STANDARD_OPTIONS = [
   { id: '802.11be', it: 'WiFi 7 (802.11be)', en: 'WiFi 7 (802.11be)' }
 ];
 export const WIFI_DEFAULT_STANDARD = '802.11ax';
+export const WIFI_RANGE_SCALE_MAX = 20;
 export const TEXT_FONT_OPTIONS = [
   { value: 'Arial, sans-serif', label: 'Arial' },
   { value: 'Helvetica, Arial, sans-serif', label: 'Helvetica' },

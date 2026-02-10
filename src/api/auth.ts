@@ -2,6 +2,7 @@ export interface Permission {
   scopeType: 'client' | 'site' | 'plan';
   scopeId: string;
   access: 'ro' | 'rw';
+  chat?: boolean;
 }
 
 export interface AuthUser {
@@ -16,6 +17,7 @@ export interface AuthUser {
   paletteFavorites?: string[];
   visibleLayerIdsByPlan?: Record<string, string[]>;
   mustChangePassword?: boolean;
+  avatarUrl?: string;
   firstName: string;
   lastName: string;
   phone: string;
@@ -93,6 +95,7 @@ export const updateMyProfile = async (payload: {
   clientOrder?: string[];
   paletteFavorites?: string[];
   visibleLayerIdsByPlan?: Record<string, string[]> | null;
+  avatarUrl?: string | null;
 }): Promise<void> => {
   const res = await apiFetch('/api/auth/me', {
     method: 'PUT',
@@ -111,6 +114,7 @@ export interface AdminUserRow {
   disabled: boolean;
   lockedUntil?: number | null;
   language: 'it' | 'en';
+  avatarUrl?: string;
   firstName: string;
   lastName: string;
   phone: string;

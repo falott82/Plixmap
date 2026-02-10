@@ -6,10 +6,9 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
-  LayoutGrid,
-  HelpCircle,
-  Trash,
-  Copy,
+	LayoutGrid,
+	Trash,
+	Copy,
   MoveDiagonal,
   Square,
   X,
@@ -21,8 +20,8 @@ import {
   Crop,
   Home,
   History,
-  Save,
-  Cog,
+	Save,
+	Cog,
   EyeOff,
   CornerDownRight,
   Link2,
@@ -30,6 +29,8 @@ import {
   LocateFixed,
   Users,
   Ruler,
+  Hourglass,
+  Unlock,
   Undo2,
   Redo2,
   Type as TypeIcon,
@@ -40,7 +41,6 @@ import {
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
 import SearchBar from './SearchBar';
-import ExportButton from './ExportButton';
 import ObjectModal from './ObjectModal';
 import RoomAllocationModal from './RoomAllocationModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
@@ -50,9 +50,11 @@ import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
-import { fetchState, saveState } from '../../api/state';
-import VersionBadge from '../ui/VersionBadge';
+import { saveState } from '../../api/state';
 import UserMenu from '../layout/UserMenu';
+import PrinterMenuButton from './PrinterMenuButton';
+import UserAvatar from '../ui/UserAvatar';
+import UnlockRequestComposeModal, { UnlockRequestLock } from './UnlockRequestComposeModal';
 import ViewModal from './ViewModal';
 import SearchResultsPopover from './SearchResultsPopover';
 import ChooseDefaultViewModal from './ChooseDefaultViewModal';
@@ -90,7 +92,8 @@ import {
   TEXT_COLOR_OPTIONS,
   TEXT_FONT_OPTIONS,
   WALL_TYPE_IDS,
-  WIFI_DEFAULT_STANDARD
+  WIFI_DEFAULT_STANDARD,
+  WIFI_RANGE_SCALE_MAX
 } from '../../store/data';
 import { getWallTypeColor } from '../../utils/wallColors';
 
@@ -314,12 +317,11 @@ const PlanView = ({ planId }: Props) => {
     pan,
     setPan,
     saveViewport,
-    loadViewport,
-    triggerHighlight,
-    highlight,
-    openHelp,
-    lastObjectScale,
-    setLastObjectScale,
+	    loadViewport,
+	    triggerHighlight,
+	    highlight,
+	    lastObjectScale,
+	    setLastObjectScale,
     lastQuoteScale,
     setLastQuoteScale,
     lastQuoteColor,
@@ -376,12 +378,11 @@ const PlanView = ({ planId }: Props) => {
       pan: s.pan,
       setPan: s.setPan,
       saveViewport: s.saveViewport,
-      loadViewport: s.loadViewport,
-      triggerHighlight: s.triggerHighlight,
-      highlight: s.highlight,
-      openHelp: s.openHelp,
-      lastObjectScale: s.lastObjectScale,
-      setLastObjectScale: s.setLastObjectScale,
+	      loadViewport: s.loadViewport,
+	      triggerHighlight: s.triggerHighlight,
+	      highlight: s.highlight,
+	      lastObjectScale: s.lastObjectScale,
+	      setLastObjectScale: s.setLastObjectScale,
       lastQuoteScale: s.lastQuoteScale,
       setLastQuoteScale: s.setLastQuoteScale,
       lastQuoteColor: s.lastQuoteColor,
@@ -815,46 +816,115 @@ const PlanView = ({ planId }: Props) => {
   }, [client?.id, permissions, planId, site?.id, user]);
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
 
-  const LOCK_TTL_MS = 60_000;
-  const LOCK_RENEW_MS = 20_000;
-  const LOCK_IDLE_MS = 5 * 60_000;
   const LOCK_REQUEST_THROTTLE_MS = 5_000;
   const LOCK_TOAST_MS = 5_000;
 
-  type PresenceUser = {
-    userId: string;
-    username: string;
-    connectedAt?: number | null;
-    ip?: string;
-    lock?: { planId: string; clientName?: string; siteName?: string; planName?: string } | null;
-    locks?: { planId: string; clientName?: string; siteName?: string; planName?: string }[];
-  };
+	  type PresenceUser = {
+	    userId: string;
+	    username: string;
+	    avatarUrl?: string;
+	    connectedAt?: number | null;
+	    ip?: string;
+	    lock?: { planId: string; clientName?: string; siteName?: string; planName?: string } | null;
+	    locks?: { planId: string; clientName?: string; siteName?: string; planName?: string }[];
+	  };
 
-  const [lockState, setLockState] = useState<{
-    lockedBy: { userId: string; username: string } | null;
-    mine: boolean;
-    expiresAt?: number | null;
-    ttlMs?: number | null;
-  }>({ lockedBy: null, mine: false, expiresAt: null, ttlMs: LOCK_TTL_MS });
+		  const [lockState, setLockState] = useState<{
+		    lockedBy: { userId: string; username: string; avatarUrl?: string } | null;
+		    mine: boolean;
+		    grant:
+		      | {
+		          userId: string;
+		          username: string;
+		          avatarUrl?: string;
+		          grantedAt?: number | null;
+		          expiresAt?: number | null;
+		          minutes?: number | null;
+		          grantedBy?: { userId: string; username: string } | null;
+		        }
+		      | null;
+		    meta:
+		      | {
+		          lastActionAt?: number | null;
+		          lastSavedAt?: number | null;
+		          lastSavedRev?: string | null;
+		        }
+		      | null;
+		  }>({ lockedBy: null, mine: false, grant: null, meta: null });
   const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
   const [globalPresenceUsers, setGlobalPresenceUsers] = useState<PresenceUser[]>([]);
   const [realtimeDisabled, setRealtimeDisabled] = useState(false);
   const realtimeDisabledRef = useRef(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const lastActiveAtRef = useRef(Date.now());
-  const lockRequestAtRef = useRef(0);
-  const [lockIdle, setLockIdle] = useState(false);
-  const [presenceMenu, setPresenceMenu] = useState<{ x: number; y: number; user: PresenceUser } | null>(null);
-  const presenceMenuRef = useRef<HTMLDivElement | null>(null);
-  const [unlockPrompt, setUnlockPrompt] = useState<{
-    requestId: string;
-    planId: string;
-    planName: string;
-    clientName?: string;
-    siteName?: string;
-    requestedBy: { userId: string; username: string };
-  } | null>(null);
-  const [unlockBusy, setUnlockBusy] = useState(false);
+		  const wsRef = useRef<WebSocket | null>(null);
+		  const lockRequestAtRef = useRef(0);
+		  const [unlockPrompt, setUnlockPrompt] = useState<{
+		    requestId: string;
+		    planId: string;
+	    planName: string;
+	    clientName?: string;
+	    siteName?: string;
+	    requestedBy: { userId: string; username: string };
+	    message?: string;
+		  } | null>(null);
+		  const [unlockBusy, setUnlockBusy] = useState(false);
+		  const [unlockCompose, setUnlockCompose] = useState<{ target: PresenceUser; locks: UnlockRequestLock[] } | null>(null);
+		  const [unlockGrantedPrompt, setUnlockGrantedPrompt] = useState<{
+		    planId: string;
+		    clientName?: string;
+		    siteName?: string;
+		    planName?: string;
+		    grantedBy?: { userId: string; username: string; avatarUrl?: string } | null;
+		    grantedAt?: number | null;
+		    expiresAt?: number | null;
+		    minutes?: number | null;
+		  } | null>(null);
+		  const [lockInfoOpen, setLockInfoOpen] = useState(false);
+		  const lockInfoRef = useRef<HTMLDivElement | null>(null);
+		  const [forceUnlockConfig, setForceUnlockConfig] = useState<{
+		    planId: string;
+		    planName: string;
+		    clientName: string;
+		    siteName: string;
+		    userId: string;
+		    username: string;
+		    avatarUrl?: string;
+		  } | null>(null);
+		  const [forceUnlockGraceMinutes, setForceUnlockGraceMinutes] = useState(5);
+		  const [forceUnlockStarting, setForceUnlockStarting] = useState(false);
+			  const [forceUnlockActive, setForceUnlockActive] = useState<{
+			    requestId: string;
+			    planId: string;
+			    targetUserId: string;
+			    targetUsername: string;
+			    deadlineAt: number;
+			    graceMinutes: number;
+			    hasUnsavedChanges?: boolean | null;
+			  } | null>(null);
+			  const [forceUnlockIncoming, setForceUnlockIncoming] = useState<{
+			    requestId: string;
+			    planId: string;
+		    clientName?: string;
+		    siteName?: string;
+		    planName?: string;
+			    requestedBy?: { userId: string; username: string } | null;
+			    deadlineAt: number;
+			    graceMinutes: number;
+			    hasUnsavedChanges?: boolean | null;
+			  } | null>(null);
+		  const [forceUnlockExecuteCommand, setForceUnlockExecuteCommand] = useState<{ requestId: string; action: 'save' | 'discard' } | null>(null);
+		  const [forceUnlockTick, setForceUnlockTick] = useState(0);
+		  const forceUnlockConfigRef = useRef(forceUnlockConfig);
+		  const forceUnlockActiveRef = useRef(forceUnlockActive);
+		  const forceUnlockIncomingRef = useRef(forceUnlockIncoming);
+		  useEffect(() => {
+		    forceUnlockConfigRef.current = forceUnlockConfig;
+		  }, [forceUnlockConfig]);
+		  useEffect(() => {
+		    forceUnlockActiveRef.current = forceUnlockActive;
+		  }, [forceUnlockActive]);
+		  useEffect(() => {
+		    forceUnlockIncomingRef.current = forceUnlockIncoming;
+		  }, [forceUnlockIncoming]);
   const formatPresenceDate = useCallback(
     (value?: number | null) => {
       if (!value) return '—';
@@ -885,28 +955,63 @@ const PlanView = ({ planId }: Props) => {
     [t]
   );
 
-  const lockActiveTitle = t({
-    it: 'Lock esclusivo: finché è attivo, solo tu puoi modificare questa planimetria. Si rinnova con attività (mouse/tastiera). Se resti inattivo per 5 minuti, smette di rinnovarsi e scade dopo ~60s.',
-    en: 'Exclusive lock: while active, only you can edit this floor plan. It auto-renews on activity (mouse/keyboard). If you stay idle for 5 minutes, it stops renewing and expires after ~60s.'
-  });
+	  const lockActiveTitle = t({
+	    it: 'Lock esclusivo: finché è attivo, solo tu puoi modificare questa planimetria. Il lock non scade per inattività: resta attivo finché non salvi o non concedi uno sblocco.',
+	    en: 'Exclusive lock: while active, only you can edit this floor plan. The lock does not expire due to inactivity: it stays active until you save or grant an unlock.'
+	  });
   const lockedByTitle = t({
     it: `Lock esclusivo detenuto da ${lockState.lockedBy?.username || 'utente'}. Finché è attivo, la planimetria è in sola lettura. Puoi acquisire il lock quando torna libero.`,
     en: `Exclusive lock held by ${lockState.lockedBy?.username || 'user'}. While active, this floor plan is read-only. You can acquire the lock when it becomes available.`
   });
 
-  const globalPresenceFallback = globalPresenceUsers.length ? globalPresenceUsers : presenceUsers;
-  const presenceEntries = isSuperAdmin ? globalPresenceFallback : presenceUsers;
-  const presenceCount = isSuperAdmin ? presenceEntries.length : globalPresenceFallback.length;
-
-  const sendWs = useCallback((payload: any) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    try {
-      ws.send(JSON.stringify(payload));
-    } catch {
-      // ignore
-    }
+  const formatMinutes = useCallback((value?: number | null): string => {
+    if (value === null || value === undefined) return '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    if (n === 0.5) return '0,5';
+    if (Number.isInteger(n)) return String(n);
+    return String(Math.round(n * 10) / 10);
   }, []);
+
+  const grantRemainingMinutes = useMemo(() => {
+    const exp = Number(lockState?.grant?.expiresAt || 0);
+    if (!Number.isFinite(exp) || exp <= 0) return null;
+    const ms = exp - Date.now();
+    if (ms <= 0) return 0;
+    // Round to nearest 0.5 minute (matches SidebarTree).
+    return Math.round((ms / 60_000) * 2) / 2;
+  }, [lockState?.grant?.expiresAt, lockInfoOpen]);
+
+  // Prefer the global presence list (includes "locks" array). Fallback to plan presence if global is not available yet.
+  const globalPresenceFallback = globalPresenceUsers.length ? globalPresenceUsers : presenceUsers;
+  const presenceEntries = globalPresenceFallback;
+  const presenceCount = presenceEntries.length;
+
+	  const sendWs = useCallback((payload: any) => {
+	    const ws = wsRef.current;
+	    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+	    try {
+	      ws.send(JSON.stringify(payload));
+	    } catch {
+	      // ignore
+	    }
+	  }, []);
+
+	  useEffect(() => {
+	    if (!lockInfoOpen) return;
+	    const onDown = (e: MouseEvent) => {
+	      if (!lockInfoRef.current) return;
+	      if (!lockInfoRef.current.contains(e.target as any)) setLockInfoOpen(false);
+	    };
+	    window.addEventListener('mousedown', onDown);
+	    return () => window.removeEventListener('mousedown', onDown);
+	  }, [lockInfoOpen]);
+
+	  useEffect(() => {
+	    if (!forceUnlockActive && !forceUnlockIncoming) return;
+	    const id = window.setInterval(() => setForceUnlockTick((x) => x + 1), 1000);
+	    return () => window.clearInterval(id);
+	  }, [forceUnlockActive?.requestId, forceUnlockIncoming?.requestId]);
 
   useEffect(() => {
     if (!user?.id || realtimeDisabledRef.current || realtimeDisabled) return;
@@ -938,34 +1043,26 @@ const PlanView = ({ planId }: Props) => {
       } catch {
         return;
       }
-      if (msg?.type === 'lock_state' && msg.planId === planId) {
-        const lockedBy = msg.lockedBy || null;
-        setLockState({
-          lockedBy,
-          mine: !!lockedBy && lockedBy.userId === user.id,
-          expiresAt: typeof msg.expiresAt === 'number' ? msg.expiresAt : null,
-          ttlMs: typeof msg.ttlMs === 'number' ? msg.ttlMs : LOCK_TTL_MS
-        });
-        updateLockedPlans(lockedBy, planId);
-      }
-      if (msg?.type === 'lock_renewed' && msg.planId === planId) {
-        setLockState((prev) => ({
-          lockedBy: prev.lockedBy,
-          mine: true,
-          expiresAt: typeof msg.expiresAt === 'number' ? msg.expiresAt : prev.expiresAt ?? null,
-          ttlMs: typeof msg.ttlMs === 'number' ? msg.ttlMs : prev.ttlMs ?? LOCK_TTL_MS
-        }));
-      }
-      if (msg?.type === 'lock_denied' && msg.planId === planId) {
-        const lockedBy = msg.lockedBy || null;
-        setLockState({
-          lockedBy,
-          mine: false,
-          expiresAt: null,
-          ttlMs: LOCK_TTL_MS
-        });
-        updateLockedPlans(lockedBy, planId);
-      }
+	      if (msg?.type === 'lock_state' && msg.planId === planId) {
+	        const lockedBy = msg.lockedBy || null;
+	        setLockState({
+	          lockedBy,
+	          mine: !!lockedBy && lockedBy.userId === user.id,
+	          grant: msg.grant || null,
+	          meta: msg.meta || null
+	        });
+	        updateLockedPlans(lockedBy, msg.grant || null, msg.meta || null, planId);
+	      }
+	      if (msg?.type === 'lock_denied' && msg.planId === planId) {
+	        const lockedBy = msg.lockedBy || null;
+	        setLockState({
+	          lockedBy,
+	          mine: false,
+	          grant: msg.grant || null,
+	          meta: msg.meta || null
+	        });
+	        updateLockedPlans(lockedBy, msg.grant || null, msg.meta || null, planId);
+	      }
       if (msg?.type === 'presence' && msg.planId === planId) {
         if (perfEnabled) perfMetrics.presenceUpdates += 1;
         setPresenceUsers(Array.isArray(msg.users) ? msg.users : []);
@@ -976,20 +1073,21 @@ const PlanView = ({ planId }: Props) => {
           setLockedPlans(msg.lockedPlans);
         }
       }
-      if (msg?.type === 'unlock_request' && msg.planId === planId) {
-        if (isReadOnlyRef.current || !lockMineRef.current) return;
-        setUnlockPrompt({
-          requestId: String(msg.requestId || ''),
-          planId: String(msg.planId || planId),
-          planName: String(msg.planName || planRef.current?.name || ''),
-          clientName: String(msg.clientName || ''),
-          siteName: String(msg.siteName || ''),
-          requestedBy: {
-            userId: String(msg.requestedBy?.userId || ''),
-            username: String(msg.requestedBy?.username || 'admin')
-          }
-        });
-      }
+	      if (msg?.type === 'unlock_request' && msg.planId === planId) {
+	        if (isReadOnlyRef.current || !lockMineRef.current) return;
+	        setUnlockPrompt({
+	          requestId: String(msg.requestId || ''),
+	          planId: String(msg.planId || planId),
+	          planName: String(msg.planName || planRef.current?.name || ''),
+	          clientName: String(msg.clientName || ''),
+	          siteName: String(msg.siteName || ''),
+		          requestedBy: {
+		            userId: String(msg.requestedBy?.userId || ''),
+		            username: String(msg.requestedBy?.username || 'user')
+		          },
+	          message: String(msg.message || '')
+	        });
+	      }
       if (msg?.type === 'unlock_sent') {
         pushStack(
           t({
@@ -1010,40 +1108,131 @@ const PlanView = ({ planId }: Props) => {
           { duration: LOCK_TOAST_MS }
         );
       }
-      if (msg?.type === 'unlock_result') {
-        const granted = msg.action === 'grant' || msg.action === 'grant_save' || msg.action === 'grant_discard';
-        if (granted && msg.released) {
-          pushStack(
-            t({
-              it: 'Unlock concesso. Lock rilasciato.',
-              en: 'Unlock granted. Lock released.'
-            }),
-            'success',
-            { duration: LOCK_TOAST_MS }
-          );
-          if (isSuperAdmin) void refreshStateFromServer();
-        } else if (granted) {
-          pushStack(
-            t({
-              it: 'Unlock concesso, ma il lock era già stato rilasciato.',
-              en: 'Unlock granted, but the lock was already released.'
-            }),
-            'info',
-            { duration: LOCK_TOAST_MS }
-          );
-          if (isSuperAdmin) void refreshStateFromServer();
-        } else {
-          pushStack(
-            t({
-              it: 'Unlock non concesso dall’utente.',
-              en: 'Unlock request denied by the user.'
-            }),
-            'danger',
-            { duration: LOCK_TOAST_MS }
-          );
-        }
-      }
-    };
+		      if (msg?.type === 'unlock_result') {
+		        const granted = msg.action === 'grant' || msg.action === 'grant_save' || msg.action === 'grant_discard';
+		        if (granted) {
+		          const takeover = String(msg?.takeover || '').trim(); // reserved|immediate|'' (legacy)
+		          const minutes = typeof msg?.grant?.minutes === 'number' ? msg.grant.minutes : null;
+		          pushStack(
+		            t({
+		              it:
+		                takeover === 'immediate'
+		                  ? 'Unlock concesso: lock acquisito immediatamente.'
+		                  : `Unlock concesso${minutes ? `: valido per ${minutes} minuti` : ''}.`,
+		              en:
+		                takeover === 'immediate'
+		                  ? 'Unlock granted: lock acquired immediately.'
+		                  : `Unlock granted${minutes ? `: valid for ${minutes} minutes` : ''}.`
+		            }),
+		            'success',
+		            { duration: LOCK_TOAST_MS }
+		          );
+		          if (takeover === 'immediate') {
+		            // If we're already inside the plan, the server assigns the lock immediately; no takeover prompt needed.
+		            return;
+		          }
+		          setUnlockGrantedPrompt({
+		            planId: String(msg.planId || ''),
+		            clientName: String(msg?.plan?.clientName || ''),
+		            siteName: String(msg?.plan?.siteName || ''),
+	            planName: String(msg?.plan?.planName || ''),
+	            grantedBy: msg?.grantedBy
+	              ? {
+	                  userId: String(msg.grantedBy.userId || ''),
+	                  username: String(msg.grantedBy.username || ''),
+	                  avatarUrl: String(msg.grantedBy.avatarUrl || '')
+	                }
+	              : null,
+		            grantedAt: typeof msg?.grant?.grantedAt === 'number' ? msg.grant.grantedAt : null,
+		            expiresAt: typeof msg?.grant?.expiresAt === 'number' ? msg.grant.expiresAt : null,
+		            minutes
+		          });
+		        } else {
+	          pushStack(
+	            t({
+	              it: 'Unlock non concesso dall’utente.',
+	              en: 'Unlock request denied by the user.'
+	            }),
+	            'danger',
+	            { duration: LOCK_TOAST_MS }
+	          );
+	        }
+	      }
+
+		      if (msg?.type === 'force_unlock_started') {
+		        setForceUnlockStarting(false);
+		        const requestId = String(msg.requestId || '').trim();
+		        const activePlanId = String(msg.planId || '').trim();
+		        const targetUserId = String(msg.targetUserId || '').trim();
+		        const deadlineAt = Number(msg.deadlineAt || 0) || Date.now();
+		        const graceMinutes = Number(msg.graceMinutes || 0) || 0;
+		        const hasUnsavedChanges = typeof msg.hasUnsavedChanges === 'boolean' ? msg.hasUnsavedChanges : null;
+		        const targetUsername = forceUnlockConfigRef.current?.username || 'user';
+		        setForceUnlockActive({ requestId, planId: activePlanId, targetUserId, targetUsername, deadlineAt, graceMinutes, hasUnsavedChanges });
+		        setForceUnlockConfig(null);
+		        pushStack(t({ it: 'Force unlock avviato.', en: 'Force unlock started.' }), 'info', { duration: LOCK_TOAST_MS });
+		      }
+	      if (msg?.type === 'force_unlock_denied') {
+	        setForceUnlockStarting(false);
+	        pushStack(t({ it: 'Force unlock non disponibile.', en: 'Force unlock denied.' }), 'danger', { duration: LOCK_TOAST_MS });
+	      }
+		      if (msg?.type === 'force_unlock_done') {
+		        const requestId = String(msg.requestId || '').trim();
+		        if (forceUnlockActiveRef.current?.requestId === requestId) {
+		          pushStack(t({ it: 'Force unlock completato.', en: 'Force unlock completed.' }), 'success', { duration: LOCK_TOAST_MS });
+		          setForceUnlockActive(null);
+		        }
+		      }
+		      if (msg?.type === 'force_unlock_cancelled' || msg?.type === 'force_unlock_expired') {
+		        const requestId = String(msg.requestId || '').trim();
+		        const isExpired = msg?.type === 'force_unlock_expired';
+		        const userMsg = t({
+		          it: isExpired
+		            ? 'Unlock forzato scaduto o annullato: puoi continuare il tuo lavoro e lasciare il lock all’utente.'
+		            : 'Unlock forzato scaduto o annullato: puoi continuare il tuo lavoro e lasciare il lock all’utente.',
+		          en: isExpired
+		            ? 'Force unlock expired or cancelled: you can keep working and keep the lock.'
+		            : 'Force unlock expired or cancelled: you can keep working and keep the lock.'
+		        });
+		        if (forceUnlockIncomingRef.current?.requestId === requestId) {
+		          pushStack(userMsg, 'info', { duration: LOCK_TOAST_MS });
+		          setForceUnlockIncoming(null);
+		        }
+		        if (forceUnlockActiveRef.current?.requestId === requestId) {
+		          pushStack(
+		            t({
+		              it: isExpired ? 'Force unlock scaduto.' : 'Force unlock annullato.',
+		              en: isExpired ? 'Force unlock expired.' : 'Force unlock cancelled.'
+		            }),
+		            'info',
+		            { duration: LOCK_TOAST_MS }
+		          );
+		          setForceUnlockActive(null);
+		        }
+		      }
+
+		      if (msg?.type === 'force_unlock' && msg.planId === planId) {
+		        setForceUnlockIncoming({
+		          requestId: String(msg.requestId || ''),
+		          planId: String(msg.planId || planId),
+	          clientName: String(msg.clientName || ''),
+	          siteName: String(msg.siteName || ''),
+	          planName: String(msg.planName || planRef.current?.name || ''),
+	          requestedBy: msg.requestedBy
+	            ? { userId: String(msg.requestedBy.userId || ''), username: String(msg.requestedBy.username || '') }
+	            : null,
+		          deadlineAt: Number(msg.deadlineAt || 0) || Date.now(),
+		          graceMinutes: Number(msg.graceMinutes || 0) || 0,
+		          hasUnsavedChanges: typeof msg.hasUnsavedChanges === 'boolean' ? msg.hasUnsavedChanges : null
+		        });
+		      }
+		      if (msg?.type === 'force_unlock_execute' && msg.planId === planId) {
+		        const requestId = String(msg.requestId || '').trim();
+		        const action = String(msg.action || '').trim();
+		        if (!requestId || (action !== 'save' && action !== 'discard')) return;
+		        setForceUnlockExecuteCommand({ requestId, action });
+		      }
+	    };
     ws.onclose = () => {
       if (closed) return;
       closed = true;
@@ -1051,12 +1240,12 @@ const PlanView = ({ planId }: Props) => {
         realtimeDisabledRef.current = true;
         setRealtimeDisabled(true);
       }
-      setPresenceUsers([]);
-      setGlobalPresenceUsers([]);
-      setLockedPlans({});
-      setLockState({ lockedBy: null, mine: false, expiresAt: null, ttlMs: LOCK_TTL_MS });
-      wsRef.current = null;
-    };
+	      setPresenceUsers([]);
+	      setGlobalPresenceUsers([]);
+	      setLockedPlans({});
+	      setLockState({ lockedBy: null, mine: false, grant: null, meta: null });
+	      wsRef.current = null;
+	    };
     ws.onerror = () => {
       if (!opened) {
         realtimeDisabledRef.current = true;
@@ -1079,94 +1268,114 @@ const PlanView = ({ planId }: Props) => {
         wsRef.current = null;
       }
     };
-  }, [LOCK_TTL_MS, activeRevision, planAccess, planId, realtimeDisabled, user?.id]);
+	  }, [activeRevision, planAccess, planId, realtimeDisabled, user?.id]);
 
-  const lockRequired = !realtimeDisabled && planAccess === 'rw' && !activeRevision;
-  const lockedByOther = lockRequired && !!lockState.lockedBy && !lockState.mine;
-  const lockAvailable = lockRequired && !lockState.lockedBy;
-  const isReadOnly = !!activeRevision || planAccess !== 'rw' || (lockRequired && !lockState.mine);
-  const isReadOnlyRef = useRef(isReadOnly);
-  const lockMineRef = useRef(lockState.mine);
-  useEffect(() => {
-    isReadOnlyRef.current = isReadOnly;
-  }, [isReadOnly]);
-  useEffect(() => {
-    lockMineRef.current = lockState.mine;
-  }, [lockState.mine]);
+	  const lockRequired = !realtimeDisabled && planAccess === 'rw' && !activeRevision;
+	  const grantBlocks = lockRequired && !!lockState.grant && !!lockState.grant.userId && lockState.grant.userId !== user?.id;
+	  const lockedByOther = lockRequired && ((!!lockState.lockedBy && !lockState.mine) || grantBlocks);
+	  const lockAvailable =
+	    lockRequired && !lockState.lockedBy && (!lockState.grant || !lockState.grant.userId || lockState.grant.userId === user?.id);
+	  const isReadOnly = !!activeRevision || planAccess !== 'rw' || (lockRequired && !lockState.mine);
+	  const isReadOnlyRef = useRef(isReadOnly);
+	  const lockMineRef = useRef(lockState.mine);
+	  const planIdRefForWs = useRef(planId);
+	  const lastPlanActionSentAtRef = useRef(0);
+	  const lastPlanDirtySentAtRef = useRef(0);
+	  const lastPlanDirtyValueRef = useRef<boolean | null>(null);
+	  useEffect(() => {
+	    isReadOnlyRef.current = isReadOnly;
+	  }, [isReadOnly]);
+	  useEffect(() => {
+	    lockMineRef.current = lockState.mine;
+	  }, [lockState.mine]);
+	  useEffect(() => {
+	    planIdRefForWs.current = planId;
+	  }, [planId]);
 
-  const requestPlanLock = useCallback(() => {
-    if (!lockRequired) return;
-    if (lockState.mine) return;
-    if (lockState.lockedBy) return;
-    const now = Date.now();
-    if (now - lockRequestAtRef.current < LOCK_REQUEST_THROTTLE_MS) return;
-    lockRequestAtRef.current = now;
-    sendWs({ type: 'request_lock', planId });
-  }, [LOCK_REQUEST_THROTTLE_MS, lockRequired, lockState.lockedBy, lockState.mine, planId, sendWs]);
+	  const requestPlanLock = useCallback(() => {
+	    if (!lockRequired) return;
+	    if (lockState.mine) return;
+	    if (lockState.lockedBy) return;
+	    if (lockState.grant?.userId && lockState.grant.userId !== user?.id) return;
+	    const now = Date.now();
+	    if (now - lockRequestAtRef.current < LOCK_REQUEST_THROTTLE_MS) return;
+	    lockRequestAtRef.current = now;
+	    sendWs({ type: 'request_lock', planId });
+	  }, [LOCK_REQUEST_THROTTLE_MS, lockRequired, lockState.grant?.userId, lockState.lockedBy, lockState.mine, planId, sendWs, user?.id]);
 
-  const updateLockedPlans = useCallback(
-    (lockedBy: { userId: string; username: string } | null, targetPlanId: string) => {
-      const prev = (useUIStore.getState() as any)?.lockedPlans || {};
-      const next = { ...prev };
-      if (lockedBy) next[targetPlanId] = lockedBy;
-      else delete next[targetPlanId];
-      setLockedPlans(next);
-    },
-    [setLockedPlans]
-  );
+	  const updateLockedPlans = useCallback(
+	    (
+	      lockedBy: { userId: string; username: string; avatarUrl?: string } | null,
+	      grant:
+	        | {
+	            userId: string;
+	            username: string;
+	            avatarUrl?: string;
+	            grantedAt?: number | null;
+	            expiresAt?: number | null;
+	            minutes?: number | null;
+	            grantedBy?: { userId: string; username: string } | null;
+	          }
+	        | null,
+	      meta:
+	        | {
+	            lastActionAt?: number | null;
+	            lastSavedAt?: number | null;
+	            lastSavedRev?: string | null;
+	          }
+	        | null,
+	      targetPlanId: string
+	    ) => {
+	      const prev = (useUIStore.getState() as any)?.lockedPlans || {};
+	      const next = { ...prev };
+	      if (lockedBy) {
+	        next[targetPlanId] = {
+	          kind: 'lock',
+	          ...lockedBy,
+	          lastActionAt: meta?.lastActionAt ?? null,
+	          lastSavedAt: meta?.lastSavedAt ?? null,
+	          lastSavedRev: meta?.lastSavedRev ?? null
+	        };
+	      } else if (grant?.userId) {
+	        next[targetPlanId] = {
+	          kind: 'grant',
+	          userId: grant.userId,
+	          username: grant.username,
+	          avatarUrl: grant.avatarUrl || '',
+	          grantedAt: grant.grantedAt ?? null,
+	          expiresAt: grant.expiresAt ?? null,
+	          minutes: grant.minutes ?? null,
+	          grantedBy: grant.grantedBy ?? null,
+	          lastActionAt: meta?.lastActionAt ?? null,
+	          lastSavedAt: meta?.lastSavedAt ?? null,
+	          lastSavedRev: meta?.lastSavedRev ?? null
+	        };
+	      } else {
+	        delete next[targetPlanId];
+	      }
+	      setLockedPlans(next);
+	    },
+	    [setLockedPlans]
+	  );
 
-  useEffect(() => {
-    const markActive = () => {
-      const now = Date.now();
-      lastActiveAtRef.current = now;
-      if (lockIdle) {
-        setLockIdle(false);
-        if (lockState.mine) {
-          sendWs({ type: 'renew_lock', planId });
-        }
-      }
-      if (lockAvailable && !lockState.mine) {
-        requestPlanLock();
-      }
-    };
-    window.addEventListener('mousemove', markActive, { passive: true });
-    window.addEventListener('mousedown', markActive);
-    window.addEventListener('keydown', markActive);
-    window.addEventListener('touchstart', markActive, { passive: true });
-    return () => {
-      window.removeEventListener('mousemove', markActive);
-      window.removeEventListener('mousedown', markActive);
-      window.removeEventListener('keydown', markActive);
-      window.removeEventListener('touchstart', markActive);
-    };
-  }, [lockAvailable, lockIdle, lockState.mine, planId, requestPlanLock, sendWs]);
-
-  useEffect(() => {
-    if (!lockRequired || !lockState.mine) {
-      if (lockIdle) setLockIdle(false);
-      return;
-    }
-    const interval = window.setInterval(() => {
-      const idle = Date.now() - lastActiveAtRef.current > LOCK_IDLE_MS;
-      setLockIdle(idle);
-      if (idle) return;
-      sendWs({ type: 'renew_lock', planId });
-    }, LOCK_RENEW_MS);
-    return () => window.clearInterval(interval);
-  }, [LOCK_IDLE_MS, LOCK_RENEW_MS, lockRequired, lockState.mine, lockIdle, planId, sendWs]);
+	  useEffect(() => {
+	    if (!lockAvailable) return;
+	    if (lockState.mine) return;
+	    requestPlanLock();
+	  }, [lockAvailable, lockState.mine, requestPlanLock]);
 
   const prevMineRef = useRef(false);
   useEffect(() => {
-    if (prevMineRef.current && !lockState.mine && lockRequired) {
-      pushStack(
-        t({
-          it: 'Lock perso: la planimetria è ora in sola lettura. Interagisci per riacquisirlo.',
-          en: 'Lock lost: the floor plan is now read-only. Interact to reacquire it.'
-        }),
-        'info',
-        { duration: LOCK_TOAST_MS }
-      );
-    }
+	    if (prevMineRef.current && !lockState.mine && lockRequired) {
+	      pushStack(
+	        t({
+	          it: 'Lock perso: la planimetria è ora in sola lettura.',
+	          en: 'Lock lost: the floor plan is now read-only.'
+	        }),
+	        'info',
+	        { duration: LOCK_TOAST_MS }
+	      );
+	    }
     prevMineRef.current = lockState.mine;
   }, [LOCK_TOAST_MS, lockRequired, lockState.mine, pushStack, t]);
   const renderPlan = useMemo<FloorPlan | undefined>(() => {
@@ -2031,13 +2240,21 @@ const PlanView = ({ planId }: Props) => {
     rackItems?: any[];
     rackLinks?: any[];
   } | null>(null);
-  const touchedRef = useRef(false);
-  const [touchedTick, setTouchedTick] = useState(0);
-  const markTouched = useCallback(() => {
-    if (touchedRef.current) return;
-    touchedRef.current = true;
-    setTouchedTick((x) => x + 1);
-  }, []);
+	  const touchedRef = useRef(false);
+	  const [touchedTick, setTouchedTick] = useState(0);
+	  const markTouched = useCallback(() => {
+	    // Track "last action" for lock tooltips even after the plan is already marked as dirty.
+	    if (lockMineRef.current) {
+	      const now = Date.now();
+	      if (now - lastPlanActionSentAtRef.current > 1500) {
+	        lastPlanActionSentAtRef.current = now;
+	        sendWs({ type: 'plan_action', planId: planIdRefForWs.current });
+	      }
+	    }
+	    if (touchedRef.current) return;
+	    touchedRef.current = true;
+	    setTouchedTick((x) => x + 1);
+	  }, []);
   const resetTouched = useCallback(() => {
     if (!touchedRef.current) return;
     touchedRef.current = false;
@@ -2541,18 +2758,19 @@ const PlanView = ({ planId }: Props) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
 
-  useEffect(() => {
-    if (!printAreaMode) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setPrintAreaMode(false);
-        push(t({ it: 'Impostazione area di stampa annullata', en: 'Print area selection cancelled' }), 'info');
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [printAreaMode, push, t]);
+		  useEffect(() => {
+		    if (!printAreaMode) return;
+		    const onKey = (e: KeyboardEvent) => {
+		      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+		      if (e.key === 'Escape') {
+		        e.preventDefault();
+		        setPrintAreaMode(false);
+		        push(t({ it: 'Impostazione area di stampa annullata', en: 'Print area selection cancelled' }), 'info');
+		      }
+		    };
+		    window.addEventListener('keydown', onKey);
+		    return () => window.removeEventListener('keydown', onKey);
+		  }, [printAreaMode, push, t]);
 
   const revertUnsavedChanges = useCallback(() => {
     if (!plan) return;
@@ -2622,8 +2840,8 @@ const PlanView = ({ planId }: Props) => {
     return forceSaveNow();
   }, [addRevision, forceSaveNow, hasAnyRevision, hasNavigationEdits, latestRev.major, latestRev.minor, plan, postAuditEvent, push, resetTouched, t, toSnapshot]);
 
-  const handleUnlockResponse = useCallback(
-    async (action: 'grant' | 'grant_save' | 'grant_discard' | 'deny') => {
+	  const handleUnlockResponse = useCallback(
+	    async (action: 'grant' | 'grant_save' | 'grant_discard' | 'deny') => {
       if (!unlockPrompt) return;
       if (unlockBusy) return;
       setUnlockBusy(true);
@@ -2697,45 +2915,125 @@ const PlanView = ({ planId }: Props) => {
     [isSuperAdmin, planId, postAuditEvent, push, t, updateRevision, user?.id, user?.username]
   );
 
-  const refreshStateFromServer = useCallback(async () => {
-    try {
-      const res = await fetchState();
-      if (Array.isArray(res.clients)) {
-        useDataStore.getState().setServerState({ clients: res.clients, objectTypes: res.objectTypes });
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+	  const openUnlockCompose = useCallback(
+	    (userEntry: PresenceUser) => {
+	      if (!userEntry?.userId) return;
+	      if (userEntry.userId === user?.id) return;
+	      const lockList: UnlockRequestLock[] =
+	        Array.isArray((userEntry as any).locks) && (userEntry as any).locks.length
+	          ? (userEntry as any).locks
+	          : (userEntry as any).lock
+	            ? [(userEntry as any).lock]
+	            : [];
+	      if (!lockList.length) return;
+	      setUnlockCompose({ target: userEntry, locks: lockList });
+	    },
+	    [user?.id]
+	  );
 
-  const requestUnlockForUser = useCallback(
-    (userEntry: PresenceUser, lockEntry: { planId: string }) => {
-      if (!userEntry?.userId || !lockEntry?.planId) return;
-      sendWs({ type: 'unlock_request', targetUserId: userEntry.userId, planId: lockEntry.planId });
-      setPresenceMenu(null);
-    },
-    [sendWs]
-  );
+		  const executeForceUnlock = useCallback(
+		    async (requestId: string, action: 'save' | 'discard') => {
+		      let ok = true;
+	      if (action === 'save') {
+	        ok = await saveRevisionForUnlock();
+	      } else if (action === 'discard') {
+	        if (hasNavigationEdits) {
+	          revertUnsavedChanges();
+	          resetTouched();
+	          entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+	        }
+	      }
+	      // Release lock (best-effort); the server will also enforce the deadline.
+	      sendWs({ type: 'release_lock', planId });
+	      sendWs({ type: 'force_unlock_done', requestId, action, ok });
+	      setForceUnlockIncoming(null);
+	      return ok;
+	    },
+	    [hasNavigationEdits, plan, planId, resetTouched, revertUnsavedChanges, saveRevisionForUnlock, sendWs, toSnapshot]
+	  );
 
-  useEffect(() => {
-    const handler = (event: Event) => {
-      if (!isSuperAdmin) return;
-      const detail = (event as CustomEvent).detail || {};
-      const planId = String(detail.planId || '').trim();
-      const userId = String(detail.userId || '').trim();
-      if (!planId || !userId) return;
-      sendWs({ type: 'unlock_request', targetUserId: userId, planId });
-    };
-    window.addEventListener('deskly_unlock_request', handler as EventListener);
-    return () => window.removeEventListener('deskly_unlock_request', handler as EventListener);
-  }, [isSuperAdmin, sendWs]);
+	  useEffect(() => {
+	    if (!forceUnlockExecuteCommand) return;
+	    const cmd = forceUnlockExecuteCommand;
+	    setForceUnlockExecuteCommand(null);
+	    void executeForceUnlock(cmd.requestId, cmd.action);
+	  }, [executeForceUnlock, forceUnlockExecuteCommand]);
 
-  useEffect(() => {
-    setPlanDirty?.(planId, !!hasNavigationEdits);
-    return () => {
-      setPlanDirty?.(planId, false);
-    };
-  }, [hasNavigationEdits, planId, setPlanDirty]);
+	  useEffect(() => {
+	    const handler = (event: Event) => {
+	      const detail = (event as CustomEvent).detail || {};
+	      const planId = String(detail.planId || '').trim();
+	      const userId = String(detail.userId || '').trim();
+	      if (!planId || !userId) return;
+	      if (userId === user?.id) return;
+	      const target: PresenceUser = {
+	        userId,
+	        username: String(detail.username || 'user'),
+	        avatarUrl: String(detail.avatarUrl || ''),
+        lock: {
+          planId,
+          clientName: String(detail.clientName || ''),
+          siteName: String(detail.siteName || ''),
+          planName: String(detail.planName || '')
+        }
+      };
+	      setUnlockCompose({
+	        target,
+	        locks: [
+          {
+            planId,
+            clientName: String(detail.clientName || ''),
+            siteName: String(detail.siteName || ''),
+            planName: String(detail.planName || '')
+          }
+        ]
+	      });
+	    };
+	    window.addEventListener('deskly_unlock_request', handler as EventListener);
+	    return () => window.removeEventListener('deskly_unlock_request', handler as EventListener);
+	  }, [user?.id]);
+
+	  useEffect(() => {
+	    const handler = (event: Event) => {
+	      if (!isSuperAdmin) return;
+	      const detail = (event as CustomEvent).detail || {};
+	      const planId = String(detail.planId || '').trim();
+	      const userId = String(detail.userId || '').trim();
+	      if (!planId || !userId) return;
+	      setForceUnlockGraceMinutes(5);
+	      setForceUnlockStarting(false);
+	      setForceUnlockConfig({
+	        planId,
+	        planName: String(detail.planName || ''),
+	        clientName: String(detail.clientName || ''),
+	        siteName: String(detail.siteName || ''),
+	        userId,
+	        username: String(detail.username || 'user'),
+	        avatarUrl: String(detail.avatarUrl || '')
+	      });
+	    };
+	    window.addEventListener('deskly_force_unlock', handler as EventListener);
+	    return () => window.removeEventListener('deskly_force_unlock', handler as EventListener);
+	  }, [isSuperAdmin]);
+
+	  useEffect(() => {
+	    setPlanDirty?.(planId, !!hasNavigationEdits);
+	    return () => {
+	      setPlanDirty?.(planId, false);
+	    };
+	  }, [hasNavigationEdits, planId, setPlanDirty]);
+
+	  useEffect(() => {
+	    if (!lockRequired) return;
+	    if (!lockState.mine) return;
+	    const dirty = !!hasNavigationEdits;
+	    const now = Date.now();
+	    if (lastPlanDirtyValueRef.current === dirty && now - lastPlanDirtySentAtRef.current < 1500) return;
+	    if (now - lastPlanDirtySentAtRef.current < 900) return;
+	    lastPlanDirtyValueRef.current = dirty;
+	    lastPlanDirtySentAtRef.current = now;
+	    sendWs({ type: 'plan_dirty', planId, dirty });
+	  }, [hasNavigationEdits, lockRequired, lockState.mine, planId, sendWs]);
 
   useEffect(() => {
     if (!pendingSaveNavigateTo) return;
@@ -2887,6 +3185,20 @@ const PlanView = ({ planId }: Props) => {
     return renderPlan.objects.filter((o) => o.type === 'photo').map((o) => o.id);
   }, [renderPlan]);
   const contextWifiRangeOn = contextIsWifi ? (contextObject as any)?.wifiShowRange !== false : false;
+  const contextWifiRangeScale = contextIsWifi
+    ? Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, Number((contextObject as any)?.wifiRangeScale ?? 1) || 1))
+    : 1;
+  const contextWifiCoverageSqm = contextIsWifi ? Number((contextObject as any)?.wifiCoverageSqm || 0) : 0;
+  const contextWifiBaseRadiusM =
+    contextIsWifi && Number.isFinite(contextWifiCoverageSqm) && contextWifiCoverageSqm > 0
+      ? Math.sqrt(contextWifiCoverageSqm / Math.PI)
+      : 0;
+  const contextWifiBaseDiameterM = contextWifiBaseRadiusM > 0 ? contextWifiBaseRadiusM * 2 : 0;
+  const contextWifiBaseAreaSqm = Number.isFinite(contextWifiCoverageSqm) && contextWifiCoverageSqm > 0 ? contextWifiCoverageSqm : 0;
+  const contextWifiEffectiveRadiusM = contextWifiBaseRadiusM > 0 ? contextWifiBaseRadiusM * contextWifiRangeScale : 0;
+  const contextWifiEffectiveDiameterM = contextWifiBaseDiameterM > 0 ? contextWifiBaseDiameterM * contextWifiRangeScale : 0;
+  const contextWifiEffectiveAreaSqm =
+    contextWifiBaseAreaSqm > 0 ? contextWifiBaseAreaSqm * Math.pow(contextWifiRangeScale, 2) : 0;
   const contextWallPolygon = useMemo(() => {
     if (!contextIsWall || !contextMenu || contextMenu.kind !== 'object') return null;
     return getWallPolygonData(contextMenu.id);
@@ -3742,17 +4054,18 @@ const PlanView = ({ planId }: Props) => {
     setModalState({ mode: 'duplicate', objectId, coords: { x: obj.x + offset, y: obj.y + offset * 0.4 } });
   };
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const isCmdF = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f';
-      if (isCmdF) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+	  useEffect(() => {
+	    const handler = (e: KeyboardEvent) => {
+	      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+	      const isCmdF = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f';
+	      if (isCmdF) {
+	        e.preventDefault();
+	        searchInputRef.current?.focus();
+	      }
+	    };
+	    window.addEventListener('keydown', handler);
+	    return () => window.removeEventListener('keydown', handler);
+	  }, []);
 
   const isPointInPoly = (points: { x: number; y: number }[], x: number, y: number) => {
     // Ray casting algorithm
@@ -4935,11 +5248,12 @@ const PlanView = ({ planId }: Props) => {
     updateObject
   ]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      const isTyping = tag === 'input' || tag === 'textarea' || (target as any)?.isContentEditable;
+	  useEffect(() => {
+	    const handler = (e: KeyboardEvent) => {
+	      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+	      const target = e.target as HTMLElement | null;
+	      const tag = target?.tagName?.toLowerCase();
+	      const isTyping = tag === 'input' || tag === 'textarea' || (target as any)?.isContentEditable;
 
       const currentConfirm = confirmDeleteRef.current;
       const currentSelectedIds = selectedObjectIdsRef.current;
@@ -5800,17 +6114,6 @@ const PlanView = ({ planId }: Props) => {
     return () => window.removeEventListener('mousedown', onDown);
   }, [gridMenuOpen]);
 
-  useEffect(() => {
-    if (!presenceMenu) return;
-    const onDown = (event: globalThis.MouseEvent) => {
-      if (!presenceMenuRef.current) return;
-      if (presenceMenuRef.current.contains(event.target as Node)) return;
-      setPresenceMenu(null);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [presenceMenu]);
-
   const roomStatsCacheRef = useRef<{
     key: string;
     value: Map<string, { items: MapObject[]; userCount: number; otherCount: number; totalCount: number }>;
@@ -6324,6 +6627,7 @@ const PlanView = ({ planId }: Props) => {
     wifiCoverageSqm?: number;
     wifiCatalogId?: string;
     wifiShowRange?: boolean;
+    wifiRangeScale?: number;
   }) => {
     if (!plan || !modalState || isReadOnly) return;
     if (modalState.mode === 'create') {
@@ -6371,7 +6675,8 @@ const PlanView = ({ planId }: Props) => {
               wifiModelCode: payload.wifiModelCode,
               wifiCoverageSqm: payload.wifiCoverageSqm,
               wifiCatalogId: payload.wifiCatalogId,
-              wifiShowRange: payload.wifiShowRange ?? true
+              wifiShowRange: payload.wifiShowRange ?? true,
+              wifiRangeScale: payload.wifiRangeScale
             }
           : {}),
         ...(modalState.type === 'text'
@@ -6475,17 +6780,18 @@ const PlanView = ({ planId }: Props) => {
           : {}),
         ...(base?.type === 'wifi'
           ? {
-              wifiDb: (base as any).wifiDb,
-              wifiStandard: (base as any).wifiStandard || WIFI_DEFAULT_STANDARD,
-              wifiBand24: (base as any).wifiBand24,
-              wifiBand5: (base as any).wifiBand5,
-              wifiBand6: (base as any).wifiBand6,
-              wifiBrand: (base as any).wifiBrand,
-              wifiModel: (base as any).wifiModel,
-              wifiModelCode: (base as any).wifiModelCode,
-              wifiCoverageSqm: (base as any).wifiCoverageSqm,
-              wifiCatalogId: (base as any).wifiCatalogId,
-              wifiShowRange: (base as any).wifiShowRange
+              wifiDb: payload.wifiDb ?? (base as any).wifiDb,
+              wifiStandard: payload.wifiStandard || (base as any).wifiStandard || WIFI_DEFAULT_STANDARD,
+              wifiBand24: payload.wifiBand24 ?? (base as any).wifiBand24,
+              wifiBand5: payload.wifiBand5 ?? (base as any).wifiBand5,
+              wifiBand6: payload.wifiBand6 ?? (base as any).wifiBand6,
+              wifiBrand: payload.wifiBrand ?? (base as any).wifiBrand,
+              wifiModel: payload.wifiModel ?? (base as any).wifiModel,
+              wifiModelCode: payload.wifiModelCode ?? (base as any).wifiModelCode,
+              wifiCoverageSqm: payload.wifiCoverageSqm ?? (base as any).wifiCoverageSqm,
+              wifiCatalogId: payload.wifiCatalogId ?? (base as any).wifiCatalogId,
+              wifiShowRange: payload.wifiShowRange ?? (base as any).wifiShowRange,
+              wifiRangeScale: payload.wifiRangeScale ?? (base as any).wifiRangeScale
             }
           : {}),
         ...(base?.type === 'text'
@@ -6732,28 +7038,30 @@ const PlanView = ({ planId }: Props) => {
     wifiCoverageSqm?: number;
     wifiCatalogId?: string;
     wifiShowRange?: boolean;
+    wifiRangeScale?: number;
   }) => {
     if (!modalState || modalState.mode !== 'edit' || isReadOnly) return;
     markTouched();
     const obj = plan?.objects?.find((o) => o.id === modalState.objectId);
     const isQuote = obj?.type === 'quote';
     const resolvedQuoteLabelBg = payload.quoteLabelBg;
-    const wifiUpdates =
-      obj?.type === 'wifi'
-        ? {
-            wifiDb: payload.wifiDb,
-            wifiStandard: payload.wifiStandard || WIFI_DEFAULT_STANDARD,
-            wifiBand24: payload.wifiBand24,
-            wifiBand5: payload.wifiBand5,
-            wifiBand6: payload.wifiBand6,
-            wifiBrand: payload.wifiBrand,
-            wifiModel: payload.wifiModel,
-            wifiModelCode: payload.wifiModelCode,
-            wifiCoverageSqm: payload.wifiCoverageSqm,
-            wifiCatalogId: payload.wifiCatalogId,
-            wifiShowRange: payload.wifiShowRange
-          }
-        : {};
+	    const wifiUpdates =
+	      obj?.type === 'wifi'
+	        ? {
+	            wifiDb: payload.wifiDb,
+	            wifiStandard: payload.wifiStandard || WIFI_DEFAULT_STANDARD,
+	            wifiBand24: payload.wifiBand24,
+	            wifiBand5: payload.wifiBand5,
+	            wifiBand6: payload.wifiBand6,
+	            wifiBrand: payload.wifiBrand,
+	            wifiModel: payload.wifiModel,
+	            wifiModelCode: payload.wifiModelCode,
+	            wifiCoverageSqm: payload.wifiCoverageSqm,
+	            wifiCatalogId: payload.wifiCatalogId,
+	            wifiShowRange: payload.wifiShowRange,
+	            wifiRangeScale: payload.wifiRangeScale
+	          }
+	        : {};
     const textUpdates =
       obj?.type === 'text'
         ? {
@@ -7102,7 +7410,8 @@ const PlanView = ({ planId }: Props) => {
               wifiBand24: false,
               wifiBand5: false,
               wifiBand6: false,
-              wifiShowRange: true
+              wifiShowRange: true,
+              wifiRangeScale: 1
             }
           : {})
       };
@@ -7149,7 +7458,8 @@ const PlanView = ({ planId }: Props) => {
             wifiModelCode: (obj as any).wifiModelCode,
             wifiCoverageSqm: (obj as any).wifiCoverageSqm,
             wifiCatalogId: (obj as any).wifiCatalogId,
-            wifiShowRange: (obj as any).wifiShowRange
+            wifiShowRange: (obj as any).wifiShowRange,
+            wifiRangeScale: (obj as any).wifiRangeScale
           }
         : {})
     };
@@ -7257,80 +7567,172 @@ const PlanView = ({ planId }: Props) => {
 	          <div className="text-[11px] font-semibold uppercase text-slate-500">
 	            {client?.shortName || client?.name} → {site?.name}
 	          </div>
-	          <div className="mt-1 flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto whitespace-nowrap">
-	            <h1 className="truncate text-xl font-semibold text-ink">{renderPlan.name}</h1>
-	            {!isReadOnly ? (
-	              <div className="flex items-center gap-1">
-	                <button
-                  onClick={() => {
-                    setPrintAreaMode(true);
-                    push(
-                      t({
-                        it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
-                        en: 'Draw a rectangle on the map to set the print area.'
-                      }),
-                      'info'
-                    );
-	                  }}
-	                  title={t({ it: 'Imposta area di stampa', en: 'Set print area' })}
-	                  className={`flex h-8 w-8 items-center justify-center rounded-xl border shadow-sm hover:bg-slate-50 ${
-	                    (basePlan as any)?.printArea ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-white text-slate-700'
-	                  }`}
-	                >
-	                  <Crop size={14} />
-	                </button>
-	                {(basePlan as any)?.printArea ? (
-	                  <button
-                    onClick={() => {
-                      updateFloorPlan(basePlan.id, { printArea: undefined });
-	                      push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
-	                    }}
-	                    title={t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })}
-	                    className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
-	                  >
-	                    <X size={14} />
-	                  </button>
-	                ) : null}
-	              </div>
-	            ) : null}
-	            {lockRequired && lockState.mine ? (
-	              <span
-	                className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800"
-	                title={lockActiveTitle}
-	              >
-	                {t({ it: 'Lock attivo', en: 'Lock active' })}
-	              </span>
-	            ) : null}
-	            {lockRequired && lockState.mine && lockIdle ? (
-	              <span
-	                className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800"
-	                title={t({
-	                  it: 'Se resti inattivo, il lock scade automaticamente.',
-	                  en: 'If you stay idle, the lock expires automatically.'
-	                })}
-              >
-                {t({ it: 'Lock in pausa (inattivo)', en: 'Lock paused (idle)' })}
-              </span>
-            ) : null}
-	            {isReadOnly ? (
-	              <span
-	                className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800"
-	                title={lockedByOther ? lockedByTitle : undefined}
-	              >
-	                {activeRevision
-                  ? t({ it: `Sola lettura: ${activeRevision.name}`, en: `Read-only: ${activeRevision.name}` })
-                  : planAccess !== 'rw'
-                    ? t({ it: 'Sola lettura (permessi)', en: 'Read-only (permissions)' })
-                    : lockedByOther
-                      ? t({
-                          it: `Bloccata da ${lockState.lockedBy?.username || 'utente'}`,
-                          en: `Locked by ${lockState.lockedBy?.username || 'user'}`
-                        })
-                      : lockRequired
-                        ? t({ it: 'Lock non acquisito', en: 'Lock not acquired' })
-                        : t({ it: 'Sola lettura', en: 'Read-only' })}
-              </span>
-            ) : null}
+			          {/* Avoid overflow clipping: dropdowns (presence/layers/etc) are positioned absolutely. */}
+			          <div className="mt-1 flex min-w-0 flex-nowrap items-center gap-2 overflow-visible whitespace-nowrap">
+		            <h1 className="truncate text-xl font-semibold text-ink">{renderPlan.name}</h1>
+		            {lockRequired && (lockState.mine || lockedByOther) ? (
+		              <div ref={lockInfoRef} className="relative">
+		                <button
+		                  type="button"
+		                  onClick={() => setLockInfoOpen((v) => !v)}
+		                  className={
+		                    lockState.mine
+		                      ? 'rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100'
+		                      : 'rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100'
+		                  }
+		                  title={
+		                    lockState.mine
+		                      ? lockActiveTitle
+		                      : lockState.lockedBy
+		                        ? lockedByTitle
+		                        : t({
+		                            it: `Lock riservato a ${lockState.grant?.username || 'utente'}.`,
+		                            en: `Lock reserved for ${lockState.grant?.username || 'user'}.`
+		                          })
+		                  }
+		                >
+		                  {lockState.mine ? (
+		                    <span>{t({ it: 'Lock attivo', en: 'Lock active' })}</span>
+		                  ) : lockState.lockedBy ? (
+		                    <span className="inline-flex items-center gap-1.5">
+		                      <UserAvatar src={(lockState as any)?.lockedBy?.avatarUrl} username={(lockState as any)?.lockedBy?.username} size={14} />
+		                      <span>
+		                        {t({
+		                          it: `Bloccata da ${lockState.lockedBy?.username || 'utente'}`,
+		                          en: `Locked by ${lockState.lockedBy?.username || 'user'}`
+		                        })}
+		                      </span>
+		                    </span>
+		                  ) : (
+		                    <span className="inline-flex items-center gap-1.5">
+		                      <Hourglass size={14} className="text-amber-700" />
+		                      <span>
+		                        {t({
+		                          it: `Lock concesso a ${lockState.grant?.username || 'utente'}`,
+		                          en: `Lock granted to ${lockState.grant?.username || 'user'}`
+		                        })}
+		                      </span>
+		                    </span>
+		                  )}
+		                </button>
+		                {lockInfoOpen ? (
+		                  <div className="absolute left-0 z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-card">
+		                    <div className="flex items-center justify-between border-b border-slate-100 px-2 pb-2">
+		                      <div className="font-semibold text-ink">{t({ it: 'Lock planimetria', en: 'Floor plan lock' })}</div>
+		                      <button
+		                        onClick={() => setLockInfoOpen(false)}
+		                        className="text-slate-400 hover:text-ink"
+		                        title={t({ it: 'Chiudi', en: 'Close' })}
+		                      >
+		                        <X size={14} />
+		                      </button>
+		                    </div>
+		                    <div className="px-2 pt-2 text-sm font-semibold text-ink">{renderPlan.name}</div>
+		                    <div className="px-2 text-[11px] text-slate-500">
+		                      {client?.shortName || client?.name} / {site?.name}
+		                    </div>
+		                    {lockState.grant ? (
+		                      <div className="mt-2 flex items-center gap-2 px-2 text-[11px] text-slate-600">
+		                        <span className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700">
+		                          <Hourglass size={14} />
+		                        </span>
+		                        <span>
+		                          {t({ it: 'Lock concesso a', en: 'Lock granted to' })}:{' '}
+		                          <span className="font-semibold text-ink">{lockState.grant.username}</span>
+		                        </span>
+		                      </div>
+		                    ) : lockState.lockedBy ? (
+		                      <div className="mt-2 flex items-center gap-2 px-2 text-[11px] text-slate-600">
+		                        <UserAvatar src={(lockState as any)?.lockedBy?.avatarUrl} username={(lockState as any)?.lockedBy?.username} size={18} />
+		                        <span>
+		                          {t({ it: 'Bloccato da', en: 'Locked by' })}:{' '}
+		                          <span className="font-semibold text-ink">{lockState.lockedBy.username}</span>
+		                        </span>
+		                      </div>
+		                    ) : null}
+		                    <div className="mt-3 space-y-1 px-2 text-[11px] text-slate-600">
+		                      <div>
+		                        <span className="font-semibold text-slate-700">{t({ it: 'Ultima azione', en: 'Last action' })}</span>:{' '}
+		                        {formatPresenceDate((lockState as any)?.meta?.lastActionAt)}
+		                      </div>
+		                      <div>
+		                        <span className="font-semibold text-slate-700">{t({ it: 'Ultimo salvataggio', en: 'Last save' })}</span>:{' '}
+		                        {formatPresenceDate((lockState as any)?.meta?.lastSavedAt)}
+		                      </div>
+		                      <div>
+		                        <span className="font-semibold text-slate-700">{t({ it: 'Revisione', en: 'Revision' })}</span>:{' '}
+		                        {String((lockState as any)?.meta?.lastSavedRev || '').trim() || '—'}
+		                      </div>
+		                      {lockState.grant ? (
+		                        <div>
+		                          <span className="font-semibold text-slate-700">{t({ it: 'Valida per', en: 'Valid for' })}</span>:{' '}
+		                          {formatMinutes(grantRemainingMinutes ?? lockState.grant.minutes)} {t({ it: 'minuti', en: 'minutes' })}
+		                        </div>
+		                      ) : null}
+		                    </div>
+		                    {lockState.lockedBy && lockState.lockedBy.userId !== user?.id ? (
+		                      <button
+		                        onClick={() => {
+		                          setLockInfoOpen(false);
+		                          window.dispatchEvent(
+		                            new CustomEvent('deskly_unlock_request', {
+		                              detail: {
+		                                planId,
+		                                planName: renderPlan.name,
+		                                clientName: client?.shortName || client?.name,
+		                                siteName: site?.name,
+		                                userId: lockState.lockedBy?.userId,
+		                                username: lockState.lockedBy?.username,
+		                                avatarUrl: (lockState.lockedBy as any)?.avatarUrl || ''
+		                              }
+		                            })
+		                          );
+		                        }}
+		                        className="mt-3 flex w-full items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+		                        title={t({ it: 'Chiedi unlock', en: 'Request unlock' })}
+		                      >
+		                        {t({ it: 'Chiedi unlock', en: 'Request unlock' })}
+		                      </button>
+		                    ) : null}
+		                    {isSuperAdmin && lockState.lockedBy && lockState.lockedBy.userId !== user?.id ? (
+		                      <button
+		                        onClick={() => {
+		                          setLockInfoOpen(false);
+		                          window.dispatchEvent(
+		                            new CustomEvent('deskly_force_unlock', {
+		                              detail: {
+		                                planId,
+		                                planName: renderPlan.name,
+		                                clientName: client?.shortName || client?.name,
+		                                siteName: site?.name,
+		                                userId: lockState.lockedBy?.userId,
+		                                username: lockState.lockedBy?.username,
+		                                avatarUrl: (lockState.lockedBy as any)?.avatarUrl || ''
+		                              }
+		                            })
+		                          );
+		                        }}
+		                        className="mt-2 flex w-full items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+		                        title={t({ it: 'Force unlock (Superadmin)', en: 'Force unlock (Superadmin)' })}
+		                      >
+		                        {t({ it: 'Force unlock', en: 'Force unlock' })}
+		                      </button>
+		                    ) : null}
+		                  </div>
+		                ) : null}
+		              </div>
+		            ) : null}
+		            {isReadOnly && !lockedByOther ? (
+		              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800">
+		                {activeRevision
+		                  ? t({ it: `Sola lettura: ${activeRevision.name}`, en: `Read-only: ${activeRevision.name}` })
+		                  : planAccess !== 'rw'
+		                    ? t({ it: 'Sola lettura (permessi)', en: 'Read-only (permissions)' })
+		                    : lockRequired
+		                      ? t({ it: 'Lock non acquisito', en: 'Lock not acquired' })
+		                      : t({ it: 'Sola lettura', en: 'Read-only' })}
+		              </span>
+		            ) : null}
 	            {lockRequired && !lockState.mine && lockAvailable ? (
 	              <button
 	                onClick={requestPlanLock}
@@ -7340,64 +7742,74 @@ const PlanView = ({ planId }: Props) => {
 	                {t({ it: 'Prendi lock', en: 'Acquire lock' })}
 	              </button>
 	            ) : null}
-            {presenceCount ? (
-              isSuperAdmin ? (
-                <div ref={presenceRef} className="relative">
-	                  <button
-	                    onClick={() => setPresenceOpen((v) => !v)}
-	                    className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-	                    title={t({ it: 'Mostra utenti online', en: 'Show online users' })}
-	                  >
-	                    {t({ it: `${presenceCount} utenti online`, en: `${presenceCount} users online` })}
-                  </button>
-                  {presenceOpen ? (
-                    <div className="absolute left-0 z-50 mt-2 w-56 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-card">
-                      <div className="flex items-center justify-between px-2 pb-2">
-                        <div className="font-semibold text-ink">{t({ it: 'Utenti online', en: 'Online users' })}</div>
-                        <button
-                          onClick={() => setPresenceOpen(false)}
-                          className="text-slate-400 hover:text-ink"
-                          title={t({ it: 'Chiudi', en: 'Close' })}
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                      <div className="max-h-48 space-y-2 overflow-y-auto px-1 pb-1">
-                        {presenceEntries.map((user) => (
-                          <div
-                            key={user.userId}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setPresenceMenu({ x: e.clientX, y: e.clientY, user });
-                            }}
-                            className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5"
-                          >
-                            <div className="text-xs font-semibold text-ink">{user.username || 'user'}</div>
-                            <div className="text-[11px] text-slate-500">
-                              {t({ it: 'Connesso', en: 'Connected' })}: {formatPresenceDate(user.connectedAt)}
-                            </div>
-                            <div className="text-[11px] text-slate-500">
-                              {t({ it: 'IP', en: 'IP' })}: {user.ip || '—'}
-                            </div>
-                            <div className="text-[11px] text-slate-500">
-                              {t({ it: 'Lock', en: 'Lock' })}: {formatPresenceLock(user.lock, user.locks)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-	                <span
-	                  className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
-	                  title={globalPresenceFallback.map((u) => u.username).join(', ')}
+	            {presenceCount ? (
+	              <div ref={presenceRef} className="relative">
+	                <button
+	                  onClick={() => setPresenceOpen((v) => !v)}
+	                  className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+	                  title={t({ it: 'Mostra utenti online', en: 'Show online users' })}
 	                >
 	                  {t({ it: `${presenceCount} utenti online`, en: `${presenceCount} users online` })}
-                </span>
-              )
-            ) : null}
+	                </button>
+	                {presenceOpen ? (
+	                  <div className="absolute left-0 z-50 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-card">
+	                    <div className="flex items-center justify-between px-2 pb-2">
+	                      <div className="font-semibold text-ink">{t({ it: 'Utenti online', en: 'Online users' })}</div>
+	                      <button
+	                        onClick={() => setPresenceOpen(false)}
+	                        className="text-slate-400 hover:text-ink"
+	                        title={t({ it: 'Chiudi', en: 'Close' })}
+	                      >
+	                        <X size={14} />
+	                      </button>
+	                    </div>
+		                    <div className="max-h-56 space-y-2 overflow-y-auto px-1 pb-1">
+			                      {presenceEntries.map((entry) => (
+			                        <div
+			                          key={entry.userId}
+			                          className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5"
+			                        >
+			                          <div className="flex items-start justify-between gap-2">
+			                            <div className="min-w-0">
+			                              <div className="flex items-center gap-2">
+			                                <UserAvatar src={(entry as any).avatarUrl} username={entry.username} size={18} />
+			                                <div className="min-w-0 text-xs font-semibold text-ink">{entry.username || 'user'}</div>
+			                              </div>
+			                            </div>
+				                            {entry.userId !== user?.id ? (
+				                              <button
+				                                onClick={() => openUnlockCompose(entry)}
+				                                disabled={
+				                                  !(
+				                                    (Array.isArray((entry as any).locks) && (entry as any).locks.length) ||
+				                                    (entry as any).lock
+				                                  )
+				                                }
+				                                className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+				                                title={t({ it: 'Richiedi unlock', en: 'Request unlock' })}
+				                              >
+				                                <Unlock size={14} />
+				                              </button>
+				                            ) : null}
+			                          </div>
+			                          <div className="text-[11px] text-slate-500">
+			                            {t({ it: 'Connesso', en: 'Connected' })}: {formatPresenceDate(entry.connectedAt)}
+			                          </div>
+			                          {isSuperAdmin ? (
+			                            <div className="text-[11px] text-slate-500">
+			                              {t({ it: 'IP', en: 'IP' })}: {entry.ip || '—'}
+			                            </div>
+			                          ) : null}
+		                          <div className="text-[11px] text-slate-500">
+		                            {t({ it: 'Lock', en: 'Lock' })}: {formatPresenceLock(entry.lock, entry.locks)}
+		                          </div>
+		                        </div>
+		                      ))}
+	                    </div>
+	                  </div>
+	                ) : null}
+	              </div>
+	            ) : null}
             {totalLayerCount ? (
               <div ref={layersPopoverRef} className="relative">
 	                <button
@@ -8200,35 +8612,32 @@ const PlanView = ({ planId }: Props) => {
                     ? 'border-primary bg-white text-primary hover:bg-slate-50'
                     : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
               }`}
-            >
-              <Ruler size={18} />
-            </button>
-            <ExportButton onClick={() => setExportModalOpen(true)} />
-            <VersionBadge />
-            <button
-              onClick={() => {
-                if (hasNavigationEdits && !isReadOnly) {
-                  requestSaveAndNavigate('/settings');
-                  return;
-                }
-                navigate('/settings');
-              }}
-              title={t({ it: 'Impostazioni', en: 'Settings' })}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
-            >
-              <Cog size={18} />
-            </button>
-            <button
-              onClick={openHelp}
-              title={t({ it: 'Aiuto', en: 'Help' })}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary shadow-card hover:bg-slate-50"
-            >
-              <HelpCircle size={18} />
-            </button>
-            <UserMenu />
-          </div>
-        </div>
-      </div>
+	            >
+	              <Ruler size={18} />
+	            </button>
+	            <PrinterMenuButton
+	              isReadOnly={isReadOnly}
+	              hasPrintArea={!!(basePlan as any)?.printArea}
+	              onSetPrintArea={() => {
+	                setPrintAreaMode(true);
+	                push(
+	                  t({
+	                    it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
+	                    en: 'Draw a rectangle on the map to set the print area.'
+	                  }),
+	                  'info'
+	                );
+	              }}
+	              onClearPrintArea={() => {
+	                updateFloorPlan(basePlan.id, { printArea: undefined });
+	                push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
+	              }}
+	              onExportPdf={() => setExportModalOpen(true)}
+	            />
+	            <UserMenu />
+	          </div>
+	        </div>
+	      </div>
 
       <div className="flex-1 min-h-0">
         <div className="relative flex h-full min-h-0 gap-4 overflow-hidden">
@@ -8955,59 +9364,20 @@ const PlanView = ({ planId }: Props) => {
         </div>
       ) : null}
 
-      {presenceMenu ? (
-        <div
-          ref={presenceMenuRef}
-          className="context-menu-panel fixed z-50 w-64 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
-          style={{ top: presenceMenu.y, left: presenceMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <span className="font-semibold text-ink">{t({ it: 'Utente online', en: 'Online user' })}</span>
-            <button
-              onClick={() => setPresenceMenu(null)}
-              className="text-slate-400 hover:text-ink"
-              title={t({ it: 'Chiudi', en: 'Close' })}
-            >
-              <X size={14} />
-            </button>
-          </div>
-          <div className="px-2 pt-2 text-sm font-semibold text-ink">{presenceMenu.user.username || 'user'}</div>
-          <div className="px-2 text-xs text-slate-500">
-            {t({ it: 'IP', en: 'IP' })}: {presenceMenu.user.ip || '—'}
-          </div>
-          <div className="mt-2 border-t border-slate-100 pt-2">
-            <div className="px-2 pb-1 text-xs font-semibold uppercase text-slate-500">
-              {t({ it: 'Chiedi unlock', en: 'Request unlock' })}
-            </div>
-            {(() => {
-              const locks =
-                Array.isArray(presenceMenu.user.locks) && presenceMenu.user.locks.length
-                  ? presenceMenu.user.locks
-                  : presenceMenu.user.lock
-                    ? [presenceMenu.user.lock]
-                    : [];
-              if (!locks.length) {
-                return <div className="px-2 py-1 text-xs text-slate-400">{t({ it: 'Nessun lock attivo', en: 'No active lock' })}</div>;
-              }
-              return locks.map((lock) => {
-                const path = [lock.clientName, lock.siteName, lock.planName].filter((v) => v && String(v).trim().length).join(' / ');
-                return (
-                  <button
-                    key={lock.planId}
-                    onClick={() => requestUnlockForUser(presenceMenu.user, lock)}
-                    className="flex w-full flex-col items-start gap-0.5 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
-                    title={t({ it: 'Chiedi unlock per questa planimetria', en: 'Request unlock for this floor plan' })}
-                  >
-                    <span className="text-sm text-ink">{t({ it: 'Chiedi unlock', en: 'Request unlock' })}</span>
-                    <span className="text-[11px] text-slate-500">{path || lock.planId}</span>
-                  </button>
-                );
-              });
-            })()}
-          </div>
-        </div>
-      ) : null}
+      <UnlockRequestComposeModal
+        open={!!unlockCompose}
+        target={
+          unlockCompose
+            ? { userId: unlockCompose.target.userId, username: unlockCompose.target.username, avatarUrl: (unlockCompose.target as any).avatarUrl }
+            : null
+        }
+        locks={unlockCompose?.locks || []}
+        onClose={() => setUnlockCompose(null)}
+	        onSend={({ targetUserId, planId, message, grantMinutes }) => {
+	          sendWs({ type: 'unlock_request', targetUserId, planId, message, grantMinutes });
+	          setUnlockCompose(null);
+	        }}
+	      />
 
       {contextMenu && plan ? (
         <>
@@ -9220,6 +9590,55 @@ const PlanView = ({ planId }: Props) => {
                               en: contextWifiRangeOn ? 'Hide range' : 'Show range'
                             })}
                           </button>
+                        ) : null}
+                        {contextIsWifi ? (
+                          <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                              <Ruler size={14} className="text-slate-500" />
+                              {t({ it: 'Range Wi-Fi', en: 'Wi-Fi range' })}
+                              <span className="ml-auto text-xs font-semibold text-slate-600 tabular-nums">
+                                x{contextWifiRangeScale.toFixed(2)}
+                              </span>
+                            </div>
+                              <input
+                                key={`${contextMenu.id}-wifi-range-scale`}
+                                type="range"
+                                min={0}
+                                max={WIFI_RANGE_SCALE_MAX}
+                                step={0.05}
+                                value={contextWifiRangeScale}
+                                onChange={(e) => {
+                                  if (!renderPlan) return;
+                                  const next = Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, Number(e.target.value) || 0));
+                                  const ids =
+                                    contextIsMulti && selectedObjectIds.length
+                                      ? selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'wifi')
+                                      : [contextMenu.id];
+                                  ids.forEach((id) => updateObject(id, { wifiRangeScale: next }));
+                                }}
+                                className="mt-1 w-full"
+                                title={t({ it: 'Estendi/riduci range (0..x20)', en: 'Extend/reduce range (0..x20)' })}
+                              />
+                              {contextWifiBaseRadiusM > 0 ? (
+                                <div className="mt-1 space-y-0.5 text-[11px] text-slate-500">
+                                  <div>
+                                    {t({ it: 'Base', en: 'Base' })}: r ~{Math.round(contextWifiBaseRadiusM)}m · d ~
+                                    {Math.round(contextWifiBaseDiameterM)}m · area ~{Math.round(contextWifiBaseAreaSqm)} m2
+                                  </div>
+                                  <div>
+                                    {t({ it: 'Effettivo', en: 'Effective' })}: r ~{Math.round(contextWifiEffectiveRadiusM)}m · d ~
+                                    {Math.round(contextWifiEffectiveDiameterM)}m · area ~{Math.round(contextWifiEffectiveAreaSqm)} m2
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  {t({
+                                    it: 'Imposta un coverage nel catalogo/proprietà per calcolare il range.',
+                                    en: 'Set coverage in catalog/properties to compute range.'
+                                  })}
+                                </div>
+                              )}
+                          </div>
                         ) : null}
                         {contextIsWall && contextWallPolygon ? (
                           <button
@@ -10549,6 +10968,7 @@ const PlanView = ({ planId }: Props) => {
             initialWifiCoverageSqm={(modalInitials as any)?.wifiCoverageSqm}
             initialWifiCatalogId={(modalInitials as any)?.wifiCatalogId}
             initialWifiShowRange={(modalInitials as any)?.wifiShowRange}
+            initialWifiRangeScale={(modalInitials as any)?.wifiRangeScale}
             wifiModels={client?.wifiAntennaModels}
             readOnly={isReadOnly}
             onClose={() => {
@@ -11946,23 +12366,34 @@ const PlanView = ({ planId }: Props) => {
                 leaveTo="opacity-0 scale-95"
               >
                 <Dialog.Panel className="w-full max-w-lg modal-panel">
-                  <div className="modal-header items-center">
-                    <div className="min-w-0">
-                      <Dialog.Title className="modal-title">
-                        {t({ it: 'Richiesta di unlock', en: 'Unlock request' })}
-                      </Dialog.Title>
+		                  <div className="modal-header items-center">
+		                    <div className="min-w-0">
+		                      <Dialog.Title className="modal-title">
+		                        {t({ it: 'Richiesta di unlock', en: 'Unlock request' })}
+		                      </Dialog.Title>
                       <div className="modal-description">
-                        {t({
-                          it: `L'amministratore del sistema chiede la possibilità di modificare la planimetria ${
-                            unlockPrompt?.planName || ''
-                          }.`,
-                          en: `The system administrator requests permission to edit floor plan ${unlockPrompt?.planName || ''}.`
-                        })}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {[unlockPrompt?.clientName, unlockPrompt?.siteName].filter(Boolean).join(' / ')}
-                      </div>
-                    </div>
+	                        {t({
+	                          it: `L’utente @${unlockPrompt?.requestedBy?.username || 'utente'} chiede la possibilità di modificare la planimetria ${
+	                            unlockPrompt?.planName || ''
+	                          }.`,
+	                          en: `User @${unlockPrompt?.requestedBy?.username || 'user'} requests permission to edit floor plan ${unlockPrompt?.planName || ''}.`
+	                        })}
+	                      </div>
+		                      <div className="mt-1 text-xs text-slate-500">
+		                        {[unlockPrompt?.clientName, unlockPrompt?.siteName].filter(Boolean).join(' / ')}
+		                      </div>
+		                      {String(unlockPrompt?.message || '').trim() ? (
+		                        <div className="mt-3 rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2">
+		                          <div className="text-[11px] font-semibold uppercase text-sky-700">
+			                            {t({ it: 'Messaggio', en: 'Message' })}{' '}
+			                            <span className="normal-case text-sky-700/80">@{unlockPrompt?.requestedBy?.username || 'admin'}</span>
+			                          </div>
+		                          <div className="mt-1 whitespace-pre-wrap text-sm font-semibold text-sky-950">
+		                            {String(unlockPrompt?.message || '').trim()}
+		                          </div>
+		                        </div>
+		                      ) : null}
+		                    </div>
                     <button
                       onClick={() => {
                         if (unlockBusy) return;
@@ -12039,11 +12470,412 @@ const PlanView = ({ planId }: Props) => {
 	            </div>
 	          </div>
 	        </Dialog>
-      </Transition>
+	      </Transition>
 
-      <PhotoViewerModal
-        open={!!photoViewer}
-        photos={photoViewer?.photos || []}
+	      <Transition show={!!unlockGrantedPrompt} as={Fragment}>
+	        <Dialog
+	          as="div"
+	          className="relative z-50"
+	          onClose={() => {
+	            setUnlockGrantedPrompt(null);
+	          }}
+	        >
+	          <Transition.Child
+	            as={Fragment}
+	            enter="ease-out duration-150"
+	            enterFrom="opacity-0"
+	            enterTo="opacity-100"
+	            leave="ease-in duration-100"
+	            leaveFrom="opacity-100"
+	            leaveTo="opacity-0"
+	          >
+	            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+	          </Transition.Child>
+	          <div className="fixed inset-0 overflow-y-auto">
+	            <div className="flex min-h-full items-center justify-center px-4 py-8">
+	              <Transition.Child
+	                as={Fragment}
+	                enter="ease-out duration-150"
+	                enterFrom="opacity-0 scale-95"
+	                enterTo="opacity-100 scale-100"
+	                leave="ease-in duration-100"
+	                leaveFrom="opacity-100 scale-100"
+	                leaveTo="opacity-0 scale-95"
+	              >
+	                <Dialog.Panel className="w-full max-w-xl modal-panel">
+	                  <div className="modal-header items-center">
+	                    <div className="min-w-0">
+	                      <Dialog.Title className="modal-title">{t({ it: 'Unlock concesso', en: 'Unlock granted' })}</Dialog.Title>
+	                      <div className="mt-1 text-xs text-slate-500">
+	                        {[unlockGrantedPrompt?.clientName, unlockGrantedPrompt?.siteName].filter(Boolean).join(' / ')}
+	                      </div>
+	                    </div>
+	                    <button onClick={() => setUnlockGrantedPrompt(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+	                      <X size={18} />
+	                    </button>
+	                  </div>
+		                  <div className="mt-3 text-sm text-slate-700">
+		                    {t({
+		                      it: `In data ${formatPresenceDate(unlockGrantedPrompt?.grantedAt)} l’utente ${
+		                        unlockGrantedPrompt?.grantedBy?.username || 'utente'
+		                      } ha concesso lo sblocco della planimetria ${unlockGrantedPrompt?.planName || ''}. Hai ${
+		                        unlockGrantedPrompt?.minutes || '—'
+		                      } minuti per entrarci e prendere il lock. Nel frattempo la planimetria sarà riservata a te e gli altri utenti vedranno un’icona a forma di clessidra. Vuoi aprire la planimetria e prendere il lock?`,
+		                      en: `On ${formatPresenceDate(unlockGrantedPrompt?.grantedAt)} user ${
+		                        unlockGrantedPrompt?.grantedBy?.username || 'user'
+		                      } granted an unlock for floor plan ${unlockGrantedPrompt?.planName || ''}. You have ${
+		                        unlockGrantedPrompt?.minutes || '—'
+		                      } minutes to enter and acquire the lock. In the meantime, the floor plan will be reserved for you and other users will see an hourglass icon. Do you want to open the floor plan and acquire the lock?`
+		                    })}
+		                  </div>
+	                  <div className="mt-5 flex flex-wrap gap-2">
+	                    <button
+	                      onClick={() => {
+	                        const targetPlanId = String(unlockGrantedPrompt?.planId || '').trim();
+	                        if (!targetPlanId) {
+	                          setUnlockGrantedPrompt(null);
+	                          return;
+	                        }
+	                        const url = `/plan/${targetPlanId}`;
+	                        setUnlockGrantedPrompt(null);
+	                        if (targetPlanId === planId) {
+	                          requestPlanLock();
+	                          return;
+	                        }
+	                        if (hasNavigationEdits) {
+	                          requestSaveAndNavigate(url);
+	                          return;
+	                        }
+	                        setSelectedPlan(targetPlanId);
+	                        navigate(url);
+	                      }}
+	                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+	                      title={t({ it: 'Apri e prendi lock', en: 'Open and acquire lock' })}
+	                    >
+	                      {t({ it: 'Sì', en: 'Yes' })}
+	                    </button>
+	                    <button
+	                      onClick={() => setUnlockGrantedPrompt(null)}
+	                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+	                      title={t({ it: 'Non ora', en: 'Not now' })}
+	                    >
+	                      {t({ it: 'No', en: 'No' })}
+	                    </button>
+	                  </div>
+	                </Dialog.Panel>
+	              </Transition.Child>
+	            </div>
+	          </div>
+	        </Dialog>
+	      </Transition>
+
+	      <Transition show={!!forceUnlockConfig} as={Fragment}>
+	        <Dialog
+	          as="div"
+	          className="relative z-50"
+	          onClose={() => {
+	            if (forceUnlockStarting) return;
+	            setForceUnlockConfig(null);
+	          }}
+	        >
+	          <Transition.Child
+	            as={Fragment}
+	            enter="ease-out duration-150"
+	            enterFrom="opacity-0"
+	            enterTo="opacity-100"
+	            leave="ease-in duration-100"
+	            leaveFrom="opacity-100"
+	            leaveTo="opacity-0"
+	          >
+	            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+	          </Transition.Child>
+	          <div className="fixed inset-0 overflow-y-auto">
+	            <div className="flex min-h-full items-center justify-center px-4 py-8">
+	              <Transition.Child
+	                as={Fragment}
+	                enter="ease-out duration-150"
+	                enterFrom="opacity-0 scale-95"
+	                enterTo="opacity-100 scale-100"
+	                leave="ease-in duration-100"
+	                leaveFrom="opacity-100 scale-100"
+	                leaveTo="opacity-0 scale-95"
+	              >
+	                <Dialog.Panel className="w-full max-w-xl modal-panel">
+	                  <div className="modal-header items-center">
+	                    <div className="min-w-0">
+	                      <Dialog.Title className="modal-title">{t({ it: 'Force unlock', en: 'Force unlock' })}</Dialog.Title>
+	                      <div className="mt-1 text-xs text-slate-500">
+	                        {forceUnlockConfig?.clientName} / {forceUnlockConfig?.siteName} / {forceUnlockConfig?.planName}
+	                      </div>
+	                    </div>
+	                    <button
+	                      onClick={() => {
+	                        if (forceUnlockStarting) return;
+	                        setForceUnlockConfig(null);
+	                      }}
+	                      className="icon-button"
+	                      title={t({ it: 'Chiudi', en: 'Close' })}
+	                    >
+	                      <X size={18} />
+	                    </button>
+	                  </div>
+	                  <div className="mt-3 text-sm text-slate-700">
+	                    {t({
+	                      it: `Vuoi procedere con lo sblocco forzato? L’utente ${forceUnlockConfig?.username || 'utente'} avrà del tempo per salvare.`,
+	                      en: `Proceed with the forced unlock? User ${forceUnlockConfig?.username || 'user'} will have some time to save.`
+	                    })}
+	                  </div>
+	                  <div className="mt-4">
+	                    <div className="flex items-center justify-between">
+	                      <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Tempo (minuti)', en: 'Time (minutes)' })}</div>
+	                      <div className="text-[11px] font-semibold text-slate-700">{forceUnlockGraceMinutes}</div>
+	                    </div>
+	                    <input
+	                      type="range"
+	                      min={0}
+	                      max={60}
+	                      step={1}
+	                      value={forceUnlockGraceMinutes}
+	                      onChange={(e) => setForceUnlockGraceMinutes(Number(e.target.value))}
+	                      className="mt-2 w-full"
+	                    />
+	                  </div>
+	                  <div className="mt-5 flex flex-wrap gap-2">
+	                    <button
+	                      onClick={() => {
+	                        if (!forceUnlockConfig) return;
+	                        if (forceUnlockStarting) return;
+	                        setForceUnlockStarting(true);
+	                        sendWs({
+	                          type: 'force_unlock_start',
+	                          planId: forceUnlockConfig.planId,
+	                          targetUserId: forceUnlockConfig.userId,
+	                          graceMinutes: forceUnlockGraceMinutes
+	                        });
+	                      }}
+	                      disabled={forceUnlockStarting}
+	                      className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
+	                      title={t({ it: 'Avvia force unlock', en: 'Start force unlock' })}
+	                    >
+	                      {t({ it: 'Conferma', en: 'Confirm' })}
+	                    </button>
+	                    <button
+	                      onClick={() => {
+	                        if (forceUnlockStarting) return;
+	                        setForceUnlockConfig(null);
+	                      }}
+	                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+	                      title={t({ it: 'Annulla', en: 'Cancel' })}
+	                    >
+	                      {t({ it: 'Annulla', en: 'Cancel' })}
+	                    </button>
+	                  </div>
+	                </Dialog.Panel>
+	              </Transition.Child>
+	            </div>
+	          </div>
+	        </Dialog>
+	      </Transition>
+
+		      <Transition show={!!forceUnlockActive} as={Fragment}>
+		        <Dialog as="div" className="relative z-50" onClose={() => {}}>
+		          <Transition.Child
+		            as={Fragment}
+		            enter="ease-out duration-150"
+	            enterFrom="opacity-0"
+	            enterTo="opacity-100"
+	            leave="ease-in duration-100"
+	            leaveFrom="opacity-100"
+	            leaveTo="opacity-0"
+	          >
+	            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+	          </Transition.Child>
+	          <div className="fixed inset-0 overflow-y-auto">
+	            <div className="flex min-h-full items-center justify-center px-4 py-8">
+	              <Transition.Child
+	                as={Fragment}
+	                enter="ease-out duration-150"
+	                enterFrom="opacity-0 scale-95"
+	                enterTo="opacity-100 scale-100"
+	                leave="ease-in duration-100"
+	                leaveFrom="opacity-100 scale-100"
+	                leaveTo="opacity-0 scale-95"
+	              >
+		                <Dialog.Panel className="w-full max-w-2xl modal-panel">
+		                  <div className="modal-header items-center">
+		                    <div className="min-w-0">
+		                      <Dialog.Title className="modal-title">{t({ it: 'Force unlock in corso', en: 'Force unlock in progress' })}</Dialog.Title>
+		                      <div className="mt-1 text-xs text-slate-500">
+		                        {t({
+		                          it: `Target: ${forceUnlockActive?.targetUsername || 'utente'}`,
+		                          en: `Target: ${forceUnlockActive?.targetUsername || 'user'}`
+		                        })}
+		                      </div>
+		                    </div>
+		                  </div>
+		                  <div className="mt-3 text-sm text-slate-700">
+		                    {(() => {
+		                      forceUnlockTick;
+		                      const deadlineAt = Number(forceUnlockActive?.deadlineAt || 0);
+	                      const remainingMs = deadlineAt - Date.now();
+	                      const remainingMin = Math.max(0, Math.ceil(remainingMs / 60_000));
+	                      return t({
+	                        it: `Countdown: ${remainingMin} minuti rimanenti.`,
+	                        en: `Countdown: ${remainingMin} minutes remaining.`
+	                      });
+		                    })()}
+		                  </div>
+		                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+		                    <div className="font-semibold text-ink">{t({ it: 'Modifiche non salvate', en: 'Unsaved changes' })}</div>
+		                    <div className="mt-1">
+		                      {forceUnlockActive?.hasUnsavedChanges === null || forceUnlockActive?.hasUnsavedChanges === undefined
+		                        ? t({ it: 'Stato non disponibile.', en: 'Status not available.' })
+		                        : forceUnlockActive?.hasUnsavedChanges
+		                          ? t({ it: 'Il proprietario del lock ha modifiche non salvate.', en: 'The lock owner has unsaved changes.' })
+		                          : t({ it: 'Il proprietario del lock non risulta avere modifiche non salvate.', en: 'The lock owner does not appear to have unsaved changes.' })}
+		                    </div>
+		                  </div>
+		                  <div className="mt-5 flex flex-wrap gap-2">
+		                    <button
+		                      onClick={() => {
+		                        if (!forceUnlockActive?.requestId) return;
+		                        sendWs({ type: 'force_unlock_execute', requestId: forceUnlockActive.requestId, action: 'save' });
+		                      }}
+		                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+		                      title={t({
+		                        it: 'Chiede al proprietario del lock di salvare le modifiche (se presenti) e rilasciare il lock. Il lock passerà al superadmin.',
+		                        en: 'Asks the lock owner to save changes (if any) and release the lock. The lock will be taken by the superadmin.'
+		                      })}
+		                    >
+		                      {t({ it: 'Salva e sblocca', en: 'Save and unlock' })}
+		                    </button>
+		                    <button
+		                      onClick={() => {
+		                        if (!forceUnlockActive?.requestId) return;
+		                        sendWs({ type: 'force_unlock_execute', requestId: forceUnlockActive.requestId, action: 'discard' });
+		                      }}
+		                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+		                      title={t({
+		                        it: 'Chiede al proprietario del lock di scartare le modifiche non salvate e rilasciare il lock. Il lock passerà al superadmin.',
+		                        en: 'Asks the lock owner to discard unsaved changes and release the lock. The lock will be taken by the superadmin.'
+		                      })}
+		                    >
+		                      {t({ it: 'Scarta e sblocca', en: 'Discard and unlock' })}
+		                    </button>
+		                    <button
+		                      onClick={() => {
+		                        if (!forceUnlockActive?.requestId) return;
+		                        sendWs({ type: 'force_unlock_cancel', requestId: forceUnlockActive.requestId });
+		                        setForceUnlockActive(null);
+		                        pushStack(t({ it: 'Force unlock annullato.', en: 'Force unlock cancelled.' }), 'info', { duration: LOCK_TOAST_MS });
+		                      }}
+		                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+		                      title={t({
+		                        it: 'Annulla la richiesta: il lock resta all’utente e l’avviso si chiude.',
+		                        en: 'Cancel the request: the lock remains with the user and the warning closes.'
+		                      })}
+		                    >
+		                      {t({ it: 'Annulla richiesta', en: 'Cancel request' })}
+		                    </button>
+		                  </div>
+		                </Dialog.Panel>
+	              </Transition.Child>
+	            </div>
+	          </div>
+	        </Dialog>
+	      </Transition>
+
+		      <Transition show={!!forceUnlockIncoming} as={Fragment}>
+		        <Dialog as="div" className="relative z-50" onClose={() => {}}>
+		          <Transition.Child
+		            as={Fragment}
+		            enter="ease-out duration-150"
+	            enterFrom="opacity-0"
+	            enterTo="opacity-100"
+	            leave="ease-in duration-100"
+	            leaveFrom="opacity-100"
+	            leaveTo="opacity-0"
+	          >
+	            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+	          </Transition.Child>
+	          <div className="fixed inset-0 overflow-y-auto">
+	            <div className="flex min-h-full items-center justify-center px-4 py-8">
+	              <Transition.Child
+	                as={Fragment}
+	                enter="ease-out duration-150"
+	                enterFrom="opacity-0 scale-95"
+	                enterTo="opacity-100 scale-100"
+	                leave="ease-in duration-100"
+	                leaveFrom="opacity-100 scale-100"
+	                leaveTo="opacity-0 scale-95"
+	              >
+		                <Dialog.Panel className="w-full max-w-xl modal-panel">
+		                  <div className="modal-header items-center">
+		                    <div className="min-w-0">
+		                      <Dialog.Title className="modal-title">{t({ it: 'Force unlock richiesto', en: 'Force unlock requested' })}</Dialog.Title>
+		                      <div className="mt-1 text-xs text-slate-500">
+		                        {[forceUnlockIncoming?.clientName, forceUnlockIncoming?.siteName, forceUnlockIncoming?.planName].filter(Boolean).join(' / ')}
+		                      </div>
+		                    </div>
+		                  </div>
+		                  <div className="mt-3 text-sm text-slate-700">
+		                    {(() => {
+	                      forceUnlockTick;
+	                      const deadlineAt = Number(forceUnlockIncoming?.deadlineAt || 0);
+	                      const remainingMs = deadlineAt - Date.now();
+	                      const remainingMin = Math.max(0, Math.ceil(remainingMs / 60_000));
+	                      return t({
+	                        it: `Il superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} ha avviato un force unlock. Tempo rimanente: ${remainingMin} minuti.`,
+	                        en: `Superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} started a force unlock. Remaining time: ${remainingMin} minutes.`
+	                      });
+		                    })()}
+		                  </div>
+		                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+		                    <div className="font-semibold text-ink">{t({ it: 'Modifiche non salvate', en: 'Unsaved changes' })}</div>
+		                    <div className="mt-1">
+		                      {hasNavigationEdits
+		                        ? t({ it: 'Sono presenti modifiche non salvate.', en: 'There are unsaved changes.' })
+		                        : t({ it: 'Non risultano modifiche non salvate.', en: 'No unsaved changes detected.' })}
+		                    </div>
+		                  </div>
+		                  <div className="mt-5 flex flex-wrap gap-2">
+		                    <button
+		                      onClick={() => {
+		                        if (!forceUnlockIncoming?.requestId) return;
+		                        void executeForceUnlock(forceUnlockIncoming.requestId, 'save');
+		                      }}
+		                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+		                      title={t({
+		                        it: 'Salva le modifiche (se presenti) e rilascia il lock.',
+		                        en: 'Saves changes (if any) and releases the lock.'
+		                      })}
+		                    >
+		                      {t({ it: 'Salva e rilascia', en: 'Save and release' })}
+		                    </button>
+		                    <button
+		                      onClick={() => {
+		                        if (!forceUnlockIncoming?.requestId) return;
+		                        void executeForceUnlock(forceUnlockIncoming.requestId, 'discard');
+		                      }}
+		                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+		                      title={t({
+		                        it: 'Scarta le modifiche non salvate e rilascia il lock.',
+		                        en: 'Discards unsaved changes and releases the lock.'
+		                      })}
+		                    >
+		                      {t({ it: 'Scarta e rilascia', en: 'Discard and release' })}
+		                    </button>
+		                  </div>
+		                </Dialog.Panel>
+	              </Transition.Child>
+	            </div>
+	          </div>
+	        </Dialog>
+	      </Transition>
+
+	      <PhotoViewerModal
+	        open={!!photoViewer}
+	        photos={photoViewer?.photos || []}
         initialId={photoViewer?.initialId}
         title={photoViewer?.title}
         countLabel={photoViewer?.countLabel}

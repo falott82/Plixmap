@@ -10,6 +10,7 @@ import UserModal from './UserModal';
 import PasswordModal from './PasswordModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { useT } from '../../i18n/useT';
+import UserAvatar from '../ui/UserAvatar';
 
 const UsersPanel = () => {
   const { clients } = useDataStore();
@@ -211,13 +212,23 @@ const UsersPanel = () => {
                 isStrictSuperAdmin ? 'bg-rose-50/70' : ''
               } hover:bg-slate-50`}
             >
-              <div>
-                <div className={`font-semibold ${isStrictSuperAdmin ? 'text-rose-600' : 'text-ink'}`}>{u.username}</div>
-                <div className="text-xs text-slate-500">
-                  {isStrictSuperAdmin ? 'Superadmin' : u.isAdmin ? 'Admin' : t({ it: 'Utente', en: 'User' })}
-                  {u.disabled ? ` • ${t({ it: 'Disattivato', en: 'Disabled' })}` : ''}
-                </div>
-              </div>
+	              <div>
+	                <div className="flex items-center gap-2">
+	                  <UserAvatar
+	                    src={(u as any).avatarUrl}
+	                    name={`${u.firstName} ${u.lastName}`.trim()}
+	                    username={u.username}
+	                    size={22}
+	                  />
+	                  <div className="min-w-0">
+	                    <div className={`font-semibold ${isStrictSuperAdmin ? 'text-rose-600' : 'text-ink'}`}>{u.username}</div>
+	                    <div className="text-xs text-slate-500">
+	                      {isStrictSuperAdmin ? 'Superadmin' : u.isAdmin ? 'Admin' : t({ it: 'Utente', en: 'User' })}
+	                      {u.disabled ? ` • ${t({ it: 'Disattivato', en: 'Disabled' })}` : ''}
+	                    </div>
+		                  </div>
+		                </div>
+		              </div>
               <div className="min-w-0">
                 <div className="truncate font-semibold text-ink">
                   {u.firstName} {u.lastName}

@@ -6,6 +6,8 @@ import { useDataStore } from '../../store/useDataStore';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
+import UserAvatar from '../ui/UserAvatar';
+import { fetchUserDirectory } from '../../api/usersDirectory';
 
 interface Props {
   open: boolean;
@@ -57,6 +59,7 @@ const RevisionsModal = ({
   const [comparePickOpen, setComparePickOpen] = useState(false);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [avatarByUserId, setAvatarByUserId] = useState<Record<string, string>>({});
 
   const byId = useMemo(() => new Map(defs.map((d) => [d.id, d])), [defs]);
   const iconOf = (id: string) => byId.get(id)?.icon;
@@ -67,6 +70,29 @@ const RevisionsModal = ({
     setComparePickOpen(false);
     setCompareOpen(false);
     setCompareIds([]);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    // Best-effort: resolve avatars for historical revisions where createdBy.avatarUrl wasn't stored.
+    fetchUserDirectory()
+      .then((res) => {
+        if (!alive) return;
+        const map: Record<string, string> = {};
+        for (const u of res.users || []) {
+          if (!u?.id) continue;
+          map[String(u.id)] = String((u as any).avatarUrl || '');
+        }
+        setAvatarByUserId(map);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setAvatarByUserId({});
+      });
+    return () => {
+      alive = false;
+    };
   }, [open]);
 
   const filtered = useMemo(() => {
@@ -287,8 +313,16 @@ const RevisionsModal = ({
                               ) : null}
                               <div className="mt-0.5 text-xs text-slate-500">{formatDate(r.createdAt)}</div>
                               {formatAuthor(r) ? (
-                                <div className="mt-0.5 text-xs text-slate-500">
-                                  {t({ it: 'Da', en: 'By' })}: {formatAuthor(r)}
+                                <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
+                                  <UserAvatar
+                                    src={(r as any)?.createdBy?.avatarUrl || avatarByUserId[String((r as any)?.createdBy?.id || '')]}
+                                    name={`${(r as any)?.createdBy?.firstName || ''} ${(r as any)?.createdBy?.lastName || ''}`.trim()}
+                                    username={(r as any)?.createdBy?.username}
+                                    size={16}
+                                  />
+                                  <span>
+                                    {t({ it: 'Da', en: 'By' })}: {formatAuthor(r)}
+                                  </span>
                                 </div>
                               ) : null}
                               {r.description ? (

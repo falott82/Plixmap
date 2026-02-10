@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Layers, History, Keyboard } from 'lucide-react';
+import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Lock, Layers, History, Keyboard } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
 import { shallow } from 'zustand/shallow';
 import { useT } from '../../i18n/useT';
@@ -19,6 +19,7 @@ const HelpPanel = () => {
     () => [
       { id: 'help-login', label: t({ it: 'Login & permessi', en: 'Login & permissions' }) },
       { id: 'help-navigation', label: t({ it: 'Navigazione & upload', en: 'Navigation & upload' }) },
+      { id: 'help-lock', label: t({ it: 'Lock planimetrie', en: 'Floor plan lock' }) },
       { id: 'help-objects', label: t({ it: 'Oggetti sulla mappa', en: 'Objects on the map' }) },
       { id: 'help-rooms', label: t({ it: 'Stanze logiche', en: 'Logical rooms' }) },
       { id: 'help-layers', label: t({ it: 'Livelli, griglia e collegamenti', en: 'Layers, grid and links' }) },
@@ -235,34 +236,10 @@ const HelpPanel = () => {
                           en: 'Links in notes: to open a link without leaving the editor, use Ctrl/Cmd+click on it.'
                         })}
                       </li>
-                      <li>
-                        {t({
-                          it: 'Nella modale Note cliente puoi anche gestire gli allegati PDF del cliente e vedere l’ultimo salvataggio. Se chiudi con modifiche non salvate viene chiesta conferma.',
-                          en: 'In the Client notes modal you can also manage the client PDF attachments and see the last saved info. If you close with unsaved changes, you will be prompted.'
-                        })}
-                      </li>
-                      <li>
-                        {t({
-                          it: 'Lock planimetrie: quando apri una planimetria con permessi di modifica, Deskly prova a prendere un lock esclusivo (durata 60s).',
-                          en: 'Floor plan lock: when you open a floor plan with edit permissions, Deskly tries to acquire an exclusive lock (60s TTL).'
-                        })}
-                      </li>
-                      <li>
-                        {t({
-                          it: 'Il lock si rinnova automaticamente finché usi mouse/tastiera. Se resti inattivo per 5 minuti il lock non si rinnova e scade dopo ~60s.',
-                          en: 'The lock auto-renews while you use mouse/keyboard. If you are idle for 5 minutes, it stops renewing and expires after ~60s.'
-                        })}
-                      </li>
-                      <li>
-                        {t({
-                          it: 'Gli altri utenti vedono la planimetria in sola lettura e possono prendere il lock quando torna libero.',
-                          en: 'Other users see the floor plan in read-only and can acquire the lock when it becomes available.'
-                        })}
-                      </li>
 	                      <li>
 	                        {t({
-	                          it: 'Superadmin: puoi chiedere l’unlock a un utente attivo; se non ha modifiche può concedere o negare. Se ha modifiche può salvare e concedere, annullare e concedere, o rifiutare.',
-	                          en: 'Superadmin: you can request unlock from an active user; if they have no changes they can grant or deny. If they have changes they can save and grant, discard and grant, or deny.'
+	                          it: 'Nella modale Note cliente puoi anche gestire gli allegati PDF del cliente e vedere l’ultimo salvataggio. Se chiudi con modifiche non salvate viene chiesta conferma.',
+	                          en: 'In the Client notes modal you can also manage the client PDF attachments and see the last saved info. If you close with unsaved changes, you will be prompted.'
 	                        })}
 	                      </li>
                       <li>
@@ -279,11 +256,84 @@ const HelpPanel = () => {
                       </li>
                       <li>{t({ it: 'Il file caricato diventa lo sfondo della mappa.', en: 'The uploaded file becomes the map background.' })}</li>
                     </ul>
-                  </div>
-                  <div data-help-block id="help-objects" className="rounded-xl bg-mist p-3">
-                    <div className="flex items-center gap-2 font-semibold text-ink">
-                      <MousePointerClick size={16} /> {t({ it: 'Oggetti sulla mappa', en: 'Objects on the map' })}
-                    </div>
+	                  </div>
+	                  <div data-help-block id="help-lock" className="rounded-xl bg-mist p-3">
+	                    <div className="flex items-center gap-2 font-semibold text-ink">
+	                      <Lock size={16} /> {t({ it: 'Lock planimetrie', en: 'Floor plan lock' })}
+	                    </div>
+	                    <ul className="ml-5 list-disc space-y-1 pt-2">
+	                      <li>
+	                        {t({
+	                          it: 'Quando apri una planimetria con permessi di modifica (RW), Deskly prova a prendere un lock esclusivo: solo un utente alla volta puo modificare.',
+	                          en: 'When you open a floor plan with edit permissions (RW), Deskly tries to acquire an exclusive lock: only one user at a time can edit.'
+	                        })}
+	                      </li>
+	                      <li>
+	                        {t({
+	                          it: 'Il lock non scade per inattivita: non decade dopo X minuti. Resta attivo finche non salvi esplicitamente oppure non concedi uno sblocco.',
+	                          en: 'The lock does not expire due to inactivity: it does not decay after X minutes. It stays active until you explicitly save or grant an unlock.'
+	                        })}
+	                      </li>
+	                      <li>
+	                        {t({
+	                          it: 'Se clicchi sull’icona del tuo lock (sia nella tree che in alto vicino al nome del piano) viene mostrata solo la finestrella informativa: non viene richiesta alcuna procedura di unlock, nemmeno per il superadmin.',
+	                          en: 'If you click your own lock icon (both in the tree and in the top bar near the plan name) you only get the info popover: no unlock flow is started, even for the superadmin.'
+	                        })}
+	                      </li>
+	                      <li>
+	                        {t({
+	                          it: 'Se clicchi sul lock di un altro utente, la finestrella mostra: Ultima azione, Ultimo salvataggio e Revisione dell’ultimo salvataggio.',
+	                          en: 'If you click another user’s lock, the popover shows: Last action, Last save, and the Revision of the last save.'
+	                        })}
+	                      </li>
+	                      <li>
+	                        {t({
+	                          it: 'Richiesta di unlock: qualsiasi utente con permessi RW puo chiedere l’unlock al detentore del lock. Nella richiesta puoi inserire un messaggio e scegliere un tempo (0,5..60 minuti) entro cui prendere possesso.',
+	                          en: 'Unlock request: any user with RW permissions can request an unlock from the lock owner. You can include a message and choose a time window (0.5..60 minutes) to take over.'
+	                        })}
+	                      </li>
+	                      <li>
+	                        {t({
+	                          it: 'Quando l’unlock viene concesso: il lock viene rilasciato subito e la planimetria viene riservata al richiedente per il tempo indicato (icona clessidra per gli altri utenti).',
+	                          en: 'When the unlock is granted: the lock is released immediately and the floor plan is reserved for the requester for the specified time (hourglass icon for other users).'
+	                        })}
+	                      </li>
+	                      <li>
+	                        {t({
+	                          it: 'Durante una riserva (clessidra), solo l’utente a cui e stato concesso puo entrare e prendere il lock. Gli altri restano in sola lettura finche la riserva scade o il lock viene preso.',
+	                          en: 'During a reservation (hourglass), only the granted user can enter and acquire the lock. Others remain read-only until the reservation expires or the lock is acquired.'
+	                        })}
+	                      </li>
+	                      <li>
+	                        {t({
+	                          it: 'Accettazione e presa possesso: quando lo sblocco viene concesso, al richiedente viene proposta una modale per aprire la planimetria e prendere il lock. Se sei su un’altra planimetria con modifiche non salvate, ti viene richiesto di salvarla prima di spostarti.',
+	                          en: 'Acceptance and takeover: when an unlock is granted, the requester gets a modal to open the floor plan and acquire the lock. If you are on another floor plan with unsaved changes, you will be asked to save before switching.'
+	                        })}
+	                      </li>
+		                      <li>
+		                        {t({
+		                          it: 'Force unlock (solo Superadmin): puoi avviare uno sblocco forzato con countdown (0..60 minuti). Durante il countdown il detentore del lock vede un avviso non chiudibile e puo solo scegliere “Salva e rilascia” oppure “Scarta e rilascia”. Il superadmin puo anche annullare la richiesta.',
+		                          en: 'Force unlock (Superadmin only): you can start a forced unlock with a countdown (0..60 minutes). During the countdown, the lock owner sees a non-dismissible warning and can only choose “Save and release” or “Discard and release”. The superadmin can also cancel the request.'
+		                        })}
+		                      </li>
+		                      <li>
+		                        {t({
+		                          it: 'Se durante un force unlock aggiorni la pagina, cambi pagina o chiudi il browser, e equivalente a scegliere “Scarta e rilascia” (le modifiche non salvate vengono perse).',
+		                          en: 'If during a force unlock you refresh the page, navigate away, or close the browser, it is equivalent to choosing “Discard and release” (unsaved changes are lost).'
+		                        })}
+		                      </li>
+		                      <li>
+		                        {t({
+		                          it: 'Se lo sblocco viene completato, il superadmin prende possesso del lock (subito se e gia dentro la planimetria; altrimenti con riserva/clessidra). Se la richiesta scade o viene annullata, il lock resta al detentore e puo continuare il suo lavoro.',
+		                          en: 'If the unlock is completed, the superadmin takes the lock (immediately if already in the floor plan; otherwise via a reservation/hourglass). If the request expires or is cancelled, the lock remains with the owner and they can keep working.'
+		                        })}
+		                      </li>
+	                    </ul>
+	                  </div>
+	                  <div data-help-block id="help-objects" className="rounded-xl bg-mist p-3">
+	                    <div className="flex items-center gap-2 font-semibold text-ink">
+	                      <MousePointerClick size={16} /> {t({ it: 'Oggetti sulla mappa', en: 'Objects on the map' })}
+	                    </div>
                     <ul className="ml-5 list-disc space-y-1 pt-2">
                       <li>
                         {t({

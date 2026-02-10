@@ -129,6 +129,7 @@ interface DataState {
         | 'wifiCoverageSqm'
         | 'wifiCatalogId'
         | 'wifiShowRange'
+        | 'wifiRangeScale'
         | 'points'
         | 'wallGroupId'
         | 'wallGroupIndex'
@@ -196,6 +197,7 @@ interface DataState {
         | 'wifiCoverageSqm'
         | 'wifiCatalogId'
         | 'wifiShowRange'
+        | 'wifiRangeScale'
         | 'points'
         | 'wallGroupId'
         | 'wallGroupIndex'
@@ -1077,11 +1079,17 @@ export const useDataStore = create<DataState>()(
       },
       addRevision: (floorPlanId, payload) => {
         const id = nanoid();
-        const actor = (() => {
-          const u = useAuthStore.getState().user as any;
-          if (!u) return undefined;
-          return { id: String(u.id), username: String(u.username), firstName: String(u.firstName || ''), lastName: String(u.lastName || '') };
-        })();
+	        const actor = (() => {
+	          const u = useAuthStore.getState().user as any;
+	          if (!u) return undefined;
+	          return {
+	            id: String(u.id),
+	            username: String(u.username),
+	            firstName: String(u.firstName || ''),
+	            lastName: String(u.lastName || ''),
+	            avatarUrl: String(u.avatarUrl || '')
+	          };
+	        })();
         set((state) => ({
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => {
             const bump = payload?.bump || 'minor';

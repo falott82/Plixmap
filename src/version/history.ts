@@ -8,6 +8,57 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.4.3',
+    date: '2026-02-10',
+    type: 'fix',
+    notes: [
+      n(
+        'Force unlock (Superadmin): rimossi “Vedi modifiche” e riepilogo; ora viene indicata solo la presenza di modifiche non salvate',
+        'Force unlock (Superadmin): removed “View changes” and summary; now shows only whether there are unsaved changes'
+      ),
+      n(
+        'Force unlock: avviso non chiudibile per il detentore del lock; può solo scegliere Salva e rilascia oppure Scarta e rilascia',
+        'Force unlock: non-dismissible warning for the lock owner; they can only choose Save+release or Discard+release'
+      ),
+      n(
+        'Force unlock: aggiunto pulsante “Annulla richiesta” per il superadmin; a scadenza/annullo il lock resta al detentore',
+        'Force unlock: added “Cancel request” button for superadmin; on expiry/cancel the lock stays with the owner'
+      )
+    ]
+  },
+  {
+    version: '2.4.2',
+    date: '2026-02-10',
+    type: 'minor',
+    notes: [
+      n('Lock planimetrie: rimosse scadenza per inattività e logica TTL', 'Floor plan locks: removed inactivity expiry and TTL logic'),
+      n('Unlock: richiesta disponibile per tutti gli utenti con tempo 0,5..60 minuti per prendere il lock (riserva con clessidra)', 'Unlock: requests available to all users with a 0.5..60 minute takeover window (hourglass reservation)'),
+      n('UI lock: popover con ultima azione, ultimo salvataggio e revisione; badge in alto cliccabile', 'Lock UI: popover shows last action, last save, and revision; top badge is clickable'),
+      n('Force unlock (Superadmin): countdown 0..60 minuti + “Vedi modifiche” e richiesta Salva/Scarta', 'Force unlock (Superadmin): 0..60 minute countdown + “View changes” and Save/Discard request')
+    ]
+  },
+  {
+    version: '2.4.1',
+    date: '2026-02-07',
+    type: 'fix',
+    notes: [
+      n('Chat: vocali stile WhatsApp (waveform), invio immediato allo stop e limite 10 minuti', 'Chat: WhatsApp-like voice notes (waveform), auto-send on stop, and 10-minute limit'),
+      n('Chat: ricerca nella conversazione, elenco messaggi importanti e separatori data', 'Chat: in-chat search, starred messages list, and day separators'),
+      n('Chat: reazioni aggiornate (aggiunto 👍/👎) e menu messaggi sistemato', 'Chat: updated reactions (added 👎) and fixed message action menu'),
+      n('Chat: svuota chat richiede digitare "DELETE" (Super Admin)', 'Chat: clearing chat requires typing "DELETE" (Super Admin)')
+    ]
+  },
+  {
+    version: '2.4.0',
+    date: '2026-02-07',
+    type: 'minor',
+    notes: [
+      n('Chat per cliente: messaggi realtime con allegati (max 5MB), export (TXT/JSON/HTML) e badge non letti', 'Client chat: realtime messages with attachments (max 5MB), exports (TXT/JSON/HTML), and unread badges'),
+      n('Chat: preview allegati stile WhatsApp, immagini in modale con download, elenco membri con stato online/offline', 'Chat: WhatsApp-like attachment preview, images in modal with download, members list with online/offline status'),
+      n('Wi-Fi: moltiplicatore range (0..x20) nelle proprietà e nel menu contestuale', 'Wi-Fi: range multiplier (0..x20) in properties and context menu')
+    ]
+  },
+  {
     version: '2.3.2',
     date: '2026-02-06',
     type: 'fix',

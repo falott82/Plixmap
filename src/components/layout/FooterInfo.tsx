@@ -1,6 +1,8 @@
 import { Github, Mail } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import PayPalIcon from '../ui/PayPalIcon';
+import { releaseHistory } from '../../version/history';
+import { useUIStore } from '../../store/useUIStore';
 
 interface Props {
   variant?: 'sidebar' | 'collapsed';
@@ -8,9 +10,18 @@ interface Props {
 
 const FooterInfo = ({ variant = 'sidebar' }: Props) => {
   const t = useT();
+  const openChangelog = useUIStore((s) => s.openChangelog);
+  const latest = releaseHistory[0]?.version || '0.0.0';
   if (variant === 'collapsed') {
     return (
       <div className="mt-auto flex flex-col items-center gap-2 pb-4">
+        <button
+          onClick={openChangelog}
+          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:text-ink"
+          title={t({ it: 'Apri changelog', en: 'Open changelog' })}
+        >
+          v{latest}
+        </button>
         <a
           href="https://github.com/falott82"
           target="_blank"
@@ -44,7 +55,18 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
   return (
     <div className="mt-auto border-t border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-semibold text-slate-700">Ottavio Falsini</span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-700">Ottavio Falsini</span>
+            <button
+              onClick={openChangelog}
+              className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 hover:text-ink"
+              title={t({ it: 'Apri changelog', en: 'Open changelog' })}
+            >
+              v{latest}
+            </button>
+          </div>
+        </div>
         <div className="flex items-center gap-1.5">
           <a
             href="https://github.com/falott82"

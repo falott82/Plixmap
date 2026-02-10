@@ -225,6 +225,7 @@ export interface MapObject {
   wifiCoverageSqm?: number;
   wifiCatalogId?: string;
   wifiShowRange?: boolean;
+  wifiRangeScale?: number; // 0..20 multiplier applied to coverage-derived radius
   roomId?: string;
   layerIds?: string[];
   cctvAngle?: number;
@@ -330,7 +331,7 @@ export interface FloorPlanView {
 export interface FloorPlanRevision {
   id: string;
   createdAt: number;
-  createdBy?: { id: string; username: string; firstName: string; lastName: string };
+  createdBy?: { id: string; username: string; firstName: string; lastName: string; avatarUrl?: string };
   immutable?: boolean;
   immutableBy?: { id: string; username: string };
   revMajor?: number;

@@ -100,6 +100,82 @@ const migrations = [
         db.exec("ALTER TABLE external_users ADD COLUMN mobile TEXT NOT NULL DEFAULT ''");
       }
     }
+  },
+  {
+    version: 6,
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info('users')").all().map((c) => c.name);
+      if (!cols.includes('avatarUrl')) {
+        db.exec("ALTER TABLE users ADD COLUMN avatarUrl TEXT NOT NULL DEFAULT ''");
+      }
+    }
+  },
+  {
+    version: 7,
+    up: (db) => {
+      const permCols = db.prepare("PRAGMA table_info('permissions')").all().map((c) => c.name);
+      if (permCols.length && !permCols.includes('chat')) {
+        db.exec('ALTER TABLE permissions ADD COLUMN chat INTEGER NOT NULL DEFAULT 0');
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS client_chat_messages (
+          id TEXT PRIMARY KEY,
+          clientId TEXT NOT NULL,
+          userId TEXT NOT NULL,
+          username TEXT NOT NULL,
+          avatarUrl TEXT NOT NULL DEFAULT '',
+          replyToId TEXT,
+          attachmentsJson TEXT NOT NULL DEFAULT '[]',
+          starredByJson TEXT NOT NULL DEFAULT '[]',
+          reactionsJson TEXT NOT NULL DEFAULT '{}',
+          text TEXT NOT NULL,
+          deleted INTEGER NOT NULL DEFAULT 0,
+          deletedAt INTEGER,
+          deletedById TEXT,
+          editedAt INTEGER,
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_client_createdAt ON client_chat_messages(clientId, createdAt);
+        CREATE TABLE IF NOT EXISTS client_chat_reads (
+          userId TEXT NOT NULL,
+          clientId TEXT NOT NULL,
+          lastReadAt INTEGER NOT NULL,
+          PRIMARY KEY(userId, clientId)
+        );
+      `);
+    }
+  }
+  ,
+  {
+    version: 8,
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info('client_chat_messages')").all().map((c) => c.name);
+      if (cols.length && !cols.includes('attachmentsJson')) {
+        db.exec("ALTER TABLE client_chat_messages ADD COLUMN attachmentsJson TEXT NOT NULL DEFAULT '[]'");
+      }
+    }
+  },
+  {
+    version: 9,
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info('client_chat_messages')").all().map((c) => c.name);
+      if (cols.length && !cols.includes('replyToId')) {
+        db.exec("ALTER TABLE client_chat_messages ADD COLUMN replyToId TEXT");
+      }
+      if (cols.length && !cols.includes('starredByJson')) {
+        db.exec("ALTER TABLE client_chat_messages ADD COLUMN starredByJson TEXT NOT NULL DEFAULT '[]'");
+      }
+    }
+  },
+  {
+    version: 10,
+    up: (db) => {
+      const cols = db.prepare("PRAGMA table_info('client_chat_messages')").all().map((c) => c.name);
+      if (cols.length && !cols.includes('reactionsJson')) {
+        db.exec("ALTER TABLE client_chat_messages ADD COLUMN reactionsJson TEXT NOT NULL DEFAULT '{}'");
+      }
+    }
   }
 ];
 
@@ -143,6 +219,7 @@ const openDb = () => {
       paletteFavoritesJson TEXT NOT NULL DEFAULT '[]',
       visibleLayerIdsByPlanJson TEXT NOT NULL DEFAULT '{}',
       mustChangePassword INTEGER NOT NULL DEFAULT 0,
+      avatarUrl TEXT NOT NULL DEFAULT '',
       firstName TEXT NOT NULL DEFAULT '',
       lastName TEXT NOT NULL DEFAULT '',
       phone TEXT NOT NULL DEFAULT '',
@@ -156,8 +233,34 @@ const openDb = () => {
       scopeType TEXT NOT NULL CHECK (scopeType IN ('client','site','plan')),
       scopeId TEXT NOT NULL,
       access TEXT NOT NULL CHECK (access IN ('ro','rw')),
+      chat INTEGER NOT NULL DEFAULT 0,
       UNIQUE(userId, scopeType, scopeId),
       FOREIGN KEY(userId) REFERENCES users(id) ON DELETE CASCADE
+    );
+	    CREATE TABLE IF NOT EXISTS client_chat_messages (
+	      id TEXT PRIMARY KEY,
+	      clientId TEXT NOT NULL,
+	      userId TEXT NOT NULL,
+	      username TEXT NOT NULL,
+	      avatarUrl TEXT NOT NULL DEFAULT '',
+	      replyToId TEXT,
+	      attachmentsJson TEXT NOT NULL DEFAULT '[]',
+	      starredByJson TEXT NOT NULL DEFAULT '[]',
+	      reactionsJson TEXT NOT NULL DEFAULT '{}',
+	      text TEXT NOT NULL,
+	      deleted INTEGER NOT NULL DEFAULT 0,
+	      deletedAt INTEGER,
+	      deletedById TEXT,
+	      editedAt INTEGER,
+	      createdAt INTEGER NOT NULL,
+	      updatedAt INTEGER NOT NULL
+	    );
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_client_createdAt ON client_chat_messages(clientId, createdAt);
+    CREATE TABLE IF NOT EXISTS client_chat_reads (
+      userId TEXT NOT NULL,
+      clientId TEXT NOT NULL,
+      lastReadAt INTEGER NOT NULL,
+      PRIMARY KEY(userId, clientId)
     );
     CREATE TABLE IF NOT EXISTS auth_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

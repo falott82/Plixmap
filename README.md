@@ -1,6 +1,6 @@
 # Deskly - Floor Plan Management
 
-Current version: **2.3.2**
+Current version: **2.4.3**
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -15,8 +15,23 @@ Note: This README was refreshed with a small formatting update.
 - Client tools: imported "Real users" directory (place "Real user" objects; Ctrl/Cmd+M to email), plus an IP map grouped by /24 (U to open URL) with searchable lists and PDF export
 - Rack editor with ports, links, and PDF export
 - Saved views, revisions (restore/immutable), and search/highlight
-- Exclusive floor plan lock with auto-renew (idle expires after ~60s), unlock requests, and immutable revisions
+- Exclusive floor plan lock (no inactivity expiry), unlock requests with takeover window, and immutable revisions
+- Client chat (per customer) with permissions, unread badge, exports, and attachments (images/docs)
 - Multi-user roles with per-plan permissions
+
+## Locks
+- A floor plan can be edited by only one user at a time (exclusive lock).
+- The lock does not expire due to inactivity: it stays active until the owner saves or grants an unlock.
+- Any user can request an unlock from the lock owner (optional message + takeover window 0.5..60 minutes). When granted, the lock is released immediately and reserved for the requester for the selected time.
+- Superadmins can start a force unlock with a countdown (0..60 minutes). During the countdown, the lock owner sees a non-dismissible warning and can only choose Save+release or Discard+release. The superadmin can cancel the request; if it expires/cancels, the lock remains with the owner. If it completes, the superadmin takes the lock (or gets an hourglass reservation).
+
+## Client chat
+- Each client can have a dedicated chat (permissions control who can access it for that client).
+- Unread messages show a badge; entering the chat marks it as read (WhatsApp-like behavior).
+- Messages support text + attachments (images/documents/videos, total max 5MB per message). Voice notes: up to 10 minutes.
+- Images open in an in-app modal (with download).
+- Users can edit their last messages within 30 minutes and delete their own messages; superadmins can delete any message or clear the whole chat.
+- Chat export: TXT/JSON/HTML.
 
 ## Screenshots
 ### Rack editor

@@ -4,7 +4,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { Hand } from 'lucide-react';
 import { FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
-import { WALL_LAYER_COLOR } from '../../store/data';
+import { WALL_LAYER_COLOR, WIFI_RANGE_SCALE_MAX } from '../../store/data';
+import { useUIStore } from '../../store/useUIStore';
 import { clamp } from '../../utils/geometry';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
@@ -2011,14 +2012,15 @@ const getRoomBounds = (room: any) => {
     return true;
   }, [onCreateRoom, perfEnabled, readOnly, roomDrawMode]);
 
-  useEffect(() => {
-    if (roomDrawMode !== 'poly') return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        finalizeDraftPoly();
-      }
-      if (e.key === 'Backspace') {
+	  useEffect(() => {
+	    if (roomDrawMode !== 'poly') return;
+	    const handler = (e: KeyboardEvent) => {
+	      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+	      if (e.key === 'Enter') {
+	        e.preventDefault();
+	        finalizeDraftPoly();
+	      }
+	      if (e.key === 'Backspace') {
         if (!draftPolyPointsRef.current.length) return;
         e.preventDefault();
         if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
@@ -2033,11 +2035,12 @@ const getRoomBounds = (room: any) => {
     return () => window.removeEventListener('keydown', handler);
   }, [finalizeDraftPoly, perfEnabled, roomDrawMode]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      const active = roomDragRef.current;
-      if (!active) return;
+	  useEffect(() => {
+	    const onKey = (e: KeyboardEvent) => {
+	      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+	      if (e.key !== 'Escape') return;
+	      const active = roomDragRef.current;
+	      if (!active) return;
       e.preventDefault();
       active.cancelled = true;
       try {
@@ -3585,9 +3588,10 @@ const getRoomBounds = (room: any) => {
             const cameraHandleY = isCamera ? Math.sin(cameraHandleAngle) * cameraHandleDistance : 0;
             const wifiCoverageSqm = isWifi ? Number((obj as any).wifiCoverageSqm || 0) : 0;
             const wifiShowRange = isWifi ? (obj as any).wifiShowRange !== false : false;
+            const wifiRangeScale = isWifi ? clamp(Number((obj as any).wifiRangeScale ?? 1) || 1, 0, WIFI_RANGE_SCALE_MAX) : 1;
             const wifiRangePx =
               isWifi && metersPerPixel && Number.isFinite(wifiCoverageSqm) && wifiCoverageSqm > 0
-                ? Math.sqrt(wifiCoverageSqm / Math.PI) / metersPerPixel
+                ? (Math.sqrt(wifiCoverageSqm / Math.PI) * wifiRangeScale) / metersPerPixel
                 : 0;
             const wifiRings =
               isWifi && wifiShowRange && wifiRangePx > 0 ? buildWifiRangeRings({ x: obj.x, y: obj.y }, wifiRangePx) : null;

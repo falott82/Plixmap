@@ -1,6 +1,7 @@
 export const uploadLimits = {
   planImageBytes: 12 * 1024 * 1024,
   logoImageBytes: 2 * 1024 * 1024,
+  avatarImageBytes: 2 * 1024 * 1024,
   noteImageBytes: 5 * 1024 * 1024,
   pdfBytes: 20 * 1024 * 1024
 };

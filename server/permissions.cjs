@@ -1,7 +1,7 @@
 const getUserWithPermissions = (db, userId) => {
   const user = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, paletteFavoritesJson, visibleLayerIdsByPlanJson, mustChangePassword, tokenVersion, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
+      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, paletteFavoritesJson, visibleLayerIdsByPlanJson, mustChangePassword, tokenVersion, avatarUrl, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
     )
     .get(userId);
   if (!user) return null;
@@ -50,8 +50,14 @@ const getUserWithPermissions = (db, userId) => {
   const permissions = isAdmin
     ? []
     : db
-        .prepare('SELECT scopeType, scopeId, access FROM permissions WHERE userId = ? ORDER BY scopeType, scopeId')
-        .all(userId);
+        .prepare('SELECT scopeType, scopeId, access, chat FROM permissions WHERE userId = ? ORDER BY scopeType, scopeId')
+        .all(userId)
+        .map((p) => ({
+          scopeType: p.scopeType,
+          scopeId: p.scopeId,
+          access: p.access,
+          chat: !!p.chat
+        }));
   // Do not leak raw JSON column.
   delete user.clientOrderJson;
   delete user.paletteFavoritesJson;

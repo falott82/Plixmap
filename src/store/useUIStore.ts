@@ -13,6 +13,7 @@ interface UIState {
   panForPlan: Record<string, { zoom: number; pan: { x: number; y: number } }>;
   highlight?: HighlightState;
   helpOpen: boolean;
+  changelogOpen: boolean;
   sidebarCollapsed: boolean;
   lastObjectScale: number;
   dirtyByPlan: Record<string, boolean>;
@@ -23,7 +24,31 @@ interface UIState {
   showGrid: boolean;
   showPrintAreaByPlan: Record<string, boolean>;
   roomCapacityStateByPlan: Record<string, Record<string, { userCount: number; capacity?: number }>>;
-  lockedPlans: Record<string, { userId: string; username: string }>;
+  lockedPlans: Record<
+    string,
+    | {
+        kind?: 'lock';
+        userId: string;
+        username: string;
+        avatarUrl?: string;
+        lastActionAt?: number | null;
+        lastSavedAt?: number | null;
+        lastSavedRev?: string | null;
+      }
+    | {
+        kind: 'grant';
+        userId: string;
+        username: string;
+        avatarUrl?: string;
+        grantedAt?: number | null;
+        expiresAt?: number | null;
+        minutes?: number | null;
+        grantedBy?: { userId: string; username: string } | null;
+        lastActionAt?: number | null;
+        lastSavedAt?: number | null;
+        lastSavedRev?: string | null;
+      }
+  >;
   perfOverlayEnabled: boolean;
   hiddenLayersByPlan: Record<string, boolean>;
   expandedClients: Record<string, boolean>;
@@ -38,6 +63,11 @@ interface UIState {
   lastQuoteDashed: boolean;
   lastQuoteEndpoint: 'arrows' | 'dots' | 'none';
   pendingPostSaveAction: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null;
+  clientChatOpen: boolean;
+  clientChatClientId: string | null;
+  clientChatDockHeight: number;
+  chatUnreadByClientId: Record<string, number>;
+  onlineUserIds: Record<string, true>;
   setSelectedPlan: (id?: string) => void;
   setSelectedObject: (id?: string) => void;
   setSelection: (ids: string[]) => void;
@@ -51,6 +81,8 @@ interface UIState {
   loadViewport: (planId: string) => { zoom: number; pan: { x: number; y: number } } | undefined;
   openHelp: () => void;
   closeHelp: () => void;
+  openChangelog: () => void;
+  closeChangelog: () => void;
   triggerHighlight: (objectId: string, durationMs?: number) => void;
   toggleSidebar: () => void;
   setPlanDirty: (planId: string, dirty: boolean) => void;
@@ -64,7 +96,25 @@ interface UIState {
   setShowGrid: (show: boolean) => void;
   toggleShowPrintArea: (planId: string) => void;
   setRoomCapacityState: (planId: string, state: Record<string, { userCount: number; capacity?: number }>) => void;
-  setLockedPlans: (payload: Record<string, { userId: string; username: string }>) => void;
+  setLockedPlans: (
+    payload: Record<
+      string,
+      | { kind?: 'lock'; userId: string; username: string; avatarUrl?: string; lastActionAt?: number | null; lastSavedAt?: number | null; lastSavedRev?: string | null }
+      | {
+          kind: 'grant';
+          userId: string;
+          username: string;
+          avatarUrl?: string;
+          grantedAt?: number | null;
+          expiresAt?: number | null;
+          minutes?: number | null;
+          grantedBy?: { userId: string; username: string } | null;
+          lastActionAt?: number | null;
+          lastSavedAt?: number | null;
+          lastSavedRev?: string | null;
+        }
+    >
+  ) => void;
   togglePerfOverlay: () => void;
   setHideAllLayers: (planId: string, hidden: boolean) => void;
   setExpandedClients: (expanded: Record<string, boolean>) => void;
@@ -82,6 +132,13 @@ interface UIState {
   setLastQuoteEndpoint: (value: 'arrows' | 'dots' | 'none') => void;
   setPendingPostSaveAction: (action: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null) => void;
   clearPendingPostSaveAction: () => void;
+  openClientChat: (clientId: string) => void;
+  closeClientChat: () => void;
+  setClientChatDockHeight: (height: number) => void;
+  setChatUnreadByClientId: (payload: Record<string, number>) => void;
+  clearChatUnread: (clientId: string) => void;
+  bumpChatUnread: (clientId: string, delta: number) => void;
+  setOnlineUserIds: (userIds: string[]) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -93,6 +150,7 @@ export const useUIStore = create<UIState>()(
       selectedObjectIds: [],
       selectedRevisionByPlan: {},
       helpOpen: false,
+      changelogOpen: false,
       sidebarCollapsed: false,
       lastObjectScale: 1,
       dirtyByPlan: {},
@@ -118,6 +176,11 @@ export const useUIStore = create<UIState>()(
       lastQuoteDashed: false,
       lastQuoteEndpoint: 'arrows',
       pendingPostSaveAction: null,
+      clientChatOpen: false,
+      clientChatClientId: null,
+      clientChatDockHeight: 0,
+      chatUnreadByClientId: {},
+      onlineUserIds: {},
       setSelectedPlan: (id) => set({ selectedPlanId: id, selectedObjectId: undefined, selectedObjectIds: [] }),
       setSelectedObject: (id) =>
         set({
@@ -156,6 +219,8 @@ export const useUIStore = create<UIState>()(
       loadViewport: (planId) => get().panForPlan[planId],
       openHelp: () => set({ helpOpen: true }),
       closeHelp: () => set({ helpOpen: false }),
+      openChangelog: () => set({ changelogOpen: true }),
+      closeChangelog: () => set({ changelogOpen: false }),
       triggerHighlight: (objectId, durationMs = 3200) =>
         set({ highlight: { objectId, until: Date.now() + durationMs } }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed }))
@@ -232,11 +297,36 @@ export const useUIStore = create<UIState>()(
       setLastQuoteDashed: (value) => set({ lastQuoteDashed: !!value }),
       setLastQuoteEndpoint: (value) => set({ lastQuoteEndpoint: value || 'arrows' }),
       setPendingPostSaveAction: (action) => set({ pendingPostSaveAction: action }),
-      clearPendingPostSaveAction: () => set({ pendingPostSaveAction: null })
+      clearPendingPostSaveAction: () => set({ pendingPostSaveAction: null }),
+      openClientChat: (clientId) => set({ clientChatOpen: true, clientChatClientId: clientId }),
+      closeClientChat: () => set({ clientChatOpen: false }),
+      setClientChatDockHeight: (height) => set({ clientChatDockHeight: Math.max(0, Number(height) || 0) }),
+      setChatUnreadByClientId: (payload) => set({ chatUnreadByClientId: { ...(payload || {}) } }),
+      clearChatUnread: (clientId) =>
+        set((state) => {
+          const next = { ...(state.chatUnreadByClientId || {}) };
+          delete next[clientId];
+          return { chatUnreadByClientId: next };
+        }),
+      bumpChatUnread: (clientId, delta) =>
+        set((state) => {
+          const current = Number(state.chatUnreadByClientId?.[clientId] || 0);
+          const nextVal = Math.max(0, current + (Number(delta) || 0));
+          return { chatUnreadByClientId: { ...(state.chatUnreadByClientId || {}), [clientId]: nextVal } };
+        }),
+      setOnlineUserIds: (userIds) =>
+        set(() => {
+          const next: Record<string, true> = {};
+          for (const id of Array.isArray(userIds) ? userIds : []) {
+            if (!id) continue;
+            next[String(id)] = true;
+          }
+          return { onlineUserIds: next };
+        })
     }),
     {
       name: 'deskly-ui',
-      version: 7,
+      version: 8,
       migrate: (persistedState: any, _version: number) => {
         if (persistedState && typeof persistedState === 'object') {
           // Do not persist time-machine selection across reloads (always start from "present").
@@ -252,6 +342,7 @@ export const useUIStore = create<UIState>()(
           if (!('lastQuoteLabelColor' in persistedState)) persistedState.lastQuoteLabelColor = '#0f172a';
           if (!('lastQuoteDashed' in persistedState)) persistedState.lastQuoteDashed = false;
           if (!('lastQuoteEndpoint' in persistedState)) persistedState.lastQuoteEndpoint = 'arrows';
+          if (!('chatUnreadByClientId' in persistedState)) persistedState.chatUnreadByClientId = {};
         }
         return persistedState as any;
       },
@@ -269,6 +360,7 @@ export const useUIStore = create<UIState>()(
         perfOverlayEnabled: state.perfOverlayEnabled,
         expandedClients: state.expandedClients,
         expandedSites: state.expandedSites,
+        chatUnreadByClientId: state.chatUnreadByClientId,
         lastQuoteScale: state.lastQuoteScale,
         lastQuoteColor: state.lastQuoteColor,
         lastQuoteLabelPosH: state.lastQuoteLabelPosH,

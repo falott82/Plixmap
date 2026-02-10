@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import SidebarTree from './components/layout/SidebarTree';
 import HelpPanel from './components/layout/HelpPanel';
+import ChangelogPanel from './components/layout/ChangelogPanel';
 import ToastStack from './components/ui/ToastStack';
 import PlanView from './components/plan/PlanView';
 import SettingsView from './components/settings/SettingsView';
@@ -18,6 +19,8 @@ import EmptyWorkspace from './components/layout/EmptyWorkspace';
 import { useT } from './i18n/useT';
 import PerfOverlay from './components/dev/PerfOverlay';
 import { perfMetrics } from './utils/perfMetrics';
+import ClientChatDock from './components/chat/ClientChatDock';
+import ClientChatWs from './components/chat/ClientChatWs';
 
 const PlanRoute = () => {
   const { planId } = useParams();
@@ -522,6 +525,9 @@ const App = () => {
         </Routes>
       </main>
       <HelpPanel />
+      <ChangelogPanel />
+      <ClientChatWs />
+      <ClientChatDock />
       <ConfirmDialog
         open={firstRunPromptOpen}
         title={t({ it: 'Superadmin creato con successo', en: 'Superadmin created successfully' })}

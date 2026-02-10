@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, HelpCircle, Mail, Heart } from 'lucide-react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, Mail, Heart } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -21,7 +21,6 @@ import SiteModal from './SiteModal';
 import ObjectTypesPanel from './ObjectTypesPanel';
 import BackupPanel from './BackupPanel';
 import CustomImportPanel from './CustomImportPanel';
-import VersionBadge from '../ui/VersionBadge';
 import EmailSettingsPanel from './EmailSettingsPanel';
 import DonationsPanel from './DonationsPanel';
 import LayersPanel from './LayersPanel';
@@ -64,7 +63,7 @@ const SettingsView = () => {
   const [planPreview, setPlanPreview] = useState<{ name: string; imageUrl: string } | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { selectedPlanId, setSelectedPlan, openHelp } = useUIStore();
+  const { selectedPlanId, setSelectedPlan } = useUIStore();
   const { user } = useAuthStore();
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
   const isAdmin = !!user?.isAdmin || isSuperAdmin;
@@ -193,7 +192,7 @@ const SettingsView = () => {
           <p className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Impostazioni', en: 'Settings' })}</p>
           <h1 className="text-2xl font-semibold text-ink">&nbsp;</h1>
         </div>
-        <div className="flex items-center gap-2">
+	        <div className="flex items-center gap-2">
             <button
               onClick={() => {
                 const target = defaultPlanId || selectedPlanId || firstPlanId;
@@ -207,17 +206,9 @@ const SettingsView = () => {
               <ArrowLeftCircle size={16} />
             {t({ it: 'Area di lavoro', en: 'Workspace' })}
           </button>
-          <VersionBadge />
-          <button
-            onClick={openHelp}
-            title={t({ it: 'Aiuto', en: 'Help' })}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-primary shadow-card hover:bg-slate-50"
-          >
-            <HelpCircle size={18} />
-          </button>
-          <UserMenu />
-        </div>
-      </div>
+	          <UserMenu />
+	        </div>
+	      </div>
 
       <div className={`mb-4 flex flex-wrap items-center gap-2 ${modalActive ? 'pointer-events-none opacity-30' : ''}`} aria-hidden={modalActive}>
         {isAdmin ? (
