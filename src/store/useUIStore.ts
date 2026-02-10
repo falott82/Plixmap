@@ -16,6 +16,8 @@ interface UIState {
   changelogOpen: boolean;
   sidebarCollapsed: boolean;
   presentationMode: boolean;
+  presentationWebcamEnabled: boolean;
+  presentationWebcamCalib: { pinchRatio: number } | null;
   lastObjectScale: number;
   dirtyByPlan: Record<string, boolean>;
   pendingSaveNavigateTo?: string | null;
@@ -92,6 +94,8 @@ interface UIState {
   toggleSidebar: () => void;
   setPresentationMode: (enabled: boolean) => void;
   togglePresentationMode: () => void;
+  setPresentationWebcamEnabled: (enabled: boolean) => void;
+  setPresentationWebcamCalib: (calib: { pinchRatio: number } | null) => void;
   setPlanDirty: (planId: string, dirty: boolean) => void;
   requestSaveAndNavigate: (to: string) => void;
   clearPendingSaveNavigate: () => void;
@@ -166,6 +170,8 @@ export const useUIStore = create<UIState>()(
       changelogOpen: false,
       sidebarCollapsed: false,
       presentationMode: false,
+      presentationWebcamEnabled: false,
+      presentationWebcamCalib: null,
       lastObjectScale: 1,
       dirtyByPlan: {},
       pendingSaveNavigateTo: null,
@@ -245,6 +251,9 @@ export const useUIStore = create<UIState>()(
       ,
       setPresentationMode: (enabled) => set({ presentationMode: !!enabled }),
       togglePresentationMode: () => set((state) => ({ presentationMode: !state.presentationMode })),
+      setPresentationWebcamEnabled: (enabled) => set({ presentationWebcamEnabled: !!enabled }),
+      setPresentationWebcamCalib: (calib) =>
+        set(() => ({ presentationWebcamCalib: calib && Number.isFinite((calib as any).pinchRatio) ? calib : null })),
       setPlanDirty: (planId, dirty) =>
         set((state) => ({
           dirtyByPlan: { ...state.dirtyByPlan, [planId]: dirty }
