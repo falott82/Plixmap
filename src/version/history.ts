@@ -37,8 +37,8 @@ export const releaseHistory: ReleaseNote[] = [
         'Blocks: block/unblock users with WhatsApp-like behavior; profile hidden when blocked'
       ),
       n(
-        'Layout chat: pannello ridimensionabile + divisorio trascinabile con preferenze salvate sull’account; scorciatoie C/P e Ctrl+P',
-        'Chat layout: resizable panel + draggable divider with preferences saved on the account; shortcuts C/P and Ctrl+P'
+        'Layout chat: pannello ridimensionabile + divisorio trascinabile con preferenze salvate sull’account; scorciatoie Cmd+K/P e Ctrl+P',
+        'Chat layout: resizable panel + draggable divider with preferences saved on the account; shortcuts Cmd+K/P and Ctrl+P'
       )
     ]
   },

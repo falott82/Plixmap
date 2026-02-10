@@ -213,13 +213,15 @@ const App = () => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
       const isTyping = tag === 'input' || tag === 'textarea' || target?.isContentEditable;
-      if (isTyping) return;
 
-      // Toggle chat with `C` (bubble phase so PlanView can keep using `C` for text color when applicable).
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'c') {
+      // Toggle chat with Cmd+K / Ctrl+K (WhatsApp-like).
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
         useUIStore.getState().toggleClientChat?.();
         return;
       }
+
+      if (isTyping) return;
 
       // Presentation mode with `P`: toggle fullscreen and collapse sidebar.
       if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {

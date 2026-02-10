@@ -272,7 +272,6 @@ const ClientChatDock = () => {
   const [clearChatTyped, setClearChatTyped] = useState('');
   const [clearChatBusy, setClearChatBusy] = useState(false);
   const [unstarConfirmId, setUnstarConfirmId] = useState<string | null>(null);
-  const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [leftSearchQ, setLeftSearchQ] = useState('');
   const [leftCompact, setLeftCompact] = useState(false);
   const [leftGroupsCollapsed, setLeftGroupsCollapsed] = useState(false);
@@ -295,7 +294,6 @@ const ClientChatDock = () => {
   }, [pendingAttachments]);
   const listRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
-  const clientPickerRef = useRef<HTMLDivElement | null>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -622,6 +620,7 @@ const ClientChatDock = () => {
   const helpItems = useMemo(() => {
     const voiceMins = Math.round(MAX_VOICE_SECONDS / 60);
     return [
+      { k: 'Cmd+K / Ctrl+K / Esc', v: t({ it: 'Chiudi chat', en: 'Close chat' }) },
       { k: 'Enter', v: t({ it: 'Invia messaggio', en: 'Send message' }) },
       { k: 'Shift+Enter', v: t({ it: 'A capo', en: 'New line' }) },
       { k: 'Alt+M', v: t({ it: 'Modifica ultimo messaggio (entro 30 minuti)', en: 'Edit last message (within 30 minutes)' }) },
@@ -703,7 +702,6 @@ const ClientChatDock = () => {
     setLoading(true);
     setExportOpen(false);
     setMembersOpen(false);
-    setClientPickerOpen(false);
     fetchChatMessages(clientChatClientId, { limit: 300 })
       .then((payload) => {
         setActiveDmMeta((payload as any)?.dm || null);
@@ -831,18 +829,6 @@ const ClientChatDock = () => {
 
   // Export and members are rendered as centered modals (not header dropdowns),
   // so they don't need "click-outside" handlers here.
-
-  useEffect(() => {
-    if (!clientPickerOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node | null;
-      if (!target) return;
-      if (clientPickerRef.current?.contains(target)) return;
-      setClientPickerOpen(false);
-    };
-    window.addEventListener('mousedown', onDown, true);
-    return () => window.removeEventListener('mousedown', onDown, true);
-  }, [clientPickerOpen]);
 
   useEffect(() => {
     if (!clientChatOpen) return;
@@ -1776,10 +1762,6 @@ const ClientChatDock = () => {
       setSearchOpen(false);
       return;
     }
-    if (clientPickerOpen) {
-      setClientPickerOpen(false);
-      return;
-    }
     if (membersOpen) {
       setMembersOpen(false);
       return;
@@ -2088,87 +2070,16 @@ const ClientChatDock = () => {
                         <div className="flex min-w-0 flex-1 flex-col">
 	                  <div className="relative z-[40] flex items-center justify-between gap-2 border-b border-slate-800 bg-slate-900 px-3 py-2">
                     <div className="min-w-0">
-	                      <div className="relative" ref={clientPickerRef}>
-	                        {chatClients.length > 1 ? (
-	                          <button
-	                            type="button"
-	                            className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-sm font-semibold text-slate-50 hover:bg-slate-800"
-	                            onClick={() => {
-	                              setClientPickerOpen((v) => !v);
-	                              setMembersOpen(false);
-	                              setExportOpen(false);
-	                              setHelpOpen(false);
-	                              setClearChatOpen(false);
-	                            }}
-	                            title={t({ it: 'Cambia chat cliente', en: 'Switch client chat' })}
-	                          >
-	                            <span className="inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-md border border-slate-700 bg-slate-950/60">
-	                              {clientLogoUrl ? (
-	                                <img src={clientLogoUrl} alt="" className="h-full w-full object-cover" draggable={false} />
-	                              ) : (
-	                                <span className="text-[12px] font-extrabold text-slate-200">{clientInitial}</span>
-	                              )}
-	                            </span>
-	                            <span className="truncate">{clientName}</span>
-	                            <ChevronDown size={16} className="text-slate-300" />
-	                          </button>
-	                        ) : (
-	                          <Dialog.Title className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-50">
-	                            <span className="inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-md border border-slate-700 bg-slate-950/60">
-	                              {clientLogoUrl ? (
-	                                <img src={clientLogoUrl} alt="" className="h-full w-full object-cover" draggable={false} />
-	                              ) : (
-	                                <span className="text-[12px] font-extrabold text-slate-200">{clientInitial}</span>
-	                              )}
-	                            </span>
-	                            <span className="truncate">{clientName}</span>
-	                          </Dialog.Title>
-	                        )}
-	                        {clientPickerOpen ? (
-	                          <div className="absolute left-0 top-full z-[60] mt-2 w-72 rounded-2xl border border-slate-700 bg-slate-950 p-1 text-sm shadow-2xl ring-1 ring-black/60">
-		                            {chatClients.map((c) => {
-		                              const active = c.id === clientChatClientId;
-		                              const unread = Number((chatUnreadByClientId as any)?.[c.id] || 0);
-		                              const logo = String((c as any)?.logoUrl || '').trim();
-		                              const initial = (String(c.name || '').trim()?.[0] || '?').toUpperCase();
-		                              return (
-		                                <button
-		                                  key={c.id}
-		                                  className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 hover:bg-slate-900 ${
-		                                    active ? 'bg-slate-900' : ''
-		                                  }`}
-                                  onClick={() => {
-                                    setClientPickerOpen(false);
-                                    setMembersOpen(false);
-                                    setExportOpen(false);
-                                    setMediaModal(null);
-                                    setMessageInfoId(null);
-                                    setReplyToId(null);
-                                    openClientChat(c.id);
-                                  }}
-                                  title={c.name}
-		                                >
-		                                  <span className="flex min-w-0 items-center gap-2">
-		                                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-700 bg-slate-950/60">
-		                                      {logo ? (
-		                                        <img src={logo} alt="" className="h-full w-full object-cover" draggable={false} />
-		                                      ) : (
-		                                        <span className="text-[12px] font-extrabold text-slate-200">{initial}</span>
-		                                      )}
-		                                    </span>
-		                                    <span className="min-w-0 truncate text-slate-100">{c.name}</span>
-		                                  </span>
-		                                  {unread > 0 ? (
-		                                    <span className="shrink-0 rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-bold text-white">
-		                                      {unread > 99 ? '99+' : String(unread)}
-		                                    </span>
-		                                  ) : null}
-		                                </button>
-		                              );
-		                            })}
-		                          </div>
-		                        ) : null}
-                      </div>
+                      <Dialog.Title className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-50">
+                        <span className="inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-md border border-slate-700 bg-slate-950/60">
+                          {clientLogoUrl ? (
+                            <img src={clientLogoUrl} alt="" className="h-full w-full object-cover" draggable={false} />
+                          ) : (
+                            <span className="text-[12px] font-extrabold text-slate-200">{clientInitial}</span>
+                          )}
+                        </span>
+                        <span className="truncate">{clientName}</span>
+                      </Dialog.Title>
                     </div>
 		                    <div className="flex items-center gap-1">
                           {activeDmContact ? (
@@ -2213,7 +2124,6 @@ const ClientChatDock = () => {
 		                          setHelpOpen(true);
 		                          setMembersOpen(false);
 		                          setExportOpen(false);
-		                          setClientPickerOpen(false);
 		                          setSearchOpen(false);
 		                          setStarredOpen(false);
 		                        }}
@@ -2229,7 +2139,6 @@ const ClientChatDock = () => {
 	                          setStarredOpen(false);
 	                          setMembersOpen(false);
 	                          setExportOpen(false);
-	                          setClientPickerOpen(false);
 	                          window.setTimeout(() => searchInputRef.current?.focus(), 0);
 	                        }}
 	                        title={t({ it: 'Cerca nella chat', en: 'Search chat' })}
@@ -2244,7 +2153,6 @@ const ClientChatDock = () => {
 	                          setSearchOpen(false);
 	                          setMembersOpen(false);
 	                          setExportOpen(false);
-	                          setClientPickerOpen(false);
 	                        }}
 	                        title={t({ it: 'Messaggi importanti', en: 'Starred messages' })}
 	                        aria-label={t({ it: 'Messaggi importanti', en: 'Starred messages' })}
@@ -2256,7 +2164,6 @@ const ClientChatDock = () => {
 		                        onClick={() => {
 		                          setMembersOpen((v) => !v);
 		                          setExportOpen(false);
-		                          setClientPickerOpen(false);
 		                          setSearchOpen(false);
 		                          setStarredOpen(false);
 		                          setHelpOpen(false);
@@ -2272,7 +2179,6 @@ const ClientChatDock = () => {
 		                        onClick={() => {
 		                          setExportOpen((v) => !v);
 		                          setMembersOpen(false);
-		                          setClientPickerOpen(false);
 		                          setSearchOpen(false);
 		                          setStarredOpen(false);
 		                          setHelpOpen(false);
@@ -2292,7 +2198,6 @@ const ClientChatDock = () => {
 	                          setHelpOpen(false);
 	                          setMembersOpen(false);
 	                          setExportOpen(false);
-	                          setClientPickerOpen(false);
 	                          setSearchOpen(false);
 	                          setStarredOpen(false);
 	                        }}
