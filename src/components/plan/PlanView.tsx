@@ -38,7 +38,7 @@ import {
   Image as ImageIcon,
   Camera,
   StickyNote
-} from 'lucide-react';
+	} from 'lucide-react';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
 import SearchBar from './SearchBar';
@@ -363,7 +363,8 @@ const PlanView = ({ planId }: Props) => {
 	    setPresentationWebcamEnabled,
 	    presentationWebcamCalib,
 	    setPresentationWebcamCalib,
-	    primePresentationWebcamPermission,
+	    presentationEnterRequested,
+	    clearPresentationEnterRequest,
 	    hiddenLayersByPlan,
 	    setHideAllLayers,
 	    setLockedPlans,
@@ -431,7 +432,8 @@ const PlanView = ({ planId }: Props) => {
 	      setPresentationWebcamEnabled: (s as any).setPresentationWebcamEnabled,
 	      presentationWebcamCalib: (s as any).presentationWebcamCalib,
 	      setPresentationWebcamCalib: (s as any).setPresentationWebcamCalib,
-	      primePresentationWebcamPermission: (s as any).primePresentationWebcamPermission,
+	      presentationEnterRequested: (s as any).presentationEnterRequested,
+	      clearPresentationEnterRequest: (s as any).clearPresentationEnterRequest,
 	      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
 	      setHideAllLayers: (s as any).setHideAllLayers,
 	      setLockedPlans: (s as any).setLockedPlans,
@@ -2742,12 +2744,62 @@ const PlanView = ({ planId }: Props) => {
 
   const getViewport = useCallback(() => viewportLiveRef.current, []);
 
-  const handleTogglePresentation = useCallback(() => {
-    if (!presentationMode) {
-      primePresentationWebcamPermission?.();
+  const [presentationEnterModalOpen, setPresentationEnterModalOpen] = useState(false);
+  const [presentationEnterBusy, setPresentationEnterBusy] = useState(false);
+  const [cameraPermissionState, setCameraPermissionState] = useState<'granted' | 'denied' | 'prompt' | 'unknown'>('unknown');
+
+  const queryCameraPermission = useCallback(async () => {
+    try {
+      const p: any = (navigator as any)?.permissions;
+      if (!p?.query) return 'unknown' as const;
+      const status = await p.query({ name: 'camera' as any });
+      const state = String(status?.state || '');
+      if (state === 'granted' || state === 'denied' || state === 'prompt') return state as any;
+      return 'unknown' as const;
+    } catch {
+      return 'unknown' as const;
     }
-    togglePresentationMode?.();
-  }, [presentationMode, primePresentationWebcamPermission, togglePresentationMode]);
+  }, []);
+
+  const requestEnterPresentation = useCallback(async () => {
+    if (presentationEnterBusy) return;
+    const perm = await queryCameraPermission();
+    if (perm === 'granted') {
+      togglePresentationMode?.();
+      return;
+    }
+    setCameraPermissionState(perm);
+    setPresentationEnterModalOpen(true);
+  }, [presentationEnterBusy, queryCameraPermission, togglePresentationMode]);
+
+  const handleTogglePresentation = useCallback(() => {
+    if (presentationMode) {
+      togglePresentationMode?.();
+      return;
+    }
+    void requestEnterPresentation();
+  }, [presentationMode, requestEnterPresentation, togglePresentationMode]);
+
+  useEffect(() => {
+    if (!presentationEnterRequested) return;
+    clearPresentationEnterRequest?.();
+    if (presentationMode) return;
+    void requestEnterPresentation();
+  }, [clearPresentationEnterRequest, presentationEnterRequested, presentationMode, requestEnterPresentation]);
+
+  const requestCameraPermissionOnce = useCallback(async () => {
+    try {
+      const md: any = (navigator as any)?.mediaDevices;
+      if (!md?.getUserMedia) return false;
+      const stream: MediaStream = await md.getUserMedia({ video: true, audio: false });
+      try {
+        stream.getTracks().forEach((t) => t.stop());
+      } catch {}
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   const {
     webcamReady,
@@ -13356,6 +13408,129 @@ const PlanView = ({ planId }: Props) => {
           }
         }}
       />
+
+      <Transition appear show={presentationEnterModalOpen} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-50"
+          onClose={() => {
+            if (presentationEnterBusy) return;
+            setPresentationEnterModalOpen(false);
+          }}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4 text-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="modal-panel w-full max-w-lg transform overflow-hidden text-left align-middle transition-all">
+                  <div className="modal-header">
+                    <Dialog.Title className="modal-title">
+                      {t({ it: 'Modalità presentazione', en: 'Presentation mode' })}
+                    </Dialog.Title>
+                    <button
+                      onClick={() => {
+                        if (presentationEnterBusy) return;
+                        setPresentationEnterModalOpen(false);
+                      }}
+                      className="icon-button"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="modal-description">
+                    {t({
+                      it: 'Stai per passare alla modalità Presentazione a schermo intero. Puoi usare la webcam e i gesti per zoomare e spostarti nella planimetria. Vuoi concedere l’accesso alla webcam e procedere, oppure procedere senza webcam?',
+                      en: 'You are about to enter fullscreen Presentation mode. You can use the webcam and hand gestures to pan and zoom the floor plan. Do you want to grant webcam access and proceed, or proceed without the webcam?'
+                    })}
+                  </Dialog.Description>
+                  {cameraPermissionState === 'denied' ? (
+                    <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                      {t({
+                        it: 'La webcam risulta bloccata per questo sito nelle impostazioni del browser. Per procedere con i gesti, abilita la camera per questo sito e riprova.',
+                        en: 'The webcam appears to be blocked for this site in your browser settings. To use gestures, allow camera access for this site and try again.'
+                      })}
+                    </div>
+                  ) : null}
+                  <div className="modal-footer flex flex-wrap gap-2">
+                    <button
+                      onClick={() => {
+                        if (presentationEnterBusy) return;
+                        setPresentationEnterModalOpen(false);
+                      }}
+                      className="btn-secondary"
+                      title={t({ it: 'Resta nella modalità attuale', en: 'Stay in the current mode' })}
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (presentationEnterBusy) return;
+                        setPresentationWebcamEnabled(false);
+                        setPresentationWebcamCalib(null);
+                        setPresentationEnterModalOpen(false);
+                        togglePresentationMode?.();
+                      }}
+                      className="btn-secondary"
+                      title={t({ it: 'Entra in presentazione senza webcam', en: 'Enter presentation without the webcam' })}
+                    >
+                      {t({ it: 'Procedi senza webcam', en: 'Proceed without webcam' })}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (presentationEnterBusy) return;
+                        setPresentationEnterBusy(true);
+                        const ok = await requestCameraPermissionOnce();
+                        const perm = await queryCameraPermission();
+                        setCameraPermissionState(perm);
+                        if (!ok) {
+                          push(
+                            t({
+                              it: 'Accesso alla webcam non concesso. Puoi procedere senza webcam oppure abilitare la camera dalle impostazioni del browser.',
+                              en: 'Webcam access was not granted. You can proceed without the webcam or allow the camera from your browser settings.'
+                            }),
+                            'danger'
+                          );
+                          setPresentationEnterBusy(false);
+                          return;
+                        }
+                        setPresentationWebcamEnabled(false);
+                        setPresentationWebcamCalib(null);
+                        setPresentationEnterModalOpen(false);
+                        setPresentationEnterBusy(false);
+                        togglePresentationMode?.();
+                      }}
+                      className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={presentationEnterBusy}
+                      title={t({ it: 'Concedi accesso alla webcam e procedi', en: 'Grant webcam access and proceed' })}
+                    >
+                      {presentationEnterBusy ? t({ it: 'Attendere…', en: 'Please wait…' }) : t({ it: 'Concedi accesso e procedi', en: 'Grant access and proceed' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
 
       {/* legacy multi-print modal kept for future use */}
     </div>

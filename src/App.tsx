@@ -232,10 +232,14 @@ const App = () => {
 
       // Presentation mode with `P`: toggle fullscreen and collapse sidebar.
       if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
-        if (!useUIStore.getState().presentationMode) {
-          useUIStore.getState().primePresentationWebcamPermission?.();
+        const path = window.location?.pathname || '';
+        if (!path.startsWith('/plan/')) return;
+        if (useUIStore.getState().presentationMode) {
+          useUIStore.getState().togglePresentationMode?.();
+          return;
         }
-        useUIStore.getState().togglePresentationMode?.();
+        // Let PlanView decide whether to prompt for webcam access before entering fullscreen.
+        useUIStore.getState().requestPresentationEnter?.();
       }
     };
     window.addEventListener('keydown', onKey, false);
