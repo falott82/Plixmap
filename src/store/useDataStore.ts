@@ -1420,24 +1420,23 @@ export const useDataStore = create<DataState>()(
         const includeViews = options?.includeViews !== false;
         const id = nanoid();
 
-        set((state) => {
-          let sitePlans: FloorPlan[] = [];
-          for (const c of state.clients) {
-            for (const s of c.sites) {
-              if (s.id !== source.siteId) continue;
-              sitePlans = s.floorPlans || [];
-            }
+        const normalizePlanName = (value: string) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        let sitePlans: FloorPlan[] = [];
+        for (const c of get().clients) {
+          for (const s of c.sites) {
+            if (s.id !== source.siteId) continue;
+            sitePlans = s.floorPlans || [];
           }
-          const baseName = String(options?.name || `${source.name} (Copy)`).trim() || `${source.name} (Copy)`;
-          const existingNames = new Set(sitePlans.map((p) => p.name));
-          let name = baseName;
-          if (existingNames.has(name)) {
-            let n = 2;
-            while (existingNames.has(`${baseName} ${n}`)) n++;
-            name = `${baseName} ${n}`;
-          }
-          const maxOrder = Math.max(-1, ...sitePlans.map((p) => (typeof (p as any).order === 'number' ? (p as any).order : -1)));
+        }
+        const name = String(options?.name || `${source.name} (Copy)`).trim() || `${source.name} (Copy)`;
+        const wantedKey = normalizePlanName(name);
+        if (wantedKey) {
+          const conflict = sitePlans.some((p) => normalizePlanName(String(p?.name || '')) === wantedKey);
+          if (conflict) return null;
+        }
+        const maxOrder = Math.max(-1, ...sitePlans.map((p) => (typeof (p as any).order === 'number' ? (p as any).order : -1)));
 
+        set((state) => {
           const roomIdMap = new Map();
           const nextRooms = includeRooms
             ? (source.rooms || []).map((r) => {

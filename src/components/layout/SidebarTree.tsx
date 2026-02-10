@@ -1128,6 +1128,17 @@ const SidebarTree = () => {
       <CloneFloorPlanModal
         open={!!clonePlan}
         sourceName={clonePlan?.name || ''}
+        existingNames={(() => {
+          if (!clonePlan) return [];
+          for (const c of clients || []) {
+            for (const s of c.sites || []) {
+              if ((s.floorPlans || []).some((p) => p.id === clonePlan.planId)) {
+                return (s.floorPlans || []).map((p) => String((p as any)?.name || '')).filter(Boolean);
+              }
+            }
+          }
+          return [];
+        })()}
         onClose={() => setClonePlan(null)}
         onConfirm={({ name, includeLayers, includeViews, includeRooms, includeObjects }) => {
           if (!clonePlan) return;

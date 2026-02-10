@@ -102,10 +102,11 @@ const App = () => {
     }),
     shallow
   );
+  const presentationMode = useUIStore((s) => (s as any).presentationMode || false);
   const { user, hydrated: authHydrated, hydrate: hydrateAuth } = useAuthStore();
   const location = useLocation();
   const navigate = useNavigate();
-  const hideSidebar = location.pathname.startsWith('/settings');
+  const hideSidebar = presentationMode || location.pathname.startsWith('/settings');
   const perfEnabled = (() => {
     try {
       const queryEnabled = new URLSearchParams(location.search || '').get('perf') === '1';
@@ -206,13 +207,19 @@ const App = () => {
   }, [user]);
 
   useEffect(() => {
-    const prevSidebarCollapsedRef = { current: false };
     const onKey = (e: KeyboardEvent) => {
       if (!useAuthStore.getState().user) return;
       if (e.defaultPrevented) return;
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
       const isTyping = tag === 'input' || tag === 'textarea' || target?.isContentEditable;
+
+      // ESC exits presentation mode.
+      if (e.key === 'Escape' && useUIStore.getState().presentationMode) {
+        e.preventDefault();
+        useUIStore.getState().setPresentationMode?.(false);
+        return;
+      }
 
       // Toggle chat with Cmd+K / Ctrl+K (WhatsApp-like).
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
@@ -225,29 +232,60 @@ const App = () => {
 
       // Presentation mode with `P`: toggle fullscreen and collapse sidebar.
       if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
-        const doc: any = document as any;
-        const root: any = document.documentElement as any;
-        const inFs = !!doc.fullscreenElement;
-        if (!inFs) {
-          prevSidebarCollapsedRef.current = !!useUIStore.getState().sidebarCollapsed;
-          useUIStore.setState({ sidebarCollapsed: true } as any);
-          try {
-            root?.requestFullscreen?.();
-          } catch {
-            // ignore
-          }
-        } else {
-          useUIStore.setState({ sidebarCollapsed: prevSidebarCollapsedRef.current } as any);
-          try {
-            doc?.exitFullscreen?.();
-          } catch {
-            // ignore
-          }
-        }
+        useUIStore.getState().togglePresentationMode?.();
       }
     };
     window.addEventListener('keydown', onKey, false);
     return () => window.removeEventListener('keydown', onKey, false);
+  }, []);
+
+  const prevSidebarCollapsedRef = useRef(false);
+  const forcedPresentationRef = useRef(false);
+  useEffect(() => {
+    const doc: any = document as any;
+    const root: any = document.documentElement as any;
+    const want = !!useUIStore.getState().presentationMode;
+    const inFs = !!doc.fullscreenElement;
+    if (want) {
+      if (!forcedPresentationRef.current) {
+        prevSidebarCollapsedRef.current = !!useUIStore.getState().sidebarCollapsed;
+        forcedPresentationRef.current = true;
+      }
+      useUIStore.setState({ sidebarCollapsed: true } as any);
+      if (!inFs) {
+        try {
+          root?.requestFullscreen?.();
+        } catch {
+          // ignore
+        }
+      }
+      return;
+    }
+    if (forcedPresentationRef.current) {
+      useUIStore.setState({ sidebarCollapsed: prevSidebarCollapsedRef.current } as any);
+      forcedPresentationRef.current = false;
+    }
+    if (inFs) {
+      try {
+        doc?.exitFullscreen?.();
+      } catch {
+        // ignore
+      }
+    }
+  }, [presentationMode]);
+
+  useEffect(() => {
+    const onFsChange = () => {
+      // If the browser exits fullscreen (ESC), exit presentation mode too.
+      const doc: any = document as any;
+      const inFs = !!doc.fullscreenElement;
+      if (inFs) return;
+      if (useUIStore.getState().presentationMode) {
+        useUIStore.getState().setPresentationMode?.(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
   useEffect(() => {
@@ -569,10 +607,10 @@ const App = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      <HelpPanel />
-      <ChangelogPanel />
+      {presentationMode ? null : <HelpPanel />}
+      {presentationMode ? null : <ChangelogPanel />}
       <ClientChatWs />
-      <ClientChatDock />
+      {presentationMode ? null : <ClientChatDock />}
       <ConfirmDialog
         open={firstRunPromptOpen}
         title={t({ it: 'Superadmin creato con successo', en: 'Superadmin created successfully' })}

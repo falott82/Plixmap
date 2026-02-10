@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Lock, Layers, History, Keyboard, MessageSquare } from 'lucide-react';
+import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Lock, Layers, History, Keyboard, MessageSquare, Server } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
 import { shallow } from 'zustand/shallow';
 import { useT } from '../../i18n/useT';
@@ -28,6 +28,7 @@ const HelpPanel = () => {
       { id: 'help-objects', label: t({ it: 'Oggetti sulla mappa', en: 'Objects on the map' }) },
       { id: 'help-rooms', label: t({ it: 'Stanze logiche', en: 'Logical rooms' }) },
       { id: 'help-layers', label: t({ it: 'Livelli, griglia e collegamenti', en: 'Layers, grid and links' }) },
+      { id: 'help-rack', label: t({ it: 'Rack designer', en: 'Rack designer' }) },
       { id: 'help-search', label: t({ it: 'Ricerca e highlight', en: 'Search & highlight' }) },
       { id: 'help-shortcuts', label: t({ it: 'Scorciatoie da tastiera', en: 'Keyboard shortcuts' }) },
       { id: 'help-views', label: t({ it: 'Viste & revisioni', en: 'Views & revisions' }) },
@@ -539,6 +540,43 @@ const HelpPanel = () => {
                         {t({
                           it: 'Collegamenti: puoi creare un collegamento lineare o un collegamento a 90°. Tasto destro su un oggetto → “Crea collegamento” oppure “Crea collegamento 90°”, poi clicca un secondo oggetto.',
                           en: 'Links: you can create a straight link or a 90° link. Right-click an object → “Create link” or “Create 90° link”, then click a second object.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Tasto destro: trovi anche il sottomenu “Livelli” per mostrare/nascondere rapidamente i layer (utile in presentazione).',
+                          en: 'Right-click: you also get a “Layers” submenu to quickly show/hide layers (useful during presentations).'
+                        })}
+                      </li>
+                    </ul>
+                  </div>
+                  <div data-help-block id="help-rack" className="rounded-xl bg-mist p-3">
+                    <div className="flex items-center gap-2 font-semibold text-ink">
+                      <Server size={16} /> {t({ it: 'Rack designer', en: 'Rack designer' })}
+                    </div>
+                    <ul className="ml-5 list-disc space-y-1 pt-2">
+                      <li>
+                        {t({
+                          it: 'Inserisci un rack dalla palette o dal menu “Aggiungi”.',
+                          en: 'Add a rack from the palette or from the “Add” menu.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Apri il rack: doppio clic sull’oggetto rack (o modifica → Rack).',
+                          en: 'Open the rack: double-click the rack object (or Edit → Rack).'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Nel rack puoi inserire apparati, porte e collegamenti (cablaggi) per rappresentare lo schema fisico.',
+                          en: 'Inside the rack you can place devices, ports and connections (cabling) to represent the physical layout.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'I collegamenti rack supportano la visualizzazione delle porte e delle connessioni.',
+                          en: 'Rack links support viewing ports and connections.'
                         })}
                       </li>
                     </ul>
