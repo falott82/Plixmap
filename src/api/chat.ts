@@ -169,6 +169,7 @@ export type DmContactRow = {
   avatarUrl?: string;
   online: boolean;
   lastOnlineAt: number | null;
+  lastMessageAt?: number | null;
   commonClients: { id: string; name: string; logoUrl?: string }[];
   canChat: boolean;
   readOnly: boolean;

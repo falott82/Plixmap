@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
-import { Check, CheckCheck, ChevronDown, Download, Paperclip, Send, Trash2, X, Pencil, Users, ArrowDownToLine, Star, CornerUpLeft, Info, Mic, Smile, Copy as CopyIcon, Search, ChevronUp, UserCheck, UserX } from 'lucide-react';
+import { Check, CheckCheck, ChevronDown, Download, Paperclip, Send, Trash2, X, Pencil, Users, ArrowDownToLine, Star, CornerUpLeft, Info, Mic, Smile, Copy as CopyIcon, Search, ChevronUp, UserCheck, UserX, Rows3 } from 'lucide-react';
 import {
   ChatMessage,
   DmContactRow,
@@ -247,10 +247,12 @@ const ClientChatDock = () => {
   }));
   const messages = useChatStore((s) => (clientChatClientId ? s.messagesByClientId[clientChatClientId] || [] : []));
   const clientNameFromStore = useChatStore((s) => (clientChatClientId ? s.clientNameById[clientChatClientId] : ''));
+  const lastActivityByClientId = useChatStore((s) => s.lastActivityByClientId || {});
   const clientTree = useDataStore((s) =>
     (s.clients || []).map((c) => ({
       id: c.id,
       name: c.shortName || c.name,
+      logoUrl: (c as any).logoUrl,
       sites: (c.sites || []).map((site) => ({ id: site.id, floorPlans: (site.floorPlans || []).map((p) => ({ id: p.id })) }))
     }))
   );
@@ -272,6 +274,9 @@ const ClientChatDock = () => {
   const [unstarConfirmId, setUnstarConfirmId] = useState<string | null>(null);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [leftSearchQ, setLeftSearchQ] = useState('');
+  const [leftCompact, setLeftCompact] = useState(false);
+  const [leftGroupsCollapsed, setLeftGroupsCollapsed] = useState(false);
+  const [leftUsersCollapsed, setLeftUsersCollapsed] = useState(false);
   const [dmContacts, setDmContacts] = useState<DmContactRow[]>([]);
   const [dmContactsLoading, setDmContactsLoading] = useState(false);
   const [activeDmMeta, setActiveDmMeta] = useState<any>(null);
@@ -289,6 +294,7 @@ const ClientChatDock = () => {
     return pendingAttachments.reduce((n: number, a) => (isVoiceRecordingAttachment(a.name, a.file?.type || '') ? n + 1 : n), 0);
   }, [pendingAttachments]);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const atBottomRef = useRef(true);
   const clientPickerRef = useRef<HTMLDivElement | null>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -399,8 +405,19 @@ const ClientChatDock = () => {
       if (Number.isFinite(layout.chatDockWidth)) setClientChatDockWidth(Number(layout.chatDockWidth));
       if (Number.isFinite(layout.chatDockHeight)) setClientChatDockPreferredHeight(Number(layout.chatDockHeight));
       if (Number.isFinite(layout.chatDividerLeftWidth)) setClientChatDividerLeftWidth(Number(layout.chatDividerLeftWidth));
+      if (typeof layout.leftCompact === 'boolean') setLeftCompact(layout.leftCompact);
+      if (typeof layout.leftGroupsCollapsed === 'boolean') setLeftGroupsCollapsed(layout.leftGroupsCollapsed);
+      if (typeof layout.leftUsersCollapsed === 'boolean') setLeftUsersCollapsed(layout.leftUsersCollapsed);
     }
-  }, [setClientChatDividerLeftWidth, setClientChatDockPreferredHeight, setClientChatDockWidth, user?.id]);
+  }, [
+    setClientChatDividerLeftWidth,
+    setClientChatDockPreferredHeight,
+    setClientChatDockWidth,
+    user?.id,
+    setLeftCompact,
+    setLeftGroupsCollapsed,
+    setLeftUsersCollapsed
+  ]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -411,7 +428,10 @@ const ClientChatDock = () => {
         ...(prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}),
         chatDockWidth: clientChatDockWidth,
         chatDockHeight: clientChatDockPreferredHeight,
-        chatDividerLeftWidth: clientChatDividerLeftWidth
+        chatDividerLeftWidth: clientChatDividerLeftWidth,
+        leftCompact,
+        leftGroupsCollapsed,
+        leftUsersCollapsed
       };
       updateMyProfile({ chatLayout: next })
         .then(() => {
@@ -424,7 +444,7 @@ const ClientChatDock = () => {
       if (saveChatLayoutTimerRef.current) window.clearTimeout(saveChatLayoutTimerRef.current);
       saveChatLayoutTimerRef.current = null;
     };
-  }, [clientChatDividerLeftWidth, clientChatDockPreferredHeight, clientChatDockWidth, user?.id]);
+  }, [clientChatDividerLeftWidth, clientChatDockPreferredHeight, clientChatDockWidth, leftCompact, leftGroupsCollapsed, leftUsersCollapsed, user?.id]);
 
   const canChatClientIds = useMemo(() => {
     const out = new Set<string>();
@@ -526,18 +546,36 @@ const ClientChatDock = () => {
   }, [activeDmContact, activeDmMeta, clientChatClientId]);
 
   const leftQuery = useMemo(() => String(leftSearchQ || '').trim().toLowerCase(), [leftSearchQ]);
+  const showLeftGroups = !!leftQuery || !leftGroupsCollapsed;
+  const showLeftUsers = !!leftQuery || !leftUsersCollapsed;
   const filteredChatClients = useMemo(() => {
     if (!leftQuery) return chatClients;
     return (chatClients || []).filter((c) => String(c.name || '').toLowerCase().includes(leftQuery));
   }, [chatClients, leftQuery]);
   const filteredDmContacts = useMemo(() => {
-    if (!leftQuery) return dmContacts;
-    return (dmContacts || []).filter((u) => {
+    const base = leftQuery
+      ? (dmContacts || []).filter((u) => {
       const name = `${u.firstName || ''} ${u.lastName || ''}`.trim();
       const hay = `${u.username || ''} ${name}`.toLowerCase();
       return hay.includes(leftQuery);
+        })
+      : dmContacts || [];
+    const meId = String(user?.id || '');
+    const list = base.slice();
+    list.sort((a, b) => {
+      const ta = meId ? dmThreadIdForUsers(meId, a.id) : null;
+      const tb = meId ? dmThreadIdForUsers(meId, b.id) : null;
+      const la = ta ? Number((lastActivityByClientId as any)?.[ta] || 0) || 0 : 0;
+      const lb = tb ? Number((lastActivityByClientId as any)?.[tb] || 0) || 0 : 0;
+      const sa = la || (Number((a as any)?.lastMessageAt || 0) || 0);
+      const sb = lb || (Number((b as any)?.lastMessageAt || 0) || 0);
+      if (sa !== sb) return sb - sa;
+      const an = (`${a.firstName || ''} ${a.lastName || ''}`.trim() || a.username || '').toLowerCase();
+      const bn = (`${b.firstName || ''} ${b.lastName || ''}`.trim() || b.username || '').toLowerCase();
+      return an.localeCompare(bn);
     });
-  }, [dmContacts, leftQuery]);
+    return list;
+  }, [dmContacts, lastActivityByClientId, leftQuery, user?.id]);
 
   const membersSorted = useMemo(() => {
     const list = Array.isArray(members) ? members.slice() : [];
@@ -629,6 +667,7 @@ const ClientChatDock = () => {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
+    atBottomRef.current = true;
   };
 
   const scrollToBottomSoon = () => {
@@ -636,14 +675,26 @@ const ClientChatDock = () => {
     window.requestAnimationFrame(() => window.requestAnimationFrame(scrollToBottom));
   };
 
-  const scrollToMessage = (id: string) => {
+  const scrollToMessage = (id: string, behavior: ScrollBehavior = 'smooth') => {
     const el = document.getElementById(`chatmsg-${id}`);
     if (!el) return;
     try {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.scrollIntoView({ behavior, block: 'center' });
     } catch {
       el.scrollIntoView();
     }
+  };
+
+  const scrollToMessageSoon = (id: string, behavior: ScrollBehavior = 'smooth') => {
+    // Two rAFs to ensure the message nodes exist after store updates.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => scrollToMessage(id, behavior)));
+  };
+
+  const onListScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+    atBottomRef.current = remaining < 80;
   };
 
   useEffect(() => {
@@ -656,42 +707,30 @@ const ClientChatDock = () => {
     fetchChatMessages(clientChatClientId, { limit: 300 })
       .then((payload) => {
         setActiveDmMeta((payload as any)?.dm || null);
+        const lastReadAt = Number((payload as any)?.lastReadAt || 0) || 0;
+        const isGroupChat = !isDmThreadId(clientChatClientId);
+        const firstUnreadId = isGroupChat
+          ? String(
+              (Array.isArray(payload.messages) ? payload.messages : []).find((m: any) => m && !m.deleted && Number(m.createdAt || 0) > lastReadAt)?.id || ''
+            ).trim()
+          : '';
         useChatStore.getState().setMessages(clientChatClientId, payload.clientName || '', payload.messages || []);
         clearChatUnread(clientChatClientId);
         markChatRead(clientChatClientId)
           .then(() => fetchChatUnreadSenders().then((p) => setChatUnreadSenderIds((p as any)?.senderIds || [])).catch(() => {}))
           .catch(() => {});
-        scrollToBottomSoon();
+        if (firstUnreadId) {
+          atBottomRef.current = false;
+          scrollToMessageSoon(firstUnreadId, 'auto');
+        } else {
+          scrollToBottomSoon();
+        }
       })
       .catch((e) => {
         setErr(e instanceof Error ? e.message : 'Failed to load chat');
       })
       .finally(() => setLoading(false));
   }, [clearChatUnread, clientChatClientId, clientChatOpen, user?.id]);
-
-  const needsInitialScrollRef = useRef(false);
-  const lastOpenRef = useRef(false);
-  const lastClientRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (clientChatOpen && clientChatClientId && (!lastOpenRef.current || lastClientRef.current !== clientChatClientId)) {
-      needsInitialScrollRef.current = true;
-      lastOpenRef.current = true;
-      lastClientRef.current = clientChatClientId;
-    }
-    if (!clientChatOpen) {
-      lastOpenRef.current = false;
-      lastClientRef.current = null;
-      needsInitialScrollRef.current = false;
-    }
-  }, [clientChatClientId, clientChatOpen]);
-
-  useEffect(() => {
-    if (!clientChatOpen) return;
-    if (!needsInitialScrollRef.current) return;
-    if (!messages.length) return;
-    needsInitialScrollRef.current = false;
-    scrollToBottomSoon();
-  }, [clientChatOpen, messages.length]);
 
   useEffect(() => {
     if (!clientChatOpen || !clientChatClientId || !user?.id) return;
@@ -705,14 +744,6 @@ const ClientChatDock = () => {
       })
       .finally(() => setMembersLoading(false));
   }, [clientChatClientId, clientChatOpen, user?.id]);
-
-  useEffect(() => {
-    if (!clientChatOpen) return;
-    // Dismiss "new chat message" toasts once the chat is opened.
-    for (const c of chatClients || []) {
-      toast.dismiss(`client-chat-new:${c.id}`);
-    }
-  }, [chatClients, clientChatOpen]);
 
   useEffect(() => {
     if (!clientChatOpen) return;
@@ -777,8 +808,11 @@ const ClientChatDock = () => {
 
   useEffect(() => {
     if (!clientChatOpen) return;
+    // Auto-scroll only if user is already at (or near) the bottom.
+    if (!messages.length) return;
+    if (!atBottomRef.current) return;
     scrollToBottomSoon();
-  }, [clientChatOpen, messages.length]);
+  }, [clientChatClientId, clientChatOpen, messages.length]);
 
   useEffect(() => {
     if (!editingId) return;
@@ -1845,67 +1879,103 @@ const ClientChatDock = () => {
                           style={{ width: clientChatDividerLeftWidth }}
                         >
                           <div className="border-b border-slate-800 bg-slate-900/70 p-2">
-                            <input
-                              value={leftSearchQ}
-                              onChange={(e) => setLeftSearchQ(e.target.value)}
-                              placeholder={t({ it: 'Cerca gruppi o utenti…', en: 'Search groups or users…' })}
-                              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none ring-primary/30 focus:ring-2"
-                            />
+                            <div className="flex items-center gap-2">
+                              <input
+                                value={leftSearchQ}
+                                onChange={(e) => setLeftSearchQ(e.target.value)}
+                                placeholder={t({ it: 'Cerca gruppi o utenti…', en: 'Search groups or users…' })}
+                                className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none ring-primary/30 focus:ring-2"
+                              />
+                              <button
+                                type="button"
+                                className={`${headerIconBtn} h-10 w-10 rounded-xl ${leftCompact ? 'bg-slate-800 text-slate-50' : ''}`}
+                                onClick={() => setLeftCompact((v) => !v)}
+                                title={t({ it: leftCompact ? 'Vista normale' : 'Vista compatta', en: leftCompact ? 'Normal view' : 'Compact view' })}
+                              >
+                                <Rows3 size={16} />
+                              </button>
+                            </div>
                           </div>
                           <div className="min-h-0 flex-1 overflow-auto p-2">
-                            <div className="px-2 pb-1 text-[11px] font-semibold uppercase text-slate-400">
-                              {t({ it: 'Gruppi', en: 'Groups' })}
-                            </div>
-                            <div className="space-y-1">
-                              {(filteredChatClients || []).map((c) => {
-                                const active = c.id === clientChatClientId;
-                                const unread = Number((chatUnreadByClientId as any)?.[c.id] || 0);
-                                const logo = String((c as any)?.logoUrl || '').trim();
-                                const initial = (String(c.name || '').trim()?.[0] || '?').toUpperCase();
-                                return (
-                                  <button
-                                    key={c.id}
-                                    className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-2 text-left hover:bg-slate-900 ${
-                                      active ? 'border-slate-600 bg-slate-900/60' : 'border-transparent'
-                                    }`}
-                                    onClick={() => {
-                                      setMediaModal(null);
-                                      setMessageInfoId(null);
-                                      setReplyToId(null);
-                                      openClientChat(c.id);
-                                    }}
-                                    title={c.name}
-                                  >
-                                    <span className="flex min-w-0 items-center gap-2">
-                                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-700 bg-slate-950/60">
-                                        {logo ? (
-                                          <img src={logo} alt="" className="h-full w-full object-cover" draggable={false} />
-                                        ) : (
-                                          <span className="text-[13px] font-extrabold text-slate-200">{initial}</span>
-                                        )}
+                            <button
+                              type="button"
+                              className="flex w-full items-center justify-between gap-2 px-2 pb-1 text-[11px] font-semibold uppercase text-slate-400 hover:text-slate-200"
+                              onClick={() => setLeftGroupsCollapsed((v) => !v)}
+                              title={t({ it: 'Mostra/nascondi gruppi', en: 'Show/hide groups' })}
+                            >
+                              <span>{t({ it: 'Gruppi', en: 'Groups' })}</span>
+                              <span className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-500">{String(filteredChatClients.length)}</span>
+                                <ChevronDown size={14} className={`transition-transform ${showLeftGroups ? '' : '-rotate-90'}`} />
+                              </span>
+                            </button>
+                            {showLeftGroups ? (
+                              <div className="space-y-1">
+                                {(filteredChatClients || []).map((c) => {
+                                  const active = c.id === clientChatClientId;
+                                  const unread = Number((chatUnreadByClientId as any)?.[c.id] || 0);
+                                  const logo = String((c as any)?.logoUrl || '').trim();
+                                  const initial = (String(c.name || '').trim()?.[0] || '?').toUpperCase();
+                                  return (
+                                    <button
+                                      key={c.id}
+                                      className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2 text-left hover:bg-slate-900 ${
+                                        leftCompact ? 'py-1.5' : 'py-2'
+                                      } ${active ? 'border-slate-600 bg-slate-900/60' : 'border-transparent'}`}
+                                      onClick={() => {
+                                        setMediaModal(null);
+                                        setMessageInfoId(null);
+                                        setReplyToId(null);
+                                        openClientChat(c.id);
+                                      }}
+                                      title={c.name}
+                                    >
+                                      <span className="flex min-w-0 items-center gap-2">
+                                        <span
+                                          className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-700 bg-slate-950/60 ${
+                                            leftCompact ? 'h-8 w-8' : 'h-9 w-9'
+                                          }`}
+                                        >
+                                          {logo ? (
+                                            <img src={logo} alt="" className="h-full w-full object-cover" draggable={false} />
+                                          ) : (
+                                            <span className="text-[13px] font-extrabold text-slate-200">{initial}</span>
+                                          )}
+                                        </span>
+                                        <span className="min-w-0">
+                                          <div className={`truncate font-semibold text-slate-100 ${leftCompact ? 'text-[13px]' : 'text-sm'}`}>{c.name}</div>
+                                          {!leftCompact ? (
+                                            <div className="truncate text-[11px] text-slate-400">{t({ it: 'Chat cliente', en: 'Customer chat' })}</div>
+                                          ) : null}
+                                        </span>
                                       </span>
-                                      <span className="min-w-0">
-                                        <div className="truncate text-sm font-semibold text-slate-100">{c.name}</div>
-                                        <div className="truncate text-[11px] text-slate-400">{t({ it: 'Chat cliente', en: 'Customer chat' })}</div>
-                                      </span>
-                                    </span>
-                                    {unread > 0 ? (
-                                      <span className="shrink-0 rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-bold text-white">
-                                        {unread > 99 ? '99+' : String(unread)}
-                                      </span>
-                                    ) : null}
-                                  </button>
-                                );
-                              })}
-                            </div>
+                                      {unread > 0 ? (
+                                        <span className="shrink-0 rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-bold text-white">
+                                          {unread > 99 ? '99+' : String(unread)}
+                                        </span>
+                                      ) : null}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
 
-                            <div className="mt-4 px-2 pb-1 text-[11px] font-semibold uppercase text-slate-400">
-                              {t({ it: 'Utenti', en: 'Users' })}
-                            </div>
+                            <button
+                              type="button"
+                              className="mt-4 flex w-full items-center justify-between gap-2 px-2 pb-1 text-[11px] font-semibold uppercase text-slate-400 hover:text-slate-200"
+                              onClick={() => setLeftUsersCollapsed((v) => !v)}
+                              title={t({ it: 'Mostra/nascondi utenti', en: 'Show/hide users' })}
+                            >
+                              <span>{t({ it: 'Utenti', en: 'Users' })}</span>
+                              <span className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-500">{String(filteredDmContacts.length)}</span>
+                                <ChevronDown size={14} className={`transition-transform ${showLeftUsers ? '' : '-rotate-90'}`} />
+                              </span>
+                            </button>
                             {dmContactsLoading ? (
                               <div className="px-2 py-2 text-xs text-slate-400">{t({ it: 'Caricamento…', en: 'Loading…' })}</div>
                             ) : null}
-                            <div className="space-y-1">
+                            {showLeftUsers ? <div className="space-y-1">
                               {(filteredDmContacts || []).map((u) => {
                                 if (!user?.id) return null;
                                 const threadId = dmThreadIdForUsers(user.id, u.id);
@@ -1919,9 +1989,9 @@ const ClientChatDock = () => {
                                 return (
                                   <button
                                     key={u.id}
-                                    className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-2 text-left hover:bg-slate-900 ${
-                                      active ? 'border-slate-600 bg-slate-900/60' : 'border-transparent'
-                                    }`}
+                                    className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2 text-left hover:bg-slate-900 ${
+                                      leftCompact ? 'py-1.5' : 'py-2'
+                                    } ${active ? 'border-slate-600 bg-slate-900/60' : 'border-transparent'}`}
                                     onClick={() => {
                                       setMediaModal(null);
                                       setMessageInfoId(null);
@@ -1932,14 +2002,19 @@ const ClientChatDock = () => {
                                   >
                                     <span className="flex min-w-0 items-center gap-2">
                                       <span className="relative">
-                                        <UserAvatar username={u.username} src={u.avatarUrl} size={36} className="border-slate-800 bg-slate-900" />
+                                        <UserAvatar
+                                          username={u.username}
+                                          src={u.avatarUrl}
+                                          size={leftCompact ? 32 : 36}
+                                          className="border-slate-800 bg-slate-900"
+                                        />
                                         {!u.readOnly && !u.blockedMe ? (
                                           <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border border-slate-950 ${dot}`} />
                                         ) : null}
                                       </span>
                                       <span className="min-w-0">
                                         <div className="flex items-center gap-2">
-                                          <div className="truncate text-sm font-semibold text-slate-100">{displayName}</div>
+                                          <div className={`truncate font-semibold text-slate-100 ${leftCompact ? 'text-[13px]' : 'text-sm'}`}>{displayName}</div>
                                           {u.blockedByMe ? (
                                             <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">
                                               {t({ it: 'Bloccato', en: 'Blocked' })}
@@ -1951,26 +2026,42 @@ const ClientChatDock = () => {
                                             </span>
                                           ) : null}
                                         </div>
-                                        <div className="truncate text-[11px] text-slate-400">
-                                          {u.readOnly || u.blockedMe ? (
-                                            t({ it: 'Gruppi in comune non disponibili', en: 'Common groups not available' })
-                                          ) : common ? (
-                                            t({ it: `In comune: ${common}`, en: `Common: ${common}` })
-                                          ) : (
-                                            t({ it: 'Nessun gruppo in comune', en: 'No common groups' })
-                                          )}
-                                        </div>
-                                        <div className="truncate text-[11px] text-slate-500">
-                                          {u.readOnly || u.blockedMe
-                                            ? ''
-                                            : online
-                                              ? t({ it: 'Online', en: 'Online' })
-                                              : status === 'never'
-                                                ? t({ it: 'Mai connesso', en: 'Never connected' })
-                                                : u.lastOnlineAt
-                                                  ? `${t({ it: 'Last online', en: 'Last online' })}: ${new Date(u.lastOnlineAt).toLocaleString()}`
-                                                  : ''}
-                                        </div>
+                                        {!leftCompact ? (
+                                          <>
+                                            <div className="truncate text-[11px] text-slate-400">
+                                              {u.readOnly || u.blockedMe ? (
+                                                t({ it: 'Gruppi in comune non disponibili', en: 'Common groups not available' })
+                                              ) : common ? (
+                                                t({ it: `In comune: ${common}`, en: `Common: ${common}` })
+                                              ) : (
+                                                t({ it: 'Nessun gruppo in comune', en: 'No common groups' })
+                                              )}
+                                            </div>
+                                            <div className="truncate text-[11px] text-slate-500">
+                                              {u.readOnly || u.blockedMe
+                                                ? ''
+                                                : online
+                                                  ? t({ it: 'Online', en: 'Online' })
+                                                  : status === 'never'
+                                                    ? t({ it: 'Mai connesso', en: 'Never connected' })
+                                                    : u.lastOnlineAt
+                                                      ? `${t({ it: 'Last online', en: 'Last online' })}: ${new Date(u.lastOnlineAt).toLocaleString()}`
+                                                      : ''}
+                                            </div>
+                                          </>
+                                        ) : (
+                                          <div className="truncate text-[11px] text-slate-500">
+                                            {u.readOnly || u.blockedMe
+                                              ? ''
+                                              : online
+                                                ? t({ it: 'Online', en: 'Online' })
+                                                : status === 'never'
+                                                  ? t({ it: 'Mai connesso', en: 'Never connected' })
+                                                  : u.lastOnlineAt
+                                                    ? `${t({ it: 'Last online', en: 'Last online' })}: ${new Date(u.lastOnlineAt).toLocaleString()}`
+                                                    : ''}
+                                          </div>
+                                        )}
                                       </span>
                                     </span>
                                     {unread > 0 ? (
@@ -1981,7 +2072,7 @@ const ClientChatDock = () => {
                                   </button>
                                 );
                               })}
-                            </div>
+                            </div> : null}
                           </div>
                         </div>
 
@@ -2282,7 +2373,7 @@ const ClientChatDock = () => {
                   ) : null}
 
 	                <div className="min-h-0 flex-1 bg-slate-950">
-	                  <div ref={listRef} className="h-full overflow-auto p-3 space-y-2">
+	                  <div ref={listRef} onScroll={onListScroll} className="h-full overflow-auto p-3 space-y-2">
                     {loading ? (
                       <div className="text-sm text-slate-300">{t({ it: 'Caricamento…', en: 'Loading…' })}</div>
                     ) : null}

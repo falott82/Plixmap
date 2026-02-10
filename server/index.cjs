@@ -3899,6 +3899,23 @@ app.get('/api/chat/dm/contacts', requireAuth, (req, res) => {
     if (info?.userId) onlineIds.add(String(info.userId));
   }
 
+  const lastDmAtByPair = new Map();
+  try {
+    const rows = db
+      .prepare(
+        `SELECT pairKey, MAX(createdAt) as lastMessageAt
+         FROM dm_chat_messages
+         WHERE (fromUserId = ? OR toUserId = ?) AND deleted = 0
+         GROUP BY pairKey`
+      )
+      .all(meId, meId);
+    for (const r of rows || []) {
+      const key = String(r.pairKey || '').trim();
+      if (!key) continue;
+      lastDmAtByPair.set(key, Number(r.lastMessageAt) || 0);
+    }
+  } catch {}
+
   const blockedByMe = new Set();
   const blockedMe = new Set();
   try {
@@ -3952,6 +3969,8 @@ app.get('/api/chat/dm/contacts', requireAuth, (req, res) => {
     })
     .filter((u) => u.id !== meId)
     .map((u) => {
+      const pairKey = u.id && meId ? (String(meId) < String(u.id) ? `${meId}:${u.id}` : `${u.id}:${meId}`) : '';
+      const lastMessageAt = pairKey ? Number(lastDmAtByPair.get(pairKey) || 0) || 0 : 0;
       const targetClients = getChatClientIdsForUser(u.id, !!u.isAdmin || !!u.isSuperAdmin);
       const common = [];
       for (const id of meClients) {
@@ -3970,6 +3989,7 @@ app.get('/api/chat/dm/contacts', requireAuth, (req, res) => {
         canChat: hasCommon,
         readOnly: !hasCommon && hasHistory,
         hasHistory,
+        lastMessageAt: lastMessageAt || null,
         blockedByMe: blockedByMe.has(u.id),
         blockedMe: blockedMe.has(u.id)
       };
