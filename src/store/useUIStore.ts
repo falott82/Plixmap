@@ -18,6 +18,7 @@ interface UIState {
   presentationMode: boolean;
   presentationWebcamEnabled: boolean;
   presentationWebcamCalib: { pinchRatio: number } | null;
+  presentationWebcamPermissionPrimed: boolean;
   lastObjectScale: number;
   dirtyByPlan: Record<string, boolean>;
   pendingSaveNavigateTo?: string | null;
@@ -96,6 +97,7 @@ interface UIState {
   togglePresentationMode: () => void;
   setPresentationWebcamEnabled: (enabled: boolean) => void;
   setPresentationWebcamCalib: (calib: { pinchRatio: number } | null) => void;
+  setPresentationWebcamPermissionPrimed: (primed: boolean) => void;
   setPlanDirty: (planId: string, dirty: boolean) => void;
   requestSaveAndNavigate: (to: string) => void;
   clearPendingSaveNavigate: () => void;
@@ -172,6 +174,7 @@ export const useUIStore = create<UIState>()(
       presentationMode: false,
       presentationWebcamEnabled: false,
       presentationWebcamCalib: null,
+      presentationWebcamPermissionPrimed: false,
       lastObjectScale: 1,
       dirtyByPlan: {},
       pendingSaveNavigateTo: null,
@@ -254,6 +257,7 @@ export const useUIStore = create<UIState>()(
       setPresentationWebcamEnabled: (enabled) => set({ presentationWebcamEnabled: !!enabled }),
       setPresentationWebcamCalib: (calib) =>
         set(() => ({ presentationWebcamCalib: calib && Number.isFinite((calib as any).pinchRatio) ? calib : null })),
+      setPresentationWebcamPermissionPrimed: (primed) => set({ presentationWebcamPermissionPrimed: !!primed }),
       setPlanDirty: (planId, dirty) =>
         set((state) => ({
           dirtyByPlan: { ...state.dirtyByPlan, [planId]: dirty }
@@ -396,6 +400,7 @@ export const useUIStore = create<UIState>()(
           if (!('clientChatDockPreferredHeight' in persistedState)) persistedState.clientChatDockPreferredHeight = 720;
           if (!('clientChatDockWidth' in persistedState)) persistedState.clientChatDockWidth = 980;
           if (!('clientChatDividerLeftWidth' in persistedState)) persistedState.clientChatDividerLeftWidth = 340;
+          if (!('presentationWebcamPermissionPrimed' in persistedState)) persistedState.presentationWebcamPermissionPrimed = false;
         }
         return persistedState as any;
       },
@@ -425,7 +430,8 @@ export const useUIStore = create<UIState>()(
         lastQuoteLabelBg: state.lastQuoteLabelBg,
         lastQuoteLabelColor: state.lastQuoteLabelColor,
         lastQuoteDashed: state.lastQuoteDashed,
-        lastQuoteEndpoint: state.lastQuoteEndpoint
+        lastQuoteEndpoint: state.lastQuoteEndpoint,
+        presentationWebcamPermissionPrimed: state.presentationWebcamPermissionPrimed
       })
     }
   )
