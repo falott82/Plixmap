@@ -6,18 +6,19 @@ Deskly is a web app to plan offices and infrastructure on floor plans using a fi
 
 Note: This README was refreshed with a small formatting update.
 
-- UI supports **Italian and English** (language switch forces a full refresh for consistency)
-- Drag & drop editor with objects, rooms, layers, and snap grid
-- Walls with per-material attenuation (used for Wi-Fi range), scale calibration, measurements, and dimensions (quotes)
-- CCTV field-of-view cones blocked by walls (glass/windows excluded), and Wi-Fi range rings affected by wall attenuation
-- Annotations: text (fonts/colors/background), images, photos (gallery), and Post-it
-- Keyboard shortcuts: move (arrows, Shift for bigger steps), rotate 90° (Ctrl/Cmd+Left/Right), scale (+/-), edit (E), link 2 selected (L), copy/paste (Ctrl/Cmd+C/V), undo/redo (Ctrl/Cmd+Z/Y)
-- Client tools: imported "Real users" directory (place "Real user" objects; Ctrl/Cmd+M to email), plus an IP map grouped by /24 (U to open URL) with searchable lists and PDF export
-- Rack editor with ports, links, and PDF export
-- Saved views, revisions (restore/immutable), and search/highlight
-- Exclusive floor plan lock (no inactivity expiry), unlock requests with takeover window, and immutable revisions
-- Client chat (per customer) with permissions, unread badge, exports, and attachments (images/docs)
-- Multi-user roles with per-plan permissions
+## Highlights
+- Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
+- Corporate asset/device management (PCs, telephony, users, workstations), including custom objects with user-configurable custom fields and advanced control via layers.
+- PDF export and printing, with customizable print areas.
+- Roles and permissions management for granular control of access and features.
+- Creation and management of virtual offices and rooms.
+- Wi‑Fi coverage and CCTV planning, with wall drawing and automatic signal attenuation calculations.
+- Centralized client notes and documentation, easy to browse and consult.
+- Internal messaging system with a dedicated interface.
+- Real-user import via Web API and a centralized corporate directory.
+- Rack configurator and structured cabling management.
+- Scaled measurements and dimensions directly on the floor plan.
+- Fast object insertion and management via modern drag & drop, copy/paste, duplication, and extensive keyboard shortcuts.
 
 ## Locks
 - A floor plan can be edited by only one user at a time (exclusive lock).
