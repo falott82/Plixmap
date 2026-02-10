@@ -316,6 +316,7 @@ export const useClipboard = ({
           wifiCoverageSqm: obj.wifiCoverageSqm,
           wifiCatalogId: obj.wifiCatalogId,
           wifiShowRange: obj.wifiShowRange,
+          wifiRangeScale: (obj as any).wifiRangeScale,
           cctvAngle: obj.cctvAngle,
           cctvRange: obj.cctvRange,
           cctvOpacity: obj.cctvOpacity,

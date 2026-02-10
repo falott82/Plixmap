@@ -5,7 +5,7 @@ import { IconName, MapObjectType, WifiAntennaModel } from '../../store/types';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
-import { TEXT_FONT_OPTIONS, WIFI_DEFAULT_STANDARD, WIFI_STANDARD_OPTIONS } from '../../store/data';
+import { TEXT_FONT_OPTIONS, WIFI_DEFAULT_STANDARD, WIFI_RANGE_SCALE_MAX, WIFI_STANDARD_OPTIONS } from '../../store/data';
 import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import { isDeskType } from './deskTypes';
 
@@ -45,6 +45,7 @@ interface Props {
     wifiCoverageSqm?: number;
     wifiCatalogId?: string;
     wifiShowRange?: boolean;
+    wifiRangeScale?: number;
     ip?: string;
     url?: string;
   }) => void;
@@ -88,6 +89,7 @@ interface Props {
   initialWifiCoverageSqm?: number;
   initialWifiCatalogId?: string;
   initialWifiShowRange?: boolean;
+  initialWifiRangeScale?: number;
   initialIp?: string;
   initialUrl?: string;
   wifiModels?: WifiAntennaModel[];
@@ -140,6 +142,7 @@ const ObjectModal = ({
   initialWifiCoverageSqm,
   initialWifiCatalogId,
   initialWifiShowRange,
+  initialWifiRangeScale,
   initialIp,
   initialUrl,
   wifiModels = [],
@@ -186,6 +189,7 @@ const ObjectModal = ({
   const [wifiModelCode, setWifiModelCode] = useState('');
   const [wifiCoverageSqm, setWifiCoverageSqm] = useState('');
   const [wifiShowRange, setWifiShowRange] = useState(true);
+  const [wifiRangeScale, setWifiRangeScale] = useState<number>(1);
   const nameRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const wifiCatalogSearchRef = useRef<HTMLInputElement | null>(null);
   const wifiCatalogRowsRef = useRef<Record<string, HTMLTableRowElement | null>>({});
@@ -272,6 +276,11 @@ const ObjectModal = ({
   };
   const wifiCoverageRadius = wifiCoverageValue ? Math.sqrt(wifiCoverageValue / Math.PI) : null;
   const wifiCoverageDiameter = wifiCoverageRadius ? wifiCoverageRadius * 2 : null;
+  const wifiEffectiveRadius = wifiCoverageRadius ? wifiCoverageRadius * (Number.isFinite(wifiRangeScale) ? wifiRangeScale : 1) : null;
+  const wifiEffectiveDiameter = wifiEffectiveRadius ? wifiEffectiveRadius * 2 : null;
+  const wifiCoverageAreaSqm = wifiCoverageValue;
+  const wifiEffectiveAreaSqm =
+    wifiCoverageAreaSqm && Number.isFinite(wifiRangeScale) ? wifiCoverageAreaSqm * Math.pow(wifiRangeScale, 2) : null;
   const wifiModelsSorted = useMemo(() => {
     return (wifiModels || [])
       .slice()
@@ -470,6 +479,11 @@ const ObjectModal = ({
       const shouldBlankCustom = !catalogModel && !hasCustomFields;
       setWifiSource(nextSource);
       setWifiCatalogId(nextCatalogId);
+      setWifiRangeScale(
+        Number.isFinite(initialWifiRangeScale as number)
+          ? Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, Number(initialWifiRangeScale)))
+          : 1
+      );
       if (nextSource === 'catalog' && nextCatalogId) {
         const model = wifiModelsById.get(nextCatalogId);
         setWifiBrand(model?.brand || '');
@@ -541,6 +555,7 @@ const ObjectModal = ({
     initialWifiCoverageSqm,
     initialWifiCatalogId,
     initialWifiShowRange,
+    initialWifiRangeScale,
     initialIp,
     initialUrl,
     open,
@@ -759,8 +774,8 @@ const ObjectModal = ({
             imageHeight: Number.isFinite(imageHeight) && imageHeight > 0 ? imageHeight : undefined
           }
         : {}),
-      ...(isWifi
-        ? {
+	      ...(isWifi
+	        ? {
             wifiDb: Number.isFinite(dbValue as number) ? (dbValue as number) : undefined,
             wifiStandard: wifiStandard || WIFI_DEFAULT_STANDARD,
             wifiBand24,
@@ -770,11 +785,12 @@ const ObjectModal = ({
             wifiModel: wifiModel.trim(),
             wifiModelCode: wifiModelCode.trim(),
             wifiCoverageSqm: Number.isFinite(coverageValue as number) ? (coverageValue as number) : undefined,
-            wifiCatalogId: wifiSource === 'catalog' ? wifiCatalogId : undefined,
-            wifiShowRange
-          }
-        : {})
-    });
+	            wifiCatalogId: wifiSource === 'catalog' ? wifiCatalogId : undefined,
+	            wifiShowRange,
+	            wifiRangeScale: Number.isFinite(wifiRangeScale) ? Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, wifiRangeScale)) : 1
+	          }
+	        : {})
+	    });
     onClose();
   };
 
@@ -1312,6 +1328,59 @@ const ObjectModal = ({
                             />
                             {t({ it: 'Mostra range access point', en: 'Show access point range' })}
                           </label>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-600">
+                              <span>{t({ it: 'Range (moltiplicatore)', en: 'Range (multiplier)' })}</span>
+                              <span className="tabular-nums text-slate-700">x{(Number(wifiRangeScale) || 0).toFixed(2)}</span>
+                            </div>
+	                            <input
+	                              type="range"
+	                              min={0}
+	                              max={WIFI_RANGE_SCALE_MAX}
+	                              step={0.05}
+	                              value={wifiRangeScale}
+	                              disabled={readOnly}
+	                              onChange={(e) => setWifiRangeScale(Number(e.target.value))}
+	                              className="mt-1 w-full"
+	                            />
+	                            {wifiCoverageRadius &&
+	                            wifiCoverageDiameter &&
+	                            wifiCoverageAreaSqm &&
+	                            wifiEffectiveRadius &&
+	                            wifiEffectiveDiameter &&
+	                            wifiEffectiveAreaSqm ? (
+	                              <div className="mt-1 text-xs text-slate-500">
+	                                <div>
+	                                  {t({
+	                                    it: `Base: r ${formatCoverage(wifiCoverageRadius)} m · d ${formatCoverage(
+	                                      wifiCoverageDiameter
+	                                    )} m · area ${formatCoverage(wifiCoverageAreaSqm)} m2`,
+	                                    en: `Base: r ${formatCoverage(wifiCoverageRadius)} m · d ${formatCoverage(
+	                                      wifiCoverageDiameter
+	                                    )} m · area ${formatCoverage(wifiCoverageAreaSqm)} m2`
+	                                  })}
+	                                </div>
+	                                <div>
+	                                  {t({
+	                                    it: `Esteso: r ${formatCoverage(wifiEffectiveRadius)} m · d ${formatCoverage(
+	                                      wifiEffectiveDiameter
+	                                    )} m · area ${formatCoverage(wifiEffectiveAreaSqm)} m2 (max r ${formatCoverage(
+	                                      wifiCoverageRadius * WIFI_RANGE_SCALE_MAX
+	                                    )} m)`,
+	                                    en: `Extended: r ${formatCoverage(wifiEffectiveRadius)} m · d ${formatCoverage(
+	                                      wifiEffectiveDiameter
+	                                    )} m · area ${formatCoverage(wifiEffectiveAreaSqm)} m2 (max r ${formatCoverage(
+	                                      wifiCoverageRadius * WIFI_RANGE_SCALE_MAX
+	                                    )} m)`
+	                                  })}
+	                                </div>
+	                              </div>
+	                            ) : (
+	                              <div className="mt-1 text-xs text-slate-500">
+	                                {t({ it: 'Imposta la copertura per calcolare il raggio.', en: 'Set coverage to compute radius.' })}
+	                              </div>
+	                            )}
+                          </div>
                           {!wifiFormValid ? (
                             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                               {t({

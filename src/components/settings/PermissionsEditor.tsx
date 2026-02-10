@@ -7,26 +7,37 @@ type Access = '' | 'ro' | 'rw';
 
 interface Props {
   clients: Client[];
-  value: Record<string, Access>;
-  onChange: (next: Record<string, Access>) => void;
+  accessValue: Record<string, Access>;
+  chatValue: Record<string, boolean>;
+  onChangeAccess: (next: Record<string, Access>) => void;
+  onChangeChat: (next: Record<string, boolean>) => void;
 }
 
 const keyOf = (scopeType: Permission['scopeType'], scopeId: string) => `${scopeType}:${scopeId}`;
 
-const PermissionsEditor = ({ clients, value, onChange }: Props) => {
+const PermissionsEditor = ({ clients, accessValue, chatValue, onChangeAccess, onChangeChat }: Props) => {
   const t = useT();
-  const entries = useMemo(() => {
+  const { entries, keysByClientId } = useMemo(() => {
     const out: { key: string; scopeType: Permission['scopeType']; scopeId: string; label: string; depth: number }[] = [];
+    const keyMap: Record<string, string[]> = {};
     for (const c of clients) {
-      out.push({ key: keyOf('client', c.id), scopeType: 'client', scopeId: c.id, label: c.name, depth: 0 });
+      const clientKeys: string[] = [];
+      const clientKey = keyOf('client', c.id);
+      clientKeys.push(clientKey);
+      out.push({ key: clientKey, scopeType: 'client', scopeId: c.id, label: c.name, depth: 0 });
       for (const s of c.sites || []) {
-        out.push({ key: keyOf('site', s.id), scopeType: 'site', scopeId: s.id, label: s.name, depth: 1 });
+        const siteKey = keyOf('site', s.id);
+        clientKeys.push(siteKey);
+        out.push({ key: siteKey, scopeType: 'site', scopeId: s.id, label: s.name, depth: 1 });
         for (const p of s.floorPlans || []) {
-          out.push({ key: keyOf('plan', p.id), scopeType: 'plan', scopeId: p.id, label: p.name, depth: 2 });
+          const planKey = keyOf('plan', p.id);
+          clientKeys.push(planKey);
+          out.push({ key: planKey, scopeType: 'plan', scopeId: p.id, label: p.name, depth: 2 });
         }
       }
+      keyMap[c.id] = clientKeys;
     }
-    return out;
+    return { entries: out, keysByClientId: keyMap };
   }, [clients]);
 
   return (
@@ -43,20 +54,63 @@ const PermissionsEditor = ({ clients, value, onChange }: Props) => {
               style={{ paddingLeft: 12 + e.depth * 16 }}
             >
               <div className="min-w-0 truncate">{e.label}</div>
-              <select
-                value={value[e.key] || ''}
-                onChange={(ev) => {
-                  const next = { ...value, [e.key]: ev.target.value as Access };
-                  if (!next[e.key]) delete next[e.key];
-                  onChange(next);
-                }}
-                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
-                title={t({ it: 'Permesso', en: 'Permission' })}
-              >
-                <option value="">{t({ it: 'Nessuno', en: 'None' })}</option>
-                <option value="ro">{t({ it: 'Sola lettura', en: 'Read-only' })}</option>
-                <option value="rw">{t({ it: 'Lettura+scrittura', en: 'Read/write' })}</option>
-              </select>
+              <div className="flex items-center gap-2">
+                {e.depth === 0 ? (
+                  (() => {
+                    const keys = keysByClientId[e.scopeId] || [];
+                    const hasAnyAccess = keys.some((k) => (accessValue[k] || '') === 'ro' || (accessValue[k] || '') === 'rw');
+                    const enabled = keys.some(
+                      (k) => !!chatValue[k] && ((accessValue[k] || '') === 'ro' || (accessValue[k] || '') === 'rw')
+                    );
+                    return (
+                      <label
+                        className={`flex items-center gap-2 rounded-lg border px-2 py-1 text-xs font-semibold ${
+                          hasAnyAccess
+                            ? enabled
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                              : 'border-slate-200 bg-white text-slate-700'
+                            : 'border-slate-200 bg-slate-100 text-slate-400'
+                        }`}
+                        title={t({ it: 'Abilita chat per questo cliente', en: 'Enable chat for this client' })}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={enabled}
+                          disabled={!hasAnyAccess}
+                          onChange={(ev) => {
+                            const want = ev.target.checked;
+                            const next = { ...(chatValue || {}) };
+                            if (want) {
+                              for (const k of keys) {
+                                const a = accessValue[k] || '';
+                                if (a === 'ro' || a === 'rw') next[k] = true;
+                              }
+                            } else {
+                              for (const k of keys) delete next[k];
+                            }
+                            onChangeChat(next);
+                          }}
+                        />
+                        <span>{t({ it: 'Chat', en: 'Chat' })}</span>
+                      </label>
+                    );
+                  })()
+                ) : null}
+                <select
+                  value={accessValue[e.key] || ''}
+                  onChange={(ev) => {
+                    const next = { ...(accessValue || {}), [e.key]: ev.target.value as Access };
+                    if (!next[e.key]) delete next[e.key];
+                    onChangeAccess(next);
+                  }}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
+                  title={t({ it: 'Permesso', en: 'Permission' })}
+                >
+                  <option value="">{t({ it: 'Nessuno', en: 'None' })}</option>
+                  <option value="ro">{t({ it: 'Sola lettura', en: 'Read-only' })}</option>
+                  <option value="rw">{t({ it: 'Lettura+scrittura', en: 'Read/write' })}</option>
+                </select>
+              </div>
             </div>
           ))
         ) : (
@@ -75,13 +129,18 @@ const PermissionsEditor = ({ clients, value, onChange }: Props) => {
   );
 };
 
-export const permissionsMapToList = (value: Record<string, Access>): Permission[] => {
+export const permissionsMapsToList = (accessValue: Record<string, Access>, chatValue: Record<string, boolean>): Permission[] => {
   const out: Permission[] = [];
-  for (const [k, access] of Object.entries(value)) {
+  for (const [k, access] of Object.entries(accessValue || {})) {
     const [scopeType, scopeId] = k.split(':');
     if (!scopeType || !scopeId) continue;
     if (access !== 'ro' && access !== 'rw') continue;
-    out.push({ scopeType: scopeType as Permission['scopeType'], scopeId, access });
+    out.push({
+      scopeType: scopeType as Permission['scopeType'],
+      scopeId,
+      access,
+      ...(chatValue?.[k] ? { chat: true } : {})
+    });
   }
   return out;
 };
@@ -90,6 +149,14 @@ export const permissionsListToMap = (list: Permission[] | undefined): Record<str
   const out: Record<string, Access> = {};
   for (const p of list || []) {
     out[keyOf(p.scopeType, p.scopeId)] = p.access;
+  }
+  return out;
+};
+
+export const permissionsListToChatMap = (list: Permission[] | undefined): Record<string, boolean> => {
+  const out: Record<string, boolean> = {};
+  for (const p of list || []) {
+    if (p?.chat) out[keyOf(p.scopeType, p.scopeId)] = true;
   }
   return out;
 };

@@ -1,9 +1,10 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, FileText, History, Image as ImageIcon, Info, Lock, Map as MapIcon, MapPinned, Network, Paperclip, Search, Star, Trash, Users, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, FileText, History, Hourglass, Image as ImageIcon, Info, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, Search, Star, Trash, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useT } from '../../i18n/useT';
+import UserAvatar from '../ui/UserAvatar';
 import FooterInfo from './FooterInfo';
 import { shallow } from 'zustand/shallow';
 import { useAuthStore } from '../../store/useAuthStore';
@@ -15,8 +16,6 @@ import ClientIpMapModal from './ClientIpMapModal';
 import ClientDirectoryModal from './ClientDirectoryModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import CloneFloorPlanModal from './CloneFloorPlanModal';
-import { useToastStore } from '../../store/useToast';
-import { SEED_CLIENT_ID } from '../../store/data';
 import { fetchImportSummary, ImportSummaryRow } from '../../api/customImport';
 
 type TreeClient = {
@@ -38,6 +37,23 @@ const parseCoords = (value: string | undefined): { lat: number; lng: number } | 
   if (lat < -90 || lat > 90) return null;
   if (lng < -180 || lng > 180) return null;
   return { lat, lng };
+};
+
+const formatTs = (value?: number | null): string => {
+  if (!value) return '—';
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return '—';
+  }
+};
+
+const formatMinutes = (value?: number | null): string => {
+  if (value === null || value === undefined) return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  // Keep 0.5 steps readable.
+  return n % 1 === 0 ? String(n) : n.toFixed(1);
 };
 
 const sameTree = (a: TreeClient[], b: TreeClient[]) => {
@@ -112,7 +128,9 @@ const SidebarTree = () => {
     setExpandedSites,
     toggleClientExpanded,
     toggleSiteExpanded,
-    lockedPlans
+    lockedPlans,
+    openClientChat,
+    chatUnreadByClientId
   } = useUIStore(
     (s) => ({
       selectedPlanId: s.selectedPlanId,
@@ -125,7 +143,9 @@ const SidebarTree = () => {
       setExpandedSites: s.setExpandedSites,
       toggleClientExpanded: s.toggleClientExpanded,
       toggleSiteExpanded: s.toggleSiteExpanded,
-      lockedPlans: (s as any).lockedPlans || {}
+      lockedPlans: (s as any).lockedPlans || {},
+      openClientChat: (s as any).openClientChat,
+      chatUnreadByClientId: (s as any).chatUnreadByClientId || {}
     }),
     shallow
   );
@@ -133,11 +153,11 @@ const SidebarTree = () => {
     (s) => ({ requestSaveAndNavigate: s.requestSaveAndNavigate, dirtyByPlan: s.dirtyByPlan }),
     shallow
   );
-  const { push } = useToastStore();
   const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
   const { user, permissions } = useAuthStore();
+  const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
   const defaultPlanId = (user as any)?.defaultPlanId as string | null | undefined;
   const clientOrder = (((user as any)?.clientOrder || []) as string[]).filter((x) => typeof x === 'string');
   const [treeQuery, setTreeQuery] = useState('');
@@ -153,20 +173,57 @@ const SidebarTree = () => {
   const [confirmDelete, setConfirmDelete] = useState<{ kind: 'client' | 'plan'; id: string; label: string } | null>(null);
   const [missingPlansNotice, setMissingPlansNotice] = useState<{ clientName: string } | null>(null);
   const [clonePlan, setClonePlan] = useState<{ planId: string; name: string } | null>(null);
-  const [lockMenu, setLockMenu] = useState<{
-    planId: string;
-    planName: string;
-    clientName: string;
-    siteName: string;
-    userId: string;
-    username: string;
-    x: number;
-    y: number;
-  } | null>(null);
+		  const [lockMenu, setLockMenu] = useState<{
+		    kind?: 'lock' | 'grant';
+		    planId: string;
+		    planName: string;
+		    clientName: string;
+		    siteName: string;
+		    userId: string;
+		    username: string;
+		    avatarUrl?: string;
+		    grantedAt?: number | null;
+		    expiresAt?: number | null;
+		    minutes?: number | null;
+		    lastActionAt?: number | null;
+		    lastSavedAt?: number | null;
+		    lastSavedRev?: string | null;
+		    x: number;
+		    y: number;
+		  } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const lockMenuRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ siteId: string; planId: string } | null>(null);
   const clientDragRef = useRef<string | null>(null);
+
+  const canChatClientIds = useMemo(() => {
+    const out = new Set<string>();
+    if (user?.isAdmin || user?.isSuperAdmin) {
+      for (const c of clients || []) out.add(c.id);
+      return out;
+    }
+    const siteToClient = new Map<string, string>();
+    const planToClient = new Map<string, string>();
+    for (const c of clients || []) {
+      for (const s of c.sites || []) {
+        siteToClient.set(s.id, c.id);
+        for (const p of s.floorPlans || []) planToClient.set(p.id, c.id);
+      }
+    }
+    for (const p of permissions || []) {
+      if (!p?.chat) continue;
+      if (p.scopeType === 'client') out.add(p.scopeId);
+      if (p.scopeType === 'site') {
+        const clientId = siteToClient.get(p.scopeId);
+        if (clientId) out.add(clientId);
+      }
+      if (p.scopeType === 'plan') {
+        const clientId = planToClient.get(p.scopeId);
+        if (clientId) out.add(clientId);
+      }
+    }
+    return out;
+  }, [clients, permissions, user?.isAdmin]);
 
   const fullClient = useDataStore(
     useMemo(
@@ -381,24 +438,24 @@ const SidebarTree = () => {
           />
         </div>
       </div>
-      <div className="flex items-center gap-2 px-4 pb-2">
+      <div className="flex items-center gap-2 px-4 pb-3">
         <button
           onClick={handleCollapseAll}
-          className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
           title={t({ it: 'Compatta tutti i clienti e le sedi', en: 'Collapse all clients and sites' })}
         >
           <ChevronsUp size={14} />
         </button>
         <button
           onClick={handleExpandAll}
-          className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
           title={t({ it: 'Espandi tutti i clienti e le sedi', en: 'Expand all clients and sites' })}
         >
           <ChevronsDown size={14} />
         </button>
-      </div>
-      <div className="px-4 pb-3 text-xs font-semibold uppercase text-slate-500">
-        {t({ it: 'Cliente → Sede → Planimetria', en: 'Client → Site → Floor plan' })}
+        <div className="min-w-0 truncate text-xs font-semibold uppercase text-slate-500">
+          {t({ it: 'Cliente → Sede → Planimetria', en: 'Client → Site → Floor plan' })}
+        </div>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto px-3 pb-6">
         {filteredClients.map((client) => {
@@ -474,27 +531,34 @@ const SidebarTree = () => {
                   {client.name.trim().slice(0, 1).toUpperCase()}
                 </div>
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 <span className="truncate">{client.shortName || client.name}</span>
-                {client.id === SEED_CLIENT_ID ? (
+              </div>
+              <div className="ml-auto flex items-center gap-1">
+                {canChatClientIds.has(client.id) ? (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      push(
-                        t({
-                          it: 'Questo è un cliente dimostrativo. Puoi eliminarlo oppure usarlo come prova.',
-                          en: 'This is a demo client. You can delete it or use it for testing.'
-                        }),
-                        'info'
-                      );
+                      openClientChat(client.id);
                     }}
-                    className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 text-[11px] font-bold text-slate-500 hover:bg-slate-50"
-                    title={t({ it: 'Cliente di prova', en: 'Demo client' })}
+                    className="relative flex h-6 w-6 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    title={t({ it: 'Chat cliente', en: 'Client chat' })}
+                    aria-label={t({ it: 'Chat cliente', en: 'Client chat' })}
                   >
-                    ?
+                    <MessageCircle size={14} />
+                    {Number((chatUnreadByClientId as any)?.[client.id] || 0) > 0 ? (
+                      <span className="absolute -right-1 -top-1 min-w-[16px] rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-4 text-white">
+                        {Number((chatUnreadByClientId as any)?.[client.id] || 0) > 99
+                          ? '99+'
+                          : String(Number((chatUnreadByClientId as any)?.[client.id] || 0))}
+                      </span>
+                    ) : null}
                   </button>
                 ) : null}
+                {/*
+                  Demo client indicator removed (requested): keep the UI clean and consistent.
+                */}
               </div>
             </div>
             {clientExpanded
@@ -539,6 +603,17 @@ const SidebarTree = () => {
                               const isDefault = !!defaultPlanId && defaultPlanId === plan.id;
                               const hasPrintArea = !!plan.printArea;
                               const lockInfo = (lockedPlans as any)?.[plan.id];
+                              const lockKind = String((lockInfo as any)?.kind || 'lock');
+                              const isGrant = lockKind === 'grant';
+                              const remainingMinutes = (() => {
+                                if (!isGrant) return null;
+                                const exp = Number((lockInfo as any)?.expiresAt || 0);
+                                if (!Number.isFinite(exp) || exp <= 0) return null;
+                                const ms = exp - Date.now();
+                                if (ms <= 0) return 0;
+                                // Round to nearest 0.5 minute.
+                                return Math.round((ms / 60_000) * 2) / 2;
+                              })();
                               return (
                                 <button
                                   key={plan.id}
@@ -587,25 +662,40 @@ const SidebarTree = () => {
                                       onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
-                                        if (!user?.isSuperAdmin || user?.username !== 'superadmin') return;
-                                        setLockMenu({
+                                      setLockMenu({
+                                          kind: isGrant ? 'grant' : 'lock',
                                           planId: plan.id,
                                           planName: plan.name,
                                           clientName: client.shortName || client.name,
                                           siteName: site.name,
                                           userId: lockInfo.userId,
                                           username: lockInfo.username,
+                                          avatarUrl: (lockInfo as any).avatarUrl,
+                                          grantedAt: (lockInfo as any)?.grantedAt ?? null,
+                                          expiresAt: (lockInfo as any)?.expiresAt ?? null,
+                                          minutes: (lockInfo as any)?.minutes ?? null,
+                                          lastActionAt: (lockInfo as any)?.lastActionAt ?? null,
+                                          lastSavedAt: (lockInfo as any)?.lastSavedAt ?? null,
+                                          lastSavedRev: (lockInfo as any)?.lastSavedRev ?? null,
                                           x: e.clientX,
                                           y: e.clientY
                                         });
                                       }}
                                       className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
                                       title={t({
-                                        it: `Lock attivo: ${lockInfo.username || 'utente'}`,
-                                        en: `Lock active: ${lockInfo.username || 'user'}`
+                                        it: isGrant
+                                          ? `Richiesta di lock concessa a ${lockInfo.username || 'utente'} e valida per i prossimi ${formatMinutes(remainingMinutes ?? (lockInfo as any)?.minutes ?? null)} minuti`
+                                          : `Lock attivo: ${lockInfo.username || 'utente'}`,
+                                        en: isGrant
+                                          ? `Lock granted to ${lockInfo.username || 'user'} for the next ${formatMinutes(remainingMinutes ?? (lockInfo as any)?.minutes ?? null)} minutes`
+                                          : `Lock active: ${lockInfo.username || 'user'}`
                                       })}
                                     >
-                                      <Lock size={14} />
+                                      {isGrant ? (
+                                        <Hourglass size={16} />
+                                      ) : (
+                                        <UserAvatar src={(lockInfo as any).avatarUrl} username={lockInfo.username} size={18} className="border-amber-200" />
+                                      )}
                                     </button>
                                   ) : null}
                                   {isDefault ? (
@@ -799,6 +889,25 @@ const SidebarTree = () => {
               <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">
                 {t({ it: 'Cliente', en: 'Client' })}
               </div>
+              {canChatClientIds.has(clientMenu.clientId) ? (
+                <button
+                  onClick={() => {
+                    openClientChat(clientMenu.clientId);
+                    setClientMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                >
+                  <MessageCircle size={14} className="text-slate-500" />
+                  {t({ it: 'Chat', en: 'Chat' })}
+                  {Number((chatUnreadByClientId as any)?.[clientMenu.clientId] || 0) > 0 ? (
+                    <span className="ml-auto rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-bold text-white">
+                      {Number((chatUnreadByClientId as any)?.[clientMenu.clientId] || 0) > 99
+                        ? '99+'
+                        : String(Number((chatUnreadByClientId as any)?.[clientMenu.clientId] || 0))}
+                    </span>
+                  ) : null}
+                </button>
+              ) : null}
               <button
                 onClick={() => {
                   setClientInfoId(clientMenu.clientId);
@@ -899,14 +1008,14 @@ const SidebarTree = () => {
         </div>
       ) : null}
 
-      {lockMenu ? (
-        <div
-          ref={lockMenuRef}
-          className="fixed z-50 w-64 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
-          style={{ top: lockMenu.y, left: lockMenu.x }}
-        >
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <span className="font-semibold text-ink">{t({ it: 'Lock planimetria', en: 'Floor plan lock' })}</span>
+	      {lockMenu ? (
+	        <div
+	          ref={lockMenuRef}
+	          className="fixed z-50 w-72 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
+	          style={{ top: lockMenu.y, left: lockMenu.x }}
+	        >
+	          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+	            <span className="font-semibold text-ink">{t({ it: 'Lock planimetria', en: 'Floor plan lock' })}</span>
             <button
               onClick={() => setLockMenu(null)}
               className="text-slate-400 hover:text-ink"
@@ -914,28 +1023,92 @@ const SidebarTree = () => {
             >
               <X size={14} />
             </button>
-          </div>
-          <div className="px-2 pt-2 text-sm font-semibold text-ink">{lockMenu.planName}</div>
-          <div className="px-2 text-xs text-slate-500">{lockMenu.clientName} / {lockMenu.siteName}</div>
-          <div className="mt-2 px-2 text-xs text-slate-600">
-            {t({ it: 'Lock attivo da', en: 'Locked by' })}: {lockMenu.username || 'user'}
-          </div>
-          <button
-            onClick={() => {
-              window.dispatchEvent(
-                new CustomEvent('deskly_unlock_request', {
-                  detail: { planId: lockMenu.planId, userId: lockMenu.userId }
-                })
-              );
-              setLockMenu(null);
-            }}
-            className="mt-3 flex w-full items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100"
-            title={t({ it: 'Chiedi unlock', en: 'Request unlock' })}
-          >
-            {t({ it: 'Chiedi unlock', en: 'Request unlock' })}
-          </button>
-        </div>
-      ) : null}
+	          </div>
+	          <div className="px-2 pt-2 text-sm font-semibold text-ink">{lockMenu.planName}</div>
+	          <div className="px-2 text-xs text-slate-500">{lockMenu.clientName} / {lockMenu.siteName}</div>
+	          <div className="mt-2 flex items-center gap-2 px-2 text-xs text-slate-600">
+	            {lockMenu.kind === 'grant' ? (
+	              <span className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700">
+	                <Hourglass size={14} />
+	              </span>
+	            ) : (
+	              <UserAvatar src={lockMenu.avatarUrl} username={lockMenu.username} size={18} />
+	            )}
+	            <span>
+	              {lockMenu.kind === 'grant'
+	                ? t({ it: 'Lock concesso a', en: 'Lock granted to' })
+	                : t({ it: 'Bloccato da', en: 'Locked by' })}
+	              : {lockMenu.username || 'user'}
+	            </span>
+	          </div>
+
+	          <div className="mt-3 space-y-1 px-2 text-[11px] text-slate-600">
+	            <div>
+	              <span className="font-semibold text-slate-700">{t({ it: 'Ultima azione', en: 'Last action' })}</span>: {formatTs(lockMenu.lastActionAt)}
+	            </div>
+	            <div>
+	              <span className="font-semibold text-slate-700">{t({ it: 'Ultimo salvataggio', en: 'Last save' })}</span>: {formatTs(lockMenu.lastSavedAt)}
+	            </div>
+	            <div>
+	              <span className="font-semibold text-slate-700">{t({ it: 'Revisione', en: 'Revision' })}</span>: {String(lockMenu.lastSavedRev || '').trim() || '—'}
+	            </div>
+	            {lockMenu.kind === 'grant' ? (
+	              <div>
+	                <span className="font-semibold text-slate-700">{t({ it: 'Valida per', en: 'Valid for' })}</span>: {formatMinutes(lockMenu.minutes)} {t({ it: 'minuti', en: 'minutes' })}
+	              </div>
+	            ) : null}
+	          </div>
+
+	          {lockMenu.kind !== 'grant' && lockMenu.userId && lockMenu.userId !== String(user?.id || '') ? (
+	            <button
+	              onClick={() => {
+	                window.dispatchEvent(
+	                  new CustomEvent('deskly_unlock_request', {
+	                    detail: {
+	                      planId: lockMenu.planId,
+	                      planName: lockMenu.planName,
+	                      clientName: lockMenu.clientName,
+	                      siteName: lockMenu.siteName,
+	                      userId: lockMenu.userId,
+	                      username: lockMenu.username,
+	                      avatarUrl: lockMenu.avatarUrl || ''
+	                    }
+	                  })
+	                );
+	                setLockMenu(null);
+	              }}
+	              className="mt-3 flex w-full items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+	              title={t({ it: 'Chiedi unlock', en: 'Request unlock' })}
+	            >
+	              {t({ it: 'Chiedi unlock', en: 'Request unlock' })}
+	            </button>
+	          ) : null}
+		          {isSuperAdmin && lockMenu.kind !== 'grant' && lockMenu.userId && lockMenu.userId !== String(user?.id || '') ? (
+		            <button
+		              onClick={() => {
+		                window.dispatchEvent(
+		                  new CustomEvent('deskly_force_unlock', {
+		                    detail: {
+	                      planId: lockMenu.planId,
+	                      planName: lockMenu.planName,
+	                      clientName: lockMenu.clientName,
+	                      siteName: lockMenu.siteName,
+	                      userId: lockMenu.userId,
+	                      username: lockMenu.username,
+	                      avatarUrl: lockMenu.avatarUrl || ''
+	                    }
+	                  })
+	                );
+	                setLockMenu(null);
+	              }}
+	              className="mt-2 flex w-full items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+	              title={t({ it: 'Force unlock (Superadmin)', en: 'Force unlock (Superadmin)' })}
+	            >
+	              {t({ it: 'Force unlock', en: 'Force unlock' })}
+	            </button>
+	          ) : null}
+	        </div>
+	      ) : null}
 
       <ClientInfoModal open={!!clientInfoId} client={fullClient || undefined} onClose={() => setClientInfoId(null)} />
       <ClientAttachmentsModal open={!!clientAttachmentsId} client={attachmentsClient || undefined} onClose={() => setClientAttachmentsId(null)} />

@@ -3,7 +3,7 @@ import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { AdminUserRow, Permission } from '../../api/auth';
 import { Client } from '../../store/types';
-import PermissionsEditor, { permissionsListToMap, permissionsMapToList } from './PermissionsEditor';
+import PermissionsEditor, { permissionsListToChatMap, permissionsListToMap, permissionsMapsToList } from './PermissionsEditor';
 import { useT } from '../../i18n/useT';
 import { SEED_CLIENT_ID } from '../../store/data';
 
@@ -42,6 +42,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
   const [disabled, setDisabled] = useState(false);
   const [language, setLanguage] = useState<'it' | 'en'>('it');
   const [permMap, setPermMap] = useState<Record<string, '' | 'ro' | 'rw'>>({});
+  const [chatMap, setChatMap] = useState<Record<string, boolean>>({});
   const [importFromUserId, setImportFromUserId] = useState('');
   const userRef = useRef<HTMLInputElement | null>(null);
 
@@ -59,7 +60,8 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       setIsAdmin(false);
       setDisabled(false);
       setLanguage('it');
-      setPermMap(seedClientExists ? { [SEED_CLIENT_ID]: 'rw' } : {});
+      setPermMap(seedClientExists ? { [`client:${SEED_CLIENT_ID}`]: 'rw' } : {});
+      setChatMap({});
       setImportFromUserId('');
     } else {
       setUsername((initial?.username || '').toLowerCase());
@@ -73,6 +75,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       setDisabled(!!(initial as any)?.disabled);
       setLanguage(((initial as any)?.language === 'en' ? 'en' : 'it') as 'it' | 'en');
       setPermMap(permissionsListToMap(initial?.permissions));
+      setChatMap(permissionsListToChatMap(initial?.permissions));
       setImportFromUserId('');
     }
     window.setTimeout(() => userRef.current?.focus(), 0);
@@ -91,7 +94,8 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
     if (!templateId) {
       const seedClientExists = clients.some((c) => c.id === SEED_CLIENT_ID);
       setIsAdmin(false);
-      setPermMap(seedClientExists ? { [SEED_CLIENT_ID]: 'rw' } : {});
+      setPermMap(seedClientExists ? { [`client:${SEED_CLIENT_ID}`]: 'rw' } : {});
+      setChatMap({});
       return;
     }
     const source = templateOptions.find((u) => u.id === templateId);
@@ -99,10 +103,12 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
     if (source.isAdmin && canCreateAdmin) {
       setIsAdmin(true);
       setPermMap({});
+      setChatMap({});
       return;
     }
     setIsAdmin(false);
     setPermMap(permissionsListToMap(source.permissions));
+    setChatMap(permissionsListToChatMap(source.permissions));
   };
 
   useEffect(() => {
@@ -110,6 +116,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
     if (!isAdmin) return;
     setImportFromUserId('');
     setPermMap({});
+    setChatMap({});
   }, [isAdmin, mode]);
 
   const normalizePhone = (value: string) => {
@@ -170,7 +177,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       isAdmin,
       disabled: lockedDisabled,
       language,
-      permissions: permissionsMapToList(permMap)
+      permissions: permissionsMapsToList(permMap, chatMap)
     });
   };
 
@@ -409,7 +416,13 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                         })}
                       </div>
                     ) : (
-                      <PermissionsEditor clients={clients} value={permMap} onChange={setPermMap} />
+                      <PermissionsEditor
+                        clients={clients}
+                        accessValue={permMap}
+                        chatValue={chatMap}
+                        onChangeAccess={setPermMap}
+                        onChangeChat={setChatMap}
+                      />
                     )}
                   </div>
                   <div className="modal-footer lg:col-span-2">

@@ -120,7 +120,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // Needed for voice notes in client chat (getUserMedia). Keep camera/geolocation disabled.
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   res.setHeader(
     'Content-Security-Policy',
@@ -275,21 +276,40 @@ const markLogsCleared = (kind, userId, username) => {
 // --- Realtime (WebSocket): plan presence + plan locking (exclusive editor) ---
 const wsPlanMembers = new Map(); // planId -> Set<ws>
 const wsClientInfo = new Map(); // ws -> { userId, username, ip, connectedAt, isSuperAdmin, plans: Map<planId, joinedAt> }
-const unlockRequests = new Map(); // requestId -> { requestedById, requestedByName, targetUserId, planId, createdAt }
-const planLocks = new Map(); // planId -> { userId, username, ts, expiresAt }
-const LOCK_TTL_MS = (() => {
-  const raw = Number(process.env.DESKLY_PLAN_LOCK_TTL_MS || '');
-  return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
-})();
+const unlockRequests = new Map(); // requestId -> { requestedById, requestedByName, requestedByAvatarUrl, targetUserId, planId, message, grantMinutes, createdAt }
+const planLocks = new Map(); // planId -> { userId, username, avatarUrl, acquiredAt, ts, lastActionAt, dirty }
+const planLockGrants = new Map(); // planId -> { userId, username, avatarUrl, grantedAt, expiresAt, minutes, grantedById, grantedByName, lastActionAt }
+const forceUnlocks = new Map(); // requestId -> { planId, targetUserId, requestedById, requestedByName, createdAt, deadlineAt, graceMinutes }
 const LOCK_CLEANUP_MS = 5_000;
+const FORCE_UNLOCK_TAKEOVER_MINUTES = 60;
 
+// Locks never expire automatically (no inactivity/TTL decay). We still use periodic cleanup for:
+// - unlock request expiry
+// - lock grants expiry
+// - force unlock deadlines
 const purgeExpiredLocks = () => {
+  // legacy no-op (kept because other code paths call it)
+  return [];
+};
+
+const purgeExpiredGrants = () => {
   const now = Date.now();
   const expired = [];
-  for (const [planId, lock] of planLocks.entries()) {
-    if (!lock?.expiresAt || lock.expiresAt > now) continue;
-    planLocks.delete(planId);
-    expired.push({ planId, lock });
+  for (const [planId, grant] of planLockGrants.entries()) {
+    if (!grant?.expiresAt || grant.expiresAt > now) continue;
+    planLockGrants.delete(planId);
+    expired.push({ planId, grant });
+  }
+  return expired;
+};
+
+const purgeExpiredForceUnlocks = () => {
+  const now = Date.now();
+  const expired = [];
+  for (const [requestId, entry] of forceUnlocks.entries()) {
+    if (!entry?.deadlineAt || entry.deadlineAt > now) continue;
+    forceUnlocks.delete(requestId);
+    expired.push({ requestId, entry });
   }
   return expired;
 };
@@ -297,11 +317,17 @@ const purgeExpiredLocks = () => {
 const getValidLock = (planId) => {
   const lock = planLocks.get(planId);
   if (!lock) return null;
-  if (lock.expiresAt && lock.expiresAt <= Date.now()) {
-    planLocks.delete(planId);
+  return lock;
+};
+
+const getValidGrant = (planId) => {
+  const grant = planLockGrants.get(planId);
+  if (!grant) return null;
+  if (grant.expiresAt && grant.expiresAt <= Date.now()) {
+    planLockGrants.delete(planId);
     return null;
   }
-  return lock;
+  return grant;
 };
 
 const jsonSend = (ws, obj) => {
@@ -326,21 +352,160 @@ const sendToUser = (userId, obj) => {
   return sent;
 };
 
+const broadcastToChatClient = (clientId, obj) => {
+  if (!clientId) return;
+  for (const [ws, info] of wsClientInfo.entries()) {
+    if (!info?.userId) continue;
+    const isAdmin = !!info.isAdmin || !!info.isSuperAdmin;
+    if (!isAdmin) {
+      const allowed = getChatClientIdsForUser(info.userId, false);
+      if (!allowed.has(clientId)) continue;
+    }
+    jsonSend(ws, obj);
+  }
+};
+
 const broadcastToPlan = (planId, obj) => {
   const members = wsPlanMembers.get(planId);
   if (!members) return;
   for (const ws of members) jsonSend(ws, obj);
 };
 
+const resolveUserIdentity = (userId, fallbackUsername = 'user') => {
+  const fallback = { userId, username: fallbackUsername || 'user', avatarUrl: '' };
+  if (!userId) return fallback;
+  // Prefer connected WS info for avatarUrl.
+  for (const info of wsClientInfo.values()) {
+    if (!info || info.userId !== userId) continue;
+    return { userId, username: info.username || fallback.username, avatarUrl: info.avatarUrl || '' };
+  }
+  try {
+    const row = db.prepare('SELECT username, avatarUrl FROM users WHERE id = ?').get(userId);
+    return { userId, username: String(row?.username || fallback.username), avatarUrl: String(row?.avatarUrl || '') };
+  } catch {
+    return fallback;
+  }
+};
+
+const userIsJoinedToPlan = (planId, userId) => {
+  const members = wsPlanMembers.get(planId);
+  if (!members) return false;
+  for (const ws of members) {
+    const info = wsClientInfo.get(ws);
+    if (info?.userId === userId) return true;
+  }
+  return false;
+};
+
+const findForceUnlockByPlanAndTarget = (planId, targetUserId) => {
+  if (!planId || !targetUserId) return null;
+  for (const [requestId, entry] of forceUnlocks.entries()) {
+    if (!entry) continue;
+    if (entry.planId === planId && entry.targetUserId === targetUserId) return { requestId, entry };
+  }
+  return null;
+};
+
+const completeForceUnlockAsAutoDiscard = (planId, targetUserId, lastActionAt, reason) => {
+  const hit = findForceUnlockByPlanAndTarget(planId, targetUserId);
+  if (!hit) return false;
+  const { requestId, entry } = hit;
+  forceUnlocks.delete(requestId);
+  // Notify requester (best effort).
+  sendToUser(entry.requestedById, { type: 'force_unlock_done', requestId, planId: entry.planId, action: 'discard', ok: true, auto: true, reason });
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'plan_force_unlock_auto_discard',
+    userId: entry.requestedById,
+    username: entry.requestedByName,
+    scopeType: 'plan',
+    scopeId: entry.planId,
+    details: { targetUserId: entry.targetUserId, reason: reason || 'target_left', requestId }
+  });
+  finalizeForceUnlockTakeover(entry.planId, entry.requestedById, entry.requestedByName, lastActionAt, requestId, reason || 'target_left');
+  return true;
+};
+
+const finalizeForceUnlockTakeover = (planId, requestedById, requestedByName, lastActionAt, requestId, reason) => {
+  if (!planId || !requestedById) return;
+  const identity = resolveUserIdentity(requestedById, requestedByName || 'user');
+  const now = Date.now();
+  // If the requester is already inside the plan, grant the lock immediately; otherwise reserve it with an hourglass.
+  if (userIsJoinedToPlan(planId, requestedById)) {
+    planLockGrants.delete(planId);
+    planLocks.set(planId, {
+      userId: requestedById,
+      username: identity.username,
+      avatarUrl: identity.avatarUrl || '',
+      acquiredAt: now,
+      ts: now,
+      lastActionAt: null,
+      dirty: false
+    });
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'plan_lock_acquired',
+      userId: requestedById,
+      username: identity.username,
+      scopeType: 'plan',
+      scopeId: planId,
+      details: { reason: reason || 'force_unlock', requestId }
+    });
+  } else {
+    const minutes = FORCE_UNLOCK_TAKEOVER_MINUTES;
+    const expiresAt = now + Math.round(minutes * 60_000);
+    // Only reserve if the plan isn't currently locked.
+    const current = getValidLock(planId);
+    if (!current) {
+      planLockGrants.set(planId, {
+        userId: requestedById,
+        username: identity.username,
+        avatarUrl: identity.avatarUrl || '',
+        grantedAt: now,
+        expiresAt,
+        minutes,
+        grantedById: requestedById,
+        grantedByName: identity.username,
+        lastActionAt: lastActionAt || null
+      });
+      writeAuditLog(db, {
+        level: 'important',
+        event: 'plan_lock_granted',
+        userId: requestedById,
+        username: identity.username,
+        scopeType: 'plan',
+        scopeId: planId,
+        details: { reason: reason || 'force_unlock', requestId, minutes }
+      });
+    }
+  }
+  emitLockState(planId);
+};
+
 const buildPlanPathMap = (clients) => {
   const map = new Map();
+  const formatRev = (rev) => {
+    if (!rev) return '';
+    if (typeof rev.revMajor === 'number' && typeof rev.revMinor === 'number') return `Rev ${rev.revMajor}.${rev.revMinor}`;
+    if (typeof rev.version === 'number') return `Rev 1.${Math.max(0, Number(rev.version) - 1)}`;
+    return '';
+  };
   for (const c of clients || []) {
     const clientName = c?.shortName || c?.name || '';
     for (const s of c?.sites || []) {
       const siteName = s?.name || '';
       for (const p of s?.floorPlans || []) {
         if (!p?.id) continue;
-        map.set(p.id, { clientName, siteName, planName: p?.name || '' });
+        const revs = Array.isArray(p?.revisions) ? p.revisions : [];
+        let latest = null;
+        for (const r of revs) {
+          if (!r) continue;
+          const ts = Number(r.createdAt || 0) || 0;
+          if (!latest || ts > (Number(latest.createdAt || 0) || 0)) latest = r;
+        }
+        const lastSavedAt = latest ? (Number(latest.createdAt || 0) || null) : null;
+        const lastSavedRev = latest ? formatRev(latest) : '';
+        map.set(p.id, { clientName, siteName, planName: p?.name || '', lastSavedAt, lastSavedRev });
       }
     }
   }
@@ -355,7 +520,6 @@ const computePresence = (planId) => {
   const lockByUser = new Map();
   for (const [lockPlanId, lock] of planLocks.entries()) {
     if (!lock?.userId) continue;
-    if (lock.expiresAt && lock.expiresAt <= Date.now()) continue;
     const path = planPathMap.get(lockPlanId);
     const entry = { planId: lockPlanId, clientName: path?.clientName || '', siteName: path?.siteName || '', planName: path?.planName || '' };
     const existing = lockByUser.get(lock.userId);
@@ -375,6 +539,7 @@ const computePresence = (planId) => {
         users.set(key, {
           userId: info.userId,
           username: info.username,
+          avatarUrl: info.avatarUrl || '',
           connectedAt: joinedAt,
           ip: info.ip || '',
           lock: lock
@@ -398,7 +563,6 @@ const computeGlobalPresence = () => {
   const locksByUser = new Map();
   for (const [lockPlanId, lock] of planLocks.entries()) {
     if (!lock?.userId) continue;
-    if (lock.expiresAt && lock.expiresAt <= Date.now()) continue;
     const path = planPathMap.get(lockPlanId);
     const entry = {
       planId: lockPlanId,
@@ -421,6 +585,7 @@ const computeGlobalPresence = () => {
       usersById.set(info.userId, {
         userId: info.userId,
         username: info.username,
+        avatarUrl: info.avatarUrl || '',
         connectedAt: info.connectedAt || null,
         ip: info.ip || '',
         locks: lockList
@@ -436,10 +601,41 @@ const computeGlobalPresence = () => {
 
 const getLockedPlansSnapshot = () => {
   const out = {};
+  const state = readState();
+  const planPathMap = buildPlanPathMap(state.clients || []);
   for (const [planId, lock] of planLocks.entries()) {
     if (!lock?.userId) continue;
-    if (lock.expiresAt && lock.expiresAt <= Date.now()) continue;
-    out[planId] = { userId: lock.userId, username: lock.username };
+    const path = planPathMap.get(planId);
+    out[planId] = {
+      kind: 'lock',
+      userId: lock.userId,
+      username: lock.username,
+      avatarUrl: lock.avatarUrl || '',
+      lastActionAt: lock.lastActionAt || null,
+      lastSavedAt: path?.lastSavedAt ?? null,
+      lastSavedRev: path?.lastSavedRev ?? ''
+    };
+  }
+  for (const [planId, grant] of planLockGrants.entries()) {
+    if (!grant?.userId) continue;
+    if (grant.expiresAt && grant.expiresAt <= Date.now()) continue;
+    // Only show grants when the plan isn't currently locked.
+    const lock = planLocks.get(planId);
+    if (lock?.userId) continue;
+    const path = planPathMap.get(planId);
+    out[planId] = {
+      kind: 'grant',
+      userId: grant.userId,
+      username: grant.username,
+      avatarUrl: grant.avatarUrl || '',
+      grantedAt: grant.grantedAt || null,
+      expiresAt: grant.expiresAt || null,
+      minutes: grant.minutes || null,
+      grantedBy: { userId: grant.grantedById || '', username: grant.grantedByName || '' },
+      lastActionAt: grant.lastActionAt || null,
+      lastSavedAt: path?.lastSavedAt ?? null,
+      lastSavedRev: path?.lastSavedRev ?? ''
+    };
   }
   return out;
 };
@@ -458,12 +654,30 @@ const emitPresence = (planId) => {
 
 const emitLockState = (planId) => {
   const lock = getValidLock(planId) || null;
+  const grant = getValidGrant(planId) || null;
+  const state = readState();
+  const planPathMap = buildPlanPathMap(state.clients || []);
+  const path = planPathMap.get(planId);
   broadcastToPlan(planId, {
     type: 'lock_state',
     planId,
-    lockedBy: lock ? { userId: lock.userId, username: lock.username } : null,
-    expiresAt: lock?.expiresAt || null,
-    ttlMs: LOCK_TTL_MS
+    lockedBy: lock ? { userId: lock.userId, username: lock.username, avatarUrl: lock.avatarUrl || '' } : null,
+    grant: grant
+      ? {
+          userId: grant.userId,
+          username: grant.username,
+          avatarUrl: grant.avatarUrl || '',
+          grantedAt: grant.grantedAt || null,
+          expiresAt: grant.expiresAt || null,
+          minutes: grant.minutes || null,
+          grantedBy: { userId: grant.grantedById || '', username: grant.grantedByName || '' }
+        }
+      : null,
+    meta: {
+      lastActionAt: lock?.lastActionAt || grant?.lastActionAt || null,
+      lastSavedAt: path?.lastSavedAt ?? null,
+      lastSavedRev: path?.lastSavedRev ?? ''
+    }
   });
   emitPresence(planId);
   emitGlobalPresence();
@@ -478,12 +692,13 @@ const releaseLocksForWs = (ws) => {
       members.delete(ws);
       if (!members.size) wsPlanMembers.delete(planId);
     }
-    const lock = planLocks.get(planId);
-    if (lock && lock.userId === info.userId) {
-      // release only if no other sockets from same user are still in the plan
-      const remaining = wsPlanMembers.get(planId);
-      let stillThere = false;
-      if (remaining) {
+	    const lock = planLocks.get(planId);
+	    if (lock && lock.userId === info.userId) {
+	      const lastActionAt = lock.lastActionAt || lock.ts || null;
+	      // release only if no other sockets from same user are still in the plan
+	      const remaining = wsPlanMembers.get(planId);
+	      let stillThere = false;
+	      if (remaining) {
         for (const otherWs of remaining) {
           const otherInfo = wsClientInfo.get(otherWs);
           if (otherInfo?.userId === info.userId) {
@@ -491,13 +706,14 @@ const releaseLocksForWs = (ws) => {
             break;
           }
         }
-      }
-      if (!stillThere) {
-        planLocks.delete(planId);
-        writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'ws_close' } });
-        emitLockState(planId);
-      }
-    }
+	      }
+	      if (!stillThere) {
+	        planLocks.delete(planId);
+	        writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'ws_close' } });
+	        const completed = completeForceUnlockAsAutoDiscard(planId, info.userId, lastActionAt, 'ws_close');
+	        if (!completed) emitLockState(planId);
+	      }
+	    }
     emitPresence(planId);
   }
   wsClientInfo.delete(ws);
@@ -505,7 +721,8 @@ const releaseLocksForWs = (ws) => {
 
 const parseDataUrl = (value) => {
   if (typeof value !== 'string') return null;
-  const m = /^data:([^;]+);base64,(.*)$/.exec(value);
+  // Allow optional data URL parameters like `data:audio/webm;codecs=opus;base64,...`
+  const m = /^data:([^;]+)(?:;[^,]+)*;base64,(.*)$/.exec(value);
   if (!m) return null;
   return { mime: m[1], base64: m[2] };
 };
@@ -772,6 +989,74 @@ const getPlanAccessForUser = (userId, planId) => {
   return access.get(planId) || null;
 };
 
+const buildClientScopeMaps = (clients) => {
+  const siteToClient = new Map();
+  const planToClient = new Map();
+  const clientIds = new Set();
+  for (const c of clients || []) {
+    if (!c?.id) continue;
+    clientIds.add(c.id);
+    for (const s of c?.sites || []) {
+      if (s?.id) siteToClient.set(s.id, c.id);
+      for (const p of s?.floorPlans || []) {
+        if (p?.id) planToClient.set(p.id, c.id);
+      }
+    }
+  }
+  return { siteToClient, planToClient, clientIds };
+};
+
+let cachedClientScopeMaps = { updatedAt: null, siteToClient: new Map(), planToClient: new Map(), clientIds: new Set() };
+const getClientScopeMaps = () => {
+  const state = readState();
+  if (cachedClientScopeMaps.updatedAt !== state.updatedAt) {
+    cachedClientScopeMaps = { updatedAt: state.updatedAt, ...buildClientScopeMaps(state.clients || []) };
+  }
+  return cachedClientScopeMaps;
+};
+
+const CHAT_CACHE_TTL_MS = 4000;
+const chatClientIdsCacheByUser = new Map(); // userId -> { ts, set }
+
+const getChatClientIdsForUser = (userId, isAdmin) => {
+  const maps = getClientScopeMaps();
+  if (isAdmin) return new Set(maps.clientIds);
+  const now = Date.now();
+  const cached = chatClientIdsCacheByUser.get(userId);
+  if (cached && now - cached.ts < CHAT_CACHE_TTL_MS) return cached.set;
+  const rows = db
+    .prepare('SELECT scopeType, scopeId FROM permissions WHERE userId = ? AND chat = 1')
+    .all(userId);
+  const out = new Set();
+  for (const r of rows || []) {
+    if (r.scopeType === 'client') {
+      if (maps.clientIds.has(r.scopeId)) out.add(r.scopeId);
+      continue;
+    }
+    if (r.scopeType === 'site') {
+      const clientId = maps.siteToClient.get(r.scopeId);
+      if (clientId) out.add(clientId);
+      continue;
+    }
+    if (r.scopeType === 'plan') {
+      const clientId = maps.planToClient.get(r.scopeId);
+      if (clientId) out.add(clientId);
+      continue;
+    }
+  }
+  chatClientIdsCacheByUser.set(userId, { ts: now, set: out });
+  return out;
+};
+
+const userCanChatClient = (userId, isAdmin, clientId) => {
+  if (!userId || !clientId) return false;
+  const maps = getClientScopeMaps();
+  if (!maps.clientIds.has(clientId)) return false;
+  if (isAdmin) return true;
+  const allowed = getChatClientIdsForUser(userId, false);
+  return allowed.has(clientId);
+};
+
 const writeState = (payload) => {
   const now = Date.now();
   // Store large binary blobs (plan images, client logos, pdf attachments) as files instead of inline data URLs.
@@ -848,12 +1133,18 @@ const getWsAuthContext = (req) => {
   const session = verifySession(authSecret, token);
   if (!session?.userId || !session?.tokenVersion || !session?.sid) return null;
   if (session.sid !== serverInstanceId) return null;
-  const row = db.prepare('SELECT id, username, isSuperAdmin, disabled FROM users WHERE id = ?').get(session.userId);
+  const row = db.prepare('SELECT id, username, isAdmin, isSuperAdmin, disabled, avatarUrl FROM users WHERE id = ?').get(session.userId);
   if (!row) return null;
   if (Number(row.disabled) === 1) return null;
   const normalizedUsername = String(row.username || '').toLowerCase();
   const isSuperAdmin = !!row.isSuperAdmin && normalizedUsername === 'superadmin';
-  return { userId: row.id, username: normalizedUsername, isSuperAdmin };
+  return {
+    userId: row.id,
+    username: normalizedUsername,
+    isAdmin: !!row.isAdmin,
+    isSuperAdmin,
+    avatarUrl: String(row.avatarUrl || '')
+  };
 };
 
 const getWsClientIp = (req) =>
@@ -2103,7 +2394,7 @@ app.post('/api/auth/first-run', requireAuth, (req, res) => {
 });
 
 app.put('/api/auth/me', requireAuth, (req, res) => {
-  const { language, defaultPlanId, clientOrder, paletteFavorites, visibleLayerIdsByPlan } = req.body || {};
+  const { language, defaultPlanId, clientOrder, paletteFavorites, visibleLayerIdsByPlan, avatarUrl } = req.body || {};
   const nextLanguage = language === 'en' ? 'en' : language === 'it' ? 'it' : undefined;
   const nextDefaultPlanId =
     typeof defaultPlanId === 'string' ? defaultPlanId : defaultPlanId === null ? null : undefined;
@@ -2125,15 +2416,35 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
       : visibleLayerIdsByPlan && typeof visibleLayerIdsByPlan === 'object' && !Array.isArray(visibleLayerIdsByPlan)
         ? visibleLayerIdsByPlan
         : undefined;
+  const nextAvatarUrl = (() => {
+    if (avatarUrl === null) return '';
+    if (typeof avatarUrl !== 'string') return undefined;
+    const s = String(avatarUrl || '').trim();
+    if (!s) return '';
+    if (s.startsWith('data:')) {
+      const v = validateDataUrl(s);
+      if (!v.ok) return { error: 'Invalid avatar upload', reason: v.reason };
+      const url = externalizeDataUrl(s);
+      if (!url) return { error: 'Invalid avatar upload' };
+      return url;
+    }
+    if (s.startsWith('/uploads/')) return s;
+    return { error: 'Invalid avatarUrl' };
+  })();
 
   if (
     nextLanguage === undefined &&
     nextDefaultPlanId === undefined &&
     nextClientOrder === undefined &&
     nextPaletteFavorites === undefined &&
-    nextVisibleLayerIdsByPlan === undefined
+    nextVisibleLayerIdsByPlan === undefined &&
+    nextAvatarUrl === undefined
   ) {
     res.status(400).json({ error: 'Invalid payload' });
+    return;
+  }
+  if (nextAvatarUrl && typeof nextAvatarUrl === 'object') {
+    res.status(400).json({ error: nextAvatarUrl.error || 'Invalid avatar upload' });
     return;
   }
 
@@ -2217,10 +2528,29 @@ app.put('/api/auth/me', requireAuth, (req, res) => {
     sets.push('visibleLayerIdsByPlanJson = ?');
     params.push(JSON.stringify(validatedVisibleLayerIdsByPlan || {}));
   }
+  if (nextAvatarUrl !== undefined) {
+    sets.push('avatarUrl = ?');
+    params.push(String(nextAvatarUrl || ''));
+  }
   sets.push('updatedAt = ?');
   params.push(now);
   params.push(req.userId);
   db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+
+  // Keep realtime presence/locks in sync (avatar is cached in wsClientInfo + planLocks).
+  if (nextAvatarUrl !== undefined) {
+    for (const [ws, info] of wsClientInfo.entries()) {
+      if (info?.userId !== req.userId) continue;
+      info.avatarUrl = String(nextAvatarUrl || '');
+    }
+    for (const [planId, lock] of planLocks.entries()) {
+      if (lock?.userId !== req.userId) continue;
+      lock.avatarUrl = String(nextAvatarUrl || '');
+      planLocks.set(planId, lock);
+      emitLockState(planId);
+    }
+    emitGlobalPresence();
+  }
   res.json({ ok: true });
 });
 
@@ -2363,6 +2693,13 @@ app.put('/api/state', requireAuth, rateByUser('state_save', 60 * 1000, 240), (re
   for (const [planId, lock] of planLocks.entries()) {
     if (!lock) continue;
     if (lock.userId && lock.userId !== req.userId) lockedByOthers.add(planId);
+  }
+  for (const [planId, grant] of planLockGrants.entries()) {
+    if (!grant) continue;
+    if (grant.expiresAt && grant.expiresAt <= Date.now()) continue;
+    const lock = planLocks.get(planId);
+    if (lock?.userId) continue;
+    if (grant.userId && grant.userId !== req.userId) lockedByOthers.add(planId);
   }
 
   const buildPlanMap = (clients) => {
@@ -2697,7 +3034,7 @@ app.get('/api/users', requireAuth, (req, res) => {
   }
   const users = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, firstName, lastName, phone, email, createdAt, updatedAt FROM users ORDER BY createdAt DESC'
+      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, avatarUrl, firstName, lastName, phone, email, createdAt, updatedAt FROM users ORDER BY createdAt DESC'
     )
     .all()
     .map((u) => {
@@ -2710,11 +3047,11 @@ app.get('/api/users', requireAuth, (req, res) => {
         disabled: !!u.disabled
       };
     });
-  const perms = db.prepare('SELECT userId, scopeType, scopeId, access FROM permissions').all();
+  const perms = db.prepare('SELECT userId, scopeType, scopeId, access, chat FROM permissions').all();
   const permsByUser = new Map();
   for (const p of perms) {
     const list = permsByUser.get(p.userId) || [];
-    list.push({ scopeType: p.scopeType, scopeId: p.scopeId, access: p.access });
+    list.push({ scopeType: p.scopeType, scopeId: p.scopeId, access: p.access, chat: !!p.chat });
     permsByUser.set(p.userId, list);
   }
   res.json({
@@ -2723,6 +3060,76 @@ app.get('/api/users', requireAuth, (req, res) => {
       lockedUntil: getUserLock(u.username),
       permissions: permsByUser.get(u.id) || []
     }))
+  });
+});
+
+// Public-ish user directory (authenticated): used to resolve avatars for historical revisions.
+app.get('/api/users/directory', requireAuth, (req, res) => {
+  const rows = db
+    .prepare('SELECT id, username, isAdmin, isSuperAdmin, disabled, firstName, lastName, avatarUrl FROM users ORDER BY username ASC')
+    .all()
+    .filter((u) => Number(u.disabled) !== 1)
+    .map((u) => {
+      const normalizedUsername = String(u.username || '').toLowerCase();
+      return {
+        id: String(u.id),
+        username: normalizedUsername,
+        firstName: String(u.firstName || ''),
+        lastName: String(u.lastName || ''),
+        avatarUrl: String(u.avatarUrl || ''),
+        isAdmin: !!u.isAdmin,
+        isSuperAdmin: !!u.isSuperAdmin && normalizedUsername === 'superadmin'
+      };
+    });
+  res.json({ users: rows });
+});
+
+// Lightweight user profile for in-app views (chat avatars, etc.).
+// Only available when users share at least one chat-enabled client, unless requester is admin.
+app.get('/api/users/:id/profile', requireAuth, (req, res) => {
+  const targetId = String(req.params.id || '').trim();
+  if (!targetId) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const target = db
+    .prepare('SELECT id, username, firstName, lastName, email, avatarUrl, isAdmin, isSuperAdmin, disabled FROM users WHERE id = ?')
+    .get(targetId);
+  if (!target || Number(target.disabled) === 1) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+
+  const requesterIsAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  const targetIsAdmin = !!target.isAdmin || !!target.isSuperAdmin;
+  const reqClients = getChatClientIdsForUser(req.userId, requesterIsAdmin);
+  const targetClients = getChatClientIdsForUser(String(target.id), targetIsAdmin);
+  const common = new Set();
+  for (const id of reqClients) if (targetClients.has(id)) common.add(id);
+  if (!common.size && !requesterIsAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+
+  const state = readState();
+  const nameByClientId = new Map();
+  for (const c of state?.clients || []) {
+    if (!c?.id) continue;
+    nameByClientId.set(String(c.id), c.shortName || c.name || String(c.id));
+  }
+  const clientsCommon = Array.from(common)
+    .map((id) => ({ id, name: nameByClientId.get(id) || id }))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+  const normalizedUsername = String(target.username || '').toLowerCase();
+  res.json({
+    id: String(target.id),
+    username: normalizedUsername,
+    firstName: String(target.firstName || ''),
+    lastName: String(target.lastName || ''),
+    email: String(target.email || ''),
+    avatarUrl: String(target.avatarUrl || ''),
+    clientsCommon
   });
 });
 
@@ -2792,11 +3199,11 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
     return;
   }
   const insertPerm = db.prepare(
-    'INSERT OR REPLACE INTO permissions (userId, scopeType, scopeId, access) VALUES (?, ?, ?, ?)'
+    'INSERT OR REPLACE INTO permissions (userId, scopeType, scopeId, access, chat) VALUES (?, ?, ?, ?, ?)'
   );
   for (const p of Array.isArray(permissions) ? permissions : []) {
     if (!p?.scopeType || !p?.scopeId || !p?.access) continue;
-    insertPerm.run(id, p.scopeType, p.scopeId, p.access);
+    insertPerm.run(id, p.scopeType, p.scopeId, p.access, p?.chat ? 1 : 0);
   }
   writeAuditLog(db, {
     level: 'important',
@@ -2855,11 +3262,11 @@ app.put('/api/users/:id', requireAuth, rateByUser('users_update', 10 * 60 * 1000
   if (Array.isArray(permissions)) {
     db.prepare('DELETE FROM permissions WHERE userId = ?').run(userId);
     const insertPerm = db.prepare(
-      'INSERT OR REPLACE INTO permissions (userId, scopeType, scopeId, access) VALUES (?, ?, ?, ?)'
+      'INSERT OR REPLACE INTO permissions (userId, scopeType, scopeId, access, chat) VALUES (?, ?, ?, ?, ?)'
     );
     for (const p of permissions) {
       if (!p?.scopeType || !p?.scopeId || !p?.access) continue;
-      insertPerm.run(userId, p.scopeType, p.scopeId, p.access);
+      insertPerm.run(userId, p.scopeType, p.scopeId, p.access, p?.chat ? 1 : 0);
     }
   }
   const changes = [];
@@ -3033,6 +3440,816 @@ app.delete('/api/users/:id', requireAuth, rateByUser('users_delete', 10 * 60 * 1
   res.json({ ok: true });
 });
 
+// Client chat
+const CHAT_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const CHAT_MAX_TOTAL_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+// Voice notes (recorded in-app) can be larger than generic attachments.
+// They are still bounded to avoid huge base64 JSON payloads.
+const CHAT_VOICE_MAX_ATTACHMENT_BYTES = (() => {
+  const raw = Number(process.env.DESKLY_CHAT_MAX_VOICE_MB || '');
+  return Number.isFinite(raw) && raw > 0 ? raw * 1024 * 1024 : 40 * 1024 * 1024;
+})();
+const CHAT_VOICE_MAX_TOTAL_ATTACHMENT_BYTES = CHAT_VOICE_MAX_ATTACHMENT_BYTES;
+const CHAT_MAX_ATTACHMENTS = 10;
+const CHAT_ALLOWED_REACTIONS = new Set(['👍', '👎', '❤️', '😂', '😮', '😢', '🙏']);
+const chatVoiceExts = new Set(['mp3', 'wav', 'm4a', 'aac', 'ogg', 'webm']);
+const chatAllowedExts = new Set([
+  'pdf',
+  'png',
+  'jpg',
+  'jpeg',
+  'jfif',
+  'gif',
+  'webp',
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'ppt',
+  'pptx',
+  'zip',
+  'rar',
+  'mp3',
+  'wav',
+  'm4a',
+  'aac',
+  'ogg',
+  'mp4',
+  'webm',
+  'mov'
+]);
+
+const chatExtForMime = (mime) => {
+  const m = String(mime || '').toLowerCase();
+  if (m === 'image/png') return 'png';
+  if (m === 'image/jpeg') return 'jpg';
+  if (m === 'image/pjpeg') return 'jpg';
+  if (m === 'image/jpg') return 'jpg';
+  if (m === 'image/gif') return 'gif';
+  if (m === 'image/webp') return 'webp';
+  if (m === 'application/pdf') return 'pdf';
+  if (m === 'application/msword') return 'doc';
+  if (m === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+  if (m === 'application/vnd.ms-excel') return 'xls';
+  if (m === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return 'xlsx';
+  if (m === 'application/vnd.ms-powerpoint') return 'ppt';
+  if (m === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') return 'pptx';
+  if (m === 'application/zip') return 'zip';
+  if (m === 'application/x-zip-compressed') return 'zip';
+  if (m === 'application/vnd.rar') return 'rar';
+  if (m === 'application/x-rar-compressed') return 'rar';
+  if (m === 'audio/mpeg') return 'mp3';
+  if (m === 'audio/mp3') return 'mp3';
+  if (m === 'audio/wav') return 'wav';
+  if (m === 'audio/x-wav') return 'wav';
+  if (m === 'audio/wave') return 'wav';
+  if (m === 'audio/mp4') return 'm4a';
+  if (m === 'audio/x-m4a') return 'm4a';
+  if (m === 'audio/aac') return 'aac';
+  if (m === 'audio/ogg') return 'ogg';
+  if (m === 'audio/webm') return 'webm';
+  if (m === 'video/mp4') return 'mp4';
+  if (m === 'video/webm') return 'webm';
+  if (m === 'video/quicktime') return 'mov';
+  return null;
+};
+
+const chatExtFromFilename = (name) => {
+  const base = String(name || '').trim();
+  const idx = base.lastIndexOf('.');
+  if (idx === -1) return null;
+  const ext = base.slice(idx + 1).toLowerCase();
+  if (!ext) return null;
+  return ext;
+};
+
+const normalizeChatAttachmentList = (raw) => {
+  if (!raw) return [];
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const a of raw) {
+    if (!a || typeof a !== 'object') continue;
+    const url = String(a.url || '');
+    if (!url || !url.startsWith('/uploads/')) continue;
+    out.push({
+      name: String(a.name || '').slice(0, 200),
+      url,
+      mime: String(a.mime || ''),
+      sizeBytes: Number(a.sizeBytes) || 0
+    });
+  }
+  return out;
+};
+
+const validateChatAttachmentInput = (a) => {
+  const name = String(a?.name || '').trim();
+  const dataUrl = String(a?.dataUrl || '').trim();
+  if (!name || !dataUrl) return { ok: false, reason: 'invalid' };
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed) return { ok: false, reason: 'invalid' };
+  const mime = String(parsed.mime || '').toLowerCase();
+  const sizeBytes = base64SizeBytes(parsed.base64 || '');
+  const extFromMime = chatExtForMime(mime);
+  const extFromName = chatExtFromFilename(name);
+  const ext = extFromMime || extFromName;
+  if (!ext || !chatAllowedExts.has(ext)) return { ok: false, reason: 'type', mime, ext };
+  const isVoice = name.toLowerCase().startsWith('voice-') && chatVoiceExts.has(ext);
+  const maxBytes = isVoice ? CHAT_VOICE_MAX_ATTACHMENT_BYTES : CHAT_MAX_ATTACHMENT_BYTES;
+  if (sizeBytes > maxBytes) return { ok: false, reason: 'size', maxBytes, sizeBytes };
+  // Accept known mimes OR generic octet-stream when extension is allowlisted.
+  if (extFromMime === null && mime !== 'application/octet-stream' && mime !== '') {
+    // Some browsers return empty mime; FileReader usually provides application/octet-stream for unknown types.
+    // We only allow unknown mimes as octet-stream.
+    return { ok: false, reason: 'mime', mime, ext };
+  }
+  return { ok: true, name, dataUrl, mime, sizeBytes, ext, isVoice };
+};
+
+const externalizeChatAttachmentDataUrl = (name, dataUrl, ext) => {
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed) return null;
+  // Validate again with the original name so voice-note size rules stay consistent.
+  const validation = validateChatAttachmentInput({ name, dataUrl });
+  if (!validation.ok) return null;
+  const id = crypto.randomUUID();
+  const filename = `${id}.${ext}`;
+  const filePath = path.join(uploadsDir, filename);
+  try {
+    const buf = Buffer.from(parsed.base64, 'base64');
+    fs.writeFileSync(filePath, buf);
+    return `/uploads/${filename}`;
+  } catch {
+    return null;
+  }
+};
+
+const normalizeChatMessageRow = (r) => {
+  const deleted = Number(r.deleted) === 1;
+  const attachments = deleted ? [] : normalizeChatAttachmentList(r.attachmentsJson);
+  const starredBy = (() => {
+    const raw = deleted ? [] : r.starredByJson;
+    if (!raw) return [];
+    let parsed = raw;
+    if (typeof parsed === 'string') {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch {
+        return [];
+      }
+    }
+    if (!Array.isArray(parsed)) return [];
+    const uniq = new Set();
+    for (const v of parsed) {
+      const id = String(v || '').trim();
+      if (!id) continue;
+      uniq.add(id);
+    }
+    return Array.from(uniq);
+  })();
+  const reactions = (() => {
+    const raw = deleted ? {} : r.reactionsJson;
+    if (!raw) return {};
+    let parsed = raw;
+    if (typeof parsed === 'string') {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch {
+        return {};
+      }
+    }
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out = {};
+    for (const [emoji, users] of Object.entries(parsed)) {
+      if (!CHAT_ALLOWED_REACTIONS.has(String(emoji))) continue;
+      if (!Array.isArray(users)) continue;
+      const uniq = new Set();
+      for (const v of users) {
+        const id = String(v || '').trim();
+        if (!id) continue;
+        uniq.add(id);
+      }
+      if (uniq.size) out[String(emoji)] = Array.from(uniq);
+    }
+    return out;
+  })();
+  return {
+    id: String(r.id),
+    clientId: String(r.clientId),
+    userId: String(r.userId),
+    username: String(r.username || '').toLowerCase(),
+    avatarUrl: String(r.avatarUrl || ''),
+    replyToId: r.replyToId ? String(r.replyToId) : null,
+    attachments,
+    starredBy,
+    reactions,
+    text: deleted ? '' : String(r.text || ''),
+    deleted,
+    deletedAt: r.deletedAt ? Number(r.deletedAt) : null,
+    deletedById: r.deletedById ? String(r.deletedById) : null,
+    editedAt: r.editedAt ? Number(r.editedAt) : null,
+    createdAt: Number(r.createdAt),
+    updatedAt: Number(r.updatedAt)
+  };
+};
+
+const getClientNameById = (clientId) => {
+  const state = readState();
+  const c = (state.clients || []).find((x) => x?.id === clientId);
+  return c?.shortName || c?.name || clientId;
+};
+
+app.get('/api/chat/unread', requireAuth, (req, res) => {
+  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  const allowedClientIds = Array.from(getChatClientIdsForUser(req.userId, isAdmin));
+  const reads = db.prepare('SELECT clientId, lastReadAt FROM client_chat_reads WHERE userId = ?').all(req.userId);
+  const lastReadAtByClient = new Map();
+  for (const r of reads || []) lastReadAtByClient.set(String(r.clientId), Number(r.lastReadAt) || 0);
+  const countStmt = db.prepare('SELECT COUNT(1) as c FROM client_chat_messages WHERE clientId = ? AND deleted = 0 AND createdAt > ?');
+  const out = {};
+  for (const clientId of allowedClientIds) {
+    const lastReadAt = lastReadAtByClient.get(clientId) || 0;
+    out[clientId] = Number(countStmt.get(clientId, lastReadAt)?.c || 0);
+  }
+  res.json({ unreadByClientId: out });
+});
+
+app.get('/api/chat/:clientId/messages', requireAuth, (req, res) => {
+  const clientId = String(req.params.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  if (!userCanChatClient(req.userId, isAdmin, clientId)) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
+  const rows = db
+    .prepare(
+      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+       FROM client_chat_messages
+       WHERE clientId = ?
+       ORDER BY createdAt ASC
+       LIMIT ?`
+    )
+    .all(clientId, limit)
+    .map(normalizeChatMessageRow);
+  const readRow = db.prepare('SELECT lastReadAt FROM client_chat_reads WHERE userId = ? AND clientId = ?').get(req.userId, clientId);
+  res.json({ clientId, clientName: getClientNameById(clientId), lastReadAt: Number(readRow?.lastReadAt || 0) || 0, messages: rows });
+});
+
+app.get('/api/chat/:clientId/members', requireAuth, (req, res) => {
+  const clientId = String(req.params.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  if (!userCanChatClient(req.userId, isAdmin, clientId)) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const maps = getClientScopeMaps();
+  if (!maps.clientIds.has(clientId)) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+
+  const adminUserIds = new Set(
+    db
+      .prepare("SELECT id FROM users WHERE disabled = 0 AND isAdmin = 1")
+      .all()
+      .map((r) => String(r.id))
+  );
+
+  const perms = db.prepare('SELECT userId, scopeType, scopeId FROM permissions WHERE chat = 1').all();
+  const memberUserIds = new Set();
+  for (const id of adminUserIds) memberUserIds.add(id);
+  for (const p of perms || []) {
+    const userId = String(p.userId || '');
+    if (!userId) continue;
+    if (p.scopeType === 'client') {
+      if (String(p.scopeId) === clientId) memberUserIds.add(userId);
+      continue;
+    }
+    if (p.scopeType === 'site') {
+      const cid = maps.siteToClient.get(String(p.scopeId || ''));
+      if (cid === clientId) memberUserIds.add(userId);
+      continue;
+    }
+    if (p.scopeType === 'plan') {
+      const cid = maps.planToClient.get(String(p.scopeId || ''));
+      if (cid === clientId) memberUserIds.add(userId);
+      continue;
+    }
+  }
+
+  // Ensure requester is present.
+  memberUserIds.add(req.userId);
+
+  const onlineIds = new Set();
+  for (const info of wsClientInfo.values()) {
+    if (info?.userId) onlineIds.add(String(info.userId));
+  }
+
+  const users = db
+    .prepare('SELECT id, username, firstName, lastName, avatarUrl, isAdmin, isSuperAdmin, disabled FROM users')
+    .all()
+    .filter((u) => Number(u.disabled) !== 1)
+    .map((u) => {
+      const normalizedUsername = String(u.username || '').toLowerCase();
+      return {
+        id: String(u.id),
+        username: normalizedUsername,
+        firstName: String(u.firstName || ''),
+        lastName: String(u.lastName || ''),
+        avatarUrl: String(u.avatarUrl || ''),
+        isAdmin: !!u.isAdmin,
+        isSuperAdmin: !!u.isSuperAdmin && normalizedUsername === 'superadmin',
+        online: onlineIds.has(String(u.id))
+      };
+    })
+    .filter((u) => memberUserIds.has(u.id))
+    .sort((a, b) => a.username.localeCompare(b.username));
+
+  const reads = db.prepare('SELECT userId, lastReadAt FROM client_chat_reads WHERE clientId = ?').all(clientId);
+  const lastReadAtByUserId = new Map();
+  for (const r of reads || []) lastReadAtByUserId.set(String(r.userId), Number(r.lastReadAt) || 0);
+  const usersWithRead = users.map((u) => ({ ...u, lastReadAt: lastReadAtByUserId.get(u.id) || 0 }));
+
+  res.json({ clientId, users: usersWithRead });
+});
+
+app.post('/api/chat/:clientId/read', requireAuth, rateByUser('chat_read', 60 * 1000, 600), (req, res) => {
+  const clientId = String(req.params.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  if (!userCanChatClient(req.userId, isAdmin, clientId)) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const now = Date.now();
+  db.prepare(
+    `INSERT INTO client_chat_reads (userId, clientId, lastReadAt)
+     VALUES (?, ?, ?)
+     ON CONFLICT(userId, clientId) DO UPDATE SET lastReadAt = excluded.lastReadAt`
+  ).run(req.userId, clientId, now);
+  broadcastToChatClient(clientId, { type: 'client_chat_read', clientId, userId: req.userId, lastReadAt: now });
+  res.json({ ok: true, lastReadAt: now });
+});
+
+app.post('/api/chat/:clientId/messages', requireAuth, rateByUser('chat_send', 60 * 1000, 120), (req, res) => {
+  const clientId = String(req.params.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  if (!userCanChatClient(req.userId, isAdmin, clientId)) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const text = typeof req.body?.text === 'string' ? String(req.body.text) : '';
+  const trimmed = text.replace(/\r\n/g, '\n').trim();
+  if (trimmed.length > 4000) {
+    res.status(400).json({ error: 'Message too long' });
+    return;
+  }
+  const attachmentsIn = Array.isArray(req.body?.attachments) ? req.body.attachments : [];
+  const replyToId = typeof req.body?.replyToId === 'string' ? String(req.body.replyToId).trim() : '';
+  if (!trimmed && (!attachmentsIn || !attachmentsIn.length)) {
+    res.status(400).json({ error: 'Empty message' });
+    return;
+  }
+  if (attachmentsIn.length > CHAT_MAX_ATTACHMENTS) {
+    res.status(400).json({ error: 'Too many attachments' });
+    return;
+  }
+  const attachments = [];
+  let totalOtherBytes = 0;
+  let totalVoiceBytes = 0;
+  for (const a of attachmentsIn) {
+    const v = validateChatAttachmentInput(a);
+    if (!v.ok) {
+      res.status(400).json({ error: 'Invalid attachment', ...v });
+      return;
+    }
+    if (v.isVoice) totalVoiceBytes += Number(v.sizeBytes) || 0;
+    else totalOtherBytes += Number(v.sizeBytes) || 0;
+    if (totalOtherBytes > CHAT_MAX_TOTAL_ATTACHMENT_BYTES) {
+      res.status(400).json({ error: 'Attachments too large', reason: 'total_size', maxBytes: CHAT_MAX_TOTAL_ATTACHMENT_BYTES, sizeBytes: totalOtherBytes });
+      return;
+    }
+    if (totalVoiceBytes > CHAT_VOICE_MAX_TOTAL_ATTACHMENT_BYTES) {
+      res.status(400).json({ error: 'Voice note too large', reason: 'voice_total_size', maxBytes: CHAT_VOICE_MAX_TOTAL_ATTACHMENT_BYTES, sizeBytes: totalVoiceBytes });
+      return;
+    }
+    const url = externalizeChatAttachmentDataUrl(v.name, v.dataUrl, v.ext);
+    if (!url) {
+      res.status(400).json({ error: 'Failed to store attachment' });
+      return;
+    }
+    attachments.push({ name: v.name.slice(0, 200), url, mime: v.mime, sizeBytes: v.sizeBytes });
+  }
+  const me = db.prepare('SELECT username, avatarUrl FROM users WHERE id = ?').get(req.userId);
+  const now = Date.now();
+  const id = crypto.randomUUID();
+  if (replyToId) {
+    const ok = db
+      .prepare('SELECT id FROM client_chat_messages WHERE id = ? AND clientId = ?')
+      .get(replyToId, clientId);
+    if (!ok) {
+      res.status(400).json({ error: 'Invalid replyToId' });
+      return;
+    }
+  }
+  db.prepare(
+    `INSERT INTO client_chat_messages (id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '{}', ?, 0, ?, ?)`
+  ).run(
+    id,
+    clientId,
+    req.userId,
+    String(me?.username || req.username || ''),
+    String(me?.avatarUrl || ''),
+    replyToId || null,
+    JSON.stringify(attachments),
+    trimmed,
+    now,
+    now
+  );
+  db.prepare(
+    `INSERT INTO client_chat_reads (userId, clientId, lastReadAt)
+     VALUES (?, ?, ?)
+     ON CONFLICT(userId, clientId) DO UPDATE SET lastReadAt = excluded.lastReadAt`
+  ).run(req.userId, clientId, now);
+
+  const row = db
+    .prepare(
+      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+       FROM client_chat_messages
+       WHERE id = ?`
+    )
+    .get(id);
+  const message = normalizeChatMessageRow(row);
+  broadcastToChatClient(clientId, { type: 'client_chat_new', clientId, message });
+  res.json({ ok: true, message });
+});
+
+app.put('/api/chat/messages/:id', requireAuth, rateByUser('chat_edit', 60 * 1000, 120), (req, res) => {
+  const id = String(req.params.id || '').trim();
+  if (!id) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const text = typeof req.body?.text === 'string' ? String(req.body.text) : '';
+  const trimmed = text.replace(/\r\n/g, '\n').trim();
+  if (!trimmed) {
+    res.status(400).json({ error: 'Empty message' });
+    return;
+  }
+  if (trimmed.length > 4000) {
+    res.status(400).json({ error: 'Message too long' });
+    return;
+  }
+  const row = db
+    .prepare('SELECT id, clientId, userId, deleted, createdAt FROM client_chat_messages WHERE id = ?')
+    .get(id);
+  if (!row) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  if (Number(row.deleted) === 1) {
+    res.status(400).json({ error: 'Deleted' });
+    return;
+  }
+  if (String(row.userId) !== req.userId) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const createdAt = Number(row.createdAt) || 0;
+  const now = Date.now();
+  if (now - createdAt > 30 * 60 * 1000) {
+    res.status(400).json({ error: 'Edit window expired' });
+    return;
+  }
+  db.prepare('UPDATE client_chat_messages SET text = ?, editedAt = ?, updatedAt = ? WHERE id = ?').run(trimmed, now, now, id);
+  const updated = db
+    .prepare(
+      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+       FROM client_chat_messages
+       WHERE id = ?`
+    )
+    .get(id);
+  const message = normalizeChatMessageRow(updated);
+  broadcastToChatClient(String(row.clientId), { type: 'client_chat_update', clientId: String(row.clientId), message });
+  res.json({ ok: true, message });
+});
+
+app.delete('/api/chat/messages/:id', requireAuth, rateByUser('chat_delete', 60 * 1000, 120), (req, res) => {
+  const id = String(req.params.id || '').trim();
+  if (!id) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const row = db
+    .prepare('SELECT id, clientId, userId, deleted FROM client_chat_messages WHERE id = ?')
+    .get(id);
+  if (!row) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  if (Number(row.deleted) === 1) {
+    res.json({ ok: true });
+    return;
+  }
+  const isOwner = String(row.userId) === req.userId;
+  if (!isOwner && !req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const now = Date.now();
+  db.prepare('UPDATE client_chat_messages SET deleted = 1, deletedAt = ?, deletedById = ?, updatedAt = ? WHERE id = ?').run(
+    now,
+    req.userId,
+    now,
+    id
+  );
+  const updated = db
+    .prepare(
+      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+       FROM client_chat_messages
+       WHERE id = ?`
+    )
+    .get(id);
+  const message = normalizeChatMessageRow(updated);
+  broadcastToChatClient(String(row.clientId), { type: 'client_chat_update', clientId: String(row.clientId), message });
+  res.json({ ok: true });
+});
+
+app.post('/api/chat/messages/:id/star', requireAuth, rateByUser('chat_star', 60 * 1000, 240), (req, res) => {
+  const id = String(req.params.id || '').trim();
+  if (!id) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const row = db
+    .prepare('SELECT id, clientId, deleted, starredByJson FROM client_chat_messages WHERE id = ?')
+    .get(id);
+  if (!row) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  if (Number(row.deleted) === 1) {
+    res.status(400).json({ error: 'Deleted' });
+    return;
+  }
+  const clientId = String(row.clientId);
+  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  if (!userCanChatClient(req.userId, isAdmin, clientId)) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  let list = [];
+  try {
+    const parsed = JSON.parse(String(row.starredByJson || '[]'));
+    if (Array.isArray(parsed)) list = parsed;
+  } catch {}
+  const uniq = new Set(list.map((x) => String(x || '').trim()).filter(Boolean));
+  const wantStar = typeof req.body?.star === 'boolean' ? !!req.body.star : !uniq.has(req.userId);
+  if (wantStar) uniq.add(req.userId);
+  else uniq.delete(req.userId);
+  const now = Date.now();
+  db.prepare('UPDATE client_chat_messages SET starredByJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(Array.from(uniq)), now, id);
+  const updated = db
+    .prepare(
+      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+       FROM client_chat_messages
+       WHERE id = ?`
+    )
+    .get(id);
+  const message = normalizeChatMessageRow(updated);
+  broadcastToChatClient(clientId, { type: 'client_chat_update', clientId, message });
+  res.json({ ok: true, message });
+});
+
+app.post('/api/chat/messages/:id/react', requireAuth, rateByUser('chat_react', 60 * 1000, 600), (req, res) => {
+  const id = String(req.params.id || '').trim();
+  if (!id) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const emoji = typeof req.body?.emoji === 'string' ? String(req.body.emoji) : '';
+  if (!CHAT_ALLOWED_REACTIONS.has(emoji)) {
+    res.status(400).json({ error: 'Invalid emoji' });
+    return;
+  }
+  const row = db
+    .prepare('SELECT id, clientId, deleted, reactionsJson FROM client_chat_messages WHERE id = ?')
+    .get(id);
+  if (!row) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  if (Number(row.deleted) === 1) {
+    res.status(400).json({ error: 'Deleted' });
+    return;
+  }
+  const clientId = String(row.clientId);
+  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  if (!userCanChatClient(req.userId, isAdmin, clientId)) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  let parsed = {};
+  try {
+    const obj = JSON.parse(String(row.reactionsJson || '{}'));
+    if (obj && typeof obj === 'object') parsed = obj;
+  } catch {}
+
+  // WhatsApp-like: one reaction per user per message. Clicking same emoji toggles off.
+  let already = false;
+  for (const [k, users] of Object.entries(parsed)) {
+    if (!Array.isArray(users)) continue;
+    const next = users.map((x) => String(x || '').trim()).filter(Boolean).filter((x) => x !== req.userId);
+    if (String(k) === emoji && next.length !== users.length) already = true;
+    parsed[k] = next;
+  }
+  if (!already) {
+    const list = Array.isArray(parsed[emoji]) ? parsed[emoji] : [];
+    const uniq = new Set(list.map((x) => String(x || '').trim()).filter(Boolean));
+    uniq.add(req.userId);
+    parsed[emoji] = Array.from(uniq);
+  }
+  // Drop empty keys and unknown emojis.
+  for (const k of Object.keys(parsed)) {
+    if (!CHAT_ALLOWED_REACTIONS.has(k)) {
+      delete parsed[k];
+      continue;
+    }
+    const users = parsed[k];
+    if (!Array.isArray(users) || users.length === 0) delete parsed[k];
+  }
+
+  const now = Date.now();
+  db.prepare('UPDATE client_chat_messages SET reactionsJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(parsed), now, id);
+  const updated = db
+    .prepare(
+      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+       FROM client_chat_messages
+       WHERE id = ?`
+    )
+    .get(id);
+  const message = normalizeChatMessageRow(updated);
+  broadcastToChatClient(clientId, { type: 'client_chat_update', clientId, message });
+  res.json({ ok: true, message });
+});
+
+app.post('/api/chat/:clientId/clear', requireAuth, rateByUser('chat_clear', 10 * 60 * 1000, 30), (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const clientId = String(req.params.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const maps = getClientScopeMaps();
+  if (!maps.clientIds.has(clientId)) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  db.prepare('DELETE FROM client_chat_messages WHERE clientId = ?').run(clientId);
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'client_chat_cleared',
+    userId: req.userId,
+    username: req.username,
+    scopeType: 'client',
+    scopeId: clientId,
+    ...requestMeta(req),
+    details: { clientName: getClientNameById(clientId) }
+  });
+  broadcastToChatClient(clientId, { type: 'client_chat_clear', clientId, clearedAt: Date.now() });
+  res.json({ ok: true });
+});
+
+app.get('/api/chat/:clientId/export', requireAuth, (req, res) => {
+  const clientId = String(req.params.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).send('Missing clientId');
+    return;
+  }
+  const isAdmin = !!req.isAdmin || !!req.isSuperAdmin;
+  if (!userCanChatClient(req.userId, isAdmin, clientId)) {
+    res.status(403).send('Forbidden');
+    return;
+  }
+  const qf = String(req.query.format || 'txt').toLowerCase();
+  const format = qf === 'json' ? 'json' : qf === 'html' ? 'html' : 'txt';
+  const rows = db
+    .prepare(
+      `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+       FROM client_chat_messages
+       WHERE clientId = ?
+       ORDER BY createdAt ASC`
+    )
+    .all(clientId)
+    .map(normalizeChatMessageRow);
+
+  const safeName = String(getClientNameById(clientId) || clientId)
+    .replace(/[^\w\- ]+/g, '')
+    .trim()
+    .slice(0, 40) || clientId;
+  if (format === 'json') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=\"chat-${safeName}.json\"`);
+    res.send(JSON.stringify({ clientId, clientName: getClientNameById(clientId), exportedAt: Date.now(), messages: rows }, null, 2));
+    return;
+  }
+  if (format === 'html') {
+    const escapeHtml = (s) =>
+      String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const items = rows
+      .map((m) => {
+        const d = new Date(m.createdAt);
+        const ts = `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        const body = m.deleted ? '<em>Messaggio eliminato</em>' : escapeHtml(m.text).replace(/\n/g, '<br/>');
+        const edited = m.editedAt && !m.deleted ? ' <span class="edited">(modificato)</span>' : '';
+        const attachments = (m.attachments || []).length
+          ? `<div class="attachments">${m.attachments
+              .map((a) => `<a href="${escapeHtml(a.url)}" target="_blank" rel="noreferrer">${escapeHtml(a.name || a.url)}</a>`)
+              .join('')}</div>`
+          : '';
+        return `<div class="msg"><div class="meta"><span class="ts">[${escapeHtml(ts)}]</span> <strong>${escapeHtml(
+          m.username
+        )}</strong>${edited}</div><div class="body">${body}</div>${attachments}</div>`;
+      })
+      .join('\n');
+    const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Chat ${escapeHtml(getClientNameById(clientId))}</title>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial; background:#0b1220; color:#e2e8f0; padding:24px;}
+    .wrap{max-width:900px;margin:0 auto;}
+    h1{font-size:18px;margin:0 0 8px 0;}
+    .sub{font-size:12px;color:#94a3b8;margin:0 0 18px 0;}
+    .msg{border:1px solid rgba(148,163,184,.22); background:rgba(15,23,42,.6); border-radius:14px; padding:12px 14px; margin:10px 0;}
+    .meta{font-size:12px;color:#cbd5e1;margin-bottom:6px;}
+    .ts{color:#94a3b8;}
+    .edited{font-weight:700;color:#a7f3d0;}
+    .body{font-size:14px;line-height:1.35;white-space:normal}
+    .attachments{margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;}
+    .attachments a{display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid rgba(148,163,184,.22); color:#e2e8f0; text-decoration:none;}
+    .attachments a:hover{background:rgba(148,163,184,.12);}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Chat: ${escapeHtml(getClientNameById(clientId))}</h1>
+    <div class="sub">Export: ${escapeHtml(new Date().toISOString())}</div>
+    ${items}
+  </div>
+</body>
+</html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=\"chat-${safeName}.html\"`);
+    res.send(html);
+    return;
+  }
+  const lines = [];
+  for (const m of rows) {
+    const d = new Date(m.createdAt);
+    const ts = `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const body = m.deleted ? '(messaggio eliminato)' : m.text.replace(/\n/g, ' ');
+    const edited = m.editedAt ? ' (modificato)' : '';
+    const att = (m.attachments || []).length ? ` [allegati: ${(m.attachments || []).map((a) => a?.name || a?.url).join(', ')}]` : '';
+    lines.push(`[${ts}] ${m.username}: ${body}${edited}${att}`);
+  }
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename=\"chat-${safeName}.txt\"`);
+  res.send(lines.join('\n'));
+});
+
 app.get('/api/admin/logs', requireAuth, (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
@@ -3096,12 +4313,14 @@ wss.on('connection', (ws, req) => {
   wsClientInfo.set(ws, {
     userId: auth.userId,
     username: auth.username,
+    avatarUrl: auth.avatarUrl || '',
     ip: getWsClientIp(req),
     connectedAt: Date.now(),
+    isAdmin: !!auth.isAdmin,
     isSuperAdmin: !!auth.isSuperAdmin,
     plans: new Map()
   });
-  jsonSend(ws, { type: 'hello', userId: auth.userId, username: auth.username });
+  jsonSend(ws, { type: 'hello', userId: auth.userId, username: auth.username, avatarUrl: auth.avatarUrl || '' });
   emitGlobalPresence();
 
   ws.on('message', (raw) => {
@@ -3114,45 +4333,96 @@ wss.on('connection', (ws, req) => {
     const info = wsClientInfo.get(ws);
     if (!info) return;
 
-    if (msg?.type === 'join') {
-      const planId = String(msg.planId || '').trim();
-      if (!planId) return;
-      const access = getPlanAccessForUser(info.userId, planId);
+	    if (msg?.type === 'join') {
+	      const planId = String(msg.planId || '').trim();
+	      if (!planId) return;
+	      const access = getPlanAccessForUser(info.userId, planId);
       if (!access) {
         jsonSend(ws, { type: 'access_denied', planId });
         return;
       }
       if (!wsPlanMembers.has(planId)) wsPlanMembers.set(planId, new Set());
-      wsPlanMembers.get(planId).add(ws);
-      info.plans.set(planId, Date.now());
+	      wsPlanMembers.get(planId).add(ws);
+	      info.plans.set(planId, Date.now());
 
-      const lock = getValidLock(planId) || null;
-      jsonSend(ws, {
-        type: 'lock_state',
-        planId,
-        lockedBy: lock ? { userId: lock.userId, username: lock.username } : null,
-        expiresAt: lock?.expiresAt || null,
-        ttlMs: LOCK_TTL_MS
-      });
-      jsonSend(ws, { type: 'presence', planId, users: computePresence(planId) });
+	      const state = readState();
+	      const planPathMap = buildPlanPathMap(state.clients || []);
+	      const path = planPathMap.get(planId);
+	      const lock = getValidLock(planId) || null;
+	      const grant = lock ? null : getValidGrant(planId) || null;
+	      jsonSend(ws, {
+	        type: 'lock_state',
+	        planId,
+	        lockedBy: lock ? { userId: lock.userId, username: lock.username, avatarUrl: lock.avatarUrl || '' } : null,
+	        grant: grant
+	          ? {
+	              userId: grant.userId,
+	              username: grant.username,
+	              avatarUrl: grant.avatarUrl || '',
+	              grantedAt: grant.grantedAt || null,
+	              expiresAt: grant.expiresAt || null,
+	              minutes: grant.minutes || null,
+	              grantedBy: { userId: grant.grantedById || '', username: grant.grantedByName || '' }
+	            }
+	          : null,
+	        meta: {
+	          lastActionAt: lock?.lastActionAt || grant?.lastActionAt || null,
+	          lastSavedAt: path?.lastSavedAt ?? null,
+	          lastSavedRev: path?.lastSavedRev ?? ''
+	        }
+	      });
+	      jsonSend(ws, { type: 'presence', planId, users: computePresence(planId) });
 
-      if (!!msg.wantLock) {
-        if (access !== 'rw') {
-          jsonSend(ws, { type: 'lock_denied', planId, lockedBy: null });
-          emitPresence(planId);
-          return;
-        }
-        const existing = getValidLock(planId);
-        if (!existing || existing.userId === info.userId) {
-          const now = Date.now();
-          planLocks.set(planId, { userId: info.userId, username: info.username, ts: now, expiresAt: now + LOCK_TTL_MS });
-          writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
-          emitLockState(planId);
-        } else {
-          jsonSend(ws, { type: 'lock_denied', planId, lockedBy: { userId: existing.userId, username: existing.username } });
-          writeAuditLog(db, {
-            level: 'important',
-            event: 'plan_lock_denied',
+	      if (!!msg.wantLock) {
+	        if (access !== 'rw') {
+	          jsonSend(ws, { type: 'lock_denied', planId, lockedBy: null, grant: null });
+	          emitPresence(planId);
+	          return;
+	        }
+	        const existing = getValidLock(planId);
+	        const activeGrant = existing ? null : getValidGrant(planId);
+	        if (activeGrant && activeGrant.userId && activeGrant.userId !== info.userId) {
+	          jsonSend(ws, {
+	            type: 'lock_denied',
+	            planId,
+	            lockedBy: null,
+	            grant: {
+	              userId: activeGrant.userId,
+	              username: activeGrant.username,
+	              avatarUrl: activeGrant.avatarUrl || '',
+	              grantedAt: activeGrant.grantedAt || null,
+	              expiresAt: activeGrant.expiresAt || null,
+	              minutes: activeGrant.minutes || null,
+	              grantedBy: { userId: activeGrant.grantedById || '', username: activeGrant.grantedByName || '' }
+	            }
+	          });
+	          emitPresence(planId);
+	          return;
+	        }
+	        if (!existing || existing.userId === info.userId) {
+	          const now = Date.now();
+	          if (activeGrant && activeGrant.userId === info.userId) planLockGrants.delete(planId);
+	          planLocks.set(planId, {
+	            userId: info.userId,
+	            username: info.username,
+	            avatarUrl: info.avatarUrl || '',
+	            acquiredAt: now,
+	            ts: now,
+	            lastActionAt: null,
+	            dirty: false
+	          });
+	          writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
+	          emitLockState(planId);
+	        } else {
+	          jsonSend(ws, {
+	            type: 'lock_denied',
+	            planId,
+	            lockedBy: { userId: existing.userId, username: existing.username, avatarUrl: existing.avatarUrl || '' },
+	            grant: null
+	          });
+	          writeAuditLog(db, {
+	            level: 'important',
+	            event: 'plan_lock_denied',
             userId: info.userId,
             username: info.username,
             scopeType: 'plan',
@@ -3163,60 +4433,244 @@ wss.on('connection', (ws, req) => {
       }
       emitPresence(planId);
       emitGlobalPresence();
-      return;
-    }
+	      return;
+	    }
 
-    if (msg?.type === 'request_lock') {
-      const planId = String(msg.planId || '').trim();
-      if (!planId) return;
-      const access = getPlanAccessForUser(info.userId, planId);
-      if (access !== 'rw') {
-        jsonSend(ws, { type: 'lock_denied', planId, lockedBy: null });
-        return;
-      }
-      const existing = getValidLock(planId);
-      if (!existing || existing.userId === info.userId) {
-        const now = Date.now();
-        planLocks.set(planId, { userId: info.userId, username: info.username, ts: now, expiresAt: now + LOCK_TTL_MS });
-        writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
-        emitLockState(planId);
-      } else {
-        jsonSend(ws, { type: 'lock_denied', planId, lockedBy: { userId: existing.userId, username: existing.username } });
-      }
-      return;
-    }
+	    if (msg?.type === 'request_lock') {
+	      const planId = String(msg.planId || '').trim();
+	      if (!planId) return;
+	      const access = getPlanAccessForUser(info.userId, planId);
+	      if (access !== 'rw') {
+	        jsonSend(ws, { type: 'lock_denied', planId, lockedBy: null, grant: null });
+	        return;
+	      }
+	      const existing = getValidLock(planId);
+	      const activeGrant = existing ? null : getValidGrant(planId);
+	      if (activeGrant && activeGrant.userId && activeGrant.userId !== info.userId) {
+	        jsonSend(ws, {
+	          type: 'lock_denied',
+	          planId,
+	          lockedBy: null,
+	          grant: {
+	            userId: activeGrant.userId,
+	            username: activeGrant.username,
+	            avatarUrl: activeGrant.avatarUrl || '',
+	            grantedAt: activeGrant.grantedAt || null,
+	            expiresAt: activeGrant.expiresAt || null,
+	            minutes: activeGrant.minutes || null,
+	            grantedBy: { userId: activeGrant.grantedById || '', username: activeGrant.grantedByName || '' }
+	          }
+	        });
+	        return;
+	      }
+	      if (!existing || existing.userId === info.userId) {
+	        const now = Date.now();
+	        if (activeGrant && activeGrant.userId === info.userId) planLockGrants.delete(planId);
+	        planLocks.set(planId, {
+	          userId: info.userId,
+	          username: info.username,
+	          avatarUrl: info.avatarUrl || '',
+	          acquiredAt: now,
+	          ts: now,
+	          lastActionAt: null,
+	          dirty: false
+	        });
+	        writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
+	        emitLockState(planId);
+	      } else {
+	        jsonSend(ws, {
+	          type: 'lock_denied',
+	          planId,
+	          lockedBy: { userId: existing.userId, username: existing.username, avatarUrl: existing.avatarUrl || '' },
+	          grant: null
+	        });
+	      }
+	      return;
+	    }
 
-    if (msg?.type === 'renew_lock') {
-      const planId = String(msg.planId || '').trim();
-      if (!planId) return;
-      const lock = getValidLock(planId);
-      if (!lock || lock.userId !== info.userId) {
-        jsonSend(ws, { type: 'lock_denied', planId, lockedBy: lock ? { userId: lock.userId, username: lock.username } : null });
-        return;
-      }
-      const now = Date.now();
-      lock.ts = now;
-      lock.expiresAt = now + LOCK_TTL_MS;
-      planLocks.set(planId, lock);
-      jsonSend(ws, { type: 'lock_renewed', planId, expiresAt: lock.expiresAt, ttlMs: LOCK_TTL_MS });
-      return;
-    }
+	    if (msg?.type === 'renew_lock') {
+	      const planId = String(msg.planId || '').trim();
+	      if (!planId) return;
+	      const lock = getValidLock(planId);
+	      if (!lock || lock.userId !== info.userId) {
+	        jsonSend(ws, {
+	          type: 'lock_denied',
+	          planId,
+	          lockedBy: lock ? { userId: lock.userId, username: lock.username, avatarUrl: lock.avatarUrl || '' } : null,
+	          grant: null
+	        });
+	        return;
+	      }
+	      const now = Date.now();
+	      lock.ts = now;
+	      planLocks.set(planId, lock);
+	      // Legacy heartbeat; locks never expire, but keeping ts fresh helps "last seen" info.
+	      jsonSend(ws, { type: 'lock_renewed', planId });
+	      return;
+	    }
 
-    if (msg?.type === 'leave') {
-      const planId = String(msg.planId || '').trim();
-      if (!planId) return;
+	    if (msg?.type === 'plan_action') {
+	      const planId = String(msg.planId || '').trim();
+	      if (!planId) return;
+	      const lock = getValidLock(planId);
+	      if (!lock || lock.userId !== info.userId) return;
+	      const now = Date.now();
+	      lock.ts = now;
+	      lock.lastActionAt = now;
+	      planLocks.set(planId, lock);
+	      emitLockState(planId);
+	      return;
+	    }
+
+	    if (msg?.type === 'plan_dirty') {
+	      const planId = String(msg.planId || '').trim();
+	      if (!planId) return;
+	      const lock = getValidLock(planId);
+	      if (!lock || lock.userId !== info.userId) return;
+	      lock.dirty = !!msg.dirty;
+	      planLocks.set(planId, lock);
+	      // Keep superadmin UI reasonably up-to-date without spamming too much (client should throttle).
+	      emitLockState(planId);
+	      return;
+	    }
+
+		    if (msg?.type === 'force_unlock_start') {
+		      const planId = String(msg.planId || '').trim();
+		      const targetUserId = String(msg.targetUserId || '').trim();
+		      const rawMinutes = Number(msg.graceMinutes ?? msg.minutes ?? '');
+		      const graceMinutes = Number.isFinite(rawMinutes) ? Math.max(0, Math.min(60, rawMinutes)) : 0;
+		      if (!planId || !targetUserId) return;
+	      if (!info?.isSuperAdmin) {
+	        jsonSend(ws, { type: 'force_unlock_denied', planId, targetUserId, reason: 'forbidden' });
+	        return;
+	      }
+		      const lock = getValidLock(planId);
+		      if (!lock || lock.userId !== targetUserId) {
+		        jsonSend(ws, { type: 'force_unlock_denied', planId, targetUserId, reason: 'no_lock' });
+		        return;
+		      }
+	      const requestId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex');
+	      const now = Date.now();
+	      const deadlineAt = now + Math.round(graceMinutes * 60_000);
+	      forceUnlocks.set(requestId, {
+	        planId,
+	        targetUserId,
+	        requestedById: info.userId,
+	        requestedByName: info.username,
+	        createdAt: now,
+	        deadlineAt,
+	        graceMinutes
+	      });
+	      const state = readState();
+	      const planPathMap = buildPlanPathMap(state.clients || []);
+	      const path = planPathMap.get(planId);
+		      const payload = {
+		        type: 'force_unlock',
+		        requestId,
+		        planId,
+		        clientName: path?.clientName || '',
+		        siteName: path?.siteName || '',
+		        planName: path?.planName || '',
+		        requestedBy: { userId: info.userId, username: info.username },
+		        deadlineAt,
+		        graceMinutes,
+		        hasUnsavedChanges: !!lock.dirty
+		      };
+		      sendToUser(targetUserId, payload);
+		      jsonSend(ws, { type: 'force_unlock_started', requestId, planId, targetUserId, deadlineAt, graceMinutes, hasUnsavedChanges: !!lock.dirty });
+		      writeAuditLog(db, {
+		        level: 'important',
+		        event: 'plan_force_unlock_started',
+		        userId: info.userId,
+		        username: info.username,
+	        scopeType: 'plan',
+	        scopeId: planId,
+	        details: { targetUserId, graceMinutes }
+		      });
+		      return;
+		    }
+
+		    if (msg?.type === 'force_unlock_cancel') {
+		      const requestId = String(msg.requestId || '').trim();
+		      if (!requestId) return;
+		      const entry = forceUnlocks.get(requestId);
+		      if (!entry) return;
+		      if (!info?.isSuperAdmin) return;
+		      if (entry.requestedById !== info.userId) return;
+		      forceUnlocks.delete(requestId);
+		      sendToUser(entry.targetUserId, { type: 'force_unlock_cancelled', requestId, planId: entry.planId });
+		      jsonSend(ws, { type: 'force_unlock_cancelled', requestId, planId: entry.planId, targetUserId: entry.targetUserId });
+		      writeAuditLog(db, {
+		        level: 'important',
+		        event: 'plan_force_unlock_cancelled',
+		        userId: info.userId,
+		        username: info.username,
+		        scopeType: 'plan',
+		        scopeId: entry.planId,
+		        details: { targetUserId: entry.targetUserId, requestId }
+		      });
+		      return;
+		    }
+
+		    if (msg?.type === 'force_unlock_execute') {
+		      const requestId = String(msg.requestId || '').trim();
+		      const action = String(msg.action || '').trim(); // save|discard
+		      if (!requestId) return;
+	      const entry = forceUnlocks.get(requestId);
+	      if (!entry) return;
+	      if (entry.requestedById !== info.userId) return;
+	      if (action !== 'save' && action !== 'discard') return;
+	      sendToUser(entry.targetUserId, { type: 'force_unlock_execute', requestId, planId: entry.planId, action });
+	      return;
+	    }
+
+		    if (msg?.type === 'force_unlock_done') {
+		      const requestId = String(msg.requestId || '').trim();
+		      const action = String(msg.action || '').trim();
+		      const ok = !!msg.ok;
+		      if (!requestId) return;
+		      const entry = forceUnlocks.get(requestId);
+		      if (!entry) return;
+		      if (entry.targetUserId !== info.userId) return;
+		      sendToUser(entry.requestedById, { type: 'force_unlock_done', requestId, planId: entry.planId, action, ok });
+		      if (ok) {
+		        // Finalize server-side: ensure the lock is released and reserve/assign it to the superadmin.
+		        const lock = getValidLock(entry.planId);
+		        const lastActionAt = lock?.lastActionAt || lock?.ts || null;
+		        if (lock && lock.userId === entry.targetUserId) {
+		          planLocks.delete(entry.planId);
+		          writeAuditLog(db, {
+		            level: 'important',
+		            event: 'plan_lock_released',
+		            userId: lock.userId,
+		            username: lock.username,
+		            scopeType: 'plan',
+		            scopeId: entry.planId,
+		            details: { reason: 'force_unlock_done', requestId, action }
+		          });
+		        }
+		        forceUnlocks.delete(requestId);
+		        finalizeForceUnlockTakeover(entry.planId, entry.requestedById, entry.requestedByName, lastActionAt, requestId, 'force_unlock_done');
+		      }
+		      return;
+		    }
+
+		    if (msg?.type === 'leave') {
+	      const planId = String(msg.planId || '').trim();
+	      if (!planId) return;
       const members = wsPlanMembers.get(planId);
       if (members) {
         members.delete(ws);
         if (!members.size) wsPlanMembers.delete(planId);
       }
       info.plans.delete(planId);
-      const lock = planLocks.get(planId);
-      if (lock && lock.userId === info.userId) {
-        const remaining = wsPlanMembers.get(planId);
-        let stillThere = false;
-        if (remaining) {
-          for (const otherWs of remaining) {
+	      const lock = planLocks.get(planId);
+	      if (lock && lock.userId === info.userId) {
+	        const lastActionAt = lock.lastActionAt || lock.ts || null;
+	        const remaining = wsPlanMembers.get(planId);
+	        let stillThere = false;
+	        if (remaining) {
+	          for (const otherWs of remaining) {
             const otherInfo = wsClientInfo.get(otherWs);
             if (otherInfo?.userId === info.userId) {
               stillThere = true;
@@ -3224,66 +4678,79 @@ wss.on('connection', (ws, req) => {
             }
           }
         }
-        if (!stillThere) {
-          planLocks.delete(planId);
-          writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'leave' } });
-          emitLockState(planId);
-        }
-      }
-      emitPresence(planId);
-      emitGlobalPresence();
-      return;
-    }
+	        if (!stillThere) {
+	          planLocks.delete(planId);
+	          writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'leave' } });
+	          // If a force unlock is active for this plan/target, treat leaving/closing as "discard".
+	          const completed = completeForceUnlockAsAutoDiscard(planId, info.userId, lastActionAt, 'target_left');
+	          if (!completed) emitLockState(planId);
+	        }
+	      }
+	      emitPresence(planId);
+	      emitGlobalPresence();
+	      return;
+	    }
 
-    if (msg?.type === 'release_lock') {
-      const planId = String(msg.planId || '').trim();
-      const lock = planLocks.get(planId);
-      if (lock && lock.userId === info.userId) {
-        planLocks.delete(planId);
-        writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'release' } });
-        emitLockState(planId);
-      }
-      return;
-    }
+	    if (msg?.type === 'release_lock') {
+	      const planId = String(msg.planId || '').trim();
+	      const lock = planLocks.get(planId);
+	      if (lock && lock.userId === info.userId) {
+	        const lastActionAt = lock.lastActionAt || lock.ts || null;
+	        planLocks.delete(planId);
+	        writeAuditLog(db, { level: 'important', event: 'plan_lock_released', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId, details: { reason: 'release' } });
+	        const completed = completeForceUnlockAsAutoDiscard(planId, info.userId, lastActionAt, 'target_released');
+	        if (!completed) emitLockState(planId);
+	      }
+	      return;
+	    }
 
-    if (msg?.type === 'unlock_request') {
-      const planId = String(msg.planId || '').trim();
-      const targetUserId = String(msg.targetUserId || '').trim();
-      if (!planId || !targetUserId) return;
-      if (!info?.isSuperAdmin) {
-        jsonSend(ws, { type: 'unlock_denied', planId, targetUserId, reason: 'forbidden' });
-        return;
-      }
-      const lock = getValidLock(planId);
-      if (!lock || lock.userId !== targetUserId) {
-        jsonSend(ws, { type: 'unlock_denied', planId, targetUserId, reason: 'no_lock' });
-        return;
+		    if (msg?.type === 'unlock_request') {
+		      const planId = String(msg.planId || '').trim();
+		      const targetUserId = String(msg.targetUserId || '').trim();
+		      const message = typeof msg.message === 'string' ? String(msg.message || '').trim() : '';
+		      const rawMinutes = Number(msg.grantMinutes ?? msg.minutes ?? '');
+		      const grantMinutes = Number.isFinite(rawMinutes) ? Math.max(0.5, Math.min(60, rawMinutes)) : 10;
+		      if (!planId || !targetUserId) return;
+		      const requesterAccess = getPlanAccessForUser(info.userId, planId);
+		      if (requesterAccess !== 'rw') {
+		        jsonSend(ws, { type: 'unlock_denied', planId, targetUserId, reason: 'forbidden' });
+		        return;
+		      }
+	      const lock = getValidLock(planId);
+	      if (!lock || lock.userId !== targetUserId) {
+	        jsonSend(ws, { type: 'unlock_denied', planId, targetUserId, reason: 'no_lock' });
+	        return;
       }
       const requestId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex');
       const state = readState();
       const planPathMap = buildPlanPathMap(state.clients || []);
       const path = planPathMap.get(planId);
-      const payload = {
-        type: 'unlock_request',
-        requestId,
-        planId,
-        clientName: path?.clientName || '',
-        siteName: path?.siteName || '',
-        planName: path?.planName || '',
-        requestedBy: { userId: info.userId, username: info.username }
-      };
+		      const payload = {
+		        type: 'unlock_request',
+		        requestId,
+		        planId,
+		        clientName: path?.clientName || '',
+		        siteName: path?.siteName || '',
+		        planName: path?.planName || '',
+		        requestedBy: { userId: info.userId, username: info.username },
+		        grantMinutes,
+		        message: message ? message.slice(0, 1000) : ''
+		      };
       const sent = sendToUser(targetUserId, payload);
       if (!sent) {
         jsonSend(ws, { type: 'unlock_denied', planId, targetUserId, reason: 'offline' });
         return;
       }
-      unlockRequests.set(requestId, {
-        requestedById: info.userId,
-        requestedByName: info.username,
-        targetUserId,
-        planId,
-        createdAt: Date.now()
-      });
+		      unlockRequests.set(requestId, {
+		        requestedById: info.userId,
+		        requestedByName: info.username,
+		        requestedByAvatarUrl: info.avatarUrl || '',
+		        targetUserId,
+		        planId,
+		        message: message ? message.slice(0, 1000) : '',
+		        grantMinutes,
+		        createdAt: Date.now()
+		      });
       writeAuditLog(db, {
         level: 'important',
         event: 'plan_unlock_requested',
@@ -3297,38 +4764,106 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    if (msg?.type === 'unlock_response') {
-      const requestId = String(msg.requestId || '').trim();
-      const planId = String(msg.planId || '').trim();
-      const action = String(msg.action || '').trim();
-      if (!requestId || !planId) return;
-      const request = unlockRequests.get(requestId);
-      if (!request) return;
-      if (request.targetUserId !== info.userId) return;
-      unlockRequests.delete(requestId);
-      let released = false;
-      if (action === 'grant' || action === 'grant_save' || action === 'grant_discard') {
-        const lock = getValidLock(planId);
-        if (lock && lock.userId === info.userId) {
-          planLocks.delete(planId);
-          writeAuditLog(db, {
-            level: 'important',
-            event: 'plan_lock_released',
-            userId: info.userId,
-            username: info.username,
-            scopeType: 'plan',
-            scopeId: planId,
-            details: { reason: 'unlock_request', action }
-          });
-          emitLockState(planId);
-          released = true;
-        }
-      }
-      writeAuditLog(db, {
-        level: 'important',
-        event: 'plan_unlock_response',
-        userId: info.userId,
-        username: info.username,
+		    if (msg?.type === 'unlock_response') {
+	      const requestId = String(msg.requestId || '').trim();
+	      const planId = String(msg.planId || '').trim();
+	      const action = String(msg.action || '').trim();
+	      if (!requestId || !planId) return;
+	      const request = unlockRequests.get(requestId);
+	      if (!request) return;
+	      if (request.targetUserId !== info.userId) return;
+	      unlockRequests.delete(requestId);
+		      const granted = action === 'grant' || action === 'grant_save' || action === 'grant_discard';
+		      let released = false;
+		      let grantCreated = false;
+		      let lockAssignedToRequester = false;
+		      let grantPayload = null;
+		      let takeover = null; // 'reserved' | 'immediate' | null
+		      let lastActionAt = null;
+		      if (granted) {
+		        const current = getValidLock(planId);
+		        // If the plan is currently locked by someone else, do not create a grant.
+		        if (current && current.userId && current.userId !== info.userId) {
+		          released = false;
+		        } else {
+		          if (current && current.userId === info.userId) {
+		            lastActionAt = current.lastActionAt || current.ts || null;
+		            planLocks.delete(planId);
+		            writeAuditLog(db, {
+		              level: 'important',
+		              event: 'plan_lock_released',
+		              userId: info.userId,
+		              username: info.username,
+		              scopeType: 'plan',
+		              scopeId: planId,
+		              details: { reason: 'unlock_request', action }
+		            });
+		            released = true;
+		          }
+		          // If the requester is already inside the plan, assign the lock immediately.
+		          const after = getValidLock(planId);
+		          if (!after) {
+		            const requesterJoined = userIsJoinedToPlan(planId, request.requestedById);
+		            if (requesterJoined) {
+		              const now = Date.now();
+		              const requester = resolveUserIdentity(request.requestedById, request.requestedByName || 'user');
+		              planLocks.set(planId, {
+		                userId: requester.userId,
+		                username: requester.username,
+		                avatarUrl: requester.avatarUrl || '',
+		                acquiredAt: now,
+		                ts: now,
+		                lastActionAt: null,
+		                dirty: false
+		              });
+		              writeAuditLog(db, {
+		                level: 'important',
+		                event: 'plan_lock_acquired',
+		                userId: requester.userId,
+		                username: requester.username,
+		                scopeType: 'plan',
+		                scopeId: planId,
+		                details: { reason: 'unlock_request_immediate' }
+		              });
+		              lockAssignedToRequester = true;
+		              takeover = 'immediate';
+		            } else {
+		              // Otherwise reserve the lock for a limited time window (hourglass).
+		              const minutes = Number.isFinite(Number(request.grantMinutes)) ? Math.max(0.5, Math.min(60, Number(request.grantMinutes))) : 10;
+		              const now = Date.now();
+		              const expiresAt = now + Math.round(minutes * 60_000);
+		              planLockGrants.set(planId, {
+		                userId: request.requestedById,
+		                username: request.requestedByName,
+		                avatarUrl: request.requestedByAvatarUrl || '',
+		                grantedAt: now,
+		                expiresAt,
+		                minutes,
+		                grantedById: info.userId,
+		                grantedByName: info.username,
+		                lastActionAt
+		              });
+		              grantCreated = true;
+		              takeover = 'reserved';
+		              grantPayload = {
+		                userId: request.requestedById,
+		                username: request.requestedByName,
+		                avatarUrl: request.requestedByAvatarUrl || '',
+		                grantedAt: now,
+		                expiresAt,
+		                minutes,
+		                grantedBy: { userId: info.userId, username: info.username }
+		              };
+		            }
+		          }
+		        }
+		      }
+		      if (released || grantCreated || lockAssignedToRequester) emitLockState(planId);
+		      writeAuditLog(db, {
+		        level: 'important',
+		        event: 'plan_unlock_response',
+		        userId: info.userId,
+	        username: info.username,
         scopeType: 'plan',
         scopeId: planId,
         details: {
@@ -3337,16 +4872,25 @@ wss.on('connection', (ws, req) => {
           requestedById: request.requestedById
         }
       });
-      sendToUser(request.requestedById, {
-        type: 'unlock_result',
-        requestId,
-        planId,
-        targetUserId: info.userId,
-        action,
-        released
-      });
-      return;
-    }
+		      sendToUser(request.requestedById, {
+		        type: 'unlock_result',
+		        requestId,
+		        planId,
+		        targetUserId: info.userId,
+		        action,
+		        released,
+		        grantedBy: { userId: info.userId, username: info.username, avatarUrl: info.avatarUrl || '' },
+		        takeover,
+		        grant: grantPayload,
+		        plan: (() => {
+		          const state = readState();
+		          const planPathMap = buildPlanPathMap(state.clients || []);
+		          const path = planPathMap.get(planId);
+	          return { clientName: path?.clientName || '', siteName: path?.siteName || '', planName: path?.planName || '' };
+	        })()
+	      });
+	      return;
+	    }
   });
 
   ws.isAlive = true;
@@ -3376,21 +4920,37 @@ const heartbeatTimer = setInterval(() => {
 }, 30_000);
 
 const lockCleanupTimer = setInterval(() => {
-  const expired = purgeExpiredLocks();
-  if (expired.length) {
-    for (const entry of expired) {
+  const expiredGrants = purgeExpiredGrants();
+  if (expiredGrants.length) {
+    for (const entry of expiredGrants) {
       writeAuditLog(db, {
         level: 'important',
-        event: 'plan_lock_released',
-        userId: entry.lock.userId,
-        username: entry.lock.username,
+        event: 'plan_lock_grant_expired',
+        userId: entry.grant.userId,
+        username: entry.grant.username,
         scopeType: 'plan',
-        scopeId: entry.planId,
-        details: { reason: 'ttl' }
+        scopeId: entry.planId
       });
       emitLockState(entry.planId);
     }
   }
+	  const expiredForce = purgeExpiredForceUnlocks();
+	  if (expiredForce.length) {
+	    for (const { requestId, entry } of expiredForce) {
+	      // Deadline reached without an explicit execute: expire the request, keep the lock as-is.
+	      sendToUser(entry.requestedById, { type: 'force_unlock_expired', requestId, planId: entry.planId, targetUserId: entry.targetUserId });
+	      sendToUser(entry.targetUserId, { type: 'force_unlock_expired', requestId, planId: entry.planId });
+	      writeAuditLog(db, {
+	        level: 'important',
+	        event: 'plan_force_unlock_expired',
+	        userId: entry.requestedById,
+	        username: entry.requestedByName,
+	        scopeType: 'plan',
+	        scopeId: entry.planId,
+	        details: { targetUserId: entry.targetUserId, requestId }
+	      });
+	    }
+	  }
   const now = Date.now();
   for (const [requestId, req] of unlockRequests.entries()) {
     if (now - (req.createdAt || 0) > 5 * 60_000) unlockRequests.delete(requestId);
