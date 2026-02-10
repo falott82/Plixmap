@@ -4,7 +4,6 @@ import { fetchChatUnread, fetchChatUnreadSenders, markChatRead } from '../../api
 import { useAuthStore } from '../../store/useAuthStore';
 import { useChatStore } from '../../store/useChatStore';
 import { useUIStore } from '../../store/useUIStore';
-import { useDataStore } from '../../store/useDataStore';
 import { useT } from '../../i18n/useT';
 
 const getWsUrl = () => {
@@ -93,26 +92,6 @@ const ClientChatWs = () => {
           }
           ui.bumpChatUnread(clientId, 1);
           ui.addChatUnreadSenderId(String(message.userId || ''));
-
-          // Toast notification (throttled per client) to make it feel instant like WhatsApp.
-          const now = Date.now();
-          const last = Number(lastToastAtByClientRef.current[clientId] || 0);
-          if (now - last > 1200) {
-            lastToastAtByClientRef.current[clientId] = now;
-            const clientLabel = (() => {
-              const clients = (useDataStore.getState() as any)?.clients || [];
-              const c = clients.find((x: any) => x?.id === clientId);
-              return c?.shortName || c?.name || clientId;
-            })();
-            const from = String(message.username || '').trim() || t({ it: 'utente', en: 'user' });
-            toast.info(
-              t({
-                it: `Nuovo messaggio in chat: ${clientLabel} (da ${from})`,
-                en: `New chat message: ${clientLabel} (from ${from})`
-              }),
-              { duration: 5000, id: `client-chat-new:${clientId}` }
-            );
-          }
           return;
         }
         if (msg?.type === 'dm_chat_new' && msg?.threadId && msg?.message?.id) {

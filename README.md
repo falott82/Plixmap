@@ -1,6 +1,6 @@
 # Deskly - Floor Plan Management
 
-Current version: **2.4.3**
+Current version: **2.5.0**
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -26,13 +26,15 @@ Note: This README was refreshed with a small formatting update.
 - Any user can request an unlock from the lock owner (optional message + takeover window 0.5..60 minutes). When granted, the lock is released immediately and reserved for the requester for the selected time.
 - Superadmins can start a force unlock by setting a grace time (0..60 minutes). While the grace timer is running, the unlock buttons are disabled. When it ends, a 5-minute decision window starts where the superadmin can choose Save+unlock, Discard+unlock, or cancel the request. If it expires/cancels, the lock remains with the owner. If it completes, the superadmin takes the lock (or gets an hourglass reservation). Timers are shown as a seconds countdown.
 
-## Client chat
-- Each client can have a dedicated chat (permissions control who can access it for that client).
-- Unread messages show a badge; entering the chat marks it as read (WhatsApp-like behavior).
+## Customer chat
+- WhatsApp Web-like dock with a 2-column layout: customer group chats on top, and user DMs below.
+- You can DM only users that share at least one customer with you. If the shared customers are removed, the DM stays visible but becomes read-only.
+- Groups show the customer logo (if available); you can toggle compact view and collapse/expand the Groups and Users sections.
+- User DMs are ordered by last interaction; clicking a group jumps to the first unread message. Group messages do not show toast notifications.
+- Unread messages show a badge; entering a chat marks it as read. DMs use WhatsApp-like checkmarks (sent/delivered/read).
 - Messages support text + attachments (images/documents/videos, total max 5MB per message). Voice notes: up to 10 minutes.
-- Images open in an in-app modal (with download).
-- Users can edit their last messages within 30 minutes and delete their own messages; superadmins can delete any message or clear the whole chat.
-- Chat export: TXT/JSON/HTML.
+- Images open in an in-app modal (with download). Chat export: TXT/JSON/HTML.
+- You can block/unblock users (WhatsApp-like behavior). When blocked, messages stay with a single check while the block is active.
 
 ## Screenshots
 ### Rack editor

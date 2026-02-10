@@ -8,6 +8,41 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.5.0',
+    date: '2026-02-10',
+    type: 'major',
+    notes: [
+      n(
+        'Chat: rework completo stile WhatsApp Web con layout a 2 colonne (Gruppi clienti + DM utenti)',
+        'Chat: full WhatsApp Web-inspired rework with a 2-column layout (customer groups + user DMs)'
+      ),
+      n(
+        'Chat: gruppi in cima con logo cliente (se presente), vista compatta e sezioni collassabili; ricerca unica',
+        'Chat: groups pinned on top with customer logo (if present), compact view and collapsible sections; unified search'
+      ),
+      n(
+        'DM: ordinamento per ultima interazione + spunte di lettura (1 inviata, 2 consegnate, 2 lette)',
+        'DM: ordered by last interaction + WhatsApp-like checkmarks (1 sent, 2 delivered, 2 read)'
+      ),
+      n(
+        'Gruppi: apertura sul primo messaggio non letto; rimossi toast per i messaggi nei gruppi',
+        'Groups: opens on the first unread message; removed toast notifications for group messages'
+      ),
+      n(
+        'Notifiche: badge in alto con numero di mittenti diversi con messaggi non letti (DM + gruppi)',
+        'Notifications: top badge shows the number of distinct senders with unread messages (DMs + groups)'
+      ),
+      n(
+        'Blocchi: blocca/sblocca utenti con comportamento tipo WhatsApp; profilo non visibile se bloccato',
+        'Blocks: block/unblock users with WhatsApp-like behavior; profile hidden when blocked'
+      ),
+      n(
+        'Layout chat: pannello ridimensionabile + divisorio trascinabile con preferenze salvate sull’account; scorciatoie C/P e Ctrl+P',
+        'Chat layout: resizable panel + draggable divider with preferences saved on the account; shortcuts C/P and Ctrl+P'
+      )
+    ]
+  },
+  {
     version: '2.4.3',
     date: '2026-02-10',
     type: 'fix',

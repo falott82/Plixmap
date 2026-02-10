@@ -348,8 +348,26 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'Nella lista gruppi viene mostrato il logo del cliente (se disponibile). Puoi anche attivare la vista compatta e compattare/espandere le sezioni Gruppi e Utenti.',
+                          en: 'In the groups list you see the customer logo (if available). You can also toggle compact view and collapse/expand the Groups and Users sections.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'Sotto ai gruppi trovi gli utenti del portale con cui condividi almeno un cliente in comune. Se la condivisione viene rimossa, la chat resta visibile ma diventa in sola lettura e lo stato utente non e mostrato.',
                           en: 'Under groups you see portal users that share at least one customer with you. If sharing is removed, the chat stays visible but becomes read-only and the user status is hidden.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Le chat utenti (DM) sono ordinate per ultima interazione, come WhatsApp.',
+                          en: 'User chats (DMs) are ordered by last interaction, like WhatsApp.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Cliccando su un gruppo, la chat va automaticamente al primo messaggio non letto. I messaggi di gruppo non generano toast.',
+                          en: 'When you click a group, the chat jumps to the first unread message. Group messages do not show toast notifications.'
                         })}
                       </li>
                       <li>
