@@ -248,6 +248,7 @@ const ClientChatDock = () => {
   const messages = useChatStore((s) => (clientChatClientId ? s.messagesByClientId[clientChatClientId] || [] : []));
   const clientNameFromStore = useChatStore((s) => (clientChatClientId ? s.clientNameById[clientChatClientId] : ''));
   const lastActivityByClientId = useChatStore((s) => s.lastActivityByClientId || {});
+  const clientsFull = useDataStore((s) => s.clients || []);
   const clientTree = useDataStore((s) =>
     (s.clients || []).map((c) => ({
       id: c.id,
@@ -365,6 +366,12 @@ const ClientChatDock = () => {
     const c = (clientTree || []).find((x) => String(x.id) === String(clientChatClientId));
     return String((c as any)?.logoUrl || '');
   }, [clientChatClientId, clientTree]);
+
+  const activeClientObj = useMemo(() => {
+    if (!clientChatClientId) return null;
+    if (isDmThreadId(clientChatClientId)) return null;
+    return (clientsFull || []).find((c: any) => String(c?.id) === String(clientChatClientId)) || null;
+  }, [clientChatClientId, clientsFull]);
 
   const clientInitial = useMemo(() => {
     const n = String(clientName || '').trim();
@@ -2127,8 +2134,8 @@ const ClientChatDock = () => {
 		                          setSearchOpen(false);
 		                          setStarredOpen(false);
 		                        }}
-		                        title={t({ it: 'Info scorciatoie', en: 'Help / shortcuts' })}
-		                        aria-label={t({ it: 'Info scorciatoie', en: 'Help / shortcuts' })}
+		                        title={t({ it: 'Info chat', en: 'Chat info' })}
+		                        aria-label={t({ it: 'Info chat', en: 'Chat info' })}
 		                      >
 		                        <Info size={18} />
 		                      </button>
@@ -2825,6 +2832,103 @@ const ClientChatDock = () => {
 		                      </button>
 			                    </div>
 			                    <div className="p-4">
+                            {activeClientObj ? (
+                              <div className="mb-3 rounded-2xl border border-slate-800 bg-slate-900/20 p-4">
+                                <div className="flex items-center gap-3">
+                                  <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-700 bg-slate-950/60">
+                                    {clientLogoUrl ? (
+                                      <img src={clientLogoUrl} alt="" className="h-full w-full object-cover" draggable={false} />
+                                    ) : (
+                                      <span className="text-[16px] font-extrabold text-slate-200">{clientInitial}</span>
+                                    )}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-extrabold text-slate-50">
+                                      {String((activeClientObj as any)?.shortName || (activeClientObj as any)?.name || clientName || '').trim() ||
+                                        clientName}
+                                    </div>
+                                    <div className="truncate text-[12px] text-slate-400">
+                                      {String((activeClientObj as any)?.address || '').trim()
+                                        ? String((activeClientObj as any)?.address || '').trim()
+                                        : t({ it: 'Cliente', en: 'Customer' })}
+                                    </div>
+                                  </div>
+                                </div>
+                                {String((activeClientObj as any)?.description || '').trim() ? (
+                                  <div className="mt-3 text-[12px] text-slate-300">{String((activeClientObj as any)?.description || '').trim()}</div>
+                                ) : null}
+                                {Array.isArray((activeClientObj as any)?.sites) ? (
+                                  <div className="mt-3">
+                                    <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase text-slate-400">
+                                      <span>{t({ it: 'Sedi', en: 'Sites' })}</span>
+                                      <span className="tabular-nums">{String(((activeClientObj as any).sites || []).length)}</span>
+                                    </div>
+                                    <div className="mt-2 space-y-1">
+                                      {(((activeClientObj as any).sites || []) as any[]).slice(0, 12).map((s: any) => {
+                                        const plans = Array.isArray(s?.floorPlans) ? s.floorPlans.length : 0;
+                                        const label = String(s?.name || '').trim() || String(s?.id || '').trim() || t({ it: 'Sede', en: 'Site' });
+                                        return (
+                                          <div key={String(s?.id || label)} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/30 px-3 py-2">
+                                            <div className="min-w-0 truncate text-[12px] font-semibold text-slate-100">{label}</div>
+                                            <div className="shrink-0 text-[12px] text-slate-400 tabular-nums">
+                                              {t({ it: `${plans} planimetrie`, en: `${plans} floor plans` })}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                      {(((activeClientObj as any).sites || []) as any[]).length > 12 ? (
+                                        <div className="pt-1 text-[11px] font-semibold text-slate-500">
+                                          {t({ it: 'Altre sedi disponibili…', en: 'More sites available…' })}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : activeDmContact ? (
+                              <div className="mb-3 rounded-2xl border border-slate-800 bg-slate-900/20 p-4">
+                                <div className="flex items-center gap-3">
+                                  <UserAvatar
+                                    username={activeDmContact.username}
+                                    src={activeDmContact.avatarUrl}
+                                    size={44}
+                                    className="border-slate-800 bg-slate-900"
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-extrabold text-slate-50">
+                                      {(`${activeDmContact.firstName || ''} ${activeDmContact.lastName || ''}`.trim() || activeDmContact.username).trim()}
+                                    </div>
+                                    <div className="truncate text-[12px] text-slate-400">@{activeDmContact.username}</div>
+                                  </div>
+                                </div>
+                                <div className="mt-3 text-[12px] text-slate-300">
+                                  {(() => {
+                                    const online = !!(onlineUserIds as any)?.[activeDmContact.id] || !!activeDmContact.online;
+                                    if (activeDmContact.readOnly || activeDmContact.blockedMe) return t({ it: 'Stato non disponibile', en: 'Status not available' });
+                                    if (online) return t({ it: 'Online', en: 'Online' });
+                                    if (!activeDmContact.lastOnlineAt) return t({ it: 'Mai connesso', en: 'Never connected' });
+                                    return `${t({ it: 'Last online', en: 'Last online' })}: ${new Date(activeDmContact.lastOnlineAt).toLocaleString()}`;
+                                  })()}
+                                </div>
+                                {!activeDmContact.readOnly && !activeDmContact.blockedMe ? (
+                                  <div className="mt-3">
+                                    <div className="text-[11px] font-semibold uppercase text-slate-400">{t({ it: 'Gruppi in comune', en: 'Common groups' })}</div>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      {(activeDmContact.commonClients || []).slice(0, 8).map((c) => (
+                                        <span
+                                          key={c.id}
+                                          className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-950/30 px-3 py-1 text-[12px] font-semibold text-slate-100"
+                                          title={c.name}
+                                        >
+                                          {c.logoUrl ? <img src={c.logoUrl} alt="" className="h-4 w-4 rounded-full object-cover" draggable={false} /> : null}
+                                          <span className="max-w-[200px] truncate">{c.name}</span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
 			                      <ul className="list-disc space-y-2 rounded-2xl border border-slate-800 bg-slate-900/20 px-6 py-4 text-sm text-slate-200">
 			                        {helpItems.map((it0) => (
 			                          <li key={it0.k}>
