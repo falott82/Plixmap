@@ -1,8 +1,26 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
-import { ChevronDown, Download, Paperclip, Send, Trash2, X, Pencil, Users, ArrowDownToLine, Star, CornerUpLeft, Info, Mic, Smile, Copy as CopyIcon, Search, ChevronUp } from 'lucide-react';
-import { ChatMessage, clearChat, deleteChatMessage, editChatMessage, exportChat, fetchChatMembers, fetchChatMessages, markChatRead, reactChatMessage, sendChatMessage, starChatMessage } from '../../api/chat';
+import { Check, CheckCheck, ChevronDown, Download, Paperclip, Send, Trash2, X, Pencil, Users, ArrowDownToLine, Star, CornerUpLeft, Info, Mic, Smile, Copy as CopyIcon, Search, ChevronUp, UserCheck, UserX } from 'lucide-react';
+import {
+  ChatMessage,
+  DmContactRow,
+  blockChatUser,
+  clearChat,
+  deleteChatMessage,
+  editChatMessage,
+  exportChat,
+  fetchChatMembers,
+  fetchChatMessages,
+  fetchChatUnreadSenders,
+  fetchDmContacts,
+  markChatRead,
+  reactChatMessage,
+  sendChatMessage,
+  starChatMessage,
+  unblockChatUser
+} from '../../api/chat';
+import { updateMyProfile } from '../../api/auth';
 import { fetchUserProfile } from '../../api/userProfile';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useChatStore } from '../../store/useChatStore';
@@ -77,6 +95,22 @@ const safeFilename = (value: string) =>
     .replace(/[^\w\- ]+/g, '')
     .trim()
     .slice(0, 40) || 'chat';
+
+const isDmThreadId = (id: string | null | undefined) => String(id || '').startsWith('dm:');
+const parseDmThreadId = (id: string) => {
+  const s = String(id || '').trim();
+  if (!s.startsWith('dm:')) return null;
+  const parts = s.slice(3).split(':').map((p) => String(p || '').trim()).filter(Boolean);
+  if (parts.length !== 2) return null;
+  return { a: parts[0], b: parts[1], pairKey: `${parts[0]}:${parts[1]}` };
+};
+const dmThreadIdForUsers = (a: string, b: string) => {
+  const x = String(a || '').trim();
+  const y = String(b || '').trim();
+  if (!x || !y) return '';
+  const [u1, u2] = x < y ? [x, y] : [y, x];
+  return `dm:${u1}:${u2}`;
+};
 
 const snippet = (value: string, max = 90) =>
   String(value || '')
@@ -195,14 +229,21 @@ const ClientChatDock = () => {
   const isSuperAdmin = !!user?.isSuperAdmin;
   const onlineUserIds = useUIStore((s) => (s as any).onlineUserIds || {});
   const setClientChatDockHeight = useUIStore((s) => (s as any).setClientChatDockHeight);
-  const { clientChatOpen, clientChatClientId, openClientChat, closeClientChat, clearChatUnread, chatUnreadByClientId } =
+  const { clientChatOpen, clientChatClientId, openClientChat, closeClientChat, clearChatUnread, chatUnreadByClientId, clientChatDockWidth, clientChatDockPreferredHeight, clientChatDividerLeftWidth, setClientChatDockWidth, setClientChatDockPreferredHeight, setClientChatDividerLeftWidth, setChatUnreadSenderIds } =
     useUIStore((s) => ({
     clientChatOpen: s.clientChatOpen,
     clientChatClientId: s.clientChatClientId,
     openClientChat: (s as any).openClientChat,
     closeClientChat: s.closeClientChat,
     clearChatUnread: s.clearChatUnread,
-    chatUnreadByClientId: (s as any).chatUnreadByClientId || {}
+    chatUnreadByClientId: (s as any).chatUnreadByClientId || {},
+    clientChatDockWidth: (s as any).clientChatDockWidth || 980,
+    clientChatDockPreferredHeight: (s as any).clientChatDockPreferredHeight || 720,
+    clientChatDividerLeftWidth: (s as any).clientChatDividerLeftWidth || 340,
+    setClientChatDockWidth: (s as any).setClientChatDockWidth,
+    setClientChatDockPreferredHeight: (s as any).setClientChatDockPreferredHeight,
+    setClientChatDividerLeftWidth: (s as any).setClientChatDividerLeftWidth,
+    setChatUnreadSenderIds: (s as any).setChatUnreadSenderIds
   }));
   const messages = useChatStore((s) => (clientChatClientId ? s.messagesByClientId[clientChatClientId] || [] : []));
   const clientNameFromStore = useChatStore((s) => (clientChatClientId ? s.clientNameById[clientChatClientId] : ''));
@@ -230,6 +271,10 @@ const ClientChatDock = () => {
   const [clearChatBusy, setClearChatBusy] = useState(false);
   const [unstarConfirmId, setUnstarConfirmId] = useState<string | null>(null);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [leftSearchQ, setLeftSearchQ] = useState('');
+  const [dmContacts, setDmContacts] = useState<DmContactRow[]>([]);
+  const [dmContactsLoading, setDmContactsLoading] = useState(false);
+  const [activeDmMeta, setActiveDmMeta] = useState<any>(null);
   const [pendingAttachments, setPendingAttachments] = useState<
     { id: string; name: string; sizeBytes: number; file: File; previewUrl?: string; kind?: 'image' | 'video' | 'audio' | 'file' }[]
   >([]);
@@ -258,6 +303,20 @@ const ClientChatDock = () => {
   const [reactPickerId, setReactPickerId] = useState<string | null>(null);
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const reactPickerRef = useRef<HTMLDivElement | null>(null);
+  const chatLayoutAppliedForUserRef = useRef<string | null>(null);
+  const saveChatLayoutTimerRef = useRef<number | null>(null);
+  const [viewport, setViewport] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: window.innerHeight });
+  const dragRef = useRef<
+    | null
+    | {
+        mode: 'resize_w' | 'resize_h' | 'resize_wh' | 'divider';
+        startX: number;
+        startY: number;
+        startW: number;
+        startH: number;
+        startDivider: number;
+      }
+  >(null);
   const replyToIdRef = useRef<string | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -308,6 +367,8 @@ const ClientChatDock = () => {
     return (n ? n[0] : '?').toUpperCase();
   }, [clientName]);
 
+  // (dmReadOnly/dmBlockedByMe are declared after activeDmContact to avoid TDZ in TS)
+
   useEffect(() => {
     replyToIdRef.current = replyToId;
   }, [replyToId]);
@@ -328,6 +389,42 @@ const ClientChatDock = () => {
       setClientChatDockHeight(0);
     };
   }, [clientChatOpen, setClientChatDockHeight]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (chatLayoutAppliedForUserRef.current === user.id) return;
+    chatLayoutAppliedForUserRef.current = user.id;
+    const layout = ((user as any).chatLayout || {}) as any;
+    if (layout && typeof layout === 'object') {
+      if (Number.isFinite(layout.chatDockWidth)) setClientChatDockWidth(Number(layout.chatDockWidth));
+      if (Number.isFinite(layout.chatDockHeight)) setClientChatDockPreferredHeight(Number(layout.chatDockHeight));
+      if (Number.isFinite(layout.chatDividerLeftWidth)) setClientChatDividerLeftWidth(Number(layout.chatDividerLeftWidth));
+    }
+  }, [setClientChatDividerLeftWidth, setClientChatDockPreferredHeight, setClientChatDockWidth, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (saveChatLayoutTimerRef.current) window.clearTimeout(saveChatLayoutTimerRef.current);
+    saveChatLayoutTimerRef.current = window.setTimeout(() => {
+      const prev = (((useAuthStore.getState() as any)?.user as any)?.chatLayout || {}) as any;
+      const next = {
+        ...(prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}),
+        chatDockWidth: clientChatDockWidth,
+        chatDockHeight: clientChatDockPreferredHeight,
+        chatDividerLeftWidth: clientChatDividerLeftWidth
+      };
+      updateMyProfile({ chatLayout: next })
+        .then(() => {
+          // keep local auth store in sync (best effort)
+          useAuthStore.setState((s) => (s.user ? ({ ...s, user: { ...(s.user as any), chatLayout: next } } as any) : s));
+        })
+        .catch(() => {});
+    }, 650);
+    return () => {
+      if (saveChatLayoutTimerRef.current) window.clearTimeout(saveChatLayoutTimerRef.current);
+      saveChatLayoutTimerRef.current = null;
+    };
+  }, [clientChatDividerLeftWidth, clientChatDockPreferredHeight, clientChatDockWidth, user?.id]);
 
   const canChatClientIds = useMemo(() => {
     const out = new Set<string>();
@@ -364,6 +461,83 @@ const ClientChatDock = () => {
       .map((c) => ({ id: c.id, name: c.name, logoUrl: (c as any)?.logoUrl }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [canChatClientIds, clientTree]);
+
+  useEffect(() => {
+    if (!clientChatOpen || !user?.id) return;
+    setDmContactsLoading(true);
+    fetchDmContacts()
+      .then((payload) => {
+        const list = Array.isArray(payload.users) ? payload.users : [];
+        setDmContacts(list);
+      })
+      .catch(() => {
+        setDmContacts([]);
+      })
+      .finally(() => setDmContactsLoading(false));
+  }, [clientChatOpen, user?.id]);
+
+  const refreshDmContacts = async () => {
+    if (!user?.id) return;
+    setDmContactsLoading(true);
+    try {
+      const payload = await fetchDmContacts();
+      const list = Array.isArray(payload.users) ? payload.users : [];
+      setDmContacts(list);
+    } catch {
+      // ignore
+    } finally {
+      setDmContactsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!clientChatOpen) return;
+    if (clientChatClientId) return;
+    if (chatClients.length) {
+      openClientChat(chatClients[0]!.id);
+      return;
+    }
+    if (user?.id && dmContacts.length) {
+      const threadId = dmThreadIdForUsers(user.id, dmContacts[0]!.id);
+      if (threadId) openClientChat(threadId);
+    }
+  }, [chatClients, clientChatClientId, clientChatOpen, dmContacts, openClientChat, user?.id]);
+
+  const activeDmContact = useMemo(() => {
+    if (!clientChatClientId || !user?.id) return null;
+    if (!isDmThreadId(clientChatClientId)) return null;
+    const parsed = parseDmThreadId(clientChatClientId);
+    if (!parsed) return null;
+    const otherId = parsed.a === user.id ? parsed.b : parsed.b === user.id ? parsed.a : '';
+    if (!otherId) return null;
+    return dmContacts.find((u) => String(u.id) === String(otherId)) || null;
+  }, [clientChatClientId, dmContacts, user?.id]);
+
+  const dmReadOnly = useMemo(() => {
+    if (!clientChatClientId) return false;
+    if (!isDmThreadId(clientChatClientId)) return false;
+    return !!(activeDmMeta as any)?.readOnly || !!(activeDmContact as any)?.readOnly;
+  }, [activeDmContact, activeDmMeta, clientChatClientId]);
+
+  const dmBlockedByMe = useMemo(() => {
+    if (!clientChatClientId) return false;
+    if (!isDmThreadId(clientChatClientId)) return false;
+    return !!(activeDmMeta as any)?.blockedByMe || !!(activeDmContact as any)?.blockedByMe;
+  }, [activeDmContact, activeDmMeta, clientChatClientId]);
+
+  const leftQuery = useMemo(() => String(leftSearchQ || '').trim().toLowerCase(), [leftSearchQ]);
+  const filteredChatClients = useMemo(() => {
+    if (!leftQuery) return chatClients;
+    return (chatClients || []).filter((c) => String(c.name || '').toLowerCase().includes(leftQuery));
+  }, [chatClients, leftQuery]);
+  const filteredDmContacts = useMemo(() => {
+    if (!leftQuery) return dmContacts;
+    return (dmContacts || []).filter((u) => {
+      const name = `${u.firstName || ''} ${u.lastName || ''}`.trim();
+      const hay = `${u.username || ''} ${name}`.toLowerCase();
+      return hay.includes(leftQuery);
+    });
+  }, [dmContacts, leftQuery]);
 
   const membersSorted = useMemo(() => {
     const list = Array.isArray(members) ? members.slice() : [];
@@ -481,9 +655,12 @@ const ClientChatDock = () => {
     setClientPickerOpen(false);
     fetchChatMessages(clientChatClientId, { limit: 300 })
       .then((payload) => {
+        setActiveDmMeta((payload as any)?.dm || null);
         useChatStore.getState().setMessages(clientChatClientId, payload.clientName || '', payload.messages || []);
         clearChatUnread(clientChatClientId);
-        markChatRead(clientChatClientId).catch(() => {});
+        markChatRead(clientChatClientId)
+          .then(() => fetchChatUnreadSenders().then((p) => setChatUnreadSenderIds((p as any)?.senderIds || [])).catch(() => {}))
+          .catch(() => {});
         scrollToBottomSoon();
       })
       .catch((e) => {
@@ -542,6 +719,12 @@ const ClientChatDock = () => {
     // WhatsApp-like: when opening the chat, focus the composer.
     window.setTimeout(() => composeTextareaRef.current?.focus(), 0);
   }, [clientChatClientId, clientChatOpen]);
+
+  useEffect(() => {
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     if (!actionMenu && !reactPickerId) return;
@@ -695,6 +878,16 @@ const ClientChatDock = () => {
   const send = async () => {
     if (!clientChatClientId || !user?.id) return;
     if (sending) return;
+    const dmReadOnly = isDmThreadId(clientChatClientId) && (!!(activeDmMeta as any)?.readOnly || !!(activeDmContact as any)?.readOnly);
+    const dmBlockedByMe = isDmThreadId(clientChatClientId) && (!!(activeDmMeta as any)?.blockedByMe || !!(activeDmContact as any)?.blockedByMe);
+    if (dmReadOnly) {
+      setErr(t({ it: 'Chat in sola lettura: non condividi clienti in comune con questo utente.', en: 'Read-only chat: you do not share any customers with this user.' }));
+      return;
+    }
+    if (dmBlockedByMe) {
+      setErr(t({ it: 'Hai bloccato questo utente: sbloccalo per inviare messaggi.', en: 'You blocked this user: unblock to send messages.' }));
+      return;
+    }
     const trimmed = text.replace(/\r\n/g, '\n').trim();
     const toSend = pendingAttachments.slice(0, 10);
     if (!trimmed && !toSend.length) return;
@@ -1571,12 +1764,50 @@ const ClientChatDock = () => {
   const headerIconBtn =
     'icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg leading-none text-slate-200 hover:bg-slate-800 hover:text-slate-50';
 
+  const panelW = Math.max(520, Math.min(Number(clientChatDockWidth) || 980, Math.max(520, viewport.w - 32)));
+  const panelH = Math.max(420, Math.min(Number(clientChatDockPreferredHeight) || 720, Math.max(420, viewport.h - 32)));
+
+  const beginDrag = (mode: 'resize_w' | 'resize_h' | 'resize_wh' | 'divider', e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragRef.current = {
+      mode,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: panelW,
+      startH: panelH,
+      startDivider: clientChatDividerLeftWidth
+    };
+    const onMove = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const dx = ev.clientX - d.startX;
+      const dy = ev.clientY - d.startY;
+      if (d.mode === 'resize_w' || d.mode === 'resize_wh') {
+        setClientChatDockWidth(d.startW - dx);
+      }
+      if (d.mode === 'resize_h' || d.mode === 'resize_wh') {
+        setClientChatDockPreferredHeight(d.startH - dy);
+      }
+      if (d.mode === 'divider') {
+        setClientChatDividerLeftWidth(d.startDivider + dx);
+      }
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+    };
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+  };
+
   return (
     <>
       <Transition show={clientChatOpen} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={onCloseChatDialog}>
 	          <div className="fixed inset-0 pointer-events-none">
-	            <div className="absolute bottom-4 right-4 pointer-events-auto w-[min(420px,calc(100vw-2rem))]">
+	            <div className="absolute bottom-4 right-4 pointer-events-auto" style={{ width: panelW }}>
               <Transition.Child
                 as={Fragment}
                 enter="ease-out duration-150"
@@ -1589,8 +1820,181 @@ const ClientChatDock = () => {
 		                <Dialog.Panel className="relative">
 		                  <div
 		                    ref={panelRef}
-		                    className="rounded-2xl border border-slate-800 bg-slate-950 text-slate-100 shadow-card overflow-hidden"
+		                    style={{ height: panelH }}
+		                    className="relative rounded-2xl border border-slate-800 bg-slate-950 text-slate-100 shadow-card overflow-hidden"
 		                  >
+                        {/* Resize handles: drag left/top edges (panel is anchored bottom-right). */}
+                        <div
+                          className="absolute left-0 top-0 z-[90] h-full w-2 cursor-ew-resize"
+                          onPointerDown={(e) => beginDrag('resize_w', e)}
+                          title={t({ it: 'Ridimensiona larghezza', en: 'Resize width' })}
+                        />
+                        <div
+                          className="absolute left-0 top-0 z-[90] h-2 w-full cursor-ns-resize"
+                          onPointerDown={(e) => beginDrag('resize_h', e)}
+                          title={t({ it: 'Ridimensiona altezza', en: 'Resize height' })}
+                        />
+                        <div
+                          className="absolute left-0 top-0 z-[91] h-4 w-4 cursor-nwse-resize"
+                          onPointerDown={(e) => beginDrag('resize_wh', e)}
+                          title={t({ it: 'Ridimensiona', en: 'Resize' })}
+                        />
+	                  <div className="flex h-full min-h-0">
+                        <div
+                          className="flex shrink-0 flex-col border-r border-slate-800 bg-slate-950/40"
+                          style={{ width: clientChatDividerLeftWidth }}
+                        >
+                          <div className="border-b border-slate-800 bg-slate-900/70 p-2">
+                            <input
+                              value={leftSearchQ}
+                              onChange={(e) => setLeftSearchQ(e.target.value)}
+                              placeholder={t({ it: 'Cerca gruppi o utenti…', en: 'Search groups or users…' })}
+                              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none ring-primary/30 focus:ring-2"
+                            />
+                          </div>
+                          <div className="min-h-0 flex-1 overflow-auto p-2">
+                            <div className="px-2 pb-1 text-[11px] font-semibold uppercase text-slate-400">
+                              {t({ it: 'Gruppi', en: 'Groups' })}
+                            </div>
+                            <div className="space-y-1">
+                              {(filteredChatClients || []).map((c) => {
+                                const active = c.id === clientChatClientId;
+                                const unread = Number((chatUnreadByClientId as any)?.[c.id] || 0);
+                                const logo = String((c as any)?.logoUrl || '').trim();
+                                const initial = (String(c.name || '').trim()?.[0] || '?').toUpperCase();
+                                return (
+                                  <button
+                                    key={c.id}
+                                    className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-2 text-left hover:bg-slate-900 ${
+                                      active ? 'border-slate-600 bg-slate-900/60' : 'border-transparent'
+                                    }`}
+                                    onClick={() => {
+                                      setMediaModal(null);
+                                      setMessageInfoId(null);
+                                      setReplyToId(null);
+                                      openClientChat(c.id);
+                                    }}
+                                    title={c.name}
+                                  >
+                                    <span className="flex min-w-0 items-center gap-2">
+                                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-700 bg-slate-950/60">
+                                        {logo ? (
+                                          <img src={logo} alt="" className="h-full w-full object-cover" draggable={false} />
+                                        ) : (
+                                          <span className="text-[13px] font-extrabold text-slate-200">{initial}</span>
+                                        )}
+                                      </span>
+                                      <span className="min-w-0">
+                                        <div className="truncate text-sm font-semibold text-slate-100">{c.name}</div>
+                                        <div className="truncate text-[11px] text-slate-400">{t({ it: 'Chat cliente', en: 'Customer chat' })}</div>
+                                      </span>
+                                    </span>
+                                    {unread > 0 ? (
+                                      <span className="shrink-0 rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-bold text-white">
+                                        {unread > 99 ? '99+' : String(unread)}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <div className="mt-4 px-2 pb-1 text-[11px] font-semibold uppercase text-slate-400">
+                              {t({ it: 'Utenti', en: 'Users' })}
+                            </div>
+                            {dmContactsLoading ? (
+                              <div className="px-2 py-2 text-xs text-slate-400">{t({ it: 'Caricamento…', en: 'Loading…' })}</div>
+                            ) : null}
+                            <div className="space-y-1">
+                              {(filteredDmContacts || []).map((u) => {
+                                if (!user?.id) return null;
+                                const threadId = dmThreadIdForUsers(user.id, u.id);
+                                const active = threadId && threadId === clientChatClientId;
+                                const unread = threadId ? Number((chatUnreadByClientId as any)?.[threadId] || 0) : 0;
+                                const displayName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username;
+                                const status = u.lastOnlineAt ? 'offline' : 'never';
+                                const online = !!(onlineUserIds as any)?.[u.id] || !!u.online;
+                                const dot = u.readOnly ? 'bg-slate-500' : online ? 'bg-emerald-500' : u.lastOnlineAt ? 'bg-rose-500' : 'bg-slate-500';
+                                const common = (u.commonClients || []).slice(0, 3).map((c) => c.name).join(', ');
+                                return (
+                                  <button
+                                    key={u.id}
+                                    className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-2 text-left hover:bg-slate-900 ${
+                                      active ? 'border-slate-600 bg-slate-900/60' : 'border-transparent'
+                                    }`}
+                                    onClick={() => {
+                                      setMediaModal(null);
+                                      setMessageInfoId(null);
+                                      setReplyToId(null);
+                                      if (threadId) openClientChat(threadId);
+                                    }}
+                                    title={displayName}
+                                  >
+                                    <span className="flex min-w-0 items-center gap-2">
+                                      <span className="relative">
+                                        <UserAvatar username={u.username} src={u.avatarUrl} size={36} className="border-slate-800 bg-slate-900" />
+                                        {!u.readOnly && !u.blockedMe ? (
+                                          <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border border-slate-950 ${dot}`} />
+                                        ) : null}
+                                      </span>
+                                      <span className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <div className="truncate text-sm font-semibold text-slate-100">{displayName}</div>
+                                          {u.blockedByMe ? (
+                                            <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+                                              {t({ it: 'Bloccato', en: 'Blocked' })}
+                                            </span>
+                                          ) : null}
+                                          {u.readOnly ? (
+                                            <span className="rounded-full border border-slate-600 bg-slate-800/50 px-2 py-0.5 text-[10px] font-bold text-slate-200">
+                                              {t({ it: 'Sola lettura', en: 'Read-only' })}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        <div className="truncate text-[11px] text-slate-400">
+                                          {u.readOnly || u.blockedMe ? (
+                                            t({ it: 'Gruppi in comune non disponibili', en: 'Common groups not available' })
+                                          ) : common ? (
+                                            t({ it: `In comune: ${common}`, en: `Common: ${common}` })
+                                          ) : (
+                                            t({ it: 'Nessun gruppo in comune', en: 'No common groups' })
+                                          )}
+                                        </div>
+                                        <div className="truncate text-[11px] text-slate-500">
+                                          {u.readOnly || u.blockedMe
+                                            ? ''
+                                            : online
+                                              ? t({ it: 'Online', en: 'Online' })
+                                              : status === 'never'
+                                                ? t({ it: 'Mai connesso', en: 'Never connected' })
+                                                : u.lastOnlineAt
+                                                  ? `${t({ it: 'Last online', en: 'Last online' })}: ${new Date(u.lastOnlineAt).toLocaleString()}`
+                                                  : ''}
+                                        </div>
+                                      </span>
+                                    </span>
+                                    {unread > 0 ? (
+                                      <span className="shrink-0 rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-bold text-white">
+                                        {unread > 99 ? '99+' : String(unread)}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          className="group relative shrink-0"
+                          style={{ width: 8 }}
+                          onPointerDown={(e) => beginDrag('divider', e)}
+                          title={t({ it: 'Ridimensiona colonna', en: 'Resize column' })}
+                        >
+                          <div className="absolute inset-y-0 left-1/2 w-[2px] -translate-x-1/2 bg-slate-800 group-hover:bg-slate-700" />
+                        </div>
+
+                        <div className="flex min-w-0 flex-1 flex-col">
 	                  <div className="relative z-[40] flex items-center justify-between gap-2 border-b border-slate-800 bg-slate-900 px-3 py-2">
                     <div className="min-w-0">
 	                      <div className="relative" ref={clientPickerRef}>
@@ -1676,6 +2080,42 @@ const ClientChatDock = () => {
                       </div>
                     </div>
 		                    <div className="flex items-center gap-1">
+                          {activeDmContact ? (
+                            <button
+                              className={headerIconBtn}
+                              onClick={async () => {
+                                try {
+                                  if (!activeDmContact?.id) return;
+                                  if (dmBlockedByMe) {
+                                    await unblockChatUser(activeDmContact.id);
+                                    setActiveDmMeta((prev: any) => (prev && typeof prev === 'object' ? { ...prev, blockedByMe: false } : prev));
+                                    await refreshDmContacts();
+                                    return;
+                                  }
+                                  const ok = window.confirm(
+                                    t({
+                                      it: `Bloccare ${activeDmContact.username}? I suoi messaggi resteranno con una sola spunta grigia finche il blocco e attivo.`,
+                                      en: `Block ${activeDmContact.username}? Their messages will stay with one gray check while blocked.`
+                                    })
+                                  );
+                                  if (!ok) return;
+                                  await blockChatUser(activeDmContact.id);
+                                  setActiveDmMeta((prev: any) => (prev && typeof prev === 'object' ? { ...prev, blockedByMe: true } : prev));
+                                  await refreshDmContacts();
+                                } catch {
+                                  // ignore
+                                }
+                              }}
+                              title={
+                                dmBlockedByMe
+                                  ? t({ it: 'Sblocca utente', en: 'Unblock user' })
+                                  : t({ it: 'Blocca utente', en: 'Block user' })
+                              }
+                              aria-label={dmBlockedByMe ? t({ it: 'Sblocca utente', en: 'Unblock user' }) : t({ it: 'Blocca utente', en: 'Block user' })}
+                            >
+                              {dmBlockedByMe ? <UserCheck size={18} /> : <UserX size={18} />}
+                            </button>
+                          ) : null}
 		                      <button
 		                        className={headerIconBtn}
 		                        onClick={() => {
@@ -1828,7 +2268,20 @@ const ClientChatDock = () => {
 	                  </div>
 	                ) : null}
 
-	                <div className="h-[360px] bg-slate-950">
+                  {dmReadOnly ? (
+                    <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] font-semibold text-amber-200">
+                      {t({
+                        it: 'Chat in sola lettura: non condividi piu alcun cliente in comune con questo utente.',
+                        en: 'Read-only chat: you no longer share any customers with this user.'
+                      })}
+                    </div>
+                  ) : dmBlockedByMe ? (
+                    <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] font-semibold text-amber-200">
+                      {t({ it: 'Hai bloccato questo utente. Sbloccalo per inviare messaggi.', en: 'You blocked this user. Unblock to send messages.' })}
+                    </div>
+                  ) : null}
+
+	                <div className="min-h-0 flex-1 bg-slate-950">
 	                  <div ref={listRef} className="h-full overflow-auto p-3 space-y-2">
                     {loading ? (
                       <div className="text-sm text-slate-300">{t({ it: 'Caricamento…', en: 'Loading…' })}</div>
@@ -1837,6 +2290,7 @@ const ClientChatDock = () => {
 	                      let lastDay = '';
 	                      return (messages || []).map((m) => {
 	                        const mine = String(m.userId) === String(user?.id || '');
+	                        const showDmTicks = !!clientChatClientId && isDmThreadId(clientChatClientId) && mine;
 	                        const showAvatar = true;
 	                        const day = localDateKey(m.createdAt);
 	                        const showDay = day !== lastDay;
@@ -1893,6 +2347,17 @@ const ClientChatDock = () => {
 	                              </div>
                               <div className="flex items-center gap-1">
                                 <div className="text-[10px] opacity-70">{new Date(m.createdAt).toLocaleTimeString()}</div>
+                                {showDmTicks ? (
+                                  <span className="inline-flex items-center opacity-90" title={t({ it: 'Stato consegna', en: 'Delivery status' })}>
+                                    {(m as any)?.readAt ? (
+                                      <CheckCheck size={14} className="text-sky-400" />
+                                    ) : (m as any)?.deliveredAt ? (
+                                      <CheckCheck size={14} className="text-slate-300/80" />
+                                    ) : (
+                                      <Check size={14} className="text-slate-300/80" />
+                                    )}
+                                  </span>
+                                ) : null}
                                 {!m.deleted ? (
                                   <button
                                     type="button"
@@ -2182,27 +2647,28 @@ const ClientChatDock = () => {
                     </div>
                   ) : null}
                   <div className="flex items-end gap-2">
-                    <button
-                      className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950/40 text-slate-200 hover:bg-slate-900"
-                      onClick={pickFiles}
+	                    <button
+	                      className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950/40 text-slate-200 hover:bg-slate-900"
+	                      onClick={pickFiles}
                       title={t({ it: 'Allega file (max 5MB)', en: 'Attach file (max 5MB)' })}
                       aria-label={t({ it: 'Allega file', en: 'Attach file' })}
-                      disabled={recording}
-                    >
+	                      disabled={recording || dmReadOnly || dmBlockedByMe}
+	                    >
                       <Paperclip size={18} />
                     </button>
-	                    <button
+		                    <button
 	                      className={`flex h-11 w-11 items-center justify-center rounded-2xl border bg-slate-950/40 hover:bg-slate-900 ${
 	                        recording ? 'border-rose-800 text-rose-200' : 'border-slate-700 text-slate-200'
 	                      }`}
-	                      onClick={() => (recording ? cancelRecording() : startRecording())}
+		                      onClick={() => (recording ? cancelRecording() : startRecording())}
 	                      title={
 	                        recording
 	                          ? t({ it: `Annulla registrazione (${formatRec(recordSeconds)})`, en: `Cancel recording (${formatRec(recordSeconds)})` })
 	                          : t({ it: 'Registra vocale', en: 'Record voice note' })
 	                      }
-	                      aria-label={t({ it: 'Vocale', en: 'Voice note' })}
-	                    >
+		                      aria-label={t({ it: 'Vocale', en: 'Voice note' })}
+		                      disabled={dmReadOnly || dmBlockedByMe}
+		                    >
 	                      {recording ? <Trash2 size={18} /> : <Mic size={18} />}
 	                    </button>
                     <textarea
@@ -2218,21 +2684,23 @@ const ClientChatDock = () => {
                       }}
                       className="min-h-[44px] flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none ring-primary/30 placeholder:text-slate-500 focus:ring-2"
                       placeholder={t({ it: 'Scrivi un messaggio…', en: 'Write a message…' })}
-                      rows={2}
-                      disabled={recording}
-                    />
-	                    <button
+	                      rows={2}
+	                      disabled={recording || dmReadOnly || dmBlockedByMe}
+	                    />
+		                    <button
 	                      className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700"
 	                      onClick={() => (recording ? stopRecording() : send())}
 	                      title={recording ? t({ it: 'Invia vocale', en: 'Send voice note' }) : t({ it: 'Invia', en: 'Send' })}
-	                      disabled={sending}
-	                    >
+		                      disabled={sending || dmReadOnly || dmBlockedByMe}
+		                    >
 	                      <Send size={18} />
 	                    </button>
 		                  </div>
 		                  {/* Help moved to the Info button in the header */}
 		                  </div>
 		                  </div>
+                        </div>
+                      </div>
 		                  {/* Action menu must live inside Dialog.Panel, otherwise HeadlessUI treats it as "outside click"
 		                      and the click is lost (resulting in downloads/click-through). */}
 		                  {actionMenu ? (
@@ -2404,7 +2872,8 @@ const ClientChatDock = () => {
 			                        <div className="space-y-1">
 			                          {membersSorted.map((m) => {
 			                            const online = !!(onlineUserIds as any)?.[m.id] || !!m.online;
-			                            const dot = online ? 'bg-emerald-500' : 'bg-rose-500';
+			                            const lastOnlineAt = (m as any).lastOnlineAt ? Number((m as any).lastOnlineAt) : null;
+			                            const dot = online ? 'bg-emerald-500' : lastOnlineAt ? 'bg-rose-500' : 'bg-slate-500';
 			                            const name = `${String(m.firstName || '').trim()} ${String(m.lastName || '').trim()}`.trim();
 			                            const label = name ? capWords(name) : capFirst(m.username);
 			                            return (
@@ -2425,10 +2894,17 @@ const ClientChatDock = () => {
 			                                  <div className="min-w-0">
 			                                    <div className="truncate text-sm font-semibold text-slate-100">{label}</div>
 			                                    <div className="truncate text-[11px] text-slate-400">@{m.username}</div>
+			                                    <div className="truncate text-[11px] text-slate-500">
+			                                      {online
+			                                        ? t({ it: 'Online', en: 'Online' })
+			                                        : lastOnlineAt
+			                                          ? `${t({ it: 'Last online', en: 'Last online' })}: ${new Date(lastOnlineAt).toLocaleString()}`
+			                                          : t({ it: 'Mai connesso', en: 'Never connected' })}
+			                                    </div>
 			                                  </div>
 			                                </div>
-			                                <div className={`text-[11px] font-semibold ${online ? 'text-emerald-300' : 'text-rose-300'}`}>
-			                                  {online ? t({ it: 'Online', en: 'Online' }) : t({ it: 'Offline', en: 'Offline' })}
+			                                <div className={`text-[11px] font-semibold ${online ? 'text-emerald-300' : lastOnlineAt ? 'text-rose-300' : 'text-slate-300'}`}>
+			                                  {online ? t({ it: 'Online', en: 'Online' }) : lastOnlineAt ? t({ it: 'Offline', en: 'Offline' }) : t({ it: 'Mai', en: 'Never' })}
 			                                </div>
 			                              </div>
 			                            );
@@ -3151,6 +3627,15 @@ const ClientChatDock = () => {
 		                                })()}
 		                              </div>
 		                              <div className="truncate text-sm text-slate-300">@{profileData.username}</div>
+		                              <div className="truncate text-[12px] text-slate-400">
+		                                {(() => {
+		                                  const online = !!(onlineUserIds as any)?.[profileData.id];
+		                                  if (online) return t({ it: 'Online', en: 'Online' });
+		                                  const ts = (profileData as any).lastOnlineAt ? Number((profileData as any).lastOnlineAt) : null;
+		                                  if (!ts) return t({ it: 'Mai connesso', en: 'Never connected' });
+		                                  return `${t({ it: 'Last online', en: 'Last online' })}: ${new Date(ts).toLocaleString()}`;
+		                                })()}
+		                              </div>
 		                              {profileData.email ? (
 		                                <div className="truncate text-sm text-slate-200">
 		                                  <span className="text-slate-400">{t({ it: 'Email', en: 'Email' })}: </span>

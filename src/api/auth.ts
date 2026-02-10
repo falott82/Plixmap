@@ -22,6 +22,7 @@ export interface AuthUser {
   lastName: string;
   phone: string;
   email: string;
+  chatLayout?: Record<string, any>;
 }
 
 export const fetchMe = async (): Promise<{ user: AuthUser; permissions: Permission[] }> => {
@@ -96,6 +97,7 @@ export const updateMyProfile = async (payload: {
   paletteFavorites?: string[];
   visibleLayerIdsByPlan?: Record<string, string[]> | null;
   avatarUrl?: string | null;
+  chatLayout?: Record<string, any> | null;
 }): Promise<void> => {
   const res = await apiFetch('/api/auth/me', {
     method: 'PUT',

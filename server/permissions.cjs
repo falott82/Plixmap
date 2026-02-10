@@ -1,7 +1,7 @@
 const getUserWithPermissions = (db, userId) => {
   const user = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, paletteFavoritesJson, visibleLayerIdsByPlanJson, mustChangePassword, tokenVersion, avatarUrl, firstName, lastName, phone, email, createdAt, updatedAt FROM users WHERE id = ?'
+      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, paletteFavoritesJson, visibleLayerIdsByPlanJson, mustChangePassword, tokenVersion, avatarUrl, firstName, lastName, phone, email, chatLayoutJson, lastOnlineAt, createdAt, updatedAt FROM users WHERE id = ?'
     )
     .get(userId);
   if (!user) return null;
@@ -47,6 +47,15 @@ const getUserWithPermissions = (db, userId) => {
       return {};
     }
   })();
+  const chatLayout = (() => {
+    try {
+      const raw = JSON.parse(user.chatLayoutJson || '{}');
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+      return raw;
+    } catch {
+      return {};
+    }
+  })();
   const permissions = isAdmin
     ? []
     : db
@@ -62,6 +71,7 @@ const getUserWithPermissions = (db, userId) => {
   delete user.clientOrderJson;
   delete user.paletteFavoritesJson;
   delete user.visibleLayerIdsByPlanJson;
+  delete user.chatLayoutJson;
   return {
     user: {
       ...user,
@@ -69,6 +79,7 @@ const getUserWithPermissions = (db, userId) => {
       clientOrder,
       paletteFavorites,
       visibleLayerIdsByPlan,
+      chatLayout,
       isAdmin,
       isSuperAdmin,
       disabled: !!user.disabled,

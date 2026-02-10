@@ -7,6 +7,7 @@ export type UserProfile = {
   lastName: string;
   email: string;
   avatarUrl?: string;
+  lastOnlineAt?: number | null;
   clientsCommon: { id: string; name: string }[];
 };
 
@@ -21,4 +22,3 @@ export const fetchUserProfile = async (id: string): Promise<UserProfile> => {
   }
   return res.json();
 };
-

@@ -66,7 +66,11 @@ interface UIState {
   clientChatOpen: boolean;
   clientChatClientId: string | null;
   clientChatDockHeight: number;
+  clientChatDockPreferredHeight: number;
+  clientChatDockWidth: number;
+  clientChatDividerLeftWidth: number;
   chatUnreadByClientId: Record<string, number>;
+  chatUnreadSenderIds: Record<string, true>;
   onlineUserIds: Record<string, true>;
   setSelectedPlan: (id?: string) => void;
   setSelectedObject: (id?: string) => void;
@@ -133,11 +137,17 @@ interface UIState {
   setPendingPostSaveAction: (action: { type: 'language'; value: 'it' | 'en' } | { type: 'logout' } | null) => void;
   clearPendingPostSaveAction: () => void;
   openClientChat: (clientId: string) => void;
+  toggleClientChat: () => void;
   closeClientChat: () => void;
   setClientChatDockHeight: (height: number) => void;
+  setClientChatDockPreferredHeight: (height: number) => void;
+  setClientChatDockWidth: (width: number) => void;
+  setClientChatDividerLeftWidth: (width: number) => void;
   setChatUnreadByClientId: (payload: Record<string, number>) => void;
   clearChatUnread: (clientId: string) => void;
   bumpChatUnread: (clientId: string, delta: number) => void;
+  setChatUnreadSenderIds: (ids: string[]) => void;
+  addChatUnreadSenderId: (id: string) => void;
   setOnlineUserIds: (userIds: string[]) => void;
 }
 
@@ -179,7 +189,11 @@ export const useUIStore = create<UIState>()(
       clientChatOpen: false,
       clientChatClientId: null,
       clientChatDockHeight: 0,
+      clientChatDockPreferredHeight: 720,
+      clientChatDockWidth: 980,
+      clientChatDividerLeftWidth: 340,
       chatUnreadByClientId: {},
+      chatUnreadSenderIds: {},
       onlineUserIds: {},
       setSelectedPlan: (id) => set({ selectedPlanId: id, selectedObjectId: undefined, selectedObjectIds: [] }),
       setSelectedObject: (id) =>
@@ -299,8 +313,12 @@ export const useUIStore = create<UIState>()(
       setPendingPostSaveAction: (action) => set({ pendingPostSaveAction: action }),
       clearPendingPostSaveAction: () => set({ pendingPostSaveAction: null }),
       openClientChat: (clientId) => set({ clientChatOpen: true, clientChatClientId: clientId }),
+      toggleClientChat: () => set((state) => ({ clientChatOpen: !state.clientChatOpen })),
       closeClientChat: () => set({ clientChatOpen: false }),
       setClientChatDockHeight: (height) => set({ clientChatDockHeight: Math.max(0, Number(height) || 0) }),
+      setClientChatDockPreferredHeight: (height) => set({ clientChatDockPreferredHeight: Math.max(420, Math.min(980, Number(height) || 720)) }),
+      setClientChatDockWidth: (width) => set({ clientChatDockWidth: Math.max(520, Math.min(1600, Number(width) || 980)) }),
+      setClientChatDividerLeftWidth: (width) => set({ clientChatDividerLeftWidth: Math.max(260, Math.min(520, Number(width) || 340)) }),
       setChatUnreadByClientId: (payload) => set({ chatUnreadByClientId: { ...(payload || {}) } }),
       clearChatUnread: (clientId) =>
         set((state) => {
@@ -314,6 +332,23 @@ export const useUIStore = create<UIState>()(
           const nextVal = Math.max(0, current + (Number(delta) || 0));
           return { chatUnreadByClientId: { ...(state.chatUnreadByClientId || {}), [clientId]: nextVal } };
         }),
+      setChatUnreadSenderIds: (ids) =>
+        set(() => {
+          const next: Record<string, true> = {};
+          for (const id of Array.isArray(ids) ? ids : []) {
+            const v = String(id || '').trim();
+            if (!v) continue;
+            next[v] = true;
+          }
+          return { chatUnreadSenderIds: next };
+        }),
+      addChatUnreadSenderId: (id) =>
+        set((state) => {
+          const v = String(id || '').trim();
+          if (!v) return {};
+          if ((state.chatUnreadSenderIds as any)?.[v]) return {};
+          return { chatUnreadSenderIds: { ...(state.chatUnreadSenderIds || {}), [v]: true } };
+        }),
       setOnlineUserIds: (userIds) =>
         set(() => {
           const next: Record<string, true> = {};
@@ -326,7 +361,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'deskly-ui',
-      version: 8,
+      version: 9,
       migrate: (persistedState: any, _version: number) => {
         if (persistedState && typeof persistedState === 'object') {
           // Do not persist time-machine selection across reloads (always start from "present").
@@ -343,6 +378,9 @@ export const useUIStore = create<UIState>()(
           if (!('lastQuoteDashed' in persistedState)) persistedState.lastQuoteDashed = false;
           if (!('lastQuoteEndpoint' in persistedState)) persistedState.lastQuoteEndpoint = 'arrows';
           if (!('chatUnreadByClientId' in persistedState)) persistedState.chatUnreadByClientId = {};
+          if (!('clientChatDockPreferredHeight' in persistedState)) persistedState.clientChatDockPreferredHeight = 720;
+          if (!('clientChatDockWidth' in persistedState)) persistedState.clientChatDockWidth = 980;
+          if (!('clientChatDividerLeftWidth' in persistedState)) persistedState.clientChatDividerLeftWidth = 340;
         }
         return persistedState as any;
       },
@@ -361,6 +399,9 @@ export const useUIStore = create<UIState>()(
         expandedClients: state.expandedClients,
         expandedSites: state.expandedSites,
         chatUnreadByClientId: state.chatUnreadByClientId,
+        clientChatDockPreferredHeight: state.clientChatDockPreferredHeight,
+        clientChatDockWidth: state.clientChatDockWidth,
+        clientChatDividerLeftWidth: state.clientChatDividerLeftWidth,
         lastQuoteScale: state.lastQuoteScale,
         lastQuoteColor: state.lastQuoteColor,
         lastQuoteLabelPosH: state.lastQuoteLabelPosH,

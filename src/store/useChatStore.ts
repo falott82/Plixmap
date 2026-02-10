@@ -6,6 +6,7 @@ interface ChatState {
   clientNameById: Record<string, string>;
   setMessages: (clientId: string, clientName: string, messages: ChatMessage[]) => void;
   upsertMessage: (clientId: string, message: ChatMessage) => void;
+  patchMessage: (clientId: string, messageId: string, patch: Partial<ChatMessage>) => void;
   clearClient: (clientId: string) => void;
 }
 
@@ -24,6 +25,14 @@ export const useChatStore = create<ChatState>()((set) => ({
       const prev = state.messagesByClientId[clientId] || [];
       const idx = prev.findIndex((m) => m.id === message.id);
       const next = idx >= 0 ? prev.map((m, i) => (i === idx ? message : m)) : [...prev, message];
+      return { messagesByClientId: { ...state.messagesByClientId, [clientId]: sortMessages(next) } };
+    }),
+  patchMessage: (clientId, messageId, patch) =>
+    set((state) => {
+      const prev = state.messagesByClientId[clientId] || [];
+      const idx = prev.findIndex((m) => m.id === messageId);
+      if (idx < 0) return {};
+      const next = prev.map((m, i) => (i === idx ? ({ ...m, ...(patch || {}) } as any) : m));
       return { messagesByClientId: { ...state.messagesByClientId, [clientId]: sortMessages(next) } };
     }),
   clearClient: (clientId) =>
