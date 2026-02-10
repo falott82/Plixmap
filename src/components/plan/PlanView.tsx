@@ -363,8 +363,7 @@ const PlanView = ({ planId }: Props) => {
 	    setPresentationWebcamEnabled,
 	    presentationWebcamCalib,
 	    setPresentationWebcamCalib,
-	    presentationWebcamPermissionPrimed,
-	    setPresentationWebcamPermissionPrimed,
+	    primePresentationWebcamPermission,
 	    hiddenLayersByPlan,
 	    setHideAllLayers,
 	    setLockedPlans,
@@ -432,8 +431,7 @@ const PlanView = ({ planId }: Props) => {
 	      setPresentationWebcamEnabled: (s as any).setPresentationWebcamEnabled,
 	      presentationWebcamCalib: (s as any).presentationWebcamCalib,
 	      setPresentationWebcamCalib: (s as any).setPresentationWebcamCalib,
-	      presentationWebcamPermissionPrimed: (s as any).presentationWebcamPermissionPrimed,
-	      setPresentationWebcamPermissionPrimed: (s as any).setPresentationWebcamPermissionPrimed,
+	      primePresentationWebcamPermission: (s as any).primePresentationWebcamPermission,
 	      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
 	      setHideAllLayers: (s as any).setHideAllLayers,
 	      setLockedPlans: (s as any).setLockedPlans,
@@ -2744,31 +2742,9 @@ const PlanView = ({ planId }: Props) => {
 
   const getViewport = useCallback(() => viewportLiveRef.current, []);
 
-  const primePresentationWebcamPermission = useCallback(() => {
-    if (presentationWebcamPermissionPrimed) return;
-    setPresentationWebcamPermissionPrimed(true);
-    try {
-      const md = (navigator as any)?.mediaDevices;
-      if (!md?.getUserMedia) return;
-      // Trigger the browser permission prompt early (first time) when entering presentation.
-      // Immediately stop the stream so the webcam is not "on" until the user explicitly enables it.
-      md.getUserMedia({ video: true, audio: false })
-        .then((stream: MediaStream) => {
-          try {
-            stream.getTracks().forEach((t) => t.stop());
-          } catch {}
-        })
-        .catch(() => {
-          // ignore: user may deny, browser may block, or device may not exist
-        });
-    } catch {
-      // ignore
-    }
-  }, [presentationWebcamPermissionPrimed, setPresentationWebcamPermissionPrimed]);
-
   const handleTogglePresentation = useCallback(() => {
     if (!presentationMode) {
-      primePresentationWebcamPermission();
+      primePresentationWebcamPermission?.();
     }
     togglePresentationMode?.();
   }, [presentationMode, primePresentationWebcamPermission, togglePresentationMode]);
