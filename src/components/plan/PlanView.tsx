@@ -2740,7 +2740,12 @@ const PlanView = ({ planId }: Props) => {
 
   const getViewport = useCallback(() => viewportLiveRef.current, []);
 
-  const { webcamReady, calibrating: webcamCalibrating, requestCalibrate } = usePresentationWebcamHands({
+  const {
+    webcamReady,
+    calibrating: webcamCalibrating,
+    requestCalibrate,
+    toggleWebcam
+  } = usePresentationWebcamHands({
     active: presentationMode,
     webcamEnabled: presentationWebcamEnabled,
     setWebcamEnabled: setPresentationWebcamEnabled,
@@ -8773,7 +8778,7 @@ const PlanView = ({ planId }: Props) => {
 	                        onTogglePresentation={() => togglePresentationMode?.()}
 	                        webcamEnabled={presentationWebcamEnabled}
 	                        webcamReady={webcamReady && !!presentationWebcamCalib && !webcamCalibrating}
-	                        onToggleWebcam={() => setPresentationWebcamEnabled(!presentationWebcamEnabled)}
+	                        onToggleWebcam={() => toggleWebcam()}
 	                        onCalibrateWebcam={() => requestCalibrate()}
 	                        plan={(canvasPlan || renderPlan) as any}
 	                        selectedId={selectedObjectId}
