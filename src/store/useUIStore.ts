@@ -98,6 +98,7 @@ interface UIState {
   setPresentationWebcamEnabled: (enabled: boolean) => void;
   setPresentationWebcamCalib: (calib: { pinchRatio: number } | null) => void;
   setPresentationWebcamPermissionPrimed: (primed: boolean) => void;
+  primePresentationWebcamPermission: () => void;
   setPlanDirty: (planId: string, dirty: boolean) => void;
   requestSaveAndNavigate: (to: string) => void;
   clearPendingSaveNavigate: () => void;
@@ -258,6 +259,59 @@ export const useUIStore = create<UIState>()(
       setPresentationWebcamCalib: (calib) =>
         set(() => ({ presentationWebcamCalib: calib && Number.isFinite((calib as any).pinchRatio) ? calib : null })),
       setPresentationWebcamPermissionPrimed: (primed) => set({ presentationWebcamPermissionPrimed: !!primed }),
+      primePresentationWebcamPermission: () => {
+        // Chrome-only for now. We intentionally do not keep the stream alive: this is just to trigger the permission prompt
+        // when the user enters Presentation mode for the first time.
+        try {
+          const md = (navigator as any)?.mediaDevices;
+          if (!md?.getUserMedia) return;
+
+          const run = async () => {
+            let permState: 'granted' | 'denied' | 'prompt' | null = null;
+            try {
+              const p = (navigator as any)?.permissions;
+              if (p?.query) {
+                const status = await p.query({ name: 'camera' as any });
+                permState = status?.state || null;
+              }
+            } catch {
+              permState = null;
+            }
+
+            // If the permission is already resolved, mark primed and stop.
+            if (permState === 'granted' || permState === 'denied') {
+              set({ presentationWebcamPermissionPrimed: true });
+              return;
+            }
+
+            const alreadyPrimed = !!get().presentationWebcamPermissionPrimed;
+            // If we can't detect permissions state, do not spam prompts.
+            if (!permState && alreadyPrimed) return;
+
+            // If state is still "prompt", try again even if marked primed (in case a previous attempt happened outside a user gesture).
+            try {
+              const stream = await md.getUserMedia({ video: true, audio: false });
+              try {
+                stream.getTracks().forEach((t: any) => t.stop());
+              } catch {}
+              set({ presentationWebcamPermissionPrimed: true });
+            } catch {
+              // If permission is still prompt, keep primed=false so we can retry next time.
+              // If the user denied, Chrome will flip the permission to 'denied' and we'll stop retrying.
+              if (permState === 'prompt') {
+                set({ presentationWebcamPermissionPrimed: false });
+              } else {
+                set({ presentationWebcamPermissionPrimed: true });
+              }
+            }
+          };
+
+          // Fire and forget; must be called from a user gesture to show the browser prompt.
+          void run();
+        } catch {
+          // ignore
+        }
+      },
       setPlanDirty: (planId, dirty) =>
         set((state) => ({
           dirtyByPlan: { ...state.dirtyByPlan, [planId]: dirty }

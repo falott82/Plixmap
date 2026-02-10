@@ -232,6 +232,9 @@ const App = () => {
 
       // Presentation mode with `P`: toggle fullscreen and collapse sidebar.
       if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        if (!useUIStore.getState().presentationMode) {
+          useUIStore.getState().primePresentationWebcamPermission?.();
+        }
         useUIStore.getState().togglePresentationMode?.();
       }
     };
