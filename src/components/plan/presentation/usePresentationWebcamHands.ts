@@ -42,44 +42,25 @@ const computePinchRatio = (lm: any[]) => {
   return pinch / palm;
 };
 
-const isFingerExtendedFromWrist = (lm: any[], tipId: number, pipId: number, mcpId: number) => {
-  const wrist = lm?.[0];
-  const tip = lm?.[tipId];
-  const pip = lm?.[pipId];
-  const mcp = lm?.[mcpId];
-  if (!wrist || !tip || !pip || !mcp) return false;
-  const dTip = dist2d(wrist, tip);
-  const dPip = dist2d(wrist, pip);
-  const dMcp = dist2d(wrist, mcp);
-  return Number.isFinite(dTip) && Number.isFinite(dPip) && Number.isFinite(dMcp) && dTip > dPip * 1.08 && dPip > dMcp * 1.02;
-};
-
 const classifyHandPose = (lm: any[]) => {
-  if (!Array.isArray(lm) || lm.length < 21) return { openFive: false, panHand: false };
+  if (!Array.isArray(lm) || lm.length < 21) return { openFive: false, panEnter: false, panStay: false };
   const palm = dist2d(lm[5], lm[17]);
-  if (!Number.isFinite(palm) || palm <= 1e-3) return { openFive: false, panHand: false };
-
-  const thumbExtended = dist2d(lm[4], lm[0]) > dist2d(lm[3], lm[0]) * 1.04;
-  const indexExtended = isFingerExtendedFromWrist(lm, 8, 6, 5);
-  const middleExtended = isFingerExtendedFromWrist(lm, 12, 10, 9);
-  const ringExtended = isFingerExtendedFromWrist(lm, 16, 14, 13);
-  const pinkyExtended = isFingerExtendedFromWrist(lm, 20, 18, 17);
-  const ext = [thumbExtended, indexExtended, middleExtended, ringExtended, pinkyExtended];
-  const extendedCount = ext.filter(Boolean).length;
-  const nonThumbExtended = [indexExtended, middleExtended, ringExtended, pinkyExtended].every(Boolean);
+  if (!Number.isFinite(palm) || palm <= 1e-3) return { openFive: false, panEnter: false, panStay: false };
 
   const spread = dist2d(lm[8], lm[20]) / palm;
   const gapIdxMid = dist2d(lm[8], lm[12]) / palm;
   const gapMidRing = dist2d(lm[12], lm[16]) / palm;
   const gapRingPinky = dist2d(lm[16], lm[20]) / palm;
+  const minGap = Math.min(gapIdxMid, gapMidRing, gapRingPinky);
   const maxGap = Math.max(gapIdxMid, gapMidRing, gapRingPinky);
 
   // "Numero 5": dita ben aperte.
-  const openFive = extendedCount >= 4 && nonThumbExtended && spread > 1.35 && maxGap > 0.28;
-  // Mano aperta con dita ravvicinate: usata per il pan (solo traslazione).
-  const panHand = extendedCount >= 3 && maxGap < 0.52 && spread >= 0.7 && spread <= 1.75;
+  const openFive = spread > 1.42 && minGap > 0.2 && maxGap > 0.3;
+  // Mano "compatta" (dita vicine) per pan; enter/stay thresholds for hysteresis.
+  const panEnter = spread >= 0.62 && spread <= 1.22 && maxGap <= 0.36;
+  const panStay = spread >= 0.55 && spread <= 1.34 && maxGap <= 0.48;
 
-  return { openFive, panHand };
+  return { openFive, panEnter, panStay };
 };
 
 async function loadTasksVision(): Promise<HandLandmarkerModule> {
@@ -164,6 +145,7 @@ export function usePresentationWebcamHands(opts: {
   const calibrationSawHandRef = useRef(false);
   const resetHoldStartAtRef = useRef(0);
   const resetCooldownUntilRef = useRef(0);
+  const resetHoldCenterRef = useRef<{ x: number; y: number } | null>(null);
 
   const pinchSessionRef = useRef<{
     active: boolean;
@@ -220,6 +202,7 @@ export function usePresentationWebcamHands(opts: {
     calibrationSawHandRef.current = false;
     resetHoldStartAtRef.current = 0;
     resetCooldownUntilRef.current = 0;
+    resetHoldCenterRef.current = null;
 
     const stream = streamRef.current;
     streamRef.current = null;
@@ -424,11 +407,22 @@ export function usePresentationWebcamHands(opts: {
 
         // Open hand "5": go back to default view (hold briefly to avoid accidental trigger).
         if (pose.openFive) {
-          if (!resetHoldStartAtRef.current) resetHoldStartAtRef.current = now;
+          if (!resetHoldStartAtRef.current) {
+            resetHoldStartAtRef.current = now;
+            resetHoldCenterRef.current = center;
+          } else if (resetHoldCenterRef.current) {
+            // Keep the hand relatively still while holding "5".
+            const driftNorm = Math.hypot(center.x - resetHoldCenterRef.current.x, center.y - resetHoldCenterRef.current.y);
+            if (driftNorm > 0.065) {
+              resetHoldStartAtRef.current = now;
+              resetHoldCenterRef.current = center;
+            }
+          }
           const holdMs = now - resetHoldStartAtRef.current;
           if (holdMs >= 550 && now >= resetCooldownUntilRef.current) {
             resetCooldownUntilRef.current = now + 2500;
             resetHoldStartAtRef.current = 0;
+            resetHoldCenterRef.current = null;
             pinchSessionRef.current.active = false;
             pinchSessionRef.current.startCenter = null;
             smoothedRef.current = null;
@@ -441,10 +435,11 @@ export function usePresentationWebcamHands(opts: {
           }
         } else {
           resetHoldStartAtRef.current = 0;
+          resetHoldCenterRef.current = null;
         }
 
         const session = pinchSessionRef.current;
-        const panActive = pose.panHand || (session.active && !pose.openFive);
+        const panActive = session.active ? pose.panStay && !pose.openFive : pose.panEnter && !pose.openFive;
         if (panActive && !session.active) {
           const { pan } = getViewport();
           session.active = true;
