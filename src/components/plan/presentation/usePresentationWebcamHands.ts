@@ -64,6 +64,8 @@ const classifyHandPose = (lm: any[]) => {
   const middleExtended = isFingerExtendedFromWrist(lm, 12, 10, 9);
   const ringExtended = isFingerExtendedFromWrist(lm, 16, 14, 13);
   const pinkyExtended = isFingerExtendedFromWrist(lm, 20, 18, 17);
+  const ext = [thumbExtended, indexExtended, middleExtended, ringExtended, pinkyExtended];
+  const extendedCount = ext.filter(Boolean).length;
   const nonThumbExtended = [indexExtended, middleExtended, ringExtended, pinkyExtended].every(Boolean);
 
   const spread = dist2d(lm[8], lm[20]) / palm;
@@ -73,9 +75,9 @@ const classifyHandPose = (lm: any[]) => {
   const maxGap = Math.max(gapIdxMid, gapMidRing, gapRingPinky);
 
   // "Numero 5": dita ben aperte.
-  const openFive = nonThumbExtended && thumbExtended && spread > 1.55 && maxGap > 0.42;
+  const openFive = extendedCount >= 4 && nonThumbExtended && spread > 1.35 && maxGap > 0.28;
   // Mano aperta con dita ravvicinate: usata per il pan (solo traslazione).
-  const panHand = nonThumbExtended && maxGap < 0.42 && spread >= 0.95 && spread <= 1.7;
+  const panHand = extendedCount >= 3 && maxGap < 0.52 && spread >= 0.7 && spread <= 1.75;
 
   return { openFive, panHand };
 };
@@ -442,7 +444,7 @@ export function usePresentationWebcamHands(opts: {
         }
 
         const session = pinchSessionRef.current;
-        const panActive = pose.panHand;
+        const panActive = pose.panHand || (session.active && !pose.openFive);
         if (panActive && !session.active) {
           const { pan } = getViewport();
           session.active = true;
@@ -531,8 +533,14 @@ export function usePresentationWebcamHands(opts: {
 
   useEffect(() => {
     if (active) return;
+    if (webcamEnabled || streamRef.current || landmarkerRef.current) {
+      onInfo({
+        it: 'Webcam disattivata: hai lasciato la modalità Presentazione.',
+        en: 'Webcam disabled: you left Presentation mode.'
+      });
+    }
     disableWebcam();
-  }, [active, disableWebcam]);
+  }, [active, disableWebcam, onInfo, webcamEnabled]);
 
   return { webcamReady, handDetected, calibrating, starting, requestCalibrate, toggleWebcam };
 }
