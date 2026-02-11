@@ -2854,6 +2854,7 @@ const PlanView = ({ planId }: Props) => {
     guideStep: webcamGuideStep,
     guideVisible: webcamGuideVisible,
     calibrationProgress: webcamCalibrationProgress,
+    calibrationPinchSeen: webcamCalibrationPinchSeen,
     guidePanDone: webcamGuidePanDone,
     guideOpenDone: webcamGuideOpenDone,
     requestCalibrate,
@@ -8927,6 +8928,45 @@ const PlanView = ({ planId }: Props) => {
                                     en: 'Great. Gesture controls are ready. You can keep using pan and view reset.'
                                   })}
                       </div>
+                      <div className="mt-3 flex items-center justify-center">
+                        {webcamGuideStep === 'calibrate' ? (
+                          <svg viewBox="0 0 240 88" className="h-20 w-full max-w-[280px]" aria-hidden="true">
+                            <rect x="2" y="2" width="236" height="84" rx="14" fill="#eff6ff" stroke="#bfdbfe" />
+                            <circle cx="82" cy="44" r="18" fill="#dbeafe" stroke="#60a5fa" strokeWidth="2" />
+                            <circle cx="158" cy="44" r="18" fill="#dbeafe" stroke="#60a5fa" strokeWidth="2" />
+                            <path d="M102 44 H138" stroke="#0ea5e9" strokeWidth="4" strokeLinecap="round" strokeDasharray="5 4" />
+                            <path d="M113 34 L102 44 L113 54" fill="none" stroke="#0ea5e9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M127 34 L138 44 L127 54" fill="none" stroke="#0ea5e9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            <text x="120" y="77" textAnchor="middle" fontSize="11" fill="#0369a1" fontWeight="700">
+                              PINCH: avvicina pollice e indice
+                            </text>
+                          </svg>
+                        ) : webcamGuideStep === 'pan' ? (
+                          <svg viewBox="0 0 240 88" className="h-20 w-full max-w-[280px]" aria-hidden="true">
+                            <rect x="2" y="2" width="236" height="84" rx="14" fill="#ecfeff" stroke="#a5f3fc" />
+                            <rect x="95" y="22" width="50" height="44" rx="18" fill="#cffafe" stroke="#06b6d4" strokeWidth="2" />
+                            <path d="M62 44 H178" stroke="#0891b2" strokeWidth="4" strokeLinecap="round" />
+                            <path d="M72 34 L62 44 L72 54" fill="none" stroke="#0891b2" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M168 34 L178 44 L168 54" fill="none" stroke="#0891b2" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            <text x="120" y="77" textAnchor="middle" fontSize="11" fill="#0e7490" fontWeight="700">
+                              PAN: muovi la mano lentamente
+                            </text>
+                          </svg>
+                        ) : webcamGuideStep === 'open' ? (
+                          <svg viewBox="0 0 240 88" className="h-20 w-full max-w-[280px]" aria-hidden="true">
+                            <rect x="2" y="2" width="236" height="84" rx="14" fill="#f0fdf4" stroke="#bbf7d0" />
+                            <rect x="100" y="26" width="40" height="40" rx="16" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="78" y="16" width="10" height="28" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="94" y="12" width="10" height="30" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="110" y="10" width="10" height="32" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="126" y="12" width="10" height="30" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="142" y="16" width="10" height="28" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <text x="120" y="77" textAnchor="middle" fontSize="11" fill="#15803d" fontWeight="700">
+                              MANO APERTA: reset vista default
+                            </text>
+                          </svg>
+                        ) : null}
+                      </div>
                       <div className="mt-3 space-y-2 text-xs">
                         <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${presentationWebcamEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                           <span>{t({ it: 'Webcam attiva', en: 'Webcam enabled' })}</span>
@@ -8935,6 +8975,10 @@ const PlanView = ({ planId }: Props) => {
                         <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${presentationWebcamCalib ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                           <span>{t({ it: 'Calibrazione', en: 'Calibration' })}</span>
                           <span>{presentationWebcamCalib ? '✓' : `${Math.max(0, Math.min(100, Math.round(webcamCalibrationProgress || 0)))}%`}</span>
+                        </div>
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamCalibrationPinchSeen ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Pinch rilevato', en: 'Pinch detected' })}</span>
+                          <span>{webcamCalibrationPinchSeen ? '✓' : '•'}</span>
                         </div>
                         <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamGuidePanDone ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                           <span>{t({ it: 'Gesto PAN', en: 'PAN gesture' })}</span>

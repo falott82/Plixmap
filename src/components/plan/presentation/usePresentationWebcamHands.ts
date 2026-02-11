@@ -116,6 +116,7 @@ export function usePresentationWebcamHands(opts: {
   const [calibrating, setCalibrating] = useState(false);
   const [starting, setStarting] = useState(false);
   const [calibrationProgress, setCalibrationProgress] = useState(0);
+  const [calibrationPinchSeen, setCalibrationPinchSeen] = useState(false);
   const [guidePanDone, setGuidePanDone] = useState(false);
   const [guideOpenDone, setGuideOpenDone] = useState(false);
   const [guideShowDone, setGuideShowDone] = useState(false);
@@ -125,6 +126,8 @@ export function usePresentationWebcamHands(opts: {
   const calibratingRef = useRef(false);
   const guidePanDoneRef = useRef(false);
   const guideOpenDoneRef = useRef(false);
+  const calibrationPinchNotifiedRef = useRef(false);
+  const guidePanNotifiedRef = useRef(false);
   useEffect(() => {
     calibRef.current = calib;
   }, [calib]);
@@ -183,6 +186,8 @@ export function usePresentationWebcamHands(opts: {
     calibratingRef.current = true;
     setCalibrating(true);
     setCalibrationProgress(0);
+    setCalibrationPinchSeen(false);
+    calibrationPinchNotifiedRef.current = false;
     calibrateFramesRef.current = 0;
     calibrateSumRef.current = 0;
     lastCalibrateInfoAtRef.current = performance.now();
@@ -204,6 +209,7 @@ export function usePresentationWebcamHands(opts: {
     calibratingRef.current = false;
     setCalibrating(false);
     setCalibrationProgress(0);
+    setCalibrationPinchSeen(false);
     setStarting(false);
     setGuidePanDone(false);
     setGuideOpenDone(false);
@@ -222,6 +228,8 @@ export function usePresentationWebcamHands(opts: {
     resetHoldStartAtRef.current = 0;
     resetCooldownUntilRef.current = 0;
     resetHoldCenterRef.current = null;
+    calibrationPinchNotifiedRef.current = false;
+    guidePanNotifiedRef.current = false;
 
     const stream = streamRef.current;
     streamRef.current = null;
@@ -306,6 +314,9 @@ export function usePresentationWebcamHands(opts: {
       setGuideOpenDone(false);
       setGuideShowDone(false);
       setCalibrationProgress(0);
+      setCalibrationPinchSeen(false);
+      calibrationPinchNotifiedRef.current = false;
+      guidePanNotifiedRef.current = false;
       onInfo({ it: 'Webcam attiva. Premi Calibra per iniziare.', en: 'Webcam enabled. Press Calibrate to start.' });
 
       const tick = () => {
@@ -383,6 +394,14 @@ export function usePresentationWebcamHands(opts: {
         // Require a pinch, but keep it permissive to work across cameras/lighting.
         const isPinch = pinchRatio <= 0.9;
         if (isPinch) {
+          if (!calibrationPinchNotifiedRef.current) {
+            calibrationPinchNotifiedRef.current = true;
+            setCalibrationPinchSeen(true);
+            onInfo({
+              it: 'Pinch rilevato. Tienilo fermo ancora un istante.',
+              en: 'Pinch detected. Keep it steady a little longer.'
+            });
+          }
           calibrateFramesRef.current += 1;
           calibrateSumRef.current += pinchRatio;
             const bucket = Math.min(4, Math.floor((calibrateFramesRef.current / 30) * 4)); // 0..4
@@ -497,6 +516,13 @@ export function usePresentationWebcamHands(opts: {
         if (!guidePanDoneRef.current && Math.hypot(dx, dy) > 18) {
           guidePanDoneRef.current = true;
           setGuidePanDone(true);
+          if (!guidePanNotifiedRef.current) {
+            guidePanNotifiedRef.current = true;
+            onInfo({
+              it: 'Gesto PAN appreso.',
+              en: 'PAN gesture learned.'
+            });
+          }
         }
         const targetPan = { x: session.startPan.x + dx, y: session.startPan.y + dy };
 
@@ -609,6 +635,7 @@ export function usePresentationWebcamHands(opts: {
     guideStep,
     guideVisible,
     calibrationProgress,
+    calibrationPinchSeen,
     guidePanDone,
     guideOpenDone
   };
