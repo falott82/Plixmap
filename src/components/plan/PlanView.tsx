@@ -2851,6 +2851,11 @@ const PlanView = ({ planId }: Props) => {
     webcamReady,
     handDetected: webcamHandDetected,
     calibrating: webcamCalibrating,
+    guideStep: webcamGuideStep,
+    guideVisible: webcamGuideVisible,
+    calibrationProgress: webcamCalibrationProgress,
+    guidePanDone: webcamGuidePanDone,
+    guideOpenDone: webcamGuideOpenDone,
     requestCalibrate,
     toggleWebcam
   } = usePresentationWebcamHands({
@@ -8876,6 +8881,70 @@ const PlanView = ({ planId }: Props) => {
                       >
                         {t({ it: 'Imposta scala', en: 'Set scale' })}
                       </button>
+                    </div>
+                  </div>
+                ) : null}
+                {presentationMode && webcamGuideVisible ? (
+                  <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center px-4">
+                    <div className="w-full max-w-md rounded-2xl border border-sky-200 bg-white/95 p-4 shadow-2xl backdrop-blur">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                        {t({ it: 'Assistente Webcam', en: 'Webcam Assistant' })}
+                      </div>
+                      <div className="mt-1 text-base font-semibold text-slate-900">
+                        {webcamGuideStep === 'enable'
+                          ? t({ it: '1. Clicca sull’icona webcam', en: '1. Click the webcam icon' })
+                          : webcamGuideStep === 'calibrate'
+                            ? t({ it: '2. Calibrazione in corso', en: '2. Calibration in progress' })
+                            : webcamGuideStep === 'pan'
+                              ? t({ it: '3. Prova il gesto PAN', en: '3. Try the PAN gesture' })
+                              : webcamGuideStep === 'open'
+                                ? t({ it: '4. Prova il gesto mano aperta', en: '4. Try the open-hand gesture' })
+                                : t({ it: 'Configurazione completata', en: 'Setup completed' })}
+                      </div>
+                      <div className="mt-1 text-sm text-slate-700">
+                        {webcamGuideStep === 'enable'
+                          ? t({
+                              it: 'Premi il pulsante videocamera nella barra per iniziare. Se necessario, autorizza l’accesso alla webcam.',
+                              en: 'Press the camera button in the toolbar to start. If needed, allow webcam access.'
+                            })
+                          : webcamGuideStep === 'calibrate'
+                            ? t({
+                                it: 'Mostra una mano e fai pinch (pollice + indice) tenendolo fermo per circa 1 secondo.',
+                                en: 'Show one hand and pinch (thumb + index), keeping it steady for about 1 second.'
+                              })
+                            : webcamGuideStep === 'pan'
+                              ? t({
+                                  it: 'Tieni la mano aperta con dita ravvicinate e spostala lentamente per muovere la planimetria.',
+                                  en: 'Keep your hand open with close fingers and move slowly to pan the floor plan.'
+                                })
+                              : webcamGuideStep === 'open'
+                                ? t({
+                                    it: 'Apri la mano a “5” e tienila ferma per un attimo: la vista torna alla posizione predefinita.',
+                                    en: 'Open your hand like “5” and hold briefly: the view returns to default.'
+                                  })
+                                : t({
+                                    it: 'Ottimo. I controlli gesture sono pronti. Puoi continuare a usare pan e reset vista.',
+                                    en: 'Great. Gesture controls are ready. You can keep using pan and view reset.'
+                                  })}
+                      </div>
+                      <div className="mt-3 space-y-2 text-xs">
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${presentationWebcamEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Webcam attiva', en: 'Webcam enabled' })}</span>
+                          <span>{presentationWebcamEnabled ? '✓' : '•'}</span>
+                        </div>
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${presentationWebcamCalib ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Calibrazione', en: 'Calibration' })}</span>
+                          <span>{presentationWebcamCalib ? '✓' : `${Math.max(0, Math.min(100, Math.round(webcamCalibrationProgress || 0)))}%`}</span>
+                        </div>
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamGuidePanDone ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Gesto PAN', en: 'PAN gesture' })}</span>
+                          <span>{webcamGuidePanDone ? '✓' : '•'}</span>
+                        </div>
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamGuideOpenDone ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Gesto mano aperta', en: 'Open-hand gesture' })}</span>
+                          <span>{webcamGuideOpenDone ? '✓' : '•'}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ) : null}
