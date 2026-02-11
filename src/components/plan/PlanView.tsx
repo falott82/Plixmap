@@ -13152,27 +13152,36 @@ const PlanView = ({ planId }: Props) => {
 		                      </div>
 		                    </div>
 		                  </div>
-		                  <div className="mt-3 text-sm text-slate-700">
-		                    {(() => {
-	                      forceUnlockTick;
-	                      const graceEndsAt = Number(forceUnlockIncoming?.graceEndsAt || 0);
-	                      const decisionEndsAt = Number(forceUnlockIncoming?.decisionEndsAt || 0);
-	                      const now = Date.now();
-	                      const inGrace = graceEndsAt > now;
-	                      const targetAt = inGrace ? graceEndsAt : decisionEndsAt;
-	                      const remainingMs = targetAt - now;
-	                      const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-	                      return inGrace
-	                        ? t({
-	                            it: `Il superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} ha avviato un force unlock. Tempo concesso per salvare: ${remainingSec}s.`,
-	                            en: `Superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} started a force unlock. Time granted to save: ${remainingSec}s.`
-	                          })
-	                        : t({
-	                            it: `Il superadmin deve decidere entro ${remainingSec}s (finestra 5 minuti).`,
-	                            en: `The superadmin must decide within ${remainingSec}s (5-minute window).`
-	                          });
-	                    })()}
-	                  </div>
+		                  {(() => {
+	                    forceUnlockTick;
+	                    const graceEndsAt = Number(forceUnlockIncoming?.graceEndsAt || 0);
+	                    const decisionEndsAt = Number(forceUnlockIncoming?.decisionEndsAt || 0);
+	                    const now = Date.now();
+	                    const inGrace = graceEndsAt > now;
+	                    const targetAt = inGrace ? graceEndsAt : decisionEndsAt;
+	                    const remainingMs = targetAt - now;
+	                    const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+	                    return (
+	                      <>
+	                        <div className="mt-3 text-sm text-slate-700">
+	                          {inGrace
+	                            ? t({
+	                                it: `Il superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} ha avviato un force unlock. Tempo concesso per salvare.`,
+	                                en: `Superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} started a force unlock. Time granted to save.`
+	                              })
+	                            : t({
+	                                it: 'Attendi la decisione del superadmin nella finestra di 5 minuti.',
+	                                en: 'Wait for the superadmin decision in the 5-minute window.'
+	                              })}
+	                        </div>
+	                        <div className="mt-2 text-sm font-semibold text-slate-800">
+	                          {inGrace
+	                            ? t({ it: `Countdown salvataggio: ${remainingSec}s`, en: `Save countdown: ${remainingSec}s` })
+	                            : t({ it: `Countdown decisione: ${remainingSec}s`, en: `Decision countdown: ${remainingSec}s` })}
+	                        </div>
+	                      </>
+	                    );
+	                  })()}
 		                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
 		                    <div className="font-semibold text-ink">{t({ it: 'Modifiche non salvate', en: 'Unsaved changes' })}</div>
 		                    <div className="mt-1">
@@ -13187,7 +13196,6 @@ const PlanView = ({ planId }: Props) => {
 		                        if (!forceUnlockIncoming?.requestId) return;
 		                        void executeForceUnlock(forceUnlockIncoming.requestId, 'save');
 		                      }}
-		                      disabled={Date.now() < Number(forceUnlockIncoming?.graceEndsAt || 0)}
 		                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
 		                      title={t({
 		                        it: 'Salva le modifiche (se presenti) e rilascia il lock.',
@@ -13201,7 +13209,6 @@ const PlanView = ({ planId }: Props) => {
 		                        if (!forceUnlockIncoming?.requestId) return;
 		                        void executeForceUnlock(forceUnlockIncoming.requestId, 'discard');
 		                      }}
-		                      disabled={Date.now() < Number(forceUnlockIncoming?.graceEndsAt || 0)}
 		                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
 		                      title={t({
 		                        it: 'Scarta le modifiche non salvate e rilascia il lock.',
