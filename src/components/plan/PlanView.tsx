@@ -2832,6 +2832,21 @@ const PlanView = ({ planId }: Props) => {
     }
   }, []);
 
+  const resetToDefaultViewFromGesture = useCallback(() => {
+    const current = renderPlan;
+    if (!current) return;
+    const def = current.views?.find((v) => v.isDefault);
+    if (!def) {
+      canvasStageRef.current?.fitView?.();
+      return;
+    }
+    setAutoFitEnabled(false);
+    setZoom(def.zoom);
+    setPan(def.pan);
+    saveViewport(current.id, def.zoom, def.pan);
+    setSelectedViewId(def.id);
+  }, [renderPlan, saveViewport, setAutoFitEnabled, setPan, setZoom]);
+
   const {
     webcamReady,
     handDetected: webcamHandDetected,
@@ -2846,8 +2861,8 @@ const PlanView = ({ planId }: Props) => {
     setCalib: setPresentationWebcamCalib,
     mapRef,
     getViewport,
-    setZoom,
     setPan,
+    onResetView: resetToDefaultViewFromGesture,
     onInfo: (msg) => push(t(msg), 'info'),
     onError: (msg) => push(t(msg), 'danger')
   });

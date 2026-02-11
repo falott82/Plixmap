@@ -7,7 +7,6 @@ type Msg = { it: string; en: string };
 type HandLandmarkerModule = any;
 type HandLandmarkerInstance = any;
 
-const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 const dist2d = (a: any, b: any) => Math.hypot(Number(a?.x || 0) - Number(b?.x || 0), Number(a?.y || 0) - Number(b?.y || 0));
@@ -41,6 +40,44 @@ const computePinchRatio = (lm: any[]) => {
   const palm = dist2d(indexMcp, pinkyMcp);
   if (!Number.isFinite(pinch) || !Number.isFinite(palm) || palm <= 0) return null;
   return pinch / palm;
+};
+
+const isFingerExtendedFromWrist = (lm: any[], tipId: number, pipId: number, mcpId: number) => {
+  const wrist = lm?.[0];
+  const tip = lm?.[tipId];
+  const pip = lm?.[pipId];
+  const mcp = lm?.[mcpId];
+  if (!wrist || !tip || !pip || !mcp) return false;
+  const dTip = dist2d(wrist, tip);
+  const dPip = dist2d(wrist, pip);
+  const dMcp = dist2d(wrist, mcp);
+  return Number.isFinite(dTip) && Number.isFinite(dPip) && Number.isFinite(dMcp) && dTip > dPip * 1.08 && dPip > dMcp * 1.02;
+};
+
+const classifyHandPose = (lm: any[]) => {
+  if (!Array.isArray(lm) || lm.length < 21) return { openFive: false, panHand: false };
+  const palm = dist2d(lm[5], lm[17]);
+  if (!Number.isFinite(palm) || palm <= 1e-3) return { openFive: false, panHand: false };
+
+  const thumbExtended = dist2d(lm[4], lm[0]) > dist2d(lm[3], lm[0]) * 1.04;
+  const indexExtended = isFingerExtendedFromWrist(lm, 8, 6, 5);
+  const middleExtended = isFingerExtendedFromWrist(lm, 12, 10, 9);
+  const ringExtended = isFingerExtendedFromWrist(lm, 16, 14, 13);
+  const pinkyExtended = isFingerExtendedFromWrist(lm, 20, 18, 17);
+  const nonThumbExtended = [indexExtended, middleExtended, ringExtended, pinkyExtended].every(Boolean);
+
+  const spread = dist2d(lm[8], lm[20]) / palm;
+  const gapIdxMid = dist2d(lm[8], lm[12]) / palm;
+  const gapMidRing = dist2d(lm[12], lm[16]) / palm;
+  const gapRingPinky = dist2d(lm[16], lm[20]) / palm;
+  const maxGap = Math.max(gapIdxMid, gapMidRing, gapRingPinky);
+
+  // "Numero 5": dita ben aperte.
+  const openFive = nonThumbExtended && thumbExtended && spread > 1.55 && maxGap > 0.42;
+  // Mano aperta con dita ravvicinate: usata per il pan (solo traslazione).
+  const panHand = nonThumbExtended && maxGap < 0.42 && spread >= 0.95 && spread <= 1.7;
+
+  return { openFive, panHand };
 };
 
 async function loadTasksVision(): Promise<HandLandmarkerModule> {
@@ -82,12 +119,12 @@ export function usePresentationWebcamHands(opts: {
   setCalib: (calib: PresentationWebcamCalib | null) => void;
   mapRef: RefObject<HTMLDivElement>;
   getViewport: () => { zoom: number; pan: { x: number; y: number } };
-  setZoom: (zoom: number) => void;
   setPan: (pan: { x: number; y: number }) => void;
+  onResetView?: () => void;
   onInfo: (msg: Msg) => void;
   onError: (msg: Msg) => void;
 }) {
-  const { active, webcamEnabled, setWebcamEnabled, calib, setCalib, mapRef, getViewport, setZoom, setPan, onInfo, onError } =
+  const { active, webcamEnabled, setWebcamEnabled, calib, setCalib, mapRef, getViewport, setPan, onResetView, onInfo, onError } =
     opts;
 
   const [webcamReady, setWebcamReady] = useState(false);
@@ -123,6 +160,8 @@ export function usePresentationWebcamHands(opts: {
   const calibrationStartAtRef = useRef(0);
   const calibrationHintShownRef = useRef(false);
   const calibrationSawHandRef = useRef(false);
+  const resetHoldStartAtRef = useRef(0);
+  const resetCooldownUntilRef = useRef(0);
 
   const pinchSessionRef = useRef<{
     active: boolean;
@@ -177,6 +216,8 @@ export function usePresentationWebcamHands(opts: {
     calibrationStartAtRef.current = 0;
     calibrationHintShownRef.current = false;
     calibrationSawHandRef.current = false;
+    resetHoldStartAtRef.current = 0;
+    resetCooldownUntilRef.current = 0;
 
     const stream = streamRef.current;
     streamRef.current = null;
@@ -373,50 +414,68 @@ export function usePresentationWebcamHands(opts: {
         return;
       }
 
-      const currentCalib = calibRef.current;
-      if (!currentCalib) return;
-
-      const pinchActive = pinchRatio <= currentCalib.pinchRatio * 1.35;
+      const pose = classifyHandPose(lms);
         const mapEl = mapRef.current;
         const cw = mapEl?.clientWidth || 0;
         const ch = mapEl?.clientHeight || 0;
         if (cw <= 0 || ch <= 0) return;
 
+        // Open hand "5": go back to default view (hold briefly to avoid accidental trigger).
+        if (pose.openFive) {
+          if (!resetHoldStartAtRef.current) resetHoldStartAtRef.current = now;
+          const holdMs = now - resetHoldStartAtRef.current;
+          if (holdMs >= 550 && now >= resetCooldownUntilRef.current) {
+            resetCooldownUntilRef.current = now + 2500;
+            resetHoldStartAtRef.current = 0;
+            pinchSessionRef.current.active = false;
+            pinchSessionRef.current.startCenter = null;
+            smoothedRef.current = null;
+            onResetView?.();
+            onInfo({
+              it: 'Vista predefinita ripristinata (gesto mano aperta).',
+              en: 'Default view restored (open-hand gesture).'
+            });
+            return;
+          }
+        } else {
+          resetHoldStartAtRef.current = 0;
+        }
+
         const session = pinchSessionRef.current;
-        if (pinchActive && !session.active) {
-          const { zoom, pan } = getViewport();
+        const panActive = pose.panHand;
+        if (panActive && !session.active) {
+          const { pan } = getViewport();
           session.active = true;
           session.startCenter = center;
           session.startPan = pan;
-          session.startZoom = zoom;
+          session.startZoom = getViewport().zoom;
           session.startPinchRatio = pinchRatio;
-          smoothedRef.current = { pan, zoom };
-        } else if (!pinchActive && session.active) {
+          smoothedRef.current = { pan, zoom: getViewport().zoom };
+        } else if (!panActive && session.active) {
           session.active = false;
           session.startCenter = null;
+          smoothedRef.current = null;
         }
 
         if (!session.active || !session.startCenter) return;
 
-        const panGain = 1.25;
-        const zoomGain = 2.2;
-
-        const dx = (center.x - session.startCenter.x) * cw * panGain;
-        const dy = (center.y - session.startCenter.y) * ch * panGain;
+        const panGain = 1.05;
+        const deadZonePx = 14;
+        const rawDx = (center.x - session.startCenter.x) * cw;
+        const rawDy = (center.y - session.startCenter.y) * ch;
+        const dx = Math.abs(rawDx) <= deadZonePx ? 0 : (rawDx - Math.sign(rawDx) * deadZonePx) * panGain;
+        const dy = Math.abs(rawDy) <= deadZonePx ? 0 : (rawDy - Math.sign(rawDy) * deadZonePx) * panGain;
         const targetPan = { x: session.startPan.x + dx, y: session.startPan.y + dy };
 
-        const pinchDelta = pinchRatio - session.startPinchRatio;
-        const factor = clamp(1 + pinchDelta * zoomGain, 0.6, 1.6);
-        const targetZoom = clamp(session.startZoom * factor, 0.2, 3);
-
-        const smooth = smoothedRef.current || { pan: getViewport().pan, zoom: getViewport().zoom };
+        const current = getViewport();
+        const smooth = smoothedRef.current || { pan: current.pan, zoom: current.zoom };
         const next = {
-          pan: { x: lerp(smooth.pan.x, targetPan.x, 0.22), y: lerp(smooth.pan.y, targetPan.y, 0.22) },
-          zoom: lerp(smooth.zoom, targetZoom, 0.22)
+          pan: { x: lerp(smooth.pan.x, targetPan.x, 0.2), y: lerp(smooth.pan.y, targetPan.y, 0.2) },
+          zoom: current.zoom
         };
         smoothedRef.current = next;
         setPan(next.pan);
-        setZoom(next.zoom);
+        // Pan only: do not change zoom with gestures.
       };
 
       rafRef.current = requestAnimationFrame(tick);
@@ -453,7 +512,7 @@ export function usePresentationWebcamHands(opts: {
     } finally {
       if (token === startTokenRef.current) setStarting(false);
     }
-  }, [active, calib, calibrating, canUseWebcam, getViewport, mapRef, onError, onInfo, setCalib, setPan, setWebcamEnabled, setZoom, starting, stop]);
+  }, [active, canUseWebcam, getViewport, mapRef, onError, onInfo, onResetView, setCalib, setPan, setWebcamEnabled, starting, stop]);
 
   const disableWebcam = useCallback(() => {
     setWebcamEnabled(false);
