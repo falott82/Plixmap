@@ -120,6 +120,9 @@ export function usePresentationWebcamHands(opts: {
   const lastInferAtRef = useRef(0);
   const lastHandSeenAtRef = useRef(0);
   const lastNoHandHintAtRef = useRef(0);
+  const calibrationStartAtRef = useRef(0);
+  const calibrationHintShownRef = useRef(false);
+  const calibrationSawHandRef = useRef(false);
 
   const pinchSessionRef = useRef<{
     active: boolean;
@@ -145,6 +148,9 @@ export function usePresentationWebcamHands(opts: {
     calibrateFramesRef.current = 0;
     calibrateSumRef.current = 0;
     lastCalibrateInfoAtRef.current = performance.now();
+    calibrationStartAtRef.current = performance.now();
+    calibrationHintShownRef.current = false;
+    calibrationSawHandRef.current = false;
     onInfo({ it: 'Calibrazione: fai un pinch e tienilo fermo per 1 secondo.', en: 'Calibration: pinch and hold still for 1 second.' });
   }, [onInfo, webcamEnabled]);
 
@@ -168,6 +174,9 @@ export function usePresentationWebcamHands(opts: {
     lastInferAtRef.current = 0;
     lastHandSeenAtRef.current = 0;
     lastNoHandHintAtRef.current = 0;
+    calibrationStartAtRef.current = 0;
+    calibrationHintShownRef.current = false;
+    calibrationSawHandRef.current = false;
 
     const stream = streamRef.current;
     streamRef.current = null;
@@ -282,21 +291,39 @@ export function usePresentationWebcamHands(opts: {
             handDetectedRef.current = false;
             setHandDetected(false);
           }
-        if (calibratingRef.current && now - lastNoHandHintAtRef.current > 6000) {
-          lastNoHandHintAtRef.current = now;
-          onInfo({
-            it: 'Calibrazione: inquadra una mano e fai un pinch (pollice + indice).',
-            en: 'Calibration: show one hand and pinch (thumb + index).'
-          });
+          if (calibratingRef.current) {
+            const elapsed = calibrationStartAtRef.current ? now - calibrationStartAtRef.current : 0;
+            if (!calibrationHintShownRef.current && elapsed > 1200 && now - lastNoHandHintAtRef.current > 1000) {
+              lastNoHandHintAtRef.current = now;
+              calibrationHintShownRef.current = true;
+              onInfo({
+                it: 'Calibrazione: inquadra una mano e fai un pinch (pollice + indice).',
+                en: 'Calibration: show one hand and pinch (thumb + index).'
+              });
+            }
+            // Never keep calibration stuck forever: apply a safe default and continue.
+            if (elapsed > 8000) {
+              const fallback = { pinchRatio: 0.55 };
+              calibRef.current = fallback;
+              setCalib(fallback);
+              calibratingRef.current = false;
+              setCalibrating(false);
+              lastCalibrateBucketRef.current = -1;
+              onInfo({
+                it: 'Calibrazione standard applicata. Se i gesti non sono fluidi, riprova avvicinando la mano alla webcam.',
+                en: 'Default calibration applied. If gestures are not smooth, retry with your hand closer to the webcam.'
+              });
+            }
+          }
+          return;
         }
-        return;
-      }
 
         const pinchRatio = computePinchRatio(lms);
         const center = computeHandCenter(lms);
         if (!center || pinchRatio == null) return;
 
         lastHandSeenAtRef.current = now;
+        calibrationSawHandRef.current = true;
         if (!handDetectedRef.current) {
           handDetectedRef.current = true;
           setHandDetected(true);
@@ -330,6 +357,18 @@ export function usePresentationWebcamHands(opts: {
           calibrateFramesRef.current = 0;
           calibrateSumRef.current = 0;
           lastCalibrateBucketRef.current = -1;
+          const elapsed = calibrationStartAtRef.current ? now - calibrationStartAtRef.current : 0;
+          if (elapsed > 8000) {
+            const fallback = { pinchRatio: 0.55 };
+            calibRef.current = fallback;
+            setCalib(fallback);
+            calibratingRef.current = false;
+            setCalibrating(false);
+            onInfo({
+              it: 'Calibrazione standard applicata. Se i gesti non sono fluidi, riprova mantenendo il pinch fermo per 1 secondo.',
+              en: 'Default calibration applied. If gestures are not smooth, retry and keep the pinch steady for 1 second.'
+            });
+          }
         }
         return;
       }
