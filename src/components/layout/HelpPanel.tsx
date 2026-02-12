@@ -492,6 +492,24 @@ const HelpPanel = () => {
                           en: 'You can move/resize the room; links are updated.'
                         })}
                       </li>
+                      <li>
+                        {t({
+                          it: 'Porte corridoio: tasto destro sulla porta → “Collega stanza”. Se il layer Stanze è nascosto, viene mostrato automaticamente.',
+                          en: 'Corridor doors: right-click the door → “Link room”. If the Rooms layer is hidden, it is automatically shown.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Nella modale “Collega stanza” la stanza più vicina è in cima con badge verde “(rilevata prossimità)”. Puoi cercare per nome stanza o utenti presenti nella stanza.',
+                          en: 'In the “Link room” modal, the nearest room is pinned on top with a green “(proximity detected)” badge. You can search by room name or by users present in the room.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Mouse over sulla porta: viene mostrato l’elenco delle stanze collegate.',
+                          en: 'Hover over a door: you see the list of linked rooms.'
+                        })}
+                      </li>
                     </ul>
                   </div>
 

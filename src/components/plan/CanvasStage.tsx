@@ -3,7 +3,7 @@ import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Te
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { Crosshair, Hand, MonitorPlay, Video } from 'lucide-react';
-import { FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
+import { Corridor, FloorPlan, IconName, MapObject, MapObjectType, Room } from '../../store/types';
 import { WALL_LAYER_COLOR, WIFI_RANGE_SCALE_MAX } from '../../store/data';
 import { useUIStore } from '../../store/useUIStore';
 import { clamp } from '../../utils/geometry';
@@ -20,6 +20,7 @@ interface Props {
   hideMultiSelectionBox?: boolean;
   selectedRoomId?: string;
   selectedRoomIds?: string[];
+  selectedCorridorId?: string;
   selectedLinkId?: string | null;
   snapEnabled?: boolean;
   gridSize?: number;
@@ -35,6 +36,7 @@ interface Props {
   panToolActive?: boolean;
   onTogglePanTool?: () => void;
   roomDrawMode?: 'rect' | 'poly' | null;
+  corridorDrawMode?: 'poly' | null;
   printArea?: { x: number; y: number; width: number; height: number } | null;
   printAreaMode?: boolean;
   showPrintArea?: boolean;
@@ -106,14 +108,64 @@ interface Props {
   onLinkDblClick?: (id: string) => void;
   onMapContextMenu: (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onSelectRoom?: (roomId?: string, options?: { keepContext?: boolean }) => void;
+  onSelectCorridor?: (corridorId?: string, options?: { keepContext?: boolean }) => void;
+  selectedCorridorDoor?: { corridorId: string; doorId: string } | null;
+  corridorDoorDraft?: { corridorId: string; start?: { edgeIndex: number; t: number; x: number; y: number } } | null;
+  onCorridorClick?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
+  onCorridorDoorDraftPoint?: (payload: {
+    corridorId: string;
+    clientX: number;
+    clientY: number;
+    point: { edgeIndex: number; t: number; x: number; y: number };
+  }) => void;
+  onSelectCorridorDoor?: (payload?: { corridorId: string; doorId: string }) => void;
+  onCorridorDoorContextMenu?: (payload: { corridorId: string; doorId: string; clientX: number; clientY: number }) => void;
+  onCorridorDoorDblClick?: (payload: { corridorId: string; doorId: string }) => void;
   onOpenRoomDetails?: (roomId: string) => void;
   onRoomContextMenu?: (payload: { id: string; clientX: number; clientY: number }) => void;
+  onCorridorContextMenu?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
+  onCorridorConnectionContextMenu?: (payload: {
+    corridorId: string;
+    connectionId: string;
+    clientX: number;
+    clientY: number;
+    worldX: number;
+    worldY: number;
+  }) => void;
   onSelectLink?: (id?: string) => void;
   onCreateRoom?: (
     shape:
       | { kind: 'rect'; rect: { x: number; y: number; width: number; height: number } }
       | { kind: 'poly'; points: { x: number; y: number }[] }
   ) => void;
+  onCreateCorridor?: (
+    shape:
+      | { kind: 'rect'; rect: { x: number; y: number; width: number; height: number } }
+      | { kind: 'poly'; points: { x: number; y: number }[] }
+  ) => void;
+  onUpdateCorridor?: (
+    corridorId: string,
+    payload: {
+      kind?: 'rect' | 'poly';
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      labelX?: number;
+      labelY?: number;
+      labelScale?: number;
+      points?: { x: number; y: number }[];
+      doors?: Array<{
+        id: string;
+        edgeIndex: number;
+        t: number;
+        edgeIndexTo?: number;
+        tTo?: number;
+      }>;
+      connections?: Array<{ id: string; edgeIndex: number; t: number; planIds: string[] }>;
+    }
+  ) => void;
+  onAdjustCorridorLabelScale?: (corridorId: string, delta: number) => void;
   onUpdateRoom?: (
     roomId: string,
     payload: {
@@ -255,6 +307,7 @@ const CanvasStageImpl = (
   hideMultiSelectionBox = false,
   selectedRoomId,
   selectedRoomIds,
+  selectedCorridorId,
   selectedLinkId = null,
   snapEnabled = false,
   gridSize = 20,
@@ -270,6 +323,7 @@ const CanvasStageImpl = (
   panToolActive = false,
   onTogglePanTool,
   roomDrawMode = null,
+  corridorDrawMode = null,
   printArea = null,
   printAreaMode = false,
   showPrintArea = false,
@@ -319,14 +373,27 @@ const CanvasStageImpl = (
   onLinkDblClick,
   onMapContextMenu,
   onSelectRoom,
+  onSelectCorridor,
+  selectedCorridorDoor = null,
+  corridorDoorDraft = null,
+  onCorridorClick,
+  onCorridorDoorDraftPoint,
+  onSelectCorridorDoor,
+  onCorridorDoorContextMenu,
+  onCorridorDoorDblClick,
   onOpenRoomDetails,
   onSelectLink,
   onCreateRoom,
+  onCreateCorridor,
   onUpdateRoom,
+  onUpdateCorridor,
+  onAdjustCorridorLabelScale,
   onUpdateObject,
   onOpenPhoto,
   onMoveWall,
   onRoomContextMenu,
+  onCorridorContextMenu,
+  onCorridorConnectionContextMenu,
   onSetPrintArea,
   wallAttenuationByType,
   onUpdateQuotePoints
@@ -345,6 +412,7 @@ const CanvasStageImpl = (
         obj: any;
       }
   >(null);
+  const [doorHoverCard, setDoorHoverCard] = useState<null | { clientX: number; clientY: number; text: string }>(null);
   const hoverRaf = useRef<number | null>(null);
   const dragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const [highlightNow, setHighlightNow] = useState(Date.now());
@@ -353,6 +421,15 @@ const CanvasStageImpl = (
   const baseWidth = plan.width || bgImage?.width || dimensions.width;
   const baseHeight = plan.height || bgImage?.height || dimensions.height;
   const objects = plan.objects || [];
+  const roomNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const room of (plan.rooms || []) as Room[]) {
+      const id = String((room as any)?.id || '').trim();
+      if (!id) continue;
+      map.set(id, String((room as any)?.name || '').trim() || t({ it: 'Stanza', en: 'Room' }));
+    }
+    return map;
+  }, [plan.rooms, t]);
   const viewportRef = useRef({ zoom, pan });
   const fitViewRef = useRef<() => void>(() => undefined);
   const wheelCommitTimer = useRef<number | null>(null);
@@ -376,6 +453,11 @@ const CanvasStageImpl = (
   const [draftPolyPointer, setDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
   const draftPolyRaf = useRef<number | null>(null);
   const draftPolyPointsRef = useRef<{ x: number; y: number }[]>([]);
+  const [corridorDraftPolyPoints, setCorridorDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
+  const [corridorDraftPolyPointer, setCorridorDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
+  const corridorDraftPolyRaf = useRef<number | null>(null);
+  const corridorDraftPolyPointsRef = useRef<{ x: number; y: number }[]>([]);
+  const [corridorDoorHover, setCorridorDoorHover] = useState<{ edgeIndex: number; t: number; x: number; y: number } | null>(null);
   const panRaf = useRef<number | null>(null);
   const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
   const selectionBoxRaf = useRef<number | null>(null);
@@ -436,6 +518,9 @@ const CanvasStageImpl = (
   const roomNodeRefs = useRef<Record<string, any>>({});
   const polyLineRefs = useRef<Record<string, any>>({});
   const polyVertexRefs = useRef<Record<string, Record<number, any>>>({});
+  const corridorNodeRefs = useRef<Record<string, any>>({});
+  const corridorPolyLineRefs = useRef<Record<string, any>>({});
+  const corridorVertexRefs = useRef<Record<string, Record<number, any>>>({});
   const objectsLayerRef = useRef<any>(null);
   const objectNodeRefs = useRef<Record<string, any>>({});
   const lastPhotoOpenAtRef = useRef(0);
@@ -449,6 +534,21 @@ const CanvasStageImpl = (
     node: any;
     cancelled: boolean;
   } | null>(null);
+  const corridorDragRef = useRef<{
+    corridorId: string;
+    startX: number;
+    startY: number;
+    node: any;
+    cancelled: boolean;
+  } | null>(null);
+  const corridorLabelDragRef = useRef<{
+    corridorId: string;
+    node: any;
+    points: { x: number; y: number }[];
+    lastX: number;
+    lastY: number;
+  } | null>(null);
+  const corridorDoorPointerRef = useRef<{ corridorId: string; doorId: string; allowDrag: boolean } | null>(null);
   const [iconImages, setIconImages] = useState<Record<string, HTMLImageElement | null>>({});
   const [imageObjects, setImageObjects] = useState<Record<string, HTMLImageElement | null>>({});
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(
@@ -540,6 +640,24 @@ const CanvasStageImpl = (
     }
     return lines;
   }, [baseHeight, baseWidth, gridSize, showGrid]);
+  const corridorPattern = useMemo(() => {
+    if (typeof document === 'undefined') return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 24;
+    canvas.height = 24;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.clearRect(0, 0, 24, 24);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(0, 0, 24, 24);
+    ctx.strokeStyle = 'rgba(71,85,105,0.24)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, 11, 11);
+    ctx.strokeRect(12.5, 0.5, 11, 11);
+    ctx.strokeRect(0.5, 12.5, 11, 11);
+    ctx.strokeRect(12.5, 12.5, 11, 11);
+    return canvas;
+  }, []);
 
   const estimateTextWidth = useCallback((text: string, fontSize: number) => text.length * fontSize * 0.6, []);
 
@@ -602,6 +720,71 @@ const getRoomBounds = (room: any) => {
   const rh = Number(room?.height || 0);
   if (!Number.isFinite(rx) || !Number.isFinite(ry) || !Number.isFinite(rw) || !Number.isFinite(rh)) return null;
   return { minX: rx, minY: ry, maxX: rx + rw, maxY: ry + rh };
+};
+
+const getCorridorPolygonPoints = (corridor: Corridor | any): { x: number; y: number }[] => {
+  const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as
+    | 'rect'
+    | 'poly';
+  if (kind === 'poly') {
+    const pts = Array.isArray(corridor?.points) ? corridor.points : [];
+    if (pts.length >= 3) return pts;
+    const x = Number(corridor?.x || 0);
+    const y = Number(corridor?.y || 0);
+    const w = Number(corridor?.width || 0);
+    const h = Number(corridor?.height || 0);
+    if (w > 0 && h > 0) {
+      return [
+        { x, y },
+        { x: x + w, y },
+        { x: x + w, y: y + h },
+        { x, y: y + h }
+      ];
+    }
+    return [];
+  }
+  const x = Number(corridor?.x || 0);
+  const y = Number(corridor?.y || 0);
+  const w = Number(corridor?.width || 0);
+  const h = Number(corridor?.height || 0);
+  if (!(w > 0 && h > 0)) return [];
+  return [
+    { x, y },
+    { x: x + w, y },
+    { x: x + w, y: y + h },
+    { x, y: y + h }
+  ];
+};
+
+const getCorridorEdgePoint = (points: { x: number; y: number }[], edgeIndex: number, t: number) => {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  const idx = Number.isFinite(edgeIndex) ? Math.floor(edgeIndex) : 0;
+  const a = points[((idx % points.length) + points.length) % points.length];
+  const b = points[(idx + 1 + points.length) % points.length];
+  if (!a || !b) return null;
+  const ratio = Math.max(0, Math.min(1, Number(t) || 0));
+  return {
+    x: a.x + (b.x - a.x) * ratio,
+    y: a.y + (b.y - a.y) * ratio
+  };
+};
+
+const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: { x: number; y: number }) => {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  let best: { edgeIndex: number; t: number; x: number; y: number; distSq: number } | null = null;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    const t = lenSq > 0.0000001 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq)) : 0;
+    const x = a.x + dx * t;
+    const y = a.y + dy * t;
+    const distSq = (point.x - x) * (point.x - x) + (point.y - y) * (point.y - y);
+    if (!best || distSq < best.distSq) best = { edgeIndex: i, t, x, y, distSq };
+  }
+  return best;
 };
 
   const distancePointToSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
@@ -1011,6 +1194,19 @@ const getRoomBounds = (room: any) => {
   useEffect(() => {
     draftPolyPointsRef.current = draftPolyPoints;
   }, [draftPolyPoints]);
+  useEffect(() => {
+    if (corridorDrawMode) return;
+    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
+    setCorridorDraftPolyPoints([]);
+    corridorDraftPolyPointsRef.current = [];
+    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
+    setCorridorDraftPolyPointer(null);
+    if (corridorDraftPolyRaf.current) cancelAnimationFrame(corridorDraftPolyRaf.current);
+    corridorDraftPolyRaf.current = null;
+  }, [corridorDrawMode, perfEnabled]);
+  useEffect(() => {
+    corridorDraftPolyPointsRef.current = corridorDraftPolyPoints;
+  }, [corridorDraftPolyPoints]);
 
   useEffect(() => {
     if (!transformerRef.current) return;
@@ -1091,6 +1287,8 @@ const getRoomBounds = (room: any) => {
       if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
       if (textDraftRaf.current) cancelAnimationFrame(textDraftRaf.current);
       if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
+      if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
+      if (corridorDraftPolyRaf.current) cancelAnimationFrame(corridorDraftPolyRaf.current);
       if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
       if (textTransformRaf.current) cancelAnimationFrame(textTransformRaf.current);
       textTransformRaf.current = null;
@@ -1488,6 +1686,7 @@ const getRoomBounds = (room: any) => {
       evt?.button === 0 &&
       !pendingType &&
       (!roomDrawMode || readOnly) &&
+      (!corridorDrawMode || readOnly) &&
       (!printAreaMode || readOnly) &&
       !toolMode);
   // Box select: left-drag on empty area (desktop-like).
@@ -2013,6 +2212,13 @@ const getRoomBounds = (room: any) => {
     if (draftPolyPointer) pts.push(draftPolyPointer);
     return pts.flatMap((p) => [p.x, p.y]);
   }, [draftPolyPointer, draftPolyPoints, roomDrawMode]);
+  const previewCorridorDraftPolyLine = useMemo(() => {
+    if (corridorDrawMode !== 'poly') return null;
+    if (!corridorDraftPolyPoints.length) return null;
+    const pts = [...corridorDraftPolyPoints];
+    if (corridorDraftPolyPointer) pts.push(corridorDraftPolyPointer);
+    return pts.flatMap((p) => [p.x, p.y]);
+  }, [corridorDraftPolyPointer, corridorDraftPolyPoints, corridorDrawMode]);
 
   const finalizeDraftPoly = useCallback(() => {
     if (roomDrawMode !== 'poly' || readOnly) return false;
@@ -2027,6 +2233,19 @@ const getRoomBounds = (room: any) => {
     onCreateRoom?.({ kind: 'poly', points: nextPoints });
     return true;
   }, [onCreateRoom, perfEnabled, readOnly, roomDrawMode]);
+  const finalizeCorridorDraftPoly = useCallback(() => {
+    if (corridorDrawMode !== 'poly' || readOnly) return false;
+    const points = corridorDraftPolyPointsRef.current;
+    if (points.length < 3) return true;
+    const nextPoints = points.slice();
+    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
+    setCorridorDraftPolyPoints([]);
+    corridorDraftPolyPointsRef.current = [];
+    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
+    setCorridorDraftPolyPointer(null);
+    onCreateCorridor?.({ kind: 'poly', points: nextPoints });
+    return true;
+  }, [corridorDrawMode, onCreateCorridor, perfEnabled, readOnly]);
 
 	  useEffect(() => {
 	    if (roomDrawMode !== 'poly') return;
@@ -2050,21 +2269,73 @@ const getRoomBounds = (room: any) => {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [finalizeDraftPoly, perfEnabled, roomDrawMode]);
+  useEffect(() => {
+    if (corridorDrawMode !== 'poly') return;
+    const handler = (e: KeyboardEvent) => {
+      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finalizeCorridorDraftPoly();
+      }
+      if (e.key === 'Backspace') {
+        if (!corridorDraftPolyPointsRef.current.length) return;
+        e.preventDefault();
+        if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
+        setCorridorDraftPolyPoints((prev) => {
+          const next = prev.slice(0, -1);
+          corridorDraftPolyPointsRef.current = next;
+          return next;
+        });
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [corridorDrawMode, finalizeCorridorDraftPoly, perfEnabled]);
 
-	  useEffect(() => {
-	    const onKey = (e: KeyboardEvent) => {
-	      if ((useUIStore.getState() as any)?.clientChatOpen) return;
-	      if (e.key !== 'Escape') return;
-	      const active = roomDragRef.current;
-	      if (!active) return;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+      if (e.key !== 'Escape') return;
+      const labelDrag = corridorLabelDragRef.current;
+      if (labelDrag) {
+        e.preventDefault();
+        corridorLabelDragRef.current = null;
+        try {
+          const nx = Number(labelDrag.node?.x?.() ?? labelDrag.lastX ?? 0);
+          const ny = Number(labelDrag.node?.y?.() ?? labelDrag.lastY ?? 0);
+          if (pointInPolygon(nx, ny, labelDrag.points)) {
+            onUpdateCorridor?.(labelDrag.corridorId, { labelX: Number(nx.toFixed(3)), labelY: Number(ny.toFixed(3)) });
+          }
+          labelDrag.node?.stopDrag?.();
+          labelDrag.node?.getLayer()?.batchDraw?.();
+        } catch {
+          // ignore
+        }
+        return;
+      }
+      const active = roomDragRef.current;
+      const corridorActive = corridorDragRef.current;
+      if (!active && !corridorActive) return;
       e.preventDefault();
-      active.cancelled = true;
-      try {
-        active.node.stopDrag?.();
-        active.node.position({ x: active.startX, y: active.startY });
-        active.node.getLayer()?.batchDraw?.();
-      } catch {
-        // ignore
+      if (active) {
+        active.cancelled = true;
+        try {
+          active.node.stopDrag?.();
+          active.node.position({ x: active.startX, y: active.startY });
+          active.node.getLayer()?.batchDraw?.();
+        } catch {
+          // ignore
+        }
+      }
+      if (corridorActive) {
+        corridorActive.cancelled = true;
+        try {
+          corridorActive.node.stopDrag?.();
+          corridorActive.node.position({ x: corridorActive.startX, y: corridorActive.startY });
+          corridorActive.node.getLayer()?.batchDraw?.();
+        } catch {
+          // ignore
+        }
       }
     };
     window.addEventListener('keydown', onKey);
@@ -2241,7 +2512,7 @@ const getRoomBounds = (room: any) => {
   return (
     <div
       className={`relative h-full w-full rounded-2xl border border-slate-200 border-b-4 border-b-slate-200 bg-white shadow-card ${
-        roomDrawMode || printAreaMode || allowTool ? 'cursor-crosshair' : ''
+        roomDrawMode || corridorDrawMode || printAreaMode || allowTool ? 'cursor-crosshair' : ''
       }`}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -2322,6 +2593,14 @@ const getRoomBounds = (room: any) => {
           </div>
         )
       ) : null}
+      {doorHoverCard ? (
+        <div
+          className="pointer-events-none fixed z-50 max-w-[340px] -translate-x-1/2 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-700 shadow-card backdrop-blur"
+          style={{ left: doorHoverCard.clientX, top: doorHoverCard.clientY + 14 }}
+        >
+          {doorHoverCard.text}
+        </div>
+      ) : null}
       <Stage
         ref={stageRef}
         width={dimensions.width}
@@ -2367,6 +2646,7 @@ const getRoomBounds = (room: any) => {
             isBoxSelectGesture(e.evt) &&
             !pendingType &&
             (!roomDrawMode || readOnly) &&
+            (!corridorDrawMode || readOnly) &&
             (!printAreaMode || readOnly) &&
             !toolMode
           ) {
@@ -2429,8 +2709,32 @@ const getRoomBounds = (room: any) => {
             });
             return;
           }
+          if (corridorDrawMode === 'poly' && !readOnly && e.evt.button === 0) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (!pos) return;
+            const world = pointerToWorld(pos.x, pos.y);
+            const closeThreshold = 12 / Math.max(0.2, viewportRef.current.zoom || 1);
+            const currentPoints = corridorDraftPolyPointsRef.current;
+            if (currentPoints.length >= 3) {
+              const first = currentPoints[0];
+              const dx = world.x - first.x;
+              const dy = world.y - first.y;
+              if (Math.hypot(dx, dy) <= closeThreshold) {
+                finalizeCorridorDraftPoly();
+                return;
+              }
+            }
+            if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
+            setCorridorDraftPolyPoints((prev) => {
+              const next = [...prev, { x: world.x, y: world.y }];
+              corridorDraftPolyPointsRef.current = next;
+              return next;
+            });
+            return;
+          }
           // Clear selection on left-click empty area (no pending placement)
-          if (!pendingType && !toolMode && isEmptyTarget && e.evt.button === 0) onSelect(undefined);
+          if (!pendingType && !toolMode && !roomDrawMode && !corridorDrawMode && isEmptyTarget && e.evt.button === 0) onSelect(undefined);
         }}
         onDblClick={(e) => {
           if (typeof e.evt?.button === 'number' && e.evt.button !== 0) return;
@@ -2504,9 +2808,38 @@ const getRoomBounds = (room: any) => {
               }
             }
           }
+          if (corridorDoorDraft?.corridorId && !readOnly) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (pos) {
+              const world = pointerToWorld(pos.x, pos.y);
+              const corridor = ((plan.corridors || []) as Corridor[]).find((c) => c.id === corridorDoorDraft.corridorId);
+              const corridorPoints = corridor ? getCorridorPolygonPoints(corridor) : [];
+              const snap = corridorPoints.length ? getClosestCorridorEdgePoint(corridorPoints, world) : null;
+              if (snap) setCorridorDoorHover({ edgeIndex: snap.edgeIndex, t: snap.t, x: snap.x, y: snap.y });
+              else setCorridorDoorHover(null);
+            } else {
+              setCorridorDoorHover(null);
+            }
+          } else if (corridorDoorHover) {
+            setCorridorDoorHover(null);
+          }
           if (updateSelectionBox(e)) return;
           if (updateDraftPrintRect(e)) return;
           if (updateDraftRect(e)) return;
+          if (corridorDrawMode === 'poly' && !readOnly) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (pos) {
+              const world = pointerToWorld(pos.x, pos.y);
+              if (corridorDraftPolyRaf.current) cancelAnimationFrame(corridorDraftPolyRaf.current);
+              corridorDraftPolyRaf.current = requestAnimationFrame(() => {
+                if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
+                setCorridorDraftPolyPointer({ x: world.x, y: world.y });
+              });
+            }
+            return;
+          }
           if (roomDrawMode === 'poly' && !readOnly) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
@@ -2569,6 +2902,8 @@ const getRoomBounds = (room: any) => {
             pendingPreviewRef.current = null;
             setPendingPreview(null);
           }
+          setCorridorDoorHover(null);
+          setDoorHoverCard(null);
         }}
       >
         {/* Background layer (kept separate so dragging objects doesn't re-draw the full image every frame) */}
@@ -2584,7 +2919,7 @@ const getRoomBounds = (room: any) => {
             }
             if (isBoxSelecting()) return;
             lastContextMenuAtRef.current = Date.now();
-            if (pendingType || readOnly || toolMode) return;
+            if (pendingType || readOnly || toolMode || roomDrawMode || corridorDrawMode) return;
             const stage = stageRef.current;
             const pos = stage?.getPointerPosition();
             if (!pos) return;
@@ -2595,7 +2930,7 @@ const getRoomBounds = (room: any) => {
             // Never pan / clear selection while box-selecting.
             if (isBoxSelecting()) return;
             if (isContextClick(e.evt)) return;
-            if (roomDrawMode || printAreaMode || allowTool) return;
+            if (roomDrawMode || corridorDrawMode || printAreaMode || allowTool) return;
             if (e.target?.attrs?.name === 'bg-rect' && !pendingType) {
               if (isPanGesture(e.evt)) startPan(e);
               return;
@@ -2607,6 +2942,376 @@ const getRoomBounds = (room: any) => {
         >
           {backPlate}
           {gridLines}
+        </Layer>
+
+        {/* Corridors layer */}
+        <Layer perfectDrawEnabled={false} listening={!toolMode}>
+          {((plan.corridors || []) as Corridor[]).map((corridor) => {
+            const points = getCorridorPolygonPoints(corridor);
+            if (points.length < 3) return null;
+            const flat = points.flatMap((p: { x: number; y: number }) => [p.x, p.y]);
+            const bounds = getPolygonLabelBounds(points);
+            const isSelectedCorridor = selectedCorridorId === corridor.id;
+            const baseColor = String(corridor.color || '#94a3b8');
+            const fillColor = hexToRgba(baseColor, isSelectedCorridor ? 0.24 : 0.18);
+            const strokeColor = isSelectedCorridor ? '#0f766e' : '#64748b';
+            const strokeWidth = isSelectedCorridor ? 2.2 : 1.3;
+            const label = corridor.showName !== false ? String(corridor.name || '').trim() : '';
+            const labelScale = clamp(Number((corridor as any).labelScale || 1), 0.6, 3);
+            const labelCenterX = Number.isFinite(Number((corridor as any).labelX))
+              ? Number((corridor as any).labelX)
+              : bounds.x + bounds.width / 2;
+            const labelCenterY = Number.isFinite(Number((corridor as any).labelY))
+              ? Number((corridor as any).labelY)
+              : bounds.y + bounds.height / 2;
+            const connections = Array.isArray(corridor.connections) ? corridor.connections : [];
+            const kind = (corridor.kind || (Array.isArray(corridor.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+            const isDraftTarget = corridorDoorDraft?.corridorId === corridor.id;
+            const canDragCorridor =
+              isSelectedCorridor &&
+              kind === 'rect' &&
+              !readOnly &&
+                  !panToolActive &&
+                  !pendingType &&
+                  !toolMode &&
+                  !isDraftTarget;
+            const canDragLabel = isSelectedCorridor && !readOnly && !isDraftTarget;
+            return (
+              <Group
+                key={corridor.id}
+                ref={(node) => {
+                  if (node) corridorNodeRefs.current[corridor.id] = node;
+                  else delete corridorNodeRefs.current[corridor.id];
+                }}
+                draggable={canDragCorridor}
+                onDragStart={(e) => {
+                  corridorDragRef.current = {
+                    corridorId: corridor.id,
+                    startX: e.target.x(),
+                    startY: e.target.y(),
+                    node: e.target,
+                    cancelled: false
+                  };
+                }}
+                onDragEnd={(e) => {
+                  if (!canDragCorridor) return;
+                  const active = corridorDragRef.current;
+                  if (active && active.corridorId === corridor.id) {
+                    corridorDragRef.current = null;
+                    if (active.cancelled) {
+                      e.target.position({ x: active.startX, y: active.startY });
+                      e.target.getLayer()?.batchDraw?.();
+                      return;
+                    }
+                  }
+                  const node = e.target;
+                  const dx = node.x();
+                  const dy = node.y();
+                  node.position({ x: 0, y: 0 });
+                  node.getLayer()?.batchDraw?.();
+                  if (!dx && !dy) return;
+                  onUpdateCorridor?.(corridor.id, {
+                    kind: 'rect',
+                    x: Number(corridor.x || 0) + dx,
+                    y: Number(corridor.y || 0) + dy,
+                    width: Number(corridor.width || 0),
+                    height: Number(corridor.height || 0)
+                  });
+                }}
+                onClick={(e) => {
+                  e.cancelBubble = true;
+                  if (e.evt?.button !== 0) return;
+                  const stage = e.target.getStage();
+                  const pos = stage?.getPointerPosition();
+                  const world = pos
+                    ? pointerToWorld(pos.x, pos.y)
+                    : { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+                  if (isDraftTarget && onCorridorDoorDraftPoint) {
+                    const snap = corridorDoorHover || getClosestCorridorEdgePoint(points, world);
+                    if (snap) {
+                      onCorridorDoorDraftPoint({
+                        corridorId: corridor.id,
+                        clientX: e.evt.clientX,
+                        clientY: e.evt.clientY,
+                        point: { edgeIndex: snap.edgeIndex, t: snap.t, x: snap.x, y: snap.y }
+                      });
+                    }
+                    onSelectCorridor?.(corridor.id);
+                    return;
+                  }
+                  onSelectCorridor?.(corridor.id);
+                  onSelectCorridorDoor?.(undefined);
+                  onCorridorClick?.({
+                    id: corridor.id,
+                    clientX: e.evt.clientX,
+                    clientY: e.evt.clientY,
+                    worldX: world.x,
+                    worldY: world.y
+                  });
+                }}
+                onContextMenu={(e) => {
+                  e.evt.preventDefault();
+                  e.cancelBubble = true;
+                  if (String((e.target as any)?.attrs?.name || '') === 'corridor-connection-point') return;
+                  if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                  if (isBoxSelecting()) return;
+                  const stage = e.target.getStage();
+                  const pos = stage?.getPointerPosition();
+                  const world = pos
+                    ? pointerToWorld(pos.x, pos.y)
+                    : { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+                  onSelectCorridor?.(corridor.id, { keepContext: true });
+                  onSelectCorridorDoor?.(undefined);
+                  onCorridorContextMenu?.({
+                    id: corridor.id,
+                    clientX: e.evt.clientX,
+                    clientY: e.evt.clientY,
+                    worldX: world.x,
+                    worldY: world.y
+                  });
+                }}
+              >
+                <Line
+                  ref={(node) => {
+                    if (node) corridorPolyLineRefs.current[corridor.id] = node;
+                    else delete corridorPolyLineRefs.current[corridor.id];
+                  }}
+                  points={flat}
+                  closed
+                  fill={fillColor}
+                  fillPatternImage={(corridorPattern as any) || undefined}
+                  fillPatternRepeat="repeat"
+                  fillPatternScale={{ x: 1, y: 1 }}
+                  stroke={strokeColor}
+                  strokeWidth={strokeWidth}
+                  dash={[4, 3]}
+                  lineJoin="round"
+                />
+                <Line
+                  points={flat}
+                  closed
+                  fill="rgba(15,23,42,0.001)"
+                  strokeEnabled={false}
+                />
+                {label ? (
+                  (() => {
+                    const maxWidth = Math.max(40, bounds.width - 12);
+                    const labelWidth = Math.min(maxWidth, Math.max(40, (label.length * 6.4 + 18) * labelScale));
+                    const labelHeight = 20 * labelScale;
+                    return (
+                      <>
+                        <Group
+                          x={labelCenterX}
+                          y={labelCenterY}
+                          draggable={canDragLabel}
+                          onDragStart={(e) => {
+                            e.cancelBubble = true;
+                            corridorLabelDragRef.current = {
+                              corridorId: corridor.id,
+                              node: e.target,
+                              points: points.map((p) => ({ x: p.x, y: p.y })),
+                              lastX: e.target.x(),
+                              lastY: e.target.y()
+                            };
+                          }}
+                          onDragMove={(e) => {
+                            e.cancelBubble = true;
+                            if (!corridorLabelDragRef.current || corridorLabelDragRef.current.corridorId !== corridor.id) return;
+                            corridorLabelDragRef.current.lastX = e.target.x();
+                            corridorLabelDragRef.current.lastY = e.target.y();
+                          }}
+                          onClick={(e) => {
+                            e.cancelBubble = true;
+                            if (e.evt?.button !== 0) return;
+                            onSelectCorridor?.(corridor.id);
+                          }}
+                          onDragEnd={(e) => {
+                            corridorLabelDragRef.current = null;
+                            if (!canDragLabel) return;
+                            const nx = e.target.x();
+                            const ny = e.target.y();
+                            if (!pointInPolygon(nx, ny, points)) {
+                              e.target.position({ x: labelCenterX, y: labelCenterY });
+                              e.target.getLayer()?.batchDraw?.();
+                              return;
+                            }
+                            onUpdateCorridor?.(corridor.id, {
+                              labelX: Number(nx.toFixed(3)),
+                              labelY: Number(ny.toFixed(3))
+                            });
+                          }}
+                        >
+                          <Rect
+                            x={-labelWidth / 2}
+                            y={-labelHeight / 2}
+                            width={labelWidth}
+                            height={labelHeight}
+                            cornerRadius={6 * labelScale}
+                            fill="rgba(255,255,255,0.9)"
+                            stroke={isSelectedCorridor ? 'rgba(15,118,110,0.65)' : 'rgba(100,116,139,0.45)'}
+                            strokeWidth={isSelectedCorridor ? 1.2 : 0.8}
+                          />
+                          <Text
+                            x={-labelWidth / 2 + 5 * labelScale}
+                            y={-labelHeight / 2 + 4 * labelScale}
+                            width={labelWidth - 10 * labelScale}
+                            text={label}
+                            align="center"
+                            fontSize={11 * labelScale}
+                            fontStyle={isSelectedCorridor ? '700' : '600'}
+                            fill={isSelectedCorridor ? '#0f172a' : '#334155'}
+                            wrap="none"
+                            ellipsis
+                          />
+                        </Group>
+                        {isSelectedCorridor ? (
+                          <Group x={labelCenterX + labelWidth / 2 + 11} y={labelCenterY - labelHeight / 2 - 1}>
+                            <Group
+                              onClick={(e) => {
+                                e.cancelBubble = true;
+                                onAdjustCorridorLabelScale?.(corridor.id, 0.1);
+                              }}
+                            >
+                              <Circle radius={8} fill="rgba(15,23,42,0.88)" stroke="rgba(255,255,255,0.35)" strokeWidth={0.9} />
+                              <Text x={-3.5} y={-5.8} text="+" fontSize={11} fill="#ffffff" listening={false} />
+                            </Group>
+                            <Group
+                              y={19}
+                              onClick={(e) => {
+                                e.cancelBubble = true;
+                                onAdjustCorridorLabelScale?.(corridor.id, -0.1);
+                              }}
+                            >
+                              <Circle radius={8} fill="rgba(15,23,42,0.88)" stroke="rgba(255,255,255,0.35)" strokeWidth={0.9} />
+                              <Text x={-2.8} y={-5.8} text="-" fontSize={11} fill="#ffffff" listening={false} />
+                            </Group>
+                          </Group>
+                        ) : null}
+                      </>
+                    );
+                  })()
+                ) : null}
+                {connections.map((connection) => {
+                  const point =
+                    (Number.isFinite(Number((connection as any).x)) && Number.isFinite(Number((connection as any).y))
+                      ? { x: Number((connection as any).x), y: Number((connection as any).y) }
+                      : null) || getCorridorEdgePoint(points, Number(connection.edgeIndex), Number(connection.t));
+                  if (!point) return null;
+                  const canDragConnection = isSelectedCorridor && !readOnly && !isDraftTarget;
+                  return (
+                    <Group key={connection.id}>
+                      <Circle
+                        name="corridor-connection-point"
+                        x={point.x}
+                        y={point.y}
+                        radius={5.2}
+                        fill="#ef4444"
+                        stroke="#7f1d1d"
+                        strokeWidth={1.1}
+                        draggable={canDragConnection}
+                        onClick={(e) => {
+                          e.cancelBubble = true;
+                          onSelectCorridor?.(corridor.id);
+                        }}
+                        onDragEnd={(e) => {
+                          if (!canDragConnection) return;
+                          const node = e.target;
+                          const nx = node.x();
+                          const ny = node.y();
+                          if (!pointInPolygon(nx, ny, points)) {
+                            node.position({ x: point.x, y: point.y });
+                            node.getLayer()?.batchDraw?.();
+                            return;
+                          }
+                          const snap = getClosestCorridorEdgePoint(points, { x: nx, y: ny });
+                          const nextConnections = connections.map((cp) =>
+                            cp.id === connection.id
+                              ? {
+                                  ...cp,
+                                  edgeIndex: snap ? snap.edgeIndex : Number(cp.edgeIndex),
+                                  t: snap ? Number(snap.t.toFixed(4)) : Number(cp.t),
+                                  x: Number(nx.toFixed(3)),
+                                  y: Number(ny.toFixed(3))
+                                }
+                              : cp
+                          );
+                          onUpdateCorridor?.(corridor.id, { connections: nextConnections as any });
+                        }}
+                        onContextMenu={(e) => {
+                          e.evt.preventDefault();
+                          e.evt.stopPropagation?.();
+                          e.cancelBubble = true;
+                          if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                          if (isBoxSelecting()) return;
+                          onSelectCorridor?.(corridor.id, { keepContext: true });
+                          onSelectCorridorDoor?.(undefined);
+                          onCorridorConnectionContextMenu?.({
+                            corridorId: corridor.id,
+                            connectionId: connection.id,
+                            clientX: e.evt.clientX,
+                            clientY: e.evt.clientY,
+                            worldX: point.x,
+                            worldY: point.y
+                          });
+                        }}
+                      />
+                      <Circle x={point.x} y={point.y} radius={1.8} fill="#fee2e2" listening={false} />
+                    </Group>
+                  );
+                })}
+                {isSelectedCorridor && kind === 'poly' && !readOnly && !isDraftTarget
+                  ? points.map((p, idx) => (
+                      <Circle
+                        key={`${corridor.id}:v:${idx}`}
+                        ref={(node) => {
+                          if (!corridorVertexRefs.current[corridor.id]) corridorVertexRefs.current[corridor.id] = {};
+                          if (node) corridorVertexRefs.current[corridor.id][idx] = node;
+                          else if (corridorVertexRefs.current[corridor.id]) delete corridorVertexRefs.current[corridor.id][idx];
+                        }}
+                        x={p.x}
+                        y={p.y}
+                        radius={3.8}
+                        fill="#ffffff"
+                        stroke="#0f766e"
+                        strokeWidth={1.3}
+                        draggable={!panToolActive}
+                        onDragMove={() => {
+                          const line = corridorPolyLineRefs.current[corridor.id];
+                          const node = corridorVertexRefs.current[corridor.id]?.[idx];
+                          if (!line || !node) return;
+                          const next = points.flatMap((pt, i) => {
+                            const x = i === idx ? node.x() : pt.x;
+                            const y = i === idx ? node.y() : pt.y;
+                            return [x, y];
+                          });
+                          line.points(next);
+                          line.getLayer()?.batchDraw?.();
+                        }}
+                        onDragEnd={() => {
+                          const node = corridorVertexRefs.current[corridor.id]?.[idx];
+                          if (!node) return;
+                          const nextPoints = points.map((pt, i) =>
+                            i === idx ? { x: Number(node.x()), y: Number(node.y()) } : { x: pt.x, y: pt.y }
+                          );
+                          if (nextPoints.length < 3) return;
+                          if (nextPoints.some((pt) => !Number.isFinite(pt.x) || !Number.isFinite(pt.y))) return;
+                          onUpdateCorridor?.(corridor.id, { kind: 'poly', points: nextPoints });
+                        }}
+                      />
+                    ))
+                  : null}
+              </Group>
+            );
+          })}
+          {corridorDoorDraft?.corridorId && corridorDoorHover ? (
+            <>
+              <Group x={corridorDoorHover.x} y={corridorDoorHover.y} listening={false}>
+                <Circle radius={8} fill="rgba(146,64,14,0.26)" stroke="#92400e" strokeWidth={1.4} />
+                <Rect x={-2.8} y={-4.2} width={5.6} height={8.4} cornerRadius={1.2} stroke="#92400e" strokeWidth={1} fillEnabled={false} />
+                <Line points={[0, -4.2, 0, 4.2]} stroke="#92400e" strokeWidth={1} />
+              </Group>
+            </>
+          ) : null}
         </Layer>
 
         {/* Rooms layer */}
@@ -2964,6 +3669,18 @@ const getRoomBounds = (room: any) => {
               listening={false}
             />
           ) : null}
+          {previewCorridorDraftPolyLine ? (
+            <Line
+              points={previewCorridorDraftPolyLine}
+              closed={corridorDraftPolyPoints.length >= 3}
+              fill="rgba(14,116,144,0.08)"
+              stroke="#0e7490"
+              strokeWidth={1.5}
+              dash={[6, 6]}
+              lineJoin="round"
+              listening={false}
+            />
+          ) : null}
           {roomDrawMode === 'poly' && draftPolyPoints.length ? (
             <Circle
               x={draftPolyPoints[0].x}
@@ -2971,6 +3688,17 @@ const getRoomBounds = (room: any) => {
               radius={6}
               fill="#ffffff"
               stroke="#2563eb"
+              strokeWidth={1.5}
+              listening={false}
+            />
+          ) : null}
+          {corridorDrawMode === 'poly' && corridorDraftPolyPoints.length ? (
+            <Circle
+              x={corridorDraftPolyPoints[0].x}
+              y={corridorDraftPolyPoints[0].y}
+              radius={6}
+              fill="#ffffff"
+              stroke="#0e7490"
               strokeWidth={1.5}
               listening={false}
             />
@@ -3491,6 +4219,165 @@ const getRoomBounds = (room: any) => {
                 ) : null}
               </Group>
             );
+          })}
+        </Layer>
+
+        {/* Corridor doors overlay (kept above rooms so doors stay always clickable) */}
+        <Layer perfectDrawEnabled={false} listening={!toolMode}>
+          {((plan.corridors || []) as Corridor[]).map((corridor) => {
+            const points = getCorridorPolygonPoints(corridor);
+            if (points.length < 3) return null;
+            const doors = Array.isArray(corridor.doors) ? corridor.doors : [];
+            if (!doors.length) return null;
+            const isSelectedCorridor = selectedCorridorId === corridor.id;
+            const isDraftTarget = corridorDoorDraft?.corridorId === corridor.id;
+            return doors.map((door) => {
+              const anchor = getCorridorEdgePoint(points, Number(door.edgeIndex), Number(door.t));
+              if (!anchor) return null;
+              const isDoorSelected = selectedCorridorDoor?.corridorId === corridor.id && selectedCorridorDoor?.doorId === door.id;
+              const canDragDoor = (isDoorSelected || isSelectedCorridor) && !readOnly && !isDraftTarget;
+              const doorMode = (door as any).mode === 'auto_sensor' || (door as any).mode === 'automated' ? (door as any).mode : 'static';
+              const doorColor = doorMode === 'automated' ? '#16a34a' : doorMode === 'auto_sensor' ? '#2563eb' : '#92400e';
+              const resolveClientPoint = (e: any): { clientX: number; clientY: number } => {
+                const cx = Number((e?.evt as any)?.clientX);
+                const cy = Number((e?.evt as any)?.clientY);
+                if (Number.isFinite(cx) && Number.isFinite(cy)) return { clientX: cx, clientY: cy };
+                const stage = e?.target?.getStage?.();
+                const pos = stage?.getPointerPosition?.();
+                const rect = stage?.container?.()?.getBoundingClientRect?.();
+                if (pos && rect) return { clientX: Number(rect.left + pos.x), clientY: Number(rect.top + pos.y) };
+                return { clientX: 0, clientY: 0 };
+              };
+              const openDoorContextMenu = (e: any) => {
+                e.evt.preventDefault();
+                e.cancelBubble = true;
+                if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                if (isBoxSelecting()) return;
+                lastContextMenuAtRef.current = Date.now();
+                const point = resolveClientPoint(e);
+                onSelectCorridorDoor?.({ corridorId: corridor.id, doorId: door.id });
+                onCorridorDoorContextMenu?.({
+                  corridorId: corridor.id,
+                  doorId: door.id,
+                  clientX: point.clientX,
+                  clientY: point.clientY
+                });
+              };
+              const linkedRoomNames = Array.isArray((door as any).linkedRoomIds)
+                ? (door as any).linkedRoomIds
+                    .map((id: any) => roomNameById.get(String(id)))
+                    .filter(Boolean)
+                : [];
+              const hoverText = linkedRoomNames.length
+                ? `${t({ it: 'Stanze collegate', en: 'Linked rooms' })}: ${linkedRoomNames.join(', ')}`
+                : t({ it: 'Nessuna stanza collegata', en: 'No linked rooms' });
+              return (
+                <Group
+                  key={`${corridor.id}:${door.id}`}
+                  name="corridor-door-point"
+                  corridorId={corridor.id}
+                  doorId={door.id}
+                  onMouseDown={(e) => {
+                    const button = Number((e.evt as any)?.button ?? 0);
+                    const isContextIntent = button === 2 || !!(e.evt as any)?.ctrlKey;
+                    corridorDoorPointerRef.current = {
+                      corridorId: corridor.id,
+                      doorId: door.id,
+                      allowDrag: !isContextIntent && button === 0
+                    };
+                    if (!isContextIntent && button === 0) onSelectCorridorDoor?.({ corridorId: corridor.id, doorId: door.id });
+                    if (isContextIntent) openDoorContextMenu(e);
+                  }}
+                  onMouseEnter={(e) => {
+                    const point = resolveClientPoint(e);
+                    setDoorHoverCard({ clientX: point.clientX, clientY: point.clientY, text: hoverText });
+                  }}
+                  onMouseMove={(e) => {
+                    const point = resolveClientPoint(e);
+                    setDoorHoverCard((prev) => (prev ? { ...prev, clientX: point.clientX, clientY: point.clientY, text: hoverText } : { clientX: point.clientX, clientY: point.clientY, text: hoverText }));
+                  }}
+                  onMouseLeave={() => {
+                    setDoorHoverCard(null);
+                  }}
+                  onClick={(e) => {
+                    e.cancelBubble = true;
+                    if (e.evt?.button !== 0) return;
+                    onSelectCorridorDoor?.({ corridorId: corridor.id, doorId: door.id });
+                  }}
+                  onDblClick={(e) => {
+                    e.cancelBubble = true;
+                    if (e.evt?.button !== 0) return;
+                    onSelectCorridorDoor?.({ corridorId: corridor.id, doorId: door.id });
+                    onCorridorDoorDblClick?.({ corridorId: corridor.id, doorId: door.id });
+                  }}
+                  onContextMenu={(e) => {
+                    openDoorContextMenu(e);
+                  }}
+                >
+                  <Group
+                    x={anchor.x}
+                    y={anchor.y}
+                    draggable={canDragDoor}
+                    onDragStart={(e) => {
+                      const dragState = corridorDoorPointerRef.current;
+                      const allowDrag =
+                        !!dragState &&
+                        dragState.allowDrag &&
+                        dragState.corridorId === corridor.id &&
+                        dragState.doorId === door.id;
+                      if (allowDrag) return;
+                      e.target.stopDrag();
+                      e.target.position({ x: anchor.x, y: anchor.y });
+                      e.target.getLayer()?.batchDraw?.();
+                    }}
+                    onContextMenu={(e) => {
+                      openDoorContextMenu(e);
+                    }}
+                    onDragEnd={(e) => {
+                      e.cancelBubble = true;
+                      const dragState = corridorDoorPointerRef.current;
+                      const allowDrag =
+                        !!dragState &&
+                        dragState.allowDrag &&
+                        dragState.corridorId === corridor.id &&
+                        dragState.doorId === door.id;
+                      if (!allowDrag) {
+                        e.target.position({ x: anchor.x, y: anchor.y });
+                        e.target.getLayer()?.batchDraw?.();
+                        return;
+                      }
+                      const snap = getClosestCorridorEdgePoint(points, { x: e.target.x(), y: e.target.y() });
+                      if (!snap) {
+                        e.target.position({ x: anchor.x, y: anchor.y });
+                        e.target.getLayer()?.batchDraw?.();
+                        return;
+                      }
+                      const nextDoors = doors.map((entry) =>
+                        entry.id === door.id
+                          ? {
+                              ...entry,
+                              edgeIndex: snap.edgeIndex,
+                              t: Number(snap.t.toFixed(4))
+                            }
+                          : entry
+                      );
+                      onUpdateCorridor?.(corridor.id, { doors: nextDoors as any });
+                    }}
+                  >
+                    <Circle radius={13} fill="rgba(15,23,42,0.001)" strokeEnabled={false} />
+                    <Circle
+                      radius={isDoorSelected ? 8 : 7}
+                      fill={doorColor}
+                      stroke={isDoorSelected ? '#f8fafc' : '#e2e8f0'}
+                      strokeWidth={isDoorSelected ? 1.6 : 1}
+                    />
+                    <Rect x={-2.8} y={-4.2} width={5.6} height={8.4} cornerRadius={1.2} stroke="#ffffff" strokeWidth={1} fillEnabled={false} />
+                    <Line points={[0, -4.2, 0, 4.2]} stroke="#ffffff" strokeWidth={1} />
+                    <Circle x={1.2} y={0} radius={0.7} fill="#ffffff" />
+                  </Group>
+                </Group>
+              );
+            });
           })}
         </Layer>
 
@@ -4449,10 +5336,7 @@ const getRoomBounds = (room: any) => {
               />
             </>
           ) : null}
-        </Layer>
-
         {/* Overlays (drafts + selection) */}
-        <Layer perfectDrawEnabled={false} listening={!toolMode}>
           {(scaleLine || scaleDraft || wallDraft || measureDraft || quoteDraft || (pendingType && pendingPreview)) ? (
             <>
               {scaleLine ? (() => {
