@@ -290,6 +290,46 @@ export interface Room {
   points?: { x: number; y: number }[];
 }
 
+export interface CorridorDoor {
+  id: string;
+  edgeIndex: number;
+  t: number; // 0..1 position along the selected edge
+  edgeIndexTo?: number;
+  tTo?: number; // optional second point (A->B segment) on the corridor border
+  mode?: 'static' | 'auto_sensor' | 'automated';
+  automationUrl?: string;
+  linkedRoomIds?: string[];
+}
+
+export interface CorridorConnectionPoint {
+  id: string;
+  edgeIndex: number;
+  t: number; // 0..1 position along the selected edge
+  planIds: string[]; // target floor plans connected by this point
+  x?: number;
+  y?: number;
+}
+
+export interface Corridor {
+  id: string;
+  name: string;
+  showName?: boolean;
+  labelX?: number;
+  labelY?: number;
+  labelScale?: number;
+  color?: string;
+  kind?: 'rect' | 'poly';
+  // rect
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  // poly (world-space points)
+  points?: { x: number; y: number }[];
+  doors?: CorridorDoor[];
+  connections?: CorridorConnectionPoint[];
+}
+
 export interface FloorPlan {
   id: string;
   siteId: string;
@@ -312,6 +352,7 @@ export interface FloorPlan {
   views?: FloorPlanView[];
   revisions?: FloorPlanRevision[];
   rooms?: Room[];
+  corridors?: Corridor[];
   links?: PlanLink[];
   racks?: RackDefinition[];
   rackItems?: RackItem[];
@@ -353,6 +394,7 @@ export interface FloorPlanRevision {
   layers?: LayerDefinition[];
   views?: FloorPlanView[];
   rooms?: Room[];
+  corridors?: Corridor[];
   links?: PlanLink[];
   racks?: RackDefinition[];
   rackItems?: RackItem[];

@@ -322,10 +322,11 @@ export const defaultData = (): Client[] => {
         { id: 'walls', name: { it: 'Mura', en: 'Walls' }, color: WALL_LAYER_COLOR, order: 8, typeIds: DEFAULT_WALL_TYPES },
         { id: 'quotes', name: { it: 'Quote', en: 'Quotes' }, color: QUOTE_LAYER_COLOR, order: 9 },
         { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 10 },
-        { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 11, typeIds: DEFAULT_RACK_TYPES },
-        { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 12, typeIds: DEFAULT_TEXT_TYPES },
-        { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 13, typeIds: DEFAULT_IMAGE_TYPES },
-        { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 14, typeIds: DEFAULT_PHOTO_TYPES }
+        { id: 'corridors', name: { it: 'Corridoi', en: 'Corridors' }, color: '#94a3b8', order: 11 },
+        { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 12, typeIds: DEFAULT_RACK_TYPES },
+        { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 13, typeIds: DEFAULT_TEXT_TYPES },
+        { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 14, typeIds: DEFAULT_IMAGE_TYPES },
+        { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 15, typeIds: DEFAULT_PHOTO_TYPES }
       ],
       sites: [
         {
@@ -350,6 +351,7 @@ export const defaultData = (): Client[] => {
                 }
               ],
               rooms: [],
+              corridors: [],
               revisions: [],
               links: [],
               racks: [],

@@ -8,6 +8,33 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.6.0',
+    date: '2026-02-12',
+    type: 'minor',
+    notes: [
+      n(
+        'Porte corridoio: nuovo comando “Collega stanza” nel menu contestuale (multi-selezione stanze nella planimetria)',
+        'Corridor doors: new “Link room” action in the context menu (multi-room selection on the current floor plan)'
+      ),
+      n(
+        'Collega stanza: se il layer Stanze è nascosto viene mostrato automaticamente; ricerca per nome stanza e utenti contenuti nella stanza',
+        'Link room: if the Rooms layer is hidden it is automatically shown; search by room name and users assigned to each room'
+      ),
+      n(
+        'Collega stanza: stanza più vicina messa in cima con badge “(rilevata prossimità)” e rilevamento aggancio magnetico corridoio',
+        'Link room: nearest room is pinned on top with “(proximity detected)” badge and corridor magnetic-match detection'
+      ),
+      n(
+        'Porte: rendering spostato su layer overlay superiore per mantenerle sempre cliccabili; hover con elenco stanze collegate',
+        'Doors: rendering moved to a top overlay layer to keep doors always clickable; hover now shows linked rooms'
+      ),
+      n(
+        'Porte automatizzate: comando “Apri” eseguito in background senza aprire nuove schede, con feedback toast',
+        'Automated doors: “Open” command now runs in background without opening new tabs, with toast feedback'
+      )
+    ]
+  },
+  {
     version: '2.5.1',
     date: '2026-02-10',
     type: 'fix',

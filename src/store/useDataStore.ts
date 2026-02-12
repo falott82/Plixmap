@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
-import { Client, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackDefinition, RackItem, RackLink, Room, Site, WifiAntennaModel } from './types';
+import { Client, Corridor, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackDefinition, RackItem, RackLink, Room, Site, WifiAntennaModel } from './types';
 import {
   ALL_ITEMS_LAYER_ID,
   ALL_ITEMS_LAYER_COLOR,
@@ -60,13 +60,13 @@ interface DataState {
   updateSite: (id: string, payload: { name?: string; coords?: string }) => void;
   deleteSite: (id: string) => void;
   addFloorPlan: (siteId: string, name: string, imageUrl: string, width?: number, height?: number) => string;
-  updateFloorPlan: (id: string, payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height' | 'printArea' | 'scale'>>) => void;
+  updateFloorPlan: (id: string, payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height' | 'printArea' | 'scale' | 'corridors'>>) => void;
   deleteFloorPlan: (id: string) => void;
   reorderFloorPlans: (siteId: string, movingPlanId: string, targetPlanId: string, before?: boolean) => void;
   setFloorPlanContent: (
     floorPlanId: string,
     payload: Pick<FloorPlan, 'imageUrl' | 'width' | 'height' | 'objects' | 'rooms' | 'views'> &
-      Partial<Pick<FloorPlan, 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'printArea' | 'scale'>>
+      Partial<Pick<FloorPlan, 'corridors' | 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'printArea' | 'scale'>>
   ) => void;
   addObject: (
     floorPlanId: string,
@@ -416,6 +416,21 @@ const snapshotRevision = (
     scale: plan.scale ? { ...plan.scale } : undefined,
     views: normalizeViews(plan.views),
     rooms: plan.rooms ? plan.rooms.map((r) => ({ ...r })) : undefined,
+    corridors: plan.corridors
+      ? plan.corridors.map((c) => ({
+          ...c,
+          points: Array.isArray(c.points) ? c.points.map((p) => ({ ...p })) : undefined,
+          doors: Array.isArray(c.doors)
+            ? c.doors.map((d) => ({
+                ...d,
+                linkedRoomIds: Array.isArray((d as any)?.linkedRoomIds)
+                  ? (d as any).linkedRoomIds.map((id: any) => String(id))
+                  : undefined
+              }))
+            : undefined,
+          connections: Array.isArray(c.connections) ? c.connections.map((cp) => ({ ...cp, planIds: [...(cp.planIds || [])] })) : undefined
+        }))
+      : undefined,
     links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
     racks: plan.racks ? plan.racks.map((r) => ({ ...r })) : undefined,
     rackItems: plan.rackItems ? plan.rackItems.map((i) => ({ ...i })) : undefined,
@@ -435,13 +450,14 @@ const defaultLayers = (): LayerDefinition[] => [
   { id: 'walls', name: { it: 'Mura', en: 'Walls' }, color: WALL_LAYER_COLOR, order: 8, typeIds: DEFAULT_WALL_TYPES },
   { id: 'quotes', name: { it: 'Quote', en: 'Quotes' }, color: QUOTE_LAYER_COLOR, order: 9 },
   { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 10 },
-  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 11, typeIds: DEFAULT_RACK_TYPES },
-  { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 12, typeIds: DEFAULT_TEXT_TYPES },
-  { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 13, typeIds: DEFAULT_IMAGE_TYPES },
-  { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 14, typeIds: DEFAULT_PHOTO_TYPES }
+  { id: 'corridors', name: { it: 'Corridoi', en: 'Corridors' }, color: '#94a3b8', order: 11 },
+  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 12, typeIds: DEFAULT_RACK_TYPES },
+  { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 13, typeIds: DEFAULT_TEXT_TYPES },
+  { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 14, typeIds: DEFAULT_IMAGE_TYPES },
+  { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 15, typeIds: DEFAULT_PHOTO_TYPES }
 ];
 
-const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling', 'quotes']);
+const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
 
 const normalizeWifiAntennaModels = (models?: WifiAntennaModel[]): WifiAntennaModel[] => {
   const source = Array.isArray(models) && models.length ? models : DEFAULT_WIFI_ANTENNA_MODELS;
@@ -564,6 +580,56 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
   if (!Array.isArray(next.links)) next.links = [];
   next.views = normalizeViews(next.views) || [];
   if (!Array.isArray(next.rooms)) next.rooms = [];
+  if (!Array.isArray(next.corridors)) next.corridors = [];
+  if (Array.isArray(next.corridors)) {
+    next.corridors = next.corridors.map((corridor: Corridor) => {
+      const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as
+        | 'rect'
+        | 'poly';
+      return {
+        ...corridor,
+        showName: corridor?.showName !== false,
+        labelX: Number.isFinite(Number((corridor as any)?.labelX)) ? Number((corridor as any).labelX) : undefined,
+        labelY: Number.isFinite(Number((corridor as any)?.labelY)) ? Number((corridor as any).labelY) : undefined,
+        labelScale: Number.isFinite(Number((corridor as any)?.labelScale))
+          ? Math.max(0.6, Math.min(3, Number((corridor as any).labelScale)))
+          : 1,
+        kind,
+        points: Array.isArray(corridor?.points) ? corridor.points.map((p) => ({ x: Number(p?.x || 0), y: Number(p?.y || 0) })) : [],
+        doors: Array.isArray(corridor?.doors)
+          ? corridor.doors
+              .map((d) => ({
+                ...d,
+                edgeIndex: Number(d?.edgeIndex || 0),
+                t: Number(d?.t || 0),
+                edgeIndexTo: Number.isFinite(Number((d as any)?.edgeIndexTo)) ? Number((d as any).edgeIndexTo) : undefined,
+                tTo: Number.isFinite(Number((d as any)?.tTo)) ? Number((d as any).tTo) : undefined,
+                mode:
+                  (d as any)?.mode === 'auto_sensor' || (d as any)?.mode === 'automated' || (d as any)?.mode === 'static'
+                    ? (d as any).mode
+                    : 'static',
+                automationUrl: typeof (d as any)?.automationUrl === 'string' ? String((d as any).automationUrl) : undefined,
+                linkedRoomIds: Array.isArray((d as any)?.linkedRoomIds)
+                  ? (d as any).linkedRoomIds.map((id: any) => String(id)).filter(Boolean)
+                  : []
+              }))
+              .filter((d) => Number.isFinite(d.edgeIndex) && Number.isFinite(d.t))
+          : [],
+        connections: Array.isArray(corridor?.connections)
+          ? corridor.connections
+              .map((cp) => ({
+                ...cp,
+                edgeIndex: Number(cp?.edgeIndex || 0),
+                t: Number(cp?.t || 0),
+                planIds: Array.isArray(cp?.planIds) ? cp.planIds.map((id) => String(id)) : [],
+                x: Number.isFinite(Number((cp as any)?.x)) ? Number((cp as any).x) : undefined,
+                y: Number.isFinite(Number((cp as any)?.y)) ? Number((cp as any).y) : undefined
+              }))
+              .filter((cp) => Number.isFinite(cp.edgeIndex) && Number.isFinite(cp.t))
+          : []
+      };
+    });
+  }
   if (!Array.isArray(next.revisions)) next.revisions = [];
   if (!Array.isArray(next.objects)) next.objects = [];
   if (Array.isArray(next.objects)) {
@@ -797,6 +863,7 @@ export const useDataStore = create<DataState>()(
               width,
               height,
               links: [],
+              corridors: [],
               racks: [],
               rackItems: [],
               rackLinks: [],
@@ -861,6 +928,7 @@ export const useDataStore = create<DataState>()(
             ...(payload as any).scale !== undefined ? { scale: (payload as any).scale } : {},
             objects: Array.isArray(payload.objects) ? payload.objects : [],
             rooms: Array.isArray(payload.rooms) ? payload.rooms : [],
+            corridors: Array.isArray((payload as any).corridors) ? (payload as any).corridors : (plan as any).corridors,
             views: Array.isArray(payload.views) ? payload.views : [],
             links: Array.isArray((payload as any).links) ? (payload as any).links : (plan as any).links,
             racks: Array.isArray((payload as any).racks) ? (payload as any).racks : (plan as any).racks,
@@ -1115,6 +1183,7 @@ export const useDataStore = create<DataState>()(
             height: rev.height,
             objects: Array.isArray(rev.objects) ? rev.objects : [],
               rooms: Array.isArray(rev.rooms) ? rev.rooms : [],
+              corridors: Array.isArray((rev as any).corridors) ? (rev as any).corridors : [],
               views: Array.isArray(rev.views) ? rev.views : [],
               links: Array.isArray((rev as any).links) ? (rev as any).links : (plan as any).links,
               racks: Array.isArray((rev as any).racks) ? (rev as any).racks : (plan as any).racks,
@@ -1446,6 +1515,28 @@ export const useDataStore = create<DataState>()(
               })
             : [];
 
+          const nextCorridors = includeRooms
+            ? ((source as any).corridors || []).map((c: any) => ({
+                ...c,
+                id: nanoid(),
+                points: Array.isArray(c?.points) ? c.points.map((p: any) => ({ ...p })) : [],
+                doors: Array.isArray(c?.doors)
+                  ? c.doors.map((d: any) => ({
+                      ...d,
+                      id: nanoid(),
+                      linkedRoomIds: Array.isArray(d?.linkedRoomIds)
+                        ? d.linkedRoomIds
+                            .map((rid: any) => (includeRooms ? roomIdMap.get(String(rid)) : String(rid)))
+                            .filter(Boolean)
+                        : []
+                    }))
+                  : [],
+                connections: Array.isArray(c?.connections)
+                  ? c.connections.map((cp: any) => ({ ...cp, id: nanoid(), planIds: Array.isArray(cp?.planIds) ? [...cp.planIds] : [] }))
+                  : []
+              }))
+            : [];
+
           const objectIdMap = new Map<string, string>();
           const nextObjects = includeObjects
             ? (source.objects || []).map((o) => {
@@ -1528,6 +1619,7 @@ export const useDataStore = create<DataState>()(
             scale: source.scale ? { ...source.scale } : undefined,
             views: nextViews,
             rooms: nextRooms,
+            corridors: nextCorridors,
             revisions: [],
             links: nextLinks,
             racks: nextRacks,
