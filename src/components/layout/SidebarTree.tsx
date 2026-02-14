@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, FileText, History, Hourglass, Image as ImageIcon, Info, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, Search, Star, Trash, Users, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, FileText, History, Hourglass, Image as ImageIcon, Info, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, Search, ShieldAlert, Star, Trash, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -17,6 +17,7 @@ import ClientDirectoryModal from './ClientDirectoryModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import CloneFloorPlanModal from './CloneFloorPlanModal';
 import { fetchImportSummary, ImportSummaryRow } from '../../api/customImport';
+import EmergencyContactsModal from './EmergencyContactsModal';
 
 type TreeClient = {
   id: string;
@@ -169,6 +170,7 @@ const SidebarTree = () => {
   const [clientAttachmentsId, setClientAttachmentsId] = useState<string | null>(null);
   const [clientIpMapId, setClientIpMapId] = useState<string | null>(null);
   const [clientDirectoryId, setClientDirectoryId] = useState<string | null>(null);
+  const [clientEmergencyId, setClientEmergencyId] = useState<string | null>(null);
   const [importSummaryByClient, setImportSummaryByClient] = useState<Record<string, ImportSummaryRow>>({});
   const [confirmDelete, setConfirmDelete] = useState<{ kind: 'client' | 'plan'; id: string; label: string } | null>(null);
   const [missingPlansNotice, setMissingPlansNotice] = useState<{ clientName: string } | null>(null);
@@ -281,6 +283,24 @@ const SidebarTree = () => {
     const p = (permissions || []).find((x: any) => x.scopeType === 'client' && x.scopeId === clientNotesId);
     return p?.access === 'rw';
   }, [clientNotesId, permissions, user?.isAdmin]);
+  const canManageEmergencyDirectory = useMemo(() => {
+    if (!clientEmergencyId) return false;
+    if (isSuperAdmin) return true;
+    if (!user?.isAdmin) return false;
+    if ((permissions || []).some((perm: any) => perm.scopeType === 'client' && perm.scopeId === clientEmergencyId && perm.access === 'rw')) {
+      return true;
+    }
+    const clientEntry = clients.find((entry) => entry.id === clientEmergencyId);
+    if (!clientEntry) return false;
+    const siteIds = new Set((clientEntry.sites || []).map((site) => site.id));
+    const planIds = new Set((clientEntry.sites || []).flatMap((site) => site.floorPlans.map((plan) => plan.id)));
+    return (permissions || []).some((perm: any) => {
+      if (perm.access !== 'rw') return false;
+      if (perm.scopeType === 'site') return siteIds.has(perm.scopeId);
+      if (perm.scopeType === 'plan') return planIds.has(perm.scopeId);
+      return false;
+    });
+  }, [clientEmergencyId, clients, isSuperAdmin, permissions, user?.isAdmin]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -964,6 +984,17 @@ const SidebarTree = () => {
                 <FileText size={14} className="text-slate-500" />
                 {t({ it: 'Note cliente', en: 'Client notes' })}
               </button>
+              <button
+                onClick={() => {
+                  setClientEmergencyId(clientMenu.clientId);
+                  setClientMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({ it: 'Rubrica emergenze', en: 'Emergency directory' })}
+              >
+                <ShieldAlert size={14} className="text-rose-600" />
+                {t({ it: 'Rubrica emergenze', en: 'Emergency directory' })}
+              </button>
               {user?.isAdmin ? (
                 <button
                   onClick={() => {
@@ -1124,6 +1155,12 @@ const SidebarTree = () => {
       />
       <ClientIpMapModal open={!!clientIpMapId} client={ipMapClient || undefined} onClose={() => setClientIpMapId(null)} />
       <ClientDirectoryModal open={!!clientDirectoryId} client={directoryClient || undefined} onClose={() => setClientDirectoryId(null)} />
+      <EmergencyContactsModal
+        open={!!clientEmergencyId}
+        clientId={clientEmergencyId}
+        readOnly={!canManageEmergencyDirectory}
+        onClose={() => setClientEmergencyId(null)}
+      />
 
       <CloneFloorPlanModal
         open={!!clonePlan}

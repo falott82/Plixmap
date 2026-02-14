@@ -8,6 +8,111 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.7.0',
+    date: '2026-02-14',
+    type: 'minor',
+    notes: [
+      n(
+        'Planimetria: rework completo della scheda sicurezza in formato “specchietto” compatto, più sottile, trascinabile e ridimensionabile direttamente sulla mappa',
+        'Floor plan: complete rework of the safety card as a compact “quick panel”, thinner, draggable, and resizable directly on the map'
+      ),
+      n(
+        'Scheda sicurezza: intestazione ridotta, pulsanti +/- rimossi e controllo dimensione font solo da tastiera (+ / -) quando la scheda è selezionata, con toaster guida',
+        'Safety card: reduced header, +/- buttons removed, and keyboard-only font size control (+ / -) when the card is selected, with guidance toast'
+      ),
+      n(
+        'Scheda sicurezza: numeri utili convertiti in testo lineare orizzontale (sequenza “| Nome Numero | …”) per lettura rapida in poco spazio',
+        'Safety card: useful numbers now rendered as linear horizontal text (“| Name Number | …”) for quick reading in minimal space'
+      ),
+      n(
+        'Pan/zoom planimetria: migliorata fluidità movimento della scheda sicurezza con posizionamento GPU-friendly (translate3d + scale)',
+        'Floor plan pan/zoom: improved safety card motion smoothness with GPU-friendly positioning (translate3d + scale)'
+      ),
+      n(
+        'Documenti sicurezza: tabella con ricerca, ordinamento colonne, filtro “Nascondi scaduti” e stato “Validità” in switch (verde=valido, grigio=archiviato)',
+        'Safety documents: table now supports search, sortable columns, “Hide expired” filter, and “Validity” switch status (green=valid, gray=archived)'
+      ),
+      n(
+        'Verifiche sicurezza: nuova azione “Nuova verifica (archivia attuale)” che sposta la verifica corrente nello storico archiviato',
+        'Safety checks: new “New check (archive current)” action that moves the current check into archived history'
+      ),
+      n(
+        'Oggetti sicurezza: icone rese univoche tra tipi sicurezza e resa grafica mappa aggiornata con interno/icone rosse',
+        'Safety objects: icons are now unique across safety types and map rendering updated with red interior/icons'
+      )
+    ]
+  },
+  {
+    version: '2.6.2',
+    date: '2026-02-14',
+    type: 'fix',
+    notes: [
+      n(
+        'Rubrica emergenze: numeri utili colorati per scope (Generale/Cliente/Sede/Planimetria), ricerca rapida, modifica inline e colonna Scope aggiornata con il nome cliente/contesto',
+        'Emergency directory: useful numbers are now color-coded by scope (Global/Client/Site/Plan), with quick search, inline editing, and an updated Scope column showing client/context names'
+      ),
+      n(
+        'Rubrica emergenze: aggiunto flag “Mostra nel riquadro” per decidere quali numeri mostrare nella scheda sicurezza in planimetria',
+        'Emergency directory: added “Show in plan card” flag to choose which numbers are displayed in the floor-plan safety card'
+      ),
+      n(
+        'Planimetria: scheda sicurezza ancorata alla mappa (segue pan/zoom come un oggetto), ridimensionamento orizzontale, layout “Numeri utili | Punti di ritrovo” e rimozione etichetta “Trascina”',
+        'Floor plan: safety card now map-anchored (follows pan/zoom like an object), horizontal resize, “Useful numbers | Meeting points” layout, and removed “Drag” label'
+      ),
+      n(
+        'Palette workspace: aggiunto spazio di scorrimento inferiore per evitare il taglio del nome dell’ultimo oggetto',
+        'Workspace palette: added bottom scrolling space to prevent clipping of the last object label'
+      ),
+      n(
+        'Oggetti sicurezza: etichetta campo aggiornata in “Coordinate GPS oggetto”',
+        'Safety objects: field label updated to “Object GPS coordinates”'
+      ),
+      n(
+        'Modali documenti/storico sicurezza: risolto errore FocusTrap e ripristinata la piena modificabilità dei campi in inserimento',
+        'Safety document/history modals: fixed FocusTrap error and restored full field editability during data entry'
+      )
+    ]
+  },
+  {
+    version: '2.6.1',
+    date: '2026-02-14',
+    type: 'minor',
+    notes: [
+      n(
+        'Sicurezza: introdotto il layer dedicato “Sicurezza” con palette oggetti prevenzione/emergenza (estintori, DAE, allarmi, sprinkler, valvole, primo soccorso, ecc.)',
+        'Safety: added the dedicated “Safety” layer with a prevention/emergency object palette (extinguishers, AED, alarms, sprinklers, valves, first-aid, etc.)'
+      ),
+      n(
+        'Oggetti sicurezza: form completo in inserimento/modifica con campi Nome obbligatorio, descrizione, note, ultima verifica, azienda verifica, coordinate GPS, allegati documento e storico revisioni',
+        'Safety objects: full create/edit form with required Name, description, notes, last check, verifier company, GPS coordinates, document attachments and checks history'
+      ),
+      n(
+        'Impostazioni: nuova tab “Sicurezza” con catalogo dispositivi inseriti in mappa + porte emergenza, ricerca/ordinamento/export CSV filtrato, mirino planimetria, storico check e documenti',
+        'Settings: new “Safety” tab with catalog of mapped safety devices + emergency doors, filtered search/sort/CSV export, floor-plan crosshair preview, checks history and documents'
+      ),
+      n(
+        'Impostazioni > Oggetti: rimossa la voce Porte dal menu e aggiunta la sezione “Sicurezza” per i tipi oggetto sicurezza predefiniti',
+        'Settings > Objects: removed Doors from the menu and added the “Safety” section for built-in safety object types'
+      ),
+      n(
+        'Porte corridoio: aggiunta opzione booleana “Tagliafuoco” e codifica [AU]/[TF]/[AU+TF] nel registro sicurezza con tooltip esplicativo',
+        'Corridor doors: added boolean “Fire door” option and [AU]/[TF]/[AU+TF] tagging in safety registry with explanatory tooltip'
+      ),
+      n(
+        'Rubrica emergenze: nuova gestione da tasto destro cliente con scope Generale/Cliente/Sede/Planimetria, permessi (superadmin/admin gestione, utenti sola consultazione) e scheda punti di ritrovo',
+        'Emergency directory: new management from client right-click with Global/Client/Site/Plan scopes, permissions (superadmin/admin manage, users read-only) and emergency points sheet'
+      ),
+      n(
+        'Planimetria: con layer Sicurezza attivo compare una scheda emergenza compatta e trascinabile con numeri utili e punti di ritrovo della planimetria corrente',
+        'Floor plan: when Safety layer is active, a compact draggable emergency card appears with useful numbers and emergency points for the current floor plan'
+      ),
+      n(
+        'Export PDF: aggiunta opzione “Includi layer sicurezza” per controllare l’esportazione dei dispositivi sicurezza',
+        'PDF export: added “Include safety layer” option to control exporting safety devices'
+      )
+    ]
+  },
+  {
     version: '2.6.0',
     date: '2026-02-12',
     type: 'minor',

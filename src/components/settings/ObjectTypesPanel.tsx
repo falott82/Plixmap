@@ -5,9 +5,13 @@ import {
   ArrowUp,
   ArrowUpDown,
   CheckCircle2,
+  Crosshair,
+  Download,
   Eye,
   EyeOff,
+  ExternalLink,
   GripVertical,
+  History,
   Inbox,
   Info,
   Pencil,
@@ -38,17 +42,130 @@ import CustomFieldsModal from './CustomFieldsModal';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { createCustomFieldsBulk } from '../../api/customFields';
 import { useLang, useT } from '../../i18n/useT';
-import { Client, IconName, WifiAntennaModel } from '../../store/types';
+import { Client, Corridor, DoorVerificationEntry, FloorPlan, IconName, Room, WifiAntennaModel } from '../../store/types';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { isDeskType } from '../plan/deskTypes';
 import { WALL_TYPE_IDS, WIFI_DEFAULT_STANDARD, WIFI_STANDARD_OPTIONS } from '../../store/data';
 import { getWallTypeColor } from '../../utils/wallColors';
 import ConfirmDialog from '../ui/ConfirmDialog';
+import { isSecurityTypeId } from '../../store/security';
+
+type Point = { x: number; y: number };
+type DoorRegistrySortKey =
+  | 'clientName'
+  | 'siteName'
+  | 'planName'
+  | 'doorId'
+  | 'description'
+  | 'doorType'
+  | 'isEmergency'
+  | 'lastVerificationAt'
+  | 'verifierCompany'
+  | 'corridorName'
+  | 'nearestRoomName';
+
+type DoorRegistryRow = {
+  rowId: string;
+  clientId: string;
+  clientName: string;
+  siteId: string;
+  siteName: string;
+  planId: string;
+  planName: string;
+  corridorId: string;
+  corridorName: string;
+  doorId: string;
+  description: string;
+  doorType: string;
+  isEmergency: boolean;
+  lastVerificationAt: string;
+  verifierCompany: string;
+  nearestRoomName: string;
+  openUrl: string;
+  mode: string;
+  verificationHistory: DoorVerificationEntry[];
+  plan: FloorPlan;
+};
+
+const toRectPolygon = (x: number, y: number, width: number, height: number): Point[] => {
+  if (!(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) return [];
+  return [
+    { x, y },
+    { x: x + width, y },
+    { x: x + width, y: y + height },
+    { x, y: y + height }
+  ];
+};
+
+const roomPolygon = (room: Room): Point[] => {
+  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+  if (kind === 'poly' && Array.isArray(room?.points) && room.points.length >= 3) {
+    return room.points
+      .filter((p) => Number.isFinite(Number(p?.x)) && Number.isFinite(Number(p?.y)))
+      .map((p) => ({ x: Number(p.x), y: Number(p.y) }));
+  }
+  return toRectPolygon(Number(room?.x || 0), Number(room?.y || 0), Number(room?.width || 0), Number(room?.height || 0));
+};
+
+const corridorPolygon = (corridor: Corridor): Point[] => {
+  const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+  if (kind === 'poly' && Array.isArray(corridor?.points) && corridor.points.length >= 3) {
+    return corridor.points
+      .filter((p) => Number.isFinite(Number(p?.x)) && Number.isFinite(Number(p?.y)))
+      .map((p) => ({ x: Number(p.x), y: Number(p.y) }));
+  }
+  return toRectPolygon(
+    Number(corridor?.x || 0),
+    Number(corridor?.y || 0),
+    Number(corridor?.width || 0),
+    Number(corridor?.height || 0)
+  );
+};
+
+const polygonCentroid = (polygon: Point[]): Point | null => {
+  if (!polygon.length) return null;
+  let area2 = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    const cross = a.x * b.y - b.x * a.y;
+    area2 += cross;
+    cx += (a.x + b.x) * cross;
+    cy += (a.y + b.y) * cross;
+  }
+  if (Math.abs(area2) < 1e-6) {
+    const sum = polygon.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+    return { x: sum.x / polygon.length, y: sum.y / polygon.length };
+  }
+  return { x: cx / (3 * area2), y: cy / (3 * area2) };
+};
+
+const getDoorAnchor = (corridor: Corridor, door: any): Point | null => {
+  const points = corridorPolygon(corridor);
+  if (points.length < 2) return null;
+  const edgeIndex = Number(door?.edgeIndex);
+  const t = Number(door?.t);
+  if (!Number.isFinite(edgeIndex) || !Number.isFinite(t)) return null;
+  const idx = ((Math.floor(edgeIndex) % points.length) + points.length) % points.length;
+  const a = points[idx];
+  const b = points[(idx + 1) % points.length];
+  if (!a || !b) return null;
+  const clampedT = Math.max(0, Math.min(1, t));
+  return { x: a.x + (b.x - a.x) * clampedT, y: a.y + (b.y - a.y) * clampedT };
+};
+
+const polygonPath = (points: Point[]) => {
+  if (!points.length) return '';
+  return `${points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} Z`;
+};
 
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
   const lang = useLang();
   const { objectTypes, addObjectType, updateObjectType, updateClient } = useDataStore();
+  const allClients = useDataStore((s) => s.clients);
   const { push } = useToastStore();
   const user = useAuthStore((s) => s.user);
   const customFields = useCustomFieldsStore((s) => s.fields);
@@ -62,13 +179,17 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     const section = new URLSearchParams(search).get('section')?.toLowerCase();
     if (section === 'desks') return 'desks';
     if (section === 'walls') return 'walls';
+    if (section === 'doors') return 'security';
+    if (section === 'security') return 'security';
     if (section === 'wifi') return 'wifi';
     return 'objects';
   };
-  const [section, setSection] = useState<'objects' | 'desks' | 'walls' | 'wifi'>(() => resolveSection(location.search));
+  const [section, setSection] = useState<'objects' | 'desks' | 'walls' | 'doors' | 'wifi' | 'security'>(() => resolveSection(location.search));
   const isDesksSection = section === 'desks';
   const isWallsSection = section === 'walls';
+  const isDoorsSection = section === 'doors';
   const isWifiSection = section === 'wifi';
+  const isSecuritySection = section === 'security';
 
   const [customOpen, setCustomOpen] = useState(false);
   const [requestsOpen, setRequestsOpen] = useState(false);
@@ -106,6 +227,12 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     coverageSqm: ''
   });
   const [confirmDeleteWifiId, setConfirmDeleteWifiId] = useState<string | null>(null);
+  const [doorSort, setDoorSort] = useState<{ key: DoorRegistrySortKey; dir: 'asc' | 'desc' }>({
+    key: 'clientName',
+    dir: 'asc'
+  });
+  const [doorMapPreviewRow, setDoorMapPreviewRow] = useState<DoorRegistryRow | null>(null);
+  const [doorHistoryRow, setDoorHistoryRow] = useState<DoorRegistryRow | null>(null);
 
   useEffect(() => {
     const next = resolveSection(location.search);
@@ -127,7 +254,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     });
   }, [wifiModal]);
 
-  const setSectionAndUrl = (nextSection: 'objects' | 'desks' | 'walls' | 'wifi') => {
+  const setSectionAndUrl = (nextSection: 'objects' | 'desks' | 'walls' | 'doors' | 'wifi' | 'security') => {
     setSection(nextSection);
     const params = new URLSearchParams(location.search);
     params.set('section', nextSection);
@@ -220,23 +347,21 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const renderWifiSortIcon = useCallback(
     (key: WifiSortKey) => {
       if (wifiSort.key !== key) return <ArrowUpDown size={14} className="text-slate-400" />;
-      return wifiSort.dir === 'asc' ? (
-        <ArrowUp size={14} className="text-primary" />
-      ) : (
-        <ArrowDown size={14} className="text-primary" />
-      );
+      return wifiSort.dir === 'asc' ? <ArrowUp size={14} className="text-primary" /> : <ArrowDown size={14} className="text-primary" />;
     },
     [wifiSort.dir, wifiSort.key]
   );
 
   const enabledDefs = useMemo(() => {
-    if (isWallsSection) return [];
+    if (isWallsSection || isDoorsSection) return [];
     const term = q.trim().toLowerCase();
     const out: any[] = [];
     for (const id of enabled) {
       const d = defById.get(id);
       if (!d) continue;
       if (isWallType(d.id)) continue;
+      if ((d as any)?.category === 'door') continue;
+      if (isSecuritySection ? !isSecurityTypeId(d.id) : isSecurityTypeId(d.id)) continue;
       if (isDesksSection ? !isDeskType(d.id) : isDeskType(d.id)) continue;
       if (
         term &&
@@ -246,21 +371,23 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
       out.push(d);
     }
     return out;
-  }, [defById, enabled, isDesksSection, isWallType, isWallsSection, q]);
+  }, [defById, enabled, isDesksSection, isDoorsSection, isSecuritySection, isWallType, isWallsSection, q]);
 
   const availableDefs = useMemo(() => {
-    if (isWallsSection) return [];
+    if (isWallsSection || isDoorsSection) return [];
     const used = new Set(enabled);
     const list = (objectTypes || []).filter((d) => {
       if (used.has(d.id)) return false;
       if (isWallType(d.id)) return false;
+      if ((d as any)?.category === 'door') return false;
+      if (isSecuritySection ? !isSecurityTypeId(d.id) : isSecurityTypeId(d.id)) return false;
       return isDesksSection ? isDeskType(d.id) : !isDeskType(d.id);
     });
     const term = q.trim().toLowerCase();
     const sorted = list.slice().sort((a, b) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
     if (!term) return sorted;
     return sorted.filter((d) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term));
-  }, [enabled, isDesksSection, isWallType, isWallsSection, lang, objectTypes, q]);
+  }, [enabled, isDesksSection, isDoorsSection, isSecuritySection, isWallType, isWallsSection, lang, objectTypes, q]);
 
   const paletteDefs = useMemo(() => {
     const enabledIds = new Set(enabled);
@@ -276,6 +403,190 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     if (!term) return wallDefs;
     return wallDefs.filter((d) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term));
   }, [q, wallDefs]);
+  const doorTypeById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const def of objectTypes || []) {
+      if ((def as any)?.category === 'door') map.set(def.id, def);
+    }
+    return map;
+  }, [objectTypes]);
+  const doorRowsRaw = useMemo<DoorRegistryRow[]>(() => {
+    const rows: DoorRegistryRow[] = [];
+    for (const currentClient of allClients || []) {
+      for (const site of currentClient?.sites || []) {
+        for (const plan of site?.floorPlans || []) {
+          const roomCenters = (plan.rooms || [])
+            .map((room) => ({ room, center: polygonCentroid(roomPolygon(room)) }))
+            .filter((entry): entry is { room: Room; center: Point } => !!entry.center);
+          for (const corridor of (plan.corridors || []) as Corridor[]) {
+            for (const door of corridor?.doors || []) {
+              const typeDef = door?.catalogTypeId ? doorTypeById.get(door.catalogTypeId) : null;
+              const typeLabel = typeDef
+                ? ((typeDef?.name?.[lang] as string) || (typeDef?.name?.it as string) || typeDef.id)
+                : door?.catalogTypeId || t({ it: 'Non definito', en: 'Undefined' });
+              const isEmergency =
+                typeof (door as any)?.isEmergency === 'boolean' ? !!(door as any).isEmergency : !!typeDef?.doorConfig?.isEmergency;
+              const anchor = getDoorAnchor(corridor, door);
+              const nearestRoomName = anchor
+                ? roomCenters
+                    .map((entry) => ({
+                      name: String(entry.room?.name || ''),
+                      dist: Math.hypot(anchor.x - entry.center.x, anchor.y - entry.center.y)
+                    }))
+                    .sort((a, b) => a.dist - b.dist)[0]?.name || ''
+                : '';
+              const verificationHistory = (Array.isArray((door as any)?.verificationHistory) ? (door as any).verificationHistory : [])
+                .map((entry: any) => ({
+                  id: String(entry?.id || nanoid()),
+                  date: typeof entry?.date === 'string' ? String(entry.date).trim() || undefined : undefined,
+                  company: String(entry?.company || '').trim(),
+                  notes: typeof entry?.notes === 'string' ? String(entry.notes).trim() || undefined : undefined,
+                  createdAt: Number.isFinite(Number(entry?.createdAt)) ? Number(entry.createdAt) : Date.now()
+                }))
+                .filter((entry: DoorVerificationEntry) => !!entry.company || !!entry.date)
+                .sort((a: DoorVerificationEntry, b: DoorVerificationEntry) => b.createdAt - a.createdAt);
+              rows.push({
+                rowId: `${currentClient.id}:${site.id}:${plan.id}:${corridor.id}:${door.id}`,
+                clientId: currentClient.id,
+                clientName: String(currentClient.name || ''),
+                siteId: site.id,
+                siteName: String(site.name || ''),
+                planId: plan.id,
+                planName: String(plan.name || ''),
+                corridorId: corridor.id,
+                corridorName: String(corridor.name || ''),
+                doorId: String(door?.id || ''),
+                description: String((door as any)?.description || '').trim(),
+                doorType: typeLabel,
+                isEmergency,
+                lastVerificationAt: String((door as any)?.lastVerificationAt || ''),
+                verifierCompany: String((door as any)?.verifierCompany || ''),
+                nearestRoomName,
+                openUrl: String((door as any)?.automationUrl || '').trim(),
+                mode: String((door as any)?.mode || 'static'),
+                verificationHistory,
+                plan
+              });
+            }
+          }
+        }
+      }
+    }
+    return rows;
+  }, [allClients, doorTypeById, lang, t]);
+  const toggleDoorSort = useCallback((key: DoorRegistrySortKey) => {
+    setDoorSort((prev) => {
+      if (prev.key === key) return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+      return { key, dir: 'asc' };
+    });
+  }, []);
+  const renderDoorSortIcon = useCallback(
+    (key: DoorRegistrySortKey) => {
+      if (doorSort.key !== key) return <ArrowUpDown size={13} className="text-slate-400" />;
+      return doorSort.dir === 'asc' ? <ArrowUp size={13} className="text-primary" /> : <ArrowDown size={13} className="text-primary" />;
+    },
+    [doorSort.dir, doorSort.key]
+  );
+  const filteredDoorRows = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    const list = term
+      ? doorRowsRaw.filter((row) =>
+          `${row.clientName} ${row.siteName} ${row.planName} ${row.doorId} ${row.description} ${row.doorType} ${row.isEmergency ? 'emergency emergenza yes si' : 'no'} ${row.lastVerificationAt} ${row.verifierCompany} ${row.corridorName} ${row.nearestRoomName}`
+            .toLowerCase()
+            .includes(term)
+        )
+      : doorRowsRaw.slice();
+    const compareText = (a: string, b: string) => a.localeCompare(b, lang, { sensitivity: 'base' });
+    list.sort((a, b) => {
+      const dir = doorSort.dir === 'asc' ? 1 : -1;
+      let base = 0;
+      switch (doorSort.key) {
+        case 'isEmergency':
+          base = Number(a.isEmergency) - Number(b.isEmergency);
+          break;
+        case 'clientName':
+          base = compareText(a.clientName, b.clientName);
+          break;
+        case 'siteName':
+          base = compareText(a.siteName, b.siteName);
+          break;
+        case 'planName':
+          base = compareText(a.planName, b.planName);
+          break;
+        case 'doorId':
+          base = compareText(a.doorId, b.doorId);
+          break;
+        case 'description':
+          base = compareText(a.description, b.description);
+          break;
+        case 'doorType':
+          base = compareText(a.doorType, b.doorType);
+          break;
+        case 'lastVerificationAt':
+          base = compareText(a.lastVerificationAt, b.lastVerificationAt);
+          break;
+        case 'verifierCompany':
+          base = compareText(a.verifierCompany, b.verifierCompany);
+          break;
+        case 'corridorName':
+          base = compareText(a.corridorName, b.corridorName);
+          break;
+        case 'nearestRoomName':
+          base = compareText(a.nearestRoomName, b.nearestRoomName);
+          break;
+      }
+      if (base !== 0) return base * dir;
+      return compareText(a.rowId, b.rowId) * dir;
+    });
+    return list;
+  }, [doorRowsRaw, doorSort.dir, doorSort.key, lang, q]);
+  const doorMapPreviewData = useMemo(() => {
+    if (!doorMapPreviewRow) return null;
+    const plan = doorMapPreviewRow.plan;
+    const corridors = ((plan?.corridors || []) as Corridor[]).filter(Boolean);
+    const rooms = (plan?.rooms || []).filter(Boolean);
+    const corridorShapes = corridors.map((corridor) => ({ corridor, points: corridorPolygon(corridor) })).filter((entry) => entry.points.length >= 3);
+    const roomShapes = rooms.map((room) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) })).filter((entry) => entry.points.length >= 3);
+    const doorAnchors = corridorShapes.flatMap((entry) =>
+      (entry.corridor.doors || [])
+        .map((door) => ({ door, point: getDoorAnchor(entry.corridor, door), corridorId: entry.corridor.id }))
+        .filter((item): item is { door: any; point: Point; corridorId: string } => !!item.point)
+    );
+    const allPoints: Point[] = [
+      ...corridorShapes.flatMap((entry) => entry.points),
+      ...roomShapes.flatMap((entry) => entry.points),
+      ...doorAnchors.map((entry) => entry.point)
+    ];
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const p of allPoints) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+      minX = 0;
+      minY = 0;
+      maxX = Number(plan?.width || 1200) || 1200;
+      maxY = Number(plan?.height || 800) || 800;
+    }
+    if (Number.isFinite(Number(plan?.width)) && Number.isFinite(Number(plan?.height)) && Number(plan?.width) > 0 && Number(plan?.height) > 0) {
+      minX = Math.min(minX, 0);
+      minY = Math.min(minY, 0);
+      maxX = Math.max(maxX, Number(plan?.width));
+      maxY = Math.max(maxY, Number(plan?.height));
+    }
+    const pad = 24;
+    return {
+      corridorShapes,
+      roomShapes,
+      doorAnchors,
+      viewBox: `${minX - pad} ${minY - pad} ${Math.max(100, maxX - minX + pad * 2)} ${Math.max(100, maxY - minY + pad * 2)}`
+    };
+  }, [doorMapPreviewRow]);
 
   const iconOptionsAll: IconName[] = [
     'user',
@@ -571,6 +882,86 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     setConfirmDeleteWifiId(null);
   }, [client, confirmDeleteWifiId, push, t, updateClient, wifiModels]);
 
+  const exportDoorRowsCsv = useCallback(() => {
+    if (!filteredDoorRows.length) {
+      push(t({ it: 'Nessuna porta da esportare.', en: 'No doors to export.' }), 'info');
+      return;
+    }
+    const headers = [
+      'Cliente',
+      'Sede',
+      'Planimetria',
+      'ID porta',
+      'Descrizione porta',
+      'Tipo porta',
+      'Porta emergenza',
+      'Ultima revisione (emergenza)',
+      'Ultima azienda revisionatrice',
+      'Nome corridoio',
+      'Ufficio piu vicino'
+    ];
+    const escapeCsv = (value: string) => {
+      const text = String(value ?? '');
+      if (!/[;"\n\r]/.test(text)) return text;
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+    const lines = [
+      headers.join(';'),
+      ...filteredDoorRows.map((row) =>
+        [
+          row.clientName,
+          row.siteName,
+          row.planName,
+          row.doorId,
+          row.description,
+          row.doorType,
+          row.isEmergency ? 'SI' : 'NO',
+          row.isEmergency ? row.lastVerificationAt || '' : '',
+          row.isEmergency ? row.verifierCompany || '' : '',
+          row.corridorName,
+          row.nearestRoomName
+        ]
+          .map((item) => escapeCsv(String(item)))
+          .join(';')
+      )
+    ];
+    const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    a.download = `deskly-porte-${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    push(
+      t({
+        it: `Export completato (${filteredDoorRows.length} righe).`,
+        en: `Export completed (${filteredDoorRows.length} rows).`
+      }),
+      'success'
+    );
+  }, [filteredDoorRows, push, t]);
+
+  const openDoorRemote = useCallback(
+    (row: DoorRegistryRow) => {
+      const url = String(row.openUrl || '').trim();
+      if (!url) {
+        push(t({ it: 'URL di apertura non configurato.', en: 'Open URL not configured.' }), 'info');
+        return;
+      }
+      try {
+        const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_deskly_open_ts=${Date.now()}`;
+        fetch(requestUrl, { method: 'GET', mode: 'no-cors', cache: 'no-store', keepalive: true }).catch(() => {});
+        push(t({ it: 'Comando apertura inviato.', en: 'Open command sent.' }), 'success');
+      } catch {
+        push(t({ it: 'Impossibile inviare il comando di apertura.', en: 'Unable to send open command.' }), 'danger');
+      }
+    },
+    [push, t]
+  );
+
   const normalizeTypeId = (value: string) =>
     value
       .trim()
@@ -849,6 +1240,16 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
           {t({ it: 'Mura', en: 'Walls' })}
         </button>
         <button
+          onClick={() => setSectionAndUrl('security')}
+          className={`rounded-full border px-4 py-2 text-sm font-semibold ${
+            section === 'security'
+              ? 'border-rose-300 bg-rose-100 text-rose-700'
+              : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          }`}
+        >
+          {t({ it: 'Sicurezza', en: 'Safety' })}
+        </button>
+        <button
           onClick={() => setSectionAndUrl('wifi')}
           className={`rounded-full border px-4 py-2 text-sm font-semibold ${
             section === 'wifi'
@@ -867,6 +1268,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                 ? t({ it: 'Mura (tipologie)', en: 'Walls (types)' })
                 : isDesksSection
                   ? t({ it: 'Scrivanie (palette)', en: 'Desks (palette)' })
+                  : isSecuritySection
+                    ? t({ it: 'Sicurezza (palette)', en: 'Safety (palette)' })
+                  : isDoorsSection
+                    ? t({ it: 'Porte (registro mappa)', en: 'Doors (map registry)' })
                   : isWifiSection
                     ? t({ it: 'WiFi Antenna (catalogo)', en: 'WiFi Antenna (catalog)' })
                     : t({ it: 'Oggetti (palette)', en: 'Objects (palette)' })}
@@ -878,6 +1283,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                   ? 'Elenco dei materiali muro con attenuazione e colore.'
                   : isDesksSection
                     ? 'Le scrivanie sono predefinite e non possono essere create o richieste. Puoi decidere quali mostrare nella palette con l’icona occhio.'
+                    : isSecuritySection
+                      ? 'Oggetti sicurezza predefiniti. Puoi decidere quali mostrare nella palette Sicurezza della mappa.'
+                    : isDoorsSection
+                      ? 'Registro porte inserite in planimetria: filtra, ordina, esporta, apri la porta e visualizza storico/modale mirino.'
                     : isWifiSection
                       ? 'Catalogo antenne WiFi usato per la selezione rapida quando aggiungi un’antenna.'
                       : 'Qui puoi mostrare o nascondere gli oggetti nella palette con l’icona occhio. Le scrivanie hanno una sezione dedicata in planimetria. Tasto destro o ingranaggio per i campi personalizzati.',
@@ -885,6 +1294,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                   ? 'List of wall materials with attenuation and color.'
                   : isDesksSection
                     ? 'Desks are built-in and cannot be created or requested. You can choose which ones appear in the palette with the eye icon.'
+                    : isSecuritySection
+                      ? 'Built-in safety objects. You can choose which ones appear in the Safety palette on the map.'
+                    : isDoorsSection
+                      ? 'Registry of doors placed on floor plans: filter, sort, export, trigger open command, and inspect history/target map.'
                     : isWifiSection
                       ? 'WiFi antenna catalog used for quick selection when adding an antenna.'
                       : 'Show or hide objects in the palette with the eye icon. Desks have a dedicated section in the floor plan. Right-click or the cog for custom fields.'
@@ -894,19 +1307,29 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
             </span>
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            {isWallsSection
-              ? t({
-                  it: 'Qui trovi tutte le tipologie di muro disponibili.',
-                  en: 'Here you can see all available wall types.'
-                })
-              : isDesksSection
+              {isWallsSection
                 ? t({
-                    it: 'La palette è per-utente: puoi nascondere o mostrare le scrivanie nella sezione dedicata.',
-                    en: 'The palette is per-user: you can hide or show desks in the dedicated section.'
+                    it: 'Qui trovi tutte le tipologie di muro disponibili.',
+                    en: 'Here you can see all available wall types.'
                   })
-                : isWifiSection
+                : isDesksSection
                   ? t({
-                      it: 'Aggiungi o modifica modelli: tutti i campi sono obbligatori.',
+                      it: 'La palette è per-utente: puoi nascondere o mostrare le scrivanie nella sezione dedicata.',
+                      en: 'The palette is per-user: you can hide or show desks in the dedicated section.'
+                    })
+                : isSecuritySection
+                  ? t({
+                      it: 'Mostra solo i tipi sicurezza predefiniti. Le porte si gestiscono dal tab “Sicurezza”.',
+                      en: 'Shows only built-in safety types. Doors are managed from the “Safety” tab.'
+                    })
+                : isDoorsSection
+                  ? t({
+                        it: 'Mostra solo le porte realmente inserite nelle planimetrie. Se non esistono porte, la lista rimane vuota.',
+                        en: 'Shows only doors actually placed on floor plans. If no doors exist, the list remains empty.'
+                      })
+                  : isWifiSection
+                    ? t({
+                        it: 'Aggiungi o modifica modelli: tutti i campi sono obbligatori.',
                       en: 'Add or edit models: all fields are required.'
                     })
                   : t({
@@ -920,6 +1343,20 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
               {t({ it: 'Tipologie muro predefinite.', en: 'Built-in wall types.' })}
             </div>
+          ) : isSecuritySection ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              {t({ it: 'Oggetti sicurezza predefiniti: nessuna creazione o richiesta.', en: 'Built-in safety objects: no creation or requests.' })}
+            </div>
+          ) : isDoorsSection ? (
+            <button
+              onClick={exportDoorRowsCsv}
+              disabled={!filteredDoorRows.length}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title={t({ it: 'Esporta CSV (righe filtrate)', en: 'Export CSV (filtered rows)' })}
+            >
+              <Download size={16} />
+              {t({ it: 'Export CSV', en: 'Export CSV' })}
+            </button>
           ) : isWifiSection ? (
             <button
               onClick={() => setWifiModal({ mode: 'create' })}
@@ -1136,6 +1573,152 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
             </table>
           </div>
         </div>
+      ) : isDoorsSection ? (
+        <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+          <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+            <Search size={16} className="text-slate-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="w-full bg-transparent text-sm outline-none"
+              placeholder={t({ it: 'Cerca cliente, sede, planimetria, porta, corridoio, ufficio…', en: 'Search client, site, floor plan, door, corridor, office…' })}
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1850px] text-sm">
+              <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('clientName')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Cliente', en: 'Client' })} {renderDoorSortIcon('clientName')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('siteName')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Sede', en: 'Site' })} {renderDoorSortIcon('siteName')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('planName')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Planimetria', en: 'Floor plan' })} {renderDoorSortIcon('planName')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('doorId')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'ID porta', en: 'Door ID' })} {renderDoorSortIcon('doorId')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('description')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Descrizione porta', en: 'Door description' })} {renderDoorSortIcon('description')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('doorType')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Tipo porta', en: 'Door type' })} {renderDoorSortIcon('doorType')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-center">
+                    <button type="button" onClick={() => toggleDoorSort('isEmergency')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Porta emergenza', en: 'Emergency door' })} {renderDoorSortIcon('isEmergency')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('lastVerificationAt')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Ultima revisione', en: 'Last revision' })} {renderDoorSortIcon('lastVerificationAt')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('verifierCompany')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Ultima azienda revisionatrice', en: 'Last verifier company' })} {renderDoorSortIcon('verifierCompany')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('corridorName')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Nome corridoio', en: 'Corridor name' })} {renderDoorSortIcon('corridorName')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-left">
+                    <button type="button" onClick={() => toggleDoorSort('nearestRoomName')} className="inline-flex items-center gap-1 hover:text-slate-800">
+                      {t({ it: 'Ufficio più vicino', en: 'Nearest office' })} {renderDoorSortIcon('nearestRoomName')}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredDoorRows.length ? (
+                  filteredDoorRows.map((row) => (
+                    <tr key={row.rowId} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-semibold text-ink">{row.clientName || '—'}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.siteName || '—'}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.planName || '—'}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-slate-700">{row.doorId || '—'}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.description || '—'}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.doorType || '—'}</td>
+                      <td className="px-3 py-2 text-center">
+                        {row.isEmergency ? (
+                          <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                            {t({ it: 'Sì', en: 'Yes' })}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-slate-700">{row.isEmergency ? row.lastVerificationAt || '—' : '—'}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.isEmergency ? row.verifierCompany || '—' : '—'}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.corridorName || '—'}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.nearestRoomName || '—'}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => setDoorMapPreviewRow(row)}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                            title={t({ it: 'Mirino: mostra su planimetria', en: 'Crosshair: show on floor plan' })}
+                          >
+                            <Crosshair size={14} />
+                          </button>
+                          {row.openUrl ? (
+                            <button
+                              onClick={() => openDoorRemote(row)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              title={t({ it: 'Apri porta', en: 'Open door' })}
+                            >
+                              <ExternalLink size={14} />
+                            </button>
+                          ) : null}
+                          {row.isEmergency ? (
+                            <button
+                              onClick={() => setDoorHistoryRow(row)}
+                              className="relative flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                              title={t({ it: 'Storico verifiche', en: 'Verification history' })}
+                            >
+                              <History size={14} />
+                              {row.verificationHistory.length ? (
+                                <span className="absolute -right-1 -top-1 rounded-full bg-white px-1 text-[9px] font-bold text-rose-700">
+                                  {row.verificationHistory.length}
+                                </span>
+                              ) : null}
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={12} className="px-3 py-8 text-center text-sm text-slate-500">
+                      {t({
+                        it: 'Nessuna porta trovata con i filtri correnti.',
+                        en: 'No doors found with current filters.'
+                      })}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
         <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
           <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
@@ -1147,6 +1730,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
               placeholder={
                 isWallsSection
                   ? t({ it: 'Cerca muri…', en: 'Search walls…' })
+                  : isDoorsSection
+                    ? t({ it: 'Cerca porte…', en: 'Search doors…' })
+                  : isSecuritySection
+                    ? t({ it: 'Cerca dispositivi sicurezza…', en: 'Search safety devices…' })
                   : isDesksSection
                     ? t({ it: 'Cerca scrivanie…', en: 'Search desks…' })
                     : t({ it: 'Cerca oggetti…', en: 'Search objects…' })
@@ -1934,6 +2521,131 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                       {t({ it: 'Crea', en: 'Create' })}
                     </button>
                   </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!doorMapPreviewRow} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setDoorMapPreviewRow(null)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-black/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <Dialog.Panel className="w-full max-w-6xl modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">{t({ it: 'Mirino porta su planimetria', en: 'Door crosshair on floor plan' })}</Dialog.Title>
+                    <button onClick={() => setDoorMapPreviewRow(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                  {doorMapPreviewRow ? (
+                    <>
+                      <div className="mt-2 text-xs text-slate-600">
+                        <span className="font-semibold">{doorMapPreviewRow.clientName || '-'}</span> ·{' '}
+                        <span className="font-semibold">{doorMapPreviewRow.siteName || '-'}</span> ·{' '}
+                        <span className="font-semibold">{doorMapPreviewRow.planName || '-'}</span> ·{' '}
+                        <span>{t({ it: 'Porta', en: 'Door' })}: </span>
+                        <span className="font-mono">{doorMapPreviewRow.doorId}</span>
+                      </div>
+                      <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                        <svg viewBox={doorMapPreviewData?.viewBox || '0 0 100 100'} className="h-[68vh] w-full">
+                          {doorMapPreviewData?.corridorShapes.map((entry) => (
+                            <path key={`c-${entry.corridor.id}`} d={polygonPath(entry.points)} fill="#e2e8f0" stroke="#64748b" strokeWidth={2} opacity={0.95} />
+                          ))}
+                          {doorMapPreviewData?.roomShapes.map((entry) => (
+                            <Fragment key={`r-${entry.room.id}`}>
+                              <path d={polygonPath(entry.points)} fill="rgba(59,130,246,0.08)" stroke="#3b82f6" strokeWidth={1.6} />
+                              {entry.center ? (
+                                <text
+                                  x={entry.center.x}
+                                  y={entry.center.y}
+                                  fill="#1e3a8a"
+                                  fontSize={14}
+                                  textAnchor="middle"
+                                  dominantBaseline="middle"
+                                  style={{ fontWeight: 700 }}
+                                >
+                                  {entry.room.name}
+                                </text>
+                              ) : null}
+                            </Fragment>
+                          ))}
+                          {doorMapPreviewData?.doorAnchors.map((entry) => {
+                            const isSelected =
+                              entry.corridorId === doorMapPreviewRow.corridorId && String(entry.door?.id || '') === String(doorMapPreviewRow.doorId || '');
+                            const isEmergency = !!(entry.door as any)?.isEmergency;
+                            return (
+                              <circle
+                                key={`d-${entry.corridorId}-${entry.door.id}`}
+                                cx={entry.point.x}
+                                cy={entry.point.y}
+                                r={isSelected ? 6.5 : 4.8}
+                                fill={isSelected ? '#f97316' : isEmergency ? '#ef4444' : '#334155'}
+                                stroke={isSelected ? '#7c2d12' : '#ffffff'}
+                                strokeWidth={2}
+                              />
+                            );
+                          })}
+                        </svg>
+                      </div>
+                    </>
+                  ) : null}
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!doorHistoryRow} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setDoorHistoryRow(null)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-black/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">
+                      {t({ it: 'Storico verifiche porta emergenza', en: 'Emergency door verification history' })}
+                    </Dialog.Title>
+                    <button onClick={() => setDoorHistoryRow(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                  {doorHistoryRow ? (
+                    <>
+                      <div className="mt-2 text-xs text-slate-600">
+                        {doorHistoryRow.clientName} · {doorHistoryRow.siteName} · {doorHistoryRow.planName} · {t({ it: 'Porta', en: 'Door' })}:{' '}
+                        <span className="font-mono">{doorHistoryRow.doorId}</span>
+                      </div>
+                      <div className="mt-4 max-h-[60vh] overflow-auto rounded-2xl border border-slate-200 bg-white">
+                        {(doorHistoryRow.verificationHistory || []).length ? (
+                          <div className="divide-y divide-slate-100">
+                            {doorHistoryRow.verificationHistory.map((entry) => (
+                              <div key={entry.id} className="px-4 py-3">
+                                <div className="text-sm font-semibold text-ink">{entry.company || '—'}</div>
+                                <div className="mt-1 text-xs text-slate-600">
+                                  {t({ it: 'Data verifica', en: 'Check date' })}: {entry.date || '—'}
+                                </div>
+                                {entry.notes ? <div className="mt-1 text-xs text-slate-600">{entry.notes}</div> : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="px-4 py-6 text-sm text-slate-500">
+                            {t({ it: 'Nessuna verifica registrata per questa porta.', en: 'No checks registered for this door.' })}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : null}
                 </Dialog.Panel>
               </Transition.Child>
             </div>

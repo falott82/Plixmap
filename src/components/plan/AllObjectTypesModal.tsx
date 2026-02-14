@@ -5,6 +5,7 @@ import { ObjectTypeDefinition } from '../../store/types';
 import Icon from '../ui/Icon';
 import { useLang, useT } from '../../i18n/useT';
 import { isDeskType } from './deskTypes';
+import { isSecurityTypeId } from '../../store/security';
 
 interface Props {
   open: boolean;
@@ -13,14 +14,14 @@ interface Props {
   onPick: (typeId: string) => void;
   paletteTypeIds?: string[];
   onAddToPalette?: (typeId: string) => void;
-  defaultTab?: 'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes';
+  defaultTab?: 'all' | 'objects' | 'security' | 'desks' | 'walls' | 'text' | 'notes';
 }
 
 const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAddToPalette, defaultTab = 'all' }: Props) => {
   const t = useT();
   const lang = useLang();
   const [q, setQ] = useState('');
-  const [tab, setTab] = useState<'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes'>(defaultTab);
+  const [tab, setTab] = useState<'all' | 'objects' | 'security' | 'desks' | 'walls' | 'text' | 'notes'>(defaultTab);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -33,6 +34,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
       walls: { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', text: '#b45309' },
       text: { border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.16)', text: '#0284c7' },
       notes: { border: '#facc15', bg: 'rgba(250, 204, 21, 0.18)', text: '#a16207' },
+      security: { border: '#f43f5e', bg: 'rgba(244, 63, 94, 0.15)', text: '#be123c' },
       objects: { border: '#e2e8f0', bg: '#ffffff', text: '#475569' }
     }),
     []
@@ -52,7 +54,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
   }, [context]);
 
   const sortedDefs = useMemo(() => {
-    const list = (defs || []).slice();
+    const list = (defs || []).filter((d) => d.category !== 'door').slice();
     list.sort((a, b) => ((a?.name?.[lang] || a.id) as string).localeCompare((b?.name?.[lang] || b.id) as string));
     return list;
   }, [defs, lang]);
@@ -71,12 +73,14 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
     () => sortedDefs.filter((d) => d.category === 'wall' || String(d.id).startsWith('wall_')),
     [sortedDefs]
   );
+  const allSecurityDefs = useMemo(() => sortedDefs.filter((d) => isSecurityTypeId(d.id)), [sortedDefs]);
   const allTextDefs = useMemo(() => sortedDefs.filter((d) => d.id === 'text'), [sortedDefs]);
   const allNoteDefs = useMemo(() => sortedDefs.filter((d) => d.id === 'postit'), [sortedDefs]);
   const allOtherDefs = useMemo(
     () =>
       sortedDefs.filter(
         (d) =>
+          !isSecurityTypeId(d.id) &&
           !isDeskType(d.id) &&
           !(d.category === 'wall' || String(d.id).startsWith('wall_')) &&
           d.id !== 'text' &&
@@ -90,6 +94,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
     () => filtered.filter((d) => d.category === 'wall' || String(d.id).startsWith('wall_')),
     [filtered]
   );
+  const securityDefs = useMemo(() => filtered.filter((d) => isSecurityTypeId(d.id)), [filtered]);
   const textDefs = useMemo(() => filtered.filter((d) => d.id === 'text'), [filtered]);
   const noteDefs = useMemo(() => filtered.filter((d) => d.id === 'postit'), [filtered]);
   const allDefs = useMemo(() => filtered, [filtered]);
@@ -97,6 +102,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
     () =>
       filtered.filter(
         (d) =>
+          !isSecurityTypeId(d.id) &&
           !isDeskType(d.id) &&
           !(d.category === 'wall' || String(d.id).startsWith('wall_')) &&
           d.id !== 'text' &&
@@ -111,6 +117,8 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
       ? deskDefs
       : tab === 'walls'
         ? wallDefs
+        : tab === 'security'
+          ? securityDefs
         : tab === 'text'
           ? textDefs
           : tab === 'notes'
@@ -126,6 +134,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
         ? 'all'
         : (defaultTab === 'desks' && allDeskDefs.length) ||
             (defaultTab === 'walls' && allWallDefs.length) ||
+            (defaultTab === 'security' && allSecurityDefs.length) ||
             (defaultTab === 'text' && allTextDefs.length) ||
             (defaultTab === 'notes' && allNoteDefs.length) ||
             (defaultTab === 'objects' && allOtherDefs.length)
@@ -134,6 +143,8 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
             ? 'desks'
             : allWallDefs.length
               ? 'walls'
+              : allSecurityDefs.length
+                ? 'security'
               : allTextDefs.length
                 ? 'text'
                 : allNoteDefs.length
@@ -142,7 +153,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
     setTab(fallbackTab);
     setActiveIndex(0);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [allDeskDefs.length, allNoteDefs.length, allOtherDefs.length, allTextDefs.length, allWallDefs.length, defaultTab, open]);
+  }, [allDeskDefs.length, allNoteDefs.length, allOtherDefs.length, allSecurityDefs.length, allTextDefs.length, allWallDefs.length, defaultTab, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -336,6 +347,25 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                   >
                     {t({ it: 'Oggetti', en: 'Objects' })}
                   </button>
+                  <button
+                    onClick={() => setTab('security')}
+                    disabled={!allSecurityDefs.length}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      tab === 'security' ? 'bg-primary/10' : 'hover:bg-slate-50'
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    title={t({ it: 'Sicurezza', en: 'Safety' })}
+                    style={
+                      tab === 'security'
+                        ? {
+                            borderColor: categoryStyles.security.border,
+                            color: categoryStyles.security.text,
+                            backgroundColor: categoryStyles.security.bg
+                          }
+                        : { borderColor: categoryStyles.security.border, color: categoryStyles.security.text }
+                    }
+                  >
+                    {t({ it: 'Sicurezza', en: 'Safety' })}
+                  </button>
                 </div>
 
                 <div ref={gridRef} className="mt-4 grid max-h-[580px] grid-cols-2 gap-3 overflow-auto sm:grid-cols-4">
@@ -347,6 +377,8 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                         ? 'desks'
                         : d.category === 'wall' || String(d.id).startsWith('wall_')
                           ? 'walls'
+                          : isSecurityTypeId(d.id)
+                            ? 'security'
                           : d.id === 'text'
                             ? 'text'
                             : d.id === 'postit'

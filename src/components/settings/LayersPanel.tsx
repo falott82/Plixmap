@@ -127,10 +127,17 @@ const LayersPanel = () => {
     return ids;
   }, [objectTypes]);
   const isWallType = useCallback((typeId: string) => wallTypeIdSet.has(typeId), [wallTypeIdSet]);
+  const isDoorType = useCallback((typeId: string) => {
+    const def = objectTypeById.get(typeId);
+    return (def as any)?.category === 'door';
+  }, [objectTypeById]);
 
   const typeOptions = useMemo(() => {
     const ids = new Set<string>();
-    for (const def of objectTypes || []) ids.add(def.id);
+    for (const def of objectTypes || []) {
+      if ((def as any)?.category === 'door') continue;
+      ids.add(def.id);
+    }
     for (const obj of clientObjects) ids.add(obj.type);
     const list = Array.from(ids).map((id) => {
       const def = objectTypeById.get(id);
@@ -176,10 +183,14 @@ const LayersPanel = () => {
       }
     }
     const allTypeIds = new Set<string>();
-    for (const def of objectTypes || []) allTypeIds.add(def.id);
+    for (const def of objectTypes || []) {
+      if ((def as any)?.category === 'door') continue;
+      allTypeIds.add(def.id);
+    }
     for (const obj of clientObjects) allTypeIds.add(obj.type);
     const effectiveLayerIdsByType = new Map<string, string[]>();
     for (const typeId of allTypeIds) {
+      if (isDoorType(typeId)) continue;
       const explicit = explicitLayerIdsByType.get(typeId);
       if (explicit && explicit.length) {
         effectiveLayerIdsByType.set(typeId, explicit);
@@ -197,7 +208,7 @@ const LayersPanel = () => {
       }
     }
     return { explicitLayerIdsByType, effectiveLayerIdsByType, typesByLayerId };
-  }, [clientObjects, objectTypes, planLayers]);
+  }, [clientObjects, isDoorType, objectTypes, planLayers]);
 
   const objectCountsByLayer = useMemo(() => {
     const counts = new Map<string, Map<string, number>>();

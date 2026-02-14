@@ -8,6 +8,7 @@ import { ReleaseNote } from '../version/history';
 import Icon from '../components/ui/Icon';
 import { sanitizeHtmlBasic } from './sanitizeHtml';
 import { isDeskType } from '../components/plan/deskTypes';
+import { isSecurityTypeId } from '../store/security';
 
 export type PdfOrientation = 'auto' | 'portrait' | 'landscape';
 
@@ -92,6 +93,7 @@ export const renderFloorPlanToJpegDataUrl = async (
     jpegQuality: number;
     includeObjects?: boolean;
     includeDesks?: boolean;
+    includeSafety?: boolean;
     includeLinks?: boolean;
     includeRooms?: boolean;
     includeWalls?: boolean;
@@ -408,6 +410,7 @@ export const renderFloorPlanToJpegDataUrl = async (
 
   if (opts.includeObjects) {
     const includeDesks = opts.includeDesks ?? true;
+    const includeSafety = opts.includeSafety ?? true;
     const iconCache = new Map<string, HTMLImageElement>();
     const imageCache = new Map<string, HTMLImageElement>();
     const getIconImg = async (typeId: string) => {
@@ -439,6 +442,7 @@ export const renderFloorPlanToJpegDataUrl = async (
     const objects = (plan.objects || []).filter((o: any) => {
       if (isWallObject(o) || o.type === 'quote') return false;
       if (!includeDesks && isDeskType(o.type)) return false;
+      if (!includeSafety && isSecurityTypeId(o.type)) return false;
       return true;
     }) as any[];
     for (const obj of objects) {
@@ -752,6 +756,7 @@ export const exportPlansToPdf = async (
     includeIndex?: boolean;
     includeObjects?: boolean;
     includeDesks?: boolean;
+    includeSafety?: boolean;
     includeLinks?: boolean;
     includeRooms?: boolean;
     includeWalls?: boolean;
@@ -817,6 +822,7 @@ export const exportPlansToPdf = async (
       jpegQuality: options.jpegQuality || 0.9,
       includeObjects: options.includeObjects ?? true,
       includeDesks: options.includeDesks ?? true,
+      includeSafety: options.includeSafety ?? true,
       includeLinks: options.includeLinks ?? true,
       includeRooms: options.includeRooms ?? true,
       includeWalls: options.includeWalls ?? true,
@@ -925,9 +931,11 @@ export const exportPlansToPdf = async (
         const generatedOn = new Date().toISOString().slice(0, 10);
         const includeObjects = options.includeObjects ?? true;
         const includeDesks = options.includeDesks ?? true;
+        const includeSafety = options.includeSafety ?? true;
         const optsLine = [
           includeObjects ? 'Objects' : null,
           includeObjects && includeDesks ? 'Desks' : null,
+          includeObjects && includeSafety ? 'Safety' : null,
           options.includeWalls ?? true ? 'Walls' : null,
           options.includeLinks ?? true ? 'Links' : null,
           options.includeRooms ?? true ? 'Rooms' : null,

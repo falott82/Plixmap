@@ -1,10 +1,18 @@
 # Deskly - Floor Plan Management
 
-Current version: **2.6.0**
+Current version: **2.7.0**
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
-Note: This README was refreshed with a small formatting update.
+## What's new in 2.7.0
+- Safety card on map redesigned as a compact quick panel (“specchietto”), thinner and less invasive.
+- Safety card text size now controlled from keyboard only (`+` / `-`) when the card is selected, with helper toast.
+- Safety card movement during pan/zoom made smoother (GPU-friendly transform).
+- Useful numbers in the safety card are now shown in linear horizontal sequence (`| Name Number | ...`).
+- Safety documents table now supports search, sortable columns, and `Hide expired`.
+- Document archive flag replaced with `Validity` switch (green valid / gray archived).
+- New action `New check (archive current)` to move current verification into archived history.
+- Safety icons are now unique per safety type and rendered with red visual emphasis on map.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
@@ -18,8 +26,24 @@ Note: This README was refreshed with a small formatting update.
 - Real-user import via Web API and a centralized corporate directory.
 - Rack configurator and structured cabling management.
 - Corridor doors with room linking: right-click a door to link one or more rooms, with nearest-room preselection and door hover info for linked rooms.
+- Internal map routing wizard: find a destination (users/devices/racks/rooms), set a start point, and compute a red orthogonal route through corridors and linked doors, with distance and ETA when scale is configured.
 - Scaled measurements and dimensions directly on the floor plan.
 - Fast object insertion and management via modern drag & drop, copy/paste, duplication, and extensive keyboard shortcuts.
+
+## Safety and emergency
+- Dedicated `Safety` layer with prevention/emergency object palette (extinguishers, AED, alarm points, sirens, hydrants, detectors, sprinklers, valves, first aid, etc.).
+- Safety object modal with required name, description, notes, last check, verifier company, GPS coordinates.
+- Safety documents and checks history in dedicated modals.
+- Emergency contacts directory with scopes: `Global`, `Client`, `Site`, `Plan`.
+- Emergency contacts support quick search, inline editing, sorting, and “Show in plan card” visibility flag.
+- Safety settings panel includes catalogs for devices and emergency doors, with search/sort/export and map preview.
+- Emergency/door verification history and revision details are tracked.
+
+## Internal map routing
+- 3-step internal map flow: `Partenza` -> `Destinazione` -> `Percorso`.
+- Start and destination can be set by search or manual point on map.
+- Route logic uses nearest doors + corridor centerline with orthogonal segments.
+- Straight red corridor path + dashed start/end connectors.
 
 ## Locks
 - A floor plan can be edited by only one user at a time (exclusive lock).

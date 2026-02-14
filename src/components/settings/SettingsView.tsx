@@ -24,6 +24,7 @@ import CustomImportPanel from './CustomImportPanel';
 import EmailSettingsPanel from './EmailSettingsPanel';
 import DonationsPanel from './DonationsPanel';
 import LayersPanel from './LayersPanel';
+import SafetyPanel from './SafetyPanel';
 
 const SettingsView = () => {
   const {
@@ -71,6 +72,7 @@ const SettingsView = () => {
     const next = new URLSearchParams(search).get('tab')?.toLowerCase() || '';
     if (next === 'account') return 'account';
     if (next === 'objects') return 'objects';
+    if (next === 'safety') return 'safety';
     if (next === 'layers' && isAdmin) return 'layers';
     if (next === 'users' && isAdmin) return 'users';
     if (next === 'logs' && isSuperAdmin) return 'logs';
@@ -82,7 +84,7 @@ const SettingsView = () => {
     if (next === 'data' && isAdmin) return 'data';
     return isAdmin ? 'data' : 'account';
   };
-  const [tab, setTab] = useState<'data' | 'objects' | 'layers' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd' | 'donations'>(
+  const [tab, setTab] = useState<'data' | 'objects' | 'safety' | 'layers' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd' | 'donations'>(
     () => resolveTab(location.search)
   );
   const setTabAndUrl = (nextTab: typeof tab) => {
@@ -306,6 +308,15 @@ const SettingsView = () => {
           </>
         ) : null}
         <button
+          onClick={() => setTabAndUrl('safety')}
+          className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+            tab === 'safety' ? 'border-rose-300 bg-rose-100 text-rose-700' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          }`}
+          title={t({ it: 'Apri tab Sicurezza', en: 'Open Safety tab' })}
+        >
+          <Heart size={16} className={tab === 'safety' ? 'fill-current' : ''} /> {t({ it: 'Sicurezza', en: 'Safety' })}
+        </button>
+        <button
           onClick={() => setTabAndUrl('account')}
           className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
             tab === 'account' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
@@ -327,12 +338,12 @@ const SettingsView = () => {
         ) : null}
         <button
           onClick={() => setTabAndUrl('donations')}
-          className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
-            tab === 'donations' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          className={`flex h-10 w-10 items-center justify-center rounded-full border ${
+            tab === 'donations' ? 'border-rose-300 bg-rose-100 text-rose-700' : 'border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100'
           }`}
           title={t({ it: 'Apri tab Donazioni', en: 'Open Donations tab' })}
         >
-          <Heart size={16} /> {t({ it: 'Donazioni', en: 'Donations' })}
+          <Heart size={16} className="fill-current" />
         </button>
       </div>
 
@@ -340,6 +351,7 @@ const SettingsView = () => {
         {tab === 'account' ? <AccountPanel /> : null}
 
         {tab === 'objects' ? <ObjectTypesPanel client={currentClient} /> : null}
+        {tab === 'safety' ? <SafetyPanel /> : null}
 
         {tab === 'layers' ? (
           isAdmin ? (

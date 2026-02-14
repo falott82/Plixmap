@@ -612,6 +612,18 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
+                          it: 'Pulsante "Mappa interna": apre un wizard in modale per trovare una destinazione, scegliere il punto A sulla mappa e calcolare il percorso interno su corridoi e porte.',
+                          en: '"Internal map" button: opens a modal wizard to find a destination, choose point A on the map, and calculate the internal route through corridors and doors.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Il percorso viene disegnato in rosso con angoli retti; se e impostata la scala, vengono mostrati distanza in metri e tempo stimato (1,4 m/s).',
+                          en: 'The route is drawn in red with right-angle turns; when scale is set, distance in meters and estimated time (1.4 m/s) are shown.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
                           it: 'Puoi cercare anche una stanza per nome.',
                           en: 'You can also search rooms by name.'
                         })}
