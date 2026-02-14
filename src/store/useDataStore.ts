@@ -1,6 +1,27 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
-import { Client, Corridor, FloorPlan, FloorPlanRevision, FloorPlanView, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackDefinition, RackItem, RackLink, Room, Site, WifiAntennaModel } from './types';
+import {
+  Client,
+  Corridor,
+  DoorVerificationEntry,
+  EmergencyContactEntry,
+  FloorPlan,
+  FloorPlanRevision,
+  FloorPlanView,
+  LayerDefinition,
+  MapObject,
+  MapObjectType,
+  ObjectTypeDefinition,
+  PlanLink,
+  RackDefinition,
+  RackItem,
+  RackLink,
+  Room,
+  SecurityCheckEntry,
+  SecurityDocumentEntry,
+  Site,
+  WifiAntennaModel
+} from './types';
 import {
   ALL_ITEMS_LAYER_ID,
   ALL_ITEMS_LAYER_COLOR,
@@ -10,6 +31,7 @@ import {
   DEFAULT_IMAGE_TYPES,
   DEFAULT_PHOTO_TYPES,
   DEFAULT_RACK_TYPES,
+  DEFAULT_SECURITY_TYPES,
   DEFAULT_TEXT_TYPES,
   DEFAULT_USER_TYPES,
   DEFAULT_WIFI_ANTENNA_MODELS,
@@ -22,6 +44,7 @@ import {
   defaultData,
   defaultObjectTypes
 } from './data';
+import { isSecurityTypeId, SECURITY_LAYER_ID } from './security';
 import { useAuthStore } from './useAuthStore';
 
 interface DataState {
@@ -32,8 +55,24 @@ interface DataState {
   setServerState: (payload: { clients: Client[]; objectTypes?: ObjectTypeDefinition[] }) => void;
   setClients: (clients: Client[]) => void;
   markSaved: () => void;
-  addObjectType: (payload: { id: string; nameIt: string; nameEn: string; icon: ObjectTypeDefinition['icon'] }) => void;
-  updateObjectType: (id: string, payload: Partial<{ nameIt: string; nameEn: string; icon: ObjectTypeDefinition['icon'] }>) => void;
+  addObjectType: (payload: {
+    id: string;
+    nameIt: string;
+    nameEn: string;
+    icon: ObjectTypeDefinition['icon'];
+    category?: ObjectTypeDefinition['category'];
+    doorConfig?: ObjectTypeDefinition['doorConfig'];
+  }) => void;
+  updateObjectType: (
+    id: string,
+    payload: Partial<{
+      nameIt: string;
+      nameEn: string;
+      icon: ObjectTypeDefinition['icon'];
+      category: ObjectTypeDefinition['category'];
+      doorConfig: ObjectTypeDefinition['doorConfig'];
+    }>
+  ) => void;
   deleteObjectType: (id: string) => void;
   addClient: (name: string) => string;
   updateClient: (
@@ -52,6 +91,7 @@ interface DataState {
           | 'description'
           | 'attachments'
           | 'wifiAntennaModels'
+          | 'emergencyContacts'
       >
     >
   ) => void;
@@ -130,6 +170,14 @@ interface DataState {
         | 'wifiCatalogId'
         | 'wifiShowRange'
         | 'wifiRangeScale'
+        | 'ip'
+        | 'url'
+        | 'notes'
+        | 'lastVerificationAt'
+        | 'verifierCompany'
+        | 'gpsCoords'
+        | 'securityDocuments'
+        | 'securityCheckHistory'
         | 'points'
         | 'wallGroupId'
         | 'wallGroupIndex'
@@ -198,6 +246,14 @@ interface DataState {
         | 'wifiCatalogId'
         | 'wifiShowRange'
         | 'wifiRangeScale'
+        | 'ip'
+        | 'url'
+        | 'notes'
+        | 'lastVerificationAt'
+        | 'verifierCompany'
+        | 'gpsCoords'
+        | 'securityDocuments'
+        | 'securityCheckHistory'
         | 'points'
         | 'wallGroupId'
         | 'wallGroupIndex'
@@ -395,6 +451,100 @@ const normalizeViews = (views: FloorPlanView[] | undefined): FloorPlanView[] | u
   return next.map((v) => (v.isDefault ? { ...v, isDefault: false } : v));
 };
 
+const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[] => {
+  if (!Array.isArray(history)) return [];
+  return history
+    .map((entry) => {
+      const company = String(entry?.company || '').trim();
+      const date = typeof entry?.date === 'string' ? String(entry.date).trim() : '';
+      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
+      const createdAtRaw = Number(entry?.createdAt);
+      return {
+        id: String(entry?.id || nanoid()),
+        company,
+        date: date || undefined,
+        notes: notes || undefined,
+        createdAt: Number.isFinite(createdAtRaw) ? createdAtRaw : Date.now()
+      } as DoorVerificationEntry;
+    })
+    .filter((entry) => !!entry.company || !!entry.date)
+    .sort((a, b) => b.createdAt - a.createdAt);
+};
+
+const normalizeSecurityDocuments = (docs: any): SecurityDocumentEntry[] => {
+  if (!Array.isArray(docs)) return [];
+  return docs
+    .map((entry) => {
+      const name = String(entry?.name || '').trim();
+      const fileName = typeof entry?.fileName === 'string' ? String(entry.fileName).trim() : '';
+      const dataUrl = typeof entry?.dataUrl === 'string' ? String(entry.dataUrl) : '';
+      const uploadedAtRaw = typeof entry?.uploadedAt === 'string' ? String(entry.uploadedAt).trim() : '';
+      const validUntilRaw = typeof entry?.validUntil === 'string' ? String(entry.validUntil).trim() : '';
+      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
+      const archived = !!entry?.archived;
+      return {
+        id: String(entry?.id || nanoid()),
+        name: name || 'Documento',
+        fileName: fileName || undefined,
+        dataUrl: dataUrl || undefined,
+        uploadedAt: uploadedAtRaw || new Date().toISOString().slice(0, 10),
+        validUntil: validUntilRaw || undefined,
+        notes: notes || undefined,
+        archived
+      } as SecurityDocumentEntry;
+    })
+    .filter((entry) => !!entry.name);
+};
+
+const normalizeSecurityCheckHistory = (history: any): SecurityCheckEntry[] => {
+  if (!Array.isArray(history)) return [];
+  return history
+    .map((entry) => {
+      const date = typeof entry?.date === 'string' ? String(entry.date).trim() : '';
+      const company = typeof entry?.company === 'string' ? String(entry.company).trim() : '';
+      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
+      const createdAtRaw = Number(entry?.createdAt);
+      const archived = !!entry?.archived;
+      return {
+        id: String(entry?.id || nanoid()),
+        date: date || undefined,
+        company: company || undefined,
+        notes: notes || undefined,
+        createdAt: Number.isFinite(createdAtRaw) ? createdAtRaw : Date.now(),
+        archived
+      } as SecurityCheckEntry;
+    })
+    .filter((entry) => !!entry.date || !!entry.company || !!entry.notes)
+    .sort((a, b) => b.createdAt - a.createdAt);
+};
+
+const normalizeEmergencyContacts = (contacts: any): EmergencyContactEntry[] => {
+  if (!Array.isArray(contacts)) return [];
+  return contacts
+    .map((entry) => {
+      const scopeRaw = String(entry?.scope || '').trim();
+      const scope: EmergencyContactEntry['scope'] =
+        scopeRaw === 'global' || scopeRaw === 'client' || scopeRaw === 'site' || scopeRaw === 'plan' ? scopeRaw : 'client';
+      const name = String(entry?.name || '').trim();
+      const phone = String(entry?.phone || '').trim();
+      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
+      const showOnPlanCard = entry?.showOnPlanCard !== false;
+      const siteId = typeof entry?.siteId === 'string' ? String(entry.siteId).trim() : '';
+      const floorPlanId = typeof entry?.floorPlanId === 'string' ? String(entry.floorPlanId).trim() : '';
+      return {
+        id: String(entry?.id || nanoid()),
+        scope,
+        name,
+        phone,
+        notes: notes || undefined,
+        showOnPlanCard,
+        siteId: siteId || undefined,
+        floorPlanId: floorPlanId || undefined
+      } as EmergencyContactEntry;
+    })
+    .filter((entry) => !!entry.name && !!entry.phone);
+};
+
 const snapshotRevision = (
   plan: FloorPlan,
   rev: { major: number; minor: number },
@@ -423,6 +573,13 @@ const snapshotRevision = (
           doors: Array.isArray(c.doors)
             ? c.doors.map((d) => ({
                 ...d,
+                catalogTypeId: typeof (d as any)?.catalogTypeId === 'string' ? String((d as any).catalogTypeId) : undefined,
+                description: typeof (d as any)?.description === 'string' ? String((d as any).description) : undefined,
+                isEmergency: !!(d as any)?.isEmergency,
+                isFireDoor: !!(d as any)?.isFireDoor,
+                lastVerificationAt: typeof (d as any)?.lastVerificationAt === 'string' ? String((d as any).lastVerificationAt) : undefined,
+                verifierCompany: typeof (d as any)?.verifierCompany === 'string' ? String((d as any).verifierCompany) : undefined,
+                verificationHistory: normalizeDoorVerificationHistory((d as any)?.verificationHistory),
                 linkedRoomIds: Array.isArray((d as any)?.linkedRoomIds)
                   ? (d as any).linkedRoomIds.map((id: any) => String(id))
                   : undefined
@@ -435,7 +592,11 @@ const snapshotRevision = (
     racks: plan.racks ? plan.racks.map((r) => ({ ...r })) : undefined,
     rackItems: plan.rackItems ? plan.rackItems.map((i) => ({ ...i })) : undefined,
     rackLinks: plan.rackLinks ? plan.rackLinks.map((l) => ({ ...l })) : undefined,
-    objects: plan.objects.map((o) => ({ ...o }))
+    objects: plan.objects.map((o) => ({
+      ...o,
+      securityDocuments: normalizeSecurityDocuments((o as any)?.securityDocuments),
+      securityCheckHistory: normalizeSecurityCheckHistory((o as any)?.securityCheckHistory)
+    }))
   };
 };
 
@@ -446,15 +607,16 @@ const defaultLayers = (): LayerDefinition[] => [
   { id: 'wifi', name: { it: 'WiFi', en: 'WiFi' }, color: WIFI_LAYER_COLOR, order: 4, typeIds: DEFAULT_WIFI_TYPES },
   { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 5, typeIds: DEFAULT_CCTV_TYPES },
   { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 6, typeIds: DEFAULT_DESK_TYPES },
-  { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 7 },
-  { id: 'walls', name: { it: 'Mura', en: 'Walls' }, color: WALL_LAYER_COLOR, order: 8, typeIds: DEFAULT_WALL_TYPES },
-  { id: 'quotes', name: { it: 'Quote', en: 'Quotes' }, color: QUOTE_LAYER_COLOR, order: 9 },
-  { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 10 },
-  { id: 'corridors', name: { it: 'Corridoi', en: 'Corridors' }, color: '#94a3b8', order: 11 },
-  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 12, typeIds: DEFAULT_RACK_TYPES },
-  { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 13, typeIds: DEFAULT_TEXT_TYPES },
-  { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 14, typeIds: DEFAULT_IMAGE_TYPES },
-  { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 15, typeIds: DEFAULT_PHOTO_TYPES }
+  { id: SECURITY_LAYER_ID, name: { it: 'Sicurezza', en: 'Safety' }, color: '#ef4444', order: 7, typeIds: DEFAULT_SECURITY_TYPES },
+  { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 8 },
+  { id: 'walls', name: { it: 'Mura', en: 'Walls' }, color: WALL_LAYER_COLOR, order: 9, typeIds: DEFAULT_WALL_TYPES },
+  { id: 'quotes', name: { it: 'Quote', en: 'Quotes' }, color: QUOTE_LAYER_COLOR, order: 10 },
+  { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 11 },
+  { id: 'corridors', name: { it: 'Corridoi', en: 'Corridors' }, color: '#94a3b8', order: 12 },
+  { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 13, typeIds: DEFAULT_RACK_TYPES },
+  { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 14, typeIds: DEFAULT_TEXT_TYPES },
+  { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 15, typeIds: DEFAULT_IMAGE_TYPES },
+  { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 16, typeIds: DEFAULT_PHOTO_TYPES }
 ];
 
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
@@ -487,6 +649,7 @@ const ensureLayerTypes = (layer: LayerDefinition): LayerDefinition => {
   if (layer.id === 'text') return { ...layer, typeIds: DEFAULT_TEXT_TYPES };
   if (layer.id === 'images') return { ...layer, typeIds: DEFAULT_IMAGE_TYPES };
   if (layer.id === 'photos') return { ...layer, typeIds: DEFAULT_PHOTO_TYPES };
+  if (layer.id === SECURITY_LAYER_ID) return { ...layer, typeIds: DEFAULT_SECURITY_TYPES };
   if (layer.id === 'walls') return { ...layer, typeIds: DEFAULT_WALL_TYPES };
   if (layer.id === 'racks') return { ...layer, typeIds: DEFAULT_RACK_TYPES };
   return layer;
@@ -533,6 +696,12 @@ const normalizeClientLayers = (client: Client): LayerDefinition[] => {
       const legacyColor = '#334155';
       if (!next.color || next.color === legacyColor) {
         next.color = WALL_LAYER_COLOR;
+      }
+    }
+    if (id === SECURITY_LAYER_ID) {
+      const legacyColor = '#dc2626';
+      if (!next.color || next.color === legacyColor) {
+        next.color = '#ef4444';
       }
     }
     if (SYSTEM_LAYER_IDS.has(id)) {
@@ -609,6 +778,15 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
                     ? (d as any).mode
                     : 'static',
                 automationUrl: typeof (d as any)?.automationUrl === 'string' ? String((d as any).automationUrl) : undefined,
+                catalogTypeId: typeof (d as any)?.catalogTypeId === 'string' ? String((d as any).catalogTypeId).trim() || undefined : undefined,
+                description: typeof (d as any)?.description === 'string' ? String((d as any).description).trim() || undefined : undefined,
+                isEmergency: !!(d as any)?.isEmergency,
+                isFireDoor: !!(d as any)?.isFireDoor,
+                lastVerificationAt:
+                  typeof (d as any)?.lastVerificationAt === 'string' ? String((d as any).lastVerificationAt).trim() || undefined : undefined,
+                verifierCompany:
+                  typeof (d as any)?.verifierCompany === 'string' ? String((d as any).verifierCompany).trim() || undefined : undefined,
+                verificationHistory: normalizeDoorVerificationHistory((d as any)?.verificationHistory),
                 linkedRoomIds: Array.isArray((d as any)?.linkedRoomIds)
                   ? (d as any).linkedRoomIds.map((id: any) => String(id)).filter(Boolean)
                   : []
@@ -634,42 +812,53 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
   if (!Array.isArray(next.objects)) next.objects = [];
   if (Array.isArray(next.objects)) {
     next.objects = next.objects.map((obj: MapObject) => {
+      const normalizedLayerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
+      const withSecurityFields = {
+        ...obj,
+        notes: typeof (obj as any)?.notes === 'string' ? String((obj as any).notes).trim() || undefined : undefined,
+        lastVerificationAt:
+          typeof (obj as any)?.lastVerificationAt === 'string' ? String((obj as any).lastVerificationAt).trim() || undefined : undefined,
+        verifierCompany:
+          typeof (obj as any)?.verifierCompany === 'string' ? String((obj as any).verifierCompany).trim() || undefined : undefined,
+        gpsCoords: typeof (obj as any)?.gpsCoords === 'string' ? String((obj as any).gpsCoords).trim() || undefined : undefined,
+        securityDocuments: normalizeSecurityDocuments((obj as any)?.securityDocuments),
+        securityCheckHistory: normalizeSecurityCheckHistory((obj as any)?.securityCheckHistory)
+      } as MapObject;
       if (obj?.type === 'wifi') {
-        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
-        const nextLayerIds = new Set(layerIds);
+        const nextLayerIds = new Set(normalizedLayerIds);
         nextLayerIds.delete('devices');
         nextLayerIds.add('wifi');
-        return { ...obj, layerIds: Array.from(nextLayerIds) };
+        return { ...withSecurityFields, layerIds: Array.from(nextLayerIds) };
       }
       if (obj?.type === 'quote') {
-        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
-        if (layerIds.includes('quotes')) return obj;
-        return { ...obj, layerIds: [...layerIds, 'quotes'] };
+        if (normalizedLayerIds.includes('quotes')) return withSecurityFields;
+        return { ...withSecurityFields, layerIds: [...normalizedLayerIds, 'quotes'] };
       }
       if (obj?.type === 'text') {
-        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
-        if (layerIds.includes('text')) return obj;
-        return { ...obj, layerIds: [...layerIds, 'text'] };
+        if (normalizedLayerIds.includes('text')) return withSecurityFields;
+        return { ...withSecurityFields, layerIds: [...normalizedLayerIds, 'text'] };
       }
       if (obj?.type === 'postit') {
-        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
-        if (layerIds.includes('text')) return obj;
-        return { ...obj, layerIds: [...layerIds, 'text'] };
+        if (normalizedLayerIds.includes('text')) return withSecurityFields;
+        return { ...withSecurityFields, layerIds: [...normalizedLayerIds, 'text'] };
       }
       if (obj?.type === 'image') {
-        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
-        if (layerIds.includes('images')) return obj;
-        return { ...obj, layerIds: [...layerIds, 'images'] };
+        if (normalizedLayerIds.includes('images')) return withSecurityFields;
+        return { ...withSecurityFields, layerIds: [...normalizedLayerIds, 'images'] };
       }
       if (obj?.type === 'photo') {
-        const layerIds = Array.isArray(obj.layerIds) ? obj.layerIds.map((id) => String(id)) : [];
-        if (layerIds.includes('photos')) return obj;
-        const nextLayerIds = new Set(layerIds);
+        if (normalizedLayerIds.includes('photos')) return withSecurityFields;
+        const nextLayerIds = new Set(normalizedLayerIds);
         nextLayerIds.delete('images');
         nextLayerIds.add('photos');
-        return { ...obj, layerIds: Array.from(nextLayerIds) };
+        return { ...withSecurityFields, layerIds: Array.from(nextLayerIds) };
       }
-      return obj;
+      if (isSecurityTypeId(obj?.type)) {
+        const nextLayerIds = new Set(normalizedLayerIds);
+        nextLayerIds.add(SECURITY_LAYER_ID);
+        return { ...withSecurityFields, layerIds: Array.from(nextLayerIds) };
+      }
+      return withSecurityFields;
     });
   }
   if (!Array.isArray(next.racks)) next.racks = [];
@@ -722,6 +911,30 @@ export const useDataStore = create<DataState>()(
             byId.set(id, { ...(def as any), icon: 'wall' } as any);
           }
         }
+        const securityBuiltinIconById = new Map(
+          defaultObjectTypes.filter((entry) => isSecurityTypeId(entry.id)).map((entry) => [entry.id, entry.icon])
+        );
+        for (const [id, def] of byId.entries()) {
+          if (!def) continue;
+          if (!isSecurityTypeId(id)) continue;
+          const expectedIcon = securityBuiltinIconById.get(id);
+          if (!expectedIcon) continue;
+          if ((def as any)?.icon !== expectedIcon) {
+            byId.set(id, { ...(def as any), icon: expectedIcon } as any);
+          }
+        }
+        for (const [id, def] of byId.entries()) {
+          if (!def) continue;
+          if ((def as any)?.category !== 'door') continue;
+          byId.set(id, {
+            ...(def as any),
+            doorConfig: {
+              isEmergency: !!(def as any)?.doorConfig?.isEmergency,
+              trackVerification: !!(def as any)?.doorConfig?.trackVerification,
+              remoteOpen: !!(def as any)?.doorConfig?.remoteOpen
+            }
+          } as any);
+        }
 
         const mergedTypes = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
         return {
@@ -729,6 +942,7 @@ export const useDataStore = create<DataState>()(
             ...c,
             layers: normalizeClientLayers(c),
             wifiAntennaModels: normalizeWifiAntennaModels((c as any).wifiAntennaModels),
+            emergencyContacts: normalizeEmergencyContacts((c as any).emergencyContacts),
             sites: (c.sites || []).map((s) => ({
               ...s,
               floorPlans: (s.floorPlans || []).map((p) => normalizePlan(p))
@@ -745,15 +959,31 @@ export const useDataStore = create<DataState>()(
         return { clients, version: nextVersion, savedVersion: nextVersion };
       }),
     markSaved: () => set((state) => ({ savedVersion: state.version })),
-    addObjectType: ({ id, nameIt, nameEn, icon }) => {
+    addObjectType: ({ id, nameIt, nameEn, icon, category, doorConfig }) => {
       const key = String(id).trim();
       if (!key) return;
       set((state) => {
         if (state.objectTypes.some((t) => t.id === key)) return state;
+        const normalizedCategory = category === 'wall' || category === 'door' ? category : undefined;
+        const normalizedDoorConfig =
+          normalizedCategory === 'door'
+            ? {
+                isEmergency: !!doorConfig?.isEmergency,
+                trackVerification: !!doorConfig?.trackVerification,
+                remoteOpen: !!doorConfig?.remoteOpen
+              }
+            : undefined;
         return {
           objectTypes: [
             ...state.objectTypes,
-            { id: key, name: { it: String(nameIt).trim() || key, en: String(nameEn).trim() || key }, icon, builtin: false }
+            {
+              id: key,
+              name: { it: String(nameIt).trim() || key, en: String(nameEn).trim() || key },
+              icon,
+              builtin: false,
+              category: normalizedCategory,
+              doorConfig: normalizedDoorConfig
+            }
           ],
           version: state.version + 1
         } as any;
@@ -770,7 +1000,23 @@ export const useDataStore = create<DataState>()(
                 name: {
                   it: payload.nameIt !== undefined ? String(payload.nameIt).trim() || t.name.it : t.name.it,
                   en: payload.nameEn !== undefined ? String(payload.nameEn).trim() || t.name.en : t.name.en
-                }
+                },
+                category:
+                  payload.category !== undefined
+                    ? payload.category === 'wall' || payload.category === 'door'
+                      ? payload.category
+                      : undefined
+                    : t.category,
+                doorConfig:
+                  payload.doorConfig !== undefined
+                    ? payload.doorConfig
+                      ? {
+                          isEmergency: !!payload.doorConfig.isEmergency,
+                          trackVerification: !!payload.doorConfig.trackVerification,
+                          remoteOpen: !!payload.doorConfig.remoteOpen
+                        }
+                      : undefined
+                    : t.doorConfig
               }
         ),
         version: state.version + 1
@@ -791,14 +1037,30 @@ export const useDataStore = create<DataState>()(
       addClient: (name) => {
         const id = nanoid();
         set((state) => ({
-          clients: [...state.clients, { id, name, layers: defaultLayers(), wifiAntennaModels: DEFAULT_WIFI_ANTENNA_MODELS, sites: [] }],
+          clients: [
+            ...state.clients,
+            { id, name, layers: defaultLayers(), wifiAntennaModels: DEFAULT_WIFI_ANTENNA_MODELS, emergencyContacts: [], sites: [] }
+          ],
           version: state.version + 1
         }));
         return id;
       },
       updateClient: (id, payload) => {
         set((state) => ({
-          clients: state.clients.map((c) => (c.id === id ? { ...c, ...payload } : c)),
+          clients: state.clients.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  ...payload,
+                  ...(payload?.wifiAntennaModels !== undefined
+                    ? { wifiAntennaModels: normalizeWifiAntennaModels(payload.wifiAntennaModels as any) }
+                    : {}),
+                  ...(payload?.emergencyContacts !== undefined
+                    ? { emergencyContacts: normalizeEmergencyContacts(payload.emergencyContacts) }
+                    : {})
+                }
+              : c
+          ),
           version: state.version + 1
         }));
       },
@@ -1524,6 +1786,15 @@ export const useDataStore = create<DataState>()(
                   ? c.doors.map((d: any) => ({
                       ...d,
                       id: nanoid(),
+                      catalogTypeId: typeof d?.catalogTypeId === 'string' ? String(d.catalogTypeId) : undefined,
+                      description: typeof d?.description === 'string' ? String(d.description) : undefined,
+                      isEmergency: !!d?.isEmergency,
+                      lastVerificationAt: typeof d?.lastVerificationAt === 'string' ? String(d.lastVerificationAt) : undefined,
+                      verifierCompany: typeof d?.verifierCompany === 'string' ? String(d.verifierCompany) : undefined,
+                      verificationHistory: normalizeDoorVerificationHistory(d?.verificationHistory).map((entry) => ({
+                        ...entry,
+                        id: nanoid()
+                      })),
                       linkedRoomIds: Array.isArray(d?.linkedRoomIds)
                         ? d.linkedRoomIds
                             .map((rid: any) => (includeRooms ? roomIdMap.get(String(rid)) : String(rid)))

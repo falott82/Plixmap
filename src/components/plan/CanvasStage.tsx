@@ -5,6 +5,7 @@ import useImage from 'use-image';
 import { Crosshair, Hand, MonitorPlay, Video } from 'lucide-react';
 import { Corridor, FloorPlan, IconName, MapObject, MapObjectType, Room } from '../../store/types';
 import { WALL_LAYER_COLOR, WIFI_RANGE_SCALE_MAX } from '../../store/data';
+import { isSecurityTypeId } from '../../store/security';
 import { useUIStore } from '../../store/useUIStore';
 import { clamp } from '../../utils/geometry';
 import Icon from '../ui/Icon';
@@ -161,6 +162,15 @@ interface Props {
         t: number;
         edgeIndexTo?: number;
         tTo?: number;
+        catalogTypeId?: string;
+        mode?: 'static' | 'auto_sensor' | 'automated';
+        automationUrl?: string;
+        description?: string;
+        isEmergency?: boolean;
+        lastVerificationAt?: string;
+        verifierCompany?: string;
+        verificationHistory?: Array<{ id: string; date?: string; company: string; notes?: string; createdAt: number }>;
+        linkedRoomIds?: string[];
       }>;
       connections?: Array<{ id: string; edgeIndex: number; t: number; planIds: string[] }>;
     }
@@ -458,6 +468,7 @@ const CanvasStageImpl = (
   const corridorDraftPolyRaf = useRef<number | null>(null);
   const corridorDraftPolyPointsRef = useRef<{ x: number; y: number }[]>([]);
   const [corridorDoorHover, setCorridorDoorHover] = useState<{ edgeIndex: number; t: number; x: number; y: number } | null>(null);
+  const corridorDoorDraftActive = !!corridorDoorDraft?.corridorId;
   const panRaf = useRef<number | null>(null);
   const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
   const selectionBoxRaf = useRef<number | null>(null);
@@ -1304,7 +1315,9 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
 
     Object.entries(objectTypeIcons || {}).forEach(([typeId, iconName]) => {
       if (!iconName) return;
-      const svg = renderToStaticMarkup(<Icon name={iconName} size={18} color="#2563eb" strokeWidth={1.8} />);
+      const svg = renderToStaticMarkup(
+        <Icon name={iconName} size={18} color={isSecurityTypeId(typeId) ? '#dc2626' : '#2563eb'} strokeWidth={1.8} />
+      );
       const img = new window.Image();
       imgs.push(img);
       img.src = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -2619,6 +2632,28 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
             startPan(e);
             return;
           }
+          if (corridorDoorDraft?.corridorId && !readOnly && !isContextClick(e.evt) && e.evt.button === 0) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (!pos) return;
+            const world = pointerToWorld(pos.x, pos.y);
+            const corridor = ((plan.corridors || []) as Corridor[]).find((c) => c.id === corridorDoorDraft.corridorId);
+            const corridorPoints = corridor ? getCorridorPolygonPoints(corridor) : [];
+            const snap = corridorPoints.length ? getClosestCorridorEdgePoint(corridorPoints, world) : null;
+            if (snap && onCorridorDoorDraftPoint) {
+              const maxDistance = 42 / Math.max(0.2, viewportRef.current.zoom || 1);
+              const distance = Math.hypot(world.x - snap.x, world.y - snap.y);
+              if (distance <= maxDistance) {
+                onCorridorDoorDraftPoint({
+                  corridorId: corridorDoorDraft.corridorId,
+                  clientX: e.evt.clientX,
+                  clientY: e.evt.clientY,
+                  point: { edgeIndex: snap.edgeIndex, t: snap.t, x: snap.x, y: snap.y }
+                });
+              }
+            }
+            return;
+          }
           if (allowTool && !isContextClick(e.evt) && e.evt.button === 0) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
@@ -3026,16 +3061,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                   const world = pos
                     ? pointerToWorld(pos.x, pos.y)
                     : { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
-                  if (isDraftTarget && onCorridorDoorDraftPoint) {
-                    const snap = corridorDoorHover || getClosestCorridorEdgePoint(points, world);
-                    if (snap) {
-                      onCorridorDoorDraftPoint({
-                        corridorId: corridor.id,
-                        clientX: e.evt.clientX,
-                        clientY: e.evt.clientY,
-                        point: { edgeIndex: snap.edgeIndex, t: snap.t, x: snap.x, y: snap.y }
-                      });
-                    }
+                  if (isDraftTarget) {
                     onSelectCorridor?.(corridor.id);
                     return;
                   }
@@ -3315,7 +3341,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
         </Layer>
 
         {/* Rooms layer */}
-        <Layer perfectDrawEnabled={false} listening={!toolMode}>
+        <Layer perfectDrawEnabled={false} listening={!toolMode && !corridorDoorDraftActive}>
           {(plan.rooms || []).map((room) => {
             const isSelectedRoom = selectedRoomId === room.id || (selectedRoomIds || []).includes(room.id);
             const kind = (room.kind || (room.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
@@ -3706,7 +3732,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
         </Layer>
 
         {/* Walls + links layer */}
-        <Layer perfectDrawEnabled={false} listening={!toolMode}>
+        <Layer perfectDrawEnabled={false} listening={!toolMode && !corridorDoorDraftActive}>
           {wallObjects.map((obj) => {
             const pts = obj.points || [];
             if (pts.length < 2) return null;
@@ -4220,10 +4246,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
               </Group>
             );
           })}
-        </Layer>
-
-        {/* Corridor doors overlay (kept above rooms so doors stay always clickable) */}
-        <Layer perfectDrawEnabled={false} listening={!toolMode}>
+          {/* Corridor doors (kept in the same layer to reduce total layer count) */}
           {((plan.corridors || []) as Corridor[]).map((corridor) => {
             const points = getCorridorPolygonPoints(corridor);
             if (points.length < 3) return null;
@@ -4268,9 +4291,16 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                     .map((id: any) => roomNameById.get(String(id)))
                     .filter(Boolean)
                 : [];
-              const hoverText = linkedRoomNames.length
-                ? `${t({ it: 'Stanze collegate', en: 'Linked rooms' })}: ${linkedRoomNames.join(', ')}`
-                : t({ it: 'Nessuna stanza collegata', en: 'No linked rooms' });
+              const doorDescription = String((door as any).description || '').trim();
+              const emergency = !!(door as any).isEmergency;
+              const hoverTextParts = [
+                linkedRoomNames.length
+                  ? `${t({ it: 'Stanze collegate', en: 'Linked rooms' })}: ${linkedRoomNames.join(', ')}`
+                  : t({ it: 'Nessuna stanza collegata', en: 'No linked rooms' }),
+                emergency ? t({ it: 'Porta emergenza', en: 'Emergency door' }) : '',
+                doorDescription ? `${t({ it: 'Descrizione', en: 'Description' })}: ${doorDescription}` : ''
+              ].filter(Boolean);
+              const hoverText = hoverTextParts.join(' · ');
               return (
                 <Group
                   key={`${corridor.id}:${door.id}`}
@@ -4365,15 +4395,19 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                     }}
                   >
                     <Circle radius={13} fill="rgba(15,23,42,0.001)" strokeEnabled={false} />
-                    <Circle
-                      radius={isDoorSelected ? 8 : 7}
+                    <Rect
+                      x={-3.4}
+                      y={-5.1}
+                      width={6.8}
+                      height={10.2}
+                      cornerRadius={1.2}
                       fill={doorColor}
                       stroke={isDoorSelected ? '#f8fafc' : '#e2e8f0'}
                       strokeWidth={isDoorSelected ? 1.6 : 1}
                     />
-                    <Rect x={-2.8} y={-4.2} width={5.6} height={8.4} cornerRadius={1.2} stroke="#ffffff" strokeWidth={1} fillEnabled={false} />
-                    <Line points={[0, -4.2, 0, 4.2]} stroke="#ffffff" strokeWidth={1} />
-                    <Circle x={1.2} y={0} radius={0.7} fill="#ffffff" />
+                    <Line points={[0, -5.1, 0, 5.1]} stroke="#ffffff" strokeWidth={1} />
+                    <Circle x={1.3} y={0} radius={0.72} fill="#ffffff" />
+                    {emergency ? <Circle x={4.5} y={-4.8} radius={2.2} fill="#dc2626" stroke="#ffffff" strokeWidth={1.2} /> : null}
                   </Group>
                 </Group>
               );
@@ -4382,7 +4416,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
         </Layer>
 
         {/* Objects layer */}
-        <Layer perfectDrawEnabled={false} ref={objectsLayerRef} listening={!toolMode}>
+        <Layer perfectDrawEnabled={false} ref={objectsLayerRef} listening={!toolMode && !corridorDoorDraftActive}>
           {regularObjects.map((obj) => {
             const isSelected = selectedIds ? selectedIds.includes(obj.id) : selectedId === obj.id;
             const highlightActive = !!(highlightId && highlightUntil && highlightId === obj.id && highlightUntil > highlightNow);
@@ -4397,6 +4431,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
             const scale = isText || isImage ? 1 : baseScale;
             const isCamera = obj.type === 'camera';
             const isWifi = obj.type === 'wifi';
+            const isSecurityObject = isSecurityTypeId(obj.type);
             const deskScaleX = isDesk ? clamp(Number(obj.scaleX ?? 1) || 1, 0.4, 4) : 1;
             const deskScaleY = isDesk ? clamp(Number(obj.scaleY ?? 1) || 1, 0.4, 4) : 1;
             const freeScaleX = isText || isImage ? clamp(Number(obj.scaleX ?? 1) || 1, 0.2, 6) : 1;
@@ -5230,7 +5265,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                       width={36 * scale}
                       height={36 * scale}
                       cornerRadius={12 * scale}
-                      fill="#ffffff"
+                      fill={isSecurityObject ? '#fee2e2' : '#ffffff'}
                       stroke={outline}
                       strokeWidth={outlineWidth}
                       opacity={bodyOpacity}
@@ -5256,7 +5291,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                         align="center"
                         fontSize={15 * scale}
                         fontStyle="bold"
-                        fill={'#2563eb'}
+                        fill={isSecurityObject ? '#dc2626' : '#2563eb'}
                         opacity={bodyOpacity}
                         listening={false}
                       />

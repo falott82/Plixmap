@@ -46,7 +46,7 @@ import SearchBar from './SearchBar';
 import ObjectModal from './ObjectModal';
 import RoomAllocationModal from './RoomAllocationModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { Corridor, FloorPlan, FloorPlanView, IconName, LayerDefinition, MapObject, MapObjectType, PlanLink, RackItem, RackLink, RackPortKind, Room } from '../../store/types';
+import { Corridor, DoorVerificationEntry, FloorPlan, FloorPlanView, IconName, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackItem, RackLink, RackPortKind, Room } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
@@ -74,6 +74,7 @@ import SelectedObjectsModal from './SelectedObjectsModal';
 import RealUserPickerModal from './RealUserPickerModal';
 import PrintModal from './PrintModal';
 import CrossPlanSearchModal, { CrossPlanSearchResult } from './CrossPlanSearchModal';
+import InternalMapModal from './InternalMapModal';
 import AllObjectTypesModal from './AllObjectTypesModal';
 import CableModal from './CableModal';
 import LinksModal from './LinksModal';
@@ -98,6 +99,7 @@ import {
   WIFI_DEFAULT_STANDARD,
   WIFI_RANGE_SCALE_MAX
 } from '../../store/data';
+import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 import { getWallTypeColor } from '../../utils/wallColors';
 import { usePresentationWebcamHands } from './presentation/usePresentationWebcamHands';
 
@@ -107,6 +109,25 @@ interface Props {
 
 const isRackLinkId = (id?: string | null) => typeof id === 'string' && id.startsWith('racklink:');
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
+const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[] => {
+  if (!Array.isArray(history)) return [];
+  return history
+    .map((entry) => {
+      const company = String(entry?.company || '').trim();
+      const date = typeof entry?.date === 'string' ? String(entry.date).trim() : '';
+      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
+      const createdAtRaw = Number(entry?.createdAt);
+      return {
+        id: String(entry?.id || nanoid()),
+        company,
+        date: date || undefined,
+        notes: notes || undefined,
+        createdAt: Number.isFinite(createdAtRaw) ? createdAtRaw : Date.now()
+      } as DoorVerificationEntry;
+    })
+    .filter((entry) => !!entry.company || !!entry.date)
+    .sort((a, b) => b.createdAt - a.createdAt);
+};
 const PlanView = ({ planId }: Props) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasStageRef = useRef<CanvasStageHandle | null>(null);
@@ -206,6 +227,25 @@ const PlanView = ({ planId }: Props) => {
     () => (objectTypeDefs || []).filter((def) => wallTypeIdSet.has(def.id)),
     [objectTypeDefs, wallTypeIdSet]
   );
+  const doorTypeIdSet = useMemo(() => {
+    const ids = new Set<string>();
+    for (const def of objectTypeDefs || []) {
+      if ((def as any)?.category === 'door') ids.add(def.id);
+    }
+    return ids;
+  }, [objectTypeDefs]);
+  const doorTypeDefs = useMemo(
+    () =>
+      (objectTypeDefs || [])
+        .filter((def) => doorTypeIdSet.has(def.id))
+        .slice()
+        .sort((a, b) => ((a?.name?.[lang] as string) || a.id).localeCompare((b?.name?.[lang] as string) || b.id)),
+    [doorTypeIdSet, lang, objectTypeDefs]
+  );
+  const defaultDoorCatalogId = useMemo(() => {
+    if (doorTypeIdSet.has('door_standard')) return 'door_standard';
+    return doorTypeDefs[0]?.id || '';
+  }, [doorTypeDefs, doorTypeIdSet]);
   const deskCatalogDefs = useMemo(
     () => (objectTypeDefs || []).filter((def) => isDeskType(def.id)),
     [objectTypeDefs]
@@ -235,6 +275,7 @@ const PlanView = ({ planId }: Props) => {
 
   const getTypeIcon = useCallback((typeId: string) => objectTypeById.get(typeId)?.icon, [objectTypeById]);
   const isWallType = useCallback((typeId: string) => wallTypeIdSet.has(typeId), [wallTypeIdSet]);
+  const isDoorType = useCallback((typeId: string) => doorTypeIdSet.has(typeId), [doorTypeIdSet]);
   const numberFormatter = useMemo(
     () => new Intl.NumberFormat(lang, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     [lang]
@@ -288,8 +329,10 @@ const PlanView = ({ planId }: Props) => {
                       ? ['images']
                       : typeId === 'photo'
                         ? ['photos']
-                      : typeId === 'postit'
-                        ? ['text']
+                : typeId === 'postit'
+                  ? ['text']
+                  : isSecurityTypeId(typeId)
+                    ? [SECURITY_LAYER_ID]
                     : isWallType(typeId)
                       ? ['walls']
                       : ['devices'];
@@ -504,7 +547,9 @@ const PlanView = ({ planId }: Props) => {
   const roomOverlapNoticeRef = useRef(0);
   const roomLayerNoticeRef = useRef(0);
   const [allTypesOpen, setAllTypesOpen] = useState(false);
-  const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes'>('objects');
+  const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes' | 'security'>(
+    'objects'
+  );
   const [roomCatalogOpen, setRoomCatalogOpen] = useState(false);
   const [wallCatalogOpen, setWallCatalogOpen] = useState(false);
   const [deskCatalogOpen, setDeskCatalogOpen] = useState(false);
@@ -543,6 +588,14 @@ const PlanView = ({ planId }: Props) => {
   const [crossPlanSearchOpen, setCrossPlanSearchOpen] = useState(false);
   const [crossPlanSearchTerm, setCrossPlanSearchTerm] = useState('');
   const [crossPlanResults, setCrossPlanResults] = useState<CrossPlanSearchResult[]>([]);
+  const [internalMapOpen, setInternalMapOpen] = useState(false);
+  const [safetyCardPos, setSafetyCardPos] = useState<{ x: number; y: number }>({ x: 24, y: 24 }); // world coords
+  const [safetyCardSize, setSafetyCardSize] = useState<{ w: number; h: number }>({ w: 420, h: 84 }); // world size
+  const [safetyCardFontSize, setSafetyCardFontSize] = useState<number>(10);
+  const [safetyCardSelected, setSafetyCardSelected] = useState(false);
+  const safetyCardRef = useRef<HTMLDivElement | null>(null);
+  const safetyCardDragRef = useRef<{ startWorldX: number; startWorldY: number; originX: number; originY: number } | null>(null);
+  const safetyCardResizeRef = useRef<{ startWorldX: number; startWorldY: number; originW: number; originH: number } | null>(null);
   const [countsOpen, setCountsOpen] = useState(false);
   const [presenceOpen, setPresenceOpen] = useState(false);
   const [layersPopoverOpen, setLayersPopoverOpen] = useState(false);
@@ -682,6 +735,13 @@ const PlanView = ({ planId }: Props) => {
   const [corridorDoorModal, setCorridorDoorModal] = useState<{
     corridorId: string;
     doorId: string;
+    catalogTypeId: string;
+    description: string;
+    isEmergency: boolean;
+    isFireDoor: boolean;
+    lastVerificationAt: string;
+    verifierCompany: string;
+    verificationHistory: DoorVerificationEntry[];
     mode: 'static' | 'auto_sensor' | 'automated';
     automationUrl: string;
   } | null>(null);
@@ -702,6 +762,112 @@ const PlanView = ({ planId }: Props) => {
     y: number;
     selectedPlanIds: string[];
   } | null>(null);
+  const clientToWorld = useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } | null => {
+      const rect = mapRef.current?.getBoundingClientRect();
+      const z = Number(zoom) || 1;
+      if (!rect || !Number.isFinite(z) || z === 0) return null;
+      return {
+        x: (clientX - rect.left - pan.x) / z,
+        y: (clientY - rect.top - pan.y) / z
+      };
+    },
+    [pan.x, pan.y, zoom]
+  );
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      const world = clientToWorld(event.clientX, event.clientY);
+      if (!world) return;
+      const drag = safetyCardDragRef.current;
+      if (drag) {
+        setSafetyCardPos({
+          x: drag.originX + (world.x - drag.startWorldX),
+          y: drag.originY + (world.y - drag.startWorldY)
+        });
+        return;
+      }
+      const resize = safetyCardResizeRef.current;
+      if (!resize) return;
+      const nextW = Math.max(260, resize.originW + (world.x - resize.startWorldX));
+      const nextH = Math.max(56, resize.originH + (world.y - resize.startWorldY));
+      setSafetyCardSize({ w: nextW, h: nextH });
+    };
+    const onUp = () => {
+      safetyCardDragRef.current = null;
+      safetyCardResizeRef.current = null;
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [clientToWorld]);
+  const startSafetyCardDrag = (event: any) => {
+    if ((event.target as HTMLElement)?.closest?.('button,a,input,textarea,select')) return;
+    const world = clientToWorld(event.clientX, event.clientY);
+    if (!world) return;
+    setSafetyCardSelected(true);
+    safetyCardDragRef.current = {
+      startWorldX: world.x,
+      startWorldY: world.y,
+      originX: safetyCardPos.x,
+      originY: safetyCardPos.y
+    };
+  };
+  const startSafetyCardResize = (event: any) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const world = clientToWorld(event.clientX, event.clientY);
+    if (!world) return;
+    setSafetyCardSelected(true);
+    safetyCardResizeRef.current = {
+      startWorldX: world.x,
+      startWorldY: world.y,
+      originW: safetyCardSize.w,
+      originH: safetyCardSize.h
+    };
+  };
+  const selectSafetyCard = useCallback(() => {
+    setSafetyCardSelected((prev) => {
+      if (!prev) {
+        push(
+          t({
+            it: 'Scheda sicurezza selezionata: usa i tasti + e - da tastiera per cambiare la dimensione del testo.',
+            en: 'Safety card selected: use keyboard + and - keys to change text size.'
+          }),
+          'info'
+        );
+      }
+      return true;
+    });
+  }, [push, t]);
+  const changeSafetyCardFontSize = useCallback(
+    (delta: number) => {
+      setSafetyCardFontSize((prev) => {
+        const next = Math.max(8, Math.min(16, prev + delta));
+        if (next !== prev) {
+          push(
+            t({
+              it: `Dimensione testo scheda: ${next}px`,
+              en: `Safety card text size: ${next}px`
+            }),
+            'info'
+          );
+        }
+        return next;
+      });
+    },
+    [push, t]
+  );
+  const safetyCardViewport = useMemo(() => {
+    const z = Number(zoom) || 1;
+    return {
+      x: pan.x + safetyCardPos.x * z,
+      y: pan.y + safetyCardPos.y * z,
+      z
+    };
+  }, [pan.x, pan.y, safetyCardPos.x, safetyCardPos.y, zoom]);
   useEffect(() => {
     if (!corridorModal) return;
     setCorridorNameInput(corridorModal.initialName || '');
@@ -774,6 +940,34 @@ const PlanView = ({ planId }: Props) => {
   const layerVisibilitySyncRef = useRef<string>('');
   renderStartRef.current = performance.now();
 
+  const dismissSelectionHintToasts = useCallback(() => {
+    selectionToastKeyRef.current = '';
+    if (selectionToastIdRef.current != null) {
+      toast.dismiss(selectionToastIdRef.current);
+      selectionToastIdRef.current = null;
+    }
+    deskToastKeyRef.current = '';
+    if (deskToastIdRef.current != null) {
+      toast.dismiss(deskToastIdRef.current);
+      deskToastIdRef.current = null;
+    }
+    multiToastKeyRef.current = '';
+    if (multiToastIdRef.current != null) {
+      toast.dismiss(multiToastIdRef.current);
+      multiToastIdRef.current = null;
+    }
+    quoteToastKeyRef.current = '';
+    if (quoteToastIdRef.current != null) {
+      toast.dismiss(quoteToastIdRef.current);
+      quoteToastIdRef.current = null;
+    }
+    mediaToastKeyRef.current = '';
+    if (mediaToastIdRef.current != null) {
+      toast.dismiss(mediaToastIdRef.current);
+      mediaToastIdRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
@@ -806,6 +1000,7 @@ const PlanView = ({ planId }: Props) => {
   const plan = useDataStore(
     useCallback((s) => s.findFloorPlan(planId), [planId])
   );
+  const allClients = useDataStore((s) => s.clients);
   const client = useDataStore(
     useCallback((s) => s.findClientByPlan(planId), [planId])
   );
@@ -2159,8 +2354,9 @@ const PlanView = ({ planId }: Props) => {
           const ids = Array.isArray(o.layerIds) && o.layerIds.length ? o.layerIds : normalizedLayerIdsForType(o.type);
           return ids.some((id: string) => visible.has(id));
         });
-    const rooms = showAll ? renderPlan.rooms : visible.has('rooms') ? renderPlan.rooms : [];
-    const corridors = showAll ? (renderPlan as any).corridors : visible.has('corridors') ? (renderPlan as any).corridors : [];
+    const securityVisible = visible.has(SECURITY_LAYER_ID);
+    const rooms = showAll || securityVisible || visible.has('rooms') ? renderPlan.rooms : [];
+    const corridors = showAll || securityVisible || visible.has('corridors') ? (renderPlan as any).corridors : [];
     const visibleObjectIds = new Set(objects.map((o: any) => o.id));
     const baseLinks = Array.isArray((renderPlan as any).links)
       ? ((renderPlan as any).links as any[]).filter((l) => {
@@ -2175,6 +2371,75 @@ const PlanView = ({ planId }: Props) => {
     const links = [...baseLinks, ...rackLinks];
     return { ...renderPlan, objects, rooms, corridors, links };
   }, [allItemsSelected, effectiveVisibleLayerIds, getTypeLayerIds, hideAllLayers, inferDefaultLayerIds, layerIdSet, rackOverlayLinks, renderPlan]);
+  const securityLayerVisible = useMemo(
+    () => !hideAllLayers && (allItemsSelected || effectiveVisibleLayerIds.includes(SECURITY_LAYER_ID)),
+    [allItemsSelected, effectiveVisibleLayerIds, hideAllLayers]
+  );
+  useEffect(() => {
+    if (!securityLayerVisible) {
+      setSafetyCardSelected(false);
+      return;
+    }
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && safetyCardRef.current?.contains(target)) return;
+      setSafetyCardSelected(false);
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    return () => window.removeEventListener('mousedown', onPointerDown);
+  }, [securityLayerVisible]);
+  useEffect(() => {
+    if (!securityLayerVisible || !safetyCardSelected) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = String(target?.tagName || '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || !!target?.isContentEditable) return;
+      if (event.key === '+' || event.key === '=' || event.key === 'Add') {
+        event.preventDefault();
+        changeSafetyCardFontSize(1);
+      } else if (event.key === '-' || event.key === '_' || event.key === 'Subtract') {
+        event.preventDefault();
+        changeSafetyCardFontSize(-1);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [changeSafetyCardFontSize, safetyCardSelected, securityLayerVisible]);
+  const safetyEmergencyContacts = useMemo(() => {
+    const list = Array.isArray((client as any)?.emergencyContacts) ? ((client as any).emergencyContacts as any[]) : [];
+    const scopeRank = (scope: string) => {
+      if (scope === 'global') return 0;
+      if (scope === 'client') return 1;
+      if (scope === 'site') return 2;
+      if (scope === 'plan') return 3;
+      return 9;
+    };
+    const out = list.filter((entry) => {
+      const scope = String(entry?.scope || '');
+      const showOnPlanCard = entry?.showOnPlanCard !== false;
+      if (!showOnPlanCard) return false;
+      if (scope === 'global' || scope === 'client') return true;
+      if (scope === 'site') return String(entry?.siteId || '') === String(site?.id || '');
+      if (scope === 'plan') return String(entry?.floorPlanId || '') === String(planId || '');
+      return false;
+    });
+    return out.sort((a, b) => {
+      const aScope = String(a?.scope || '');
+      const bScope = String(b?.scope || '');
+      const byScope = scopeRank(aScope) - scopeRank(bScope);
+      if (byScope !== 0) return byScope;
+      return `${a?.name || ''}`.localeCompare(`${b?.name || ''}`);
+    });
+  }, [client, planId, site?.id]);
+  const safetyEmergencyPoints = useMemo(() => {
+    const objects = (((renderPlan as any)?.objects || []) as any[]).filter((obj) => String(obj?.type || '') === 'safety_assembly_point');
+    return objects.map((obj) => ({
+      id: String(obj?.id || ''),
+      name: String(obj?.name || obj?.type || ''),
+      gps: String((obj as any)?.gpsCoords || ''),
+      coords: `${Math.round(Number(obj?.x || 0))}, ${Math.round(Number(obj?.y || 0))}`
+    }));
+  }, [renderPlan]);
   const quoteLabels = useMemo(() => {
     const map: Record<string, string> = {};
     const objects = ((canvasPlan || renderPlan) as any)?.objects || [];
@@ -2836,12 +3101,14 @@ const PlanView = ({ planId }: Props) => {
         objects: latest.objects,
         views: latest.views,
         rooms: latest.rooms,
+        corridors: latest.corridors,
         racks: latest.racks,
         rackItems: latest.rackItems,
         rackLinks: latest.rackLinks
       };
       const normalizedCurrent = {
         ...current,
+        corridors: latestSnapshot.corridors === undefined ? undefined : current.corridors,
         racks: latestSnapshot.racks === undefined ? undefined : current.racks,
         rackItems: latestSnapshot.rackItems === undefined ? undefined : current.rackItems,
         rackLinks: latestSnapshot.rackLinks === undefined ? undefined : current.rackLinks
@@ -3894,6 +4161,10 @@ const PlanView = ({ planId }: Props) => {
     selectedLinkIdRef.current = selectedLinkId;
   }, [selectedLinkId]);
   useEffect(() => {
+    if (!internalMapOpen) return;
+    dismissSelectionHintToasts();
+  }, [dismissSelectionHintToasts, internalMapOpen]);
+  useEffect(() => {
     selectedRoomIdRef.current = selectedRoomId;
   }, [selectedRoomId]);
   useEffect(() => {
@@ -4233,8 +4504,11 @@ const PlanView = ({ planId }: Props) => {
       clientX: number;
       clientY: number;
       wallSegmentLengthPx?: number;
-    }) => setContextMenu({ kind: 'object', id, x: clientX, y: clientY, wallSegmentLengthPx }),
-    []
+    }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'object', id, x: clientX, y: clientY, wallSegmentLengthPx });
+    },
+    [dismissSelectionHintToasts]
   );
 
   const handleWallQuickMenu = useCallback(
@@ -4289,6 +4563,10 @@ const PlanView = ({ planId }: Props) => {
         if (duplicate) return c;
         created = true;
         const doorId = nanoid();
+        const defaultDoorType = defaultDoorCatalogId
+          ? (objectTypeById.get(defaultDoorCatalogId) as ObjectTypeDefinition | undefined)
+          : undefined;
+        const defaultEmergency = !!defaultDoorType?.doorConfig?.isEmergency;
         setSelectedCorridorDoor({ corridorId, doorId });
         return {
           ...c,
@@ -4300,7 +4578,12 @@ const PlanView = ({ planId }: Props) => {
               t: Number(point.t.toFixed(4)),
               edgeIndexTo: undefined,
               tTo: undefined,
+              catalogTypeId: defaultDoorCatalogId || undefined,
               mode: 'static',
+              description: undefined,
+              isEmergency: defaultEmergency,
+              isFireDoor: false,
+              verificationHistory: [],
               linkedRoomIds: []
             }
           ]
@@ -4316,7 +4599,7 @@ const PlanView = ({ planId }: Props) => {
       setCorridorDoorDraft(null);
       setCorridorQuickMenu(null);
     },
-    [corridorDoorDraft, markTouched, push, t, updateFloorPlan]
+    [corridorDoorDraft, defaultDoorCatalogId, markTouched, objectTypeById, push, t, updateFloorPlan]
   );
 
   const toggleMapSubmenu = useCallback((section: typeof mapSubmenu) => {
@@ -4326,21 +4609,26 @@ const PlanView = ({ planId }: Props) => {
   const handleLinkContextMenu = useCallback(
     ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) => {
       if (isRackLinkId(id)) return;
+      dismissSelectionHintToasts();
       setContextMenu({ kind: 'link', id, x: clientX, y: clientY });
     },
-    []
+    [dismissSelectionHintToasts]
   );
 
   const handleRoomContextMenu = useCallback(
-    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) =>
-      setContextMenu({ kind: 'room', id, x: clientX, y: clientY }),
-    []
+    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'room', id, x: clientX, y: clientY });
+    },
+    [dismissSelectionHintToasts]
   );
 
   const handleCorridorContextMenu = useCallback(
-    ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) =>
-      setContextMenu({ kind: 'corridor', id, x: clientX, y: clientY, worldX, worldY }),
-    []
+    ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'corridor', id, x: clientX, y: clientY, worldX, worldY });
+    },
+    [dismissSelectionHintToasts]
   );
   const handleCorridorConnectionContextMenu = useCallback(
     ({
@@ -4357,13 +4645,18 @@ const PlanView = ({ planId }: Props) => {
       clientY: number;
       worldX: number;
       worldY: number;
-    }) => setContextMenu({ kind: 'corridor_connection', corridorId, connectionId, x: clientX, y: clientY, worldX, worldY }),
-    []
+    }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'corridor_connection', corridorId, connectionId, x: clientX, y: clientY, worldX, worldY });
+    },
+    [dismissSelectionHintToasts]
   );
   const handleCorridorDoorContextMenu = useCallback(
-    ({ corridorId, doorId, clientX, clientY }: { corridorId: string; doorId: string; clientX: number; clientY: number }) =>
-      setContextMenu({ kind: 'corridor_door', corridorId, doorId, x: clientX, y: clientY }),
-    []
+    ({ corridorId, doorId, clientX, clientY }: { corridorId: string; doorId: string; clientX: number; clientY: number }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'corridor_door', corridorId, doorId, x: clientX, y: clientY });
+    },
+    [dismissSelectionHintToasts]
   );
 
   const handleScaleContextMenu = useCallback(
@@ -4446,6 +4739,7 @@ const PlanView = ({ planId }: Props) => {
 
   const handleMapContextMenu = useCallback(
     ({ clientX, clientY, worldX, worldY }: { clientX: number; clientY: number; worldX: number; worldY: number }) => {
+      dismissSelectionHintToasts();
       if (toolMode) return;
       const getCorridorPoints = (corridor: any): { x: number; y: number }[] => {
         const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
@@ -4559,6 +4853,7 @@ const PlanView = ({ planId }: Props) => {
     },
     [
       clearSelection,
+      dismissSelectionHintToasts,
       effectiveVisibleLayerIds,
       push,
       renderPlan,
@@ -6818,18 +7113,18 @@ const PlanView = ({ planId }: Props) => {
   const paletteFavorites = useAuthStore((s) => (s.user as any)?.paletteFavorites) as string[] | undefined;
   const paletteOrder = useMemo(() => {
     const fav = Array.isArray(paletteFavorites) ? paletteFavorites : [];
-    return fav.filter((id) => !isWallType(id));
-  }, [isWallType, paletteFavorites]);
+    return fav.filter((id) => !isWallType(id) && !isDoorType(id) && !isSecurityTypeId(id));
+  }, [isDoorType, isWallType, paletteFavorites]);
   // User-configured palette: list can be empty (meaning no objects enabled).
   const paletteHasCustom = paletteOrder.length > 0;
   const paletteIsEmpty = Array.isArray(paletteFavorites) && paletteOrder.length === 0;
   const paletteHasMore = useMemo(() => {
     const all = (objectTypeDefs || [])
       .map((d) => d.id)
-      .filter((id) => !isDeskType(id) && !isWallType(id));
+      .filter((id) => !isDeskType(id) && !isWallType(id) && !isDoorType(id) && !isSecurityTypeId(id));
     const fav = new Set(paletteOrder);
     return all.some((id) => !fav.has(id));
-  }, [isWallType, objectTypeDefs, paletteOrder]);
+  }, [isDoorType, isWallType, objectTypeDefs, paletteOrder]);
   const deskTypeSet = useMemo(() => new Set(DESK_TYPE_IDS as readonly string[]), []);
   const deskPaletteDefs = useMemo(() => {
     const defs = objectTypeDefs || [];
@@ -6839,32 +7134,50 @@ const PlanView = ({ planId }: Props) => {
     const filtered = paletteOrder.filter((id) => deskTypeSet.has(id));
     return filtered.length ? filtered : undefined;
   }, [deskTypeSet, paletteOrder]);
+  const securityPaletteDefs = useMemo(() => {
+    const defs = objectTypeDefs || [];
+    return defs.filter((d) => isSecurityTypeId(d.id));
+  }, [objectTypeDefs]);
   const otherPaletteDefs = useMemo(() => {
     const defs = objectTypeDefs || [];
-    return defs.filter((d) => !deskTypeSet.has(d.id) && !isWallType(d.id));
-  }, [deskTypeSet, isWallType, objectTypeDefs]);
-  const [paletteSection, setPaletteSection] = useState<'desks' | 'objects'>('objects');
+    return defs.filter((d) => !deskTypeSet.has(d.id) && !isWallType(d.id) && !isDoorType(d.id) && !isSecurityTypeId(d.id));
+  }, [deskTypeSet, isDoorType, isWallType, objectTypeDefs]);
+  const [paletteSection, setPaletteSection] = useState<'desks' | 'objects' | 'security'>('objects');
   const [annotationsOpen, setAnnotationsOpen] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
   const [desksOpen, setDesksOpen] = useState(false);
   const [objectsOpen, setObjectsOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
 
   useEffect(() => {
     if (paletteSection === 'desks' && !deskPaletteDefs.length) {
       setPaletteSection('objects');
     } else if (paletteSection === 'objects' && !otherPaletteDefs.length && deskPaletteDefs.length) {
       setPaletteSection('desks');
+    } else if (paletteSection === 'objects' && !otherPaletteDefs.length && !deskPaletteDefs.length && securityPaletteDefs.length) {
+      setPaletteSection('security');
+    } else if (paletteSection === 'security' && !securityPaletteDefs.length) {
+      setPaletteSection(otherPaletteDefs.length ? 'objects' : 'desks');
     }
-  }, [deskPaletteDefs.length, otherPaletteDefs.length, paletteSection]);
+  }, [deskPaletteDefs.length, otherPaletteDefs.length, paletteSection, securityPaletteDefs.length]);
 
   useEffect(() => {
     if (!deskPaletteDefs.length) setDesksOpen(false);
     if (!otherPaletteDefs.length) setObjectsOpen(false);
-  }, [deskPaletteDefs.length, otherPaletteDefs.length]);
-  const paletteSettingsSection = paletteSection === 'desks' ? 'desks' : 'objects';
+    if (!securityPaletteDefs.length) setSecurityOpen(false);
+  }, [deskPaletteDefs.length, otherPaletteDefs.length, securityPaletteDefs.length]);
+  const paletteSettingsSection = paletteSection === 'desks' ? 'desks' : paletteSection === 'security' ? 'security' : 'objects';
 
   const addTypeToPalette = useCallback(
     async (typeId: string) => {
+      if (isDoorType(typeId)) {
+        push(t({ it: 'Le porte sono gestite dal catalogo dedicato e non dalla palette.', en: 'Doors are managed in the dedicated catalog, not in the palette.' }), 'info');
+        return;
+      }
+      if (isSecurityTypeId(typeId)) {
+        push(t({ it: 'I dispositivi sicurezza sono nel pannello Sicurezza dedicato.', en: 'Safety devices are managed in the dedicated Safety panel.' }), 'info');
+        return;
+      }
       const user = useAuthStore.getState().user as any;
       const enabled = Array.isArray(user?.paletteFavorites) ? (user.paletteFavorites as string[]) : [];
       if (enabled.includes(typeId)) return;
@@ -6879,7 +7192,7 @@ const PlanView = ({ planId }: Props) => {
         push(t({ it: 'Salvataggio non riuscito', en: 'Save failed' }), 'danger');
       }
     },
-    [push, t]
+    [isDoorType, push, t]
   );
 
   const removeTypeFromPalette = useCallback(
@@ -7350,14 +7663,25 @@ const PlanView = ({ planId }: Props) => {
       const corridor = corridors.find((c) => c.id === corridorId);
       const door = (corridor?.doors || []).find((d) => d.id === doorId);
       if (!corridor || !door) return;
+      const rawCatalogTypeId = typeof (door as any)?.catalogTypeId === 'string' ? String((door as any).catalogTypeId) : '';
+      const catalogTypeId = doorTypeIdSet.has(rawCatalogTypeId) ? rawCatalogTypeId : defaultDoorCatalogId;
+      const doorType = catalogTypeId ? (objectTypeById.get(catalogTypeId) as ObjectTypeDefinition | undefined) : undefined;
+      const defaultEmergency = !!(doorType as any)?.doorConfig?.isEmergency;
       setCorridorDoorModal({
         corridorId,
         doorId,
+        catalogTypeId,
+        description: typeof (door as any)?.description === 'string' ? String((door as any).description) : '',
+        isEmergency: typeof (door as any)?.isEmergency === 'boolean' ? !!(door as any).isEmergency : defaultEmergency,
+        isFireDoor: !!(door as any)?.isFireDoor,
+        lastVerificationAt: typeof (door as any)?.lastVerificationAt === 'string' ? String((door as any).lastVerificationAt) : '',
+        verifierCompany: typeof (door as any)?.verifierCompany === 'string' ? String((door as any).verifierCompany) : '',
+        verificationHistory: normalizeDoorVerificationHistory((door as any)?.verificationHistory),
         mode: door.mode === 'auto_sensor' || door.mode === 'automated' ? door.mode : 'static',
         automationUrl: String((door as any).automationUrl || '')
       });
     },
-    [corridors]
+    [corridors, defaultDoorCatalogId, doorTypeIdSet, objectTypeById]
   );
   const openCorridorDoorLinkModal = useCallback(
     (corridorId: string, doorId: string) => {
@@ -7444,9 +7768,43 @@ const PlanView = ({ planId }: Props) => {
     if (!corridorDoorModal || !plan || isReadOnly) return;
     const mode = corridorDoorModal.mode;
     const automationUrl = corridorDoorModal.automationUrl.trim();
+    const doorType = corridorDoorModal.catalogTypeId
+      ? (objectTypeById.get(corridorDoorModal.catalogTypeId) as ObjectTypeDefinition | undefined)
+      : undefined;
+    const supportsRemoteOpen = doorType ? !!doorType?.doorConfig?.remoteOpen : true;
+    if (mode === 'automated' && !supportsRemoteOpen) {
+      push(
+        t({
+          it: 'Il tipo porta selezionato non supporta l’apertura da remoto.',
+          en: 'The selected door type does not support remote opening.'
+        }),
+        'info'
+      );
+      return;
+    }
     if (mode === 'automated' && automationUrl && !/^https?:\/\//i.test(automationUrl)) {
       push(t({ it: 'Inserisci un URL valido (http/https).', en: 'Enter a valid URL (http/https).' }), 'danger');
       return;
+    }
+    const isEmergency = !!corridorDoorModal.isEmergency;
+    const isFireDoor = !!corridorDoorModal.isFireDoor;
+    const description = corridorDoorModal.description.trim();
+    const lastVerificationAt = corridorDoorModal.lastVerificationAt.trim();
+    const verifierCompany = corridorDoorModal.verifierCompany.trim();
+    let verificationHistory = normalizeDoorVerificationHistory(corridorDoorModal.verificationHistory);
+    if (isEmergency && (lastVerificationAt || verifierCompany)) {
+      const latest = verificationHistory[0];
+      if (!latest || (latest.date || '') !== lastVerificationAt || latest.company !== verifierCompany) {
+        verificationHistory = normalizeDoorVerificationHistory([
+          {
+            id: nanoid(),
+            date: lastVerificationAt || undefined,
+            company: verifierCompany,
+            createdAt: Date.now()
+          },
+          ...verificationHistory
+        ]);
+      }
     }
     const current = (plan.corridors || []) as Corridor[];
     const next = current.map((corridor) => {
@@ -7455,7 +7813,18 @@ const PlanView = ({ planId }: Props) => {
         ...corridor,
         doors: (corridor.doors || []).map((door) =>
           door.id === corridorDoorModal.doorId
-            ? { ...door, mode, automationUrl: mode === 'automated' ? automationUrl : undefined }
+            ? {
+                ...door,
+                catalogTypeId: corridorDoorModal.catalogTypeId || undefined,
+                description: description || undefined,
+                isEmergency,
+                isFireDoor,
+                lastVerificationAt: isEmergency ? lastVerificationAt || undefined : undefined,
+                verifierCompany: isEmergency ? verifierCompany || undefined : undefined,
+                verificationHistory,
+                mode,
+                automationUrl: mode === 'automated' ? automationUrl : undefined
+              }
             : door
         )
       };
@@ -7464,7 +7833,7 @@ const PlanView = ({ planId }: Props) => {
     updateFloorPlan(plan.id, { corridors: next } as any);
     push(t({ it: 'Proprietà porta aggiornate', en: 'Door properties updated' }), 'success');
     setCorridorDoorModal(null);
-  }, [corridorDoorModal, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
+  }, [corridorDoorModal, isReadOnly, markTouched, objectTypeById, plan, push, t, updateFloorPlan]);
   const saveCorridorDoorLinkModal = useCallback(() => {
     if (!corridorDoorLinkModal || !plan || isReadOnly) return;
     const availableRooms = ((renderPlan?.rooms || []) as Room[]).filter(Boolean);
@@ -7550,6 +7919,7 @@ const PlanView = ({ planId }: Props) => {
     (corridorId: string) => {
       if (isReadOnly) return;
       setCorridorDoorDraft({ corridorId });
+      setCorridorQuickMenu(null);
       setSelectedCorridorDoor(null);
       setSelectedCorridorId(corridorId);
       push(
@@ -7922,6 +8292,12 @@ const PlanView = ({ planId }: Props) => {
   const handleCreate = (payload: {
     name: string;
     description?: string;
+    notes?: string;
+    lastVerificationAt?: string;
+    verifierCompany?: string;
+    gpsCoords?: string;
+    securityDocuments?: any[];
+    securityCheckHistory?: any[];
     layerIds?: string[];
     customValues?: Record<string, any>;
     scale?: number;
@@ -7953,6 +8329,8 @@ const PlanView = ({ planId }: Props) => {
     wifiCatalogId?: string;
     wifiShowRange?: boolean;
     wifiRangeScale?: number;
+    ip?: string;
+    url?: string;
   }) => {
     if (!plan || !modalState || isReadOnly) return;
     if (modalState.mode === 'create') {
@@ -8021,7 +8399,15 @@ const PlanView = ({ planId }: Props) => {
               imageWidth: payload.imageWidth,
               imageHeight: payload.imageHeight
             }
-          : {})
+          : {}),
+        ...(payload.ip !== undefined ? { ip: payload.ip } : {}),
+        ...(payload.url !== undefined ? { url: payload.url } : {}),
+        ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
+        ...(payload.lastVerificationAt !== undefined ? { lastVerificationAt: payload.lastVerificationAt } : {}),
+        ...(payload.verifierCompany !== undefined ? { verifierCompany: payload.verifierCompany } : {}),
+        ...(payload.gpsCoords !== undefined ? { gpsCoords: payload.gpsCoords } : {}),
+        ...(payload.securityDocuments !== undefined ? { securityDocuments: payload.securityDocuments } : {}),
+        ...(payload.securityCheckHistory !== undefined ? { securityCheckHistory: payload.securityCheckHistory } : {})
       };
       const fallbackLayerIds =
         modalState.type === 'quote' ? ['quotes'] : (getTypeLayerIds(modalState.type) || inferDefaultLayerIds(modalState.type, layerIdSet));
@@ -8136,7 +8522,15 @@ const PlanView = ({ planId }: Props) => {
               imageWidth: payload.imageWidth ?? (base as any).imageWidth,
               imageHeight: payload.imageHeight ?? (base as any).imageHeight
             }
-          : {})
+          : {}),
+        ip: payload.ip ?? (base as any)?.ip,
+        url: payload.url ?? (base as any)?.url,
+        notes: payload.notes ?? (base as any)?.notes,
+        lastVerificationAt: payload.lastVerificationAt ?? (base as any)?.lastVerificationAt,
+        verifierCompany: payload.verifierCompany ?? (base as any)?.verifierCompany,
+        gpsCoords: payload.gpsCoords ?? (base as any)?.gpsCoords,
+        securityDocuments: payload.securityDocuments ?? (base as any)?.securityDocuments,
+        securityCheckHistory: payload.securityCheckHistory ?? (base as any)?.securityCheckHistory
       };
       const layerIds =
         base?.type === 'quote'
@@ -8333,6 +8727,12 @@ const PlanView = ({ planId }: Props) => {
   const handleUpdate = (payload: {
     name: string;
     description?: string;
+    notes?: string;
+    lastVerificationAt?: string;
+    verifierCompany?: string;
+    gpsCoords?: string;
+    securityDocuments?: any[];
+    securityCheckHistory?: any[];
     layerIds?: string[];
     customValues?: Record<string, any>;
     scale?: number;
@@ -8364,6 +8764,8 @@ const PlanView = ({ planId }: Props) => {
     wifiCatalogId?: string;
     wifiShowRange?: boolean;
     wifiRangeScale?: number;
+    ip?: string;
+    url?: string;
   }) => {
     if (!modalState || modalState.mode !== 'edit' || isReadOnly) return;
     markTouched();
@@ -8408,6 +8810,14 @@ const PlanView = ({ planId }: Props) => {
     updateObject(modalState.objectId, {
       name: payload.name,
       description: payload.description,
+      ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
+      ...(payload.lastVerificationAt !== undefined ? { lastVerificationAt: payload.lastVerificationAt } : {}),
+      ...(payload.verifierCompany !== undefined ? { verifierCompany: payload.verifierCompany } : {}),
+      ...(payload.gpsCoords !== undefined ? { gpsCoords: payload.gpsCoords } : {}),
+      ...(payload.securityDocuments !== undefined ? { securityDocuments: payload.securityDocuments } : {}),
+      ...(payload.securityCheckHistory !== undefined ? { securityCheckHistory: payload.securityCheckHistory } : {}),
+      ...(payload.ip !== undefined ? { ip: payload.ip } : {}),
+      ...(payload.url !== undefined ? { url: payload.url } : {}),
       layerIds: isQuote ? ['quotes'] : (payload.layerIds ?? obj?.layerIds),
       ...(payload.scale !== undefined ? { scale: Math.max(0.2, Math.min(2.4, Number(payload.scale) || 1)) } : {}),
       ...(isQuote && payload.quoteLabelScale !== undefined
@@ -8738,6 +9148,16 @@ const PlanView = ({ planId }: Props) => {
               wifiShowRange: true,
               wifiRangeScale: 1
             }
+          : {}),
+        ...(isSecurityTypeId(modalState.type)
+          ? {
+              notes: '',
+              lastVerificationAt: '',
+              verifierCompany: '',
+              gpsCoords: '',
+              securityDocuments: [],
+              securityCheckHistory: []
+            }
           : {})
       };
     }
@@ -8771,6 +9191,14 @@ const PlanView = ({ planId }: Props) => {
       imageUrl: (obj as any).imageUrl,
       imageWidth: (obj as any).imageWidth,
       imageHeight: (obj as any).imageHeight,
+      ip: (obj as any).ip,
+      url: (obj as any).url,
+      notes: (obj as any).notes,
+      lastVerificationAt: (obj as any).lastVerificationAt,
+      verifierCompany: (obj as any).verifierCompany,
+      gpsCoords: (obj as any).gpsCoords,
+      securityDocuments: (obj as any).securityDocuments,
+      securityCheckHistory: (obj as any).securityCheckHistory,
         ...(obj.type === 'wifi'
           ? {
             wifiDb: (obj as any).wifiDb,
@@ -9705,6 +10133,17 @@ const PlanView = ({ planId }: Props) => {
               }}
             />
           </div>
+          <button
+            onClick={() => {
+              dismissSelectionHintToasts();
+              setInternalMapOpen(true);
+            }}
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-card hover:bg-slate-50"
+            title={t({ it: 'Mappa interna', en: 'Internal map' })}
+          >
+            <LocateFixed size={15} />
+            {t({ it: 'Mappa interna', en: 'Internal map' })}
+          </button>
           <div className="flex items-center gap-2">
             <button
               onClick={() => performUndo()}
@@ -10002,6 +10441,71 @@ const PlanView = ({ planId }: Props) => {
                         {t({ it: 'Imposta scala', en: 'Set scale' })}
                       </button>
                     </div>
+                  </div>
+                ) : null}
+                {securityLayerVisible ? (
+                  <div
+                    ref={safetyCardRef}
+                    className={`absolute z-30 rounded-2xl border bg-amber-50/95 p-2 shadow-2xl ${
+                      safetyCardSelected ? 'border-amber-500' : 'border-amber-300'
+                    }`}
+                    style={{
+                      left: 0,
+                      top: 0,
+                      width: safetyCardSize.w,
+                      height: safetyCardSize.h,
+                      transform: `translate3d(${safetyCardViewport.x}px, ${safetyCardViewport.y}px, 0) scale(${safetyCardViewport.z})`,
+                      transformOrigin: 'top left',
+                      willChange: 'transform',
+                      backfaceVisibility: 'hidden'
+                    }}
+                    onMouseDownCapture={selectSafetyCard}
+                  >
+                    <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-amber-200 bg-amber-50/90" style={{ fontSize: `${safetyCardFontSize}px` }}>
+                      <div className="flex cursor-move items-center border-b border-amber-200 bg-amber-100/80 px-1.5 py-[1px] select-none" onMouseDown={startSafetyCardDrag}>
+                        <div className="text-[0.58em] font-semibold uppercase tracking-wide text-amber-900">
+                          {t({ it: 'Scheda Sicurezza', en: 'Safety Card' })}
+                        </div>
+                      </div>
+                      <div className="flex min-h-0 flex-1 flex-col gap-1 px-2 py-1">
+                        <div className="flex min-h-0 items-center gap-1 text-[0.82em]">
+                          <span className="shrink-0 font-semibold text-slate-600">{t({ it: 'Numeri', en: 'Numbers' })}:</span>
+                          <div className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-slate-700">
+                            {safetyEmergencyContacts.length ? (
+                              safetyEmergencyContacts.map((entry: any, index: number) => (
+                                <span key={entry.id} className="inline-block pr-2">
+                                  {index === 0 ? '|' : '|'} {entry.name || '—'} {entry.phone || '—'}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-slate-500">{t({ it: 'Nessun numero', en: 'No numbers' })}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex min-h-0 items-center gap-1 text-[0.82em]">
+                          <span className="shrink-0 font-semibold text-slate-600">{t({ it: 'Ritrovo', en: 'Meeting' })}:</span>
+                          <div className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-slate-700">
+                            {safetyEmergencyPoints.length ? (
+                              safetyEmergencyPoints.map((point, index) => (
+                                <span key={point.id} className="inline-block pr-2">
+                                  {index === 0 ? '|' : '|'} {point.name} {point.gps || point.coords}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-slate-500">{t({ it: 'Nessun punto', en: 'No points' })}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onMouseDown={startSafetyCardResize}
+                      className="absolute bottom-1 right-1 flex h-5 w-5 cursor-nwse-resize items-center justify-center rounded bg-amber-100 text-amber-800 hover:bg-amber-200"
+                      title={t({ it: 'Allarga/riduci scheda', en: 'Resize card' })}
+                    >
+                      <span className="block h-[2px] w-2 rotate-45 rounded bg-current" />
+                    </button>
                   </div>
                 ) : null}
                 {webcamGesturesEnabled && presentationMode && webcamGuideVisible ? (
@@ -10345,6 +10849,21 @@ const PlanView = ({ planId }: Props) => {
                                     ? (door as any).mode
                                     : 'static',
                                 automationUrl: typeof (door as any).automationUrl === 'string' ? String((door as any).automationUrl) : undefined,
+                                catalogTypeId:
+                                  typeof (door as any).catalogTypeId === 'string' ? String((door as any).catalogTypeId).trim() || undefined : undefined,
+                                description:
+                                  typeof (door as any).description === 'string' ? String((door as any).description).trim() || undefined : undefined,
+                                isEmergency: !!(door as any).isEmergency,
+                                isFireDoor: !!(door as any).isFireDoor,
+                                lastVerificationAt:
+                                  typeof (door as any).lastVerificationAt === 'string'
+                                    ? String((door as any).lastVerificationAt).trim() || undefined
+                                    : undefined,
+                                verifierCompany:
+                                  typeof (door as any).verifierCompany === 'string'
+                                    ? String((door as any).verifierCompany).trim() || undefined
+                                    : undefined,
+                                verificationHistory: normalizeDoorVerificationHistory((door as any).verificationHistory),
                                 linkedRoomIds: Array.isArray((door as any).linkedRoomIds)
                                   ? Array.from(new Set((door as any).linkedRoomIds.map((id: any) => String(id)).filter(Boolean)))
                                   : []
@@ -10390,7 +10909,7 @@ const PlanView = ({ planId }: Props) => {
               </div>
             ) : null}
 		          {!isReadOnly && !presentationMode ? (
-		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-[9rem] shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-[9rem] shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 pb-8 shadow-card">
                 <div className="rounded-xl bg-slate-50/80 p-2">
                   <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
                     <button
@@ -10704,6 +11223,58 @@ const PlanView = ({ planId }: Props) => {
                             setPendingType(type);
                           }}
                           onRemoveFromPalette={(type) => removeTypeFromPalette(type)}
+                          activeType={pendingType || (wallDrawMode ? wallDrawType : null)}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="h-px w-full bg-slate-200" />
+                  <div className="rounded-xl bg-rose-50/70 p-2">
+                    <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
+                      <button
+                        onClick={() => {
+                          if (!securityPaletteDefs.length) return;
+                          setPaletteSection('security');
+                          setSecurityOpen((prev) => !prev);
+                        }}
+                        disabled={!securityPaletteDefs.length}
+                        className="flex items-center gap-1 rounded-md px-1 py-0.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={
+                          securityOpen
+                            ? t({ it: 'Nascondi sicurezza', en: 'Collapse safety' })
+                            : t({ it: 'Mostra sicurezza', en: 'Expand safety' })
+                        }
+                      >
+                        {securityOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span>{t({ it: 'Sicurezza', en: 'Safety' })}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          const url = '/settings?tab=objects&section=security';
+                          if (hasNavigationEdits && !isReadOnly) {
+                            requestSaveAndNavigate(url);
+                            return;
+                          }
+                          navigate(url);
+                        }}
+                        title={t({ it: 'Impostazioni sicurezza', en: 'Safety settings' })}
+                        className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </div>
+                    {securityOpen && securityPaletteDefs.length ? (
+                      <div className="mt-3 flex flex-col items-center gap-3">
+                        <Toolbar
+                          defs={securityPaletteDefs}
+                          onSelectType={(type) => {
+                            setPaletteSection('security');
+                            setWallDrawMode(false);
+                            setMeasureMode(false);
+                            setScaleMode(false);
+                            setRoomDrawMode(null);
+                            setPendingType(type);
+                          }}
                           activeType={pendingType || (wallDrawMode ? wallDrawType : null)}
                         />
                       </div>
@@ -11904,14 +12475,26 @@ const PlanView = ({ planId }: Props) => {
                 (() => {
                   const corridor = corridors.find((c) => c.id === contextMenu.corridorId);
                   const door = (corridor?.doors || []).find((d) => d.id === contextMenu.doorId);
+                  const doorType = door?.catalogTypeId ? (objectTypeById.get(door.catalogTypeId) as ObjectTypeDefinition | undefined) : undefined;
+                  const supportsRemoteOpen = doorType ? !!doorType.doorConfig?.remoteOpen : true;
                   const mode = door?.mode || 'static';
                   const url = String((door as any)?.automationUrl || '').trim();
-                  const canOpen = mode === 'automated' && !!url;
+                  const canOpen = supportsRemoteOpen && mode === 'automated' && !!url;
                   return (
                     <button
                       onClick={() => {
                         if (!canOpen) {
-                          push(t({ it: 'Apri disponibile solo per porte automatizzate con URL', en: 'Open is available only for automated doors with URL' }), 'info');
+                          push(
+                            t({
+                              it: supportsRemoteOpen
+                                ? 'Apri disponibile solo per porte automatizzate con URL'
+                                : 'Questo tipo porta non supporta l’apertura da remoto',
+                              en: supportsRemoteOpen
+                                ? 'Open is available only for automated doors with URL'
+                                : 'This door type does not support remote opening'
+                            }),
+                            'info'
+                          );
                           setContextMenu(null);
                           return;
                         }
@@ -12821,6 +13404,14 @@ const PlanView = ({ planId }: Props) => {
             initialImageUrl={(modalInitials as any)?.imageUrl}
             initialImageWidth={(modalInitials as any)?.imageWidth}
             initialImageHeight={(modalInitials as any)?.imageHeight}
+            initialIp={(modalInitials as any)?.ip}
+            initialUrl={(modalInitials as any)?.url}
+            initialNotes={(modalInitials as any)?.notes}
+            initialLastVerificationAt={(modalInitials as any)?.lastVerificationAt}
+            initialVerifierCompany={(modalInitials as any)?.verifierCompany}
+            initialGpsCoords={(modalInitials as any)?.gpsCoords}
+            initialSecurityDocuments={(modalInitials as any)?.securityDocuments}
+            initialSecurityCheckHistory={(modalInitials as any)?.securityCheckHistory}
             typeLabel={
               modalState?.mode === 'create'
                 ? `${t({ it: 'Nuovo', en: 'New' })} ${modalInitials?.type ? getTypeLabel(modalInitials.type) : ''} (${Math.round((modalState as any)?.coords?.x || 0)}, ${Math.round(
@@ -13001,7 +13592,7 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                <Dialog.Panel className="w-full max-w-2xl modal-panel">
                   <div className="flex items-center justify-between gap-3">
                     <Dialog.Title className="modal-title">{t({ it: 'Crea layer per tipologia', en: 'Create type layer' })}</Dialog.Title>
                     <button
@@ -13713,48 +14304,333 @@ const PlanView = ({ planId }: Props) => {
                   <Dialog.Description className="mt-2 text-sm text-slate-600">
                     {t({ it: 'Configura tipo e azione della porta selezionata.', en: 'Configure type and action for the selected door.' })}
                   </Dialog.Description>
-                  <div className="mt-4 space-y-3">
-                    <label className="text-sm font-semibold text-slate-700">
-                      {t({ it: 'Tipo porta', en: 'Door type' })}
-                      <select
-                        value={corridorDoorModal?.mode || 'static'}
-                        onChange={(e) =>
-                          setCorridorDoorModal((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  mode: (e.target.value as 'static' | 'auto_sensor' | 'automated') || 'static'
+                  <div className="mt-4 space-y-4">
+                    {(() => {
+                      const selectedDoorType = corridorDoorModal?.catalogTypeId
+                        ? (objectTypeById.get(corridorDoorModal.catalogTypeId) as ObjectTypeDefinition | undefined)
+                        : undefined;
+                      const supportsRemoteOpen = !!selectedDoorType?.doorConfig?.remoteOpen;
+                      const verificationEnabled = !!selectedDoorType?.doorConfig?.trackVerification;
+                      const canOpenNow =
+                        supportsRemoteOpen &&
+                        corridorDoorModal?.mode === 'automated' &&
+                        /^https?:\/\//i.test(String(corridorDoorModal?.automationUrl || '').trim());
+                      return (
+                        <>
+                          {doorTypeDefs.length ? (
+                            <label className="text-sm font-semibold text-slate-700">
+                              {t({ it: 'Catalogo porta', en: 'Door catalog' })}
+                              <select
+                                value={corridorDoorModal?.catalogTypeId || ''}
+                                onChange={(e) => {
+                                  const nextTypeId = e.target.value;
+                                  const nextType = doorTypeDefs.find((def) => def.id === nextTypeId);
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          catalogTypeId: nextTypeId,
+                                          isEmergency: !!nextType?.doorConfig?.isEmergency,
+                                          mode: !!nextType?.doorConfig?.remoteOpen ? prev.mode : prev.mode === 'automated' ? 'static' : prev.mode
+                                        }
+                                      : prev
+                                  );
+                                }}
+                                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                title={t({
+                                  it: 'Seleziona il tipo porta dal catalogo impostazioni.',
+                                  en: 'Pick the door type from the settings catalog.'
+                                })}
+                              >
+                                {doorTypeDefs.map((def) => (
+                                  <option key={def.id} value={def.id}>
+                                    {(def.name?.[lang] as string) || (def.name?.it as string) || def.id}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : null}
+                          <label className="text-sm font-semibold text-slate-700">
+                            {t({ it: 'Descrizione porta', en: 'Door description' })}
+                            <textarea
+                              value={corridorDoorModal?.description || ''}
+                              onChange={(e) =>
+                                setCorridorDoorModal((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        description: e.target.value
+                                      }
+                                    : prev
+                                )
+                              }
+                              className="mt-1 min-h-[72px] w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              placeholder={t({ it: 'Es. Porta lato reception', en: 'e.g. Reception-side door' })}
+                            />
+                          </label>
+                          <label
+                            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                            title={t({
+                              it: 'Se attivo puoi registrare verifiche e storico porta emergenza.',
+                              en: 'When enabled you can record checks and emergency-door history.'
+                            })}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!corridorDoorModal?.isEmergency}
+                              onChange={(e) =>
+                                setCorridorDoorModal((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        isEmergency: e.target.checked
+                                      }
+                                    : prev
+                                )
+                              }
+                            />
+                            {t({ it: 'Porta emergenza', en: 'Emergency door' })}
+                          </label>
+                          <label
+                            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                            title={t({
+                              it: 'Segna la porta come tagliafuoco.',
+                              en: 'Mark this door as fire-rated.'
+                            })}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!corridorDoorModal?.isFireDoor}
+                              onChange={(e) =>
+                                setCorridorDoorModal((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        isFireDoor: e.target.checked
+                                      }
+                                    : prev
+                                )
+                              }
+                            />
+                            {t({ it: 'Tagliafuoco', en: 'Fire-rated' })}
+                          </label>
+                          {corridorDoorModal?.isEmergency ? (
+                            <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3">
+                              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-700">
+                                {t({ it: 'Verifiche emergenza', en: 'Emergency checks' })}
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <label className="text-sm font-semibold text-slate-700">
+                                  {t({ it: 'Data ultima verifica (opzionale)', en: 'Last check date (optional)' })}
+                                  <input
+                                    type="date"
+                                    value={corridorDoorModal?.lastVerificationAt || ''}
+                                    onChange={(e) =>
+                                      setCorridorDoorModal((prev) =>
+                                        prev
+                                          ? {
+                                              ...prev,
+                                              lastVerificationAt: e.target.value
+                                            }
+                                          : prev
+                                      )
+                                    }
+                                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                  />
+                                </label>
+                                <label className="text-sm font-semibold text-slate-700">
+                                  {t({ it: 'Società verificatrice', en: 'Verifier company' })}
+                                  <input
+                                    value={corridorDoorModal?.verifierCompany || ''}
+                                    onChange={(e) =>
+                                      setCorridorDoorModal((prev) =>
+                                        prev
+                                          ? {
+                                              ...prev,
+                                              verifierCompany: e.target.value
+                                            }
+                                          : prev
+                                      )
+                                    }
+                                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                    placeholder={t({ it: 'Es. SafeCheck Srl', en: 'e.g. SafeCheck Ltd' })}
+                                  />
+                                </label>
+                              </div>
+                              <div className="mt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const company = String(corridorDoorModal?.verifierCompany || '').trim();
+                                    const date = String(corridorDoorModal?.lastVerificationAt || '').trim();
+                                    if (!company && !date) {
+                                      push(
+                                        t({
+                                          it: 'Inserisci almeno società o data per aggiungere una verifica allo storico.',
+                                          en: 'Enter at least company or date to add a history check.'
+                                        }),
+                                        'info'
+                                      );
+                                      return;
+                                    }
+                                    setCorridorDoorModal((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            verificationHistory: normalizeDoorVerificationHistory([
+                                              { id: nanoid(), company, date: date || undefined, createdAt: Date.now() },
+                                              ...(prev.verificationHistory || [])
+                                            ])
+                                          }
+                                        : prev
+                                    );
+                                  }}
+                                  className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                                  title={t({ it: 'Aggiungi verifica allo storico', en: 'Add check to history' })}
+                                >
+                                  <Plus size={13} />
+                                  {t({ it: 'Aggiungi allo storico', en: 'Add to history' })}
+                                </button>
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                {(corridorDoorModal?.verificationHistory || []).length ? (
+                                  (corridorDoorModal?.verificationHistory || []).map((entry) => (
+                                    <div key={entry.id} className="flex items-center justify-between rounded-lg border border-rose-200 bg-white px-2.5 py-2 text-xs">
+                                      <div className="min-w-0">
+                                        <div className="truncate font-semibold text-slate-700">
+                                          {entry.company || t({ it: 'Società non indicata', en: 'Company not specified' })}
+                                        </div>
+                                        <div className="text-slate-500">
+                                          {(entry.date && entry.date.trim()) || t({ it: 'Data non indicata', en: 'Date not specified' })}
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setCorridorDoorModal((prev) =>
+                                            prev
+                                              ? {
+                                                  ...prev,
+                                                  verificationHistory: (prev.verificationHistory || []).filter((item) => item.id !== entry.id)
+                                                }
+                                              : prev
+                                          )
+                                        }
+                                        className="rounded-lg border border-rose-200 bg-rose-50 p-1.5 text-rose-700 hover:bg-rose-100"
+                                        title={t({ it: 'Rimuovi voce storico', en: 'Remove history entry' })}
+                                      >
+                                        <Trash size={12} />
+                                      </button>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="rounded-lg border border-dashed border-rose-200 bg-white px-2.5 py-2 text-xs text-slate-500">
+                                    {t({ it: 'Nessuna verifica storica registrata.', en: 'No historical checks registered.' })}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+                          <label className="text-sm font-semibold text-slate-700">
+                            {t({ it: 'Tipo porta', en: 'Door type' })}
+                            <select
+                              value={corridorDoorModal?.mode || 'static'}
+                              onChange={(e) =>
+                                setCorridorDoorModal((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        mode: (e.target.value as 'static' | 'auto_sensor' | 'automated') || 'static'
+                                      }
+                                    : prev
+                                )
+                              }
+                              className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            >
+                              <option value="static">{t({ it: 'Statica', en: 'Static' })}</option>
+                              <option value="auto_sensor">{t({ it: 'Automatica a rilevazione', en: 'Automatic with sensor' })}</option>
+                              <option value="automated" disabled={!supportsRemoteOpen}>
+                                {t({ it: 'Apertura automatizzata', en: 'Automated opening' })}
+                              </option>
+                            </select>
+                          </label>
+                          {!supportsRemoteOpen ? (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                              {t({
+                                it: 'Questo tipo porta non è configurato per apertura da remoto.',
+                                en: 'This door type is not configured for remote opening.'
+                              })}
+                            </div>
+                          ) : null}
+                          {corridorDoorModal?.mode === 'automated' ? (
+                            <label className="text-sm font-semibold text-slate-700">
+                              URL
+                              <input
+                                value={corridorDoorModal?.automationUrl || ''}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          automationUrl: e.target.value
+                                        }
+                                      : prev
+                                  )
                                 }
-                              : prev
-                          )
-                        }
-                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                      >
-                        <option value="static">{t({ it: 'Statica', en: 'Static' })}</option>
-                        <option value="auto_sensor">{t({ it: 'Automatica a rilevazione', en: 'Automatic with sensor' })}</option>
-                        <option value="automated">{t({ it: 'Apertura automatizzata', en: 'Automated opening' })}</option>
-                      </select>
-                    </label>
-                    {corridorDoorModal?.mode === 'automated' ? (
-                      <label className="text-sm font-semibold text-slate-700">
-                        URL
-                        <input
-                          value={corridorDoorModal?.automationUrl || ''}
-                          onChange={(e) =>
-                            setCorridorDoorModal((prev) =>
-                              prev
-                                ? {
-                                    ...prev,
-                                    automationUrl: e.target.value
-                                  }
-                                : prev
-                            )
-                          }
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                          placeholder="https://..."
-                        />
-                      </label>
-                    ) : null}
+                                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                placeholder="https://..."
+                              />
+                            </label>
+                          ) : null}
+                          {verificationEnabled ? (
+                            <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                              {t({
+                                it: 'Questo tipo porta prevede tracciamento data revisione e società verificatrice.',
+                                en: 'This door type supports revision date and verifier company tracking.'
+                              })}
+                            </div>
+                          ) : null}
+                          <div className="flex items-center justify-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!canOpenNow) {
+                                  push(
+                                    t({
+                                      it: supportsRemoteOpen
+                                        ? 'Apri disponibile solo con URL valido su porte automatizzate.'
+                                        : 'Questo tipo porta non supporta apertura da remoto.',
+                                      en: supportsRemoteOpen
+                                        ? 'Open is available only with a valid URL on automated doors.'
+                                        : 'This door type does not support remote opening.'
+                                    }),
+                                    'info'
+                                  );
+                                  return;
+                                }
+                                const requestUrl = `${String(corridorDoorModal?.automationUrl || '').trim()}${
+                                  String(corridorDoorModal?.automationUrl || '').includes('?') ? '&' : '?'
+                                }_deskly_open_ts=${Date.now()}`;
+                                fetch(requestUrl, {
+                                  method: 'GET',
+                                  mode: 'no-cors',
+                                  cache: 'no-store',
+                                  keepalive: true
+                                }).catch(() => {});
+                                push(t({ it: 'Comando apertura porta avviato.', en: 'Door opening command started.' }), 'success');
+                              }}
+                              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${
+                                canOpenNow ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50' : 'border-slate-200 bg-slate-100 text-slate-400'
+                              }`}
+                              title={t({ it: 'Apri', en: 'Open' })}
+                            >
+                              <DoorOpen size={14} />
+                              {t({ it: 'Apri', en: 'Open' })}
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="modal-footer">
                     <button
@@ -13815,6 +14691,13 @@ const PlanView = ({ planId }: Props) => {
                       en: 'Select one or more rooms to link to this door. The nearest room is preselected by default.'
                     })}
                   </Dialog.Description>
+                  <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900">
+                    <span className="font-semibold">{t({ it: 'Guida rapida:', en: 'Quick hint:' })}</span>{' '}
+                    {t({
+                      it: 'badge verde = stanza più vicina alla porta; badge azzurro = prossimità al perimetro del corridoio.',
+                      en: 'green badge = nearest room to the door; cyan badge = close to the corridor perimeter.'
+                    })}
+                  </div>
                   <div className="mt-4">
                     <input
                       value={corridorDoorLinkQuery}
@@ -13833,7 +14716,7 @@ const PlanView = ({ planId }: Props) => {
                         return (
                           <label
                             key={entry.id}
-                            className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 ${
+                            className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-2.5 py-2 ${
                               checked ? 'border-primary/40 bg-primary/5' : 'border-slate-200 bg-white hover:bg-slate-50'
                             }`}
                           >
@@ -13856,19 +14739,31 @@ const PlanView = ({ planId }: Props) => {
                               <div className="truncate text-sm font-semibold text-slate-800">
                                 {entry.name}{' '}
                                 {entry.isNearest ? (
-                                  <span className="font-semibold text-emerald-600">
-                                    ({t({ it: 'rilevata prossimità', en: 'proximity detected' })})
+                                  <span
+                                    className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-900"
+                                    title={t({
+                                      it: 'Stanza più vicina alla porta rilevata automaticamente.',
+                                      en: 'Nearest room to this door, detected automatically.'
+                                    })}
+                                  >
+                                    {t({ it: 'rilevata prossimità', en: 'proximity detected' })}
                                   </span>
                                 ) : null}
                               </div>
-                              <div className="mt-0.5 text-xs text-slate-600">
+                              <div className="mt-0.5 text-[11px] text-slate-600">
                                 {t({
                                   it: `Utenti: ${entry.userCount} · Utenti reali: ${entry.realUserCount}`,
                                   en: `Users: ${entry.userCount} · Real users: ${entry.realUserCount}`
                                 })}
                               </div>
                               {entry.isMagnetic ? (
-                                <div className="mt-0.5 text-[11px] font-semibold text-sky-600">
+                                <div
+                                  className="mt-0.5 inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-800"
+                                  title={t({
+                                    it: 'La stanza è adiacente al perimetro del corridoio vicino alla porta.',
+                                    en: 'The room is adjacent to the corridor perimeter near this door.'
+                                  })}
+                                >
                                   {t({ it: 'Aggancio magnetico corridoio rilevato', en: 'Corridor magnetic match detected' })}
                                 </div>
                               ) : null}
@@ -15278,7 +16173,7 @@ const PlanView = ({ planId }: Props) => {
 
       <AllObjectTypesModal
         open={allTypesOpen}
-        defs={objectTypeDefs || []}
+        defs={(objectTypeDefs || []).filter((def) => (def as any)?.category !== 'door')}
         onClose={() => setAllTypesOpen(false)}
         onPick={(typeId) => {
           setPendingType(typeId);
@@ -15492,6 +16387,14 @@ const PlanView = ({ planId }: Props) => {
             setHighlightRoom({ roomId: r.roomId, until: Date.now() + 3200 });
           }
         }}
+      />
+
+      <InternalMapModal
+        open={internalMapOpen}
+        clients={allClients}
+        objectTypeLabels={objectTypeLabels}
+        initialLocation={{ clientId: client?.id, siteId: site?.id, planId }}
+        onClose={() => setInternalMapOpen(false)}
       />
 
       <Transition appear show={webcamGesturesEnabled && presentationEnterModalOpen} as={Fragment}>
