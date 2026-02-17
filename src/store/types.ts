@@ -354,6 +354,7 @@ export interface CorridorDoor {
   automationUrl?: string;
   description?: string;
   isEmergency?: boolean;
+  isMainEntrance?: boolean;
   isFireDoor?: boolean;
   lastVerificationAt?: string;
   verifierCompany?: string;
