@@ -172,6 +172,7 @@ interface Props {
         automationUrl?: string;
         description?: string;
         isEmergency?: boolean;
+        isMainEntrance?: boolean;
         lastVerificationAt?: string;
         verifierCompany?: string;
         verificationHistory?: Array<{ id: string; date?: string; company: string; notes?: string; createdAt: number }>;
@@ -4798,6 +4799,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
               };
               const doorDescription = String((door as any).description || '').trim();
               const emergency = !!(door as any).isEmergency;
+              const mainEntrance = !!(door as any).isMainEntrance;
               const isFireDoor = !!(door as any).isFireDoor;
               const automationUrl = String((door as any).automationUrl || '').trim();
               const mode = String((door as any).mode || 'static');
@@ -4813,6 +4815,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                 doorDescription ? `${t({ it: 'Descrizione', en: 'Description' })}: ${doorDescription}` : t({ it: 'Porta', en: 'Door' }),
                 `${t({ it: 'Modalità', en: 'Mode' })}: ${modeLabel}`,
                 emergency ? t({ it: 'Porta emergenza', en: 'Emergency door' }) : '',
+                mainEntrance ? t({ it: 'Ingresso principale', en: 'Main entrance' }) : '',
                 isFireDoor ? t({ it: 'Tagliafuoco', en: 'Fire door' }) : '',
                 automationUrl ? `${t({ it: 'URL apertura', en: 'Open URL' })}: ${automationUrl}` : '',
                 emergency && (lastVerificationAt || verifierCompany)
