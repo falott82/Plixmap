@@ -27,14 +27,14 @@ export default function CloneFloorPlanModal({
     if (open) setName(defaultName);
   }, [defaultName, open]);
 
-  if (!open) return null;
-
   const normalizeName = (v: string) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const duplicateName = useMemo(() => {
     const wanted = normalizeName(name);
     if (!wanted) return false;
     return (existingNames || []).some((n) => normalizeName(String(n || '')) === wanted);
   }, [existingNames, name]);
+
+  if (!open) return null;
 
   const submit = () => {
     const n = name.trim();

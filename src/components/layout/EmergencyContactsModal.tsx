@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { Check, Crosshair, Pencil, Plus, RotateCcw, Save, Search, ShieldAlert, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Crosshair, ExternalLink, Info, Pencil, Plus, RotateCcw, Save, Search, ShieldAlert, Trash2, X } from 'lucide-react';
 import { useDataStore } from '../../store/useDataStore';
 import { EmergencyContactEntry } from '../../store/types';
 import { useT } from '../../i18n/useT';
@@ -23,6 +23,28 @@ type ContactDraft = {
 };
 
 const makeEntryId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const parseGoogleMapsCoordinates = (rawValue: string): { lat: number; lng: number } | null => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return null;
+  const decimal = '[-+]?\\d{1,3}(?:\\.\\d+)?';
+  const pair = new RegExp(`(${decimal})\\s*,\\s*(${decimal})`);
+  const direct = raw.match(pair);
+  const fromPair = direct || raw.match(/[@?&]q=([-+]?\d{1,3}(?:\.\d+)?),\s*([-+]?\d{1,3}(?:\.\d+)?)/);
+  if (!fromPair) return null;
+  const lat = Number(fromPair[1]);
+  const lng = Number(fromPair[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+};
+const googleMapsUrlFromCoords = (rawValue: string) => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const parsed = parseGoogleMapsCoordinates(raw);
+  if (!parsed) return '';
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${parsed.lat},${parsed.lng}`)}`;
+};
 
 const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: Props) => {
   const t = useT();
@@ -52,6 +74,7 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
     floorPlanId: ''
   });
   const [error, setError] = useState('');
+  const [newContactOpen, setNewContactOpen] = useState(true);
 
   const globalContacts = useMemo(() => {
     const rows = clients
@@ -106,6 +129,7 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
     setEditingId(null);
     setSearch('');
     setError('');
+    setNewContactOpen(true);
   }, [client, globalContacts, open]);
 
   const toDraft = (entry: EmergencyContactEntry): ContactDraft => ({
@@ -124,18 +148,20 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
 
   const emergencyPoints = useMemo(() => {
     if (!client) return [];
-    const out: Array<{ id: string; name: string; siteName: string; planName: string; gps: string; coords: string }> = [];
+    const out: Array<{ id: string; name: string; siteName: string; planName: string; gps: string; coords: string; mapsUrl: string }> = [];
     for (const site of client.sites || []) {
       for (const plan of site.floorPlans || []) {
         for (const obj of plan.objects || []) {
           if (String(obj.type || '') !== 'safety_assembly_point') continue;
+          const gps = String(obj.gpsCoords || '');
           out.push({
             id: String(obj.id || ''),
             name: String(obj.name || obj.type || ''),
             siteName: String(site.name || ''),
             planName: String(plan.name || ''),
-            gps: String(obj.gpsCoords || ''),
-            coords: `${Math.round(Number(obj.x || 0))}, ${Math.round(Number(obj.y || 0))}`
+            gps,
+            coords: `${Math.round(Number(obj.x || 0))}, ${Math.round(Number(obj.y || 0))}`,
+            mapsUrl: googleMapsUrlFromCoords(gps)
           });
         }
       }
@@ -297,71 +323,144 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
     compact = false
   ) => {
     const planOptions = getPlanOptionsForSite(value.siteId);
+    const clientLabel = client?.shortName || client?.name || '—';
+    const isGlobal = value.scope === 'global';
+    const canPickSite = value.scope === 'site' || value.scope === 'plan';
+    const canPickPlan = value.scope === 'plan';
+    const scopeLabelClass = 'mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500';
+    const fieldClass = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2';
+    const disabledClass = 'w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs text-slate-400';
+    const updateScope = (scope: ContactDraft['scope']) => {
+      setValue((prev) => {
+        if (scope === prev.scope) return prev;
+        const firstSiteId = client?.sites?.[0]?.id || '';
+        const nextSiteId = scope === 'global' ? '' : prev.siteId || firstSiteId;
+        const nextPlanId = scope === 'plan' ? prev.floorPlanId || getPlanOptionsForSite(nextSiteId)?.[0]?.id || '' : '';
+        return {
+          ...prev,
+          scope,
+          siteId: nextSiteId,
+          floorPlanId: nextPlanId
+        };
+      });
+    };
+    if (compact) {
+      return (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div>
+            <label className={scopeLabelClass}>{t({ it: 'Ambito', en: 'Scope' })}</label>
+            <select value={value.scope} onChange={(e) => updateScope(e.target.value as ContactDraft['scope'])} className={fieldClass}>
+              <option value="global">{t({ it: 'Generale', en: 'Global' })}</option>
+              <option value="client">{t({ it: 'Cliente', en: 'Client' })}</option>
+              <option value="site">{t({ it: 'Sede', en: 'Site' })}</option>
+              <option value="plan">{t({ it: 'Planimetria', en: 'Plan' })}</option>
+            </select>
+          </div>
+          {!isGlobal ? (
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-emerald-700">{t({ it: 'Cliente', en: 'Client' })}</label>
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{clientLabel}</div>
+            </div>
+          ) : null}
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-amber-700">{t({ it: 'Sede', en: 'Site' })}</label>
+            {canPickSite ? (
+              <select
+                value={value.siteId}
+                onChange={(e) => {
+                  const nextSiteId = e.target.value;
+                  const firstPlan = getPlanOptionsForSite(nextSiteId)?.[0]?.id || '';
+                  setValue((prev) => ({ ...prev, siteId: nextSiteId, floorPlanId: prev.scope === 'plan' ? firstPlan : '' }));
+                }}
+                className={`${fieldClass} border-amber-200 bg-amber-50/40`}
+              >
+                {(client?.sites || []).map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className={disabledClass}>{t({ it: 'Non richiesta', en: 'Not required' })}</div>
+            )}
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-rose-700">{t({ it: 'Planimetria', en: 'Floor plan' })}</label>
+            {canPickPlan ? (
+              <select value={value.floorPlanId} onChange={(e) => setValue((prev) => ({ ...prev, floorPlanId: e.target.value }))} className={`${fieldClass} border-rose-200 bg-rose-50/40`}>
+                {(planOptions || []).map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className={disabledClass}>{t({ it: 'Non richiesta', en: 'Not required' })}</div>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
-      <>
-        <select
-          value={value.scope}
-          onChange={(e) => {
-            const scope = e.target.value as ContactDraft['scope'];
-            setValue((prev) => {
-              if (scope === prev.scope) return prev;
-              return {
-                ...prev,
-                scope,
-                siteId: scope === 'site' || scope === 'plan' ? prev.siteId || client?.sites?.[0]?.id || '' : '',
-                floorPlanId:
-                  scope === 'plan'
-                    ? prev.floorPlanId || getPlanOptionsForSite(prev.siteId || client?.sites?.[0]?.id || '')?.[0]?.id || ''
-                    : ''
-              };
-            });
-          }}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-        >
-          <option value="global">{t({ it: 'Generale', en: 'Global' })}</option>
-          <option value="client">{t({ it: 'Cliente corrente', en: 'Current client' })}</option>
-          <option value="site">{t({ it: 'Sede', en: 'Site' })}</option>
-          <option value="plan">{t({ it: 'Planimetria', en: 'Plan' })}</option>
-        </select>
-        {(value.scope === 'site' || value.scope === 'plan') ? (
-          <select
-            value={value.siteId}
-            onChange={(e) => {
-              const nextSiteId = e.target.value;
-              const firstPlan = getPlanOptionsForSite(nextSiteId)?.[0]?.id || '';
-              setValue((prev) => ({ ...prev, siteId: nextSiteId, floorPlanId: prev.scope === 'plan' ? firstPlan : prev.floorPlanId }));
-            }}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-          >
-            {(client?.sites || []).map((site) => (
-              <option key={site.id} value={site.id}>
-                {site.name}
-              </option>
-            ))}
-          </select>
-        ) : compact ? null : (
-          <div className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
-            {t({ it: 'Nessuna sede richiesta', en: 'No site required' })}
+      <div className="sm:col-span-2 lg:col-span-8 rounded-xl border border-slate-200 bg-slate-50 p-2">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <label className={scopeLabelClass}>{t({ it: 'Ambito', en: 'Scope' })}</label>
+            <select value={value.scope} onChange={(e) => updateScope(e.target.value as ContactDraft['scope'])} className={fieldClass}>
+              <option value="global">{t({ it: 'Generale', en: 'Global' })}</option>
+              <option value="client">{t({ it: 'Cliente', en: 'Client' })}</option>
+              <option value="site">{t({ it: 'Sede', en: 'Site' })}</option>
+              <option value="plan">{t({ it: 'Planimetria', en: 'Plan' })}</option>
+            </select>
           </div>
-        )}
-        {value.scope === 'plan' ? (
-          <select
-            value={value.floorPlanId}
-            onChange={(e) => setValue((prev) => ({ ...prev, floorPlanId: e.target.value }))}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-          >
-            {(planOptions || []).map((plan) => (
-              <option key={plan.id} value={plan.id}>
-                {plan.name}
-              </option>
-            ))}
-          </select>
-        ) : compact ? null : (
-          <div className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
-            {t({ it: 'Nessuna planimetria richiesta', en: 'No plan required' })}
+          {!isGlobal ? (
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-emerald-700">{t({ it: 'Cliente', en: 'Client' })}</label>
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{clientLabel}</div>
+            </div>
+          ) : null}
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-amber-700">{t({ it: 'Sede', en: 'Site' })}</label>
+            {canPickSite ? (
+              <select
+                value={value.siteId}
+                onChange={(e) => {
+                  const nextSiteId = e.target.value;
+                  const firstPlan = getPlanOptionsForSite(nextSiteId)?.[0]?.id || '';
+                  setValue((prev) => ({ ...prev, siteId: nextSiteId, floorPlanId: prev.scope === 'plan' ? firstPlan : '' }));
+                }}
+                className={`${fieldClass} border-amber-200 bg-amber-50/40`}
+              >
+                {(client?.sites || []).map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className={disabledClass}>
+                {t({ it: 'Non richiesta', en: 'Not required' })}
+              </div>
+            )}
           </div>
-        )}
-      </>
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-rose-700">{t({ it: 'Planimetria', en: 'Floor plan' })}</label>
+            {canPickPlan ? (
+              <select value={value.floorPlanId} onChange={(e) => setValue((prev) => ({ ...prev, floorPlanId: e.target.value }))} className={`${fieldClass} border-rose-200 bg-rose-50/40`}>
+                {(planOptions || []).map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className={disabledClass}>
+                {t({ it: 'Non richiesta', en: 'Not required' })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -382,50 +481,69 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
                   </button>
                 </div>
                 <div className="mt-2 text-xs text-slate-600">
-                  {client?.shortName || client?.name || '—'} · {t({ it: 'Numeri utili e scheda emergenza', en: 'Useful numbers and emergency sheet' })}
+                  {client?.shortName || client?.name || '—'} · {t({ it: 'Numeri utili e punti di raccolta', en: 'Useful numbers and assembly points' })}
                 </div>
 
                 {!readOnly ? (
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t({ it: 'Nuovo contatto', en: 'New contact' })}</div>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-8">
-                      {renderScopeSelectors(draft, (updater) => setDraft((prev) => updater(prev)))}
-                      <input
-                        value={draft.name}
-                        onChange={(e) => setDraft((prev) => ({ ...prev, name: e.target.value }))}
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        placeholder={t({ it: 'Nome*', en: 'Name*' })}
-                      />
-                      <input
-                        value={draft.phone}
-                        onChange={(e) => setDraft((prev) => ({ ...prev, phone: e.target.value }))}
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        placeholder={t({ it: 'Telefono*', en: 'Phone*' })}
-                      />
-                      <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={draft.showOnPlanCard}
-                          onChange={(e) => setDraft((prev) => ({ ...prev, showOnPlanCard: e.target.checked }))}
+                    <button
+                      type="button"
+                      onClick={() => setNewContactOpen((prev) => !prev)}
+                      className="flex w-full items-center justify-between text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
+                    >
+                      <span>{t({ it: 'Nuovo contatto', en: 'New contact' })}</span>
+                      {newContactOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </button>
+                    {newContactOpen ? (
+                      <div className="mt-2 space-y-2">
+                        {renderScopeSelectors(draft, (updater) => setDraft((prev) => updater(prev)))}
+                        <div className="flex flex-wrap items-start gap-2">
+                          <input
+                            value={draft.name}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, name: e.target.value }))}
+                            className="min-w-[280px] flex-[1.2] rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Nome*', en: 'Name*' })}
+                          />
+                          <input
+                            value={draft.phone}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, phone: e.target.value }))}
+                            className="min-w-[280px] flex-[1.2] rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Telefono*', en: 'Phone*' })}
+                          />
+                          <label
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700"
+                            title={t({
+                              it: 'Mostra questo contatto nella scheda sicurezza visibile in planimetria.',
+                              en: 'Show this contact in the safety card visible on the floor plan.'
+                            })}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={draft.showOnPlanCard}
+                              onChange={(e) => setDraft((prev) => ({ ...prev, showOnPlanCard: e.target.checked }))}
+                            />
+                            {t({ it: 'Scheda sicurezza', en: 'Safety card' })}
+                            <Info size={12} className="text-slate-400" />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={addContact}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-primary bg-primary/10 text-primary hover:bg-primary/20"
+                            title={t({ it: 'Aggiungi contatto', en: 'Add contact' })}
+                            aria-label={t({ it: 'Aggiungi contatto', en: 'Add contact' })}
+                          >
+                            <Plus size={16} />
+                          </button>
+                        </div>
+                        <textarea
+                          value={draft.notes}
+                          onChange={(e) => setDraft((prev) => ({ ...prev, notes: e.target.value }))}
+                          rows={2}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          placeholder={t({ it: 'Note', en: 'Notes' })}
                         />
-                        {t({ it: 'Mostra nel riquadro', en: 'Show in plan card' })}
-                      </label>
-                      <button
-                        type="button"
-                        onClick={addContact}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/20"
-                      >
-                        <Plus size={15} />
-                        {t({ it: 'Aggiungi', en: 'Add' })}
-                      </button>
-                      <textarea
-                        value={draft.notes}
-                        onChange={(e) => setDraft((prev) => ({ ...prev, notes: e.target.value }))}
-                        rows={2}
-                        className="sm:col-span-2 lg:col-span-8 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                        placeholder={t({ it: 'Note', en: 'Notes' })}
-                      />
-                    </div>
+                      </div>
+                    ) : null}
                     {error ? <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</div> : null}
                   </div>
                 ) : (
@@ -457,7 +575,7 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
                           <th className="px-3 py-2 text-left">{t({ it: 'Nome', en: 'Name' })}</th>
                           <th className="px-3 py-2 text-left">{t({ it: 'Telefono', en: 'Phone' })}</th>
                           <th className="px-3 py-2 text-left">{t({ it: 'Note', en: 'Notes' })}</th>
-                          <th className="px-3 py-2 text-left">{t({ it: 'Riquadro', en: 'Plan card' })}</th>
+                          <th className="px-3 py-2 text-left">{t({ it: 'Scheda sicurezza', en: 'Safety card' })}</th>
                           {!readOnly ? <th className="px-3 py-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</th> : null}
                         </tr>
                       </thead>
@@ -520,7 +638,7 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
                                         checked={editDraft.showOnPlanCard}
                                         onChange={(e) => setEditDraft((prev) => ({ ...prev, showOnPlanCard: e.target.checked }))}
                                       />
-                                      {t({ it: 'Mostra', en: 'Show' })}
+                                      {t({ it: 'Scheda', en: 'Card' })}
                                     </label>
                                   ) : (
                                     <input
@@ -596,7 +714,7 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
                 <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
                   <div className="flex items-center gap-2 bg-rose-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-rose-700">
                     <ShieldAlert size={14} />
-                    {t({ it: 'Scheda emergenza', en: 'Emergency sheet' })}
+                    {t({ it: 'Punti di raccolta', en: 'Assembly points' })}
                   </div>
                   <div className="max-h-[28vh] overflow-auto divide-y divide-slate-100">
                     {emergencyPoints.length ? (
@@ -609,7 +727,20 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
                             </div>
                           </div>
                           <div className="text-right text-xs text-slate-600">
-                            <div>{point.gps || point.coords}</div>
+                            {point.mapsUrl ? (
+                              <a
+                                href={point.mapsUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 font-semibold text-sky-700 hover:text-sky-800 hover:underline"
+                                title={t({ it: 'Apri in Google Maps', en: 'Open in Google Maps' })}
+                              >
+                                <ExternalLink size={12} />
+                                {point.gps || point.coords}
+                              </a>
+                            ) : (
+                              <div>{point.gps || point.coords}</div>
+                            )}
                             <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5">
                               <Crosshair size={11} /> {t({ it: 'Punto di raccolta', en: 'Assembly point' })}
                             </div>

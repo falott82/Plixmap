@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, Mail, Heart } from 'lucide-react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, Mail, Heart, ShieldAlert } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import ConfirmDialog from '../ui/ConfirmDialog';
@@ -64,7 +65,7 @@ const SettingsView = () => {
   const [planPreview, setPlanPreview] = useState<{ name: string; imageUrl: string } | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { selectedPlanId, setSelectedPlan } = useUIStore();
+  const { selectedPlanId, setSelectedPlan, clearSelection } = useUIStore();
   const { user } = useAuthStore();
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
   const isAdmin = !!user?.isAdmin || isSuperAdmin;
@@ -109,6 +110,10 @@ const SettingsView = () => {
       setSelectedSite(clients[0]?.sites[0]?.id);
     }
   }, [clients, selectedClient, selectedSite]);
+  useEffect(() => {
+    toast.dismiss();
+    clearSelection();
+  }, [clearSelection]);
 
   const currentClient = useMemo(
     () => clients.find((c) => c.id === selectedClient) || clients[0],
@@ -314,7 +319,7 @@ const SettingsView = () => {
           }`}
           title={t({ it: 'Apri tab Sicurezza', en: 'Open Safety tab' })}
         >
-          <Heart size={16} className={tab === 'safety' ? 'fill-current' : ''} /> {t({ it: 'Sicurezza', en: 'Safety' })}
+          <ShieldAlert size={16} /> {t({ it: 'Sicurezza', en: 'Safety' })}
         </button>
         <button
           onClick={() => setTabAndUrl('account')}

@@ -8,9 +8,10 @@ type Props = {
   onSetPrintArea: () => void;
   onClearPrintArea: () => void;
   onExportPdf: () => void;
+  triggerTitle?: string;
 };
 
-const PrinterMenuButton = ({ isReadOnly, hasPrintArea, onSetPrintArea, onClearPrintArea, onExportPdf }: Props) => {
+const PrinterMenuButton = ({ isReadOnly, hasPrintArea, onSetPrintArea, onClearPrintArea, onExportPdf, triggerTitle }: Props) => {
   const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -34,7 +35,7 @@ const PrinterMenuButton = ({ isReadOnly, hasPrintArea, onSetPrintArea, onClearPr
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
-        title={printLabel}
+        title={triggerTitle || printLabel}
       >
         <Printer size={18} />
       </button>

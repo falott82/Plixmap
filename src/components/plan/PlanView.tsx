@@ -21,6 +21,7 @@ import {
   FileDown,
   Crop,
   Home,
+  PhoneCall,
   History,
 		Save,
 		Cog,
@@ -29,17 +30,19 @@ import {
 	  Link2,
   User,
   LocateFixed,
+  Footprints,
   Users,
   Ruler,
   Hourglass,
   Unlock,
   Undo2,
   Redo2,
+  ExternalLink,
   Type as TypeIcon,
   Image as ImageIcon,
   Camera,
   StickyNote
-	} from 'lucide-react';
+		} from 'lucide-react';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
 import SearchBar from './SearchBar';
@@ -54,6 +57,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
 import { saveState } from '../../api/state';
 import UserMenu from '../layout/UserMenu';
+import EmergencyContactsModal from '../layout/EmergencyContactsModal';
 import PrinterMenuButton from './PrinterMenuButton';
 import UserAvatar from '../ui/UserAvatar';
 import UnlockRequestComposeModal, { UnlockRequestLock } from './UnlockRequestComposeModal';
@@ -109,6 +113,7 @@ interface Props {
 
 const isRackLinkId = (id?: string | null) => typeof id === 'string' && id.startsWith('racklink:');
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
+const DEFAULT_SAFETY_CARD_LAYOUT = { x: 24, y: 24, w: 420, h: 84, fontSize: 10, fontIndex: 0, colorIndex: 0, textBgIndex: 0 } as const;
 const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[] => {
   if (!Array.isArray(history)) return [];
   return history
@@ -127,6 +132,28 @@ const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[]
     })
     .filter((entry) => !!entry.company || !!entry.date)
     .sort((a, b) => b.createdAt - a.createdAt);
+};
+const parseGoogleMapsCoordinates = (rawValue: string): { lat: number; lng: number } | null => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return null;
+  const decimal = '[-+]?\\d{1,3}(?:\\.\\d+)?';
+  const pair = new RegExp(`(${decimal})\\s*,\\s*(${decimal})`);
+  const direct = raw.match(pair);
+  const fromPair = direct || raw.match(/[@?&]q=([-+]?\d{1,3}(?:\.\d+)?),\s*([-+]?\d{1,3}(?:\.\d+)?)/);
+  if (!fromPair) return null;
+  const lat = Number(fromPair[1]);
+  const lng = Number(fromPair[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+};
+const googleMapsUrlFromCoords = (rawValue: string) => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const parsed = parseGoogleMapsCoordinates(raw);
+  if (!parsed) return '';
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${parsed.lat},${parsed.lng}`)}`;
 };
 const PlanView = ({ planId }: Props) => {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -159,6 +186,7 @@ const PlanView = ({ planId }: Props) => {
     updateFloorPlan,
     setFloorPlanContent,
     addView,
+    updateView,
     deleteView,
     setDefaultView,
     clearObjects,
@@ -187,6 +215,7 @@ const PlanView = ({ planId }: Props) => {
       updateFloorPlan: s.updateFloorPlan,
       setFloorPlanContent: s.setFloorPlanContent,
       addView: s.addView,
+      updateView: s.updateView,
       deleteView: s.deleteView,
       setDefaultView: s.setDefaultView,
       clearObjects: s.clearObjects,
@@ -560,6 +589,7 @@ const PlanView = ({ planId }: Props) => {
     | { kind: 'corridor'; id: string; x: number; y: number; worldX: number; worldY: number }
     | { kind: 'corridor_door'; corridorId: string; doorId: string; x: number; y: number }
     | { kind: 'corridor_connection'; corridorId: string; connectionId: string; x: number; y: number; worldX: number; worldY: number }
+    | { kind: 'safety_card'; x: number; y: number; worldX: number; worldY: number }
     | { kind: 'scale'; x: number; y: number }
     | { kind: 'map'; x: number; y: number; worldX: number; worldY: number }
     | null
@@ -589,13 +619,33 @@ const PlanView = ({ planId }: Props) => {
   const [crossPlanSearchTerm, setCrossPlanSearchTerm] = useState('');
   const [crossPlanResults, setCrossPlanResults] = useState<CrossPlanSearchResult[]>([]);
   const [internalMapOpen, setInternalMapOpen] = useState(false);
+  const [emergencyContactsOpen, setEmergencyContactsOpen] = useState(false);
+  const normalizeSafetyCardLayout = useCallback((layout: any) => {
+    const x = Number(layout?.x);
+    const y = Number(layout?.y);
+    const w = Number(layout?.w);
+    const h = Number(layout?.h);
+    const fontSize = Number(layout?.fontSize);
+    const fontIndex = Number(layout?.fontIndex);
+    const colorIndex = Number(layout?.colorIndex);
+    const textBgIndex = Number(layout?.textBgIndex);
+    return {
+      x: Number.isFinite(x) ? x : DEFAULT_SAFETY_CARD_LAYOUT.x,
+      y: Number.isFinite(y) ? y : DEFAULT_SAFETY_CARD_LAYOUT.y,
+      w: Number.isFinite(w) ? Math.max(220, w) : DEFAULT_SAFETY_CARD_LAYOUT.w,
+      h: Number.isFinite(h) ? Math.max(56, h) : DEFAULT_SAFETY_CARD_LAYOUT.h,
+      fontSize: Number.isFinite(fontSize) ? Math.max(8, Math.min(22, fontSize)) : DEFAULT_SAFETY_CARD_LAYOUT.fontSize,
+      fontIndex: Number.isFinite(fontIndex) ? Math.max(0, Math.floor(fontIndex)) : DEFAULT_SAFETY_CARD_LAYOUT.fontIndex,
+      colorIndex: Number.isFinite(colorIndex) ? Math.max(0, Math.floor(colorIndex)) : DEFAULT_SAFETY_CARD_LAYOUT.colorIndex,
+      textBgIndex: Number.isFinite(textBgIndex) ? Math.max(0, Math.floor(textBgIndex)) : DEFAULT_SAFETY_CARD_LAYOUT.textBgIndex
+    };
+  }, []);
   const [safetyCardPos, setSafetyCardPos] = useState<{ x: number; y: number }>({ x: 24, y: 24 }); // world coords
   const [safetyCardSize, setSafetyCardSize] = useState<{ w: number; h: number }>({ w: 420, h: 84 }); // world size
   const [safetyCardFontSize, setSafetyCardFontSize] = useState<number>(10);
-  const [safetyCardSelected, setSafetyCardSelected] = useState(false);
-  const safetyCardRef = useRef<HTMLDivElement | null>(null);
-  const safetyCardDragRef = useRef<{ startWorldX: number; startWorldY: number; originX: number; originY: number } | null>(null);
-  const safetyCardResizeRef = useRef<{ startWorldX: number; startWorldY: number; originW: number; originH: number } | null>(null);
+  const [safetyCardFontIndex, setSafetyCardFontIndex] = useState<number>(0);
+  const [safetyCardColorIndex, setSafetyCardColorIndex] = useState<number>(0);
+  const [safetyCardTextBgIndex, setSafetyCardTextBgIndex] = useState<number>(0);
   const [countsOpen, setCountsOpen] = useState(false);
   const [presenceOpen, setPresenceOpen] = useState(false);
   const [layersPopoverOpen, setLayersPopoverOpen] = useState(false);
@@ -735,7 +785,6 @@ const PlanView = ({ planId }: Props) => {
   const [corridorDoorModal, setCorridorDoorModal] = useState<{
     corridorId: string;
     doorId: string;
-    catalogTypeId: string;
     description: string;
     isEmergency: boolean;
     isFireDoor: boolean;
@@ -761,113 +810,35 @@ const PlanView = ({ planId }: Props) => {
     x: number;
     y: number;
     selectedPlanIds: string[];
+    transitionType: 'stairs' | 'elevator';
   } | null>(null);
-  const clientToWorld = useCallback(
-    (clientX: number, clientY: number): { x: number; y: number } | null => {
-      const rect = mapRef.current?.getBoundingClientRect();
-      const z = Number(zoom) || 1;
-      if (!rect || !Number.isFinite(z) || z === 0) return null;
-      return {
-        x: (clientX - rect.left - pan.x) / z,
-        y: (clientY - rect.top - pan.y) / z
-      };
+  const handleSafetyCardChange = useCallback(
+    (
+      layout: { x: number; y: number; w: number; h: number; fontSize: number; fontIndex?: number; colorIndex?: number; textBgIndex?: number },
+      options?: { commit?: boolean }
+    ) => {
+      const normalized = normalizeSafetyCardLayout(layout);
+      setSafetyCardPos({ x: normalized.x, y: normalized.y });
+      setSafetyCardSize({ w: normalized.w, h: normalized.h });
+      setSafetyCardFontSize(normalized.fontSize);
+      setSafetyCardFontIndex(normalized.fontIndex);
+      setSafetyCardColorIndex(normalized.colorIndex);
+      setSafetyCardTextBgIndex(normalized.textBgIndex);
+      if (!options?.commit || !planRef.current || isReadOnlyRef.current) return;
+      const baseLayout = normalizeSafetyCardLayout((planRef.current as any)?.safetyCardLayout);
+      const hasDiff =
+        Math.abs(normalized.x - baseLayout.x) > 0.15 ||
+        Math.abs(normalized.y - baseLayout.y) > 0.15 ||
+        Math.abs(normalized.w - baseLayout.w) > 0.15 ||
+        Math.abs(normalized.h - baseLayout.h) > 0.15 ||
+        Math.abs(normalized.fontSize - baseLayout.fontSize) > 0.01 ||
+        normalized.fontIndex !== baseLayout.fontIndex ||
+        normalized.colorIndex !== baseLayout.colorIndex ||
+        normalized.textBgIndex !== baseLayout.textBgIndex;
+      if (hasDiff) updateFloorPlan((planRef.current as any).id, { safetyCardLayout: normalized } as any);
     },
-    [pan.x, pan.y, zoom]
+    [normalizeSafetyCardLayout, updateFloorPlan]
   );
-  useEffect(() => {
-    const onMove = (event: MouseEvent) => {
-      const world = clientToWorld(event.clientX, event.clientY);
-      if (!world) return;
-      const drag = safetyCardDragRef.current;
-      if (drag) {
-        setSafetyCardPos({
-          x: drag.originX + (world.x - drag.startWorldX),
-          y: drag.originY + (world.y - drag.startWorldY)
-        });
-        return;
-      }
-      const resize = safetyCardResizeRef.current;
-      if (!resize) return;
-      const nextW = Math.max(260, resize.originW + (world.x - resize.startWorldX));
-      const nextH = Math.max(56, resize.originH + (world.y - resize.startWorldY));
-      setSafetyCardSize({ w: nextW, h: nextH });
-    };
-    const onUp = () => {
-      safetyCardDragRef.current = null;
-      safetyCardResizeRef.current = null;
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [clientToWorld]);
-  const startSafetyCardDrag = (event: any) => {
-    if ((event.target as HTMLElement)?.closest?.('button,a,input,textarea,select')) return;
-    const world = clientToWorld(event.clientX, event.clientY);
-    if (!world) return;
-    setSafetyCardSelected(true);
-    safetyCardDragRef.current = {
-      startWorldX: world.x,
-      startWorldY: world.y,
-      originX: safetyCardPos.x,
-      originY: safetyCardPos.y
-    };
-  };
-  const startSafetyCardResize = (event: any) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const world = clientToWorld(event.clientX, event.clientY);
-    if (!world) return;
-    setSafetyCardSelected(true);
-    safetyCardResizeRef.current = {
-      startWorldX: world.x,
-      startWorldY: world.y,
-      originW: safetyCardSize.w,
-      originH: safetyCardSize.h
-    };
-  };
-  const selectSafetyCard = useCallback(() => {
-    setSafetyCardSelected((prev) => {
-      if (!prev) {
-        push(
-          t({
-            it: 'Scheda sicurezza selezionata: usa i tasti + e - da tastiera per cambiare la dimensione del testo.',
-            en: 'Safety card selected: use keyboard + and - keys to change text size.'
-          }),
-          'info'
-        );
-      }
-      return true;
-    });
-  }, [push, t]);
-  const changeSafetyCardFontSize = useCallback(
-    (delta: number) => {
-      setSafetyCardFontSize((prev) => {
-        const next = Math.max(8, Math.min(16, prev + delta));
-        if (next !== prev) {
-          push(
-            t({
-              it: `Dimensione testo scheda: ${next}px`,
-              en: `Safety card text size: ${next}px`
-            }),
-            'info'
-          );
-        }
-        return next;
-      });
-    },
-    [push, t]
-  );
-  const safetyCardViewport = useMemo(() => {
-    const z = Number(zoom) || 1;
-    return {
-      x: pan.x + safetyCardPos.x * z,
-      y: pan.y + safetyCardPos.y * z,
-      z
-    };
-  }, [pan.x, pan.y, safetyCardPos.x, safetyCardPos.y, zoom]);
   useEffect(() => {
     if (!corridorModal) return;
     setCorridorNameInput(corridorModal.initialName || '');
@@ -1695,6 +1666,7 @@ const PlanView = ({ planId }: Props) => {
       rooms: activeRevision.rooms,
       corridors: (activeRevision as any).corridors ?? (plan as any).corridors,
       links: (activeRevision as any).links || (plan as any).links,
+      safetyCardLayout: (activeRevision as any).safetyCardLayout || (plan as any).safetyCardLayout,
       objects: activeRevision.objects,
       views: effectiveViews as any
     } as FloorPlan;
@@ -2376,35 +2348,15 @@ const PlanView = ({ planId }: Props) => {
     [allItemsSelected, effectiveVisibleLayerIds, hideAllLayers]
   );
   useEffect(() => {
-    if (!securityLayerVisible) {
-      setSafetyCardSelected(false);
-      return;
-    }
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (target && safetyCardRef.current?.contains(target)) return;
-      setSafetyCardSelected(false);
-    };
-    window.addEventListener('mousedown', onPointerDown);
-    return () => window.removeEventListener('mousedown', onPointerDown);
-  }, [securityLayerVisible]);
-  useEffect(() => {
-    if (!securityLayerVisible || !safetyCardSelected) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const tag = String(target?.tagName || '').toUpperCase();
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || !!target?.isContentEditable) return;
-      if (event.key === '+' || event.key === '=' || event.key === 'Add') {
-        event.preventDefault();
-        changeSafetyCardFontSize(1);
-      } else if (event.key === '-' || event.key === '_' || event.key === 'Subtract') {
-        event.preventDefault();
-        changeSafetyCardFontSize(-1);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [changeSafetyCardFontSize, safetyCardSelected, securityLayerVisible]);
+    if (!renderPlan) return;
+    const layout = normalizeSafetyCardLayout((renderPlan as any)?.safetyCardLayout);
+    setSafetyCardPos((prev) => (Math.abs(prev.x - layout.x) > 0.01 || Math.abs(prev.y - layout.y) > 0.01 ? { x: layout.x, y: layout.y } : prev));
+    setSafetyCardSize((prev) => (Math.abs(prev.w - layout.w) > 0.01 || Math.abs(prev.h - layout.h) > 0.01 ? { w: layout.w, h: layout.h } : prev));
+    setSafetyCardFontSize((prev) => (Math.abs(prev - layout.fontSize) > 0.01 ? layout.fontSize : prev));
+    setSafetyCardFontIndex((prev) => (prev !== layout.fontIndex ? layout.fontIndex : prev));
+    setSafetyCardColorIndex((prev) => (prev !== layout.colorIndex ? layout.colorIndex : prev));
+    setSafetyCardTextBgIndex((prev) => (prev !== layout.textBgIndex ? layout.textBgIndex : prev));
+  }, [normalizeSafetyCardLayout, renderPlan]);
   const safetyEmergencyContacts = useMemo(() => {
     const list = Array.isArray((client as any)?.emergencyContacts) ? ((client as any).emergencyContacts as any[]) : [];
     const scopeRank = (scope: string) => {
@@ -2440,6 +2392,14 @@ const PlanView = ({ planId }: Props) => {
       coords: `${Math.round(Number(obj?.x || 0))}, ${Math.round(Number(obj?.y || 0))}`
     }));
   }, [renderPlan]);
+  const safetyNumbersInline = useMemo(
+    () => safetyEmergencyContacts.map((entry: any) => `| ${entry.name || '—'} ${entry.phone || '—'}`).join(' '),
+    [safetyEmergencyContacts]
+  );
+  const safetyPointsInline = useMemo(
+    () => safetyEmergencyPoints.map((point) => `| ${point.name || '—'}`).join(' '),
+    [safetyEmergencyPoints]
+  );
   const quoteLabels = useMemo(() => {
     const map: Record<string, string> = {};
     const objects = ((canvasPlan || renderPlan) as any)?.objects || [];
@@ -2688,6 +2648,18 @@ const PlanView = ({ planId }: Props) => {
       width: p?.width,
       height: p?.height,
       scale: p?.scale,
+      safetyCardLayout: (p as any)?.safetyCardLayout
+        ? {
+            x: Number((p as any).safetyCardLayout.x || 0),
+            y: Number((p as any).safetyCardLayout.y || 0),
+            w: Number((p as any).safetyCardLayout.w || 420),
+            h: Number((p as any).safetyCardLayout.h || 84),
+            fontSize: Number((p as any).safetyCardLayout.fontSize || 10),
+            fontIndex: Number((p as any).safetyCardLayout.fontIndex || 0),
+            colorIndex: Number((p as any).safetyCardLayout.colorIndex || 0),
+            textBgIndex: Number((p as any).safetyCardLayout.textBgIndex || 0)
+          }
+        : undefined,
       objects: Array.isArray(p?.objects) ? p.objects : [],
       views: Array.isArray(p?.views) ? p.views : [],
       rooms: Array.isArray(p?.rooms) ? p.rooms : [],
@@ -2754,6 +2726,7 @@ const PlanView = ({ planId }: Props) => {
       width?: number;
       height?: number;
       scale?: any;
+      safetyCardLayout?: { x: number; y: number; w: number; h: number; fontSize?: number; fontIndex?: number; colorIndex?: number; textBgIndex?: number };
       objects: any[];
       views?: any[];
       rooms?: any[];
@@ -2767,6 +2740,7 @@ const PlanView = ({ planId }: Props) => {
       width?: number;
       height?: number;
       scale?: any;
+      safetyCardLayout?: { x: number; y: number; w: number; h: number; fontSize?: number; fontIndex?: number; colorIndex?: number; textBgIndex?: number };
       objects: any[];
       views?: any[];
       rooms?: any[];
@@ -2789,6 +2763,19 @@ const PlanView = ({ planId }: Props) => {
       if ((aScale.start?.y ?? 0) !== (bScale.start?.y ?? 0)) return false;
       if ((aScale.end?.x ?? 0) !== (bScale.end?.x ?? 0)) return false;
       if ((aScale.end?.y ?? 0) !== (bScale.end?.y ?? 0)) return false;
+    }
+    const aSafetyCard = current.safetyCardLayout;
+    const bSafetyCard = latest.safetyCardLayout;
+    if (!!aSafetyCard || !!bSafetyCard) {
+      if (!aSafetyCard || !bSafetyCard) return false;
+      if (Number(aSafetyCard.x || 0) !== Number(bSafetyCard.x || 0)) return false;
+      if (Number(aSafetyCard.y || 0) !== Number(bSafetyCard.y || 0)) return false;
+      if (Number(aSafetyCard.w || 0) !== Number(bSafetyCard.w || 0)) return false;
+      if (Number(aSafetyCard.h || 0) !== Number(bSafetyCard.h || 0)) return false;
+      if (Number(aSafetyCard.fontSize || 10) !== Number(bSafetyCard.fontSize || 10)) return false;
+      if (Number(aSafetyCard.fontIndex || 0) !== Number(bSafetyCard.fontIndex || 0)) return false;
+      if (Number(aSafetyCard.colorIndex || 0) !== Number(bSafetyCard.colorIndex || 0)) return false;
+      if (Number(aSafetyCard.textBgIndex || 0) !== Number(bSafetyCard.textBgIndex || 0)) return false;
     }
 
     const sameList = (a?: string[], b?: string[]) => {
@@ -2905,6 +2892,7 @@ const PlanView = ({ planId }: Props) => {
         if (Number(cp.t) !== Number(ocp.t)) return false;
         if (Number((cp as any).x ?? -1) !== Number((ocp as any).x ?? -1)) return false;
         if (Number((cp as any).y ?? -1) !== Number((ocp as any).y ?? -1)) return false;
+        if (String((cp as any).transitionType || 'stairs') !== String((ocp as any).transitionType || 'stairs')) return false;
         const aPlanIds = Array.isArray(cp.planIds) ? cp.planIds.map((id: any) => String(id)).sort() : [];
         const bPlanIds = Array.isArray(ocp.planIds) ? ocp.planIds.map((id: any) => String(id)).sort() : [];
         if (aPlanIds.length !== bPlanIds.length) return false;
@@ -3016,6 +3004,7 @@ const PlanView = ({ planId }: Props) => {
         ...snap,
         printArea: snap.printArea ?? undefined,
         scale: snap.scale,
+        safetyCardLayout: (snap as any).safetyCardLayout,
         objects: snap.objects,
         views: snap.views,
         rooms: snap.rooms,
@@ -3098,6 +3087,7 @@ const PlanView = ({ planId }: Props) => {
         width: latest.width,
         height: latest.height,
         scale: latest.scale,
+        safetyCardLayout: latest.safetyCardLayout,
         objects: latest.objects,
         views: latest.views,
         rooms: latest.rooms,
@@ -3111,7 +3101,8 @@ const PlanView = ({ planId }: Props) => {
         corridors: latestSnapshot.corridors === undefined ? undefined : current.corridors,
         racks: latestSnapshot.racks === undefined ? undefined : current.racks,
         rackItems: latestSnapshot.rackItems === undefined ? undefined : current.rackItems,
-        rackLinks: latestSnapshot.rackLinks === undefined ? undefined : current.rackLinks
+        rackLinks: latestSnapshot.rackLinks === undefined ? undefined : current.rackLinks,
+        safetyCardLayout: latestSnapshot.safetyCardLayout === undefined ? undefined : current.safetyCardLayout
       };
       return !samePlanSnapshot(normalizedCurrent, latestSnapshot);
     },
@@ -3383,6 +3374,7 @@ const PlanView = ({ planId }: Props) => {
       width: base.width,
       height: base.height,
       scale: base.scale,
+      safetyCardLayout: (base as any).safetyCardLayout,
       objects: base.objects,
       rooms: base.rooms,
       corridors: base.corridors,
@@ -3766,6 +3758,9 @@ const PlanView = ({ planId }: Props) => {
   const contextIsQuote = contextObject?.type === 'quote';
   const contextIsWifi = contextObject?.type === 'wifi';
   const contextIsPhoto = contextObject?.type === 'photo';
+  const contextIsAssemblyPoint = contextObject?.type === 'safety_assembly_point';
+  const contextAssemblyGps = contextIsAssemblyPoint ? String((contextObject as any)?.gpsCoords || '') : '';
+  const contextAssemblyMapsUrl = useMemo(() => googleMapsUrlFromCoords(contextAssemblyGps), [contextAssemblyGps]);
   const contextPhotoSelectionIds = useMemo(() => {
     if (!contextIsPhoto || !renderPlan) return [];
     const ids =
@@ -4143,10 +4138,14 @@ const PlanView = ({ planId }: Props) => {
     if (selectionToastIdRef.current != null) {
       toast.dismiss(selectionToastIdRef.current);
     }
+    const objectTypeLabel = getTypeLabel(obj.type);
+    const objectNameLabel = String(obj.name || '').trim() || t({ it: 'Senza nome', en: 'Unnamed' });
     selectionToastIdRef.current = toast.info(
       renderKeybindToast(
         { it: 'Oggetto selezionato', en: 'Object selected' },
         [
+          { cmd: t({ it: 'Tipo oggetto:', en: 'Object type:' }), it: objectTypeLabel, en: objectTypeLabel },
+          { cmd: t({ it: 'Nome oggetto:', en: 'Object name:' }), it: objectNameLabel, en: objectNameLabel },
           { cmd: 'Trascina', it: 'sposta', en: 'move' },
           { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
           { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
@@ -4156,7 +4155,7 @@ const PlanView = ({ planId }: Props) => {
       ),
       { duration: Infinity }
     );
-  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
+  }, [getTypeLabel, renderKeybindToast, renderPlan, selectedObjectIds, t]);
   useEffect(() => {
     selectedLinkIdRef.current = selectedLinkId;
   }, [selectedLinkId]);
@@ -4868,6 +4867,36 @@ const PlanView = ({ planId }: Props) => {
     ]
   );
 
+  const handleSafetyCardContextMenu = useCallback(
+    ({ clientX, clientY, worldX, worldY }: { clientX: number; clientY: number; worldX: number; worldY: number }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'safety_card', x: clientX, y: clientY, worldX, worldY });
+    },
+    [dismissSelectionHintToasts]
+  );
+  const toggleSecurityCardVisibility = useCallback(() => {
+    const baseVisible = hideAllLayers
+      ? []
+      : allItemsSelected
+        ? nonAllLayerIds
+        : visibleLayerIds;
+    const hasSecurity = baseVisible.includes(SECURITY_LAYER_ID);
+    const nextRaw = hasSecurity
+      ? baseVisible.filter((id) => id !== SECURITY_LAYER_ID)
+      : [...baseVisible, SECURITY_LAYER_ID];
+    if (hideAllLayers) setHideAllLayers(planId, false);
+    setVisibleLayerIds(planId, normalizeLayerSelection(nextRaw));
+  }, [
+    allItemsSelected,
+    hideAllLayers,
+    nonAllLayerIds,
+    normalizeLayerSelection,
+    planId,
+    setHideAllLayers,
+    setVisibleLayerIds,
+    visibleLayerIds
+  ]);
+
   const applyView = useCallback((view: FloorPlanView) => {
     if (!renderPlan) return;
     setAutoFitEnabled(false);
@@ -4884,6 +4913,17 @@ const PlanView = ({ planId }: Props) => {
     setSelectedViewId(id);
     setViewsMenuOpen(false);
   };
+
+  const handleOverwriteView = useCallback(
+    (view: FloorPlanView) => {
+      if (!plan || isReadOnly) return;
+      updateView(plan.id, view.id, { zoom, pan });
+      push(t({ it: 'Vista sovrascritta', en: 'View overwritten' }), 'success');
+      setSelectedViewId(view.id);
+      setViewsMenuOpen(false);
+    },
+    [isReadOnly, pan, plan, push, t, updateView, zoom]
+  );
 
   const goToDefaultView = () => {
     const current = renderPlan;
@@ -6248,6 +6288,11 @@ const PlanView = ({ planId }: Props) => {
       const currentSelectedIds = selectedObjectIdsRef.current;
       const currentPlan = planRef.current;
       const hasBlockingModal = !!corridorModal || !!corridorConnectionModal || !!corridorDoorModal || !!corridorDoorLinkModal;
+      const hasObjectSearchModal = !!allTypesOpen;
+
+      // While the "All objects" search modal is open, do not trigger plan keyboard shortcuts.
+      // Let keys flow to the modal (including Enter / Escape) without interception here.
+      if (hasObjectSearchModal) return;
 
       if (hasBlockingModal && e.key === 'Escape') {
         e.preventDefault();
@@ -6699,14 +6744,28 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
-      const isScaleUp = (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !e.ctrlKey && !e.metaKey;
-      const isScaleDown = (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') && !e.ctrlKey && !e.metaKey;
-      if (isScaleUp || isScaleDown) {
-        if (!currentSelectedIds.length || !currentPlan) return;
-        if (isReadOnlyRef.current) return;
-        e.preventDefault();
-        markTouched();
-        const step = e.shiftKey ? 0.2 : 0.1;
+	      const isScaleUp = (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !e.ctrlKey && !e.metaKey;
+	      const isScaleDown = (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') && !e.ctrlKey && !e.metaKey;
+	      if (isScaleUp || isScaleDown) {
+	        if (!currentPlan) return;
+	        if (isReadOnlyRef.current) return;
+          const selectedRoomKey = selectedRoomIdRef.current;
+          if (!currentSelectedIds.length && selectedRoomKey) {
+            const room = ((currentPlan as FloorPlan).rooms || []).find((entry) => entry.id === selectedRoomKey);
+            if (!room) return;
+            e.preventDefault();
+            markTouched();
+            const step = e.shiftKey ? 0.2 : 0.1;
+            const delta = isScaleUp ? step : -step;
+            const currentScale = Number((room as any).labelScale ?? 1) || 1;
+            const nextScale = Math.max(0.3, Math.min(3, currentScale + delta));
+            updateRoom((currentPlan as FloorPlan).id, room.id, { labelScale: nextScale } as any);
+            return;
+          }
+	        if (!currentSelectedIds.length) return;
+	        e.preventDefault();
+	        markTouched();
+	        const step = e.shiftKey ? 0.2 : 0.1;
         const delta = isScaleUp ? step : -step;
         const fontStep = e.shiftKey ? 4 : 2;
         for (const id of currentSelectedIds) {
@@ -6804,11 +6863,42 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
-      if (isArrow) {
-        if (!currentSelectedIds.length || !currentPlan) return;
-        if (isReadOnlyRef.current) return;
-        e.preventDefault();
-        const z = zoomRef.current || 1;
+	      if (isArrow) {
+	        if (!currentPlan) return;
+	        if (isReadOnlyRef.current) return;
+          const selectedRoomKey = selectedRoomIdRef.current;
+          if (!currentSelectedIds.length && selectedRoomKey && (isArrowUp || isArrowDown || isArrowLeft || isArrowRight)) {
+            const room = ((currentPlan as FloorPlan).rooms || []).find((entry) => entry.id === selectedRoomKey);
+            if (!room) return;
+            e.preventDefault();
+            markTouched();
+            if (e.shiftKey) {
+              const nextPos = isArrowUp ? 'top' : isArrowDown ? 'bottom' : isArrowLeft ? 'left' : 'right';
+              updateRoom((currentPlan as FloorPlan).id, room.id, { labelPosition: nextPos } as any);
+              return;
+            }
+            const z = zoomRef.current || 1;
+            const step = 1 / Math.max(0.2, z);
+            const dx = isArrowLeft ? -step : isArrowRight ? step : 0;
+            const dy = isArrowUp ? -step : isArrowDown ? step : 0;
+            const kind = (room.kind || (Array.isArray(room.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+            if (kind === 'poly') {
+              const points = (room.points || []).map((p) => ({ x: Number(p.x || 0) + dx, y: Number(p.y || 0) + dy }));
+              updateRoom((currentPlan as FloorPlan).id, room.id, { kind: 'poly', points } as any);
+            } else {
+              updateRoom((currentPlan as FloorPlan).id, room.id, {
+                kind: 'rect',
+                x: Number(room.x || 0) + dx,
+                y: Number(room.y || 0) + dy,
+                width: Number(room.width || 0),
+                height: Number(room.height || 0)
+              } as any);
+            }
+            return;
+          }
+	        if (!currentSelectedIds.length) return;
+	        e.preventDefault();
+	        const z = zoomRef.current || 1;
         const step = (e.shiftKey ? 10 : 1) / Math.max(0.2, z);
         const dx = isArrowLeft ? -step : isArrowRight ? step : 0;
         const dy = isArrowUp ? -step : isArrowDown ? step : 0;
@@ -6893,6 +6983,7 @@ const PlanView = ({ planId }: Props) => {
   }, [
     addRevision,
     addLink,
+    allTypesOpen,
     cancelScaleMode,
     clearSelection,
     copySelection,
@@ -6943,11 +7034,12 @@ const PlanView = ({ planId }: Props) => {
     stopQuote,
     t,
     toSnapshot,
-    updateFloorPlan,
-    updateObject,
-    updateQuoteLabelPos,
-    photoViewer
-  ]);
+	    updateFloorPlan,
+	    updateObject,
+    updateRoom,
+	    updateQuoteLabelPos,
+	    photoViewer
+	  ]);
 
   const objectsByType = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -7083,6 +7175,9 @@ const PlanView = ({ planId }: Props) => {
   const rooms = useMemo(() => renderPlan?.rooms || [], [renderPlan?.rooms]);
   const corridors = useMemo(() => (renderPlan?.corridors || []) as Corridor[], [renderPlan?.corridors]);
   const corridorLabelHelpToastId = 'corridor-label-help';
+  const corridorPolyHelpToastId = 'corridor-poly-help';
+  const roomPolyHelpToastId = 'room-poly-help';
+  const roomLabelHelpToastId = 'room-label-help';
   useEffect(() => {
     if (isReadOnly || !selectedCorridorId) {
       toast.dismiss(corridorLabelHelpToastId);
@@ -7095,8 +7190,8 @@ const PlanView = ({ planId }: Props) => {
     }
     toast.info(
       t({
-        it: 'Comandi etichetta corridoio: trascina per spostare, usa + / - per dimensione, premi E per modificare il testo.',
-        en: 'Corridor label commands: drag to move, use + / - to resize, press E to edit text.'
+        it: 'Comandi corridoio: trascina etichetta per spostarla, usa + / - per dimensione testo, premi E per rinomina; tasto centrale del mouse sul corridoio = aggiungi punto di snodo.',
+        en: 'Corridor commands: drag label to move, use + / - to resize text, press E to rename; middle mouse button on corridor = add junction point.'
       }),
       {
         id: corridorLabelHelpToastId,
@@ -7107,6 +7202,65 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     return () => {
       toast.dismiss(corridorLabelHelpToastId);
+    };
+  }, []);
+  useEffect(() => {
+    if (isReadOnly || corridorDrawMode !== 'poly') {
+      toast.dismiss(corridorPolyHelpToastId);
+      return;
+    }
+    toast.info(
+      t({
+        it:
+          'Disegno corridoio: clicca i vertici del perimetro. Click destro rimuove l’ultimo punto. Esc interrompe il disegno. Invio conclude il corridoio (oppure chiudi tornando sul primo punto).',
+        en:
+          'Corridor drawing: click perimeter vertices. Right click removes the last point. Esc cancels drawing. Enter finalizes the corridor (or close by returning to the first point).'
+      }),
+      {
+        id: corridorPolyHelpToastId,
+        duration: Infinity
+      }
+    );
+  }, [corridorDrawMode, isReadOnly, t]);
+  useEffect(() => {
+    if (isReadOnly || roomDrawMode !== 'poly') {
+      toast.dismiss(roomPolyHelpToastId);
+      return;
+    }
+    toast.info(
+      t({
+        it:
+          'Disegno stanza poligonale: linee orizzontali/verticali di default. Tieni premuto Shift per tracciare linee oblique. Per chiudere il poligono torna sul punto iniziale o premi Invio. Backspace annulla l’ultimo vertice.',
+        en:
+          'Polygon room drawing: horizontal/vertical lines by default. Hold Shift to draw oblique lines. Close the polygon by returning to the starting point or pressing Enter. Backspace removes the last vertex.'
+      }),
+      {
+        id: roomPolyHelpToastId,
+        duration: Infinity
+      }
+    );
+  }, [isReadOnly, roomDrawMode, t]);
+  useEffect(() => {
+    if (isReadOnly || !selectedRoomId || roomDrawMode) {
+      toast.dismiss(roomLabelHelpToastId);
+      return;
+    }
+    toast.info(
+      t({
+        it: 'Stanza selezionata: frecce per spostare la stanza, Shift+frecce per spostare la scritta (alto/basso/sinistra/destra), + / - per dimensione testo.',
+        en: 'Selected room: arrows move the room, Shift+arrows move the label (top/bottom/left/right), + / - changes text size.'
+      }),
+      {
+        id: roomLabelHelpToastId,
+        duration: Infinity
+      }
+    );
+  }, [isReadOnly, roomDrawMode, selectedRoomId, t]);
+  useEffect(() => {
+    return () => {
+      toast.dismiss(corridorPolyHelpToastId);
+      toast.dismiss(roomPolyHelpToastId);
+      toast.dismiss(roomLabelHelpToastId);
     };
   }, []);
 
@@ -7540,13 +7694,6 @@ const PlanView = ({ planId }: Props) => {
     setCorridorDrawMode('poly');
     setRoomsOpen(false);
     setContextMenu(null);
-    push(
-      t({
-        it: 'Disegno corridoio: clicca i vertici del perimetro. Clicca sul primo punto (o premi Invio) per chiudere.',
-        en: 'Corridor drawing: click perimeter vertices. Click the first point (or press Enter) to close.'
-      }),
-      'info'
-    );
   };
 
   const openEditRoom = (roomId: string) => {
@@ -7664,13 +7811,12 @@ const PlanView = ({ planId }: Props) => {
       const door = (corridor?.doors || []).find((d) => d.id === doorId);
       if (!corridor || !door) return;
       const rawCatalogTypeId = typeof (door as any)?.catalogTypeId === 'string' ? String((door as any).catalogTypeId) : '';
-      const catalogTypeId = doorTypeIdSet.has(rawCatalogTypeId) ? rawCatalogTypeId : defaultDoorCatalogId;
+      const catalogTypeId = defaultDoorCatalogId || (doorTypeIdSet.has(rawCatalogTypeId) ? rawCatalogTypeId : '');
       const doorType = catalogTypeId ? (objectTypeById.get(catalogTypeId) as ObjectTypeDefinition | undefined) : undefined;
       const defaultEmergency = !!(doorType as any)?.doorConfig?.isEmergency;
       setCorridorDoorModal({
         corridorId,
         doorId,
-        catalogTypeId,
         description: typeof (door as any)?.description === 'string' ? String((door as any).description) : '',
         isEmergency: typeof (door as any)?.isEmergency === 'boolean' ? !!(door as any).isEmergency : defaultEmergency,
         isFireDoor: !!(door as any)?.isFireDoor,
@@ -7768,20 +7914,6 @@ const PlanView = ({ planId }: Props) => {
     if (!corridorDoorModal || !plan || isReadOnly) return;
     const mode = corridorDoorModal.mode;
     const automationUrl = corridorDoorModal.automationUrl.trim();
-    const doorType = corridorDoorModal.catalogTypeId
-      ? (objectTypeById.get(corridorDoorModal.catalogTypeId) as ObjectTypeDefinition | undefined)
-      : undefined;
-    const supportsRemoteOpen = doorType ? !!doorType?.doorConfig?.remoteOpen : true;
-    if (mode === 'automated' && !supportsRemoteOpen) {
-      push(
-        t({
-          it: 'Il tipo porta selezionato non supporta l’apertura da remoto.',
-          en: 'The selected door type does not support remote opening.'
-        }),
-        'info'
-      );
-      return;
-    }
     if (mode === 'automated' && automationUrl && !/^https?:\/\//i.test(automationUrl)) {
       push(t({ it: 'Inserisci un URL valido (http/https).', en: 'Enter a valid URL (http/https).' }), 'danger');
       return;
@@ -7815,7 +7947,6 @@ const PlanView = ({ planId }: Props) => {
           door.id === corridorDoorModal.doorId
             ? {
                 ...door,
-                catalogTypeId: corridorDoorModal.catalogTypeId || undefined,
                 description: description || undefined,
                 isEmergency,
                 isFireDoor,
@@ -7823,7 +7954,7 @@ const PlanView = ({ planId }: Props) => {
                 verifierCompany: isEmergency ? verifierCompany || undefined : undefined,
                 verificationHistory,
                 mode,
-                automationUrl: mode === 'automated' ? automationUrl : undefined
+                automationUrl: mode === 'automated' ? automationUrl || undefined : undefined
               }
             : door
         )
@@ -7833,7 +7964,7 @@ const PlanView = ({ planId }: Props) => {
     updateFloorPlan(plan.id, { corridors: next } as any);
     push(t({ it: 'Proprietà porta aggiornate', en: 'Door properties updated' }), 'success');
     setCorridorDoorModal(null);
-  }, [corridorDoorModal, isReadOnly, markTouched, objectTypeById, plan, push, t, updateFloorPlan]);
+  }, [corridorDoorModal, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
   const saveCorridorDoorLinkModal = useCallback(() => {
     if (!corridorDoorLinkModal || !plan || isReadOnly) return;
     const availableRooms = ((renderPlan?.rooms || []) as Room[]).filter(Boolean);
@@ -8040,7 +8171,8 @@ const PlanView = ({ planId }: Props) => {
         t: Number(anchor.t.toFixed(4)),
         x: Number(point.x.toFixed(3)),
         y: Number(point.y.toFixed(3)),
-        selectedPlanIds: []
+        selectedPlanIds: [],
+        transitionType: 'stairs'
       });
     },
     [corridors, getClosestCorridorEdge]
@@ -8067,7 +8199,8 @@ const PlanView = ({ planId }: Props) => {
         t: Number(anchor.t.toFixed(4)),
         x: Number(fallbackPoint.x.toFixed(3)),
         y: Number(fallbackPoint.y.toFixed(3)),
-        selectedPlanIds: Array.from(new Set((connection.planIds || []).filter(Boolean)))
+        selectedPlanIds: Array.from(new Set((connection.planIds || []).filter(Boolean))),
+        transitionType: (connection as any)?.transitionType === 'elevator' ? 'elevator' : 'stairs'
       });
     },
     [corridors, getClosestCorridorEdge, getCorridorEdgePoint]
@@ -8086,7 +8219,8 @@ const PlanView = ({ planId }: Props) => {
         t: corridorConnectionModal.t,
         planIds: selectedPlanIds,
         x: corridorConnectionModal.x,
-        y: corridorConnectionModal.y
+        y: corridorConnectionModal.y,
+        transitionType: corridorConnectionModal.transitionType === 'elevator' ? 'elevator' : 'stairs'
       };
       if (isEdit) {
         const connectionId = String(corridorConnectionModal.connectionId);
@@ -10133,22 +10267,34 @@ const PlanView = ({ planId }: Props) => {
               }}
             />
           </div>
-          <button
-            onClick={() => {
-              dismissSelectionHintToasts();
-              setInternalMapOpen(true);
-            }}
-            className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-card hover:bg-slate-50"
-            title={t({ it: 'Mappa interna', en: 'Internal map' })}
-          >
-            <LocateFixed size={15} />
-            {t({ it: 'Mappa interna', en: 'Internal map' })}
-          </button>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => performUndo()}
-              disabled={!canUndo || isReadOnly}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+	          <button
+	            onClick={() => {
+	              dismissSelectionHintToasts();
+	              setInternalMapOpen(true);
+	            }}
+	            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-card hover:bg-slate-50"
+	            title={t({
+	              it: 'Mappa interna guidata (3 passi): 1) scegli punto A, 2) scegli punto B, 3) calcola percorso nei corridoi. Supporta ricerca utenti/oggetti/stanze.',
+	              en: 'Guided internal map (3 steps): 1) set point A, 2) set point B, 3) compute corridor route. Supports user/object/room search.'
+	            })}
+	          >
+	            <Footprints size={15} />
+	          </button>
+	          <button
+	            onClick={() => setRevisionsOpen(true)}
+	            title={t({
+	              it: 'Time machine: apri la cronologia revisioni della planimetria, confronta versioni e ripristina uno stato precedente.',
+	              en: 'Time machine: open floor-plan revision history, compare versions, and restore a previous state.'
+	            })}
+	            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
+	          >
+	            <History size={18} />
+	          </button>
+	          <div className="flex items-center gap-2">
+	            <button
+	              onClick={() => performUndo()}
+	              disabled={!canUndo || isReadOnly}
+	              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={t({ it: 'Annulla (Ctrl/Cmd+Z)', en: 'Undo (Ctrl/Cmd+Z)' })}
             >
               <Undo2 size={16} />
@@ -10192,26 +10338,11 @@ const PlanView = ({ planId }: Props) => {
                   : 'border-slate-200 bg-white text-slate-400 opacity-60'
               }`}
             >
-              <Save size={18} />
-            </button>
-          ) : null}
-	          {/* Presentation button moved to the in-canvas toolbar (under "VD"). */}
-          <button
-            onClick={() => setRevisionsOpen(true)}
-            title={t({ it: 'Time machine', en: 'Time machine' })}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
-          >
-            <History size={18} />
-          </button>
-          <div className="relative">
-            <button
-              onClick={() => setViewsMenuOpen((v) => !v)}
-              disabled={isReadOnly}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50 disabled:opacity-60"
-              title={t({ it: 'Viste', en: 'Views' })}
-            >
-              <Eye size={18} className="text-slate-700" />
-            </button>
+	              <Save size={18} />
+	            </button>
+	          ) : null}
+		          {/* Presentation button moved to the in-canvas toolbar (under "VD"). */}
+	          <div className="relative">
             {viewsMenuOpen ? (
               <div className="absolute right-0 z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
                 <div className="flex items-center justify-between px-2 pb-2">
@@ -10253,9 +10384,9 @@ const PlanView = ({ planId }: Props) => {
 	                      >
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-ink">{view.name}</div>
-                          {view.description ? (
-                            <div className="truncate text-xs text-slate-500">{view.description}</div>
-                          ) : null}
+	                          {view.description ? (
+	                            <div className="truncate text-xs text-slate-500">{view.description}</div>
+	                          ) : null}
                         </div>
                       </button>
                       <div className="flex items-center gap-1">
@@ -10268,6 +10399,16 @@ const PlanView = ({ planId }: Props) => {
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-white"
                         >
                           <Star size={14} className={view.isDefault ? 'text-amber-500' : 'text-slate-400'} />
+                        </button>
+                        <button
+                          title={t({ it: 'Sovrascrivi con vista attuale', en: 'Overwrite with current view' })}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOverwriteView(view);
+                          }}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                        >
+                          <Save size={14} />
                         </button>
                         <button
                           title={t({ it: 'Elimina vista', en: 'Delete view' })}
@@ -10303,15 +10444,18 @@ const PlanView = ({ planId }: Props) => {
             ) : null}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <div ref={gridMenuRef} className="relative">
-              <button
-                onClick={() => setGridMenuOpen((v) => !v)}
-                title={t({ it: 'Griglia', en: 'Grid' })}
-                className={`flex h-10 w-10 items-center justify-center rounded-xl border bg-white shadow-card hover:bg-slate-50 ${
-                  gridMenuOpen ? 'border-primary text-primary' : 'border-slate-200 text-ink'
-                }`}
-              >
-                <LayoutGrid size={18} />
+	            <div ref={gridMenuRef} className="relative">
+	              <button
+	                onClick={() => setGridMenuOpen((v) => !v)}
+	                title={t({
+                    it: 'Griglia: attiva/disattiva overlay, snap ai punti e step di aggancio per posizionamenti precisi.',
+                    en: 'Grid: toggle overlay, snap-to-grid, and step spacing for precise placement.'
+                  })}
+	                className={`flex h-10 w-10 items-center justify-center rounded-xl border bg-white shadow-card hover:bg-slate-50 ${
+	                  gridMenuOpen ? 'border-primary text-primary' : 'border-slate-200 text-ink'
+	                }`}
+	              >
+	                <LayoutGrid size={18} />
               </button>
               {gridMenuOpen ? (
                 <div className="absolute right-0 z-50 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
@@ -10386,11 +10530,15 @@ const PlanView = ({ planId }: Props) => {
 	              <Ruler size={18} />
 	            </button>
 	            <PrinterMenuButton
-	              isReadOnly={isReadOnly}
-	              hasPrintArea={!!(basePlan as any)?.printArea}
-	              onSetPrintArea={() => {
-	                setPrintAreaMode(true);
-	                push(
+		              isReadOnly={isReadOnly}
+		              hasPrintArea={!!(basePlan as any)?.printArea}
+                  triggerTitle={t({
+                    it: 'Stampa: imposta area di stampa, rimuovi area o esporta PDF della planimetria.',
+                    en: 'Print: set print area, clear print area, or export floor plan to PDF.'
+                  })}
+		              onSetPrintArea={() => {
+		                setPrintAreaMode(true);
+		                push(
 	                  t({
 	                    it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
 	                    en: 'Draw a rectangle on the map to set the print area.'
@@ -10441,71 +10589,6 @@ const PlanView = ({ planId }: Props) => {
                         {t({ it: 'Imposta scala', en: 'Set scale' })}
                       </button>
                     </div>
-                  </div>
-                ) : null}
-                {securityLayerVisible ? (
-                  <div
-                    ref={safetyCardRef}
-                    className={`absolute z-30 rounded-2xl border bg-amber-50/95 p-2 shadow-2xl ${
-                      safetyCardSelected ? 'border-amber-500' : 'border-amber-300'
-                    }`}
-                    style={{
-                      left: 0,
-                      top: 0,
-                      width: safetyCardSize.w,
-                      height: safetyCardSize.h,
-                      transform: `translate3d(${safetyCardViewport.x}px, ${safetyCardViewport.y}px, 0) scale(${safetyCardViewport.z})`,
-                      transformOrigin: 'top left',
-                      willChange: 'transform',
-                      backfaceVisibility: 'hidden'
-                    }}
-                    onMouseDownCapture={selectSafetyCard}
-                  >
-                    <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-amber-200 bg-amber-50/90" style={{ fontSize: `${safetyCardFontSize}px` }}>
-                      <div className="flex cursor-move items-center border-b border-amber-200 bg-amber-100/80 px-1.5 py-[1px] select-none" onMouseDown={startSafetyCardDrag}>
-                        <div className="text-[0.58em] font-semibold uppercase tracking-wide text-amber-900">
-                          {t({ it: 'Scheda Sicurezza', en: 'Safety Card' })}
-                        </div>
-                      </div>
-                      <div className="flex min-h-0 flex-1 flex-col gap-1 px-2 py-1">
-                        <div className="flex min-h-0 items-center gap-1 text-[0.82em]">
-                          <span className="shrink-0 font-semibold text-slate-600">{t({ it: 'Numeri', en: 'Numbers' })}:</span>
-                          <div className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-slate-700">
-                            {safetyEmergencyContacts.length ? (
-                              safetyEmergencyContacts.map((entry: any, index: number) => (
-                                <span key={entry.id} className="inline-block pr-2">
-                                  {index === 0 ? '|' : '|'} {entry.name || '—'} {entry.phone || '—'}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-slate-500">{t({ it: 'Nessun numero', en: 'No numbers' })}</span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex min-h-0 items-center gap-1 text-[0.82em]">
-                          <span className="shrink-0 font-semibold text-slate-600">{t({ it: 'Ritrovo', en: 'Meeting' })}:</span>
-                          <div className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-slate-700">
-                            {safetyEmergencyPoints.length ? (
-                              safetyEmergencyPoints.map((point, index) => (
-                                <span key={point.id} className="inline-block pr-2">
-                                  {index === 0 ? '|' : '|'} {point.name} {point.gps || point.coords}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-slate-500">{t({ it: 'Nessun punto', en: 'No points' })}</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onMouseDown={startSafetyCardResize}
-                      className="absolute bottom-1 right-1 flex h-5 w-5 cursor-nwse-resize items-center justify-center rounded bg-amber-100 text-amber-800 hover:bg-amber-200"
-                      title={t({ it: 'Allarga/riduci scheda', en: 'Resize card' })}
-                    >
-                      <span className="block h-[2px] w-2 rotate-45 rounded bg-current" />
-                    </button>
                   </div>
                 ) : null}
                 {webcamGesturesEnabled && presentationMode && webcamGuideVisible ? (
@@ -10680,15 +10763,41 @@ const PlanView = ({ planId }: Props) => {
                         setPrintAreaMode(false);
                         push(t({ it: 'Area di stampa impostata correttamente', en: 'Print area set successfully' }), 'success');
                       }}
+                      safetyCard={{
+                        visible: securityLayerVisible,
+                        x: safetyCardPos.x,
+                        y: safetyCardPos.y,
+                        w: safetyCardSize.w,
+                        h: safetyCardSize.h,
+                        fontSize: safetyCardFontSize,
+                        fontIndex: safetyCardFontIndex,
+                        colorIndex: safetyCardColorIndex,
+                        textBgIndex: safetyCardTextBgIndex,
+                        title: t({ it: 'Scheda sicurezza', en: 'Safety card' }),
+                        numbersLabel: t({ it: 'Numeri utili', en: 'Emergency numbers' }),
+                        pointsLabel: t({ it: 'Punti di ritrovo', en: 'Meeting points' }),
+                        numbersText: safetyNumbersInline,
+                        pointsText: safetyPointsInline,
+                        noNumbersText: t({ it: 'Nessun numero', en: 'No numbers' }),
+                        noPointsText: t({ it: 'Nessun punto', en: 'No points' })
+                      }}
+                      onSafetyCardChange={handleSafetyCardChange}
+                      onSafetyCardContextMenu={handleSafetyCardContextMenu}
+                      onSafetyCardDoubleClick={() => {
+                        if (!client?.id) return;
+                        setEmergencyContactsOpen(true);
+                      }}
 	                    objectTypeIcons={objectTypeIcons}
                       snapEnabled={gridSnapEnabled}
                       gridSize={gridSize}
                       showGrid={showGrid}
-				                zoom={zoom}
-				                pan={pan}
-				                autoFit={autoFitEnabled && !hasDefaultView}
+					                zoom={zoom}
+					                pan={pan}
+					                autoFit={autoFitEnabled && !hasDefaultView}
+                      hasDefaultView={hasDefaultView}
+                      onToggleViewsMenu={() => setViewsMenuOpen((v) => !v)}
                       perfEnabled={perfEnabled}
-			                onZoomChange={handleZoomChange}
+				                onZoomChange={handleZoomChange}
 			                onPanChange={handlePanChange}
 					                onSelect={handleStageSelect}
                       roomStatsById={roomStatsById}
@@ -10743,6 +10852,10 @@ const PlanView = ({ planId }: Props) => {
                     onCorridorDoorContextMenu={handleCorridorDoorContextMenu}
                     onCorridorDoorDblClick={({ corridorId, doorId }) => openCorridorDoorModal(corridorId, doorId)}
                     onCorridorClick={handleCorridorQuickMenu}
+                    onCorridorMiddleClick={({ corridorId, worldX, worldY }) => {
+                      insertCorridorJunctionPoint(corridorId, { x: worldX, y: worldY });
+                      setCorridorQuickMenu(null);
+                    }}
                     onCorridorDoorDraftPoint={handleCorridorDoorDraftPoint}
                     onLinkDblClick={(id) => {
                       if (isRackLinkId(id)) {
@@ -10881,7 +10994,8 @@ const PlanView = ({ planId }: Props) => {
                                 ...cp,
                                 x: Number.isFinite(Number((cp as any)?.x)) ? Number((cp as any).x) : undefined,
                                 y: Number.isFinite(Number((cp as any)?.y)) ? Number((cp as any).y) : undefined,
-                                planIds: [...(cp.planIds || [])]
+                                planIds: [...(cp.planIds || [])],
+                                transitionType: (cp as any)?.transitionType === 'elevator' ? 'elevator' : 'stairs'
                               }))
                             : corridor.connections
                         };
@@ -10897,6 +11011,10 @@ const PlanView = ({ planId }: Props) => {
                     }}
                     onOpenPhoto={openPhotoViewer}
                     onMoveWall={handleWallMove}
+                    suspendKeyboardShortcuts={allTypesOpen}
+                    connectionPlanNamesById={Object.fromEntries(
+                      ((site as any)?.floorPlans || []).map((fp: any) => [String(fp?.id || ''), String(fp?.name || fp?.id || '')])
+                    )}
 	              />
 	            </div>
 	          </div>
@@ -11433,16 +11551,6 @@ const PlanView = ({ planId }: Props) => {
           </button>
           <button
             onClick={() => {
-              insertCorridorJunctionPoint(corridorQuickMenu.id, corridorQuickMenu.world);
-              setCorridorQuickMenu(null);
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20"
-            title={t({ it: 'Aggiungi punto di snodo sul perimetro', en: 'Add perimeter junction point' })}
-          >
-            <Plus size={14} />
-          </button>
-          <button
-            onClick={() => {
               if (corridorDoorDraft?.corridorId === corridorQuickMenu.id) {
                 setCorridorDoorDraft(null);
                 push(t({ it: 'Disegno porta corridoio annullato', en: 'Corridor door drawing cancelled' }), 'info');
@@ -11579,7 +11687,8 @@ const PlanView = ({ planId }: Props) => {
           {planLayers.length &&
           contextMenu.kind !== 'corridor' &&
           contextMenu.kind !== 'corridor_connection' &&
-          contextMenu.kind !== 'corridor_door' ? (
+          contextMenu.kind !== 'corridor_door' &&
+          contextMenu.kind !== 'safety_card' ? (
             <button
               onClick={() => setLayersContextMenu((prev) => (prev ? null : { x: contextMenu.x, y: contextMenu.y }))}
               className="mt-2 flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
@@ -11736,7 +11845,7 @@ const PlanView = ({ planId }: Props) => {
                             )}
                           </button>
                         ) : null}
-                        {contextObject ? (
+	                        {contextObject ? (
                           <button
                             onClick={() => {
                               if (!renderPlan) return;
@@ -11765,8 +11874,21 @@ const PlanView = ({ planId }: Props) => {
                               en: `Select all: ${contextObjectTypeLabel}`
                             })}
                           </button>
+	                        ) : null}
+                        {contextIsAssemblyPoint && contextAssemblyMapsUrl ? (
+                          <button
+                            onClick={() => {
+                              window.open(contextAssemblyMapsUrl, '_blank', 'noopener,noreferrer');
+                              setContextMenu(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                            title={t({ it: 'Apri in Google Maps', en: 'Open in Google Maps' })}
+                          >
+                            <ExternalLink size={14} className="text-slate-500" />
+                            {t({ it: 'Apri in Google Maps', en: 'Open in Google Maps' })}
+                          </button>
                         ) : null}
-                        {contextIsWifi ? (
+	                        {contextIsWifi ? (
                           <button
                             onClick={() => {
                               const ids =
@@ -12475,29 +12597,13 @@ const PlanView = ({ planId }: Props) => {
                 (() => {
                   const corridor = corridors.find((c) => c.id === contextMenu.corridorId);
                   const door = (corridor?.doors || []).find((d) => d.id === contextMenu.doorId);
-                  const doorType = door?.catalogTypeId ? (objectTypeById.get(door.catalogTypeId) as ObjectTypeDefinition | undefined) : undefined;
-                  const supportsRemoteOpen = doorType ? !!doorType.doorConfig?.remoteOpen : true;
                   const mode = door?.mode || 'static';
                   const url = String((door as any)?.automationUrl || '').trim();
-                  const canOpen = supportsRemoteOpen && mode === 'automated' && !!url;
+                  const canOpen = mode === 'automated' && /^https?:\/\//i.test(url);
+                  if (!canOpen) return null;
                   return (
                     <button
                       onClick={() => {
-                        if (!canOpen) {
-                          push(
-                            t({
-                              it: supportsRemoteOpen
-                                ? 'Apri disponibile solo per porte automatizzate con URL'
-                                : 'Questo tipo porta non supporta l’apertura da remoto',
-                              en: supportsRemoteOpen
-                                ? 'Open is available only for automated doors with URL'
-                                : 'This door type does not support remote opening'
-                            }),
-                            'info'
-                          );
-                          setContextMenu(null);
-                          return;
-                        }
                         // Trigger automated door endpoint in background, without opening a new tab/window.
                         try {
                           const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_deskly_open_ts=${Date.now()}`;
@@ -12515,10 +12621,10 @@ const PlanView = ({ planId }: Props) => {
                         push(t({ it: 'Comando apertura porta avviato.', en: 'Door opening command started.' }), 'success');
                         setContextMenu(null);
                       }}
-                      className={`mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 ${canOpen ? 'hover:bg-slate-50' : 'text-slate-400 hover:bg-slate-50'}`}
+                      className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
                       title={t({ it: 'Apri', en: 'Open' })}
                     >
-                      <Link2 size={14} className={canOpen ? 'text-slate-500' : 'text-slate-400'} /> {t({ it: 'Apri', en: 'Open' })}
+                      <Link2 size={14} className="text-slate-500" /> {t({ it: 'Apri', en: 'Open' })}
                     </button>
                   );
                 })()
@@ -12565,6 +12671,36 @@ const PlanView = ({ planId }: Props) => {
                   <Trash size={14} /> {t({ it: 'Elimina punto di collegamento', en: 'Delete connection point' })}
                 </button>
               ) : null}
+            </>
+            ) : contextMenu.kind === 'safety_card' ? (
+            <>
+              <button
+                onClick={() => {
+                  toggleSecurityCardVisibility();
+                  setContextMenu(null);
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({
+                  it: securityLayerVisible ? 'Nascondi scheda sicurezza' : 'Mostra scheda sicurezza',
+                  en: securityLayerVisible ? 'Hide safety card' : 'Show safety card'
+                })}
+              >
+                {securityLayerVisible ? <EyeOff size={14} className="text-slate-500" /> : <Eye size={14} className="text-slate-500" />}
+                {t({
+                  it: securityLayerVisible ? 'Nascondi' : 'Mostra',
+                  en: securityLayerVisible ? 'Hide' : 'Show'
+                })}
+              </button>
+              <button
+                onClick={() => {
+                  setEmergencyContactsOpen(true);
+                  setContextMenu(null);
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Apri rubrica emergenze', en: 'Open emergency directory' })}
+              >
+                <PhoneCall size={14} className="text-slate-500" /> {t({ it: 'Rubrica emergenze', en: 'Emergency directory' })}
+              </button>
             </>
             ) : contextMenu.kind === 'scale' ? (
             <>
@@ -12752,11 +12888,17 @@ const PlanView = ({ planId }: Props) => {
             ) : null}
             <button
               onClick={() => {
+                if (!hasDefaultView) return;
                 goToDefaultView();
                 setContextMenu(null);
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-              title={t({ it: 'Vai a default', en: 'Go to default' })}
+              disabled={!hasDefaultView}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title={
+                hasDefaultView
+                  ? t({ it: 'Vai a default', en: 'Go to default' })
+                  : t({ it: 'Imposta prima una vista di default', en: 'Set a default view first' })
+              }
             >
               <Home size={14} className="text-slate-500" /> {t({ it: 'Vai a default', en: 'Go to default' })}
             </button>
@@ -14209,6 +14351,39 @@ const PlanView = ({ planId }: Props) => {
                       en: 'Optional: select floor plans linked by this connection point.'
                     })}
                   </Dialog.Description>
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs font-semibold uppercase text-slate-500">
+                      {t({ it: 'Tipo collegamento', en: 'Connection type' })}
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCorridorConnectionModal((prev) => (prev ? { ...prev, transitionType: 'stairs' } : prev))
+                        }
+                        className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                          corridorConnectionModal?.transitionType !== 'elevator'
+                            ? 'border-primary/40 bg-primary/10 text-primary'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        {t({ it: 'Scale', en: 'Stairs' })}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCorridorConnectionModal((prev) => (prev ? { ...prev, transitionType: 'elevator' } : prev))
+                        }
+                        className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                          corridorConnectionModal?.transitionType === 'elevator'
+                            ? 'border-primary/40 bg-primary/10 text-primary'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        {t({ it: 'Ascensore', en: 'Elevator' })}
+                      </button>
+                    </div>
+                  </div>
                   <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
                     {corridorConnectionTargetPlans.length ? (
                       corridorConnectionTargetPlans.map((floorPlan) => {
@@ -14306,50 +14481,11 @@ const PlanView = ({ planId }: Props) => {
                   </Dialog.Description>
                   <div className="mt-4 space-y-4">
                     {(() => {
-                      const selectedDoorType = corridorDoorModal?.catalogTypeId
-                        ? (objectTypeById.get(corridorDoorModal.catalogTypeId) as ObjectTypeDefinition | undefined)
-                        : undefined;
-                      const supportsRemoteOpen = !!selectedDoorType?.doorConfig?.remoteOpen;
-                      const verificationEnabled = !!selectedDoorType?.doorConfig?.trackVerification;
                       const canOpenNow =
-                        supportsRemoteOpen &&
                         corridorDoorModal?.mode === 'automated' &&
                         /^https?:\/\//i.test(String(corridorDoorModal?.automationUrl || '').trim());
                       return (
                         <>
-                          {doorTypeDefs.length ? (
-                            <label className="text-sm font-semibold text-slate-700">
-                              {t({ it: 'Catalogo porta', en: 'Door catalog' })}
-                              <select
-                                value={corridorDoorModal?.catalogTypeId || ''}
-                                onChange={(e) => {
-                                  const nextTypeId = e.target.value;
-                                  const nextType = doorTypeDefs.find((def) => def.id === nextTypeId);
-                                  setCorridorDoorModal((prev) =>
-                                    prev
-                                      ? {
-                                          ...prev,
-                                          catalogTypeId: nextTypeId,
-                                          isEmergency: !!nextType?.doorConfig?.isEmergency,
-                                          mode: !!nextType?.doorConfig?.remoteOpen ? prev.mode : prev.mode === 'automated' ? 'static' : prev.mode
-                                        }
-                                      : prev
-                                  );
-                                }}
-                                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                                title={t({
-                                  it: 'Seleziona il tipo porta dal catalogo impostazioni.',
-                                  en: 'Pick the door type from the settings catalog.'
-                                })}
-                              >
-                                {doorTypeDefs.map((def) => (
-                                  <option key={def.id} value={def.id}>
-                                    {(def.name?.[lang] as string) || (def.name?.it as string) || def.id}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          ) : null}
                           <label className="text-sm font-semibold text-slate-700">
                             {t({ it: 'Descrizione porta', en: 'Door description' })}
                             <textarea
@@ -14368,52 +14504,88 @@ const PlanView = ({ planId }: Props) => {
                               placeholder={t({ it: 'Es. Porta lato reception', en: 'e.g. Reception-side door' })}
                             />
                           </label>
-                          <label
-                            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
-                            title={t({
-                              it: 'Se attivo puoi registrare verifiche e storico porta emergenza.',
-                              en: 'When enabled you can record checks and emergency-door history.'
-                            })}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={!!corridorDoorModal?.isEmergency}
-                              onChange={(e) =>
-                                setCorridorDoorModal((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        isEmergency: e.target.checked
-                                      }
-                                    : prev
-                                )
-                              }
-                            />
-                            {t({ it: 'Porta emergenza', en: 'Emergency door' })}
-                          </label>
-                          <label
-                            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
-                            title={t({
-                              it: 'Segna la porta come tagliafuoco.',
-                              en: 'Mark this door as fire-rated.'
-                            })}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={!!corridorDoorModal?.isFireDoor}
-                              onChange={(e) =>
-                                setCorridorDoorModal((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        isFireDoor: e.target.checked
-                                      }
-                                    : prev
-                                )
-                              }
-                            />
-                            {t({ it: 'Tagliafuoco', en: 'Fire-rated' })}
-                          </label>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <label
+                              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                              title={t({
+                                it: 'Se attivo puoi registrare verifiche e storico porta emergenza.',
+                                en: 'When enabled you can record checks and emergency-door history.'
+                              })}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!corridorDoorModal?.isEmergency}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          isEmergency: e.target.checked
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Emergenza', en: 'Emergency' })}
+                            </label>
+                            <label
+                              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                              title={t({
+                                it: 'Segna la porta come tagliafuoco.',
+                                en: 'Mark this door as fire-rated.'
+                              })}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!corridorDoorModal?.isFireDoor}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          isFireDoor: e.target.checked
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Tagliafuoco', en: 'Fire-rated' })}
+                            </label>
+                            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={corridorDoorModal?.mode === 'auto_sensor'}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          mode: e.target.checked ? 'auto_sensor' : 'static'
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Apertura a rilevazione', en: 'Sensor opening' })}
+                            </label>
+                            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={corridorDoorModal?.mode === 'automated'}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          mode: e.target.checked ? 'automated' : 'static'
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Apertura automatizzata', en: 'Automated opening' })}
+                            </label>
+                          </div>
                           {corridorDoorModal?.isEmergency ? (
                             <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3">
                               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-700">
@@ -14531,103 +14703,65 @@ const PlanView = ({ planId }: Props) => {
                               </div>
                             </div>
                           ) : null}
-                          <label className="text-sm font-semibold text-slate-700">
-                            {t({ it: 'Tipo porta', en: 'Door type' })}
-                            <select
-                              value={corridorDoorModal?.mode || 'static'}
-                              onChange={(e) =>
-                                setCorridorDoorModal((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        mode: (e.target.value as 'static' | 'auto_sensor' | 'automated') || 'static'
-                                      }
-                                    : prev
-                                )
-                              }
-                              className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            >
-                              <option value="static">{t({ it: 'Statica', en: 'Static' })}</option>
-                              <option value="auto_sensor">{t({ it: 'Automatica a rilevazione', en: 'Automatic with sensor' })}</option>
-                              <option value="automated" disabled={!supportsRemoteOpen}>
-                                {t({ it: 'Apertura automatizzata', en: 'Automated opening' })}
-                              </option>
-                            </select>
-                          </label>
-                          {!supportsRemoteOpen ? (
+                          {corridorDoorModal?.mode === 'automated' ? (
+                            <>
+                              <label className="text-sm font-semibold text-slate-700">
+                                {t({ it: 'Link apertura', en: 'Opening link' })}
+                                <input
+                                  value={corridorDoorModal?.automationUrl || ''}
+                                  onChange={(e) =>
+                                    setCorridorDoorModal((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            automationUrl: e.target.value
+                                          }
+                                        : prev
+                                    )
+                                  }
+                                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                  placeholder="https://..."
+                                />
+                              </label>
+                              <div className="text-xs text-slate-500">
+                                {t({
+                                  it: 'Il link è opzionale. Senza link il pulsante Apri non viene mostrato.',
+                                  en: 'The link is optional. Without a link the Open button is hidden.'
+                                })}
+                              </div>
+                            </>
+                          ) : (
                             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                               {t({
-                                it: 'Questo tipo porta non è configurato per apertura da remoto.',
-                                en: 'This door type is not configured for remote opening.'
+                                it: 'Attiva la modalità automatizzata per configurare un eventuale link di apertura remota.',
+                                en: 'Enable automated mode to optionally configure a remote opening link.'
                               })}
                             </div>
-                          ) : null}
-                          {corridorDoorModal?.mode === 'automated' ? (
-                            <label className="text-sm font-semibold text-slate-700">
-                              URL
-                              <input
-                                value={corridorDoorModal?.automationUrl || ''}
-                                onChange={(e) =>
-                                  setCorridorDoorModal((prev) =>
-                                    prev
-                                      ? {
-                                          ...prev,
-                                          automationUrl: e.target.value
-                                        }
-                                      : prev
-                                  )
-                                }
-                                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                                placeholder="https://..."
-                              />
-                            </label>
-                          ) : null}
-                          {verificationEnabled ? (
-                            <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-                              {t({
-                                it: 'Questo tipo porta prevede tracciamento data revisione e società verificatrice.',
-                                en: 'This door type supports revision date and verifier company tracking.'
-                              })}
+                          )}
+                          {canOpenNow ? (
+                            <div className="flex items-center justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const requestUrl = `${String(corridorDoorModal?.automationUrl || '').trim()}${
+                                    String(corridorDoorModal?.automationUrl || '').includes('?') ? '&' : '?'
+                                  }_deskly_open_ts=${Date.now()}`;
+                                  fetch(requestUrl, {
+                                    method: 'GET',
+                                    mode: 'no-cors',
+                                    cache: 'no-store',
+                                    keepalive: true
+                                  }).catch(() => {});
+                                  push(t({ it: 'Comando apertura porta avviato.', en: 'Door opening command started.' }), 'success');
+                                }}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                title={t({ it: 'Apri', en: 'Open' })}
+                              >
+                                <DoorOpen size={14} />
+                                {t({ it: 'Apri', en: 'Open' })}
+                              </button>
                             </div>
                           ) : null}
-                          <div className="flex items-center justify-end">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!canOpenNow) {
-                                  push(
-                                    t({
-                                      it: supportsRemoteOpen
-                                        ? 'Apri disponibile solo con URL valido su porte automatizzate.'
-                                        : 'Questo tipo porta non supporta apertura da remoto.',
-                                      en: supportsRemoteOpen
-                                        ? 'Open is available only with a valid URL on automated doors.'
-                                        : 'This door type does not support remote opening.'
-                                    }),
-                                    'info'
-                                  );
-                                  return;
-                                }
-                                const requestUrl = `${String(corridorDoorModal?.automationUrl || '').trim()}${
-                                  String(corridorDoorModal?.automationUrl || '').includes('?') ? '&' : '?'
-                                }_deskly_open_ts=${Date.now()}`;
-                                fetch(requestUrl, {
-                                  method: 'GET',
-                                  mode: 'no-cors',
-                                  cache: 'no-store',
-                                  keepalive: true
-                                }).catch(() => {});
-                                push(t({ it: 'Comando apertura porta avviato.', en: 'Door opening command started.' }), 'success');
-                              }}
-                              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${
-                                canOpenNow ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50' : 'border-slate-200 bg-slate-100 text-slate-400'
-                              }`}
-                              title={t({ it: 'Apri', en: 'Open' })}
-                            >
-                              <DoorOpen size={14} />
-                              {t({ it: 'Apri', en: 'Open' })}
-                            </button>
-                          </div>
                         </>
                       );
                     })()}
@@ -15431,6 +15565,8 @@ const PlanView = ({ planId }: Props) => {
         open={viewModalOpen}
         onClose={() => setViewModalOpen(false)}
         onSubmit={handleSaveView}
+        hasExistingDefault={hasDefaultView}
+        existingDefaultName={(basePlan.views || []).find((v) => v.isDefault)?.name || ''}
       />
 
       <PrintModal open={exportModalOpen} onClose={() => setExportModalOpen(false)} mode="single" singlePlanId={basePlan.id} />
@@ -16395,6 +16531,12 @@ const PlanView = ({ planId }: Props) => {
         objectTypeLabels={objectTypeLabels}
         initialLocation={{ clientId: client?.id, siteId: site?.id, planId }}
         onClose={() => setInternalMapOpen(false)}
+      />
+      <EmergencyContactsModal
+        open={emergencyContactsOpen}
+        clientId={client?.id || null}
+        readOnly={planAccess !== 'rw'}
+        onClose={() => setEmergencyContactsOpen(false)}
       />
 
       <Transition appear show={webcamGesturesEnabled && presentationEnterModalOpen} as={Fragment}>

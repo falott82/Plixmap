@@ -100,13 +100,16 @@ interface DataState {
   updateSite: (id: string, payload: { name?: string; coords?: string }) => void;
   deleteSite: (id: string) => void;
   addFloorPlan: (siteId: string, name: string, imageUrl: string, width?: number, height?: number) => string;
-  updateFloorPlan: (id: string, payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height' | 'printArea' | 'scale' | 'corridors'>>) => void;
+  updateFloorPlan: (
+    id: string,
+    payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height' | 'printArea' | 'scale' | 'corridors' | 'safetyCardLayout'>>
+  ) => void;
   deleteFloorPlan: (id: string) => void;
   reorderFloorPlans: (siteId: string, movingPlanId: string, targetPlanId: string, before?: boolean) => void;
   setFloorPlanContent: (
     floorPlanId: string,
     payload: Pick<FloorPlan, 'imageUrl' | 'width' | 'height' | 'objects' | 'rooms' | 'views'> &
-      Partial<Pick<FloorPlan, 'corridors' | 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'printArea' | 'scale'>>
+      Partial<Pick<FloorPlan, 'corridors' | 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'printArea' | 'scale' | 'safetyCardLayout'>>
   ) => void;
   addObject: (
     floorPlanId: string,
@@ -434,7 +437,22 @@ const nextRev = (plan: FloorPlan, bump: 'major' | 'minor') => {
 const normalizeViews = (views: FloorPlanView[] | undefined): FloorPlanView[] | undefined => {
   if (!Array.isArray(views)) return views;
   if (!views.length) return [];
-  const next = views.map((v) => ({ ...v, pan: { ...v.pan } }));
+  const withUniqueNames = (items: FloorPlanView[]) => {
+    const used = new Set<string>();
+    return items.map((view) => {
+      const baseNameRaw = String(view?.name || '').trim();
+      const baseName = baseNameRaw || 'View';
+      let candidate = baseName;
+      let suffix = 1;
+      while (used.has(candidate.toLowerCase())) {
+        candidate = `${baseName}_${suffix}`;
+        suffix += 1;
+      }
+      used.add(candidate.toLowerCase());
+      return candidate === view.name ? view : { ...view, name: candidate };
+    });
+  };
+  const next = views.map((v) => ({ ...v, pan: { ...v.pan }, name: String(v?.name || '').trim() }));
   let defaultIndex = next.findIndex((v) => v.isDefault);
   if (defaultIndex === -1) {
     defaultIndex = next.findIndex((v) => String(v.name || '').trim().toLowerCase() === 'default');
@@ -442,13 +460,12 @@ const normalizeViews = (views: FloorPlanView[] | undefined): FloorPlanView[] | u
   if (defaultIndex !== -1) {
     const normalized = next.map((v, idx) => ({
       ...v,
-      isDefault: idx === defaultIndex,
-      name: idx === defaultIndex ? 'DEFAULT' : v.name
+      isDefault: idx === defaultIndex
     }));
     const [def] = normalized.splice(defaultIndex, 1);
-    return [def, ...normalized];
+    return withUniqueNames([def, ...normalized]);
   }
-  return next.map((v) => (v.isDefault ? { ...v, isDefault: false } : v));
+  return withUniqueNames(next.map((v) => (v.isDefault ? { ...v, isDefault: false } : v)));
 };
 
 const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[] => {
@@ -585,13 +602,39 @@ const snapshotRevision = (
                   : undefined
               }))
             : undefined,
-          connections: Array.isArray(c.connections) ? c.connections.map((cp) => ({ ...cp, planIds: [...(cp.planIds || [])] })) : undefined
+          connections: Array.isArray(c.connections)
+            ? c.connections.map((cp) => ({
+                ...cp,
+                planIds: [...(cp.planIds || [])],
+                transitionType: (cp as any)?.transitionType === 'elevator' ? 'elevator' : 'stairs'
+              }))
+            : undefined
         }))
       : undefined,
     links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
     racks: plan.racks ? plan.racks.map((r) => ({ ...r })) : undefined,
     rackItems: plan.rackItems ? plan.rackItems.map((i) => ({ ...i })) : undefined,
     rackLinks: plan.rackLinks ? plan.rackLinks.map((l) => ({ ...l })) : undefined,
+    safetyCardLayout: (plan as any).safetyCardLayout
+      ? {
+          x: Number((plan as any).safetyCardLayout.x || 0),
+          y: Number((plan as any).safetyCardLayout.y || 0),
+          w: Number((plan as any).safetyCardLayout.w || 420),
+          h: Number((plan as any).safetyCardLayout.h || 84),
+          fontSize: Number.isFinite(Number((plan as any).safetyCardLayout.fontSize))
+            ? Number((plan as any).safetyCardLayout.fontSize)
+            : undefined,
+          fontIndex: Number.isFinite(Number((plan as any).safetyCardLayout.fontIndex))
+            ? Number((plan as any).safetyCardLayout.fontIndex)
+            : undefined,
+          colorIndex: Number.isFinite(Number((plan as any).safetyCardLayout.colorIndex))
+            ? Number((plan as any).safetyCardLayout.colorIndex)
+            : undefined,
+          textBgIndex: Number.isFinite(Number((plan as any).safetyCardLayout.textBgIndex))
+            ? Number((plan as any).safetyCardLayout.textBgIndex)
+            : undefined
+        }
+      : undefined,
     objects: plan.objects.map((o) => ({
       ...o,
       securityDocuments: normalizeSecurityDocuments((o as any)?.securityDocuments),
@@ -747,8 +790,40 @@ const normalizeClientLayers = (client: Client): LayerDefinition[] => {
 const normalizePlan = (plan: FloorPlan): FloorPlan => {
   const next = { ...plan } as any;
   if (!Array.isArray(next.links)) next.links = [];
+  if (next.safetyCardLayout) {
+    next.safetyCardLayout = {
+      x: Number(next.safetyCardLayout.x || 0),
+      y: Number(next.safetyCardLayout.y || 0),
+      w: Math.max(220, Number(next.safetyCardLayout.w || 420)),
+      h: Math.max(56, Number(next.safetyCardLayout.h || 84)),
+      fontSize: Number.isFinite(Number(next.safetyCardLayout.fontSize))
+        ? Math.max(8, Math.min(22, Number(next.safetyCardLayout.fontSize)))
+        : undefined,
+      fontIndex: Number.isFinite(Number(next.safetyCardLayout.fontIndex))
+        ? Math.max(0, Math.floor(Number(next.safetyCardLayout.fontIndex)))
+        : 0,
+      colorIndex: Number.isFinite(Number(next.safetyCardLayout.colorIndex))
+        ? Math.max(0, Math.floor(Number(next.safetyCardLayout.colorIndex)))
+        : 0,
+      textBgIndex: Number.isFinite(Number(next.safetyCardLayout.textBgIndex))
+        ? Math.max(0, Math.floor(Number(next.safetyCardLayout.textBgIndex)))
+        : 0
+    };
+  }
   next.views = normalizeViews(next.views) || [];
   if (!Array.isArray(next.rooms)) next.rooms = [];
+  if (Array.isArray(next.rooms)) {
+    next.rooms = next.rooms.map((room: Room) => ({
+      ...room,
+      labelScale: Number.isFinite(Number((room as any)?.labelScale))
+        ? Math.max(0.3, Math.min(3, Number((room as any).labelScale)))
+        : undefined,
+      labelPosition:
+        (room as any)?.labelPosition === 'bottom' || (room as any)?.labelPosition === 'left' || (room as any)?.labelPosition === 'right'
+          ? (room as any).labelPosition
+          : 'top'
+    }));
+  }
   if (!Array.isArray(next.corridors)) next.corridors = [];
   if (Array.isArray(next.corridors)) {
     next.corridors = next.corridors.map((corridor: Corridor) => {
@@ -801,7 +876,8 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
                 t: Number(cp?.t || 0),
                 planIds: Array.isArray(cp?.planIds) ? cp.planIds.map((id) => String(id)) : [],
                 x: Number.isFinite(Number((cp as any)?.x)) ? Number((cp as any).x) : undefined,
-                y: Number.isFinite(Number((cp as any)?.y)) ? Number((cp as any).y) : undefined
+                y: Number.isFinite(Number((cp as any)?.y)) ? Number((cp as any).y) : undefined,
+                transitionType: (cp as any)?.transitionType === 'elevator' ? 'elevator' : 'stairs'
               }))
               .filter((cp) => Number.isFinite(cp.edgeIndex) && Number.isFinite(cp.t))
           : []
@@ -1188,6 +1264,7 @@ export const useDataStore = create<DataState>()(
             height: payload.height,
             ...(payload as any).printArea !== undefined ? { printArea: (payload as any).printArea } : {},
             ...(payload as any).scale !== undefined ? { scale: (payload as any).scale } : {},
+            ...(payload as any).safetyCardLayout !== undefined ? { safetyCardLayout: (payload as any).safetyCardLayout } : {},
             objects: Array.isArray(payload.objects) ? payload.objects : [],
             rooms: Array.isArray(payload.rooms) ? payload.rooms : [],
             corridors: Array.isArray((payload as any).corridors) ? (payload as any).corridors : (plan as any).corridors,
@@ -1450,7 +1527,8 @@ export const useDataStore = create<DataState>()(
               links: Array.isArray((rev as any).links) ? (rev as any).links : (plan as any).links,
               racks: Array.isArray((rev as any).racks) ? (rev as any).racks : (plan as any).racks,
               rackItems: Array.isArray((rev as any).rackItems) ? (rev as any).rackItems : (plan as any).rackItems,
-              rackLinks: Array.isArray((rev as any).rackLinks) ? (rev as any).rackLinks : (plan as any).rackLinks
+              rackLinks: Array.isArray((rev as any).rackLinks) ? (rev as any).rackLinks : (plan as any).rackLinks,
+              safetyCardLayout: (rev as any).safetyCardLayout || (plan as any).safetyCardLayout
             };
           }),
           version: state.version + 1
@@ -1509,7 +1587,7 @@ export const useDataStore = create<DataState>()(
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => {
             const existing = plan.views || [];
             const nextViews = view.isDefault ? existing.map((v) => ({ ...v, isDefault: false })) : existing;
-            const nextView = { id, ...view, name: view.isDefault ? 'DEFAULT' : view.name };
+            const nextView = { id, ...view, name: String(view?.name || '').trim() };
             const merged = view.isDefault ? [nextView, ...nextViews] : [...nextViews, nextView];
             return { ...plan, views: normalizeViews(merged) || [] };
           }),
@@ -1525,7 +1603,7 @@ export const useDataStore = create<DataState>()(
               (plan.views || []).map((v) => {
                 if (v.id !== viewId) return v;
                 const next = { ...v, ...changes };
-                if (changes?.isDefault) next.name = 'DEFAULT';
+                if (typeof changes?.name === 'string') next.name = String(changes.name).trim();
                 return next;
               })
             ) || []
@@ -1549,8 +1627,7 @@ export const useDataStore = create<DataState>()(
             views: normalizeViews(
               (plan.views || []).map((v) => ({
                 ...v,
-                isDefault: v.id === viewId,
-                name: v.id === viewId ? 'DEFAULT' : v.name
+                isDefault: v.id === viewId
               }))
             ) || []
           })),
@@ -1803,7 +1880,12 @@ export const useDataStore = create<DataState>()(
                     }))
                   : [],
                 connections: Array.isArray(c?.connections)
-                  ? c.connections.map((cp: any) => ({ ...cp, id: nanoid(), planIds: Array.isArray(cp?.planIds) ? [...cp.planIds] : [] }))
+                  ? c.connections.map((cp: any) => ({
+                      ...cp,
+                      id: nanoid(),
+                      planIds: Array.isArray(cp?.planIds) ? [...cp.planIds] : [],
+                      transitionType: cp?.transitionType === 'elevator' ? 'elevator' : 'stairs'
+                    }))
                   : []
               }))
             : [];
@@ -1896,6 +1978,7 @@ export const useDataStore = create<DataState>()(
             racks: nextRacks,
             rackItems: nextRackItems,
             rackLinks: nextRackLinks,
+            safetyCardLayout: (source as any).safetyCardLayout ? { ...(source as any).safetyCardLayout } : undefined,
             objects: nextObjects
           });
 

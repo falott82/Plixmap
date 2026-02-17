@@ -287,6 +287,7 @@ export interface Room {
   color?: string;
   capacity?: number;
   labelScale?: number;
+  labelPosition?: 'top' | 'bottom' | 'left' | 'right';
   showName?: boolean;
   surfaceSqm?: number;
   notes?: string;
@@ -367,6 +368,7 @@ export interface CorridorConnectionPoint {
   planIds: string[]; // target floor plans connected by this point
   x?: number;
   y?: number;
+  transitionType?: 'stairs' | 'elevator';
 }
 
 export interface Corridor {
@@ -416,6 +418,16 @@ export interface FloorPlan {
   racks?: RackDefinition[];
   rackItems?: RackItem[];
   rackLinks?: RackLink[];
+  safetyCardLayout?: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    fontSize?: number;
+    fontIndex?: number;
+    colorIndex?: number;
+    textBgIndex?: number;
+  };
   objects: MapObject[];
 }
 
@@ -458,6 +470,16 @@ export interface FloorPlanRevision {
   racks?: RackDefinition[];
   rackItems?: RackItem[];
   rackLinks?: RackLink[];
+  safetyCardLayout?: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    fontSize?: number;
+    fontIndex?: number;
+    colorIndex?: number;
+    textBgIndex?: number;
+  };
   objects: MapObject[];
 }
 

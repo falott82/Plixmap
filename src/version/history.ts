@@ -8,6 +8,200 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.8.2',
+    date: '2026-02-17',
+    type: 'fix',
+    notes: [
+      n(
+        'Export PDF mappa interna: stabilizzato il download da anteprima senza chiudere la modale (fix click su dialog sovrapposti + fallback blob/save)',
+        'Internal map PDF export: stabilized preview download flow without closing the modal (overlapping-dialog click fix + blob/save fallback)'
+      ),
+      n(
+        'Indicazioni passo-passo PDF: nuovo layout visuale con icone SVG contestuali (partenza, svolta dx/sx, corridoio, scale/ascensore, arrivo)',
+        'PDF step-by-step directions: new visual layout with contextual SVG icons (start, left/right turn, corridor, stairs/elevator, arrival)'
+      ),
+      n(
+        'Indicazioni passo-passo PDF: rimossi i badge numerici e migliorata leggibilità icone (dimensioni maggiori e resa grafica più definita)',
+        'PDF step-by-step directions: removed numeric badges and improved icon readability (larger size and sharper visual rendering)'
+      )
+    ]
+  },
+  {
+    version: '2.8.1',
+    date: '2026-02-17',
+    type: 'fix',
+    notes: [
+      n(
+        'Mappa interna: export percorso con anteprima in-app (prima si verifica il risultato, poi si esporta PDF) con pulsanti Chiudi e Stampa/Salva PDF funzionanti',
+        'Internal map: route export now uses an in-app preview first (review before PDF export) with working Close and Print/Save PDF actions'
+      ),
+      n(
+        'Fix export PDF percorso multi-piano: ripristinata la planimetria di sfondo nelle pagine esportate (inline immagini + rasterizzazione SVG prima della cattura)',
+        'Multi-floor route PDF export fix: restored background floor plan rendering in exported pages (image inlining + SVG rasterization before capture)'
+      ),
+      n(
+        'Export percorso interno: eliminata la dipendenza da finestre about:blank/blob e script inline, rendendo il flusso compatibile con CSP restrittive',
+        'Internal route export: removed dependency on about:blank/blob windows and inline scripts, making the flow compatible with strict CSP policies'
+      )
+    ]
+  },
+  {
+    version: '2.8.0',
+    date: '2026-02-17',
+    type: 'minor',
+    notes: [
+      n(
+        'Mappa interna: percorso multi-piano con segmenti per piano, indicatore piano corrente e frecce in basso a destra per passare al piano precedente/successivo',
+        'Internal map: multi-floor routing with per-floor segments, current-floor indicator, and bottom-right arrows to move to previous/next floor'
+      ),
+      n(
+        'Punti di collegamento corridoio tra piani: tipo transizione configurabile (Scale/Ascensore), visualizzazione in mappa e penalità tempo nel calcolo ETA (+15s scale, +30s ascensore)',
+        'Cross-floor corridor connection points: configurable transition type (Stairs/Elevator), shown on map, with ETA penalties (+15s stairs, +30s elevator)'
+      ),
+      n(
+        'Mappa interna: in destinazione cliente/sede bloccati sulla scelta di partenza (si cambia solo planimetria di destinazione)',
+        'Internal map: destination keeps client/site locked to start selection (only destination floor plan can change)'
+      ),
+      n(
+        'Routing corridoi: se A e B sono interni al corridoio il percorso resta sulla mediana del corridoio e chiude con tratti obliqui verso i punti',
+        'Corridor routing: when both A and B are inside corridors, route stays on corridor centerline and ends with oblique links to points'
+      ),
+      n(
+        'Punti di collegamento tra piani: tooltip descrittivo senza ID tecnici, con nomi piano evidenziati',
+        'Inter-floor connection points: descriptive tooltip without technical IDs, with highlighted floor names'
+      ),
+      n(
+        'Punto di raccolta: coordinate Google Maps spostate sotto Note, link cliccabili in Rubrica emergenze e voce contestuale "Apri in Google Maps"',
+        'Assembly point: Google Maps coordinates moved under Notes, clickable links in Emergency directory, and context action "Open in Google Maps"'
+      ),
+      n(
+        'Mappa interna: fallback percorso su corridoi nei casi misti corridoio/non-corridoio per ridurre i falsi "Percorso non trovato" nei tragitti multi-piano',
+        'Internal map: corridor-walkable fallback for mixed corridor/non-corridor cases to reduce false "Path not found" on multi-floor routes'
+      ),
+      n(
+        'Mappa interna: export PDF multi-pagina con una pagina per ogni piano del percorso (partenza/attraversamento/arrivo) e pagina finale con indicazioni passo-passo',
+        'Internal map: multi-page PDF export with one page per route floor (start/transit/arrival) and a final page with step-by-step directions'
+      ),
+      n(
+        'Routing misto corridoio/non-corridoio: corretto salto porta->collegamento, mantenendo il tracciato rosso sulla mediana del corridoio fino al punto interno',
+        'Mixed corridor/non-corridor routing: fixed door->connection jump by keeping the red route on corridor centerline up to the internal point'
+      ),
+      n(
+        'Export PDF mappa interna: generazione diretta del file senza popup anteprima (eliminati problemi CSP su about:blank/blob)',
+        'Internal map PDF export: direct file generation without preview popup (removed CSP issues on about:blank/blob)'
+      ),
+      n(
+        'Scheda sicurezza in planimetria: rimossi i pulsanti statici +/- e aggiunto menu contestuale dedicato (Mostra/Nascondi, Rubrica emergenze) con toaster coerente alla selezione',
+        'Floor-plan safety card: removed static +/- buttons and added dedicated context menu (Show/Hide, Emergency directory) with selection-aware helper toast'
+      ),
+      n(
+        'Corridoi: aggiunta inserzione punto di svincolo con tasto centrale del mouse (in sostituzione del pulsante + contestuale)',
+        'Corridors: added middle-mouse insertion of junction points (replacing the contextual + button)'
+      ),
+      n(
+        'Stanze: etichette renderizzate con clipping sul perimetro stanza per evitare overflow fuori dal poligono',
+        'Rooms: labels are now clipped to room bounds to prevent overflow outside room polygons'
+      ),
+      n(
+        'Fix duplicazione planimetria: risolto crash React dovuto all’ordine degli hook nella modale di clonazione',
+        'Floor-plan duplication fix: resolved React crash caused by hook-order violation in clone modal'
+      ),
+      n(
+        'Fix modale oggetto: inizializzazione resa stabile per evitare reset dei campi durante l’editing (incluso inserimento nome telecamera)',
+        'Object modal fix: stabilized initialization to prevent field reset while editing (including camera name input)'
+      )
+    ]
+  },
+  {
+    version: '2.7.3',
+    date: '2026-02-16',
+    type: 'minor',
+    notes: [
+      n(
+        'Sicurezza > Mirino selezionati: aggiunti full screen, navigazione tra planimetrie con frecce tastiera (←/→), frecce in basso a sinistra/destra e uscita full screen con Esc',
+        'Safety > Selected crosshair: added fullscreen, floor-plan navigation with keyboard arrows (←/→), bottom-left/bottom-right arrow buttons, and Esc fullscreen exit'
+      ),
+      n(
+        'Sicurezza > Mirino selezionati: export PDF aggiornato con selezione planimetrie (tutte o subset) mantenendo il contenuto visibile della preview',
+        'Safety > Selected crosshair: PDF export now supports floor-plan selection (all or subset) while preserving visible preview content'
+      ),
+      n(
+        'Toolbar planimetria: Time Machine spostato accanto a Mappa interna, tooltips estesi su Time Machine/Griglia/Chat/Stampa e pulsante Mappa interna arricchito con guida a passi',
+        'Floor-plan toolbar: Time Machine moved next to Internal Map, extended tooltips for Time Machine/Grid/Chat/Print, and Internal Map button enriched with step-by-step guidance'
+      ),
+      n(
+        'Stanze: etichette ora gestibili da tastiera su stanza selezionata (+/- dimensione, freccia su/giù posizione alto/basso)',
+        'Rooms: labels are now keyboard-editable on selected rooms (+/- size, up/down arrow top/bottom position)'
+      ),
+      n(
+        'Disegno stanza poligonale: segmenti ortogonali di default, segmenti obliqui con Shift e toaster guida persistente durante il disegno',
+        'Polygon room drawing: orthogonal segments by default, oblique segments with Shift, and persistent guidance toast while drawing'
+      ),
+      n(
+        'Scheda sicurezza in planimetria: resize unificato al sistema room (Transformer), rimosso il grip custom, palette azzurra a angoli retti, controlli +/- ridotti e shortcut C/F con toaster guida',
+        'Floor-plan safety card: resize unified with room system (Transformer), custom grip removed, square-corner azure palette, smaller +/- controls, and C/F shortcuts with guidance toast'
+      )
+    ]
+  },
+  {
+    version: '2.7.2',
+    date: '2026-02-16',
+    type: 'minor',
+    notes: [
+      n(
+        'Viste: icona occhio spostata nel menu verticale della mappa (sopra VD) e pulsante VD disabilitato quando manca una vista di default',
+        'Views: eye icon moved to the map vertical toolbar (above VD), and VD button disabled when no default view exists'
+      ),
+      n(
+        'Modale “Salva vista”: opzione Default come primo controllo, nome vista sempre obbligatorio, avviso esplicito quando si sostituisce una default già presente',
+        '“Save view” modal: Default option moved to the first control, view name always required, and explicit warning when replacing an existing default'
+      ),
+      n(
+        'Viste planimetria: nomi resi univoci per planimetria con rinomina automatica dei duplicati (_1, _2, ...)',
+        'Floor-plan views: names are now unique per floor plan with automatic duplicate renaming (_1, _2, ...)'
+      ),
+      n(
+        'Toaster oggetto selezionato: aggiunti dettagli “Tipo oggetto” e “Nome oggetto”',
+        'Selected object toast: added “Object type” and “Object name” details'
+      )
+    ]
+  },
+  {
+    version: '2.7.1',
+    date: '2026-02-16',
+    type: 'minor',
+    notes: [
+      n(
+        'Scheda sicurezza in planimetria: ridimensionamento statico corretto (senza saltelli), stile azzurro con angoli retti, selezione al click e controlli +/- inline per la dimensione testo',
+        'Floor-plan safety card: fixed static resize (no jitter), azure style with square corners, click selection, and inline +/- controls for text size'
+      ),
+      n(
+        'Modale oggetto sicurezza: layout riorganizzato senza spazi vuoti (Nome full-width, Descrizione sotto Nome, Note sotto Descrizione)',
+        'Safety object modal: layout reorganized with no empty gaps (Name full-width, Description below Name, Notes below Description)'
+      ),
+      n(
+        'Impostazioni > Sicurezza: filtri per cliente/sede/planimetria/tipo, multi-selezione righe e azione “Mostra selezionati in mappa”',
+        'Settings > Safety: filters by client/site/floor plan/type, row multi-selection, and “Show selected on map” action'
+      ),
+      n(
+        'Mirino sicurezza: preview con immagine planimetria + corridoi + stanze, etichetta nome sopra target e gestione multi-planimetria tramite tendina',
+        'Safety crosshair: preview now shows floor-plan image + corridors + rooms, target label above marker, and multi-plan selection via dropdown'
+      ),
+      n(
+        'Sicurezza: esportazione PDF disponibile per schermata registro e preview mirino',
+        'Safety: PDF export available for registry screen and crosshair preview'
+      ),
+      n(
+        'Proprietà porta: rework UI con tipologia unica standard e opzioni Emergenza/Tagliafuoco/Apertura a rilevazione/Apertura automatizzata',
+        'Door properties: UI rework with single standard type and Emergency/Fire-rated/Sensor opening/Automated opening options'
+      ),
+      n(
+        'Ingresso in impostazioni: chiusura toast pendenti workspace e pulizia selezioni attive in planimetria',
+        'Entering settings: dismisses pending workspace toasts and clears active floor-plan selections'
+      )
+    ]
+  },
+  {
     version: '2.7.0',
     date: '2026-02-14',
     type: 'minor',
