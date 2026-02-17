@@ -8,6 +8,44 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.9.0',
+    date: '2026-02-17',
+    type: 'minor',
+    notes: [
+      n(
+        'Via di fuga: indicazioni passo-passo aggiornate, con icona bandiera a scacchi riservata esclusivamente all’ultimo step (punto di raccolta quando presente)',
+        'Escape route: step-by-step directions updated, with checkered-flag icon reserved exclusively for the final step (assembly point when present)'
+      ),
+      n(
+        'Via di fuga: aggiunte coordinate Google Maps al punto di raccolta nelle indicazioni e nella scheda emergenza PDF',
+        'Escape route: added Google Maps coordinates for assembly points in directions and in the PDF emergency card'
+      ),
+      n(
+        'Export PDF via di fuga: la scheda emergenza è stata spostata in fondo come ultima sezione, sotto le indicazioni passo-passo, con testo “Indicazione aggiuntiva” aggiornato',
+        'Escape route PDF export: emergency card moved to the end as the last section, below step-by-step directions, with updated “Additional guidance” text'
+      )
+    ]
+  },
+  {
+    version: '2.8.6',
+    date: '2026-02-17',
+    type: 'minor',
+    notes: [
+      n(
+        'Via di fuga: aggiunta modalità Full screen nella modale per visualizzare la mappa percorso a schermo intero',
+        'Escape route: added Fullscreen mode in the modal to view the route map in full screen'
+      ),
+      n(
+        'Export PDF via di fuga: aggiunta pagina “Scheda emergenza” con numeri utili e punti di raccolta configurati',
+        'Escape route PDF export: added an “Emergency card” page with useful numbers and configured assembly points'
+      ),
+      n(
+        'Via di fuga: se è presente un punto di raccolta sul piano di arrivo, il tracciato mostra una linea tratteggiata dall’uscita al punto di raccolta (anche in PDF)',
+        'Escape route: when an assembly point exists on the arrival floor, the route now shows a dashed line from the exit to the assembly point (also in PDF)'
+      )
+    ]
+  },
+  {
     version: '2.8.5',
     date: '2026-02-17',
     type: 'minor',

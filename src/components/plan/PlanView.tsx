@@ -16646,6 +16646,7 @@ const PlanView = ({ planId }: Props) => {
       <EscapeRouteModal
         open={!!escapeRouteModal}
         plans={siteFloorPlans}
+        emergencyContacts={safetyEmergencyContacts}
         startPlanId={escapeRouteModal?.startPlanId || planId}
         startPoint={escapeRouteModal?.startPoint || null}
         sourceKind={escapeRouteModal?.sourceKind || 'map'}
