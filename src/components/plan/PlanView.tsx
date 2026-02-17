@@ -787,6 +787,7 @@ const PlanView = ({ planId }: Props) => {
     doorId: string;
     description: string;
     isEmergency: boolean;
+    isMainEntrance: boolean;
     isFireDoor: boolean;
     lastVerificationAt: string;
     verifierCompany: string;
@@ -4581,6 +4582,7 @@ const PlanView = ({ planId }: Props) => {
               mode: 'static',
               description: undefined,
               isEmergency: defaultEmergency,
+              isMainEntrance: false,
               isFireDoor: false,
               verificationHistory: [],
               linkedRoomIds: []
@@ -7819,6 +7821,7 @@ const PlanView = ({ planId }: Props) => {
         doorId,
         description: typeof (door as any)?.description === 'string' ? String((door as any).description) : '',
         isEmergency: typeof (door as any)?.isEmergency === 'boolean' ? !!(door as any).isEmergency : defaultEmergency,
+        isMainEntrance: !!(door as any)?.isMainEntrance,
         isFireDoor: !!(door as any)?.isFireDoor,
         lastVerificationAt: typeof (door as any)?.lastVerificationAt === 'string' ? String((door as any).lastVerificationAt) : '',
         verifierCompany: typeof (door as any)?.verifierCompany === 'string' ? String((door as any).verifierCompany) : '',
@@ -7919,6 +7922,7 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     const isEmergency = !!corridorDoorModal.isEmergency;
+    const isMainEntrance = !!corridorDoorModal.isMainEntrance;
     const isFireDoor = !!corridorDoorModal.isFireDoor;
     const description = corridorDoorModal.description.trim();
     const lastVerificationAt = corridorDoorModal.lastVerificationAt.trim();
@@ -7949,6 +7953,7 @@ const PlanView = ({ planId }: Props) => {
                 ...door,
                 description: description || undefined,
                 isEmergency,
+                isMainEntrance,
                 isFireDoor,
                 lastVerificationAt: isEmergency ? lastVerificationAt || undefined : undefined,
                 verifierCompany: isEmergency ? verifierCompany || undefined : undefined,
@@ -10967,6 +10972,7 @@ const PlanView = ({ planId }: Props) => {
                                 description:
                                   typeof (door as any).description === 'string' ? String((door as any).description).trim() || undefined : undefined,
                                 isEmergency: !!(door as any).isEmergency,
+                                isMainEntrance: !!(door as any).isMainEntrance,
                                 isFireDoor: !!(door as any).isFireDoor,
                                 lastVerificationAt:
                                   typeof (door as any).lastVerificationAt === 'string'
@@ -14527,6 +14533,29 @@ const PlanView = ({ planId }: Props) => {
                                 }
                               />
                               {t({ it: 'Emergenza', en: 'Emergency' })}
+                            </label>
+                            <label
+                              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                              title={t({
+                                it: 'Segna questa porta come ingresso principale.',
+                                en: 'Mark this door as a main entrance.'
+                              })}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!corridorDoorModal?.isMainEntrance}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          isMainEntrance: e.target.checked
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Ingresso principale', en: 'Main entrance' })}
                             </label>
                             <label
                               className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
