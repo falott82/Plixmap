@@ -1,11 +1,12 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ExternalLink, X } from 'lucide-react';
+import { ArrowUpDown, ExternalLink, FileText, History, Plus, Search, Trash2, X } from 'lucide-react';
 import { IconName, MapObjectType, WifiAntennaModel } from '../../store/types';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { TEXT_FONT_OPTIONS, WIFI_DEFAULT_STANDARD, WIFI_RANGE_SCALE_MAX, WIFI_STANDARD_OPTIONS } from '../../store/data';
+import { isSecurityTypeId } from '../../store/security';
 import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import { isDeskType } from './deskTypes';
 
@@ -15,6 +16,28 @@ interface Props {
   onSubmit: (payload: {
     name: string;
     description?: string;
+    notes?: string;
+    lastVerificationAt?: string;
+    verifierCompany?: string;
+    gpsCoords?: string;
+    securityDocuments?: Array<{
+      id: string;
+      name: string;
+      fileName?: string;
+      dataUrl?: string;
+      uploadedAt: string;
+      validUntil?: string;
+      notes?: string;
+      archived?: boolean;
+    }>;
+    securityCheckHistory?: Array<{
+      id: string;
+      date?: string;
+      company?: string;
+      notes?: string;
+      createdAt: number;
+      archived?: boolean;
+    }>;
     layerIds?: string[];
     customValues?: Record<string, any>;
     scale?: number;
@@ -51,6 +74,28 @@ interface Props {
   }) => void;
   initialName?: string;
   initialDescription?: string;
+  initialNotes?: string;
+  initialLastVerificationAt?: string;
+  initialVerifierCompany?: string;
+  initialGpsCoords?: string;
+  initialSecurityDocuments?: Array<{
+    id: string;
+    name: string;
+    fileName?: string;
+    dataUrl?: string;
+    uploadedAt: string;
+    validUntil?: string;
+    notes?: string;
+    archived?: boolean;
+  }>;
+  initialSecurityCheckHistory?: Array<{
+    id: string;
+    date?: string;
+    company?: string;
+    notes?: string;
+    createdAt: number;
+    archived?: boolean;
+  }>;
   layers?: { id: string; label: string; color?: string }[];
   initialLayerIds?: string[];
   initialScale?: number;
@@ -97,6 +142,63 @@ interface Props {
 }
 
 const normalizeRackName = (value: string) => value.trim().toLowerCase();
+type SecurityDocsSortKey = 'name' | 'uploadedAt' | 'validUntil' | 'status';
+const parseDateOnly = (value?: string) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  return new Date(year, month - 1, day, 0, 0, 0, 0);
+};
+
+const parseLatLngPair = (value: string): { lat: number; lng: number } | null => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90) return null;
+  if (lng < -180 || lng > 180) return null;
+  return { lat, lng };
+};
+
+const formatCoord = (value: number) => Number(value.toFixed(6)).toString();
+
+const normalizeGoogleMapsCoordsInput = (value: string) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const direct = parseLatLngPair(raw);
+  if (direct) return `${formatCoord(direct.lat)}, ${formatCoord(direct.lng)}`;
+  try {
+    const url = new URL(raw);
+    const candidates = [
+      url.searchParams.get('q'),
+      url.searchParams.get('query'),
+      url.searchParams.get('ll'),
+      url.searchParams.get('destination'),
+      url.searchParams.get('daddr')
+    ].filter(Boolean) as string[];
+    for (const candidate of candidates) {
+      const parsed = parseLatLngPair(decodeURIComponent(String(candidate)));
+      if (parsed) return `${formatCoord(parsed.lat)}, ${formatCoord(parsed.lng)}`;
+    }
+    const decodedPath = decodeURIComponent(String(url.pathname || ''));
+    const atMatch = decodedPath.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+    if (atMatch) {
+      const parsed = parseLatLngPair(`${atMatch[1]},${atMatch[2]}`);
+      if (parsed) return `${formatCoord(parsed.lat)}, ${formatCoord(parsed.lng)}`;
+    }
+  } catch {
+    // Not a URL or not parseable as a Google Maps URL.
+  }
+  return raw;
+};
 
 const ObjectModal = ({
   open,
@@ -104,6 +206,12 @@ const ObjectModal = ({
   onSubmit,
   initialName = '',
   initialDescription = '',
+  initialNotes = '',
+  initialLastVerificationAt = '',
+  initialVerifierCompany = '',
+  initialGpsCoords = '',
+  initialSecurityDocuments = [],
+  initialSecurityCheckHistory = [],
   layers = [],
   initialLayerIds = [],
   initialScale = 1,
@@ -151,6 +259,33 @@ const ObjectModal = ({
   const t = useT();
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
+  const [notes, setNotes] = useState(initialNotes);
+  const [lastVerificationAt, setLastVerificationAt] = useState(initialLastVerificationAt);
+  const [verifierCompany, setVerifierCompany] = useState(initialVerifierCompany);
+  const [gpsCoords, setGpsCoords] = useState(initialGpsCoords);
+  const [securityDocuments, setSecurityDocuments] = useState<
+    Array<{ id: string; name: string; fileName?: string; dataUrl?: string; uploadedAt: string; validUntil?: string; notes?: string; archived?: boolean }>
+  >(initialSecurityDocuments || []);
+  const [securityCheckHistory, setSecurityCheckHistory] = useState<
+    Array<{ id: string; date?: string; company?: string; notes?: string; createdAt: number; archived?: boolean }>
+  >(initialSecurityCheckHistory || []);
+  const [securityDocDraft, setSecurityDocDraft] = useState<{ name: string; validUntil: string; notes: string; archived: boolean; fileName?: string; dataUrl?: string }>(
+    { name: '', validUntil: '', notes: '', archived: false }
+  );
+  const [securityCheckDraft, setSecurityCheckDraft] = useState<{ date: string; company: string; notes: string }>({
+    date: '',
+    company: '',
+    notes: ''
+  });
+  const [securityError, setSecurityError] = useState('');
+  const [securityDocumentsOpen, setSecurityDocumentsOpen] = useState(false);
+  const [securityHistoryOpen, setSecurityHistoryOpen] = useState(false);
+  const [securityDocsSearch, setSecurityDocsSearch] = useState('');
+  const [securityDocsHideExpired, setSecurityDocsHideExpired] = useState(false);
+  const [securityDocsSort, setSecurityDocsSort] = useState<{ key: SecurityDocsSortKey; dir: 'asc' | 'desc' }>({
+    key: 'uploadedAt',
+    dir: 'desc'
+  });
   const [layerIds, setLayerIds] = useState<string[]>(initialLayerIds);
   const [scale, setScale] = useState<number>(initialScale);
   const [quoteLabelScale, setQuoteLabelScale] = useState<number>(initialQuoteLabelScale);
@@ -193,6 +328,11 @@ const ObjectModal = ({
   const nameRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const wifiCatalogSearchRef = useRef<HTMLInputElement | null>(null);
   const wifiCatalogRowsRef = useRef<Record<string, HTMLTableRowElement | null>>({});
+  const securityDocsFirstFieldRef = useRef<HTMLInputElement | null>(null);
+  const securityDocsCloseRef = useRef<HTMLButtonElement | null>(null);
+  const securityHistoryFirstFieldRef = useRef<HTMLInputElement | null>(null);
+  const securityHistoryCloseRef = useRef<HTMLButtonElement | null>(null);
+  const initSessionKeyRef = useRef('');
   const { hydrated, getFieldsForType, loadObjectValues } = useCustomFieldsStore();
   const isWifi = type === 'wifi';
   const isQuote = type === 'quote';
@@ -201,10 +341,21 @@ const ObjectModal = ({
   const isPhoto = type === 'photo';
   const isImageLike = isImage || isPhoto;
   const isPostIt = type === 'postit';
+  const isSecurityType = isSecurityTypeId(type);
+  const isAssemblyPoint = type === 'safety_assembly_point';
   const isDesk = type ? isDeskType(type) : false;
   const isWall = typeof type === 'string' && String(type).startsWith('wall_');
   const canHaveNetworkFields =
-    !!type && !isQuote && !isText && !isImageLike && !isPostIt && !isDesk && !isWall && type !== 'user' && type !== 'real_user';
+    !!type &&
+    !isSecurityType &&
+    !isQuote &&
+    !isText &&
+    !isImageLike &&
+    !isPostIt &&
+    !isDesk &&
+    !isWall &&
+    type !== 'user' &&
+    type !== 'real_user';
   const ipIsValid = useMemo(() => {
     const raw = ipAddress.trim();
     if (!raw) return true;
@@ -432,101 +583,126 @@ const ObjectModal = ({
   };
 
   useEffect(() => {
-    if (open) {
-      setName(initialName);
-      setDescription(initialDescription);
-      setLayerIds(initialLayerIds);
-      setScale(Number.isFinite(initialScale) ? initialScale : 1);
-      setQuoteLabelScale(Number.isFinite(initialQuoteLabelScale) ? initialQuoteLabelScale : 1);
-      setQuoteLabelBg(!!initialQuoteLabelBg);
-      setQuoteLabelColor(initialQuoteLabelColor || '#0f172a');
-      setQuoteLabelOffset(
-        Number.isFinite(initialQuoteLabelOffset)
-          ? (initialQuoteLabelOffset as number)
-          : (quoteOrientation === 'horizontal' && initialQuoteLabelPos === 'below' ? 1.15 : 1)
-      );
-      setQuoteLabelOffsetTouched(false);
-      setQuoteLabelPos(initialQuoteLabelPos || 'center');
-      setQuoteDashed(!!initialQuoteDashed);
-      setQuoteEndpoint(initialQuoteEndpoint || 'arrows');
-      setQuoteColor(initialQuoteColor || '#f97316');
-      setTextFont(initialTextFont || 'Arial, sans-serif');
-      setTextSize(Number.isFinite(initialTextSize) ? (initialTextSize as number) : 18);
-      setTextColor(initialTextColor || '#000000');
-      setTextBg(!!initialTextBg);
-      setTextBgColor(initialTextBgColor || '#ffffff');
-      setImageUrl(initialImageUrl || '');
-      setImageWidth(Number.isFinite(initialImageWidth) ? (initialImageWidth as number) : 0);
-      setImageHeight(Number.isFinite(initialImageHeight) ? (initialImageHeight as number) : 0);
-      setImageError('');
-      setCustomValues({});
-      setWifiDb(initialWifiDb !== undefined ? String(initialWifiDb) : '');
-      const hasCatalog = (wifiModels || []).length > 0;
-      const hasCustomFields = !!(
-        initialWifiBrand ||
-        initialWifiModel ||
-        initialWifiModelCode ||
-        initialWifiCoverageSqm ||
-        initialWifiStandard ||
-        initialWifiBand24 ||
-        initialWifiBand5 ||
-        initialWifiBand6
-      );
-      const catalogModel =
-        hasCatalog && initialWifiCatalogId ? wifiModelsById.get(initialWifiCatalogId) : undefined;
-      const nextCatalogId = catalogModel ? String(initialWifiCatalogId) : '';
-      const nextSource: 'catalog' | 'custom' = catalogModel ? 'catalog' : 'custom';
-      const shouldBlankCustom = !catalogModel && !hasCustomFields;
-      setWifiSource(nextSource);
-      setWifiCatalogId(nextCatalogId);
-      setWifiRangeScale(
-        Number.isFinite(initialWifiRangeScale as number)
-          ? Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, Number(initialWifiRangeScale)))
-          : 1
-      );
-      if (nextSource === 'catalog' && nextCatalogId) {
-        const model = wifiModelsById.get(nextCatalogId);
-        setWifiBrand(model?.brand || '');
-        setWifiModel(model?.model || '');
-        setWifiModelCode(model?.modelCode || '');
-        setWifiCoverageSqm(model?.coverageSqm ? String(model.coverageSqm) : '');
-        setWifiStandard(model?.standard || WIFI_DEFAULT_STANDARD);
-        setWifiBand24(!!model?.band24);
-        setWifiBand5(!!model?.band5);
-        setWifiBand6(!!model?.band6);
-        setWifiShowRange(initialWifiShowRange !== undefined ? initialWifiShowRange : true);
-      } else if (!shouldBlankCustom) {
-        setWifiBrand(initialWifiBrand || '');
-        setWifiModel(initialWifiModel || '');
-        setWifiModelCode(initialWifiModelCode || '');
-        setWifiCoverageSqm(initialWifiCoverageSqm ? String(initialWifiCoverageSqm) : '');
-        setWifiStandard(initialWifiStandard || WIFI_DEFAULT_STANDARD);
-        setWifiBand24(!!initialWifiBand24);
-        setWifiBand5(!!initialWifiBand5);
-        setWifiBand6(!!initialWifiBand6);
-        setWifiShowRange(initialWifiShowRange !== undefined ? initialWifiShowRange : true);
-      } else {
-        setWifiBrand('');
-        setWifiModel('');
-        setWifiModelCode('');
-        setWifiCoverageSqm('');
-        setWifiStandard('');
-        setWifiBand24(false);
-        setWifiBand5(false);
-        setWifiBand6(false);
-        setWifiShowRange(true);
-      }
-      setWifiCatalogQuery('');
-      setWifiCatalogSearchOpen(false);
-      setWifiCatalogSelectedId('');
-      setIpAddress(initialIp || '');
-      setUrlValue(initialUrl || '');
-      window.setTimeout(() => nameRef.current?.focus(), 0);
+    if (!open) {
+      initSessionKeyRef.current = '';
+      return;
     }
+    const sessionKey = `${String(objectId || 'create')}::${String(type || '')}`;
+    if (initSessionKeyRef.current === sessionKey) return;
+    initSessionKeyRef.current = sessionKey;
+    setName(initialName);
+    setDescription(initialDescription);
+    setNotes(initialNotes || '');
+    setLastVerificationAt(initialLastVerificationAt || '');
+    setVerifierCompany(initialVerifierCompany || '');
+    setGpsCoords(initialGpsCoords || '');
+    setSecurityDocuments(Array.isArray(initialSecurityDocuments) ? initialSecurityDocuments : []);
+    setSecurityCheckHistory(Array.isArray(initialSecurityCheckHistory) ? initialSecurityCheckHistory : []);
+    setSecurityDocDraft({ name: '', validUntil: '', notes: '', archived: false });
+    setSecurityCheckDraft({ date: '', company: '', notes: '' });
+    setSecurityError('');
+    setSecurityDocumentsOpen(false);
+    setSecurityHistoryOpen(false);
+    setSecurityDocsSearch('');
+    setSecurityDocsHideExpired(false);
+    setSecurityDocsSort({ key: 'uploadedAt', dir: 'desc' });
+    setLayerIds(initialLayerIds);
+    setScale(Number.isFinite(initialScale) ? initialScale : 1);
+    setQuoteLabelScale(Number.isFinite(initialQuoteLabelScale) ? initialQuoteLabelScale : 1);
+    setQuoteLabelBg(!!initialQuoteLabelBg);
+    setQuoteLabelColor(initialQuoteLabelColor || '#0f172a');
+    setQuoteLabelOffset(
+      Number.isFinite(initialQuoteLabelOffset)
+        ? (initialQuoteLabelOffset as number)
+        : (quoteOrientation === 'horizontal' && initialQuoteLabelPos === 'below' ? 1.15 : 1)
+    );
+    setQuoteLabelOffsetTouched(false);
+    setQuoteLabelPos(initialQuoteLabelPos || 'center');
+    setQuoteDashed(!!initialQuoteDashed);
+    setQuoteEndpoint(initialQuoteEndpoint || 'arrows');
+    setQuoteColor(initialQuoteColor || '#f97316');
+    setTextFont(initialTextFont || 'Arial, sans-serif');
+    setTextSize(Number.isFinite(initialTextSize) ? (initialTextSize as number) : 18);
+    setTextColor(initialTextColor || '#000000');
+    setTextBg(!!initialTextBg);
+    setTextBgColor(initialTextBgColor || '#ffffff');
+    setImageUrl(initialImageUrl || '');
+    setImageWidth(Number.isFinite(initialImageWidth) ? (initialImageWidth as number) : 0);
+    setImageHeight(Number.isFinite(initialImageHeight) ? (initialImageHeight as number) : 0);
+    setImageError('');
+    setCustomValues({});
+    setWifiDb(initialWifiDb !== undefined ? String(initialWifiDb) : '');
+    const hasCatalog = (wifiModels || []).length > 0;
+    const hasCustomFields = !!(
+      initialWifiBrand ||
+      initialWifiModel ||
+      initialWifiModelCode ||
+      initialWifiCoverageSqm ||
+      initialWifiStandard ||
+      initialWifiBand24 ||
+      initialWifiBand5 ||
+      initialWifiBand6
+    );
+    const catalogModel =
+      hasCatalog && initialWifiCatalogId ? wifiModelsById.get(initialWifiCatalogId) : undefined;
+    const nextCatalogId = catalogModel ? String(initialWifiCatalogId) : '';
+    const nextSource: 'catalog' | 'custom' = catalogModel ? 'catalog' : 'custom';
+    const shouldBlankCustom = !catalogModel && !hasCustomFields;
+    setWifiSource(nextSource);
+    setWifiCatalogId(nextCatalogId);
+    setWifiRangeScale(
+      Number.isFinite(initialWifiRangeScale as number)
+        ? Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, Number(initialWifiRangeScale)))
+        : 1
+    );
+    if (nextSource === 'catalog' && nextCatalogId) {
+      const model = wifiModelsById.get(nextCatalogId);
+      setWifiBrand(model?.brand || '');
+      setWifiModel(model?.model || '');
+      setWifiModelCode(model?.modelCode || '');
+      setWifiCoverageSqm(model?.coverageSqm ? String(model.coverageSqm) : '');
+      setWifiStandard(model?.standard || WIFI_DEFAULT_STANDARD);
+      setWifiBand24(!!model?.band24);
+      setWifiBand5(!!model?.band5);
+      setWifiBand6(!!model?.band6);
+      setWifiShowRange(initialWifiShowRange !== undefined ? initialWifiShowRange : true);
+    } else if (!shouldBlankCustom) {
+      setWifiBrand(initialWifiBrand || '');
+      setWifiModel(initialWifiModel || '');
+      setWifiModelCode(initialWifiModelCode || '');
+      setWifiCoverageSqm(initialWifiCoverageSqm ? String(initialWifiCoverageSqm) : '');
+      setWifiStandard(initialWifiStandard || WIFI_DEFAULT_STANDARD);
+      setWifiBand24(!!initialWifiBand24);
+      setWifiBand5(!!initialWifiBand5);
+      setWifiBand6(!!initialWifiBand6);
+      setWifiShowRange(initialWifiShowRange !== undefined ? initialWifiShowRange : true);
+    } else {
+      setWifiBrand('');
+      setWifiModel('');
+      setWifiModelCode('');
+      setWifiCoverageSqm('');
+      setWifiStandard('');
+      setWifiBand24(false);
+      setWifiBand5(false);
+      setWifiBand6(false);
+      setWifiShowRange(true);
+    }
+    setWifiCatalogQuery('');
+    setWifiCatalogSearchOpen(false);
+    setWifiCatalogSelectedId('');
+    setIpAddress(initialIp || '');
+    setUrlValue(initialUrl || '');
+    window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [
     initialDescription,
+    initialGpsCoords,
+    initialLastVerificationAt,
     initialLayerIds,
     initialName,
+    initialNotes,
+    initialSecurityCheckHistory,
+    initialSecurityDocuments,
+    initialVerifierCompany,
     initialScale,
     initialQuoteDashed,
     initialQuoteEndpoint,
@@ -558,6 +734,8 @@ const ObjectModal = ({
     initialWifiRangeScale,
     initialIp,
     initialUrl,
+    objectId,
+    type,
     open,
     wifiModels,
     wifiModelsById
@@ -658,9 +836,9 @@ const ObjectModal = ({
   }, []);
 
   const handleDialogClose = useCallback(() => {
-    if (wifiCatalogSearchOpen) return;
+    if (wifiCatalogSearchOpen || securityDocumentsOpen || securityHistoryOpen) return;
     onClose();
-  }, [onClose, wifiCatalogSearchOpen]);
+  }, [onClose, securityDocumentsOpen, securityHistoryOpen, wifiCatalogSearchOpen]);
 
   const handleSearchDialogClose = useCallback(() => {}, []);
 
@@ -712,6 +890,169 @@ const ObjectModal = ({
     closeWifiCatalogSearch();
   }, [closeWifiCatalogSearch, open]);
 
+  const buildEntryId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const handleAttachSecurityDocument = async (fileList: FileList | null) => {
+    if (!fileList?.[0]) return;
+    const file = fileList[0];
+    const validation = validateFile(file, {
+      allowedTypes: uploadMimes.pdf,
+      maxBytes: uploadLimits.pdfBytes
+    });
+    if (!validation.ok) {
+      setSecurityError(
+        validation.reason === 'size'
+          ? t({
+              it: `File troppo grande (max ${formatBytes(uploadLimits.pdfBytes)}).`,
+              en: `File too large (max ${formatBytes(uploadLimits.pdfBytes)}).`
+            })
+          : t({
+              it: 'Formato non supportato. Usa PDF.',
+              en: 'Unsupported format. Use PDF.'
+            })
+      );
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setSecurityDocDraft((prev) => ({ ...prev, fileName: file.name, dataUrl }));
+      setSecurityError('');
+    } catch {
+      setSecurityError(t({ it: 'Upload non riuscito.', en: 'Upload failed.' }));
+    }
+  };
+
+  const addSecurityDocumentDraft = () => {
+    const title = securityDocDraft.name.trim();
+    if (!title) {
+      setSecurityError(t({ it: 'Inserisci il nome del documento.', en: 'Enter a document name.' }));
+      return;
+    }
+    setSecurityDocuments((prev) => [
+      ...prev,
+      {
+        id: buildEntryId(),
+        name: title,
+        fileName: securityDocDraft.fileName || undefined,
+        dataUrl: securityDocDraft.dataUrl || undefined,
+        uploadedAt: new Date().toISOString(),
+        validUntil: securityDocDraft.validUntil.trim() || undefined,
+        notes: securityDocDraft.notes.trim() || undefined,
+        archived: !!securityDocDraft.archived
+      }
+    ]);
+    setSecurityDocDraft({ name: '', validUntil: '', notes: '', archived: false });
+    setSecurityError('');
+  };
+
+  const removeSecurityDocument = (id: string) => {
+    setSecurityDocuments((prev) => prev.filter((entry) => entry.id !== id));
+  };
+  const toggleSecurityDocumentValidity = (id: string, valid: boolean) => {
+    setSecurityDocuments((prev) => prev.map((entry) => (entry.id === id ? { ...entry, archived: !valid } : entry)));
+  };
+  const getDocumentStatus = useCallback((doc: { archived?: boolean; validUntil?: string }): 'archived' | 'expired' | 'warning' | 'ok' | 'none' => {
+    if (doc.archived) return 'archived';
+    const due = parseDateOnly(doc.validUntil);
+    if (!due) return 'none';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (due.getTime() < today.getTime()) return 'expired';
+    const warnLimit = new Date(today);
+    warnLimit.setMonth(warnLimit.getMonth() + 1);
+    if (due.getTime() <= warnLimit.getTime()) return 'warning';
+    return 'ok';
+  }, []);
+  const toggleSecurityDocsSort = (key: SecurityDocsSortKey) => {
+    setSecurityDocsSort((prev) => {
+      if (prev.key === key) {
+        return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+      }
+      const defaultDir = key === 'name' || key === 'status' ? 'asc' : 'desc';
+      return { key, dir: defaultDir };
+    });
+  };
+  const securityDocumentsRows = useMemo(() => {
+    const q = securityDocsSearch.trim().toLowerCase();
+    const base = securityDocuments.filter((doc) => {
+      if (securityDocsHideExpired && getDocumentStatus(doc) === 'expired') return false;
+      if (!q) return true;
+      const hay = `${doc.name || ''} ${doc.fileName || ''} ${doc.notes || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+    const statusRank: Record<ReturnType<typeof getDocumentStatus>, number> = {
+      ok: 0,
+      warning: 1,
+      expired: 2,
+      none: 3,
+      archived: 4
+    };
+    const dateMs = (value?: string) => parseDateOnly(value)?.getTime() || 0;
+    const sorted = base.slice().sort((a, b) => {
+      let cmp = 0;
+      switch (securityDocsSort.key) {
+        case 'name':
+          cmp = `${a.name || ''}`.localeCompare(`${b.name || ''}`);
+          break;
+        case 'uploadedAt':
+          cmp = (new Date(a.uploadedAt || 0).getTime() || 0) - (new Date(b.uploadedAt || 0).getTime() || 0);
+          break;
+        case 'validUntil':
+          cmp = dateMs(a.validUntil) - dateMs(b.validUntil);
+          break;
+        case 'status':
+          cmp = statusRank[getDocumentStatus(a)] - statusRank[getDocumentStatus(b)];
+          break;
+      }
+      if (cmp === 0) cmp = `${a.name || ''}`.localeCompare(`${b.name || ''}`);
+      return securityDocsSort.dir === 'asc' ? cmp : -cmp;
+    });
+    return sorted;
+  }, [getDocumentStatus, securityDocsHideExpired, securityDocsSearch, securityDocsSort.dir, securityDocsSort.key, securityDocuments]);
+
+  const createNewSecurityVerification = () => {
+    if (readOnly) return;
+    const currentDate = lastVerificationAt.trim();
+    const currentCompany = verifierCompany.trim();
+    if (currentDate || currentCompany) {
+      setSecurityCheckHistory((prev) => [
+        {
+          id: buildEntryId(),
+          date: currentDate || undefined,
+          company: currentCompany || undefined,
+          createdAt: Date.now(),
+          archived: true
+        },
+        ...prev
+      ]);
+    }
+    setLastVerificationAt('');
+    setVerifierCompany('');
+    setSecurityError('');
+  };
+
+  const addSecurityCheckDraft = () => {
+    const company = securityCheckDraft.company.trim();
+    const date = securityCheckDraft.date.trim();
+    const notesValue = securityCheckDraft.notes.trim();
+    if (!company && !date && !notesValue) return;
+    setSecurityCheckHistory((prev) => [
+      ...prev,
+      {
+        id: buildEntryId(),
+        date: date || undefined,
+        company: company || undefined,
+        notes: notesValue || undefined,
+        createdAt: Date.now(),
+        archived: true
+      }
+    ]);
+    setSecurityCheckDraft({ date: '', company: '', notes: '' });
+  };
+
+  const removeSecurityCheck = (id: string) => {
+    setSecurityCheckHistory((prev) => prev.filter((entry) => entry.id !== id));
+  };
+
   const handleSave = () => {
     if (type !== 'quote' && type !== 'image' && type !== 'photo' && !name.trim()) return;
     if (isImageLike && !imageUrl) return;
@@ -722,8 +1063,10 @@ const ObjectModal = ({
     if (canHaveNetworkFields && !ipIsValid) {
       return;
     }
+    if (isSecurityType && !name.trim()) return;
     const trimmedIp = ipAddress.trim();
     const trimmedUrl = urlValue.trim();
+    const normalizedGpsCoords = normalizeGoogleMapsCoordsInput(gpsCoords);
     const dbRaw = wifiDb.trim().replace(',', '.');
     const dbValue = dbRaw ? Number(dbRaw) : undefined;
     const coverageRaw = wifiCoverageSqm.trim().replace(',', '.');
@@ -741,6 +1084,16 @@ const ObjectModal = ({
     onSubmit({
       name: safeName,
       description: description.trim() || undefined,
+      ...(isSecurityType
+        ? {
+            notes: notes.trim() || undefined,
+            lastVerificationAt: lastVerificationAt.trim() || undefined,
+            verifierCompany: verifierCompany.trim() || undefined,
+            gpsCoords: normalizedGpsCoords || undefined,
+            securityDocuments,
+            securityCheckHistory
+          }
+        : {}),
       layerIds: isQuote ? undefined : (layerIds.length ? layerIds : undefined),
       customValues: customFields.length ? customValues : undefined,
       scale: Number.isFinite(scale) ? Math.max(0.2, Math.min(2.4, scale)) : undefined,
@@ -793,10 +1146,46 @@ const ObjectModal = ({
 	    });
     onClose();
   };
+  const getDocumentStatusMeta = (doc: { archived?: boolean; validUntil?: string }) => {
+    const status = getDocumentStatus(doc);
+    if (status === 'archived') {
+      return {
+        status,
+        label: t({ it: 'Archivio', en: 'Archived' }),
+        className: 'border-slate-300 bg-slate-200 text-slate-700'
+      };
+    }
+    if (status === 'expired') {
+      return {
+        status,
+        label: t({ it: 'Scaduto', en: 'Expired' }),
+        className: 'border-rose-200 bg-rose-100 text-rose-700'
+      };
+    }
+    if (status === 'warning') {
+      return {
+        status,
+        label: t({ it: 'In scadenza', en: 'Expiring soon' }),
+        className: 'border-amber-200 bg-amber-100 text-amber-800'
+      };
+    }
+    if (status === 'ok') {
+      return {
+        status,
+        label: t({ it: 'Valido', en: 'Valid' }),
+        className: 'border-emerald-200 bg-emerald-100 text-emerald-700'
+      };
+    }
+    return {
+      status,
+      label: t({ it: 'Senza scadenza', en: 'No expiry' }),
+      className: 'border-slate-200 bg-slate-100 text-slate-700'
+    };
+  };
 
   return (
     <Fragment>
-      <Transition show={open && !wifiCatalogSearchOpen} as={Fragment}>
+      <Transition show={open && !wifiCatalogSearchOpen && !securityDocumentsOpen && !securityHistoryOpen} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={handleDialogClose}>
           <Transition.Child
             as={Fragment}
@@ -820,7 +1209,7 @@ const ObjectModal = ({
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className={`w-full ${isWifi ? 'max-w-4xl' : 'max-w-md'} modal-panel`}>
+                <Dialog.Panel className={`w-full ${isWifi ? 'max-w-4xl' : isSecurityType ? 'max-w-5xl' : 'max-w-md'} modal-panel`}>
                   <div className="flex items-center justify-between">
                     <Dialog.Title className="modal-title">
                       {isEdit
@@ -837,8 +1226,8 @@ const ObjectModal = ({
                       {typeLabel}
                     </div>
                   ) : null}
-                  <div className="mt-4 space-y-3">
-                  <label className="block text-sm font-medium text-slate-700">
+                  <div className={`mt-4 ${isSecurityType ? 'grid auto-rows-min gap-3 lg:grid-cols-2' : 'space-y-3'}`}>
+                  <label className={`block text-sm font-medium text-slate-700 ${isSecurityType ? 'lg:col-span-2' : ''}`}>
                     {isPostIt
                       ? t({ it: 'Nota', en: 'Note' })
                       : isText || isImage
@@ -891,16 +1280,124 @@ const ObjectModal = ({
                     ) : null}
                   </label>
                   {!isText && !isImage && !isPostIt ? (
-                    <label className="block text-sm font-medium text-slate-700">
+                    <label className={`block text-sm font-medium text-slate-700 ${isSecurityType ? 'lg:col-span-2' : ''}`}>
                       {t({ it: 'Descrizione', en: 'Description' })}
                       <textarea
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
                         className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                         placeholder={t({ it: 'Facoltativa', en: 'Optional' })}
-                        rows={3}
+                        rows={isSecurityType ? 2 : 3}
                       />
                     </label>
+                  ) : null}
+                  {isSecurityType ? (
+                    <label className="block text-sm font-medium text-slate-700 lg:col-span-2">
+                      {t({ it: 'Note', en: 'Notes' })}
+                      <textarea
+                        value={notes}
+                        disabled={readOnly}
+                        onChange={(e) => setNotes(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        rows={2}
+                        placeholder={t({ it: 'Informazioni operative', en: 'Operational notes' })}
+                      />
+                    </label>
+                  ) : null}
+                  {isAssemblyPoint ? (
+                    <label className="block text-sm font-medium text-slate-700 lg:col-span-2">
+                      {t({ it: 'Coordinate Google Maps', en: 'Google Maps coordinates' })}
+                      <input
+                        value={gpsCoords}
+                        disabled={readOnly}
+                        onChange={(e) => setGpsCoords(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. 41.9028, 12.4964 o URL Google Maps', en: 'e.g. 41.9028, 12.4964 or Google Maps URL' })}
+                      />
+                    </label>
+                  ) : null}
+                  {isSecurityType ? (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50/40 px-3 py-3 lg:col-span-2">
+                      <div className="text-sm font-semibold text-rose-900">{t({ it: 'Scheda sicurezza', en: 'Safety sheet' })}</div>
+                      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Ultima verifica', en: 'Last check' })}
+                          <input
+                            type="date"
+                            value={lastVerificationAt}
+                            disabled={readOnly}
+                            onChange={(e) => setLastVerificationAt(e.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Azienda verifica', en: 'Verifier company' })}
+                          <input
+                            value={verifierCompany}
+                            disabled={readOnly}
+                            onChange={(e) => setVerifierCompany(e.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Es. Safety Srl', en: 'e.g. Safety Ltd' })}
+                          />
+                        </label>
+                        {!isAssemblyPoint ? (
+                          <label className="block text-sm font-medium text-slate-700 md:col-span-2 xl:col-span-1">
+                            {t({ it: 'Coordinate GPS oggetto', en: 'Object GPS coordinates' })}
+                            <input
+                              value={gpsCoords}
+                              disabled={readOnly}
+                              onChange={(e) => setGpsCoords(e.target.value)}
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              placeholder={t({ it: 'Es. 41.9028, 12.4964', en: 'e.g. 41.9028, 12.4964' })}
+                            />
+                          </label>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={createNewSecurityVerification}
+                          className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Plus size={14} />
+                          {t({ it: 'Nuova verifica (archivia attuale)', en: 'New check (archive current)' })}
+                        </button>
+                      </div>
+                      <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => setSecurityDocumentsOpen(true)}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          <FileText size={15} />
+                          {t({
+                            it: `Gestisci documenti (${securityDocuments.length})`,
+                            en: `Manage documents (${securityDocuments.length})`
+                          })}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSecurityHistoryOpen(true)}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          <History size={15} />
+                          {t({
+                            it: `Storico verifiche (${securityCheckHistory.length})`,
+                            en: `Check history (${securityCheckHistory.length})`
+                          })}
+                        </button>
+                      </div>
+                      <div className="mt-2 text-xs text-slate-500">
+                        {t({
+                          it: 'Documenti e storico sono gestiti in modali dedicate.',
+                          en: 'Documents and history are managed in dedicated modals.'
+                        })}
+                      </div>
+                      {securityError ? (
+                        <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">{securityError}</div>
+                      ) : null}
+                    </div>
                   ) : null}
                   {canHaveNetworkFields ? (
                     <div className="space-y-3">
@@ -1393,7 +1890,7 @@ const ObjectModal = ({
                       </div>
                     </div>
                   ) : null}
-                  {!isQuote && !isText && !isImageLike && !isPostIt && layers.length ? (
+                  {!isQuote && !isText && !isImageLike && !isPostIt && !isSecurityType && layers.length ? (
                     <div>
                       <div className="text-sm font-medium text-slate-700">{t({ it: 'Livelli', en: 'Layers' })}</div>
                       <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1426,7 +1923,7 @@ const ObjectModal = ({
                     </div>
                   ) : null}
                   {!isQuote && !isText && !isImageLike && !isPostIt ? (
-                    <div>
+                    <div className={isSecurityType ? 'lg:col-span-2' : ''}>
                       <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
                         {t({ it: 'Scala oggetto', en: 'Object scale' })}
                         <span className="ml-auto text-xs font-mono text-slate-500 tabular-nums">{scale.toFixed(2)}</span>
@@ -1666,6 +2163,442 @@ const ObjectModal = ({
                     {t({ it: 'Salva', en: 'Save' })}
                   </button>
                 </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+      <Transition show={open && isSecurityType && securityDocumentsOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-[60]" initialFocus={securityDocsCloseRef} onClose={() => setSecurityDocumentsOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-6xl modal-panel" onMouseDown={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="modal-title">{t({ it: 'Documenti sicurezza', en: 'Safety documents' })}</Dialog.Title>
+                    <button
+                      ref={securityDocsCloseRef}
+                      onClick={() => setSecurityDocumentsOpen(false)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1.4fr]">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t({ it: 'Nuovo documento', en: 'New document' })}
+                      </div>
+                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <input
+                          ref={securityDocsFirstFieldRef}
+                          value={securityDocDraft.name}
+                          disabled={readOnly}
+                          onChange={(e) => setSecurityDocDraft((prev) => ({ ...prev, name: e.target.value }))}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 sm:col-span-2"
+                          placeholder={t({ it: 'Nome documento*', en: 'Document name*' })}
+                        />
+                        <label className="text-xs font-medium text-slate-600">
+                          {t({ it: 'Scadenza documento', en: 'Document expiry' })}
+                          <input
+                            type="date"
+                            value={securityDocDraft.validUntil}
+                            disabled={readOnly}
+                            onChange={(e) => setSecurityDocDraft((prev) => ({ ...prev, validUntil: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          />
+                        </label>
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {t({ it: 'Validità', en: 'Validity' })}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={!securityDocDraft.archived}
+                              disabled={readOnly}
+                              onClick={() => setSecurityDocDraft((prev) => ({ ...prev, archived: !prev.archived }))}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                !securityDocDraft.archived ? 'bg-emerald-500' : 'bg-slate-400'
+                              } disabled:cursor-not-allowed disabled:opacity-60`}
+                            >
+                              <span
+                                className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+                                  !securityDocDraft.archived ? 'translate-x-5' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                            <span className={`text-xs font-semibold ${!securityDocDraft.archived ? 'text-emerald-700' : 'text-slate-600'}`}>
+                              {!securityDocDraft.archived
+                                ? t({ it: 'Valido', en: 'Valid' })
+                                : t({ it: 'Archiviato', en: 'Archived' })}
+                            </span>
+                          </div>
+                        </div>
+                        <textarea
+                          value={securityDocDraft.notes}
+                          disabled={readOnly}
+                          onChange={(e) => setSecurityDocDraft((prev) => ({ ...prev, notes: e.target.value }))}
+                          className="sm:col-span-2 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          rows={3}
+                          placeholder={t({ it: 'Note documento', en: 'Document notes' })}
+                        />
+                        <label
+                          className={`relative inline-flex items-center justify-center rounded-lg border px-3 py-2 text-xs font-semibold ${
+                            readOnly
+                              ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                              : 'cursor-pointer border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {securityDocDraft.fileName
+                            ? t({ it: `File: ${securityDocDraft.fileName}`, en: `File: ${securityDocDraft.fileName}` })
+                            : t({ it: 'Carica PDF', en: 'Upload PDF' })}
+                          <input
+                            type="file"
+                            accept={uploadMimes.pdf.join(',')}
+                            disabled={readOnly}
+                            onChange={(e) => {
+                              void handleAttachSecurityDocument(e.target.files);
+                              e.currentTarget.value = '';
+                            }}
+                            className="absolute inset-0 cursor-pointer opacity-0"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={addSecurityDocumentDraft}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Plus size={14} />
+                          {t({ it: 'Aggiungi documento', en: 'Add document' })}
+                        </button>
+                      </div>
+                      <div className="mt-2 text-[11px] text-slate-500">
+                        {t({
+                          it: `Formato accettato: PDF (max ${formatBytes(uploadLimits.pdfBytes)}).`,
+                          en: `Accepted format: PDF (max ${formatBytes(uploadLimits.pdfBytes)}).`
+                        })}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t({ it: 'Tabella documenti', en: 'Documents table' })}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <label className="relative min-w-[220px] flex-1">
+                          <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            value={securityDocsSearch}
+                            onChange={(e) => setSecurityDocsSearch(e.target.value)}
+                            className="w-full rounded-lg border border-slate-200 py-2 pl-8 pr-3 text-xs outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Cerca documento...', en: 'Search document...' })}
+                          />
+                        </label>
+                        <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={securityDocsHideExpired}
+                            onChange={(e) => setSecurityDocsHideExpired(e.target.checked)}
+                          />
+                          {t({ it: 'Nascondi scaduti', en: 'Hide expired' })}
+                        </label>
+                      </div>
+                      <div className="mt-2 max-h-[52vh] overflow-auto rounded-lg border border-slate-200">
+                        <table className="w-full text-left text-xs">
+                          <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                            <tr>
+                              {([
+                                ['name', t({ it: 'Nome', en: 'Name' })],
+                                ['uploadedAt', t({ it: 'Upload', en: 'Upload' })],
+                                ['validUntil', t({ it: 'Scadenza', en: 'Expiry' })],
+                                ['status', t({ it: 'Stato', en: 'Status' })]
+                              ] as Array<[SecurityDocsSortKey, string]>).map(([key, label]) => (
+                                <th key={key} className="px-2 py-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleSecurityDocsSort(key)}
+                                    className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide text-slate-500 hover:text-slate-700"
+                                  >
+                                    {label}
+                                    <ArrowUpDown size={12} className={securityDocsSort.key === key ? 'text-primary' : 'text-slate-400'} />
+                                  </button>
+                                </th>
+                              ))}
+                              <th className="px-2 py-2">{t({ it: 'Validità', en: 'Validity' })}</th>
+                              <th className="px-2 py-2">{t({ it: 'Azioni', en: 'Actions' })}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {securityDocumentsRows.length ? (
+                              securityDocumentsRows.map((doc) => {
+                                const statusMeta = getDocumentStatusMeta(doc);
+                                return (
+                                  <tr key={doc.id} className={`border-t border-slate-100 ${doc.archived ? 'bg-slate-100 text-slate-500' : ''}`}>
+                                    <td className="px-2 py-2">
+                                      <div className="font-semibold text-slate-800">{doc.name}</div>
+                                      <div className="text-[11px] text-slate-500">{doc.fileName || 'PDF'}</div>
+                                    </td>
+                                    <td className="px-2 py-2 text-slate-600">
+                                      {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : '—'}
+                                    </td>
+                                    <td className="px-2 py-2 text-slate-700">{doc.validUntil || '—'}</td>
+                                    <td className="px-2 py-2">
+                                      <span className={`inline-flex rounded-full border px-2 py-0.5 font-semibold ${statusMeta.className}`}>
+                                        {statusMeta.label}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 py-2">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          role="switch"
+                                          aria-checked={!doc.archived}
+                                          disabled={readOnly}
+                                          onClick={() => toggleSecurityDocumentValidity(doc.id, !!doc.archived)}
+                                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                            !doc.archived ? 'bg-emerald-500' : 'bg-slate-400'
+                                          } disabled:cursor-not-allowed disabled:opacity-60`}
+                                        >
+                                          <span
+                                            className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+                                              !doc.archived ? 'translate-x-5' : 'translate-x-1'
+                                            }`}
+                                          />
+                                        </button>
+                                        <span className={`text-[11px] font-semibold ${!doc.archived ? 'text-emerald-700' : 'text-slate-600'}`}>
+                                          {!doc.archived ? t({ it: 'Valido', en: 'Valid' }) : t({ it: 'Archiviato', en: 'Archived' })}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="px-2 py-2">
+                                      {!readOnly ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => removeSecurityDocument(doc.id)}
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                          title={t({ it: 'Rimuovi', en: 'Remove' })}
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      ) : (
+                                        '—'
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                                  {t({ it: 'Nessun documento trovato con i filtri correnti.', en: 'No documents found with current filters.' })}
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                  {securityError ? (
+                    <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">{securityError}</div>
+                  ) : null}
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      onClick={() => setSecurityDocumentsOpen(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+      <Transition show={open && isSecurityType && securityHistoryOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-[60]" initialFocus={securityHistoryCloseRef} onClose={() => setSecurityHistoryOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-5xl modal-panel" onMouseDown={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="modal-title">{t({ it: 'Storico modifiche/verifiche', en: 'Checks/changes history' })}</Dialog.Title>
+                    <button
+                      ref={securityHistoryCloseRef}
+                      onClick={() => setSecurityHistoryOpen(false)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t({ it: 'Nuova voce', en: 'New entry' })}
+                      </div>
+                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <label className="text-xs font-medium text-slate-600">
+                          {t({ it: 'Data verifica', en: 'Check date' })}
+                          <input
+                            ref={securityHistoryFirstFieldRef}
+                            type="date"
+                            value={securityCheckDraft.date}
+                            disabled={readOnly}
+                            onChange={(e) => setSecurityCheckDraft((prev) => ({ ...prev, date: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          />
+                        </label>
+                        <label className="text-xs font-medium text-slate-600">
+                          {t({ it: 'Azienda', en: 'Company' })}
+                          <input
+                            value={securityCheckDraft.company}
+                            disabled={readOnly}
+                            onChange={(e) => setSecurityCheckDraft((prev) => ({ ...prev, company: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Azienda', en: 'Company' })}
+                          />
+                        </label>
+                        <textarea
+                          value={securityCheckDraft.notes}
+                          disabled={readOnly}
+                          onChange={(e) => setSecurityCheckDraft((prev) => ({ ...prev, notes: e.target.value }))}
+                          className="sm:col-span-2 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          rows={3}
+                          placeholder={t({ it: 'Note verifica', en: 'Check notes' })}
+                        />
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={addSecurityCheckDraft}
+                          className="sm:col-span-2 inline-flex items-center justify-center gap-2 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Plus size={14} />
+                          {t({ it: 'Aggiungi verifica', en: 'Add check' })}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t({ it: 'Storico', en: 'History' })}
+                      </div>
+                      <div className="mt-2 max-h-[52vh] overflow-auto rounded-lg border border-slate-200">
+                        <table className="w-full text-left text-xs">
+                          <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                            <tr>
+                              <th className="px-2 py-2">{t({ it: 'Data', en: 'Date' })}</th>
+                              <th className="px-2 py-2">{t({ it: 'Azienda', en: 'Company' })}</th>
+                              <th className="px-2 py-2">{t({ it: 'Note', en: 'Notes' })}</th>
+                              <th className="px-2 py-2">{t({ it: 'Creato', en: 'Created' })}</th>
+                              <th className="px-2 py-2">{t({ it: 'Stato', en: 'Status' })}</th>
+                              <th className="px-2 py-2">{t({ it: 'Azioni', en: 'Actions' })}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {securityCheckHistory.length ? (
+                              securityCheckHistory
+                                .slice()
+                                .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
+                                .map((entry) => (
+                                  <tr key={entry.id} className="border-t border-slate-100">
+                                    <td className="px-2 py-2 text-slate-700">{entry.date || '—'}</td>
+                                    <td className="px-2 py-2 text-slate-700">{entry.company || '—'}</td>
+                                    <td className="px-2 py-2 text-slate-600">{entry.notes || '—'}</td>
+                                    <td className="px-2 py-2 text-slate-500">
+                                      {entry.createdAt ? new Date(entry.createdAt).toLocaleDateString() : '—'}
+                                    </td>
+                                    <td className="px-2 py-2">
+                                      <span
+                                        className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                                          entry.archived === false
+                                            ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
+                                            : 'border-slate-300 bg-slate-200 text-slate-700'
+                                        }`}
+                                      >
+                                        {entry.archived === false
+                                          ? t({ it: 'Attiva', en: 'Active' })
+                                          : t({ it: 'Archiviata', en: 'Archived' })}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 py-2">
+                                      {!readOnly ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => removeSecurityCheck(entry.id)}
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                          title={t({ it: 'Rimuovi', en: 'Remove' })}
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      ) : (
+                                        '—'
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))
+                            ) : (
+                              <tr>
+                                <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                                  {t({ it: 'Nessuna verifica registrata.', en: 'No checks registered.' })}
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      onClick={() => setSecurityHistoryOpen(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                  </div>
                 </Dialog.Panel>
               </Transition.Child>
             </div>

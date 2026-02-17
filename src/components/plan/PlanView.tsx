@@ -17,9 +17,11 @@ import {
   Star,
   BookmarkPlus,
   Plus,
+  DoorOpen,
   FileDown,
   Crop,
   Home,
+  PhoneCall,
   History,
 		Save,
 		Cog,
@@ -28,24 +30,26 @@ import {
 	  Link2,
   User,
   LocateFixed,
+  Footprints,
   Users,
   Ruler,
   Hourglass,
   Unlock,
   Undo2,
   Redo2,
+  ExternalLink,
   Type as TypeIcon,
   Image as ImageIcon,
   Camera,
   StickyNote
-} from 'lucide-react';
+		} from 'lucide-react';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
 import SearchBar from './SearchBar';
 import ObjectModal from './ObjectModal';
 import RoomAllocationModal from './RoomAllocationModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { FloorPlan, FloorPlanView, IconName, LayerDefinition, MapObject, MapObjectType, PlanLink, RackItem, RackLink, RackPortKind, Room } from '../../store/types';
+import { Corridor, DoorVerificationEntry, FloorPlan, FloorPlanView, IconName, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackItem, RackLink, RackPortKind, Room } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
@@ -53,6 +57,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
 import { saveState } from '../../api/state';
 import UserMenu from '../layout/UserMenu';
+import EmergencyContactsModal from '../layout/EmergencyContactsModal';
 import PrinterMenuButton from './PrinterMenuButton';
 import UserAvatar from '../ui/UserAvatar';
 import UnlockRequestComposeModal, { UnlockRequestLock } from './UnlockRequestComposeModal';
@@ -73,6 +78,7 @@ import SelectedObjectsModal from './SelectedObjectsModal';
 import RealUserPickerModal from './RealUserPickerModal';
 import PrintModal from './PrintModal';
 import CrossPlanSearchModal, { CrossPlanSearchResult } from './CrossPlanSearchModal';
+import InternalMapModal from './InternalMapModal';
 import AllObjectTypesModal from './AllObjectTypesModal';
 import CableModal from './CableModal';
 import LinksModal from './LinksModal';
@@ -87,6 +93,7 @@ import { postAuditEvent } from '../../api/audit';
 import { hasExternalUsers } from '../../api/customImport';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
+import { nanoid } from 'nanoid';
 import {
   ALL_ITEMS_LAYER_ID,
   DEFAULT_WALL_TYPES,
@@ -96,14 +103,58 @@ import {
   WIFI_DEFAULT_STANDARD,
   WIFI_RANGE_SCALE_MAX
 } from '../../store/data';
+import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 import { getWallTypeColor } from '../../utils/wallColors';
+import { usePresentationWebcamHands } from './presentation/usePresentationWebcamHands';
 
 interface Props {
   planId: string;
 }
 
 const isRackLinkId = (id?: string | null) => typeof id === 'string' && id.startsWith('racklink:');
-const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling', 'quotes']);
+const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
+const DEFAULT_SAFETY_CARD_LAYOUT = { x: 24, y: 24, w: 420, h: 84, fontSize: 10, fontIndex: 0, colorIndex: 0, textBgIndex: 0 } as const;
+const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[] => {
+  if (!Array.isArray(history)) return [];
+  return history
+    .map((entry) => {
+      const company = String(entry?.company || '').trim();
+      const date = typeof entry?.date === 'string' ? String(entry.date).trim() : '';
+      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
+      const createdAtRaw = Number(entry?.createdAt);
+      return {
+        id: String(entry?.id || nanoid()),
+        company,
+        date: date || undefined,
+        notes: notes || undefined,
+        createdAt: Number.isFinite(createdAtRaw) ? createdAtRaw : Date.now()
+      } as DoorVerificationEntry;
+    })
+    .filter((entry) => !!entry.company || !!entry.date)
+    .sort((a, b) => b.createdAt - a.createdAt);
+};
+const parseGoogleMapsCoordinates = (rawValue: string): { lat: number; lng: number } | null => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return null;
+  const decimal = '[-+]?\\d{1,3}(?:\\.\\d+)?';
+  const pair = new RegExp(`(${decimal})\\s*,\\s*(${decimal})`);
+  const direct = raw.match(pair);
+  const fromPair = direct || raw.match(/[@?&]q=([-+]?\d{1,3}(?:\.\d+)?),\s*([-+]?\d{1,3}(?:\.\d+)?)/);
+  if (!fromPair) return null;
+  const lat = Number(fromPair[1]);
+  const lng = Number(fromPair[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+};
+const googleMapsUrlFromCoords = (rawValue: string) => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const parsed = parseGoogleMapsCoordinates(raw);
+  if (!parsed) return '';
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${parsed.lat},${parsed.lng}`)}`;
+};
 const PlanView = ({ planId }: Props) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasStageRef = useRef<CanvasStageHandle | null>(null);
@@ -126,6 +177,7 @@ const PlanView = ({ planId }: Props) => {
   );
   const [autoFitEnabled, setAutoFitEnabled] = useState(true);
   const presentationViewportRef = useRef<{ zoom: number; pan: { x: number; y: number }; autoFitEnabled: boolean } | null>(null);
+  const viewportLiveRef = useRef<{ zoom: number; pan: { x: number; y: number } }>({ zoom: 1, pan: { x: 0, y: 0 } });
   const {
     addObject,
     updateObject,
@@ -134,6 +186,7 @@ const PlanView = ({ planId }: Props) => {
     updateFloorPlan,
     setFloorPlanContent,
     addView,
+    updateView,
     deleteView,
     setDefaultView,
     clearObjects,
@@ -162,6 +215,7 @@ const PlanView = ({ planId }: Props) => {
       updateFloorPlan: s.updateFloorPlan,
       setFloorPlanContent: s.setFloorPlanContent,
       addView: s.addView,
+      updateView: s.updateView,
       deleteView: s.deleteView,
       setDefaultView: s.setDefaultView,
       clearObjects: s.clearObjects,
@@ -202,6 +256,25 @@ const PlanView = ({ planId }: Props) => {
     () => (objectTypeDefs || []).filter((def) => wallTypeIdSet.has(def.id)),
     [objectTypeDefs, wallTypeIdSet]
   );
+  const doorTypeIdSet = useMemo(() => {
+    const ids = new Set<string>();
+    for (const def of objectTypeDefs || []) {
+      if ((def as any)?.category === 'door') ids.add(def.id);
+    }
+    return ids;
+  }, [objectTypeDefs]);
+  const doorTypeDefs = useMemo(
+    () =>
+      (objectTypeDefs || [])
+        .filter((def) => doorTypeIdSet.has(def.id))
+        .slice()
+        .sort((a, b) => ((a?.name?.[lang] as string) || a.id).localeCompare((b?.name?.[lang] as string) || b.id)),
+    [doorTypeIdSet, lang, objectTypeDefs]
+  );
+  const defaultDoorCatalogId = useMemo(() => {
+    if (doorTypeIdSet.has('door_standard')) return 'door_standard';
+    return doorTypeDefs[0]?.id || '';
+  }, [doorTypeDefs, doorTypeIdSet]);
   const deskCatalogDefs = useMemo(
     () => (objectTypeDefs || []).filter((def) => isDeskType(def.id)),
     [objectTypeDefs]
@@ -231,6 +304,7 @@ const PlanView = ({ planId }: Props) => {
 
   const getTypeIcon = useCallback((typeId: string) => objectTypeById.get(typeId)?.icon, [objectTypeById]);
   const isWallType = useCallback((typeId: string) => wallTypeIdSet.has(typeId), [wallTypeIdSet]);
+  const isDoorType = useCallback((typeId: string) => doorTypeIdSet.has(typeId), [doorTypeIdSet]);
   const numberFormatter = useMemo(
     () => new Intl.NumberFormat(lang, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     [lang]
@@ -284,8 +358,10 @@ const PlanView = ({ planId }: Props) => {
                       ? ['images']
                       : typeId === 'photo'
                         ? ['photos']
-                      : typeId === 'postit'
-                        ? ['text']
+                : typeId === 'postit'
+                  ? ['text']
+                  : isSecurityTypeId(typeId)
+                    ? [SECURITY_LAYER_ID]
                     : isWallType(typeId)
                       ? ['walls']
                       : ['devices'];
@@ -354,12 +430,20 @@ const PlanView = ({ planId }: Props) => {
     toggleShowPrintArea,
     roomCapacityStateByPlan,
     setRoomCapacityState,
-    perfOverlayEnabled,
-    presentationMode,
-    togglePresentationMode,
-    hiddenLayersByPlan,
-    setHideAllLayers,
-    setLockedPlans,
+	    perfOverlayEnabled,
+	    presentationMode,
+	    togglePresentationMode,
+	    presentationWebcamEnabled,
+	    setPresentationWebcamEnabled,
+	    presentationWebcamCalib,
+	    setPresentationWebcamCalib,
+	    presentationEnterRequested,
+	    clearPresentationEnterRequest,
+      cameraPermissionState,
+      setCameraPermissionState,
+	    hiddenLayersByPlan,
+	    setHideAllLayers,
+	    setLockedPlans,
     setPlanDirty,
     requestSaveAndNavigate,
     pendingSaveNavigateTo,
@@ -417,12 +501,20 @@ const PlanView = ({ planId }: Props) => {
       toggleShowPrintArea: (s as any).toggleShowPrintArea,
       roomCapacityStateByPlan: (s as any).roomCapacityStateByPlan,
       setRoomCapacityState: (s as any).setRoomCapacityState,
-      perfOverlayEnabled: (s as any).perfOverlayEnabled,
-      presentationMode: (s as any).presentationMode,
-      togglePresentationMode: (s as any).togglePresentationMode,
-      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
-      setHideAllLayers: (s as any).setHideAllLayers,
-      setLockedPlans: (s as any).setLockedPlans,
+	      perfOverlayEnabled: (s as any).perfOverlayEnabled,
+	      presentationMode: (s as any).presentationMode,
+	      togglePresentationMode: (s as any).togglePresentationMode,
+	      presentationWebcamEnabled: (s as any).presentationWebcamEnabled,
+	      setPresentationWebcamEnabled: (s as any).setPresentationWebcamEnabled,
+	      presentationWebcamCalib: (s as any).presentationWebcamCalib,
+	      setPresentationWebcamCalib: (s as any).setPresentationWebcamCalib,
+	      presentationEnterRequested: (s as any).presentationEnterRequested,
+	      clearPresentationEnterRequest: (s as any).clearPresentationEnterRequest,
+        cameraPermissionState: (s as any).cameraPermissionState,
+        setCameraPermissionState: (s as any).setCameraPermissionState,
+	      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
+	      setHideAllLayers: (s as any).setHideAllLayers,
+	      setLockedPlans: (s as any).setLockedPlans,
       setPlanDirty: (s as any).setPlanDirty,
       requestSaveAndNavigate: (s as any).requestSaveAndNavigate,
       pendingSaveNavigateTo: (s as any).pendingSaveNavigateTo,
@@ -484,7 +576,9 @@ const PlanView = ({ planId }: Props) => {
   const roomOverlapNoticeRef = useRef(0);
   const roomLayerNoticeRef = useRef(0);
   const [allTypesOpen, setAllTypesOpen] = useState(false);
-  const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes'>('objects');
+  const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes' | 'security'>(
+    'objects'
+  );
   const [roomCatalogOpen, setRoomCatalogOpen] = useState(false);
   const [wallCatalogOpen, setWallCatalogOpen] = useState(false);
   const [deskCatalogOpen, setDeskCatalogOpen] = useState(false);
@@ -492,6 +586,10 @@ const PlanView = ({ planId }: Props) => {
     | { kind: 'object'; id: string; x: number; y: number; wallSegmentLengthPx?: number }
     | { kind: 'link'; id: string; x: number; y: number }
     | { kind: 'room'; id: string; x: number; y: number }
+    | { kind: 'corridor'; id: string; x: number; y: number; worldX: number; worldY: number }
+    | { kind: 'corridor_door'; corridorId: string; doorId: string; x: number; y: number }
+    | { kind: 'corridor_connection'; corridorId: string; connectionId: string; x: number; y: number; worldX: number; worldY: number }
+    | { kind: 'safety_card'; x: number; y: number; worldX: number; worldY: number }
     | { kind: 'scale'; x: number; y: number }
     | { kind: 'map'; x: number; y: number; worldX: number; worldY: number }
     | null
@@ -520,6 +618,34 @@ const PlanView = ({ planId }: Props) => {
   const [crossPlanSearchOpen, setCrossPlanSearchOpen] = useState(false);
   const [crossPlanSearchTerm, setCrossPlanSearchTerm] = useState('');
   const [crossPlanResults, setCrossPlanResults] = useState<CrossPlanSearchResult[]>([]);
+  const [internalMapOpen, setInternalMapOpen] = useState(false);
+  const [emergencyContactsOpen, setEmergencyContactsOpen] = useState(false);
+  const normalizeSafetyCardLayout = useCallback((layout: any) => {
+    const x = Number(layout?.x);
+    const y = Number(layout?.y);
+    const w = Number(layout?.w);
+    const h = Number(layout?.h);
+    const fontSize = Number(layout?.fontSize);
+    const fontIndex = Number(layout?.fontIndex);
+    const colorIndex = Number(layout?.colorIndex);
+    const textBgIndex = Number(layout?.textBgIndex);
+    return {
+      x: Number.isFinite(x) ? x : DEFAULT_SAFETY_CARD_LAYOUT.x,
+      y: Number.isFinite(y) ? y : DEFAULT_SAFETY_CARD_LAYOUT.y,
+      w: Number.isFinite(w) ? Math.max(220, w) : DEFAULT_SAFETY_CARD_LAYOUT.w,
+      h: Number.isFinite(h) ? Math.max(56, h) : DEFAULT_SAFETY_CARD_LAYOUT.h,
+      fontSize: Number.isFinite(fontSize) ? Math.max(8, Math.min(22, fontSize)) : DEFAULT_SAFETY_CARD_LAYOUT.fontSize,
+      fontIndex: Number.isFinite(fontIndex) ? Math.max(0, Math.floor(fontIndex)) : DEFAULT_SAFETY_CARD_LAYOUT.fontIndex,
+      colorIndex: Number.isFinite(colorIndex) ? Math.max(0, Math.floor(colorIndex)) : DEFAULT_SAFETY_CARD_LAYOUT.colorIndex,
+      textBgIndex: Number.isFinite(textBgIndex) ? Math.max(0, Math.floor(textBgIndex)) : DEFAULT_SAFETY_CARD_LAYOUT.textBgIndex
+    };
+  }, []);
+  const [safetyCardPos, setSafetyCardPos] = useState<{ x: number; y: number }>({ x: 24, y: 24 }); // world coords
+  const [safetyCardSize, setSafetyCardSize] = useState<{ w: number; h: number }>({ w: 420, h: 84 }); // world size
+  const [safetyCardFontSize, setSafetyCardFontSize] = useState<number>(10);
+  const [safetyCardFontIndex, setSafetyCardFontIndex] = useState<number>(0);
+  const [safetyCardColorIndex, setSafetyCardColorIndex] = useState<number>(0);
+  const [safetyCardTextBgIndex, setSafetyCardTextBgIndex] = useState<number>(0);
   const [countsOpen, setCountsOpen] = useState(false);
   const [presenceOpen, setPresenceOpen] = useState(false);
   const [layersPopoverOpen, setLayersPopoverOpen] = useState(false);
@@ -554,12 +680,24 @@ const PlanView = ({ planId }: Props) => {
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
+  const [selectedCorridorId, setSelectedCorridorId] = useState<string | undefined>(undefined);
+  const [selectedCorridorDoor, setSelectedCorridorDoor] = useState<{ corridorId: string; doorId: string } | null>(null);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [wallQuickMenu, setWallQuickMenu] = useState<{
     id: string;
     x: number;
     y: number;
     world: { x: number; y: number };
+  } | null>(null);
+  const [corridorQuickMenu, setCorridorQuickMenu] = useState<{
+    id: string;
+    x: number;
+    y: number;
+    world: { x: number; y: number };
+  } | null>(null);
+  const [corridorDoorDraft, setCorridorDoorDraft] = useState<{
+    corridorId: string;
+    start?: { edgeIndex: number; t: number; x: number; y: number };
   } | null>(null);
   const [wallTypeMenu, setWallTypeMenu] = useState<{ ids: string[]; x: number; y: number } | null>(null);
   const [mapSubmenu, setMapSubmenu] = useState<null | 'view' | 'measure' | 'create' | 'print' | 'manage'>(null);
@@ -577,6 +715,7 @@ const PlanView = ({ planId }: Props) => {
     emptyLabel?: { it: string; en: string };
   } | null>(null);
   const [roomDrawMode, setRoomDrawMode] = useState<'rect' | 'poly' | null>(null);
+  const [corridorDrawMode, setCorridorDrawMode] = useState<'poly' | null>(null);
   const [wallDrawMode, setWallDrawMode] = useState(false);
   const [wallDrawType, setWallDrawType] = useState<MapObjectType | null>(null);
   const [wallDraftPoints, setWallDraftPoints] = useState<{ x: number; y: number }[]>([]);
@@ -634,6 +773,96 @@ const PlanView = ({ planId }: Props) => {
   >(null);
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
   const [confirmDeleteRoomIds, setConfirmDeleteRoomIds] = useState<string[] | null>(null);
+  const [confirmDeleteCorridorId, setConfirmDeleteCorridorId] = useState<string | null>(null);
+  const [corridorModal, setCorridorModal] = useState<
+    | { mode: 'create'; kind: 'poly'; points: { x: number; y: number }[]; initialName?: string; initialShowName?: boolean }
+    | { mode: 'edit'; corridorId: string; initialName: string; initialShowName?: boolean }
+    | null
+  >(null);
+  const [corridorNameInput, setCorridorNameInput] = useState('');
+  const corridorNameInputRef = useRef<HTMLInputElement | null>(null);
+  const [corridorShowNameInput, setCorridorShowNameInput] = useState(true);
+  const [corridorDoorModal, setCorridorDoorModal] = useState<{
+    corridorId: string;
+    doorId: string;
+    description: string;
+    isEmergency: boolean;
+    isFireDoor: boolean;
+    lastVerificationAt: string;
+    verifierCompany: string;
+    verificationHistory: DoorVerificationEntry[];
+    mode: 'static' | 'auto_sensor' | 'automated';
+    automationUrl: string;
+  } | null>(null);
+  const [corridorDoorLinkModal, setCorridorDoorLinkModal] = useState<{
+    corridorId: string;
+    doorId: string;
+    selectedRoomIds: string[];
+    nearestRoomId?: string;
+    magneticRoomIds?: string[];
+  } | null>(null);
+  const [corridorDoorLinkQuery, setCorridorDoorLinkQuery] = useState('');
+  const [corridorConnectionModal, setCorridorConnectionModal] = useState<{
+    connectionId?: string | null;
+    corridorId: string;
+    edgeIndex: number;
+    t: number;
+    x: number;
+    y: number;
+    selectedPlanIds: string[];
+    transitionType: 'stairs' | 'elevator';
+  } | null>(null);
+  const handleSafetyCardChange = useCallback(
+    (
+      layout: { x: number; y: number; w: number; h: number; fontSize: number; fontIndex?: number; colorIndex?: number; textBgIndex?: number },
+      options?: { commit?: boolean }
+    ) => {
+      const normalized = normalizeSafetyCardLayout(layout);
+      setSafetyCardPos({ x: normalized.x, y: normalized.y });
+      setSafetyCardSize({ w: normalized.w, h: normalized.h });
+      setSafetyCardFontSize(normalized.fontSize);
+      setSafetyCardFontIndex(normalized.fontIndex);
+      setSafetyCardColorIndex(normalized.colorIndex);
+      setSafetyCardTextBgIndex(normalized.textBgIndex);
+      if (!options?.commit || !planRef.current || isReadOnlyRef.current) return;
+      const baseLayout = normalizeSafetyCardLayout((planRef.current as any)?.safetyCardLayout);
+      const hasDiff =
+        Math.abs(normalized.x - baseLayout.x) > 0.15 ||
+        Math.abs(normalized.y - baseLayout.y) > 0.15 ||
+        Math.abs(normalized.w - baseLayout.w) > 0.15 ||
+        Math.abs(normalized.h - baseLayout.h) > 0.15 ||
+        Math.abs(normalized.fontSize - baseLayout.fontSize) > 0.01 ||
+        normalized.fontIndex !== baseLayout.fontIndex ||
+        normalized.colorIndex !== baseLayout.colorIndex ||
+        normalized.textBgIndex !== baseLayout.textBgIndex;
+      if (hasDiff) updateFloorPlan((planRef.current as any).id, { safetyCardLayout: normalized } as any);
+    },
+    [normalizeSafetyCardLayout, updateFloorPlan]
+  );
+  useEffect(() => {
+    if (!corridorModal) return;
+    setCorridorNameInput(corridorModal.initialName || '');
+    setCorridorShowNameInput(corridorModal.initialShowName !== false);
+  }, [corridorModal]);
+  useEffect(() => {
+    if (!corridorModal) return;
+    const timer = window.setTimeout(() => {
+      const el = corridorNameInputRef.current;
+      if (!el) return;
+      const len = el.value.length;
+      el.focus();
+      try {
+        el.setSelectionRange(len, len);
+      } catch {
+        // ignore unsupported inputs
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [corridorModal]);
+  useEffect(() => {
+    if (corridorDoorLinkModal) return;
+    if (corridorDoorLinkQuery) setCorridorDoorLinkQuery('');
+  }, [corridorDoorLinkModal, corridorDoorLinkQuery]);
   const [wallTypeModal, setWallTypeModal] = useState<{ ids: string[]; typeId: string } | null>(null);
   const [wallTypeDraft, setWallTypeDraft] = useState<string>('');
   const [roomWallTypeModal, setRoomWallTypeModal] = useState<{
@@ -682,6 +911,34 @@ const PlanView = ({ planId }: Props) => {
   const layerVisibilitySyncRef = useRef<string>('');
   renderStartRef.current = performance.now();
 
+  const dismissSelectionHintToasts = useCallback(() => {
+    selectionToastKeyRef.current = '';
+    if (selectionToastIdRef.current != null) {
+      toast.dismiss(selectionToastIdRef.current);
+      selectionToastIdRef.current = null;
+    }
+    deskToastKeyRef.current = '';
+    if (deskToastIdRef.current != null) {
+      toast.dismiss(deskToastIdRef.current);
+      deskToastIdRef.current = null;
+    }
+    multiToastKeyRef.current = '';
+    if (multiToastIdRef.current != null) {
+      toast.dismiss(multiToastIdRef.current);
+      multiToastIdRef.current = null;
+    }
+    quoteToastKeyRef.current = '';
+    if (quoteToastIdRef.current != null) {
+      toast.dismiss(quoteToastIdRef.current);
+      quoteToastIdRef.current = null;
+    }
+    mediaToastKeyRef.current = '';
+    if (mediaToastIdRef.current != null) {
+      toast.dismiss(mediaToastIdRef.current);
+      mediaToastIdRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
@@ -714,6 +971,7 @@ const PlanView = ({ planId }: Props) => {
   const plan = useDataStore(
     useCallback((s) => s.findFloorPlan(planId), [planId])
   );
+  const allClients = useDataStore((s) => s.clients);
   const client = useDataStore(
     useCallback((s) => s.findClientByPlan(planId), [planId])
   );
@@ -1406,7 +1664,9 @@ const PlanView = ({ planId }: Props) => {
       width: activeRevision.width,
       height: activeRevision.height,
       rooms: activeRevision.rooms,
+      corridors: (activeRevision as any).corridors ?? (plan as any).corridors,
       links: (activeRevision as any).links || (plan as any).links,
+      safetyCardLayout: (activeRevision as any).safetyCardLayout || (plan as any).safetyCardLayout,
       objects: activeRevision.objects,
       views: effectiveViews as any
     } as FloorPlan;
@@ -2050,7 +2310,7 @@ const PlanView = ({ planId }: Props) => {
   const canvasPlan = useMemo(() => {
     if (!renderPlan) return renderPlan;
     if (hideAllLayers) {
-      return { ...renderPlan, objects: [], rooms: [], links: [] };
+      return { ...renderPlan, objects: [], rooms: [], corridors: [], links: [] };
     }
     const showAll = allItemsSelected;
     const visible = new Set(effectiveVisibleLayerIds);
@@ -2066,7 +2326,9 @@ const PlanView = ({ planId }: Props) => {
           const ids = Array.isArray(o.layerIds) && o.layerIds.length ? o.layerIds : normalizedLayerIdsForType(o.type);
           return ids.some((id: string) => visible.has(id));
         });
-    const rooms = showAll ? renderPlan.rooms : visible.has('rooms') ? renderPlan.rooms : [];
+    const securityVisible = visible.has(SECURITY_LAYER_ID);
+    const rooms = showAll || securityVisible || visible.has('rooms') ? renderPlan.rooms : [];
+    const corridors = showAll || securityVisible || visible.has('corridors') ? (renderPlan as any).corridors : [];
     const visibleObjectIds = new Set(objects.map((o: any) => o.id));
     const baseLinks = Array.isArray((renderPlan as any).links)
       ? ((renderPlan as any).links as any[]).filter((l) => {
@@ -2079,8 +2341,65 @@ const PlanView = ({ planId }: Props) => {
       ? rackOverlayLinks.filter((l) => visibleObjectIds.has(String(l.fromId)) && visibleObjectIds.has(String(l.toId)))
       : [];
     const links = [...baseLinks, ...rackLinks];
-    return { ...renderPlan, objects, rooms, links };
+    return { ...renderPlan, objects, rooms, corridors, links };
   }, [allItemsSelected, effectiveVisibleLayerIds, getTypeLayerIds, hideAllLayers, inferDefaultLayerIds, layerIdSet, rackOverlayLinks, renderPlan]);
+  const securityLayerVisible = useMemo(
+    () => !hideAllLayers && (allItemsSelected || effectiveVisibleLayerIds.includes(SECURITY_LAYER_ID)),
+    [allItemsSelected, effectiveVisibleLayerIds, hideAllLayers]
+  );
+  useEffect(() => {
+    if (!renderPlan) return;
+    const layout = normalizeSafetyCardLayout((renderPlan as any)?.safetyCardLayout);
+    setSafetyCardPos((prev) => (Math.abs(prev.x - layout.x) > 0.01 || Math.abs(prev.y - layout.y) > 0.01 ? { x: layout.x, y: layout.y } : prev));
+    setSafetyCardSize((prev) => (Math.abs(prev.w - layout.w) > 0.01 || Math.abs(prev.h - layout.h) > 0.01 ? { w: layout.w, h: layout.h } : prev));
+    setSafetyCardFontSize((prev) => (Math.abs(prev - layout.fontSize) > 0.01 ? layout.fontSize : prev));
+    setSafetyCardFontIndex((prev) => (prev !== layout.fontIndex ? layout.fontIndex : prev));
+    setSafetyCardColorIndex((prev) => (prev !== layout.colorIndex ? layout.colorIndex : prev));
+    setSafetyCardTextBgIndex((prev) => (prev !== layout.textBgIndex ? layout.textBgIndex : prev));
+  }, [normalizeSafetyCardLayout, renderPlan]);
+  const safetyEmergencyContacts = useMemo(() => {
+    const list = Array.isArray((client as any)?.emergencyContacts) ? ((client as any).emergencyContacts as any[]) : [];
+    const scopeRank = (scope: string) => {
+      if (scope === 'global') return 0;
+      if (scope === 'client') return 1;
+      if (scope === 'site') return 2;
+      if (scope === 'plan') return 3;
+      return 9;
+    };
+    const out = list.filter((entry) => {
+      const scope = String(entry?.scope || '');
+      const showOnPlanCard = entry?.showOnPlanCard !== false;
+      if (!showOnPlanCard) return false;
+      if (scope === 'global' || scope === 'client') return true;
+      if (scope === 'site') return String(entry?.siteId || '') === String(site?.id || '');
+      if (scope === 'plan') return String(entry?.floorPlanId || '') === String(planId || '');
+      return false;
+    });
+    return out.sort((a, b) => {
+      const aScope = String(a?.scope || '');
+      const bScope = String(b?.scope || '');
+      const byScope = scopeRank(aScope) - scopeRank(bScope);
+      if (byScope !== 0) return byScope;
+      return `${a?.name || ''}`.localeCompare(`${b?.name || ''}`);
+    });
+  }, [client, planId, site?.id]);
+  const safetyEmergencyPoints = useMemo(() => {
+    const objects = (((renderPlan as any)?.objects || []) as any[]).filter((obj) => String(obj?.type || '') === 'safety_assembly_point');
+    return objects.map((obj) => ({
+      id: String(obj?.id || ''),
+      name: String(obj?.name || obj?.type || ''),
+      gps: String((obj as any)?.gpsCoords || ''),
+      coords: `${Math.round(Number(obj?.x || 0))}, ${Math.round(Number(obj?.y || 0))}`
+    }));
+  }, [renderPlan]);
+  const safetyNumbersInline = useMemo(
+    () => safetyEmergencyContacts.map((entry: any) => `| ${entry.name || '—'} ${entry.phone || '—'}`).join(' '),
+    [safetyEmergencyContacts]
+  );
+  const safetyPointsInline = useMemo(
+    () => safetyEmergencyPoints.map((point) => `| ${point.name || '—'}`).join(' '),
+    [safetyEmergencyPoints]
+  );
   const quoteLabels = useMemo(() => {
     const map: Record<string, string> = {};
     const objects = ((canvasPlan || renderPlan) as any)?.objects || [];
@@ -2239,6 +2558,7 @@ const PlanView = ({ planId }: Props) => {
     objects: any[];
     views?: any[];
     rooms?: any[];
+    corridors?: any[];
     racks?: any[];
     rackItems?: any[];
     rackLinks?: any[];
@@ -2251,6 +2571,7 @@ const PlanView = ({ planId }: Props) => {
     objects: any[];
     views?: any[];
     rooms?: any[];
+    corridors?: any[];
     racks?: any[];
     rackItems?: any[];
     rackLinks?: any[];
@@ -2327,9 +2648,22 @@ const PlanView = ({ planId }: Props) => {
       width: p?.width,
       height: p?.height,
       scale: p?.scale,
+      safetyCardLayout: (p as any)?.safetyCardLayout
+        ? {
+            x: Number((p as any).safetyCardLayout.x || 0),
+            y: Number((p as any).safetyCardLayout.y || 0),
+            w: Number((p as any).safetyCardLayout.w || 420),
+            h: Number((p as any).safetyCardLayout.h || 84),
+            fontSize: Number((p as any).safetyCardLayout.fontSize || 10),
+            fontIndex: Number((p as any).safetyCardLayout.fontIndex || 0),
+            colorIndex: Number((p as any).safetyCardLayout.colorIndex || 0),
+            textBgIndex: Number((p as any).safetyCardLayout.textBgIndex || 0)
+          }
+        : undefined,
       objects: Array.isArray(p?.objects) ? p.objects : [],
       views: Array.isArray(p?.views) ? p.views : [],
       rooms: Array.isArray(p?.rooms) ? p.rooms : [],
+      corridors: Array.isArray((p as any)?.corridors) ? (p as any).corridors : [],
       racks: Array.isArray((p as any)?.racks) ? (p as any).racks : [],
       rackItems: Array.isArray((p as any)?.rackItems) ? (p as any).rackItems : [],
       rackLinks: Array.isArray((p as any)?.rackLinks) ? (p as any).rackLinks : []
@@ -2392,9 +2726,11 @@ const PlanView = ({ planId }: Props) => {
       width?: number;
       height?: number;
       scale?: any;
+      safetyCardLayout?: { x: number; y: number; w: number; h: number; fontSize?: number; fontIndex?: number; colorIndex?: number; textBgIndex?: number };
       objects: any[];
       views?: any[];
       rooms?: any[];
+      corridors?: any[];
       racks?: any[];
       rackItems?: any[];
       rackLinks?: any[];
@@ -2404,9 +2740,11 @@ const PlanView = ({ planId }: Props) => {
       width?: number;
       height?: number;
       scale?: any;
+      safetyCardLayout?: { x: number; y: number; w: number; h: number; fontSize?: number; fontIndex?: number; colorIndex?: number; textBgIndex?: number };
       objects: any[];
       views?: any[];
       rooms?: any[];
+      corridors?: any[];
       racks?: any[];
       rackItems?: any[];
       rackLinks?: any[];
@@ -2425,6 +2763,19 @@ const PlanView = ({ planId }: Props) => {
       if ((aScale.start?.y ?? 0) !== (bScale.start?.y ?? 0)) return false;
       if ((aScale.end?.x ?? 0) !== (bScale.end?.x ?? 0)) return false;
       if ((aScale.end?.y ?? 0) !== (bScale.end?.y ?? 0)) return false;
+    }
+    const aSafetyCard = current.safetyCardLayout;
+    const bSafetyCard = latest.safetyCardLayout;
+    if (!!aSafetyCard || !!bSafetyCard) {
+      if (!aSafetyCard || !bSafetyCard) return false;
+      if (Number(aSafetyCard.x || 0) !== Number(bSafetyCard.x || 0)) return false;
+      if (Number(aSafetyCard.y || 0) !== Number(bSafetyCard.y || 0)) return false;
+      if (Number(aSafetyCard.w || 0) !== Number(bSafetyCard.w || 0)) return false;
+      if (Number(aSafetyCard.h || 0) !== Number(bSafetyCard.h || 0)) return false;
+      if (Number(aSafetyCard.fontSize || 10) !== Number(bSafetyCard.fontSize || 10)) return false;
+      if (Number(aSafetyCard.fontIndex || 0) !== Number(bSafetyCard.fontIndex || 0)) return false;
+      if (Number(aSafetyCard.colorIndex || 0) !== Number(bSafetyCard.colorIndex || 0)) return false;
+      if (Number(aSafetyCard.textBgIndex || 0) !== Number(bSafetyCard.textBgIndex || 0)) return false;
     }
 
     const sameList = (a?: string[], b?: string[]) => {
@@ -2480,6 +2831,75 @@ const PlanView = ({ planId }: Props) => {
       if (r.name !== other.name) return false;
       if (r.x !== other.x || r.y !== other.y) return false;
       if (r.width !== other.width || r.height !== other.height) return false;
+    }
+
+    const aCorridors = current.corridors || [];
+    const bCorridors = latest.corridors || [];
+    if (aCorridors.length !== bCorridors.length) return false;
+    const bCorridorsById = new Map<string, any>();
+    for (const c of bCorridors) bCorridorsById.set(c.id, c);
+    for (const c of aCorridors) {
+      const other = bCorridorsById.get(c.id);
+      if (!other) return false;
+      if (c.name !== other.name) return false;
+      if ((c.showName !== false) !== (other.showName !== false)) return false;
+      if (Number((c as any).labelX ?? -1) !== Number((other as any).labelX ?? -1)) return false;
+      if (Number((c as any).labelY ?? -1) !== Number((other as any).labelY ?? -1)) return false;
+      if (Number((c as any).labelScale ?? 1) !== Number((other as any).labelScale ?? 1)) return false;
+      if ((c.kind || 'poly') !== (other.kind || 'poly')) return false;
+      if ((c.color || '') !== (other.color || '')) return false;
+      if ((c.x ?? null) !== (other.x ?? null)) return false;
+      if ((c.y ?? null) !== (other.y ?? null)) return false;
+      if ((c.width ?? null) !== (other.width ?? null)) return false;
+      if ((c.height ?? null) !== (other.height ?? null)) return false;
+      const cPts = Array.isArray(c.points) ? c.points : [];
+      const oPts = Array.isArray(other.points) ? other.points : [];
+      if (cPts.length !== oPts.length) return false;
+      for (let i = 0; i < cPts.length; i += 1) {
+        if ((cPts[i]?.x ?? 0) !== (oPts[i]?.x ?? 0)) return false;
+        if ((cPts[i]?.y ?? 0) !== (oPts[i]?.y ?? 0)) return false;
+      }
+      const cDoors = Array.isArray(c.doors) ? c.doors : [];
+      const oDoors = Array.isArray(other.doors) ? other.doors : [];
+      if (cDoors.length !== oDoors.length) return false;
+      const oDoorsById = new Map<string, any>();
+      for (const d of oDoors) oDoorsById.set(d.id, d);
+      for (const d of cDoors) {
+        const od = oDoorsById.get(d.id);
+        if (!od) return false;
+        if (Number(d.edgeIndex) !== Number(od.edgeIndex)) return false;
+        if (Number(d.t) !== Number(od.t)) return false;
+        if (Number((d as any).edgeIndexTo ?? -1) !== Number((od as any).edgeIndexTo ?? -1)) return false;
+        if (Number((d as any).tTo ?? -1) !== Number((od as any).tTo ?? -1)) return false;
+        if (String((d as any).mode || 'static') !== String((od as any).mode || 'static')) return false;
+        if (String((d as any).automationUrl || '') !== String((od as any).automationUrl || '')) return false;
+        const aLinked = Array.isArray((d as any).linkedRoomIds) ? (d as any).linkedRoomIds.map((id: any) => String(id)).sort() : [];
+        const bLinked = Array.isArray((od as any).linkedRoomIds) ? (od as any).linkedRoomIds.map((id: any) => String(id)).sort() : [];
+        if (aLinked.length !== bLinked.length) return false;
+        for (let i = 0; i < aLinked.length; i += 1) {
+          if (aLinked[i] !== bLinked[i]) return false;
+        }
+      }
+      const cConn = Array.isArray(c.connections) ? c.connections : [];
+      const oConn = Array.isArray(other.connections) ? other.connections : [];
+      if (cConn.length !== oConn.length) return false;
+      const oConnById = new Map<string, any>();
+      for (const cp of oConn) oConnById.set(cp.id, cp);
+      for (const cp of cConn) {
+        const ocp = oConnById.get(cp.id);
+        if (!ocp) return false;
+        if (Number(cp.edgeIndex) !== Number(ocp.edgeIndex)) return false;
+        if (Number(cp.t) !== Number(ocp.t)) return false;
+        if (Number((cp as any).x ?? -1) !== Number((ocp as any).x ?? -1)) return false;
+        if (Number((cp as any).y ?? -1) !== Number((ocp as any).y ?? -1)) return false;
+        if (String((cp as any).transitionType || 'stairs') !== String((ocp as any).transitionType || 'stairs')) return false;
+        const aPlanIds = Array.isArray(cp.planIds) ? cp.planIds.map((id: any) => String(id)).sort() : [];
+        const bPlanIds = Array.isArray(ocp.planIds) ? ocp.planIds.map((id: any) => String(id)).sort() : [];
+        if (aPlanIds.length !== bPlanIds.length) return false;
+        for (let i = 0; i < aPlanIds.length; i += 1) {
+          if (aPlanIds[i] !== bPlanIds[i]) return false;
+        }
+      }
     }
 
     const aRacks = current.racks || [];
@@ -2552,6 +2972,7 @@ const PlanView = ({ planId }: Props) => {
         objects: any[];
         views?: any[];
         rooms?: any[];
+        corridors?: any[];
         racks?: any[];
         rackItems?: any[];
         rackLinks?: any[];
@@ -2564,6 +2985,7 @@ const PlanView = ({ planId }: Props) => {
         objects: any[];
         views?: any[];
         rooms?: any[];
+        corridors?: any[];
         racks?: any[];
         rackItems?: any[];
         rackLinks?: any[];
@@ -2582,9 +3004,11 @@ const PlanView = ({ planId }: Props) => {
         ...snap,
         printArea: snap.printArea ?? undefined,
         scale: snap.scale,
+        safetyCardLayout: (snap as any).safetyCardLayout,
         objects: snap.objects,
         views: snap.views,
         rooms: snap.rooms,
+        corridors: snap.corridors,
         links: snap.links,
         racks: snap.racks,
         rackItems: snap.rackItems,
@@ -2663,18 +3087,22 @@ const PlanView = ({ planId }: Props) => {
         width: latest.width,
         height: latest.height,
         scale: latest.scale,
+        safetyCardLayout: latest.safetyCardLayout,
         objects: latest.objects,
         views: latest.views,
         rooms: latest.rooms,
+        corridors: latest.corridors,
         racks: latest.racks,
         rackItems: latest.rackItems,
         rackLinks: latest.rackLinks
       };
       const normalizedCurrent = {
         ...current,
+        corridors: latestSnapshot.corridors === undefined ? undefined : current.corridors,
         racks: latestSnapshot.racks === undefined ? undefined : current.racks,
         rackItems: latestSnapshot.rackItems === undefined ? undefined : current.rackItems,
-        rackLinks: latestSnapshot.rackLinks === undefined ? undefined : current.rackLinks
+        rackLinks: latestSnapshot.rackLinks === undefined ? undefined : current.rackLinks,
+        safetyCardLayout: latestSnapshot.safetyCardLayout === undefined ? undefined : current.safetyCardLayout
       };
       return !samePlanSnapshot(normalizedCurrent, latestSnapshot);
     },
@@ -2723,6 +3151,150 @@ const PlanView = ({ planId }: Props) => {
   }, [plan, samePlanSnapshotIgnoringDims, toSnapshot]);
 
   const pendingNavigateRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    viewportLiveRef.current = { zoom, pan };
+  }, [pan, zoom]);
+
+  const getViewport = useCallback(() => viewportLiveRef.current, []);
+
+  const [presentationEnterModalOpen, setPresentationEnterModalOpen] = useState(false);
+  const [presentationEnterBusy, setPresentationEnterBusy] = useState(false);
+  const webcamGesturesEnabled = false;
+
+  const enterFullscreenFromGesture = useCallback(() => {
+    try {
+      const doc: any = document as any;
+      const root: any = document.documentElement as any;
+      if (!!doc.fullscreenElement) return;
+      const p = root?.requestFullscreen?.();
+      if (p && typeof p.then === 'function') {
+        p.catch(() => {
+          // ignore: fullscreen may be blocked or already active
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const queryCameraPermission = useCallback(async () => {
+    try {
+      const p: any = (navigator as any)?.permissions;
+      if (!p?.query) return 'unknown' as const;
+      const status = await p.query({ name: 'camera' as any });
+      const state = String(status?.state || '');
+      if (state === 'granted' || state === 'denied' || state === 'prompt') return state as any;
+      return 'unknown' as const;
+    } catch {
+      return 'unknown' as const;
+    }
+  }, []);
+
+  const requestEnterPresentation = useCallback(() => {
+    if (presentationEnterBusy) return;
+    setPresentationWebcamEnabled(false);
+    setPresentationWebcamCalib(null);
+    setPresentationEnterModalOpen(false);
+    enterFullscreenFromGesture();
+    togglePresentationMode?.();
+  }, [
+    enterFullscreenFromGesture,
+    presentationEnterBusy,
+    setPresentationWebcamCalib,
+    setPresentationWebcamEnabled,
+    togglePresentationMode
+  ]);
+
+  const handleTogglePresentation = useCallback(() => {
+    if (presentationMode) {
+      togglePresentationMode?.();
+      return;
+    }
+    requestEnterPresentation();
+  }, [presentationMode, requestEnterPresentation, togglePresentationMode]);
+
+  useEffect(() => {
+    if (!presentationEnterRequested) return;
+    clearPresentationEnterRequest?.();
+    if (presentationMode) return;
+    requestEnterPresentation();
+  }, [clearPresentationEnterRequest, presentationEnterRequested, presentationMode, requestEnterPresentation]);
+
+  useEffect(() => {
+    if (!presentationEnterModalOpen) return;
+    let cancelled = false;
+    void (async () => {
+      const perm = await queryCameraPermission();
+      if (cancelled) return;
+      setCameraPermissionState?.(perm);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [presentationEnterModalOpen, queryCameraPermission, setCameraPermissionState]);
+
+  const requestCameraPermissionOnce = useCallback(async () => {
+    try {
+      const md: any = (navigator as any)?.mediaDevices;
+      if (!md?.getUserMedia) return false;
+      const stream: MediaStream = await md.getUserMedia({ video: true, audio: false });
+      try {
+        stream.getTracks().forEach((t) => t.stop());
+      } catch {}
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const resetToDefaultViewFromGesture = useCallback(() => {
+    const current = renderPlan;
+    if (!current) return;
+    const def = current.views?.find((v) => v.isDefault);
+    if (!def) {
+      canvasStageRef.current?.fitView?.();
+      return;
+    }
+    setAutoFitEnabled(false);
+    setZoom(def.zoom);
+    setPan(def.pan);
+    saveViewport(current.id, def.zoom, def.pan);
+    setSelectedViewId(def.id);
+  }, [renderPlan, saveViewport, setAutoFitEnabled, setPan, setZoom]);
+
+  const {
+    guideStep: webcamGuideStep,
+    guideVisible: webcamGuideVisible,
+    calibrationProgress: webcamCalibrationProgress,
+    calibrationPinchSeen: webcamCalibrationPinchSeen,
+    guidePanDone: webcamGuidePanDone,
+    guideOpenDone: webcamGuideOpenDone,
+  } = usePresentationWebcamHands({
+    active: presentationMode && webcamGesturesEnabled,
+    webcamEnabled: webcamGesturesEnabled && presentationWebcamEnabled,
+    setWebcamEnabled: setPresentationWebcamEnabled,
+    calib: presentationWebcamCalib,
+    setCalib: setPresentationWebcamCalib,
+    mapRef,
+    getViewport,
+    setPan,
+    onResetView: resetToDefaultViewFromGesture,
+    onInfo: (msg) => push(t(msg), 'info'),
+    onError: (msg) => push(t(msg), 'danger')
+  });
+
+  useEffect(() => {
+    if (webcamGesturesEnabled) return;
+    if (presentationWebcamEnabled) setPresentationWebcamEnabled(false);
+    if (presentationWebcamCalib) setPresentationWebcamCalib(null);
+  }, [
+    presentationWebcamCalib,
+    presentationWebcamEnabled,
+    setPresentationWebcamCalib,
+    setPresentationWebcamEnabled,
+    webcamGesturesEnabled
+  ]);
 
   useEffect(() => {
     const sp = new URLSearchParams(location.search || '');
@@ -2802,8 +3374,10 @@ const PlanView = ({ planId }: Props) => {
       width: base.width,
       height: base.height,
       scale: base.scale,
+      safetyCardLayout: (base as any).safetyCardLayout,
       objects: base.objects,
       rooms: base.rooms,
+      corridors: base.corridors,
       views: base.views,
       racks: base.racks,
       rackItems: base.rackItems,
@@ -3184,6 +3758,9 @@ const PlanView = ({ planId }: Props) => {
   const contextIsQuote = contextObject?.type === 'quote';
   const contextIsWifi = contextObject?.type === 'wifi';
   const contextIsPhoto = contextObject?.type === 'photo';
+  const contextIsAssemblyPoint = contextObject?.type === 'safety_assembly_point';
+  const contextAssemblyGps = contextIsAssemblyPoint ? String((contextObject as any)?.gpsCoords || '') : '';
+  const contextAssemblyMapsUrl = useMemo(() => googleMapsUrlFromCoords(contextAssemblyGps), [contextAssemblyGps]);
   const contextPhotoSelectionIds = useMemo(() => {
     if (!contextIsPhoto || !renderPlan) return [];
     const ids =
@@ -3561,10 +4138,14 @@ const PlanView = ({ planId }: Props) => {
     if (selectionToastIdRef.current != null) {
       toast.dismiss(selectionToastIdRef.current);
     }
+    const objectTypeLabel = getTypeLabel(obj.type);
+    const objectNameLabel = String(obj.name || '').trim() || t({ it: 'Senza nome', en: 'Unnamed' });
     selectionToastIdRef.current = toast.info(
       renderKeybindToast(
         { it: 'Oggetto selezionato', en: 'Object selected' },
         [
+          { cmd: t({ it: 'Tipo oggetto:', en: 'Object type:' }), it: objectTypeLabel, en: objectTypeLabel },
+          { cmd: t({ it: 'Nome oggetto:', en: 'Object name:' }), it: objectNameLabel, en: objectNameLabel },
           { cmd: 'Trascina', it: 'sposta', en: 'move' },
           { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
           { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
@@ -3574,13 +4155,23 @@ const PlanView = ({ planId }: Props) => {
       ),
       { duration: Infinity }
     );
-  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
+  }, [getTypeLabel, renderKeybindToast, renderPlan, selectedObjectIds, t]);
   useEffect(() => {
     selectedLinkIdRef.current = selectedLinkId;
   }, [selectedLinkId]);
   useEffect(() => {
+    if (!internalMapOpen) return;
+    dismissSelectionHintToasts();
+  }, [dismissSelectionHintToasts, internalMapOpen]);
+  useEffect(() => {
     selectedRoomIdRef.current = selectedRoomId;
   }, [selectedRoomId]);
+  useEffect(() => {
+    if (!selectedCorridorDoor) return;
+    if (selectedCorridorId && selectedCorridorDoor.corridorId !== selectedCorridorId) {
+      setSelectedCorridorDoor(null);
+    }
+  }, [selectedCorridorDoor, selectedCorridorId]);
   useEffect(() => {
     confirmDeleteRef.current = confirmDelete;
   }, [confirmDelete]);
@@ -3602,9 +4193,15 @@ const PlanView = ({ planId }: Props) => {
   }, [wallQuickMenu]);
 
   useEffect(() => {
+    if (!corridorQuickMenu) return;
+    if (selectedCorridorId !== corridorQuickMenu.id) setCorridorQuickMenu(null);
+  }, [corridorQuickMenu, selectedCorridorId]);
+
+  useEffect(() => {
     if (!contextMenu) return;
     setWallQuickMenu(null);
     setWallTypeMenu(null);
+    setCorridorQuickMenu(null);
     setAlignMenuOpen(false);
     setLayersContextMenu(null);
     if (contextMenu.kind === 'map') {
@@ -3621,6 +4218,7 @@ const PlanView = ({ planId }: Props) => {
     if (!toolMode) return;
     setWallQuickMenu(null);
     setWallTypeMenu(null);
+    setCorridorQuickMenu(null);
   }, [toolMode]);
 
   const getSubmenuStyle = useCallback(
@@ -3771,20 +4369,25 @@ const PlanView = ({ planId }: Props) => {
     setContextMenu(null);
     setWallQuickMenu(null);
     setWallTypeMenu(null);
+    setCorridorQuickMenu(null);
+    setCorridorDoorDraft(null);
     clearSelection();
     setSelectedRoomId(undefined);
     setSelectedRoomIds([]);
+    setSelectedCorridorId(undefined);
+    setSelectedCorridorDoor(null);
     setSelectedLinkId(null);
     setLinkFromId(null);
   }, [isReadOnly]);
 
   useEffect(() => {
-    // If the user selects an object to place while drawing a room, cancel the room creation mode.
-    if (!roomDrawMode) return;
+    // If the user selects an object to place while drawing an area, cancel creation mode.
+    if (!roomDrawMode && !corridorDrawMode) return;
     if (!pendingType) return;
     setRoomDrawMode(null);
+    setCorridorDrawMode(null);
     setNewRoomMenuOpen(false);
-  }, [pendingType, roomDrawMode]);
+  }, [corridorDrawMode, pendingType, roomDrawMode]);
 
   const saveTimer = useRef<number | null>(null);
   useEffect(() => {
@@ -3808,6 +4411,9 @@ const PlanView = ({ planId }: Props) => {
 	        setRoomDrawMode(null);
 	        setNewRoomMenuOpen(false);
 	      }
+        if (corridorDrawMode && id) {
+          setCorridorDrawMode(null);
+        }
 	      if (linkFromId && id && planRef.current && !isReadOnlyRef.current) {
 	        if (id !== linkFromId) {
             const fromObj = (planRef.current as any).objects?.find((o: any) => o.id === linkFromId);
@@ -3837,15 +4443,24 @@ const PlanView = ({ planId }: Props) => {
         clearSelection();
         setSelectedRoomId(undefined);
         setSelectedRoomIds([]);
+        setSelectedCorridorId(undefined);
+        setSelectedCorridorDoor(null);
+        setCorridorQuickMenu(null);
         setSelectedLinkId(null);
       } else if (options?.multi) {
         setSelectedRoomId(undefined);
         setSelectedRoomIds([]);
+        setSelectedCorridorId(undefined);
+        setSelectedCorridorDoor(null);
+        setCorridorQuickMenu(null);
         setSelectedLinkId(null);
         toggleSelectedObject(id);
       } else {
         setSelectedRoomId(undefined);
         setSelectedRoomIds([]);
+        setSelectedCorridorId(undefined);
+        setSelectedCorridorDoor(null);
+        setCorridorQuickMenu(null);
         setSelectedLinkId(null);
         const currentSelectedIds = selectedObjectIdsRef.current;
         const currentSelectedId = selectedObjectIdRef.current;
@@ -3867,8 +4482,10 @@ const PlanView = ({ planId }: Props) => {
 	      markTouched,
 	      panToolActive,
 	      push,
+        corridorDrawMode,
 	      roomDrawMode,
 	      setPanToolActive,
+        setSelectedCorridorId,
 	      setSelectedObject,
 	      t,
 	      toggleSelectedObject
@@ -3886,8 +4503,11 @@ const PlanView = ({ planId }: Props) => {
       clientX: number;
       clientY: number;
       wallSegmentLengthPx?: number;
-    }) => setContextMenu({ kind: 'object', id, x: clientX, y: clientY, wallSegmentLengthPx }),
-    []
+    }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'object', id, x: clientX, y: clientY, wallSegmentLengthPx });
+    },
+    [dismissSelectionHintToasts]
   );
 
   const handleWallQuickMenu = useCallback(
@@ -3905,6 +4525,82 @@ const PlanView = ({ planId }: Props) => {
     []
   );
 
+  const handleCorridorQuickMenu = useCallback(
+    ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
+      if (isReadOnlyRef.current) return;
+      if (corridorDoorDraft && corridorDoorDraft.corridorId !== id) return;
+      setCorridorQuickMenu({ id, x: clientX, y: clientY, world: { x: worldX, y: worldY } });
+    },
+    [corridorDoorDraft]
+  );
+
+  const handleCorridorDoorDraftPoint = useCallback(
+    ({
+      corridorId,
+      point
+    }: {
+      corridorId: string;
+      clientX: number;
+      clientY: number;
+      point: { edgeIndex: number; t: number; x: number; y: number };
+    }) => {
+      if (isReadOnlyRef.current) return;
+      const currentPlan = planRef.current as FloorPlan | undefined;
+      if (!currentPlan) return;
+      const draft = corridorDoorDraft;
+      if (!draft || draft.corridorId !== corridorId) return;
+      const current = (currentPlan.corridors || []) as Corridor[];
+      let created = false;
+      const next = current.map((c) => {
+        if (c.id !== corridorId) return c;
+        const doors = Array.isArray(c.doors) ? [...c.doors] : [];
+        const duplicate = doors.some((d: any) => {
+          const sameEdge = Number(d.edgeIndex) === Number(point.edgeIndex);
+          if (!sameEdge) return false;
+          return Math.abs(Number(d.t) - Number(point.t)) < 0.02;
+        });
+        if (duplicate) return c;
+        created = true;
+        const doorId = nanoid();
+        const defaultDoorType = defaultDoorCatalogId
+          ? (objectTypeById.get(defaultDoorCatalogId) as ObjectTypeDefinition | undefined)
+          : undefined;
+        const defaultEmergency = !!defaultDoorType?.doorConfig?.isEmergency;
+        setSelectedCorridorDoor({ corridorId, doorId });
+        return {
+          ...c,
+          doors: [
+            ...doors,
+            {
+              id: doorId,
+              edgeIndex: Number(point.edgeIndex),
+              t: Number(point.t.toFixed(4)),
+              edgeIndexTo: undefined,
+              tTo: undefined,
+              catalogTypeId: defaultDoorCatalogId || undefined,
+              mode: 'static',
+              description: undefined,
+              isEmergency: defaultEmergency,
+              isFireDoor: false,
+              verificationHistory: [],
+              linkedRoomIds: []
+            }
+          ]
+        };
+      });
+      if (!created) {
+        push(t({ it: 'Porta già presente in questo punto', en: 'A door already exists at this point' }), 'info');
+        return;
+      }
+      markTouched();
+      updateFloorPlan(currentPlan.id, { corridors: next } as any);
+      push(t({ it: 'Porta creata sul corridoio', en: 'Door created on corridor' }), 'success');
+      setCorridorDoorDraft(null);
+      setCorridorQuickMenu(null);
+    },
+    [corridorDoorDraft, defaultDoorCatalogId, markTouched, objectTypeById, push, t, updateFloorPlan]
+  );
+
   const toggleMapSubmenu = useCallback((section: typeof mapSubmenu) => {
     setMapSubmenu((prev) => (prev === section ? null : section));
   }, []);
@@ -3912,15 +4608,54 @@ const PlanView = ({ planId }: Props) => {
   const handleLinkContextMenu = useCallback(
     ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) => {
       if (isRackLinkId(id)) return;
+      dismissSelectionHintToasts();
       setContextMenu({ kind: 'link', id, x: clientX, y: clientY });
     },
-    []
+    [dismissSelectionHintToasts]
   );
 
   const handleRoomContextMenu = useCallback(
-    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) =>
-      setContextMenu({ kind: 'room', id, x: clientX, y: clientY }),
-    []
+    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'room', id, x: clientX, y: clientY });
+    },
+    [dismissSelectionHintToasts]
+  );
+
+  const handleCorridorContextMenu = useCallback(
+    ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'corridor', id, x: clientX, y: clientY, worldX, worldY });
+    },
+    [dismissSelectionHintToasts]
+  );
+  const handleCorridorConnectionContextMenu = useCallback(
+    ({
+      corridorId,
+      connectionId,
+      clientX,
+      clientY,
+      worldX,
+      worldY
+    }: {
+      corridorId: string;
+      connectionId: string;
+      clientX: number;
+      clientY: number;
+      worldX: number;
+      worldY: number;
+    }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'corridor_connection', corridorId, connectionId, x: clientX, y: clientY, worldX, worldY });
+    },
+    [dismissSelectionHintToasts]
+  );
+  const handleCorridorDoorContextMenu = useCallback(
+    ({ corridorId, doorId, clientX, clientY }: { corridorId: string; doorId: string; clientX: number; clientY: number }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'corridor_door', corridorId, doorId, x: clientX, y: clientY });
+    },
+    [dismissSelectionHintToasts]
   );
 
   const handleScaleContextMenu = useCallback(
@@ -4003,7 +4738,91 @@ const PlanView = ({ planId }: Props) => {
 
   const handleMapContextMenu = useCallback(
     ({ clientX, clientY, worldX, worldY }: { clientX: number; clientY: number; worldX: number; worldY: number }) => {
+      dismissSelectionHintToasts();
       if (toolMode) return;
+      const getCorridorPoints = (corridor: any): { x: number; y: number }[] => {
+        const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+        if (kind === 'poly' && Array.isArray(corridor?.points) && corridor.points.length >= 3) {
+          return corridor.points
+            .filter((p: any) => Number.isFinite(Number(p?.x)) && Number.isFinite(Number(p?.y)))
+            .map((p: any) => ({ x: Number(p.x), y: Number(p.y) }));
+        }
+        const x = Number(corridor?.x || 0);
+        const y = Number(corridor?.y || 0);
+        const width = Number(corridor?.width || 0);
+        const height = Number(corridor?.height || 0);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+          return [];
+        }
+        return [
+          { x, y },
+          { x: x + width, y },
+          { x: x + width, y: y + height },
+          { x, y: y + height }
+        ];
+      };
+      const getEdgePoint = (points: { x: number; y: number }[], edgeIndex: number, t: number): { x: number; y: number } | null => {
+        if (!points.length) return null;
+        const len = points.length;
+        const from = points[((Math.floor(edgeIndex) % len) + len) % len];
+        const to = points[(((Math.floor(edgeIndex) % len) + len) % len + 1) % len];
+        if (!from || !to) return null;
+        const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+        return {
+          x: from.x + (to.x - from.x) * clamped,
+          y: from.y + (to.y - from.y) * clamped
+        };
+      };
+      const planCorridors = (((renderPlan as FloorPlan | undefined)?.corridors || []) as Corridor[]).filter(Boolean);
+      if (planCorridors.length) {
+        const hitRadius = 16 / Math.max(0.2, Number(zoom) || 1);
+        const hitRadiusSq = hitRadius * hitRadius;
+        let bestHit: { corridorId: string; doorId: string; distanceSq: number } | null = null;
+        for (const corridor of planCorridors) {
+          const doors = Array.isArray(corridor.doors) ? corridor.doors : [];
+          if (!doors.length) continue;
+          const points = getCorridorPoints(corridor);
+          if (!points.length) continue;
+          for (const door of doors) {
+            const anchor = getEdgePoint(points, Number((door as any)?.edgeIndex), Number((door as any)?.t));
+            if (!anchor) continue;
+            const dx = anchor.x - worldX;
+            const dy = anchor.y - worldY;
+            const distSq = dx * dx + dy * dy;
+            if (distSq > hitRadiusSq) continue;
+            if (!bestHit || distSq < bestHit.distanceSq) {
+              bestHit = { corridorId: corridor.id, doorId: door.id, distanceSq: distSq };
+            }
+          }
+        }
+        if (bestHit) {
+          clearSelection();
+          setSelectedLinkId(null);
+          setSelectedRoomId(undefined);
+          setSelectedRoomIds([]);
+          setSelectedCorridorId(undefined);
+          setSelectedCorridorDoor({ corridorId: bestHit.corridorId, doorId: bestHit.doorId });
+          setContextMenu({
+            kind: 'corridor_door',
+            corridorId: bestHit.corridorId,
+            doorId: bestHit.doorId,
+            x: clientX,
+            y: clientY
+          });
+          return;
+        }
+      }
+      const corridorId = getCorridorIdAt((renderPlan as FloorPlan | undefined)?.corridors as any, worldX, worldY);
+      if (corridorId) {
+        clearSelection();
+        setSelectedLinkId(null);
+        setSelectedRoomId(undefined);
+        setSelectedRoomIds([]);
+        setSelectedCorridorDoor(null);
+        setSelectedCorridorId(corridorId);
+        setContextMenu({ kind: 'corridor', id: corridorId, x: clientX, y: clientY, worldX, worldY });
+        return;
+      }
       const roomId = getRoomIdAt((renderPlan as FloorPlan | undefined)?.rooms, worldX, worldY);
       if (roomId) {
         if (!effectiveVisibleLayerIds.includes('rooms')) {
@@ -4023,6 +4842,7 @@ const PlanView = ({ planId }: Props) => {
         }
         clearSelection();
         setSelectedLinkId(null);
+        setSelectedCorridorId(undefined);
         setSelectedRoomId(roomId);
         setSelectedRoomIds([roomId]);
         setContextMenu({ kind: 'room', id: roomId, x: clientX, y: clientY });
@@ -4030,8 +4850,52 @@ const PlanView = ({ planId }: Props) => {
       }
       setContextMenu({ kind: 'map', x: clientX, y: clientY, worldX, worldY });
     },
-    [clearSelection, effectiveVisibleLayerIds, push, renderPlan, setSelectedLinkId, setSelectedRoomId, setSelectedRoomIds, t, toolMode]
+    [
+      clearSelection,
+      dismissSelectionHintToasts,
+      effectiveVisibleLayerIds,
+      push,
+      renderPlan,
+      setSelectedCorridorDoor,
+      setSelectedCorridorId,
+      setSelectedLinkId,
+      setSelectedRoomId,
+      setSelectedRoomIds,
+      t,
+      toolMode,
+      zoom
+    ]
   );
+
+  const handleSafetyCardContextMenu = useCallback(
+    ({ clientX, clientY, worldX, worldY }: { clientX: number; clientY: number; worldX: number; worldY: number }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'safety_card', x: clientX, y: clientY, worldX, worldY });
+    },
+    [dismissSelectionHintToasts]
+  );
+  const toggleSecurityCardVisibility = useCallback(() => {
+    const baseVisible = hideAllLayers
+      ? []
+      : allItemsSelected
+        ? nonAllLayerIds
+        : visibleLayerIds;
+    const hasSecurity = baseVisible.includes(SECURITY_LAYER_ID);
+    const nextRaw = hasSecurity
+      ? baseVisible.filter((id) => id !== SECURITY_LAYER_ID)
+      : [...baseVisible, SECURITY_LAYER_ID];
+    if (hideAllLayers) setHideAllLayers(planId, false);
+    setVisibleLayerIds(planId, normalizeLayerSelection(nextRaw));
+  }, [
+    allItemsSelected,
+    hideAllLayers,
+    nonAllLayerIds,
+    normalizeLayerSelection,
+    planId,
+    setHideAllLayers,
+    setVisibleLayerIds,
+    visibleLayerIds
+  ]);
 
   const applyView = useCallback((view: FloorPlanView) => {
     if (!renderPlan) return;
@@ -4049,6 +4913,17 @@ const PlanView = ({ planId }: Props) => {
     setSelectedViewId(id);
     setViewsMenuOpen(false);
   };
+
+  const handleOverwriteView = useCallback(
+    (view: FloorPlanView) => {
+      if (!plan || isReadOnly) return;
+      updateView(plan.id, view.id, { zoom, pan });
+      push(t({ it: 'Vista sovrascritta', en: 'View overwritten' }), 'success');
+      setSelectedViewId(view.id);
+      setViewsMenuOpen(false);
+    },
+    [isReadOnly, pan, plan, push, t, updateView, zoom]
+  );
 
   const goToDefaultView = () => {
     const current = renderPlan;
@@ -4104,9 +4979,9 @@ const PlanView = ({ planId }: Props) => {
     setModalState({ mode: 'duplicate', objectId, coords: { x: obj.x + offset, y: obj.y + offset * 0.4 } });
   };
 
-	  useEffect(() => {
-	    const handler = (e: KeyboardEvent) => {
-	      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((useUIStore.getState() as any)?.clientChatOpen) return;
         const target = e.target as HTMLElement | null;
         const tag = target?.tagName?.toLowerCase();
         const isTyping = tag === 'input' || tag === 'textarea' || target?.isContentEditable;
@@ -4124,9 +4999,9 @@ const PlanView = ({ planId }: Props) => {
           setExportModalOpen(true);
         }
 	    };
-	    window.addEventListener('keydown', handler);
-	    return () => window.removeEventListener('keydown', handler);
-	  }, []);
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const isPointInPoly = (points: { x: number; y: number }[], x: number, y: number) => {
     // Ray casting algorithm
@@ -4148,7 +5023,13 @@ const PlanView = ({ planId }: Props) => {
       | 'poly';
     if (kind === 'poly') {
       const pts = Array.isArray(room?.points) ? room.points : [];
-      if (pts.length < 3) return false;
+      if (pts.length < 3) {
+        const rx = Number(room?.x || 0);
+        const ry = Number(room?.y || 0);
+        const rw = Number(room?.width || 0);
+        const rh = Number(room?.height || 0);
+        return rw > 0 && rh > 0 && x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+      }
       // quick bbox check
       let minX = Infinity;
       let minY = Infinity;
@@ -4175,6 +5056,15 @@ const PlanView = ({ planId }: Props) => {
     for (let i = list.length - 1; i >= 0; i--) {
       const room = list[i];
       if (isPointInRoom(room, x, y)) return room.id as string;
+    }
+    return undefined;
+  }
+
+  function getCorridorIdAt(corridors: any[] | undefined, x: number, y: number) {
+    const list = corridors || [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const corridor = list[i];
+      if (isPointInRoom(corridor, x, y)) return corridor.id as string;
     }
     return undefined;
   }
@@ -4222,6 +5112,84 @@ const PlanView = ({ planId }: Props) => {
       { x, y: y + h }
     ];
   };
+
+  const getCorridorPolygon = useCallback((corridor: any) => {
+    const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+    if (kind === 'poly') {
+      const pts = Array.isArray(corridor?.points) ? corridor.points : [];
+      if (pts.length >= 3) return pts;
+      const x = Number(corridor?.x || 0);
+      const y = Number(corridor?.y || 0);
+      const w = Number(corridor?.width || 0);
+      const h = Number(corridor?.height || 0);
+      if (!w || !h) return [];
+      return [
+        { x, y },
+        { x: x + w, y },
+        { x: x + w, y: y + h },
+        { x, y: y + h }
+      ];
+    }
+    const x = Number(corridor?.x || 0);
+    const y = Number(corridor?.y || 0);
+    const w = Number(corridor?.width || 0);
+    const h = Number(corridor?.height || 0);
+    if (!w || !h) return [];
+    return [
+      { x, y },
+      { x: x + w, y },
+      { x: x + w, y: y + h },
+      { x, y: y + h }
+    ];
+  }, []);
+
+  const projectPointToSegment = useCallback(
+    (a: { x: number; y: number }, b: { x: number; y: number }, p: { x: number; y: number }) => {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq <= 0.0000001) {
+        return { t: 0, x: a.x, y: a.y, distSq: (p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y) };
+      }
+      const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+      const x = a.x + dx * t;
+      const y = a.y + dy * t;
+      const distSq = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+      return { t, x, y, distSq };
+    },
+    []
+  );
+
+  const getClosestCorridorEdge = useCallback(
+    (corridor: Corridor, point: { x: number; y: number }) => {
+      const pts = getCorridorPolygon(corridor);
+      if (pts.length < 2) return null;
+      let best: { edgeIndex: number; t: number; x: number; y: number; distSq: number } | null = null;
+      for (let i = 0; i < pts.length; i += 1) {
+        const a = pts[i];
+        const b = pts[(i + 1) % pts.length];
+        const proj = projectPointToSegment(a, b, point);
+        if (!best || proj.distSq < best.distSq) {
+          best = { edgeIndex: i, t: proj.t, x: proj.x, y: proj.y, distSq: proj.distSq };
+        }
+      }
+      return best;
+    },
+    [getCorridorPolygon, projectPointToSegment]
+  );
+  const getCorridorEdgePoint = useCallback(
+    (corridor: Corridor, edgeIndex: number, t: number) => {
+      const pts = getCorridorPolygon(corridor);
+      if (pts.length < 2) return null;
+      const idx = ((Math.floor(edgeIndex) % pts.length) + pts.length) % pts.length;
+      const a = pts[idx];
+      const b = pts[(idx + 1) % pts.length];
+      if (!a || !b) return null;
+      const ratio = Math.max(0, Math.min(1, Number(t) || 0));
+      return { x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio };
+    },
+    [getCorridorPolygon]
+  );
 
   const roomContextMetrics = useMemo(() => {
     if (!contextMenu || contextMenu.kind !== 'room' || !renderPlan) return null;
@@ -5319,6 +6287,22 @@ const PlanView = ({ planId }: Props) => {
       const currentConfirm = confirmDeleteRef.current;
       const currentSelectedIds = selectedObjectIdsRef.current;
       const currentPlan = planRef.current;
+      const hasBlockingModal = !!corridorModal || !!corridorConnectionModal || !!corridorDoorModal || !!corridorDoorLinkModal;
+      const hasObjectSearchModal = !!allTypesOpen;
+
+      // While the "All objects" search modal is open, do not trigger plan keyboard shortcuts.
+      // Let keys flow to the modal (including Enter / Escape) without interception here.
+      if (hasObjectSearchModal) return;
+
+      if (hasBlockingModal && e.key === 'Escape') {
+        e.preventDefault();
+        if (corridorDoorLinkModal) setCorridorDoorLinkModal(null);
+        else if (corridorDoorModal) setCorridorDoorModal(null);
+        else if (corridorConnectionModal) setCorridorConnectionModal(null);
+        else if (corridorModal) setCorridorModal(null);
+        return;
+      }
+      if (hasBlockingModal) return;
 
       if (scaleMode && e.key === 'Escape') {
         e.preventDefault();
@@ -5450,6 +6434,20 @@ const PlanView = ({ planId }: Props) => {
         e.preventDefault();
         setRoomDrawMode(null);
         push(t({ it: 'Disegno stanza annullato', en: 'Room drawing cancelled' }), 'info');
+        return;
+      }
+
+      if (corridorDrawMode && e.key === 'Escape') {
+        e.preventDefault();
+        setCorridorDrawMode(null);
+        push(t({ it: 'Disegno corridoio annullato', en: 'Corridor drawing cancelled' }), 'info');
+        return;
+      }
+
+      if (corridorDoorDraft && e.key === 'Escape') {
+        e.preventDefault();
+        setCorridorDoorDraft(null);
+        push(t({ it: 'Disegno porta corridoio annullato', en: 'Corridor door drawing cancelled' }), 'info');
         return;
       }
 
@@ -5746,14 +6744,28 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
-      const isScaleUp = (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !e.ctrlKey && !e.metaKey;
-      const isScaleDown = (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') && !e.ctrlKey && !e.metaKey;
-      if (isScaleUp || isScaleDown) {
-        if (!currentSelectedIds.length || !currentPlan) return;
-        if (isReadOnlyRef.current) return;
-        e.preventDefault();
-        markTouched();
-        const step = e.shiftKey ? 0.2 : 0.1;
+	      const isScaleUp = (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !e.ctrlKey && !e.metaKey;
+	      const isScaleDown = (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') && !e.ctrlKey && !e.metaKey;
+	      if (isScaleUp || isScaleDown) {
+	        if (!currentPlan) return;
+	        if (isReadOnlyRef.current) return;
+          const selectedRoomKey = selectedRoomIdRef.current;
+          if (!currentSelectedIds.length && selectedRoomKey) {
+            const room = ((currentPlan as FloorPlan).rooms || []).find((entry) => entry.id === selectedRoomKey);
+            if (!room) return;
+            e.preventDefault();
+            markTouched();
+            const step = e.shiftKey ? 0.2 : 0.1;
+            const delta = isScaleUp ? step : -step;
+            const currentScale = Number((room as any).labelScale ?? 1) || 1;
+            const nextScale = Math.max(0.3, Math.min(3, currentScale + delta));
+            updateRoom((currentPlan as FloorPlan).id, room.id, { labelScale: nextScale } as any);
+            return;
+          }
+	        if (!currentSelectedIds.length) return;
+	        e.preventDefault();
+	        markTouched();
+	        const step = e.shiftKey ? 0.2 : 0.1;
         const delta = isScaleUp ? step : -step;
         const fontStep = e.shiftKey ? 4 : 2;
         for (const id of currentSelectedIds) {
@@ -5819,6 +6831,7 @@ const PlanView = ({ planId }: Props) => {
         e.preventDefault();
         const allIds = ((currentPlan as FloorPlan).objects || []).map((o) => o.id);
         const allRoomIds = ((currentPlan as FloorPlan).rooms || []).map((r) => r.id);
+        setSelectedCorridorId(undefined);
         setSelection(allIds);
         setContextMenu(null);
         setSelectedRoomId(allRoomIds.length === 1 ? allRoomIds[0] : undefined);
@@ -5838,22 +6851,54 @@ const PlanView = ({ planId }: Props) => {
         if (photoViewer) {
           return;
         }
-        if (currentSelectedIds.length || selectedRoomId || selectedRoomIds.length) {
+        if (currentSelectedIds.length || selectedRoomId || selectedRoomIds.length || selectedCorridorId) {
           e.preventDefault();
           setContextMenu(null);
           clearSelection();
           setSelectedRoomId(undefined);
           setSelectedRoomIds([]);
+          setSelectedCorridorId(undefined);
           setSelectedLinkId(null);
         }
         return;
       }
 
-      if (isArrow) {
-        if (!currentSelectedIds.length || !currentPlan) return;
-        if (isReadOnlyRef.current) return;
-        e.preventDefault();
-        const z = zoomRef.current || 1;
+	      if (isArrow) {
+	        if (!currentPlan) return;
+	        if (isReadOnlyRef.current) return;
+          const selectedRoomKey = selectedRoomIdRef.current;
+          if (!currentSelectedIds.length && selectedRoomKey && (isArrowUp || isArrowDown || isArrowLeft || isArrowRight)) {
+            const room = ((currentPlan as FloorPlan).rooms || []).find((entry) => entry.id === selectedRoomKey);
+            if (!room) return;
+            e.preventDefault();
+            markTouched();
+            if (e.shiftKey) {
+              const nextPos = isArrowUp ? 'top' : isArrowDown ? 'bottom' : isArrowLeft ? 'left' : 'right';
+              updateRoom((currentPlan as FloorPlan).id, room.id, { labelPosition: nextPos } as any);
+              return;
+            }
+            const z = zoomRef.current || 1;
+            const step = 1 / Math.max(0.2, z);
+            const dx = isArrowLeft ? -step : isArrowRight ? step : 0;
+            const dy = isArrowUp ? -step : isArrowDown ? step : 0;
+            const kind = (room.kind || (Array.isArray(room.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+            if (kind === 'poly') {
+              const points = (room.points || []).map((p) => ({ x: Number(p.x || 0) + dx, y: Number(p.y || 0) + dy }));
+              updateRoom((currentPlan as FloorPlan).id, room.id, { kind: 'poly', points } as any);
+            } else {
+              updateRoom((currentPlan as FloorPlan).id, room.id, {
+                kind: 'rect',
+                x: Number(room.x || 0) + dx,
+                y: Number(room.y || 0) + dy,
+                width: Number(room.width || 0),
+                height: Number(room.height || 0)
+              } as any);
+            }
+            return;
+          }
+	        if (!currentSelectedIds.length) return;
+	        e.preventDefault();
+	        const z = zoomRef.current || 1;
         const step = (e.shiftKey ? 10 : 1) / Math.max(0.2, z);
         const dx = isArrowLeft ? -step : isArrowRight ? step : 0;
         const dy = isArrowUp ? -step : isArrowDown ? step : 0;
@@ -5883,6 +6928,21 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
       const isDeleteKey = e.key === 'Delete' || e.key === 'Backspace';
+      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && selectedCorridorDoor && isDeleteKey && currentPlan) {
+        e.preventDefault();
+        if (isReadOnlyRef.current) return;
+        const currentCorridors = ((((currentPlan as FloorPlan).corridors || []) as Corridor[])).filter(Boolean);
+        const next = currentCorridors.map((corridor) => {
+          if (corridor.id !== selectedCorridorDoor.corridorId) return corridor;
+          const doors = Array.isArray(corridor.doors) ? corridor.doors.filter((door) => door.id !== selectedCorridorDoor.doorId) : [];
+          return { ...corridor, doors };
+        });
+        markTouched();
+        updateFloorPlan((currentPlan as FloorPlan).id, { corridors: next } as any);
+        setSelectedCorridorDoor(null);
+        push(t({ it: 'Porta del corridoio eliminata', en: 'Corridor door deleted' }), 'info');
+        return;
+      }
       if (!currentSelectedIds.length && selectedRoomIds.length && isDeleteKey && currentPlan) {
         e.preventDefault();
         if (isReadOnlyRef.current) return;
@@ -5893,8 +6953,14 @@ const PlanView = ({ planId }: Props) => {
         }
         return;
       }
+      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && selectedCorridorId && isDeleteKey && currentPlan) {
+        e.preventDefault();
+        if (isReadOnlyRef.current) return;
+        setConfirmDeleteCorridorId(selectedCorridorId);
+        return;
+      }
       const linkId = selectedLinkIdRef.current;
-      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && linkId && isDeleteKey && currentPlan) {
+      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && !selectedCorridorId && linkId && isDeleteKey && currentPlan) {
         e.preventDefault();
         if (isRackLinkId(linkId)) return;
         if (isReadOnlyRef.current) return;
@@ -5917,6 +6983,7 @@ const PlanView = ({ planId }: Props) => {
   }, [
     addRevision,
     addLink,
+    allTypesOpen,
     cancelScaleMode,
     clearSelection,
     copySelection,
@@ -5938,23 +7005,41 @@ const PlanView = ({ planId }: Props) => {
     quoteMode,
     requestPaste,
     resetTouched,
+    corridorDoorDraft,
+    corridorDrawMode,
+    corridorModal,
+    corridorConnectionModal,
+    corridorDoorModal,
+    corridorDoorLinkModal,
     roomDrawMode,
     saveRevisionOpen,
     scaleMode,
+    selectedCorridorId,
+    selectedCorridorDoor,
     selectedRoomId,
     selectedRoomIds,
+    setConfirmDeleteCorridorId,
+    setCorridorDoorDraft,
+    setCorridorModal,
+    setCorridorConnectionModal,
+    setCorridorDoorLinkModal,
+    setCorridorDoorModal,
     setContextMenu,
     setSelection,
+    setSelectedCorridorId,
+    setSelectedCorridorDoor,
     startQuote,
     startWallDraw,
     stopMeasure,
     stopQuote,
     t,
     toSnapshot,
-    updateObject,
-    updateQuoteLabelPos,
-    photoViewer
-  ]);
+	    updateFloorPlan,
+	    updateObject,
+    updateRoom,
+	    updateQuoteLabelPos,
+	    photoViewer
+	  ]);
 
   const objectsByType = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -6076,24 +7161,124 @@ const PlanView = ({ planId }: Props) => {
   ]);
 
   const isUserObject = useCallback((type: string) => type === 'user' || type === 'real_user' || type === 'generic_user', []);
+  const getUserObjectLabel = useCallback(
+    (obj: MapObject) => {
+      const first = String((obj as any).firstName || '').trim();
+      const last = String((obj as any).lastName || '').trim();
+      if (obj.type === 'real_user' && (first || last)) return `${first} ${last}`.trim();
+      const name = String(obj.name || '').trim();
+      return name || t({ it: 'Utente', en: 'User' });
+    },
+    [t]
+  );
 
   const rooms = useMemo(() => renderPlan?.rooms || [], [renderPlan?.rooms]);
+  const corridors = useMemo(() => (renderPlan?.corridors || []) as Corridor[], [renderPlan?.corridors]);
+  const corridorLabelHelpToastId = 'corridor-label-help';
+  const corridorPolyHelpToastId = 'corridor-poly-help';
+  const roomPolyHelpToastId = 'room-poly-help';
+  const roomLabelHelpToastId = 'room-label-help';
+  useEffect(() => {
+    if (isReadOnly || !selectedCorridorId) {
+      toast.dismiss(corridorLabelHelpToastId);
+      return;
+    }
+    const selected = corridors.find((c) => c.id === selectedCorridorId);
+    if (!selected || selected.showName === false || !String(selected.name || '').trim()) {
+      toast.dismiss(corridorLabelHelpToastId);
+      return;
+    }
+    toast.info(
+      t({
+        it: 'Comandi corridoio: trascina etichetta per spostarla, usa + / - per dimensione testo, premi E per rinomina; tasto centrale del mouse sul corridoio = aggiungi punto di snodo.',
+        en: 'Corridor commands: drag label to move, use + / - to resize text, press E to rename; middle mouse button on corridor = add junction point.'
+      }),
+      {
+        id: corridorLabelHelpToastId,
+        duration: Infinity
+      }
+    );
+  }, [corridors, isReadOnly, selectedCorridorId, t]);
+  useEffect(() => {
+    return () => {
+      toast.dismiss(corridorLabelHelpToastId);
+    };
+  }, []);
+  useEffect(() => {
+    if (isReadOnly || corridorDrawMode !== 'poly') {
+      toast.dismiss(corridorPolyHelpToastId);
+      return;
+    }
+    toast.info(
+      t({
+        it:
+          'Disegno corridoio: clicca i vertici del perimetro. Click destro rimuove l’ultimo punto. Esc interrompe il disegno. Invio conclude il corridoio (oppure chiudi tornando sul primo punto).',
+        en:
+          'Corridor drawing: click perimeter vertices. Right click removes the last point. Esc cancels drawing. Enter finalizes the corridor (or close by returning to the first point).'
+      }),
+      {
+        id: corridorPolyHelpToastId,
+        duration: Infinity
+      }
+    );
+  }, [corridorDrawMode, isReadOnly, t]);
+  useEffect(() => {
+    if (isReadOnly || roomDrawMode !== 'poly') {
+      toast.dismiss(roomPolyHelpToastId);
+      return;
+    }
+    toast.info(
+      t({
+        it:
+          'Disegno stanza poligonale: linee orizzontali/verticali di default. Tieni premuto Shift per tracciare linee oblique. Per chiudere il poligono torna sul punto iniziale o premi Invio. Backspace annulla l’ultimo vertice.',
+        en:
+          'Polygon room drawing: horizontal/vertical lines by default. Hold Shift to draw oblique lines. Close the polygon by returning to the starting point or pressing Enter. Backspace removes the last vertex.'
+      }),
+      {
+        id: roomPolyHelpToastId,
+        duration: Infinity
+      }
+    );
+  }, [isReadOnly, roomDrawMode, t]);
+  useEffect(() => {
+    if (isReadOnly || !selectedRoomId || roomDrawMode) {
+      toast.dismiss(roomLabelHelpToastId);
+      return;
+    }
+    toast.info(
+      t({
+        it: 'Stanza selezionata: frecce per spostare la stanza, Shift+frecce per spostare la scritta (alto/basso/sinistra/destra), + / - per dimensione testo.',
+        en: 'Selected room: arrows move the room, Shift+arrows move the label (top/bottom/left/right), + / - changes text size.'
+      }),
+      {
+        id: roomLabelHelpToastId,
+        duration: Infinity
+      }
+    );
+  }, [isReadOnly, roomDrawMode, selectedRoomId, t]);
+  useEffect(() => {
+    return () => {
+      toast.dismiss(corridorPolyHelpToastId);
+      toast.dismiss(roomPolyHelpToastId);
+      toast.dismiss(roomLabelHelpToastId);
+    };
+  }, []);
 
   const paletteFavorites = useAuthStore((s) => (s.user as any)?.paletteFavorites) as string[] | undefined;
   const paletteOrder = useMemo(() => {
     const fav = Array.isArray(paletteFavorites) ? paletteFavorites : [];
-    return fav.filter((id) => !isWallType(id));
-  }, [isWallType, paletteFavorites]);
+    return fav.filter((id) => !isWallType(id) && !isDoorType(id) && !isSecurityTypeId(id));
+  }, [isDoorType, isWallType, paletteFavorites]);
   // User-configured palette: list can be empty (meaning no objects enabled).
   const paletteHasCustom = paletteOrder.length > 0;
   const paletteIsEmpty = Array.isArray(paletteFavorites) && paletteOrder.length === 0;
   const paletteHasMore = useMemo(() => {
     const all = (objectTypeDefs || [])
       .map((d) => d.id)
-      .filter((id) => !isDeskType(id) && !isWallType(id));
+      .filter((id) => !isDeskType(id) && !isWallType(id) && !isDoorType(id) && !isSecurityTypeId(id));
     const fav = new Set(paletteOrder);
     return all.some((id) => !fav.has(id));
-  }, [isWallType, objectTypeDefs, paletteOrder]);
+  }, [isDoorType, isWallType, objectTypeDefs, paletteOrder]);
   const deskTypeSet = useMemo(() => new Set(DESK_TYPE_IDS as readonly string[]), []);
   const deskPaletteDefs = useMemo(() => {
     const defs = objectTypeDefs || [];
@@ -6103,32 +7288,50 @@ const PlanView = ({ planId }: Props) => {
     const filtered = paletteOrder.filter((id) => deskTypeSet.has(id));
     return filtered.length ? filtered : undefined;
   }, [deskTypeSet, paletteOrder]);
+  const securityPaletteDefs = useMemo(() => {
+    const defs = objectTypeDefs || [];
+    return defs.filter((d) => isSecurityTypeId(d.id));
+  }, [objectTypeDefs]);
   const otherPaletteDefs = useMemo(() => {
     const defs = objectTypeDefs || [];
-    return defs.filter((d) => !deskTypeSet.has(d.id) && !isWallType(d.id));
-  }, [deskTypeSet, isWallType, objectTypeDefs]);
-  const [paletteSection, setPaletteSection] = useState<'desks' | 'objects'>('objects');
+    return defs.filter((d) => !deskTypeSet.has(d.id) && !isWallType(d.id) && !isDoorType(d.id) && !isSecurityTypeId(d.id));
+  }, [deskTypeSet, isDoorType, isWallType, objectTypeDefs]);
+  const [paletteSection, setPaletteSection] = useState<'desks' | 'objects' | 'security'>('objects');
   const [annotationsOpen, setAnnotationsOpen] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
   const [desksOpen, setDesksOpen] = useState(false);
   const [objectsOpen, setObjectsOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
 
   useEffect(() => {
     if (paletteSection === 'desks' && !deskPaletteDefs.length) {
       setPaletteSection('objects');
     } else if (paletteSection === 'objects' && !otherPaletteDefs.length && deskPaletteDefs.length) {
       setPaletteSection('desks');
+    } else if (paletteSection === 'objects' && !otherPaletteDefs.length && !deskPaletteDefs.length && securityPaletteDefs.length) {
+      setPaletteSection('security');
+    } else if (paletteSection === 'security' && !securityPaletteDefs.length) {
+      setPaletteSection(otherPaletteDefs.length ? 'objects' : 'desks');
     }
-  }, [deskPaletteDefs.length, otherPaletteDefs.length, paletteSection]);
+  }, [deskPaletteDefs.length, otherPaletteDefs.length, paletteSection, securityPaletteDefs.length]);
 
   useEffect(() => {
     if (!deskPaletteDefs.length) setDesksOpen(false);
     if (!otherPaletteDefs.length) setObjectsOpen(false);
-  }, [deskPaletteDefs.length, otherPaletteDefs.length]);
-  const paletteSettingsSection = paletteSection === 'desks' ? 'desks' : 'objects';
+    if (!securityPaletteDefs.length) setSecurityOpen(false);
+  }, [deskPaletteDefs.length, otherPaletteDefs.length, securityPaletteDefs.length]);
+  const paletteSettingsSection = paletteSection === 'desks' ? 'desks' : paletteSection === 'security' ? 'security' : 'objects';
 
   const addTypeToPalette = useCallback(
     async (typeId: string) => {
+      if (isDoorType(typeId)) {
+        push(t({ it: 'Le porte sono gestite dal catalogo dedicato e non dalla palette.', en: 'Doors are managed in the dedicated catalog, not in the palette.' }), 'info');
+        return;
+      }
+      if (isSecurityTypeId(typeId)) {
+        push(t({ it: 'I dispositivi sicurezza sono nel pannello Sicurezza dedicato.', en: 'Safety devices are managed in the dedicated Safety panel.' }), 'info');
+        return;
+      }
       const user = useAuthStore.getState().user as any;
       const enabled = Array.isArray(user?.paletteFavorites) ? (user.paletteFavorites as string[]) : [];
       if (enabled.includes(typeId)) return;
@@ -6143,7 +7346,7 @@ const PlanView = ({ planId }: Props) => {
         push(t({ it: 'Salvataggio non riuscito', en: 'Save failed' }), 'danger');
       }
     },
-    [push, t]
+    [isDoorType, push, t]
   );
 
   const removeTypeFromPalette = useCallback(
@@ -6200,6 +7403,38 @@ const PlanView = ({ planId }: Props) => {
     roomStatsCacheRef.current = { key, value: map };
     return map;
   }, [isUserObject, renderPlan?.objects]);
+  const corridorDoorLinkRoomEntries = useMemo(() => {
+    const list = (renderPlan?.rooms || []) as Room[];
+    const normalized = corridorDoorLinkQuery.trim().toLowerCase();
+    const nearestRoomId = String(corridorDoorLinkModal?.nearestRoomId || '');
+    const magneticRoomIdSet = new Set((corridorDoorLinkModal?.magneticRoomIds || []).map((id) => String(id)));
+    return list
+      .map((room) => {
+        const stats = roomStatsById.get(room.id) || ({ items: [] as MapObject[], userCount: 0, otherCount: 0, totalCount: 0 } as const);
+        const userObjects = stats.items.filter((obj) => isUserObject(String(obj.type)));
+        const realUsers = userObjects.filter((obj) => String(obj.type) === 'real_user');
+        const userNames = userObjects.map((obj) => getUserObjectLabel(obj)).filter(Boolean);
+        const realUserNames = realUsers.map((obj) => getUserObjectLabel(obj)).filter(Boolean);
+        const search = `${String(room.name || '')} ${userNames.join(' ')} ${realUserNames.join(' ')}`.toLowerCase();
+        return {
+          id: room.id,
+          name: String(room.name || ''),
+          userCount: userObjects.length,
+          realUserCount: realUsers.length,
+          userNames,
+          realUserNames,
+          isNearest: nearestRoomId ? room.id === nearestRoomId : false,
+          isMagnetic: magneticRoomIdSet.has(room.id),
+          search
+        };
+      })
+      .filter((entry) => (!normalized ? true : entry.search.includes(normalized)))
+      .sort((a, b) => {
+        if (a.isNearest !== b.isNearest) return a.isNearest ? -1 : 1;
+        if (a.isMagnetic !== b.isMagnetic) return a.isMagnetic ? -1 : 1;
+        return a.name.localeCompare(b.name, lang === 'it' ? 'it' : 'en', { sensitivity: 'base' });
+      });
+  }, [corridorDoorLinkModal?.magneticRoomIds, corridorDoorLinkModal?.nearestRoomId, corridorDoorLinkQuery, getUserObjectLabel, isUserObject, lang, renderPlan?.rooms, roomStatsById]);
 
   const handleStageMoveStart = useCallback((id: string, x: number, y: number, roomId?: string) => {
     dragStartRef.current.set(id, { x, y, roomId });
@@ -6450,6 +7685,17 @@ const PlanView = ({ planId }: Props) => {
     );
   };
 
+  const beginCorridorPolyDraw = () => {
+    if (isReadOnly) return;
+    setPendingType(null);
+    setRoomDrawMode(null);
+    setCorridorDoorDraft(null);
+    setCorridorQuickMenu(null);
+    setCorridorDrawMode('poly');
+    setRoomsOpen(false);
+    setContextMenu(null);
+  };
+
   const openEditRoom = (roomId: string) => {
     const room = rooms.find((r) => r.id === roomId);
     if (!room || isReadOnly) return;
@@ -6488,6 +7734,528 @@ const PlanView = ({ planId }: Props) => {
     setRoomDrawMode(null);
     setRoomModal({ mode: 'create', kind: 'poly', points });
   };
+
+  const openEditCorridor = useCallback(
+    (corridorId: string) => {
+      const corridor = corridors.find((c) => c.id === corridorId);
+      if (!corridor || isReadOnly) return;
+      setCorridorModal({
+        mode: 'edit',
+        corridorId,
+        initialName: corridor.name || '',
+        initialShowName: corridor.showName !== false
+      });
+      setCorridorNameInput(corridor.name || '');
+      setCorridorShowNameInput(corridor.showName !== false);
+    },
+    [corridors, isReadOnly]
+  );
+
+  const handleCreateCorridorFromPoly = useCallback(
+    (points: { x: number; y: number }[]) => {
+      if (isReadOnly || !plan) return;
+      setCorridorDrawMode(null);
+      const nextIndex = Math.max(1, (plan.corridors || []).length + 1);
+      setCorridorModal({
+        mode: 'create',
+        kind: 'poly',
+        points,
+        initialName: t({ it: `Corridoio ${nextIndex}`, en: `Corridor ${nextIndex}` }),
+        initialShowName: true
+      });
+      setCorridorNameInput(t({ it: `Corridoio ${nextIndex}`, en: `Corridor ${nextIndex}` }));
+      setCorridorShowNameInput(true);
+    },
+    [isReadOnly, plan, t]
+  );
+
+  const saveCorridorModal = useCallback(() => {
+    if (!plan || !corridorModal || isReadOnly) return;
+    const nextName = corridorNameInput.trim() || t({ it: 'Corridoio', en: 'Corridor' });
+    const current = (plan.corridors || []) as Corridor[];
+    if (corridorModal.mode === 'create') {
+      const next: Corridor = {
+        id: nanoid(),
+        name: nextName,
+        showName: corridorShowNameInput,
+        color: '#94a3b8',
+        kind: corridorModal.kind,
+        points: corridorModal.points.map((p) => ({ x: p.x, y: p.y })),
+        doors: [],
+        connections: []
+      };
+      markTouched();
+      updateFloorPlan(plan.id, { corridors: [...current, next] } as any);
+      postAuditEvent({ event: 'corridor_create', scopeType: 'plan', scopeId: plan.id, details: { id: next.id, name: nextName } });
+      setSelectedCorridorId(next.id);
+      push(t({ it: 'Corridoio creato', en: 'Corridor created' }), 'success');
+    } else {
+      const next = current.map((c) => (c.id === corridorModal.corridorId ? { ...c, name: nextName, showName: corridorShowNameInput } : c));
+      markTouched();
+      updateFloorPlan(plan.id, { corridors: next } as any);
+      postAuditEvent({
+        event: 'corridor_update',
+        scopeType: 'plan',
+        scopeId: plan.id,
+        details: { id: corridorModal.corridorId, name: nextName }
+      });
+      push(t({ it: 'Corridoio aggiornato', en: 'Corridor updated' }), 'success');
+    }
+    setCorridorModal(null);
+    setCorridorNameInput('');
+  }, [corridorModal, corridorNameInput, corridorShowNameInput, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
+
+  const openCorridorDoorModal = useCallback(
+    (corridorId: string, doorId: string) => {
+      const corridor = corridors.find((c) => c.id === corridorId);
+      const door = (corridor?.doors || []).find((d) => d.id === doorId);
+      if (!corridor || !door) return;
+      const rawCatalogTypeId = typeof (door as any)?.catalogTypeId === 'string' ? String((door as any).catalogTypeId) : '';
+      const catalogTypeId = defaultDoorCatalogId || (doorTypeIdSet.has(rawCatalogTypeId) ? rawCatalogTypeId : '');
+      const doorType = catalogTypeId ? (objectTypeById.get(catalogTypeId) as ObjectTypeDefinition | undefined) : undefined;
+      const defaultEmergency = !!(doorType as any)?.doorConfig?.isEmergency;
+      setCorridorDoorModal({
+        corridorId,
+        doorId,
+        description: typeof (door as any)?.description === 'string' ? String((door as any).description) : '',
+        isEmergency: typeof (door as any)?.isEmergency === 'boolean' ? !!(door as any).isEmergency : defaultEmergency,
+        isFireDoor: !!(door as any)?.isFireDoor,
+        lastVerificationAt: typeof (door as any)?.lastVerificationAt === 'string' ? String((door as any).lastVerificationAt) : '',
+        verifierCompany: typeof (door as any)?.verifierCompany === 'string' ? String((door as any).verifierCompany) : '',
+        verificationHistory: normalizeDoorVerificationHistory((door as any)?.verificationHistory),
+        mode: door.mode === 'auto_sensor' || door.mode === 'automated' ? door.mode : 'static',
+        automationUrl: String((door as any).automationUrl || '')
+      });
+    },
+    [corridors, defaultDoorCatalogId, doorTypeIdSet, objectTypeById]
+  );
+  const openCorridorDoorLinkModal = useCallback(
+    (corridorId: string, doorId: string) => {
+      const corridor = corridors.find((c) => c.id === corridorId);
+      const door = (corridor?.doors || []).find((d) => d.id === doorId);
+      if (!corridor || !door) return;
+      // Force rooms layer visible for better context while linking door->rooms.
+      setHideAllLayers(planId, false);
+      setVisibleLayerIds(planId, normalizeLayerSelection([...visibleLayerIds, 'rooms']));
+      const availableRooms = (renderPlan?.rooms || []) as Room[];
+      const availableRoomIdSet = new Set(availableRooms.map((room) => room.id));
+      let selectedRoomIds: string[] = Array.isArray((door as any).linkedRoomIds)
+        ? (Array.from(
+            new Set((door as any).linkedRoomIds.map((id: any) => String(id)).filter((id: string) => availableRoomIdSet.has(id)))
+          ) as string[])
+        : [];
+      let nearestRoomId: string | undefined;
+      let magneticRoomIds: string[] = [];
+      if (availableRooms.length) {
+        const anchor = getCorridorEdgePoint(corridor, Number((door as any).edgeIndex), Number((door as any).t));
+        if (anchor) {
+          const getRoomCenter = (room: Room): { x: number; y: number } | null => {
+            const points = getRoomPolygon(room as any);
+            if (points.length >= 3) {
+              const total = points.reduce((acc: { x: number; y: number }, p: { x: number; y: number }) => ({ x: acc.x + p.x, y: acc.y + p.y }), {
+                x: 0,
+                y: 0
+              });
+              return { x: total.x / points.length, y: total.y / points.length };
+            }
+            const x = Number((room as any)?.x || 0);
+            const y = Number((room as any)?.y || 0);
+            const width = Number((room as any)?.width || 0);
+            const height = Number((room as any)?.height || 0);
+            if (width > 0 && height > 0) return { x: x + width / 2, y: y + height / 2 };
+            return null;
+          };
+          const roomByDistance: Array<{ id: string; distSq: number }> = [];
+          for (const room of availableRooms) {
+            const points = getRoomPolygon(room as any);
+            let distSq = Number.POSITIVE_INFINITY;
+            if (points.length >= 2) {
+              for (let i = 0; i < points.length; i += 1) {
+                const a = points[i];
+                const b = points[(i + 1) % points.length];
+                const proj = projectPointToSegment(a, b, anchor);
+                if (proj.distSq < distSq) distSq = proj.distSq;
+              }
+            } else {
+              const center = getRoomCenter(room);
+              if (center) {
+                const dx = center.x - anchor.x;
+                const dy = center.y - anchor.y;
+                distSq = dx * dx + dy * dy;
+              }
+            }
+            if (Number.isFinite(distSq)) roomByDistance.push({ id: room.id, distSq });
+          }
+          roomByDistance.sort((a, b) => a.distSq - b.distSq);
+          nearestRoomId = roomByDistance[0]?.id;
+          const magneticThresholdSq = 18 * 18;
+          magneticRoomIds = roomByDistance.filter((entry) => entry.distSq <= magneticThresholdSq).map((entry) => entry.id);
+          if (!selectedRoomIds.length && nearestRoomId) selectedRoomIds = [nearestRoomId];
+        }
+      }
+      setCorridorDoorLinkModal({ corridorId, doorId, selectedRoomIds, nearestRoomId, magneticRoomIds });
+      setCorridorDoorLinkQuery('');
+    },
+    [
+      corridors,
+      getCorridorEdgePoint,
+      getRoomPolygon,
+      normalizeLayerSelection,
+      planId,
+      projectPointToSegment,
+      renderPlan?.rooms,
+      setHideAllLayers,
+      setVisibleLayerIds,
+      visibleLayerIds
+    ]
+  );
+
+  const saveCorridorDoorModal = useCallback(() => {
+    if (!corridorDoorModal || !plan || isReadOnly) return;
+    const mode = corridorDoorModal.mode;
+    const automationUrl = corridorDoorModal.automationUrl.trim();
+    if (mode === 'automated' && automationUrl && !/^https?:\/\//i.test(automationUrl)) {
+      push(t({ it: 'Inserisci un URL valido (http/https).', en: 'Enter a valid URL (http/https).' }), 'danger');
+      return;
+    }
+    const isEmergency = !!corridorDoorModal.isEmergency;
+    const isFireDoor = !!corridorDoorModal.isFireDoor;
+    const description = corridorDoorModal.description.trim();
+    const lastVerificationAt = corridorDoorModal.lastVerificationAt.trim();
+    const verifierCompany = corridorDoorModal.verifierCompany.trim();
+    let verificationHistory = normalizeDoorVerificationHistory(corridorDoorModal.verificationHistory);
+    if (isEmergency && (lastVerificationAt || verifierCompany)) {
+      const latest = verificationHistory[0];
+      if (!latest || (latest.date || '') !== lastVerificationAt || latest.company !== verifierCompany) {
+        verificationHistory = normalizeDoorVerificationHistory([
+          {
+            id: nanoid(),
+            date: lastVerificationAt || undefined,
+            company: verifierCompany,
+            createdAt: Date.now()
+          },
+          ...verificationHistory
+        ]);
+      }
+    }
+    const current = (plan.corridors || []) as Corridor[];
+    const next = current.map((corridor) => {
+      if (corridor.id !== corridorDoorModal.corridorId) return corridor;
+      return {
+        ...corridor,
+        doors: (corridor.doors || []).map((door) =>
+          door.id === corridorDoorModal.doorId
+            ? {
+                ...door,
+                description: description || undefined,
+                isEmergency,
+                isFireDoor,
+                lastVerificationAt: isEmergency ? lastVerificationAt || undefined : undefined,
+                verifierCompany: isEmergency ? verifierCompany || undefined : undefined,
+                verificationHistory,
+                mode,
+                automationUrl: mode === 'automated' ? automationUrl || undefined : undefined
+              }
+            : door
+        )
+      };
+    });
+    markTouched();
+    updateFloorPlan(plan.id, { corridors: next } as any);
+    push(t({ it: 'Proprietà porta aggiornate', en: 'Door properties updated' }), 'success');
+    setCorridorDoorModal(null);
+  }, [corridorDoorModal, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
+  const saveCorridorDoorLinkModal = useCallback(() => {
+    if (!corridorDoorLinkModal || !plan || isReadOnly) return;
+    const availableRooms = ((renderPlan?.rooms || []) as Room[]).filter(Boolean);
+    const validRoomIds = new Set(availableRooms.map((room) => room.id));
+    const roomNameById = new Map(availableRooms.map((room) => [room.id, String(room.name || '').trim() || t({ it: 'Stanza', en: 'Room' })]));
+    const selectedRoomIds = Array.from(
+      new Set(corridorDoorLinkModal.selectedRoomIds.map((id) => String(id)).filter((id) => validRoomIds.has(id)))
+    );
+    const current = (plan.corridors || []) as Corridor[];
+    const next = current.map((corridor) => {
+      if (corridor.id !== corridorDoorLinkModal.corridorId) return corridor;
+      return {
+        ...corridor,
+        doors: (corridor.doors || []).map((door) =>
+          door.id === corridorDoorLinkModal.doorId
+            ? {
+                ...door,
+                linkedRoomIds: selectedRoomIds
+              }
+            : door
+        )
+      };
+    });
+    markTouched();
+    updateFloorPlan(plan.id, { corridors: next } as any);
+    if (selectedRoomIds.length === 1) {
+      const name = roomNameById.get(selectedRoomIds[0]) || t({ it: 'Stanza', en: 'Room' });
+      push(t({ it: `Porta correttamente collegata con la stanza: "${name}".`, en: `Door successfully linked to room: "${name}".` }), 'success');
+    } else if (selectedRoomIds.length > 1) {
+      push(t({ it: 'Porta correttamente collegata alle stanze selezionate.', en: 'Door successfully linked to selected rooms.' }), 'success');
+    } else {
+      push(t({ it: 'Collegamenti stanza rimossi dalla porta.', en: 'Room links removed from the door.' }), 'info');
+    }
+    setCorridorDoorLinkModal(null);
+  }, [corridorDoorLinkModal, isReadOnly, markTouched, plan, push, renderPlan?.rooms, t, updateFloorPlan]);
+
+  const updateCorridorLabelScale = useCallback(
+    (corridorId: string, delta: number) => {
+      if (isReadOnly || !plan || !corridorId || !Number.isFinite(delta)) return;
+      const current = (plan.corridors || []) as Corridor[];
+      const next = current.map((corridor) => {
+        if (corridor.id !== corridorId) return corridor;
+        const currentScale = Number.isFinite(Number((corridor as any).labelScale)) ? Number((corridor as any).labelScale) : 1;
+        const nextScale = Math.max(0.6, Math.min(3, Number((currentScale + delta).toFixed(2))));
+        return { ...corridor, labelScale: nextScale };
+      });
+      markTouched();
+      updateFloorPlan(plan.id, { corridors: next } as any);
+    },
+    [isReadOnly, markTouched, plan, updateFloorPlan]
+  );
+
+  useEffect(() => {
+    if (!selectedCorridorId || isReadOnly) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTyping = tag === 'input' || tag === 'textarea' || target?.isContentEditable;
+      if (isTyping) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'e') {
+        e.preventDefault();
+        openEditCorridor(selectedCorridorId);
+        return;
+      }
+      if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') {
+        e.preventDefault();
+        updateCorridorLabelScale(selectedCorridorId, 0.1);
+        return;
+      }
+      if (e.key === '-' || e.code === 'NumpadSubtract') {
+        e.preventDefault();
+        updateCorridorLabelScale(selectedCorridorId, -0.1);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isReadOnly, openEditCorridor, selectedCorridorId, updateCorridorLabelScale]);
+
+  const startCorridorDoorDraw = useCallback(
+    (corridorId: string) => {
+      if (isReadOnly) return;
+      setCorridorDoorDraft({ corridorId });
+      setCorridorQuickMenu(null);
+      setSelectedCorridorDoor(null);
+      setSelectedCorridorId(corridorId);
+      push(
+        t({
+          it: 'Seleziona un punto sul bordo del corridoio per inserire una porta.',
+          en: 'Select a point on the corridor perimeter to place a door.'
+        }),
+        'info'
+      );
+    },
+    [isReadOnly, push, t]
+  );
+
+  const insertCorridorJunctionPoint = useCallback(
+    (corridorId: string, worldPoint: { x: number; y: number }) => {
+      if (isReadOnly || !plan) return;
+      const current = (plan.corridors || []) as Corridor[];
+      const target = current.find((c) => c.id === corridorId);
+      if (!target) return;
+      const basePoints = getCorridorPolygon(target);
+      if (basePoints.length < 3) return;
+      const anchor = getClosestCorridorEdge(target, worldPoint);
+      if (!anchor) return;
+      const splitT = Number(anchor.t);
+      // Avoid creating duplicate vertices too close to edge endpoints.
+      if (!Number.isFinite(splitT) || splitT <= 0.02 || splitT >= 0.98) {
+        push(
+          t({
+            it: 'Punto troppo vicino a un vertice esistente.',
+            en: 'Point is too close to an existing vertex.'
+          }),
+          'info'
+        );
+        return;
+      }
+      const insertIndex = Number(anchor.edgeIndex) + 1;
+      const newPoint = { x: Number(anchor.x.toFixed(3)), y: Number(anchor.y.toFixed(3)) };
+      const nextPoints = [...basePoints.slice(0, insertIndex), newPoint, ...basePoints.slice(insertIndex)];
+      const edgeCount = basePoints.length;
+      const remapEdgeRef = (edgeIndexRaw: any, tRaw: any) => {
+        const edgeIndex = ((Math.floor(Number(edgeIndexRaw) || 0) % edgeCount) + edgeCount) % edgeCount;
+        const rawT = Number(tRaw);
+        const tVal = Number.isFinite(rawT) ? Math.max(0, Math.min(1, rawT)) : 0;
+        if (edgeIndex < Number(anchor.edgeIndex)) return { edgeIndex, t: tVal };
+        if (edgeIndex > Number(anchor.edgeIndex)) return { edgeIndex: edgeIndex + 1, t: tVal };
+        if (tVal <= splitT) {
+          const den = splitT;
+          return { edgeIndex, t: den > 0.000001 ? tVal / den : 0 };
+        }
+        const den = 1 - splitT;
+        return { edgeIndex: edgeIndex + 1, t: den > 0.000001 ? (tVal - splitT) / den : 1 };
+      };
+      const getEdgePointOnPoints = (points: { x: number; y: number }[], edgeIndex: number, tVal: number) => {
+        if (!points.length) return null;
+        const idx = ((Math.floor(edgeIndex) % points.length) + points.length) % points.length;
+        const a = points[idx];
+        const b = points[(idx + 1) % points.length];
+        if (!a || !b) return null;
+        const ratio = Math.max(0, Math.min(1, tVal));
+        return { x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio };
+      };
+      const next = current.map((corridor) => {
+        if (corridor.id !== corridorId) return corridor;
+        const doors = (corridor.doors || []).map((door) => {
+          const start = remapEdgeRef(door.edgeIndex, door.t);
+          const hasEnd = Number.isFinite(Number((door as any).edgeIndexTo)) && Number.isFinite(Number((door as any).tTo));
+          const end = hasEnd ? remapEdgeRef((door as any).edgeIndexTo, (door as any).tTo) : null;
+          return {
+            ...door,
+            edgeIndex: start.edgeIndex,
+            t: Number(start.t.toFixed(4)),
+            edgeIndexTo: end ? end.edgeIndex : undefined,
+            tTo: end ? Number(end.t.toFixed(4)) : undefined
+          };
+        });
+        const connections = (corridor.connections || []).map((cp) => {
+          const mapped = remapEdgeRef(cp.edgeIndex, cp.t);
+          const pt = getEdgePointOnPoints(nextPoints, mapped.edgeIndex, mapped.t);
+          return {
+            ...cp,
+            edgeIndex: mapped.edgeIndex,
+            t: Number(mapped.t.toFixed(4)),
+            x: pt ? Number(pt.x.toFixed(3)) : (cp as any).x,
+            y: pt ? Number(pt.y.toFixed(3)) : (cp as any).y
+          };
+        });
+        return {
+          ...corridor,
+          kind: 'poly' as const,
+          points: nextPoints,
+          doors,
+          connections
+        };
+      });
+      markTouched();
+      updateFloorPlan(plan.id, { corridors: next } as any);
+      push(
+        t({
+          it: 'Punto di snodo inserito nel perimetro del corridoio.',
+          en: 'Junction point inserted on corridor perimeter.'
+        }),
+        'success'
+      );
+    },
+    [getClosestCorridorEdge, getCorridorPolygon, isReadOnly, markTouched, plan, push, t, updateFloorPlan]
+  );
+
+  const openCorridorConnectionModalAt = useCallback(
+    (corridorId: string, point: { x: number; y: number }) => {
+      const corridor = corridors.find((c) => c.id === corridorId);
+      if (!corridor) return;
+      const anchor = getClosestCorridorEdge(corridor, point);
+      if (!anchor) return;
+      setCorridorConnectionModal({
+        connectionId: null,
+        corridorId,
+        edgeIndex: anchor.edgeIndex,
+        t: Number(anchor.t.toFixed(4)),
+        x: Number(point.x.toFixed(3)),
+        y: Number(point.y.toFixed(3)),
+        selectedPlanIds: [],
+        transitionType: 'stairs'
+      });
+    },
+    [corridors, getClosestCorridorEdge]
+  );
+
+  const openEditCorridorConnectionModal = useCallback(
+    (corridorId: string, connectionId: string, point?: { x: number; y: number }) => {
+      const corridor = corridors.find((c) => c.id === corridorId);
+      if (!corridor) return;
+      const connection = (corridor.connections || []).find((cp) => cp.id === connectionId);
+      if (!connection) return;
+      const fallbackPoint =
+        point ||
+        (Number.isFinite(Number((connection as any).x)) && Number.isFinite(Number((connection as any).y))
+          ? { x: Number((connection as any).x), y: Number((connection as any).y) }
+          : getCorridorEdgePoint(corridor, Number(connection.edgeIndex), Number(connection.t)));
+      if (!fallbackPoint) return;
+      const anchor = getClosestCorridorEdge(corridor, fallbackPoint);
+      if (!anchor) return;
+      setCorridorConnectionModal({
+        connectionId,
+        corridorId,
+        edgeIndex: Number(anchor.edgeIndex),
+        t: Number(anchor.t.toFixed(4)),
+        x: Number(fallbackPoint.x.toFixed(3)),
+        y: Number(fallbackPoint.y.toFixed(3)),
+        selectedPlanIds: Array.from(new Set((connection.planIds || []).filter(Boolean))),
+        transitionType: (connection as any)?.transitionType === 'elevator' ? 'elevator' : 'stairs'
+      });
+    },
+    [corridors, getClosestCorridorEdge, getCorridorEdgePoint]
+  );
+
+  const saveCorridorConnectionModal = useCallback(() => {
+    if (!plan || !corridorConnectionModal || isReadOnly) return;
+    const selectedPlanIds = Array.from(new Set(corridorConnectionModal.selectedPlanIds.filter(Boolean)));
+    const current = (plan.corridors || []) as Corridor[];
+    const isEdit = !!corridorConnectionModal.connectionId;
+    const next = current.map((c) => {
+      if (c.id !== corridorConnectionModal.corridorId) return c;
+      const prevConnections = Array.isArray(c.connections) ? c.connections : [];
+      const payload = {
+        edgeIndex: corridorConnectionModal.edgeIndex,
+        t: corridorConnectionModal.t,
+        planIds: selectedPlanIds,
+        x: corridorConnectionModal.x,
+        y: corridorConnectionModal.y,
+        transitionType: corridorConnectionModal.transitionType === 'elevator' ? 'elevator' : 'stairs'
+      };
+      if (isEdit) {
+        const connectionId = String(corridorConnectionModal.connectionId);
+        let found = false;
+        const updated = prevConnections.map((cp) => {
+          if (cp.id !== connectionId) return cp;
+          found = true;
+          return { ...cp, ...payload };
+        });
+        return {
+          ...c,
+          connections: found ? updated : [...updated, { id: connectionId, ...payload }]
+        };
+      }
+      return {
+        ...c,
+        connections: [
+          ...prevConnections,
+          {
+            id: nanoid(),
+            ...payload
+          }
+        ]
+      };
+    });
+    markTouched();
+    updateFloorPlan(plan.id, { corridors: next } as any);
+    push(
+      isEdit
+        ? t({ it: 'Punto di collegamento aggiornato', en: 'Connection point updated' })
+        : t({ it: 'Punto di collegamento creato', en: 'Connection point created' }),
+      'success'
+    );
+    setCorridorConnectionModal(null);
+  }, [corridorConnectionModal, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
 
   const openRoomWallTypes = useCallback(
     (payload: { roomId: string; roomName: string; kind: 'rect' | 'poly'; rect?: { x: number; y: number; width: number; height: number }; points?: { x: number; y: number }[] }) => {
@@ -6658,6 +8426,12 @@ const PlanView = ({ planId }: Props) => {
   const handleCreate = (payload: {
     name: string;
     description?: string;
+    notes?: string;
+    lastVerificationAt?: string;
+    verifierCompany?: string;
+    gpsCoords?: string;
+    securityDocuments?: any[];
+    securityCheckHistory?: any[];
     layerIds?: string[];
     customValues?: Record<string, any>;
     scale?: number;
@@ -6689,6 +8463,8 @@ const PlanView = ({ planId }: Props) => {
     wifiCatalogId?: string;
     wifiShowRange?: boolean;
     wifiRangeScale?: number;
+    ip?: string;
+    url?: string;
   }) => {
     if (!plan || !modalState || isReadOnly) return;
     if (modalState.mode === 'create') {
@@ -6757,7 +8533,15 @@ const PlanView = ({ planId }: Props) => {
               imageWidth: payload.imageWidth,
               imageHeight: payload.imageHeight
             }
-          : {})
+          : {}),
+        ...(payload.ip !== undefined ? { ip: payload.ip } : {}),
+        ...(payload.url !== undefined ? { url: payload.url } : {}),
+        ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
+        ...(payload.lastVerificationAt !== undefined ? { lastVerificationAt: payload.lastVerificationAt } : {}),
+        ...(payload.verifierCompany !== undefined ? { verifierCompany: payload.verifierCompany } : {}),
+        ...(payload.gpsCoords !== undefined ? { gpsCoords: payload.gpsCoords } : {}),
+        ...(payload.securityDocuments !== undefined ? { securityDocuments: payload.securityDocuments } : {}),
+        ...(payload.securityCheckHistory !== undefined ? { securityCheckHistory: payload.securityCheckHistory } : {})
       };
       const fallbackLayerIds =
         modalState.type === 'quote' ? ['quotes'] : (getTypeLayerIds(modalState.type) || inferDefaultLayerIds(modalState.type, layerIdSet));
@@ -6872,7 +8656,15 @@ const PlanView = ({ planId }: Props) => {
               imageWidth: payload.imageWidth ?? (base as any).imageWidth,
               imageHeight: payload.imageHeight ?? (base as any).imageHeight
             }
-          : {})
+          : {}),
+        ip: payload.ip ?? (base as any)?.ip,
+        url: payload.url ?? (base as any)?.url,
+        notes: payload.notes ?? (base as any)?.notes,
+        lastVerificationAt: payload.lastVerificationAt ?? (base as any)?.lastVerificationAt,
+        verifierCompany: payload.verifierCompany ?? (base as any)?.verifierCompany,
+        gpsCoords: payload.gpsCoords ?? (base as any)?.gpsCoords,
+        securityDocuments: payload.securityDocuments ?? (base as any)?.securityDocuments,
+        securityCheckHistory: payload.securityCheckHistory ?? (base as any)?.securityCheckHistory
       };
       const layerIds =
         base?.type === 'quote'
@@ -7069,6 +8861,12 @@ const PlanView = ({ planId }: Props) => {
   const handleUpdate = (payload: {
     name: string;
     description?: string;
+    notes?: string;
+    lastVerificationAt?: string;
+    verifierCompany?: string;
+    gpsCoords?: string;
+    securityDocuments?: any[];
+    securityCheckHistory?: any[];
     layerIds?: string[];
     customValues?: Record<string, any>;
     scale?: number;
@@ -7100,6 +8898,8 @@ const PlanView = ({ planId }: Props) => {
     wifiCatalogId?: string;
     wifiShowRange?: boolean;
     wifiRangeScale?: number;
+    ip?: string;
+    url?: string;
   }) => {
     if (!modalState || modalState.mode !== 'edit' || isReadOnly) return;
     markTouched();
@@ -7144,6 +8944,14 @@ const PlanView = ({ planId }: Props) => {
     updateObject(modalState.objectId, {
       name: payload.name,
       description: payload.description,
+      ...(payload.notes !== undefined ? { notes: payload.notes } : {}),
+      ...(payload.lastVerificationAt !== undefined ? { lastVerificationAt: payload.lastVerificationAt } : {}),
+      ...(payload.verifierCompany !== undefined ? { verifierCompany: payload.verifierCompany } : {}),
+      ...(payload.gpsCoords !== undefined ? { gpsCoords: payload.gpsCoords } : {}),
+      ...(payload.securityDocuments !== undefined ? { securityDocuments: payload.securityDocuments } : {}),
+      ...(payload.securityCheckHistory !== undefined ? { securityCheckHistory: payload.securityCheckHistory } : {}),
+      ...(payload.ip !== undefined ? { ip: payload.ip } : {}),
+      ...(payload.url !== undefined ? { url: payload.url } : {}),
       layerIds: isQuote ? ['quotes'] : (payload.layerIds ?? obj?.layerIds),
       ...(payload.scale !== undefined ? { scale: Math.max(0.2, Math.min(2.4, Number(payload.scale) || 1)) } : {}),
       ...(isQuote && payload.quoteLabelScale !== undefined
@@ -7474,6 +9282,16 @@ const PlanView = ({ planId }: Props) => {
               wifiShowRange: true,
               wifiRangeScale: 1
             }
+          : {}),
+        ...(isSecurityTypeId(modalState.type)
+          ? {
+              notes: '',
+              lastVerificationAt: '',
+              verifierCompany: '',
+              gpsCoords: '',
+              securityDocuments: [],
+              securityCheckHistory: []
+            }
           : {})
       };
     }
@@ -7507,6 +9325,14 @@ const PlanView = ({ planId }: Props) => {
       imageUrl: (obj as any).imageUrl,
       imageWidth: (obj as any).imageWidth,
       imageHeight: (obj as any).imageHeight,
+      ip: (obj as any).ip,
+      url: (obj as any).url,
+      notes: (obj as any).notes,
+      lastVerificationAt: (obj as any).lastVerificationAt,
+      verifierCompany: (obj as any).verifierCompany,
+      gpsCoords: (obj as any).gpsCoords,
+      securityDocuments: (obj as any).securityDocuments,
+      securityCheckHistory: (obj as any).securityCheckHistory,
         ...(obj.type === 'wifi'
           ? {
             wifiDb: (obj as any).wifiDb,
@@ -7594,6 +9420,10 @@ const PlanView = ({ planId }: Props) => {
     });
   }, [basePlan.views]);
   const showPrintArea = !!(showPrintAreaByPlan as any)?.[basePlan.id];
+  const corridorConnectionTargetPlans = useMemo(
+    () => ((site?.floorPlans || []) as FloorPlan[]).filter((p) => p.id !== planId),
+    [planId, site?.floorPlans]
+  );
 
   const linksInSelection = useMemo(() => {
     const planLinks = ((basePlan as any)?.links || []) as PlanLink[];
@@ -8437,11 +10267,34 @@ const PlanView = ({ planId }: Props) => {
               }}
             />
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => performUndo()}
-              disabled={!canUndo || isReadOnly}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+	          <button
+	            onClick={() => {
+	              dismissSelectionHintToasts();
+	              setInternalMapOpen(true);
+	            }}
+	            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-card hover:bg-slate-50"
+	            title={t({
+	              it: 'Mappa interna guidata (3 passi): 1) scegli punto A, 2) scegli punto B, 3) calcola percorso nei corridoi. Supporta ricerca utenti/oggetti/stanze.',
+	              en: 'Guided internal map (3 steps): 1) set point A, 2) set point B, 3) compute corridor route. Supports user/object/room search.'
+	            })}
+	          >
+	            <Footprints size={15} />
+	          </button>
+	          <button
+	            onClick={() => setRevisionsOpen(true)}
+	            title={t({
+	              it: 'Time machine: apri la cronologia revisioni della planimetria, confronta versioni e ripristina uno stato precedente.',
+	              en: 'Time machine: open floor-plan revision history, compare versions, and restore a previous state.'
+	            })}
+	            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
+	          >
+	            <History size={18} />
+	          </button>
+	          <div className="flex items-center gap-2">
+	            <button
+	              onClick={() => performUndo()}
+	              disabled={!canUndo || isReadOnly}
+	              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={t({ it: 'Annulla (Ctrl/Cmd+Z)', en: 'Undo (Ctrl/Cmd+Z)' })}
             >
               <Undo2 size={16} />
@@ -8485,26 +10338,11 @@ const PlanView = ({ planId }: Props) => {
                   : 'border-slate-200 bg-white text-slate-400 opacity-60'
               }`}
             >
-              <Save size={18} />
-            </button>
-          ) : null}
-	          {/* Presentation button moved to the in-canvas toolbar (under "VD"). */}
-          <button
-            onClick={() => setRevisionsOpen(true)}
-            title={t({ it: 'Time machine', en: 'Time machine' })}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
-          >
-            <History size={18} />
-          </button>
-          <div className="relative">
-            <button
-              onClick={() => setViewsMenuOpen((v) => !v)}
-              disabled={isReadOnly}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50 disabled:opacity-60"
-              title={t({ it: 'Viste', en: 'Views' })}
-            >
-              <Eye size={18} className="text-slate-700" />
-            </button>
+	              <Save size={18} />
+	            </button>
+	          ) : null}
+		          {/* Presentation button moved to the in-canvas toolbar (under "VD"). */}
+	          <div className="relative">
             {viewsMenuOpen ? (
               <div className="absolute right-0 z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-2 shadow-card">
                 <div className="flex items-center justify-between px-2 pb-2">
@@ -8546,9 +10384,9 @@ const PlanView = ({ planId }: Props) => {
 	                      >
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-ink">{view.name}</div>
-                          {view.description ? (
-                            <div className="truncate text-xs text-slate-500">{view.description}</div>
-                          ) : null}
+	                          {view.description ? (
+	                            <div className="truncate text-xs text-slate-500">{view.description}</div>
+	                          ) : null}
                         </div>
                       </button>
                       <div className="flex items-center gap-1">
@@ -8561,6 +10399,16 @@ const PlanView = ({ planId }: Props) => {
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-white"
                         >
                           <Star size={14} className={view.isDefault ? 'text-amber-500' : 'text-slate-400'} />
+                        </button>
+                        <button
+                          title={t({ it: 'Sovrascrivi con vista attuale', en: 'Overwrite with current view' })}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOverwriteView(view);
+                          }}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                        >
+                          <Save size={14} />
                         </button>
                         <button
                           title={t({ it: 'Elimina vista', en: 'Delete view' })}
@@ -8596,15 +10444,18 @@ const PlanView = ({ planId }: Props) => {
             ) : null}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <div ref={gridMenuRef} className="relative">
-              <button
-                onClick={() => setGridMenuOpen((v) => !v)}
-                title={t({ it: 'Griglia', en: 'Grid' })}
-                className={`flex h-10 w-10 items-center justify-center rounded-xl border bg-white shadow-card hover:bg-slate-50 ${
-                  gridMenuOpen ? 'border-primary text-primary' : 'border-slate-200 text-ink'
-                }`}
-              >
-                <LayoutGrid size={18} />
+	            <div ref={gridMenuRef} className="relative">
+	              <button
+	                onClick={() => setGridMenuOpen((v) => !v)}
+	                title={t({
+                    it: 'Griglia: attiva/disattiva overlay, snap ai punti e step di aggancio per posizionamenti precisi.',
+                    en: 'Grid: toggle overlay, snap-to-grid, and step spacing for precise placement.'
+                  })}
+	                className={`flex h-10 w-10 items-center justify-center rounded-xl border bg-white shadow-card hover:bg-slate-50 ${
+	                  gridMenuOpen ? 'border-primary text-primary' : 'border-slate-200 text-ink'
+	                }`}
+	              >
+	                <LayoutGrid size={18} />
               </button>
               {gridMenuOpen ? (
                 <div className="absolute right-0 z-50 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
@@ -8679,11 +10530,15 @@ const PlanView = ({ planId }: Props) => {
 	              <Ruler size={18} />
 	            </button>
 	            <PrinterMenuButton
-	              isReadOnly={isReadOnly}
-	              hasPrintArea={!!(basePlan as any)?.printArea}
-	              onSetPrintArea={() => {
-	                setPrintAreaMode(true);
-	                push(
+		              isReadOnly={isReadOnly}
+		              hasPrintArea={!!(basePlan as any)?.printArea}
+                  triggerTitle={t({
+                    it: 'Stampa: imposta area di stampa, rimuovi area o esporta PDF della planimetria.',
+                    en: 'Print: set print area, clear print area, or export floor plan to PDF.'
+                  })}
+		              onSetPrintArea={() => {
+		                setPrintAreaMode(true);
+		                push(
 	                  t({
 	                    it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
 	                    en: 'Draw a rectangle on the map to set the print area.'
@@ -8703,7 +10558,7 @@ const PlanView = ({ planId }: Props) => {
 		      </div>
 
 	      <div className="flex-1 min-h-0">
-	        <div className="relative flex h-full min-h-0 gap-4 overflow-hidden">
+	        <div className={`relative flex h-full min-h-0 overflow-hidden ${presentationMode ? 'gap-0' : 'gap-4'}`}>
 	        <div className="flex-1 min-w-0 min-h-0">
 	            <div
                 className={`relative h-full min-h-0 w-full ${panToolActive ? 'cursor-grab active:cursor-grabbing' : ''}`}
@@ -8736,26 +10591,140 @@ const PlanView = ({ planId }: Props) => {
                     </div>
                   </div>
                 ) : null}
+                {webcamGesturesEnabled && presentationMode && webcamGuideVisible ? (
+                  <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center px-4">
+                    <div className="w-full max-w-md rounded-2xl border border-sky-200 bg-white/95 p-4 shadow-2xl backdrop-blur">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                        {t({ it: 'Assistente Webcam', en: 'Webcam Assistant' })}
+                      </div>
+                      <div className="mt-1 text-base font-semibold text-slate-900">
+                        {webcamGuideStep === 'enable'
+                          ? t({ it: '1. Clicca sull’icona webcam', en: '1. Click the webcam icon' })
+                          : webcamGuideStep === 'calibrate'
+                            ? t({ it: '2. Calibrazione in corso', en: '2. Calibration in progress' })
+                            : webcamGuideStep === 'pan'
+                              ? t({ it: '3. Prova il gesto PAN', en: '3. Try the PAN gesture' })
+                              : webcamGuideStep === 'open'
+                                ? t({ it: '4. Prova il gesto mano aperta', en: '4. Try the open-hand gesture' })
+                                : t({ it: 'Configurazione completata', en: 'Setup completed' })}
+                      </div>
+                      <div className="mt-1 text-sm text-slate-700">
+                        {webcamGuideStep === 'enable'
+                          ? t({
+                              it: 'Premi il pulsante videocamera nella barra per iniziare. Se necessario, autorizza l’accesso alla webcam.',
+                              en: 'Press the camera button in the toolbar to start. If needed, allow webcam access.'
+                            })
+                          : webcamGuideStep === 'calibrate'
+                            ? t({
+                                it: 'Mostra una mano e fai pinch (pollice + indice) tenendolo fermo per circa 1 secondo.',
+                                en: 'Show one hand and pinch (thumb + index), keeping it steady for about 1 second.'
+                              })
+                            : webcamGuideStep === 'pan'
+                              ? t({
+                                  it: 'Tieni la mano aperta con dita ravvicinate e spostala lentamente per muovere la planimetria.',
+                                  en: 'Keep your hand open with close fingers and move slowly to pan the floor plan.'
+                                })
+                              : webcamGuideStep === 'open'
+                                ? t({
+                                    it: 'Apri la mano a “5” e tienila ferma per un attimo: la vista torna alla posizione predefinita.',
+                                    en: 'Open your hand like “5” and hold briefly: the view returns to default.'
+                                  })
+                                : t({
+                                    it: 'Ottimo. I controlli gesture sono pronti. Puoi continuare a usare pan e reset vista.',
+                                    en: 'Great. Gesture controls are ready. You can keep using pan and view reset.'
+                                  })}
+                      </div>
+                      <div className="mt-3 flex items-center justify-center">
+                        {webcamGuideStep === 'calibrate' ? (
+                          <svg viewBox="0 0 240 88" className="h-20 w-full max-w-[280px]" aria-hidden="true">
+                            <rect x="2" y="2" width="236" height="84" rx="14" fill="#eff6ff" stroke="#bfdbfe" />
+                            <circle cx="82" cy="44" r="18" fill="#dbeafe" stroke="#60a5fa" strokeWidth="2" />
+                            <circle cx="158" cy="44" r="18" fill="#dbeafe" stroke="#60a5fa" strokeWidth="2" />
+                            <path d="M102 44 H138" stroke="#0ea5e9" strokeWidth="4" strokeLinecap="round" strokeDasharray="5 4" />
+                            <path d="M113 34 L102 44 L113 54" fill="none" stroke="#0ea5e9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M127 34 L138 44 L127 54" fill="none" stroke="#0ea5e9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            <text x="120" y="77" textAnchor="middle" fontSize="11" fill="#0369a1" fontWeight="700">
+                              PINCH: avvicina pollice e indice
+                            </text>
+                          </svg>
+                        ) : webcamGuideStep === 'pan' ? (
+                          <svg viewBox="0 0 240 88" className="h-20 w-full max-w-[280px]" aria-hidden="true">
+                            <rect x="2" y="2" width="236" height="84" rx="14" fill="#ecfeff" stroke="#a5f3fc" />
+                            <rect x="95" y="22" width="50" height="44" rx="18" fill="#cffafe" stroke="#06b6d4" strokeWidth="2" />
+                            <path d="M62 44 H178" stroke="#0891b2" strokeWidth="4" strokeLinecap="round" />
+                            <path d="M72 34 L62 44 L72 54" fill="none" stroke="#0891b2" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M168 34 L178 44 L168 54" fill="none" stroke="#0891b2" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            <text x="120" y="77" textAnchor="middle" fontSize="11" fill="#0e7490" fontWeight="700">
+                              PAN: muovi la mano lentamente
+                            </text>
+                          </svg>
+                        ) : webcamGuideStep === 'open' ? (
+                          <svg viewBox="0 0 240 88" className="h-20 w-full max-w-[280px]" aria-hidden="true">
+                            <rect x="2" y="2" width="236" height="84" rx="14" fill="#f0fdf4" stroke="#bbf7d0" />
+                            <rect x="100" y="26" width="40" height="40" rx="16" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="78" y="16" width="10" height="28" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="94" y="12" width="10" height="30" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="110" y="10" width="10" height="32" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="126" y="12" width="10" height="30" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <rect x="142" y="16" width="10" height="28" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
+                            <text x="120" y="77" textAnchor="middle" fontSize="11" fill="#15803d" fontWeight="700">
+                              MANO APERTA: reset vista default
+                            </text>
+                          </svg>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 space-y-2 text-xs">
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${presentationWebcamEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Webcam attiva', en: 'Webcam enabled' })}</span>
+                          <span>{presentationWebcamEnabled ? '✓' : '•'}</span>
+                        </div>
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${presentationWebcamCalib ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Calibrazione', en: 'Calibration' })}</span>
+                          <span>{presentationWebcamCalib ? '✓' : `${Math.max(0, Math.min(100, Math.round(webcamCalibrationProgress || 0)))}%`}</span>
+                        </div>
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamCalibrationPinchSeen ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Pinch rilevato', en: 'Pinch detected' })}</span>
+                          <span>{webcamCalibrationPinchSeen ? '✓' : '•'}</span>
+                        </div>
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamGuidePanDone ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Gesto PAN', en: 'PAN gesture' })}</span>
+                          <span>{webcamGuidePanDone ? '✓' : '•'}</span>
+                        </div>
+                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamGuideOpenDone ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          <span>{t({ it: 'Gesto mano aperta', en: 'Open-hand gesture' })}</span>
+                          <span>{webcamGuideOpenDone ? '✓' : '•'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 	                        <CanvasStage
 	                        ref={canvasStageRef}
 	                        containerRef={mapRef}
 	                        presentationMode={presentationMode}
-	                        onTogglePresentation={() => togglePresentationMode?.()}
+	                        onTogglePresentation={() => handleTogglePresentation()}
+	                        webcamEnabled={false}
+	                        webcamReady={false}
+                          webcamHandDetected={false}
+	                        onToggleWebcam={undefined}
+	                        onCalibrateWebcam={undefined}
 	                        plan={(canvasPlan || renderPlan) as any}
 	                        selectedId={selectedObjectId}
 	                        selectedIds={selectedObjectIds}
 	                    selectedRoomId={selectedRoomId}
                       selectedRoomIds={selectedRoomIds}
+                      selectedCorridorId={selectedCorridorId}
 	                    selectedLinkId={selectedLinkId}
 				                highlightId={highlight?.objectId}
 				                highlightUntil={highlight?.until}
 	                    highlightRoomId={highlightRoom?.roomId}
 	                    highlightRoomUntil={highlightRoom?.until}
 				                pendingType={pendingType}
-				                readOnly={isReadOnly}
+				                readOnly={isReadOnly || presentationMode}
                         panToolActive={panToolActive}
                         onTogglePanTool={() => setPanToolActive((v) => !v)}
 	                    roomDrawMode={roomDrawMode}
+                      corridorDrawMode={corridorDrawMode}
                       printArea={(basePlan as any)?.printArea || null}
                       printAreaMode={printAreaMode}
                       showPrintArea={showPrintArea}
@@ -8794,21 +10763,48 @@ const PlanView = ({ planId }: Props) => {
                         setPrintAreaMode(false);
                         push(t({ it: 'Area di stampa impostata correttamente', en: 'Print area set successfully' }), 'success');
                       }}
+                      safetyCard={{
+                        visible: securityLayerVisible,
+                        x: safetyCardPos.x,
+                        y: safetyCardPos.y,
+                        w: safetyCardSize.w,
+                        h: safetyCardSize.h,
+                        fontSize: safetyCardFontSize,
+                        fontIndex: safetyCardFontIndex,
+                        colorIndex: safetyCardColorIndex,
+                        textBgIndex: safetyCardTextBgIndex,
+                        title: t({ it: 'Scheda sicurezza', en: 'Safety card' }),
+                        numbersLabel: t({ it: 'Numeri utili', en: 'Emergency numbers' }),
+                        pointsLabel: t({ it: 'Punti di ritrovo', en: 'Meeting points' }),
+                        numbersText: safetyNumbersInline,
+                        pointsText: safetyPointsInline,
+                        noNumbersText: t({ it: 'Nessun numero', en: 'No numbers' }),
+                        noPointsText: t({ it: 'Nessun punto', en: 'No points' })
+                      }}
+                      onSafetyCardChange={handleSafetyCardChange}
+                      onSafetyCardContextMenu={handleSafetyCardContextMenu}
+                      onSafetyCardDoubleClick={() => {
+                        if (!client?.id) return;
+                        setEmergencyContactsOpen(true);
+                      }}
 	                    objectTypeIcons={objectTypeIcons}
                       snapEnabled={gridSnapEnabled}
                       gridSize={gridSize}
                       showGrid={showGrid}
-				                zoom={zoom}
-				                pan={pan}
-				                autoFit={autoFitEnabled && !hasDefaultView}
+					                zoom={zoom}
+					                pan={pan}
+					                autoFit={autoFitEnabled && !hasDefaultView}
+                      hasDefaultView={hasDefaultView}
+                      onToggleViewsMenu={() => setViewsMenuOpen((v) => !v)}
                       perfEnabled={perfEnabled}
-			                onZoomChange={handleZoomChange}
+				                onZoomChange={handleZoomChange}
 			                onPanChange={handlePanChange}
 					                onSelect={handleStageSelect}
                       roomStatsById={roomStatsById}
                       onSelectRooms={(ids) => {
                         setSelectedRoomIds(ids);
                         setSelectedRoomId(ids.length === 1 ? ids[0] : undefined);
+                        setSelectedCorridorId(undefined);
                       }}
 	                    onSelectLink={(id) => {
 	                      if (!id) {
@@ -8822,6 +10818,7 @@ const PlanView = ({ planId }: Props) => {
 	                        clearSelection();
 	                        setSelectedRoomId(undefined);
                         setSelectedRoomIds([]);
+                        setSelectedCorridorId(undefined);
 	                        return;
 	                      }
 	                      setSelectedLinkId(id || null);
@@ -8829,9 +10826,11 @@ const PlanView = ({ planId }: Props) => {
 	                      clearSelection();
 	                      setSelectedRoomId(undefined);
                       setSelectedRoomIds([]);
+                      setSelectedCorridorId(undefined);
 	                    }}
 	                    onSelectMany={(ids) => {
                       setSelectedLinkId(null);
+                      setSelectedCorridorId(undefined);
 	                    setSelection(ids);
 	                    setContextMenu(null);
 	                  }}
@@ -8848,6 +10847,16 @@ const PlanView = ({ planId }: Props) => {
 		        onContextMenu={handleObjectContextMenu}
                     onLinkContextMenu={handleLinkContextMenu}
                     onRoomContextMenu={handleRoomContextMenu}
+                    onCorridorContextMenu={handleCorridorContextMenu}
+                    onCorridorConnectionContextMenu={handleCorridorConnectionContextMenu}
+                    onCorridorDoorContextMenu={handleCorridorDoorContextMenu}
+                    onCorridorDoorDblClick={({ corridorId, doorId }) => openCorridorDoorModal(corridorId, doorId)}
+                    onCorridorClick={handleCorridorQuickMenu}
+                    onCorridorMiddleClick={({ corridorId, worldX, worldY }) => {
+                      insertCorridorJunctionPoint(corridorId, { x: worldX, y: worldY });
+                      setCorridorQuickMenu(null);
+                    }}
+                    onCorridorDoorDraftPoint={handleCorridorDoorDraftPoint}
                     onLinkDblClick={(id) => {
                       if (isRackLinkId(id)) {
                         openRackLinkPorts(id);
@@ -8862,16 +10871,47 @@ const PlanView = ({ planId }: Props) => {
                       clearSelection();
                       setSelectedRoomId(roomId);
                       setSelectedRoomIds(roomId ? [roomId] : []);
+                      setSelectedCorridorId(undefined);
                       if (!options?.keepContext) setContextMenu(null);
                     }}
+                    onSelectCorridor={(corridorId, options) => {
+                      if (corridorDoorDraft?.corridorId && corridorId && corridorId !== corridorDoorDraft.corridorId) return;
+                      clearSelection();
+                      setSelectedRoomId(undefined);
+                      setSelectedRoomIds([]);
+                      setSelectedLinkId(null);
+                      if (!corridorId || selectedCorridorDoor?.corridorId !== corridorId) setSelectedCorridorDoor(null);
+                      setSelectedCorridorId(corridorId || undefined);
+                      if (!options?.keepContext) setContextMenu(null);
+                    }}
+                    onSelectCorridorDoor={(payload) => {
+                      if (!payload) {
+                        setSelectedCorridorDoor(null);
+                        return;
+                      }
+                      clearSelection();
+                      setSelectedRoomId(undefined);
+                      setSelectedRoomIds([]);
+                      setSelectedLinkId(null);
+                      setSelectedCorridorId(undefined);
+                      setCorridorQuickMenu(null);
+                      setSelectedCorridorDoor(payload);
+                    }}
+                    selectedCorridorDoor={selectedCorridorDoor}
+                    corridorDoorDraft={corridorDoorDraft}
                     onOpenRoomDetails={(roomId) => {
                       setSelectedRoomId(roomId);
                       setSelectedRoomIds([roomId]);
+                      setSelectedCorridorId(undefined);
+                      setSelectedCorridorDoor(null);
                       openEditRoom(roomId);
                     }}
                     onCreateRoom={(shape) => {
                       if (shape.kind === 'rect') handleCreateRoomFromRect(shape.rect);
                       else handleCreateRoomFromPoly(shape.points);
+                    }}
+                    onCreateCorridor={(shape) => {
+                      if (shape.kind === 'poly') handleCreateCorridorFromPoly(shape.points);
                     }}
                     onUpdateRoom={(roomId, payload) => {
                       if (isReadOnly) return;
@@ -8893,6 +10933,77 @@ const PlanView = ({ planId }: Props) => {
                       const updates = computeRoomReassignments(nextRooms, (plan as FloorPlan).objects);
                       if (Object.keys(updates).length) setObjectRoomIds((plan as FloorPlan).id, updates);
                     }}
+                    onUpdateCorridor={(corridorId, payload) => {
+                      if (isReadOnly) return;
+                      const sanitizePoints = (points: { x: number; y: number }[] | undefined) =>
+                        (points || [])
+                          .filter((p) => Number.isFinite(Number((p as any)?.x)) && Number.isFinite(Number((p as any)?.y)))
+                          .map((p) => ({ x: Number((p as any).x), y: Number((p as any).y) }));
+                      const current = (((plan as FloorPlan).corridors || []) as Corridor[]).filter(Boolean);
+                      const next = current.map((corridor) => {
+                        if (corridor.id !== corridorId) return corridor;
+                        const currentPoints = sanitizePoints(getCorridorPolygon(corridor));
+                        const nextPointsRaw = Array.isArray(payload.points) ? sanitizePoints(payload.points as any) : currentPoints;
+                        const resolvedKind = (payload.kind || corridor.kind || (nextPointsRaw.length >= 3 ? 'poly' : 'rect')) as 'rect' | 'poly';
+                        const nextPoints = resolvedKind === 'poly' ? (nextPointsRaw.length >= 3 ? nextPointsRaw : currentPoints) : currentPoints;
+                        const nextDoors = Array.isArray(payload.doors)
+                          ? payload.doors
+                              .filter((door) => door && door.id)
+                              .map((door) => ({
+                                ...door,
+                                edgeIndex: Number(door.edgeIndex),
+                                t: Number(door.t),
+                                edgeIndexTo: Number.isFinite(Number((door as any).edgeIndexTo)) ? Number((door as any).edgeIndexTo) : undefined,
+                                tTo: Number.isFinite(Number((door as any).tTo)) ? Number((door as any).tTo) : undefined,
+                                mode:
+                                  (door as any).mode === 'auto_sensor' ||
+                                  (door as any).mode === 'automated' ||
+                                  (door as any).mode === 'static'
+                                    ? (door as any).mode
+                                    : 'static',
+                                automationUrl: typeof (door as any).automationUrl === 'string' ? String((door as any).automationUrl) : undefined,
+                                catalogTypeId:
+                                  typeof (door as any).catalogTypeId === 'string' ? String((door as any).catalogTypeId).trim() || undefined : undefined,
+                                description:
+                                  typeof (door as any).description === 'string' ? String((door as any).description).trim() || undefined : undefined,
+                                isEmergency: !!(door as any).isEmergency,
+                                isFireDoor: !!(door as any).isFireDoor,
+                                lastVerificationAt:
+                                  typeof (door as any).lastVerificationAt === 'string'
+                                    ? String((door as any).lastVerificationAt).trim() || undefined
+                                    : undefined,
+                                verifierCompany:
+                                  typeof (door as any).verifierCompany === 'string'
+                                    ? String((door as any).verifierCompany).trim() || undefined
+                                    : undefined,
+                                verificationHistory: normalizeDoorVerificationHistory((door as any).verificationHistory),
+                                linkedRoomIds: Array.isArray((door as any).linkedRoomIds)
+                                  ? Array.from(new Set((door as any).linkedRoomIds.map((id: any) => String(id)).filter(Boolean)))
+                                  : []
+                              }))
+                              .filter((door) => Number.isFinite(door.edgeIndex) && Number.isFinite(door.t))
+                          : corridor.doors;
+                        return {
+                          ...corridor,
+                          ...payload,
+                          kind: resolvedKind,
+                          points: nextPoints,
+                          doors: nextDoors,
+                          connections: Array.isArray(payload.connections)
+                            ? payload.connections.map((cp) => ({
+                                ...cp,
+                                x: Number.isFinite(Number((cp as any)?.x)) ? Number((cp as any).x) : undefined,
+                                y: Number.isFinite(Number((cp as any)?.y)) ? Number((cp as any).y) : undefined,
+                                planIds: [...(cp.planIds || [])],
+                                transitionType: (cp as any)?.transitionType === 'elevator' ? 'elevator' : 'stairs'
+                              }))
+                            : corridor.connections
+                        };
+                      });
+                      markTouched();
+                      updateFloorPlan((plan as FloorPlan).id, { corridors: next } as any);
+                    }}
+                    onAdjustCorridorLabelScale={updateCorridorLabelScale}
                     onUpdateObject={(id, changes) => {
                       if (isReadOnly) return;
                       markTouched();
@@ -8900,6 +11011,10 @@ const PlanView = ({ planId }: Props) => {
                     }}
                     onOpenPhoto={openPhotoViewer}
                     onMoveWall={handleWallMove}
+                    suspendKeyboardShortcuts={allTypesOpen}
+                    connectionPlanNamesById={Object.fromEntries(
+                      ((site as any)?.floorPlans || []).map((fp: any) => [String(fp?.id || ''), String(fp?.name || fp?.id || '')])
+                    )}
 	              />
 	            </div>
 	          </div>
@@ -8912,7 +11027,7 @@ const PlanView = ({ planId }: Props) => {
               </div>
             ) : null}
 		          {!isReadOnly && !presentationMode ? (
-		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-[9rem] shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+		            <aside className="sticky top-0 max-h-[calc(100vh-24px)] w-[9rem] shrink-0 self-start overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 pb-8 shadow-card">
                 <div className="rounded-xl bg-slate-50/80 p-2">
                   <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
                     <button
@@ -9231,6 +11346,58 @@ const PlanView = ({ planId }: Props) => {
                       </div>
                     ) : null}
                   </div>
+                  <div className="h-px w-full bg-slate-200" />
+                  <div className="rounded-xl bg-rose-50/70 p-2">
+                    <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-slate-500">
+                      <button
+                        onClick={() => {
+                          if (!securityPaletteDefs.length) return;
+                          setPaletteSection('security');
+                          setSecurityOpen((prev) => !prev);
+                        }}
+                        disabled={!securityPaletteDefs.length}
+                        className="flex items-center gap-1 rounded-md px-1 py-0.5 text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={
+                          securityOpen
+                            ? t({ it: 'Nascondi sicurezza', en: 'Collapse safety' })
+                            : t({ it: 'Mostra sicurezza', en: 'Expand safety' })
+                        }
+                      >
+                        {securityOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span>{t({ it: 'Sicurezza', en: 'Safety' })}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          const url = '/settings?tab=objects&section=security';
+                          if (hasNavigationEdits && !isReadOnly) {
+                            requestSaveAndNavigate(url);
+                            return;
+                          }
+                          navigate(url);
+                        }}
+                        title={t({ it: 'Impostazioni sicurezza', en: 'Safety settings' })}
+                        className="rounded-md p-1 text-slate-500 hover:bg-slate-50 hover:text-ink"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </div>
+                    {securityOpen && securityPaletteDefs.length ? (
+                      <div className="mt-3 flex flex-col items-center gap-3">
+                        <Toolbar
+                          defs={securityPaletteDefs}
+                          onSelectType={(type) => {
+                            setPaletteSection('security');
+                            setWallDrawMode(false);
+                            setMeasureMode(false);
+                            setScaleMode(false);
+                            setRoomDrawMode(null);
+                            setPendingType(type);
+                          }}
+                          activeType={pendingType || (wallDrawMode ? wallDrawType : null)}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
                 {paletteIsEmpty ? (
                   <button
@@ -9366,6 +11533,53 @@ const PlanView = ({ planId }: Props) => {
         </div>
       ) : null}
 
+      {corridorQuickMenu ? (
+        <div
+          className="context-menu-panel fixed z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-slate-900/90 px-2 py-1.5 text-white shadow-card"
+          style={{ top: corridorQuickMenu.y - 52, left: corridorQuickMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              openEditCorridor(corridorQuickMenu.id);
+              setCorridorQuickMenu(null);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20"
+            title={t({ it: 'Rinomina corridoio', en: 'Rename corridor' })}
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            onClick={() => {
+              if (corridorDoorDraft?.corridorId === corridorQuickMenu.id) {
+                setCorridorDoorDraft(null);
+                push(t({ it: 'Disegno porta corridoio annullato', en: 'Corridor door drawing cancelled' }), 'info');
+                return;
+              }
+              startCorridorDoorDraw(corridorQuickMenu.id);
+            }}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg ${corridorDoorDraft?.corridorId === corridorQuickMenu.id ? 'bg-amber-500/80 text-white' : 'bg-white/10 hover:bg-white/20'}`}
+            title={
+              corridorDoorDraft?.corridorId === corridorQuickMenu.id
+                ? t({ it: 'Annulla inserimento porta', en: 'Cancel door insertion' })
+                : t({ it: 'Inserisci porta sul perimetro del corridoio', en: 'Insert door on corridor perimeter' })
+            }
+          >
+            <DoorOpen size={14} />
+          </button>
+          <button
+            onClick={() => {
+              setConfirmDeleteCorridorId(corridorQuickMenu.id);
+              setCorridorQuickMenu(null);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20"
+            title={t({ it: 'Elimina corridoio', en: 'Delete corridor' })}
+          >
+            <Trash size={14} />
+          </button>
+        </div>
+      ) : null}
+
       {layersQuickMenu ? (
         <div
           ref={layersQuickMenuRef}
@@ -9470,7 +11684,11 @@ const PlanView = ({ planId }: Props) => {
             </button>
           </div>
 
-          {planLayers.length ? (
+          {planLayers.length &&
+          contextMenu.kind !== 'corridor' &&
+          contextMenu.kind !== 'corridor_connection' &&
+          contextMenu.kind !== 'corridor_door' &&
+          contextMenu.kind !== 'safety_card' ? (
             <button
               onClick={() => setLayersContextMenu((prev) => (prev ? null : { x: contextMenu.x, y: contextMenu.y }))}
               className="mt-2 flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
@@ -9627,7 +11845,7 @@ const PlanView = ({ planId }: Props) => {
                             )}
                           </button>
                         ) : null}
-                        {contextObject ? (
+	                        {contextObject ? (
                           <button
                             onClick={() => {
                               if (!renderPlan) return;
@@ -9656,8 +11874,21 @@ const PlanView = ({ planId }: Props) => {
                               en: `Select all: ${contextObjectTypeLabel}`
                             })}
                           </button>
+	                        ) : null}
+                        {contextIsAssemblyPoint && contextAssemblyMapsUrl ? (
+                          <button
+                            onClick={() => {
+                              window.open(contextAssemblyMapsUrl, '_blank', 'noopener,noreferrer');
+                              setContextMenu(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                            title={t({ it: 'Apri in Google Maps', en: 'Open in Google Maps' })}
+                          >
+                            <ExternalLink size={14} className="text-slate-500" />
+                            {t({ it: 'Apri in Google Maps', en: 'Open in Google Maps' })}
+                          </button>
                         ) : null}
-                        {contextIsWifi ? (
+	                        {contextIsWifi ? (
                           <button
                             onClick={() => {
                               const ids =
@@ -10294,6 +12525,183 @@ const PlanView = ({ planId }: Props) => {
                 </button>
               ) : null}
             </>
+            ) : contextMenu.kind === 'corridor' ? (
+            <>
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    if (contextMenu.kind !== 'corridor') return;
+                    openCorridorConnectionModalAt(contextMenu.id, { x: contextMenu.worldX, y: contextMenu.worldY });
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Collegamento tra piani', en: 'Floor connection' })}
+                >
+                  <Link2 size={14} className="text-slate-500" /> {t({ it: 'Collegamento tra piani', en: 'Floor connection' })}
+                </button>
+              ) : null}
+            </>
+            ) : contextMenu.kind === 'corridor_door' ? (
+            <>
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    if (!plan || contextMenu.kind !== 'corridor_door') return;
+                    const current = ((plan.corridors || []) as Corridor[]).filter(Boolean);
+                    const next = current.map((corridor) => {
+                      if (corridor.id !== contextMenu.corridorId) return corridor;
+                      return {
+                        ...corridor,
+                        doors: (corridor.doors || []).filter((door) => door.id !== contextMenu.doorId)
+                      };
+                    });
+                    markTouched();
+                    updateFloorPlan(plan.id, { corridors: next } as any);
+                    setSelectedCorridorDoor(null);
+                    push(t({ it: 'Porta eliminata', en: 'Door deleted' }), 'info');
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Elimina', en: 'Delete' })}
+                >
+                  <Trash size={14} className="text-rose-600" /> {t({ it: 'Elimina', en: 'Delete' })}
+                </button>
+              ) : null}
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    if (contextMenu.kind !== 'corridor_door') return;
+                    openCorridorDoorModal(contextMenu.corridorId, contextMenu.doorId);
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Modifica', en: 'Edit' })}
+                >
+                  <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
+                </button>
+              ) : null}
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    if (contextMenu.kind !== 'corridor_door') return;
+                    openCorridorDoorLinkModal(contextMenu.corridorId, contextMenu.doorId);
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Collega stanza', en: 'Link room' })}
+                >
+                  <Home size={14} /> {t({ it: 'Collega stanza', en: 'Link room' })}
+                </button>
+              ) : null}
+              {!isReadOnly ? (
+                (() => {
+                  const corridor = corridors.find((c) => c.id === contextMenu.corridorId);
+                  const door = (corridor?.doors || []).find((d) => d.id === contextMenu.doorId);
+                  const mode = door?.mode || 'static';
+                  const url = String((door as any)?.automationUrl || '').trim();
+                  const canOpen = mode === 'automated' && /^https?:\/\//i.test(url);
+                  if (!canOpen) return null;
+                  return (
+                    <button
+                      onClick={() => {
+                        // Trigger automated door endpoint in background, without opening a new tab/window.
+                        try {
+                          const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_deskly_open_ts=${Date.now()}`;
+                          fetch(requestUrl, {
+                            method: 'GET',
+                            mode: 'no-cors',
+                            cache: 'no-store',
+                            keepalive: true
+                          }).catch(() => {
+                            // ignore network/CORS errors by design
+                          });
+                        } catch {
+                          // ignore sync errors by design
+                        }
+                        push(t({ it: 'Comando apertura porta avviato.', en: 'Door opening command started.' }), 'success');
+                        setContextMenu(null);
+                      }}
+                      className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                      title={t({ it: 'Apri', en: 'Open' })}
+                    >
+                      <Link2 size={14} className="text-slate-500" /> {t({ it: 'Apri', en: 'Open' })}
+                    </button>
+                  );
+                })()
+              ) : null}
+            </>
+            ) : contextMenu.kind === 'corridor_connection' ? (
+            <>
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    if (contextMenu.kind !== 'corridor_connection') return;
+                    openEditCorridorConnectionModal(contextMenu.corridorId, contextMenu.connectionId, {
+                      x: contextMenu.worldX,
+                      y: contextMenu.worldY
+                    });
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Modifica punto di collegamento', en: 'Edit connection point' })}
+                >
+                  <Pencil size={14} /> {t({ it: 'Modifica punto di collegamento', en: 'Edit connection point' })}
+                </button>
+              ) : null}
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    if (!plan || contextMenu.kind !== 'corridor_connection') return;
+                    const current = ((plan.corridors || []) as Corridor[]).filter(Boolean);
+                    const next = current.map((corridor) => {
+                      if (corridor.id !== contextMenu.corridorId) return corridor;
+                      return {
+                        ...corridor,
+                        connections: (corridor.connections || []).filter((cp) => cp.id !== contextMenu.connectionId)
+                      };
+                    });
+                    markTouched();
+                    updateFloorPlan(plan.id, { corridors: next } as any);
+                    push(t({ it: 'Punto di collegamento eliminato', en: 'Connection point deleted' }), 'info');
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50"
+                  title={t({ it: 'Elimina punto di collegamento', en: 'Delete connection point' })}
+                >
+                  <Trash size={14} /> {t({ it: 'Elimina punto di collegamento', en: 'Delete connection point' })}
+                </button>
+              ) : null}
+            </>
+            ) : contextMenu.kind === 'safety_card' ? (
+            <>
+              <button
+                onClick={() => {
+                  toggleSecurityCardVisibility();
+                  setContextMenu(null);
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({
+                  it: securityLayerVisible ? 'Nascondi scheda sicurezza' : 'Mostra scheda sicurezza',
+                  en: securityLayerVisible ? 'Hide safety card' : 'Show safety card'
+                })}
+              >
+                {securityLayerVisible ? <EyeOff size={14} className="text-slate-500" /> : <Eye size={14} className="text-slate-500" />}
+                {t({
+                  it: securityLayerVisible ? 'Nascondi' : 'Mostra',
+                  en: securityLayerVisible ? 'Hide' : 'Show'
+                })}
+              </button>
+              <button
+                onClick={() => {
+                  setEmergencyContactsOpen(true);
+                  setContextMenu(null);
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Apri rubrica emergenze', en: 'Open emergency directory' })}
+              >
+                <PhoneCall size={14} className="text-slate-500" /> {t({ it: 'Rubrica emergenze', en: 'Emergency directory' })}
+              </button>
+            </>
             ) : contextMenu.kind === 'scale' ? (
             <>
               <button
@@ -10480,11 +12888,17 @@ const PlanView = ({ planId }: Props) => {
             ) : null}
             <button
               onClick={() => {
+                if (!hasDefaultView) return;
                 goToDefaultView();
                 setContextMenu(null);
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-              title={t({ it: 'Vai a default', en: 'Go to default' })}
+              disabled={!hasDefaultView}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title={
+                hasDefaultView
+                  ? t({ it: 'Vai a default', en: 'Go to default' })
+                  : t({ it: 'Imposta prima una vista di default', en: 'Set a default view first' })
+              }
             >
               <Home size={14} className="text-slate-500" /> {t({ it: 'Vai a default', en: 'Go to default' })}
             </button>
@@ -10570,6 +12984,16 @@ const PlanView = ({ planId }: Props) => {
                   title={t({ it: 'Apri catalogo stanze', en: 'Open room catalog' })}
                 >
                   <Square size={14} className="text-slate-500" /> {t({ it: 'Catalogo stanze', en: 'Room catalog' })}
+                </button>
+                <button
+                  onClick={() => {
+                    beginCorridorPolyDraw();
+                    setContextMenu(null);
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  title={t({ it: 'Crea corridoio', en: 'Create corridor' })}
+                >
+                  <Square size={14} className="text-slate-500" /> {t({ it: 'Crea corridoio', en: 'Create corridor' })}
                 </button>
                 <div className="my-2 h-px bg-slate-100" />
                 <div className="px-2 text-[11px] font-semibold text-slate-500">{t({ it: 'Oggetti', en: 'Objects' })}</div>
@@ -11122,6 +13546,14 @@ const PlanView = ({ planId }: Props) => {
             initialImageUrl={(modalInitials as any)?.imageUrl}
             initialImageWidth={(modalInitials as any)?.imageWidth}
             initialImageHeight={(modalInitials as any)?.imageHeight}
+            initialIp={(modalInitials as any)?.ip}
+            initialUrl={(modalInitials as any)?.url}
+            initialNotes={(modalInitials as any)?.notes}
+            initialLastVerificationAt={(modalInitials as any)?.lastVerificationAt}
+            initialVerifierCompany={(modalInitials as any)?.verifierCompany}
+            initialGpsCoords={(modalInitials as any)?.gpsCoords}
+            initialSecurityDocuments={(modalInitials as any)?.securityDocuments}
+            initialSecurityCheckHistory={(modalInitials as any)?.securityCheckHistory}
             typeLabel={
               modalState?.mode === 'create'
                 ? `${t({ it: 'Nuovo', en: 'New' })} ${modalInitials?.type ? getTypeLabel(modalInitials.type) : ''} (${Math.round((modalState as any)?.coords?.x || 0)}, ${Math.round(
@@ -11302,7 +13734,7 @@ const PlanView = ({ planId }: Props) => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                <Dialog.Panel className="w-full max-w-2xl modal-panel">
                   <div className="flex items-center justify-between gap-3">
                     <Dialog.Title className="modal-title">{t({ it: 'Crea layer per tipologia', en: 'Create type layer' })}</Dialog.Title>
                     <button
@@ -11778,6 +14210,735 @@ const PlanView = ({ planId }: Props) => {
           return true;
         }}
       />
+
+      <Transition show={!!corridorModal} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setCorridorModal(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="modal-title">
+                      {corridorModal?.mode === 'edit'
+                        ? t({ it: 'Rinomina corridoio', en: 'Rename corridor' })
+                        : t({ it: 'Nuovo corridoio', en: 'New corridor' })}
+                    </Dialog.Title>
+                    <button
+                      onClick={() => setCorridorModal(null)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                    {corridorModal?.mode === 'edit'
+                      ? t({
+                          it: 'Aggiorna il nome del corridoio e scegli se mostrarlo in planimetria.',
+                          en: 'Update corridor name and choose whether to display it on the map.'
+                        })
+                      : t({
+                          it: 'Definisci il nome del corridoio appena disegnato e se deve essere visibile.',
+                          en: 'Set corridor name and whether it should be visible.'
+                        })}
+                  </Dialog.Description>
+                  <div className="mt-4">
+                    <label className="text-sm font-semibold text-slate-700">
+                      {t({ it: 'Nome corridoio', en: 'Corridor name' })}
+                      <input
+                        ref={corridorNameInputRef}
+                        value={corridorNameInput}
+                        onChange={(e) => setCorridorNameInput(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. Corridoio principale', en: 'e.g. Main corridor' })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            saveCorridorModal();
+                          }
+                        }}
+                      />
+                    </label>
+                    <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={corridorShowNameInput}
+                        onChange={(e) => setCorridorShowNameInput(e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      <span>{t({ it: 'Mostra nome dentro il corridoio', en: 'Show name inside corridor' })}</span>
+                    </label>
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      onClick={() => setCorridorModal(null)}
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button onClick={saveCorridorModal} className="btn-primary">
+                      {corridorModal?.mode === 'edit' ? t({ it: 'Salva', en: 'Save' }) : t({ it: 'Crea corridoio', en: 'Create corridor' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!corridorConnectionModal} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setCorridorConnectionModal(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="modal-title">
+                      {corridorConnectionModal?.connectionId
+                        ? t({ it: 'Modifica punto di collegamento tra piani', en: 'Edit floor-connection point' })
+                        : t({ it: 'Nuovo punto di collegamento tra piani', en: 'New floor-connection point' })}
+                    </Dialog.Title>
+                    <button
+                      onClick={() => setCorridorConnectionModal(null)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                    {t({
+                      it: 'Opzionale: seleziona i piani collegati da questo punto di collegamento.',
+                      en: 'Optional: select floor plans linked by this connection point.'
+                    })}
+                  </Dialog.Description>
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs font-semibold uppercase text-slate-500">
+                      {t({ it: 'Tipo collegamento', en: 'Connection type' })}
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCorridorConnectionModal((prev) => (prev ? { ...prev, transitionType: 'stairs' } : prev))
+                        }
+                        className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                          corridorConnectionModal?.transitionType !== 'elevator'
+                            ? 'border-primary/40 bg-primary/10 text-primary'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        {t({ it: 'Scale', en: 'Stairs' })}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCorridorConnectionModal((prev) => (prev ? { ...prev, transitionType: 'elevator' } : prev))
+                        }
+                        className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                          corridorConnectionModal?.transitionType === 'elevator'
+                            ? 'border-primary/40 bg-primary/10 text-primary'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        {t({ it: 'Ascensore', en: 'Elevator' })}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-4 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    {corridorConnectionTargetPlans.length ? (
+                      corridorConnectionTargetPlans.map((floorPlan) => {
+                        const checked = !!corridorConnectionModal?.selectedPlanIds.includes(floorPlan.id);
+                        return (
+                          <label
+                            key={floorPlan.id}
+                            className="flex cursor-pointer items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const nextChecked = e.target.checked;
+                                setCorridorConnectionModal((prev) => {
+                                  if (!prev) return prev;
+                                  const ids = nextChecked
+                                    ? Array.from(new Set([...prev.selectedPlanIds, floorPlan.id]))
+                                    : prev.selectedPlanIds.filter((id) => id !== floorPlan.id);
+                                  return { ...prev, selectedPlanIds: ids };
+                                });
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                            />
+                            <span className="truncate">{floorPlan.name}</span>
+                          </label>
+                        );
+                      })
+                    ) : (
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                        {t({ it: 'Nessun altro piano disponibile in questa sede.', en: 'No other floor plans available in this site.' })}
+                      </div>
+                    )}
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      onClick={() => setCorridorConnectionModal(null)}
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      onClick={saveCorridorConnectionModal}
+                      className="btn-primary"
+                    >
+                      {corridorConnectionModal?.connectionId
+                        ? t({ it: 'Salva modifiche', en: 'Save changes' })
+                        : t({ it: 'Crea punto di collegamento', en: 'Create connection point' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!corridorDoorModal} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setCorridorDoorModal(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="modal-title">{t({ it: 'Proprietà porta', en: 'Door properties' })}</Dialog.Title>
+                    <button
+                      onClick={() => setCorridorDoorModal(null)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                    {t({ it: 'Configura tipo e azione della porta selezionata.', en: 'Configure type and action for the selected door.' })}
+                  </Dialog.Description>
+                  <div className="mt-4 space-y-4">
+                    {(() => {
+                      const canOpenNow =
+                        corridorDoorModal?.mode === 'automated' &&
+                        /^https?:\/\//i.test(String(corridorDoorModal?.automationUrl || '').trim());
+                      return (
+                        <>
+                          <label className="text-sm font-semibold text-slate-700">
+                            {t({ it: 'Descrizione porta', en: 'Door description' })}
+                            <textarea
+                              value={corridorDoorModal?.description || ''}
+                              onChange={(e) =>
+                                setCorridorDoorModal((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        description: e.target.value
+                                      }
+                                    : prev
+                                )
+                              }
+                              className="mt-1 min-h-[72px] w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              placeholder={t({ it: 'Es. Porta lato reception', en: 'e.g. Reception-side door' })}
+                            />
+                          </label>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <label
+                              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                              title={t({
+                                it: 'Se attivo puoi registrare verifiche e storico porta emergenza.',
+                                en: 'When enabled you can record checks and emergency-door history.'
+                              })}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!corridorDoorModal?.isEmergency}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          isEmergency: e.target.checked
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Emergenza', en: 'Emergency' })}
+                            </label>
+                            <label
+                              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                              title={t({
+                                it: 'Segna la porta come tagliafuoco.',
+                                en: 'Mark this door as fire-rated.'
+                              })}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!corridorDoorModal?.isFireDoor}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          isFireDoor: e.target.checked
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Tagliafuoco', en: 'Fire-rated' })}
+                            </label>
+                            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={corridorDoorModal?.mode === 'auto_sensor'}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          mode: e.target.checked ? 'auto_sensor' : 'static'
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Apertura a rilevazione', en: 'Sensor opening' })}
+                            </label>
+                            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={corridorDoorModal?.mode === 'automated'}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          mode: e.target.checked ? 'automated' : 'static'
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Apertura automatizzata', en: 'Automated opening' })}
+                            </label>
+                          </div>
+                          {corridorDoorModal?.isEmergency ? (
+                            <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3">
+                              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-700">
+                                {t({ it: 'Verifiche emergenza', en: 'Emergency checks' })}
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <label className="text-sm font-semibold text-slate-700">
+                                  {t({ it: 'Data ultima verifica (opzionale)', en: 'Last check date (optional)' })}
+                                  <input
+                                    type="date"
+                                    value={corridorDoorModal?.lastVerificationAt || ''}
+                                    onChange={(e) =>
+                                      setCorridorDoorModal((prev) =>
+                                        prev
+                                          ? {
+                                              ...prev,
+                                              lastVerificationAt: e.target.value
+                                            }
+                                          : prev
+                                      )
+                                    }
+                                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                  />
+                                </label>
+                                <label className="text-sm font-semibold text-slate-700">
+                                  {t({ it: 'Società verificatrice', en: 'Verifier company' })}
+                                  <input
+                                    value={corridorDoorModal?.verifierCompany || ''}
+                                    onChange={(e) =>
+                                      setCorridorDoorModal((prev) =>
+                                        prev
+                                          ? {
+                                              ...prev,
+                                              verifierCompany: e.target.value
+                                            }
+                                          : prev
+                                      )
+                                    }
+                                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                    placeholder={t({ it: 'Es. SafeCheck Srl', en: 'e.g. SafeCheck Ltd' })}
+                                  />
+                                </label>
+                              </div>
+                              <div className="mt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const company = String(corridorDoorModal?.verifierCompany || '').trim();
+                                    const date = String(corridorDoorModal?.lastVerificationAt || '').trim();
+                                    if (!company && !date) {
+                                      push(
+                                        t({
+                                          it: 'Inserisci almeno società o data per aggiungere una verifica allo storico.',
+                                          en: 'Enter at least company or date to add a history check.'
+                                        }),
+                                        'info'
+                                      );
+                                      return;
+                                    }
+                                    setCorridorDoorModal((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            verificationHistory: normalizeDoorVerificationHistory([
+                                              { id: nanoid(), company, date: date || undefined, createdAt: Date.now() },
+                                              ...(prev.verificationHistory || [])
+                                            ])
+                                          }
+                                        : prev
+                                    );
+                                  }}
+                                  className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                                  title={t({ it: 'Aggiungi verifica allo storico', en: 'Add check to history' })}
+                                >
+                                  <Plus size={13} />
+                                  {t({ it: 'Aggiungi allo storico', en: 'Add to history' })}
+                                </button>
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                {(corridorDoorModal?.verificationHistory || []).length ? (
+                                  (corridorDoorModal?.verificationHistory || []).map((entry) => (
+                                    <div key={entry.id} className="flex items-center justify-between rounded-lg border border-rose-200 bg-white px-2.5 py-2 text-xs">
+                                      <div className="min-w-0">
+                                        <div className="truncate font-semibold text-slate-700">
+                                          {entry.company || t({ it: 'Società non indicata', en: 'Company not specified' })}
+                                        </div>
+                                        <div className="text-slate-500">
+                                          {(entry.date && entry.date.trim()) || t({ it: 'Data non indicata', en: 'Date not specified' })}
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setCorridorDoorModal((prev) =>
+                                            prev
+                                              ? {
+                                                  ...prev,
+                                                  verificationHistory: (prev.verificationHistory || []).filter((item) => item.id !== entry.id)
+                                                }
+                                              : prev
+                                          )
+                                        }
+                                        className="rounded-lg border border-rose-200 bg-rose-50 p-1.5 text-rose-700 hover:bg-rose-100"
+                                        title={t({ it: 'Rimuovi voce storico', en: 'Remove history entry' })}
+                                      >
+                                        <Trash size={12} />
+                                      </button>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="rounded-lg border border-dashed border-rose-200 bg-white px-2.5 py-2 text-xs text-slate-500">
+                                    {t({ it: 'Nessuna verifica storica registrata.', en: 'No historical checks registered.' })}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+                          {corridorDoorModal?.mode === 'automated' ? (
+                            <>
+                              <label className="text-sm font-semibold text-slate-700">
+                                {t({ it: 'Link apertura', en: 'Opening link' })}
+                                <input
+                                  value={corridorDoorModal?.automationUrl || ''}
+                                  onChange={(e) =>
+                                    setCorridorDoorModal((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            automationUrl: e.target.value
+                                          }
+                                        : prev
+                                    )
+                                  }
+                                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                                  placeholder="https://..."
+                                />
+                              </label>
+                              <div className="text-xs text-slate-500">
+                                {t({
+                                  it: 'Il link è opzionale. Senza link il pulsante Apri non viene mostrato.',
+                                  en: 'The link is optional. Without a link the Open button is hidden.'
+                                })}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                              {t({
+                                it: 'Attiva la modalità automatizzata per configurare un eventuale link di apertura remota.',
+                                en: 'Enable automated mode to optionally configure a remote opening link.'
+                              })}
+                            </div>
+                          )}
+                          {canOpenNow ? (
+                            <div className="flex items-center justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const requestUrl = `${String(corridorDoorModal?.automationUrl || '').trim()}${
+                                    String(corridorDoorModal?.automationUrl || '').includes('?') ? '&' : '?'
+                                  }_deskly_open_ts=${Date.now()}`;
+                                  fetch(requestUrl, {
+                                    method: 'GET',
+                                    mode: 'no-cors',
+                                    cache: 'no-store',
+                                    keepalive: true
+                                  }).catch(() => {});
+                                  push(t({ it: 'Comando apertura porta avviato.', en: 'Door opening command started.' }), 'success');
+                                }}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                title={t({ it: 'Apri', en: 'Open' })}
+                              >
+                                <DoorOpen size={14} />
+                                {t({ it: 'Apri', en: 'Open' })}
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      onClick={() => setCorridorDoorModal(null)}
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button onClick={saveCorridorDoorModal} className="btn-primary">
+                      {t({ it: 'Salva', en: 'Save' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!corridorDoorLinkModal} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setCorridorDoorLinkModal(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-2xl modal-panel">
+                  <div className="flex items-center justify-between">
+                    <Dialog.Title className="modal-title">{t({ it: 'Collega stanza', en: 'Link room' })}</Dialog.Title>
+                    <button
+                      onClick={() => setCorridorDoorLinkModal(null)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="mt-2 text-sm text-slate-600">
+                    {t({
+                      it: 'Seleziona una o più stanze da collegare alla porta. Per default è selezionata la stanza più vicina.',
+                      en: 'Select one or more rooms to link to this door. The nearest room is preselected by default.'
+                    })}
+                  </Dialog.Description>
+                  <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900">
+                    <span className="font-semibold">{t({ it: 'Guida rapida:', en: 'Quick hint:' })}</span>{' '}
+                    {t({
+                      it: 'badge verde = stanza più vicina alla porta; badge azzurro = prossimità al perimetro del corridoio.',
+                      en: 'green badge = nearest room to the door; cyan badge = close to the corridor perimeter.'
+                    })}
+                  </div>
+                  <div className="mt-4">
+                    <input
+                      value={corridorDoorLinkQuery}
+                      onChange={(e) => setCorridorDoorLinkQuery(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                      placeholder={t({
+                        it: 'Cerca stanza o utente...',
+                        en: 'Search room or user...'
+                      })}
+                    />
+                  </div>
+                  <div className="mt-3 max-h-[22rem] space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    {corridorDoorLinkRoomEntries.length ? (
+                      corridorDoorLinkRoomEntries.map((entry) => {
+                        const checked = !!corridorDoorLinkModal?.selectedRoomIds.includes(entry.id);
+                        return (
+                          <label
+                            key={entry.id}
+                            className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-2.5 py-2 ${
+                              checked ? 'border-primary/40 bg-primary/5' : 'border-slate-200 bg-white hover:bg-slate-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const nextChecked = e.target.checked;
+                                setCorridorDoorLinkModal((prev) => {
+                                  if (!prev) return prev;
+                                  const ids = nextChecked
+                                    ? Array.from(new Set([...prev.selectedRoomIds, entry.id]))
+                                    : prev.selectedRoomIds.filter((id) => id !== entry.id);
+                                  return { ...prev, selectedRoomIds: ids };
+                                });
+                              }}
+                              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold text-slate-800">
+                                {entry.name}{' '}
+                                {entry.isNearest ? (
+                                  <span
+                                    className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-900"
+                                    title={t({
+                                      it: 'Stanza più vicina alla porta rilevata automaticamente.',
+                                      en: 'Nearest room to this door, detected automatically.'
+                                    })}
+                                  >
+                                    {t({ it: 'rilevata prossimità', en: 'proximity detected' })}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-slate-600">
+                                {t({
+                                  it: `Utenti: ${entry.userCount} · Utenti reali: ${entry.realUserCount}`,
+                                  en: `Users: ${entry.userCount} · Real users: ${entry.realUserCount}`
+                                })}
+                              </div>
+                              {entry.isMagnetic ? (
+                                <div
+                                  className="mt-0.5 inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-800"
+                                  title={t({
+                                    it: 'La stanza è adiacente al perimetro del corridoio vicino alla porta.',
+                                    en: 'The room is adjacent to the corridor perimeter near this door.'
+                                  })}
+                                >
+                                  {t({ it: 'Aggancio magnetico corridoio rilevato', en: 'Corridor magnetic match detected' })}
+                                </div>
+                              ) : null}
+                              <div className="mt-1 text-[11px] text-slate-500">
+                                {entry.userNames.length
+                                  ? entry.userNames.join(', ')
+                                  : t({ it: 'Nessun utente assegnato alla stanza', en: 'No users assigned to this room' })}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })
+                    ) : (
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                        {t({ it: 'Nessuna stanza trovata con questi filtri.', en: 'No rooms found with these filters.' })}
+                      </div>
+                    )}
+                  </div>
+                  <div className="modal-footer">
+                    <div className="mr-auto text-xs text-slate-500">
+                      {t({
+                        it: `${corridorDoorLinkModal?.selectedRoomIds.length || 0} stanze selezionate`,
+                        en: `${corridorDoorLinkModal?.selectedRoomIds.length || 0} rooms selected`
+                      })}
+                    </div>
+                    <button
+                      onClick={() => setCorridorDoorLinkModal(null)}
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button onClick={saveCorridorDoorLinkModal} className="btn-primary">
+                      {t({ it: 'Salva collegamenti', en: 'Save links' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
 
       <ConfirmDialog
         open={!!roomWallPrompt}
@@ -12306,6 +15467,52 @@ const PlanView = ({ planId }: Props) => {
       />
 
       <ConfirmDialog
+        open={!!confirmDeleteCorridorId}
+        title={t({ it: 'Eliminare il corridoio?', en: 'Delete corridor?' })}
+        description={
+          confirmDeleteCorridorId
+            ? t({
+                it: `Eliminare il corridoio "${(((basePlan as any).corridors || []) as Corridor[]).find((c) => c.id === confirmDeleteCorridorId)?.name || 'corridoio'}" insieme a porte e punti di connessione?`,
+                en: `Delete corridor "${(((basePlan as any).corridors || []) as Corridor[]).find((c) => c.id === confirmDeleteCorridorId)?.name || 'corridor'}" including doors and connection points?`
+              })
+            : undefined
+        }
+        onCancel={() => setConfirmDeleteCorridorId(null)}
+        onConfirm={() => {
+          if (!confirmDeleteCorridorId) return;
+          const current = (((basePlan as any).corridors || []) as Corridor[]).filter(Boolean);
+          const target = current.find((c) => c.id === confirmDeleteCorridorId);
+          if (!target) {
+            setConfirmDeleteCorridorId(null);
+            return;
+          }
+          const next = current.filter((c) => c.id !== confirmDeleteCorridorId);
+          markTouched();
+          updateFloorPlan(basePlan.id, { corridors: next } as any);
+          postAuditEvent({
+            event: 'corridor_delete',
+            scopeType: 'plan',
+            scopeId: basePlan.id,
+            details: {
+              id: target.id,
+              name: target.name || null,
+              doors: Array.isArray(target.doors) ? target.doors.length : 0,
+              connections: Array.isArray(target.connections) ? target.connections.length : 0
+            }
+          });
+          if (selectedCorridorId === confirmDeleteCorridorId) setSelectedCorridorId(undefined);
+          if (corridorDoorDraft?.corridorId === confirmDeleteCorridorId) setCorridorDoorDraft(null);
+          if (corridorQuickMenu?.id === confirmDeleteCorridorId) setCorridorQuickMenu(null);
+          push(t({ it: 'Corridoio eliminato', en: 'Corridor deleted' }), 'info');
+          setContextMenu(null);
+          setConfirmDeleteCorridorId(null);
+        }}
+        confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+        confirmOnEnter
+      />
+
+      <ConfirmDialog
         open={!!confirmDeleteViewId}
         title={t({ it: 'Eliminare la vista?', en: 'Delete view?' })}
         description={
@@ -12358,6 +15565,8 @@ const PlanView = ({ planId }: Props) => {
         open={viewModalOpen}
         onClose={() => setViewModalOpen(false)}
         onSubmit={handleSaveView}
+        hasExistingDefault={hasDefaultView}
+        existingDefaultName={(basePlan.views || []).find((v) => v.isDefault)?.name || ''}
       />
 
       <PrintModal open={exportModalOpen} onClose={() => setExportModalOpen(false)} mode="single" singlePlanId={basePlan.id} />
@@ -13004,27 +16213,36 @@ const PlanView = ({ planId }: Props) => {
 		                      </div>
 		                    </div>
 		                  </div>
-		                  <div className="mt-3 text-sm text-slate-700">
-		                    {(() => {
-	                      forceUnlockTick;
-	                      const graceEndsAt = Number(forceUnlockIncoming?.graceEndsAt || 0);
-	                      const decisionEndsAt = Number(forceUnlockIncoming?.decisionEndsAt || 0);
-	                      const now = Date.now();
-	                      const inGrace = graceEndsAt > now;
-	                      const targetAt = inGrace ? graceEndsAt : decisionEndsAt;
-	                      const remainingMs = targetAt - now;
-	                      const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-	                      return inGrace
-	                        ? t({
-	                            it: `Il superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} ha avviato un force unlock. Tempo concesso per salvare: ${remainingSec}s.`,
-	                            en: `Superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} started a force unlock. Time granted to save: ${remainingSec}s.`
-	                          })
-	                        : t({
-	                            it: `Il superadmin deve decidere entro ${remainingSec}s (finestra 5 minuti).`,
-	                            en: `The superadmin must decide within ${remainingSec}s (5-minute window).`
-	                          });
-	                    })()}
-	                  </div>
+		                  {(() => {
+	                    forceUnlockTick;
+	                    const graceEndsAt = Number(forceUnlockIncoming?.graceEndsAt || 0);
+	                    const decisionEndsAt = Number(forceUnlockIncoming?.decisionEndsAt || 0);
+	                    const now = Date.now();
+	                    const inGrace = graceEndsAt > now;
+	                    const targetAt = inGrace ? graceEndsAt : decisionEndsAt;
+	                    const remainingMs = targetAt - now;
+	                    const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+	                    return (
+	                      <>
+	                        <div className="mt-3 text-sm text-slate-700">
+	                          {inGrace
+	                            ? t({
+	                                it: `Il superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} ha avviato un force unlock. Tempo concesso per salvare.`,
+	                                en: `Superadmin @${forceUnlockIncoming?.requestedBy?.username || 'superadmin'} started a force unlock. Time granted to save.`
+	                              })
+	                            : t({
+	                                it: 'Attendi la decisione del superadmin nella finestra di 5 minuti.',
+	                                en: 'Wait for the superadmin decision in the 5-minute window.'
+	                              })}
+	                        </div>
+	                        <div className="mt-2 text-sm font-semibold text-slate-800">
+	                          {inGrace
+	                            ? t({ it: `Countdown salvataggio: ${remainingSec}s`, en: `Save countdown: ${remainingSec}s` })
+	                            : t({ it: `Countdown decisione: ${remainingSec}s`, en: `Decision countdown: ${remainingSec}s` })}
+	                        </div>
+	                      </>
+	                    );
+	                  })()}
 		                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
 		                    <div className="font-semibold text-ink">{t({ it: 'Modifiche non salvate', en: 'Unsaved changes' })}</div>
 		                    <div className="mt-1">
@@ -13039,7 +16257,6 @@ const PlanView = ({ planId }: Props) => {
 		                        if (!forceUnlockIncoming?.requestId) return;
 		                        void executeForceUnlock(forceUnlockIncoming.requestId, 'save');
 		                      }}
-		                      disabled={Date.now() < Number(forceUnlockIncoming?.graceEndsAt || 0)}
 		                      className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
 		                      title={t({
 		                        it: 'Salva le modifiche (se presenti) e rilascia il lock.',
@@ -13053,7 +16270,6 @@ const PlanView = ({ planId }: Props) => {
 		                        if (!forceUnlockIncoming?.requestId) return;
 		                        void executeForceUnlock(forceUnlockIncoming.requestId, 'discard');
 		                      }}
-		                      disabled={Date.now() < Number(forceUnlockIncoming?.graceEndsAt || 0)}
 		                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
 		                      title={t({
 		                        it: 'Scarta le modifiche non salvate e rilascia il lock.',
@@ -13093,7 +16309,7 @@ const PlanView = ({ planId }: Props) => {
 
       <AllObjectTypesModal
         open={allTypesOpen}
-        defs={objectTypeDefs || []}
+        defs={(objectTypeDefs || []).filter((def) => (def as any)?.category !== 'door')}
         onClose={() => setAllTypesOpen(false)}
         onPick={(typeId) => {
           setPendingType(typeId);
@@ -13308,6 +16524,146 @@ const PlanView = ({ planId }: Props) => {
           }
         }}
       />
+
+      <InternalMapModal
+        open={internalMapOpen}
+        clients={allClients}
+        objectTypeLabels={objectTypeLabels}
+        initialLocation={{ clientId: client?.id, siteId: site?.id, planId }}
+        onClose={() => setInternalMapOpen(false)}
+      />
+      <EmergencyContactsModal
+        open={emergencyContactsOpen}
+        clientId={client?.id || null}
+        readOnly={planAccess !== 'rw'}
+        onClose={() => setEmergencyContactsOpen(false)}
+      />
+
+      <Transition appear show={webcamGesturesEnabled && presentationEnterModalOpen} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-50"
+          onClose={() => {
+            if (presentationEnterBusy) return;
+            setPresentationEnterModalOpen(false);
+          }}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4 text-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="modal-panel w-full max-w-lg transform overflow-hidden text-left align-middle transition-all">
+                  <div className="modal-header">
+                    <Dialog.Title className="modal-title">
+                      {t({ it: 'Modalità presentazione', en: 'Presentation mode' })}
+                    </Dialog.Title>
+                    <button
+                      onClick={() => {
+                        if (presentationEnterBusy) return;
+                        setPresentationEnterModalOpen(false);
+                      }}
+                      className="icon-button"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <Dialog.Description className="modal-description">
+                    {t({
+                      it: 'Stai per passare alla modalità Presentazione a schermo intero. Puoi usare la webcam e i gesti per zoomare e spostarti nella planimetria. Vuoi concedere l’accesso alla webcam e procedere, oppure procedere senza webcam?',
+                      en: 'You are about to enter fullscreen Presentation mode. You can use the webcam and hand gestures to pan and zoom the floor plan. Do you want to grant webcam access and proceed, or proceed without the webcam?'
+                    })}
+                  </Dialog.Description>
+                  {cameraPermissionState === 'denied' ? (
+                    <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                      {t({
+                        it: 'La webcam risulta bloccata per questo sito nelle impostazioni del browser. Per procedere con i gesti, abilita la camera per questo sito e riprova.',
+                        en: 'The webcam appears to be blocked for this site in your browser settings. To use gestures, allow camera access for this site and try again.'
+                      })}
+                    </div>
+                  ) : null}
+                  <div className="modal-footer flex flex-wrap gap-2">
+                    <button
+                      onClick={() => {
+                        if (presentationEnterBusy) return;
+                        setPresentationEnterModalOpen(false);
+                      }}
+                      className="btn-secondary"
+                      title={t({ it: 'Resta nella modalità attuale', en: 'Stay in the current mode' })}
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (presentationEnterBusy) return;
+                        setPresentationWebcamEnabled(false);
+                        setPresentationWebcamCalib(null);
+                        setPresentationEnterModalOpen(false);
+                        enterFullscreenFromGesture();
+                        togglePresentationMode?.();
+                      }}
+                      className="btn-secondary"
+                      title={t({ it: 'Entra in presentazione senza webcam', en: 'Enter presentation without the webcam' })}
+                    >
+                      {t({ it: 'Procedi senza webcam', en: 'Proceed without webcam' })}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (presentationEnterBusy) return;
+                        setPresentationEnterBusy(true);
+                        setPresentationWebcamEnabled(false);
+                        setPresentationWebcamCalib(null);
+                        setPresentationEnterModalOpen(false);
+                        enterFullscreenFromGesture();
+                        togglePresentationMode?.();
+                        const p = requestCameraPermissionOnce();
+                        void p
+                          .then(async (ok) => {
+                            const perm = await queryCameraPermission();
+                            setCameraPermissionState?.(perm);
+                            if (!ok) {
+                              push(
+                                t({
+                                  it: 'Accesso alla webcam non concesso. Puoi usare la presentazione senza webcam.',
+                                  en: 'Webcam access was not granted. You can still use presentation mode without the webcam.'
+                                }),
+                                'danger'
+                              );
+                            }
+                          })
+                          .finally(() => setPresentationEnterBusy(false));
+                      }}
+                      className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={presentationEnterBusy}
+                      title={t({ it: 'Concedi accesso alla webcam e procedi', en: 'Grant webcam access and proceed' })}
+                    >
+                      {presentationEnterBusy ? t({ it: 'Attendere…', en: 'Please wait…' }) : t({ it: 'Concedi accesso e procedi', en: 'Grant access and proceed' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
 
       {/* legacy multi-print modal kept for future use */}
     </div>

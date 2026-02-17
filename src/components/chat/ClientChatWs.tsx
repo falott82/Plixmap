@@ -112,17 +112,18 @@ const ClientChatWs = () => {
             } else {
               ui.bumpChatUnread(threadId, 1);
               ui.addChatUnreadSenderId(String(message.userId || ''));
-              // Avoid noisy toasts for backfill delivery.
-              if (!msg?.backfill) {
+              // Show DM toast only when the chat dock is closed.
+              if (!msg?.backfill && !ui.clientChatOpen) {
                 const now = Date.now();
                 const last = Number(lastToastAtByClientRef.current[threadId] || 0);
                 if (now - last > 1200) {
                   lastToastAtByClientRef.current[threadId] = now;
-                  const from = String(message.username || '').trim() || t({ it: 'utente', en: 'user' });
+                  const fromRaw = String(message.username || '').trim();
+                  const from = fromRaw ? (fromRaw.startsWith('@') ? fromRaw : `@${fromRaw}`) : t({ it: '@utente', en: '@user' });
                   toast.info(
                     t({
-                      it: `Nuovo messaggio in chat (da ${from})`,
-                      en: `New chat message (from ${from})`
+                      it: `Hai ricevuto un messaggio privato da ${from}`,
+                      en: `You received a private message from ${from}`
                     }),
                     { duration: 5000, id: `dm-chat-new:${threadId}` }
                   );

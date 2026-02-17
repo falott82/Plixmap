@@ -4,7 +4,32 @@ Current version: 2.8.2
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
-Note: This README was refreshed with a small formatting update.
+## What's new in 2.8.2
+- Internal Map PDF export from preview is now stable: clicking `Stampa / Salva PDF` no longer closes the modal and reliably starts the download.
+- Added a redesigned step-by-step section with contextual SVG guidance icons (start traffic light, left/right turns, corridor, stairs/elevator, checkered finish).
+- Refined the step list style by removing numeric badges and increasing icon size/definition for better readability.
+
+## What's new in 2.8.1
+- Internal Map route export now opens an in-app preview first; from there you can use `Stampa / Salva PDF` or `Chiudi` directly without popup windows.
+- Fixed multi-floor route PDF rendering: exported pages now include the full floor plan background (not only corridors/rooms), with robust SVG/image inlining before capture.
+- Removed the old `about:blank/blob` export dependency and inline-script path, improving compatibility with stricter CSP setups.
+
+## What's new in 2.8.0
+- Internal Map: multi-floor routing with corridor connection points, per-floor route segments, floor indicator, and `previous/next floor` arrows in the route result.
+- Corridor inter-floor points: configurable transition type (`Stairs` / `Elevator`) and ETA penalties (`+15s` stairs, `+30s` elevator).
+- Internal Map routing constraints: destination keeps the same Client/Site selected at start; only destination floor can change.
+- Corridor routing refinement: when both A and B are inside corridors, path stays on corridor centerline and connects with final oblique access lines.
+- Corridor inter-floor hover: tooltip now uses descriptive labels (no technical IDs) with connected floor names highlighted.
+- Assembly point updates: Google Maps coordinates are managed under notes, shown as clickable links in the emergency directory, and available via right-click action `Open in Google Maps`.
+- Multi-floor routing resilience: mixed corridor/non-corridor segments now use a walkable-corridor fallback to avoid false `Path not found` errors when floor connection points are valid.
+- Internal Map export PDF: one page per route floor segment (`Start` / `Transit` / `Arrival`) plus final page with step-by-step directions.
+- Mixed-route correction: when one endpoint is inside a corridor and the other is outside, routing now keeps the red path on corridor centerline and avoids door-to-connection jumps.
+- Internal Map export now generates and downloads the PDF directly (no popup preview page), avoiding CSP issues with `about:blank/blob` windows.
+- Safety card UX: removed static `+/-` buttons, added dedicated right-click menu (`Show/Hide`, `Emergency directory`), and safety-card helper toast is dismissed when selection changes.
+- Corridor editing UX: middle mouse button now inserts junction points (replacing the contextual `+` button) and guide toast updated.
+- Rooms: label rendering is clipped to room polygon/rect bounds so labels never overflow outside the room.
+- Fix: `Duplicate floor plan` crash resolved (React hook order issue).
+- Fix: object modal initialization stabilized to avoid input reset while editing fields (including camera name entry flow).
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
@@ -17,8 +42,25 @@ Note: This README was refreshed with a small formatting update.
 - Internal messaging system with a dedicated interface.
 - Real-user import via Web API and a centralized corporate directory.
 - Rack configurator and structured cabling management.
+- Corridor doors with room linking: right-click a door to link one or more rooms, with nearest-room preselection and door hover info for linked rooms.
+- Internal map routing wizard: find a destination (users/devices/racks/rooms), set a start point, and compute a red orthogonal route through corridors and linked doors, with distance and ETA when scale is configured.
 - Scaled measurements and dimensions directly on the floor plan.
 - Fast object insertion and management via modern drag & drop, copy/paste, duplication, and extensive keyboard shortcuts.
+
+## Safety and emergency
+- Dedicated `Safety` layer with prevention/emergency object palette (extinguishers, AED, alarm points, sirens, hydrants, detectors, sprinklers, valves, first aid, etc.).
+- Safety object modal with required name, description, notes, last check, verifier company, GPS coordinates.
+- Safety documents and checks history in dedicated modals.
+- Emergency contacts directory with scopes: `Global`, `Client`, `Site`, `Plan`.
+- Emergency contacts support quick search, inline editing, sorting, and “Show in plan card” visibility flag.
+- Safety settings panel includes catalogs for devices and emergency doors, with search/sort/export and map preview.
+- Emergency/door verification history and revision details are tracked.
+
+## Internal map routing
+- 3-step internal map flow: `Partenza` -> `Destinazione` -> `Percorso`.
+- Start and destination can be set by search or manual point on map.
+- Route logic uses nearest doors + corridor centerline with orthogonal segments.
+- Straight red corridor path + dashed start/end connectors.
 
 ## Locks
 - A floor plan can be edited by only one user at a time (exclusive lock).

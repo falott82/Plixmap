@@ -158,7 +158,12 @@ export interface ObjectTypeDefinition {
   icon: IconName;
   builtin?: boolean;
   attenuationDb?: number;
-  category?: 'wall';
+  category?: 'wall' | 'door';
+  doorConfig?: {
+    isEmergency?: boolean;
+    trackVerification?: boolean;
+    remoteOpen?: boolean;
+  };
 }
 
 export interface MapObject {
@@ -228,6 +233,12 @@ export interface MapObject {
   wifiRangeScale?: number; // 0..20 multiplier applied to coverage-derived radius
   roomId?: string;
   layerIds?: string[];
+  notes?: string;
+  lastVerificationAt?: string;
+  verifierCompany?: string;
+  gpsCoords?: string;
+  securityDocuments?: SecurityDocumentEntry[];
+  securityCheckHistory?: SecurityCheckEntry[];
   cctvAngle?: number;
   cctvRange?: number;
   cctvOpacity?: number;
@@ -276,6 +287,7 @@ export interface Room {
   color?: string;
   capacity?: number;
   labelScale?: number;
+  labelPosition?: 'top' | 'bottom' | 'left' | 'right';
   showName?: boolean;
   surfaceSqm?: number;
   notes?: string;
@@ -288,6 +300,95 @@ export interface Room {
   height?: number;
   // poly (world-space points)
   points?: { x: number; y: number }[];
+}
+
+export interface DoorVerificationEntry {
+  id: string;
+  date?: string;
+  company: string;
+  notes?: string;
+  createdAt: number;
+}
+
+export interface SecurityDocumentEntry {
+  id: string;
+  name: string;
+  fileName?: string;
+  dataUrl?: string;
+  uploadedAt: string;
+  validUntil?: string;
+  notes?: string;
+  archived?: boolean;
+}
+
+export interface SecurityCheckEntry {
+  id: string;
+  date?: string;
+  company?: string;
+  notes?: string;
+  createdAt: number;
+  archived?: boolean;
+}
+
+export type EmergencyContactScope = 'global' | 'client' | 'site' | 'plan';
+
+export interface EmergencyContactEntry {
+  id: string;
+  scope: EmergencyContactScope;
+  name: string;
+  phone: string;
+  notes?: string;
+  showOnPlanCard?: boolean;
+  siteId?: string;
+  floorPlanId?: string;
+}
+
+export interface CorridorDoor {
+  id: string;
+  edgeIndex: number;
+  t: number; // 0..1 position along the selected edge
+  edgeIndexTo?: number;
+  tTo?: number; // optional second point (A->B segment) on the corridor border
+  catalogTypeId?: string;
+  mode?: 'static' | 'auto_sensor' | 'automated';
+  automationUrl?: string;
+  description?: string;
+  isEmergency?: boolean;
+  isFireDoor?: boolean;
+  lastVerificationAt?: string;
+  verifierCompany?: string;
+  verificationHistory?: DoorVerificationEntry[];
+  linkedRoomIds?: string[];
+}
+
+export interface CorridorConnectionPoint {
+  id: string;
+  edgeIndex: number;
+  t: number; // 0..1 position along the selected edge
+  planIds: string[]; // target floor plans connected by this point
+  x?: number;
+  y?: number;
+  transitionType?: 'stairs' | 'elevator';
+}
+
+export interface Corridor {
+  id: string;
+  name: string;
+  showName?: boolean;
+  labelX?: number;
+  labelY?: number;
+  labelScale?: number;
+  color?: string;
+  kind?: 'rect' | 'poly';
+  // rect
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  // poly (world-space points)
+  points?: { x: number; y: number }[];
+  doors?: CorridorDoor[];
+  connections?: CorridorConnectionPoint[];
 }
 
 export interface FloorPlan {
@@ -312,10 +413,21 @@ export interface FloorPlan {
   views?: FloorPlanView[];
   revisions?: FloorPlanRevision[];
   rooms?: Room[];
+  corridors?: Corridor[];
   links?: PlanLink[];
   racks?: RackDefinition[];
   rackItems?: RackItem[];
   rackLinks?: RackLink[];
+  safetyCardLayout?: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    fontSize?: number;
+    fontIndex?: number;
+    colorIndex?: number;
+    textBgIndex?: number;
+  };
   objects: MapObject[];
 }
 
@@ -353,10 +465,21 @@ export interface FloorPlanRevision {
   layers?: LayerDefinition[];
   views?: FloorPlanView[];
   rooms?: Room[];
+  corridors?: Corridor[];
   links?: PlanLink[];
   racks?: RackDefinition[];
   rackItems?: RackItem[];
   rackLinks?: RackLink[];
+  safetyCardLayout?: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    fontSize?: number;
+    fontIndex?: number;
+    colorIndex?: number;
+    textBgIndex?: number;
+  };
   objects: MapObject[];
 }
 
@@ -398,6 +521,7 @@ export interface Client {
   notes?: ClientNote[];
   attachments?: { id: string; name: string; dataUrl: string }[];
   wifiAntennaModels?: WifiAntennaModel[];
+  emergencyContacts?: EmergencyContactEntry[];
   sites: Site[];
 }
 

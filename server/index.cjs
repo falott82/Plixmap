@@ -120,12 +120,16 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // Needed for voice notes in client chat (getUserMedia). Keep camera/geolocation disabled.
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
+  // Needed for voice notes in client chat + presentation mode webcam controls (getUserMedia).
+  // Browser permission prompts still apply; this only controls whether the feature is allowed at all.
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; connect-src 'self' ws: wss:; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob:; frame-ancestors 'none'"
+    // Allow MediaPipe Tasks (webcam gestures) runtime assets.
+    // NOTE: MediaPipe Tasks uses WebAssembly; Chrome may require `unsafe-eval` / `wasm-unsafe-eval` to instantiate it.
+    // We keep the allowance scoped to `script-src` only (other directives remain strict).
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://storage.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob: https://cdn.jsdelivr.net; frame-ancestors 'none'"
   );
   if (resolveSecureCookie(req)) {
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');

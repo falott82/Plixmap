@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, FileText, History, Hourglass, Image as ImageIcon, Info, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, Search, Star, Trash, Users, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, Eye, EyeOff, FileText, History, Hourglass, Image as ImageIcon, Info, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, Search, ShieldAlert, Star, Trash, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -17,6 +17,9 @@ import ClientDirectoryModal from './ClientDirectoryModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import CloneFloorPlanModal from './CloneFloorPlanModal';
 import { fetchImportSummary, ImportSummaryRow } from '../../api/customImport';
+import EmergencyContactsModal from './EmergencyContactsModal';
+import { ALL_ITEMS_LAYER_ID } from '../../store/data';
+import { SECURITY_LAYER_ID } from '../../store/security';
 
 type TreeClient = {
   id: string;
@@ -130,7 +133,11 @@ const SidebarTree = () => {
     toggleSiteExpanded,
     lockedPlans,
     openClientChat,
-    chatUnreadByClientId
+    chatUnreadByClientId,
+    visibleLayerIdsByPlan,
+    hiddenLayersByPlan,
+    setVisibleLayerIds,
+    setHideAllLayers
   } = useUIStore(
     (s) => ({
       selectedPlanId: s.selectedPlanId,
@@ -145,7 +152,11 @@ const SidebarTree = () => {
       toggleSiteExpanded: s.toggleSiteExpanded,
       lockedPlans: (s as any).lockedPlans || {},
       openClientChat: (s as any).openClientChat,
-      chatUnreadByClientId: (s as any).chatUnreadByClientId || {}
+      chatUnreadByClientId: (s as any).chatUnreadByClientId || {},
+      visibleLayerIdsByPlan: (s as any).visibleLayerIdsByPlan || {},
+      hiddenLayersByPlan: (s as any).hiddenLayersByPlan || {},
+      setVisibleLayerIds: (s as any).setVisibleLayerIds,
+      setHideAllLayers: (s as any).setHideAllLayers
     }),
     shallow
   );
@@ -169,6 +180,7 @@ const SidebarTree = () => {
   const [clientAttachmentsId, setClientAttachmentsId] = useState<string | null>(null);
   const [clientIpMapId, setClientIpMapId] = useState<string | null>(null);
   const [clientDirectoryId, setClientDirectoryId] = useState<string | null>(null);
+  const [clientEmergencyId, setClientEmergencyId] = useState<string | null>(null);
   const [importSummaryByClient, setImportSummaryByClient] = useState<Record<string, ImportSummaryRow>>({});
   const [confirmDelete, setConfirmDelete] = useState<{ kind: 'client' | 'plan'; id: string; label: string } | null>(null);
   const [missingPlansNotice, setMissingPlansNotice] = useState<{ clientName: string } | null>(null);
@@ -274,6 +286,87 @@ const SidebarTree = () => {
     )
   );
   const planMenuPhotoCount = planMenu ? planPhotoCountById[planMenu.planId] || 0 : 0;
+  const planLayerIdsByPlan = useDataStore(
+    useMemo(
+      () => (s: any) => {
+        const out: Record<string, string[]> = {};
+        for (const client of s.clients || []) {
+          const layerIds = ((client?.layers || []) as any[]).map((layer) => String(layer?.id || '')).filter(Boolean);
+          for (const site of client.sites || []) {
+            for (const plan of site.floorPlans || []) {
+              out[String(plan.id)] = layerIds;
+            }
+          }
+        }
+        return out;
+      },
+      []
+    )
+  );
+  const normalizePlanLayerSelection = useMemo(
+    () => (planLayerIds: string[], ids: string[]) => {
+      const orderedLayerIds = planLayerIds.map((id) => String(id));
+      const layerSet = new Set(orderedLayerIds);
+      const nonAllLayerIds = orderedLayerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
+      const filtered = Array.from(new Set(ids.map((id) => String(id)).filter((id) => layerSet.has(id))));
+      let ordered = orderedLayerIds.filter((id) => filtered.includes(id));
+      if (!nonAllLayerIds.length) {
+        return layerSet.has(ALL_ITEMS_LAYER_ID) ? [ALL_ITEMS_LAYER_ID] : ordered;
+      }
+      const hasAll = nonAllLayerIds.every((id) => ordered.includes(id));
+      if (hasAll) {
+        if (!ordered.includes(ALL_ITEMS_LAYER_ID) && layerSet.has(ALL_ITEMS_LAYER_ID)) {
+          ordered = [ALL_ITEMS_LAYER_ID, ...ordered];
+        }
+      } else {
+        ordered = ordered.filter((id) => id !== ALL_ITEMS_LAYER_ID);
+      }
+      return ordered;
+    },
+    []
+  );
+  const getPlanLayerIds = useMemo(
+    () => (planId: string) => {
+      const known = planLayerIdsByPlan[planId] || [];
+      if (known.length) return known;
+      return Array.from(new Set([ALL_ITEMS_LAYER_ID, SECURITY_LAYER_ID, ...((visibleLayerIdsByPlan[planId] || []) as string[])]));
+    },
+    [planLayerIdsByPlan, visibleLayerIdsByPlan]
+  );
+  const isSecurityCardVisibleForPlan = useMemo(
+    () => (planId: string) => {
+      if (!planId) return false;
+      if (hiddenLayersByPlan[planId]) return false;
+      const layerIds = getPlanLayerIds(planId);
+      const nonAllLayerIds = layerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
+      const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
+      const visible = typeof current === 'undefined' ? layerIds : normalizePlanLayerSelection(layerIds, current);
+      const allItemsSelected = visible.includes(ALL_ITEMS_LAYER_ID);
+      const effective = allItemsSelected ? nonAllLayerIds : visible.filter((id) => id !== ALL_ITEMS_LAYER_ID);
+      return effective.includes(SECURITY_LAYER_ID);
+    },
+    [getPlanLayerIds, hiddenLayersByPlan, normalizePlanLayerSelection, visibleLayerIdsByPlan]
+  );
+  const toggleSecurityCardVisibilityForPlan = useMemo(
+    () => (planId: string) => {
+      if (!planId) return;
+      const layerIds = getPlanLayerIds(planId);
+      const nonAllLayerIds = layerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
+      const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
+      const hideAll = !!hiddenLayersByPlan[planId];
+      const visible = typeof current === 'undefined' ? layerIds : normalizePlanLayerSelection(layerIds, current);
+      const allItemsSelected = visible.includes(ALL_ITEMS_LAYER_ID);
+      const baseVisible = hideAll ? [] : allItemsSelected ? nonAllLayerIds : visible.filter((id) => id !== ALL_ITEMS_LAYER_ID);
+      const hasSecurity = baseVisible.includes(SECURITY_LAYER_ID);
+      const nextRaw = hasSecurity
+        ? baseVisible.filter((id) => id !== SECURITY_LAYER_ID)
+        : [...baseVisible, SECURITY_LAYER_ID];
+      if (hideAll) setHideAllLayers(planId, false);
+      setVisibleLayerIds(planId, normalizePlanLayerSelection(layerIds, nextRaw));
+    },
+    [getPlanLayerIds, hiddenLayersByPlan, normalizePlanLayerSelection, setHideAllLayers, setVisibleLayerIds, visibleLayerIdsByPlan]
+  );
+  const planMenuSecurityVisible = planMenu ? isSecurityCardVisibleForPlan(planMenu.planId) : false;
 
   const canEditClientNotes = useMemo(() => {
     if (!clientNotesId) return false;
@@ -281,6 +374,24 @@ const SidebarTree = () => {
     const p = (permissions || []).find((x: any) => x.scopeType === 'client' && x.scopeId === clientNotesId);
     return p?.access === 'rw';
   }, [clientNotesId, permissions, user?.isAdmin]);
+  const canManageEmergencyDirectory = useMemo(() => {
+    if (!clientEmergencyId) return false;
+    if (isSuperAdmin) return true;
+    if (!user?.isAdmin) return false;
+    if ((permissions || []).some((perm: any) => perm.scopeType === 'client' && perm.scopeId === clientEmergencyId && perm.access === 'rw')) {
+      return true;
+    }
+    const clientEntry = clients.find((entry) => entry.id === clientEmergencyId);
+    if (!clientEntry) return false;
+    const siteIds = new Set((clientEntry.sites || []).map((site) => site.id));
+    const planIds = new Set((clientEntry.sites || []).flatMap((site) => site.floorPlans.map((plan) => plan.id)));
+    return (permissions || []).some((perm: any) => {
+      if (perm.access !== 'rw') return false;
+      if (perm.scopeType === 'site') return siteIds.has(perm.scopeId);
+      if (perm.scopeType === 'plan') return planIds.has(perm.scopeId);
+      return false;
+    });
+  }, [clientEmergencyId, clients, isSuperAdmin, permissions, user?.isAdmin]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -777,6 +888,23 @@ const SidebarTree = () => {
                 </button>
               ) : null}
               <button
+                onClick={() => {
+                  toggleSecurityCardVisibilityForPlan(planMenu.planId);
+                  setPlanMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({
+                  it: planMenuSecurityVisible ? 'Nascondi scheda sicurezza' : 'Mostra scheda sicurezza',
+                  en: planMenuSecurityVisible ? 'Hide safety card' : 'Show safety card'
+                })}
+              >
+                {planMenuSecurityVisible ? <EyeOff size={14} className="text-slate-600" /> : <Eye size={14} className="text-slate-600" />}
+                {t({
+                  it: planMenuSecurityVisible ? 'Nascondi scheda sicurezza' : 'Mostra scheda sicurezza',
+                  en: planMenuSecurityVisible ? 'Hide safety card' : 'Show safety card'
+                })}
+              </button>
+              <button
                 onClick={async () => {
                   const next = defaultPlanId === planMenu.planId ? null : planMenu.planId;
                   try {
@@ -964,6 +1092,17 @@ const SidebarTree = () => {
                 <FileText size={14} className="text-slate-500" />
                 {t({ it: 'Note cliente', en: 'Client notes' })}
               </button>
+              <button
+                onClick={() => {
+                  setClientEmergencyId(clientMenu.clientId);
+                  setClientMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({ it: 'Rubrica emergenze', en: 'Emergency directory' })}
+              >
+                <ShieldAlert size={14} className="text-rose-600" />
+                {t({ it: 'Rubrica emergenze', en: 'Emergency directory' })}
+              </button>
               {user?.isAdmin ? (
                 <button
                   onClick={() => {
@@ -1124,6 +1263,12 @@ const SidebarTree = () => {
       />
       <ClientIpMapModal open={!!clientIpMapId} client={ipMapClient || undefined} onClose={() => setClientIpMapId(null)} />
       <ClientDirectoryModal open={!!clientDirectoryId} client={directoryClient || undefined} onClose={() => setClientDirectoryId(null)} />
+      <EmergencyContactsModal
+        open={!!clientEmergencyId}
+        clientId={clientEmergencyId}
+        readOnly={!canManageEmergencyDirectory}
+        onClose={() => setClientEmergencyId(null)}
+      />
 
       <CloneFloorPlanModal
         open={!!clonePlan}

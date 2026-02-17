@@ -16,6 +16,10 @@ interface UIState {
   changelogOpen: boolean;
   sidebarCollapsed: boolean;
   presentationMode: boolean;
+  presentationWebcamEnabled: boolean;
+  presentationWebcamCalib: { pinchRatio: number } | null;
+  presentationEnterRequested: boolean;
+  cameraPermissionState: 'granted' | 'denied' | 'prompt' | 'unknown';
   lastObjectScale: number;
   dirtyByPlan: Record<string, boolean>;
   pendingSaveNavigateTo?: string | null;
@@ -92,6 +96,11 @@ interface UIState {
   toggleSidebar: () => void;
   setPresentationMode: (enabled: boolean) => void;
   togglePresentationMode: () => void;
+  setPresentationWebcamEnabled: (enabled: boolean) => void;
+  setPresentationWebcamCalib: (calib: { pinchRatio: number } | null) => void;
+  requestPresentationEnter: () => void;
+  clearPresentationEnterRequest: () => void;
+  setCameraPermissionState: (state: 'granted' | 'denied' | 'prompt' | 'unknown') => void;
   setPlanDirty: (planId: string, dirty: boolean) => void;
   requestSaveAndNavigate: (to: string) => void;
   clearPendingSaveNavigate: () => void;
@@ -166,6 +175,10 @@ export const useUIStore = create<UIState>()(
       changelogOpen: false,
       sidebarCollapsed: false,
       presentationMode: false,
+      presentationWebcamEnabled: false,
+      presentationWebcamCalib: null,
+      presentationEnterRequested: false,
+      cameraPermissionState: 'unknown',
       lastObjectScale: 1,
       dirtyByPlan: {},
       pendingSaveNavigateTo: null,
@@ -245,6 +258,12 @@ export const useUIStore = create<UIState>()(
       ,
       setPresentationMode: (enabled) => set({ presentationMode: !!enabled }),
       togglePresentationMode: () => set((state) => ({ presentationMode: !state.presentationMode })),
+      setPresentationWebcamEnabled: (enabled) => set({ presentationWebcamEnabled: !!enabled }),
+      setPresentationWebcamCalib: (calib) =>
+        set(() => ({ presentationWebcamCalib: calib && Number.isFinite((calib as any).pinchRatio) ? calib : null })),
+      requestPresentationEnter: () => set({ presentationEnterRequested: true }),
+      clearPresentationEnterRequest: () => set({ presentationEnterRequested: false }),
+      setCameraPermissionState: (state) => set({ cameraPermissionState: state || 'unknown' }),
       setPlanDirty: (planId, dirty) =>
         set((state) => ({
           dirtyByPlan: { ...state.dirtyByPlan, [planId]: dirty }
@@ -365,10 +384,10 @@ export const useUIStore = create<UIState>()(
           return { onlineUserIds: next };
         })
     }),
-    {
-      name: 'deskly-ui',
-      version: 9,
-      migrate: (persistedState: any, _version: number) => {
+	    {
+	      name: 'deskly-ui',
+	      version: 10,
+	      migrate: (persistedState: any, _version: number) => {
         if (persistedState && typeof persistedState === 'object') {
           // Do not persist time-machine selection across reloads (always start from "present").
           if ('selectedRevisionByPlan' in persistedState) delete persistedState.selectedRevisionByPlan;
@@ -387,6 +406,8 @@ export const useUIStore = create<UIState>()(
           if (!('clientChatDockPreferredHeight' in persistedState)) persistedState.clientChatDockPreferredHeight = 720;
           if (!('clientChatDockWidth' in persistedState)) persistedState.clientChatDockWidth = 980;
           if (!('clientChatDividerLeftWidth' in persistedState)) persistedState.clientChatDividerLeftWidth = 340;
+          // Always reset transient UI flags.
+          persistedState.presentationEnterRequested = false;
         }
         return persistedState as any;
       },

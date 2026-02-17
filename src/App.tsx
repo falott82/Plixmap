@@ -182,6 +182,47 @@ const App = () => {
   }, [hydrateAuth]);
 
   useEffect(() => {
+    // Track camera permission state so we can decide whether to prompt before entering presentation mode.
+    let cancelled = false;
+    let status: any = null;
+    let onChange: (() => void) | null = null;
+
+    const normalize = (value: any): 'granted' | 'denied' | 'prompt' | 'unknown' => {
+      const v = String(value || '');
+      if (v === 'granted' || v === 'denied' || v === 'prompt') return v as any;
+      return 'unknown';
+    };
+
+    (async () => {
+      try {
+        const p: any = (navigator as any)?.permissions;
+        if (!p?.query) {
+          useUIStore.getState().setCameraPermissionState?.('unknown');
+          return;
+        }
+        status = await p.query({ name: 'camera' as any });
+        if (cancelled) return;
+        useUIStore.getState().setCameraPermissionState?.(normalize(status?.state));
+        onChange = () => useUIStore.getState().setCameraPermissionState?.(normalize(status?.state));
+        if (typeof status?.addEventListener === 'function') status.addEventListener('change', onChange);
+        else status.onchange = onChange;
+      } catch {
+        useUIStore.getState().setCameraPermissionState?.('unknown');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      try {
+        if (status && onChange && typeof status.removeEventListener === 'function') status.removeEventListener('change', onChange);
+      } catch {}
+      try {
+        if (status) status.onchange = null;
+      } catch {}
+    };
+  }, []);
+
+  useEffect(() => {
     // Keep a cheap ref so we can warn on refresh/close without re-rendering App.
     if (unsubscribeUnsavedRef.current) unsubscribeUnsavedRef.current();
     unsubscribeUnsavedRef.current = useUIStore.subscribe((state) => {
@@ -232,7 +273,28 @@ const App = () => {
 
       // Presentation mode with `P`: toggle fullscreen and collapse sidebar.
       if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
-        useUIStore.getState().togglePresentationMode?.();
+        const path = window.location?.pathname || '';
+        if (!path.startsWith('/plan/')) return;
+        e.preventDefault();
+        if (useUIStore.getState().presentationMode) {
+          useUIStore.getState().setPresentationMode?.(false);
+          return;
+        }
+        const perm = useUIStore.getState().cameraPermissionState;
+        if (perm === 'granted') {
+          try {
+            const doc: any = document as any;
+            const root: any = document.documentElement as any;
+            if (!doc.fullscreenElement) {
+              const p = root?.requestFullscreen?.();
+              if (p && typeof p.then === 'function') p.catch(() => {});
+            }
+          } catch {}
+          useUIStore.getState().setPresentationMode?.(true);
+          return;
+        }
+        // Let PlanView prompt before entering presentation (second click keeps the user gesture).
+        useUIStore.getState().requestPresentationEnter?.();
       }
     };
     window.addEventListener('keydown', onKey, false);
@@ -243,7 +305,6 @@ const App = () => {
   const forcedPresentationRef = useRef(false);
   useEffect(() => {
     const doc: any = document as any;
-    const root: any = document.documentElement as any;
     const want = !!useUIStore.getState().presentationMode;
     const inFs = !!doc.fullscreenElement;
     if (want) {
@@ -252,13 +313,6 @@ const App = () => {
         forcedPresentationRef.current = true;
       }
       useUIStore.setState({ sidebarCollapsed: true } as any);
-      if (!inFs) {
-        try {
-          root?.requestFullscreen?.();
-        } catch {
-          // ignore
-        }
-      }
       return;
     }
     if (forcedPresentationRef.current) {
