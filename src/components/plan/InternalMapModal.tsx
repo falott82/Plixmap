@@ -30,6 +30,7 @@ interface RouteResult {
   distancePx: number;
   distanceMeters?: number;
   etaSeconds?: number;
+  directDashedOnly?: boolean;
 }
 
 type ConnectionTransitionType = 'stairs' | 'elevator';
@@ -570,6 +571,40 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
     endDist: number;
   };
 
+  const buildDirectRoomRoute = (): { route: RouteResult } | null => {
+    const rooms = (plan.rooms || []).filter(Boolean);
+    for (const room of rooms) {
+      const poly = roomPolygon(room);
+      if (poly.length < 3) continue;
+      const startInRoom = pointInPolygon(startPoint, poly) || pointOnPolygonBoundary(startPoint, poly);
+      if (!startInRoom) continue;
+      const targetInRoom = pointInPolygon(targetPoint, poly) || pointOnPolygonBoundary(targetPoint, poly);
+      if (!targetInRoom) continue;
+      const directLine = [startPoint, targetPoint];
+      const distancePx = polylineLength(directLine);
+      const metersPerPixel = Number(plan.scale?.metersPerPixel);
+      const distanceMeters = Number.isFinite(metersPerPixel) && metersPerPixel > 0 ? distancePx * metersPerPixel : undefined;
+      const etaSeconds = distanceMeters ? distanceMeters / SPEED_MPS : undefined;
+      return {
+        route: {
+          startDoor: startPoint,
+          endDoor: targetPoint,
+          approachPoints: directLine,
+          corridorPoints: [],
+          exitPoints: [],
+          distancePx,
+          distanceMeters,
+          etaSeconds,
+          directDashedOnly: true
+        }
+      };
+    }
+    return null;
+  };
+
+  const directRoomRoute = buildDirectRoomRoute();
+  if (directRoomRoute) return directRoomRoute;
+
   const corridors = ((plan.corridors || []) as Corridor[]).filter(Boolean);
   if (!corridors.length) return { error: 'no-corridors' };
   const corridorPolys = corridors.map((corridor) => corridorPolygon(corridor)).filter((poly) => poly.length >= 3);
@@ -949,7 +984,8 @@ const reverseRoute = (route: RouteResult): RouteResult => ({
   exitPoints: [...(route.approachPoints || [])].reverse(),
   distancePx: route.distancePx,
   distanceMeters: route.distanceMeters,
-  etaSeconds: route.etaSeconds
+  etaSeconds: route.etaSeconds,
+  directDashedOnly: route.directDashedOnly
 });
 
 const computeMultiFloorRoute = (
@@ -2063,9 +2099,14 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
       }
       const isFirst = segmentIndex === 0;
       const isLast = segmentIndex === routeResult.segments.length - 1;
-      const markers = `
+      const doorMarkers = route.directDashedOnly
+        ? ''
+        : `
         <circle cx="${route.startDoor.x}" cy="${route.startDoor.y}" r="5.5" fill="#fb923c" stroke="#7c2d12" stroke-width="1.3" />
         <circle cx="${route.endDoor.x}" cy="${route.endDoor.y}" r="5.5" fill="#fb923c" stroke="#7c2d12" stroke-width="1.3" />
+        `;
+      const markers = `
+        ${doorMarkers}
         ${
           isFirst && startPoint
             ? `<g><circle cx="${startPoint.x}" cy="${startPoint.y}" r="7" fill="#dc2626" stroke="#ffffff" stroke-width="2" /><text x="${startPoint.x + 10}" y="${startPoint.y - 10}" font-size="12" font-weight="700" fill="#7f1d1d">A</text></g>`
@@ -2168,67 +2209,78 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
     };
     const instructions: PdfInstruction[] = [];
     const firstSegment = routeResult.segments[0];
-    const firstSegmentPlan = planById.get(firstSegment.planId);
-    const startRoom = getRoomNameAtPoint(firstSegmentPlan, startPoint);
-    const firstTurn = getTurnWord(firstSegment.route);
-    if (startRoom) {
-      instructions.push({ kind: 'start', text: t({ it: `Esci da ${startRoom}.`, en: `Leave ${startRoom}.` }) });
-    } else {
-      instructions.push({ kind: 'start', text: t({ it: `Parti da ${startLabel}.`, en: `Start from ${startLabel}.` }) });
-    }
-    if (firstTurn) {
-      instructions.push({
-        kind: firstTurn.it === 'destra' ? 'turn-right' : 'turn-left',
-        text: t({ it: `Gira a ${firstTurn.it}.`, en: `Turn ${firstTurn.en}.` })
-      });
-    }
-    for (let i = 0; i < routeResult.segments.length; i += 1) {
-      const segment = routeResult.segments[i];
-      const plan = planById.get(segment.planId);
-      const corridorName = pickCorridorNameForSegment(plan, segment);
-      const corridorPx = polylineLength(segment.route.corridorPoints || []);
-      const metersPerPixel = Number(plan?.scale?.metersPerPixel);
-      const corridorMeters = Number.isFinite(metersPerPixel) && metersPerPixel > 0 ? corridorPx * metersPerPixel : undefined;
-      const corridorSeconds = corridorMeters ? corridorMeters / SPEED_MPS : undefined;
-      if (corridorPx > 0.5) {
-        instructions.push({
-          kind: 'corridor',
-          text: t({
-            it: `Percorri ${corridorName} (${segment.planName}) per ${formatDistance(corridorMeters, corridorPx)}${
-              corridorSeconds ? ` (${formatEta(corridorSeconds)})` : ''
-            }.`,
-            en: `Follow ${corridorName} (${segment.planName}) for ${formatDistance(corridorMeters, corridorPx)}${
-              corridorSeconds ? ` (${formatEta(corridorSeconds)})` : ''
-            }.`
-          })
-        });
-      }
-      if (segment.endConnectionId && i < routeResult.segments.length - 1) {
-        const next = routeResult.segments[i + 1];
-        const action = getTransitionAction(segment.planId, next.planId);
-        const typeText = segment.endTransitionType === 'elevator' ? t({ it: "l'ascensore", en: 'the elevator' }) : t({ it: 'le scale', en: 'the stairs' });
-        const penalty = transitionPenaltySeconds(segment.endTransitionType);
-        instructions.push({
-          kind: segment.endTransitionType === 'elevator' ? 'elevator' : 'stairs',
-          text: `${t(action)} ${t({ it: 'tramite', en: 'via' })} ${typeText} ${t({ it: 'verso', en: 'to' })} ${next.planName} (+${penalty}s).`
-        });
-      }
-    }
-    const lastSegment = routeResult.segments[routeResult.segments.length - 1];
-    const lastSegmentPlan = planById.get(lastSegment.planId);
-    const destinationRoom = getRoomNameAtPoint(lastSegmentPlan, destinationPoint);
-    const destinationSide = getDestinationSideWord(lastSegment.route, destinationPoint);
-    const destinationSubject = destinationRoom || destinationLabel;
-    if (destinationSide) {
+    const isDirectSameRoomRoute = routeResult.segments.length === 1 && !!firstSegment?.route?.directDashedOnly;
+    if (isDirectSameRoomRoute) {
       instructions.push({
         kind: 'arrival',
         text: t({
-          it: `${destinationSubject} si troverà sulla ${destinationSide.it}.`,
-          en: `${destinationSubject} will be on the ${destinationSide.en}.`
+          it: "Partenza e destinazione sono all'interno della stessa stanza.",
+          en: 'Start and destination are inside the same room.'
         })
       });
     } else {
-      instructions.push({ kind: 'arrival', text: t({ it: `Raggiungi ${destinationSubject}.`, en: `Reach ${destinationSubject}.` }) });
+      const firstSegmentPlan = planById.get(firstSegment.planId);
+      const startRoom = getRoomNameAtPoint(firstSegmentPlan, startPoint);
+      const firstTurn = getTurnWord(firstSegment.route);
+      if (startRoom) {
+        instructions.push({ kind: 'start', text: t({ it: `Esci da ${startRoom}.`, en: `Leave ${startRoom}.` }) });
+      } else {
+        instructions.push({ kind: 'start', text: t({ it: `Parti da ${startLabel}.`, en: `Start from ${startLabel}.` }) });
+      }
+      if (firstTurn) {
+        instructions.push({
+          kind: firstTurn.it === 'destra' ? 'turn-right' : 'turn-left',
+          text: t({ it: `Gira a ${firstTurn.it}.`, en: `Turn ${firstTurn.en}.` })
+        });
+      }
+      for (let i = 0; i < routeResult.segments.length; i += 1) {
+        const segment = routeResult.segments[i];
+        const plan = planById.get(segment.planId);
+        const corridorName = pickCorridorNameForSegment(plan, segment);
+        const corridorPx = polylineLength(segment.route.corridorPoints || []);
+        const metersPerPixel = Number(plan?.scale?.metersPerPixel);
+        const corridorMeters = Number.isFinite(metersPerPixel) && metersPerPixel > 0 ? corridorPx * metersPerPixel : undefined;
+        const corridorSeconds = corridorMeters ? corridorMeters / SPEED_MPS : undefined;
+        if (corridorPx > 0.5) {
+          instructions.push({
+            kind: 'corridor',
+            text: t({
+              it: `Percorri ${corridorName} (${segment.planName}) per ${formatDistance(corridorMeters, corridorPx)}${
+                corridorSeconds ? ` (${formatEta(corridorSeconds)})` : ''
+              }.`,
+              en: `Follow ${corridorName} (${segment.planName}) for ${formatDistance(corridorMeters, corridorPx)}${
+                corridorSeconds ? ` (${formatEta(corridorSeconds)})` : ''
+              }.`
+            })
+          });
+        }
+        if (segment.endConnectionId && i < routeResult.segments.length - 1) {
+          const next = routeResult.segments[i + 1];
+          const action = getTransitionAction(segment.planId, next.planId);
+          const typeText = segment.endTransitionType === 'elevator' ? t({ it: "l'ascensore", en: 'the elevator' }) : t({ it: 'le scale', en: 'the stairs' });
+          const penalty = transitionPenaltySeconds(segment.endTransitionType);
+          instructions.push({
+            kind: segment.endTransitionType === 'elevator' ? 'elevator' : 'stairs',
+            text: `${t(action)} ${t({ it: 'tramite', en: 'via' })} ${typeText} ${t({ it: 'verso', en: 'to' })} ${next.planName} (+${penalty}s).`
+          });
+        }
+      }
+      const lastSegment = routeResult.segments[routeResult.segments.length - 1];
+      const lastSegmentPlan = planById.get(lastSegment.planId);
+      const destinationRoom = getRoomNameAtPoint(lastSegmentPlan, destinationPoint);
+      const destinationSide = getDestinationSideWord(lastSegment.route, destinationPoint);
+      const destinationSubject = destinationRoom || destinationLabel;
+      if (destinationSide) {
+        instructions.push({
+          kind: 'arrival',
+          text: t({
+            it: `${destinationSubject} si troverà sulla ${destinationSide.it}.`,
+            en: `${destinationSubject} will be on the ${destinationSide.en}.`
+          })
+        });
+      } else {
+        instructions.push({ kind: 'arrival', text: t({ it: `Raggiungi ${destinationSubject}.`, en: `Reach ${destinationSubject}.` }) });
+      }
     }
     const introBlock = `
       <div class="intro">
@@ -3159,7 +3211,7 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
                             </text>
                           </g>
                         ) : null}
-                        {activeRoute ? (
+                        {activeRoute && !activeRoute.directDashedOnly ? (
                           <>
                             <circle cx={activeRoute.startDoor.x} cy={activeRoute.startDoor.y} r={5.5} fill="#fb923c" stroke="#7c2d12" strokeWidth={1.3} />
                             <circle cx={activeRoute.endDoor.x} cy={activeRoute.endDoor.y} r={5.5} fill="#fb923c" stroke="#7c2d12" strokeWidth={1.3} />

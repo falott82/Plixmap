@@ -1,8 +1,14 @@
 # Deskly - Floor Plan Management
 
-Current version: 2.8.2
+Current version: 2.8.3
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
+
+## What's new in 2.8.3
+- Internal Map now supports direct in-room routes without corridors: if A and B are inside the same room, the route is a simple dashed A→B line.
+- Fixed false `No corridors configured in the selected floor plan` in valid same-room scenarios.
+- Direct in-room route rendering now hides orange door markers to keep the path clean and readable.
+- In same-room scenarios, step-by-step directions are collapsed to a single message with the checkered-flag arrival icon.
 
 ## What's new in 2.8.2
 - Internal Map PDF export from preview is now stable: clicking `Stampa / Salva PDF` no longer closes the modal and reliably starts the download.
