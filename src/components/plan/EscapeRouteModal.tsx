@@ -353,6 +353,8 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
   const [activeSegmentIndex, setActiveSegmentIndex] = useState(0);
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
+  const computeRunRef = useRef(0);
+  const lastComputeSignatureRef = useRef('');
 
   const planById = useMemo(() => new Map((plans || []).map((plan) => [plan.id, plan])), [plans]);
   const sortedPlans = useMemo(
@@ -386,13 +388,13 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
             corridorId: corridor.id,
             doorId: door.id,
             point: anchor,
-            label: description || t({ it: 'Uscita emergenza esterna', en: 'External emergency exit' })
+            label: description
           });
         }
       }
     }
     return list;
-  }, [plans, t]);
+  }, [plans]);
 
   const activeRouteSegment = useMemo(() => {
     if (!routeResult || !routeResult.segments.length) return null;
@@ -423,6 +425,10 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
     if (sourceKind === 'corridor') return t({ it: 'Punto selezionato in corridoio', en: 'Selected point in corridor' });
     return t({ it: 'Punto selezionato su mappa', en: 'Selected point on map' });
   }, [sourceKind, t]);
+  const targetDoorLabel = useMemo(
+    () => targetDoor?.label || t({ it: 'Uscita emergenza esterna', en: 'External emergency exit' }),
+    [targetDoor?.label, t]
+  );
 
   const escapeInstructions = useMemo(() => {
     if (!routeResult || !targetDoor) return [] as Array<{ icon: 'start' | 'route' | 'stairs' | 'arrival'; text: string }>;
@@ -464,8 +470,8 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
     items.push({
       icon: 'arrival',
       text: t({
-        it: `Raggiungi ${targetDoor.label} su ${targetDoor.planName}.`,
-        en: `Reach ${targetDoor.label} on ${targetDoor.planName}.`
+        it: `Raggiungi ${targetDoor.label || t({ it: 'uscita emergenza esterna', en: 'external emergency exit' })} su ${targetDoor.planName}.`,
+        en: `Reach ${targetDoor.label || t({ it: 'uscita emergenza esterna', en: 'external emergency exit' })} on ${targetDoor.planName}.`
       })
     });
     return items;
@@ -473,6 +479,8 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
 
   useEffect(() => {
     if (!open) {
+      computeRunRef.current += 1;
+      lastComputeSignatureRef.current = '';
       setComputing(false);
       setRouteError('');
       setRouteResult(null);
@@ -489,55 +497,128 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
       setActiveSegmentIndex(0);
       return;
     }
+    const signature = `${startPlanId}|${Number(startPoint.x.toFixed(2))},${Number(startPoint.y.toFixed(2))}|${plans
+      .map((plan) => String(plan.id))
+      .join(',')}|${emergencyDoorCandidates.length}`;
+    if (lastComputeSignatureRef.current === signature) return;
+    lastComputeSignatureRef.current = signature;
+    const runId = computeRunRef.current + 1;
+    computeRunRef.current = runId;
     setRouteError('');
     setComputing(true);
     setRouteResult(null);
     setTargetDoor(null);
     setActiveSegmentIndex(0);
-    window.setTimeout(() => {
-      if (!emergencyDoorCandidates.length) {
-        setRouteError(
-          t({
-            it: 'Nessuna porta con opzioni Emergenza + Esterno configurata. Imposta almeno una porta di uscita.',
-            en: 'No door configured with Emergency + External options. Configure at least one exit door.'
-          })
-        );
-        setComputing(false);
-        return;
-      }
-      let best: EscapeRouteSelection | null = null;
-      for (const candidate of emergencyDoorCandidates) {
-        const computed = computeMultiFloorRoute(
-          plans,
-          startPlanId,
-          candidate.planId,
-          startPoint,
-          candidate.point,
-          { allowedTransitionTypes: ['stairs'] }
-        );
-        if (!computed.result) continue;
-        const eta = Number(computed.result.etaSeconds);
-        const score = Number.isFinite(eta) && eta > 0 ? eta : Number(computed.result.distancePx || Number.POSITIVE_INFINITY);
-        if (!best || score < best.score) {
-          best = { candidate, result: computed.result, score };
+    const timer = window.setTimeout(() => {
+      try {
+        if (runId !== computeRunRef.current) return;
+        if (!emergencyDoorCandidates.length) {
+          setRouteError(
+            t({
+              it: 'Nessuna porta con opzioni Emergenza + Esterno configurata. Imposta almeno una porta di uscita.',
+              en: 'No door configured with Emergency + External options. Configure at least one exit door.'
+            })
+          );
+          setRouteResult(null);
+          setTargetDoor(null);
+          return;
         }
-      }
-      if (!best) {
-        setRouteError(
-          t({
-            it: 'Via di fuga non trovata. Verifica corridoi, collegamenti tra piani e presenza di scale collegate.',
-            en: 'Escape route not found. Check corridors, floor links, and connected stairs.'
+        const startPlan = planById.get(startPlanId);
+        const sameFloorCandidates = emergencyDoorCandidates.filter((candidate) => candidate.planId === startPlanId);
+        const bestByScore = (
+          current: EscapeRouteSelection | null,
+          candidate: EscapeDoorCandidate,
+          result: MultiFloorRouteResult
+        ) => {
+          const eta = Number(result.etaSeconds);
+          const score = Number.isFinite(eta) && eta > 0 ? eta : Number(result.distancePx || Number.POSITIVE_INFINITY);
+          if (!current || score < current.score) return { candidate, result, score };
+          return current;
+        };
+
+        let best: EscapeRouteSelection | null = null;
+
+        // Fast path: if at least one valid external emergency exit is on the start floor,
+        // compute only same-floor routes first and return immediately if one is found.
+        if (startPlan && sameFloorCandidates.length) {
+          const localPlanSet = [startPlan];
+          for (const candidate of sameFloorCandidates) {
+            if (runId !== computeRunRef.current) return;
+            const computed = computeMultiFloorRoute(
+              localPlanSet,
+              startPlanId,
+              candidate.planId,
+              startPoint,
+              candidate.point,
+              { allowedTransitionTypes: ['stairs'] }
+            );
+            if (!computed.result) continue;
+            best = bestByScore(best, candidate, computed.result);
+          }
+          if (best) {
+            setRouteResult(best.result);
+            setTargetDoor(best.candidate);
+            setActiveSegmentIndex(0);
+            setRouteError('');
+            return;
+          }
+        }
+
+        const startPlanOrder = Number(planOrder.get(startPlanId) ?? 0);
+        const prioritizedOtherFloors = emergencyDoorCandidates
+          .filter((candidate) => candidate.planId !== startPlanId)
+          .map((candidate) => {
+            const floorOrder = Number(planOrder.get(candidate.planId) ?? startPlanOrder);
+            const floorDelta = Math.abs(floorOrder - startPlanOrder);
+            const linearDist = Math.hypot(candidate.point.x - startPoint.x, candidate.point.y - startPoint.y);
+            return {
+              candidate,
+              rank: floorDelta * 5000 + linearDist
+            };
           })
-        );
+          .sort((a, b) => a.rank - b.rank)
+          .slice(0, 24)
+          .map((entry) => entry.candidate);
+
+        const deadline = Date.now() + 15000;
+        for (let i = 0; i < prioritizedOtherFloors.length; i += 1) {
+          if (runId !== computeRunRef.current) return;
+          if (Date.now() > deadline) break;
+          const candidate = prioritizedOtherFloors[i];
+          const computed = computeMultiFloorRoute(
+            plans,
+            startPlanId,
+            candidate.planId,
+            startPoint,
+            candidate.point,
+            { allowedTransitionTypes: ['stairs'] }
+          );
+          if (!computed.result) continue;
+          best = bestByScore(best, candidate, computed.result);
+        }
+        if (!best) {
+          setRouteError(
+            t({
+              it: 'Via di fuga non trovata. Verifica corridoi, collegamenti tra piani e presenza di scale collegate.',
+              en: 'Escape route not found. Check corridors, floor links, and connected stairs.'
+            })
+          );
+          setRouteResult(null);
+          setTargetDoor(null);
+        } else {
+          setRouteResult(best.result);
+          setTargetDoor(best.candidate);
+          setActiveSegmentIndex(0);
+        }
+      } catch {
+        setRouteError(t({ it: 'Errore nel calcolo della via di fuga.', en: 'Error while computing the escape route.' }));
         setRouteResult(null);
         setTargetDoor(null);
-      } else {
-        setRouteResult(best.result);
-        setTargetDoor(best.candidate);
-        setActiveSegmentIndex(0);
+      } finally {
+        if (runId === computeRunRef.current) setComputing(false);
       }
-      setComputing(false);
     }, 0);
+    return () => window.clearTimeout(timer);
   }, [emergencyDoorCandidates, open, plans, startPlanId, startPoint, t]);
 
   const close = () => {
@@ -828,7 +909,7 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
                           <span className="font-semibold text-slate-700">{t({ it: 'Destinazione', en: 'Destination' })}</span>
                           <span>{targetDoor ? targetDoor.planName : '-'}</span>
                         </div>
-                        <div className="mt-1 text-[11px] text-slate-500">{targetDoor?.label || '-'}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">{targetDoor ? targetDoorLabel : '-'}</div>
                         <div className="mt-2 flex items-center justify-between">
                           <span className="font-semibold text-slate-700">{t({ it: 'Distanza', en: 'Distance' })}</span>
                           <span>{routeMetrics?.distanceLabel || '--'}</span>
@@ -1020,7 +1101,7 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
                                     </div>
                                     <div className="mt-1">
                                       <strong>{t({ it: 'Destinazione', en: 'Destination' })}:</strong>{' '}
-                                      {`${clientName || '-'} > ${siteName || '-'} > ${targetDoor?.planName || '-'} > ${targetDoor?.label || '-'}`}
+                                      {`${clientName || '-'} > ${siteName || '-'} > ${targetDoor?.planName || '-'} > ${targetDoor ? targetDoorLabel : '-'}`}
                                     </div>
                                     <div className="mt-1">
                                       <strong>{t({ it: 'Distanza totale', en: 'Total distance' })}:</strong> {routeMetrics?.distanceLabel || '--'} | <strong>{t({ it: 'Tempo calcolato', en: 'Calculated time' })}:</strong> {routeMetrics?.etaLabel || '--'}
