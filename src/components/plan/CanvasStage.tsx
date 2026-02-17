@@ -1,10 +1,11 @@
-import { Fragment, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { Fragment, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
-import { Crosshair, Hand, MonitorPlay, Video } from 'lucide-react';
-import { Corridor, FloorPlan, IconName, MapObject, MapObjectType, Room } from '../../store/types';
-import { WALL_LAYER_COLOR, WIFI_RANGE_SCALE_MAX } from '../../store/data';
+import { Crosshair, Eye, Hand, MonitorPlay, Video } from 'lucide-react';
+import { toast } from 'sonner';
+import { Corridor, FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
+import { TEXT_FONT_OPTIONS, WALL_LAYER_COLOR, WIFI_RANGE_SCALE_MAX } from '../../store/data';
 import { isSecurityTypeId } from '../../store/security';
 import { useUIStore } from '../../store/useUIStore';
 import { clamp } from '../../utils/geometry';
@@ -78,6 +79,9 @@ interface Props {
   containerRef: React.RefObject<HTMLDivElement>;
   autoFit?: boolean;
   onGoDefaultView?: () => void;
+  hasDefaultView?: boolean;
+  onToggleViewsMenu?: () => void;
+  suspendKeyboardShortcuts?: boolean;
   presentationMode?: boolean;
   onTogglePresentation?: () => void;
   webcamEnabled?: boolean;
@@ -113,6 +117,7 @@ interface Props {
   selectedCorridorDoor?: { corridorId: string; doorId: string } | null;
   corridorDoorDraft?: { corridorId: string; start?: { edgeIndex: number; t: number; x: number; y: number } } | null;
   onCorridorClick?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
+  onCorridorMiddleClick?: (payload: { corridorId: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onCorridorDoorDraftPoint?: (payload: {
     corridorId: string;
     clientX: number;
@@ -172,7 +177,7 @@ interface Props {
         verificationHistory?: Array<{ id: string; date?: string; company: string; notes?: string; createdAt: number }>;
         linkedRoomIds?: string[];
       }>;
-      connections?: Array<{ id: string; edgeIndex: number; t: number; planIds: string[] }>;
+      connections?: Array<{ id: string; edgeIndex: number; t: number; planIds: string[]; transitionType?: 'stairs' | 'elevator' }>;
     }
   ) => void;
   onAdjustCorridorLabelScale?: (corridorId: string, delta: number) => void;
@@ -185,6 +190,8 @@ interface Props {
       width?: number;
       height?: number;
       points?: { x: number; y: number }[];
+      labelScale?: number;
+      labelPosition?: 'top' | 'bottom' | 'left' | 'right';
     }
   ) => void;
   onUpdateObject?: (
@@ -198,6 +205,31 @@ interface Props {
   onSetPrintArea?: (rect: { x: number; y: number; width: number; height: number }) => void;
   wallAttenuationByType?: Map<string, number>;
   onUpdateQuotePoints?: (id: string, points: { x: number; y: number }[]) => void;
+  safetyCard?: {
+    visible: boolean;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    fontSize: number;
+    fontIndex?: number;
+    colorIndex?: number;
+    textBgIndex?: number;
+    title: string;
+    numbersLabel: string;
+    pointsLabel: string;
+    numbersText: string;
+    pointsText: string;
+    noNumbersText: string;
+    noPointsText: string;
+  } | null;
+  onSafetyCardChange?: (
+    layout: { x: number; y: number; w: number; h: number; fontSize: number; fontIndex?: number; colorIndex?: number; textBgIndex?: number },
+    options?: { commit?: boolean }
+  ) => void;
+  onSafetyCardDoubleClick?: () => void;
+  onSafetyCardContextMenu?: (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) => void;
+  connectionPlanNamesById?: Record<string, string>;
 }
 
 export interface CanvasStageHandle {
@@ -233,6 +265,15 @@ const SELECTION_COLOR = '#2563eb';
 const SELECTION_FILL = 'rgba(37,99,235,0.1)';
 const SELECTION_GLOW = 'rgba(37,99,235,0.18)';
 const SELECTION_DASH = [6, 6];
+const SAFETY_CARD_HELP_TOAST_ID = 'safety-card-help';
+const SAFETY_CARD_COLOR_VARIANTS = [
+  { body: '#e0f2fe', header: '#bae6fd', border: '#0ea5e9', title: '#075985', text: '#0f172a' },
+  { body: '#ecfeff', header: '#cffafe', border: '#06b6d4', title: '#0e7490', text: '#0f172a' },
+  { body: '#dbeafe', header: '#bfdbfe', border: '#3b82f6', title: '#1d4ed8', text: '#0f172a' },
+  { body: '#f0f9ff', header: '#e0f2fe', border: '#0284c7', title: '#0c4a6e', text: '#111827' }
+] as const;
+const SAFETY_CARD_TEXT_BG_VARIANTS = ['transparent', '#ecfeff', '#dbeafe', '#e0f2fe'] as const;
+const SAFETY_CARD_FONT_VALUES = (TEXT_FONT_OPTIONS || []).map((entry) => String(entry.value || '').trim()).filter(Boolean);
 
 const getDeskBounds = (
   type: string,
@@ -357,6 +398,9 @@ const CanvasStageImpl = (
   containerRef,
   autoFit = true,
   onGoDefaultView,
+  hasDefaultView = false,
+  onToggleViewsMenu,
+  suspendKeyboardShortcuts = false,
   presentationMode = false,
   onTogglePresentation,
   webcamEnabled = false,
@@ -387,6 +431,7 @@ const CanvasStageImpl = (
   selectedCorridorDoor = null,
   corridorDoorDraft = null,
   onCorridorClick,
+  onCorridorMiddleClick,
   onCorridorDoorDraftPoint,
   onSelectCorridorDoor,
   onCorridorDoorContextMenu,
@@ -406,7 +451,12 @@ const CanvasStageImpl = (
   onCorridorConnectionContextMenu,
   onSetPrintArea,
   wallAttenuationByType,
-  onUpdateQuotePoints
+  onUpdateQuotePoints,
+  safetyCard = null,
+  onSafetyCardChange,
+  onSafetyCardDoubleClick,
+  onSafetyCardContextMenu,
+  connectionPlanNamesById
 }: Props,
   ref: React.ForwardedRef<CanvasStageHandle>
 ) => {
@@ -422,7 +472,7 @@ const CanvasStageImpl = (
         obj: any;
       }
   >(null);
-  const [doorHoverCard, setDoorHoverCard] = useState<null | { clientX: number; clientY: number; text: string }>(null);
+  const [doorHoverCard, setDoorHoverCard] = useState<null | { clientX: number; clientY: number; content: ReactNode }>(null);
   const hoverRaf = useRef<number | null>(null);
   const dragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const [highlightNow, setHighlightNow] = useState(Date.now());
@@ -431,15 +481,6 @@ const CanvasStageImpl = (
   const baseWidth = plan.width || bgImage?.width || dimensions.width;
   const baseHeight = plan.height || bgImage?.height || dimensions.height;
   const objects = plan.objects || [];
-  const roomNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const room of (plan.rooms || []) as Room[]) {
-      const id = String((room as any)?.id || '').trim();
-      if (!id) continue;
-      map.set(id, String((room as any)?.name || '').trim() || t({ it: 'Stanza', en: 'Room' }));
-    }
-    return map;
-  }, [plan.rooms, t]);
   const viewportRef = useRef({ zoom, pan });
   const fitViewRef = useRef<() => void>(() => undefined);
   const wheelCommitTimer = useRef<number | null>(null);
@@ -449,6 +490,7 @@ const CanvasStageImpl = (
   const panOrigin = useRef<{ x: number; y: number } | null>(null);
   const fitApplied = useRef<string | null>(null);
   const lastContextMenuAtRef = useRef(0);
+  const lastCorridorUndoAtRef = useRef(0);
   const lastBoxSelectAtRef = useRef(0);
   const [roomHighlightNow, setRoomHighlightNow] = useState(Date.now());
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -568,7 +610,123 @@ const CanvasStageImpl = (
   const [pendingPreview, setPendingPreview] = useState<{ x: number; y: number } | null>(null);
   const pendingPreviewRef = useRef<{ x: number; y: number } | null>(null);
   const pendingPreviewRaf = useRef<number | null>(null);
+  const [safetyCardDraft, setSafetyCardDraft] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    fontSize: number;
+    fontIndex: number;
+    colorIndex: number;
+    textBgIndex: number;
+  } | null>(null);
+  const [safetyCardSelected, setSafetyCardSelected] = useState(false);
+  const safetyCardRectRef = useRef<any>(null);
+  const safetyCardTransformerRef = useRef<any>(null);
+  const safetyCardDraggingRef = useRef(false);
   const objectById = useMemo(() => new Map(objects.map((o) => [o.id, o])), [objects]);
+  const isSafetyCardNode = useCallback((node: any) => {
+    let cursor = node;
+    while (cursor) {
+      const name = String(cursor?.attrs?.name || '');
+      if (name === 'safety-card-group' || name.startsWith('safety-card-')) return true;
+      const parent = cursor.getParent?.();
+      if (!parent || parent === cursor) break;
+      cursor = parent;
+    }
+    return false;
+  }, []);
+  useEffect(() => {
+    if (!safetyCard) {
+      setSafetyCardDraft(null);
+      return;
+    }
+    const next = {
+      x: Number.isFinite(Number(safetyCard.x)) ? Number(safetyCard.x) : 24,
+      y: Number.isFinite(Number(safetyCard.y)) ? Number(safetyCard.y) : 24,
+      w: Math.max(220, Number(safetyCard.w) || 420),
+      h: Math.max(56, Number(safetyCard.h) || 84),
+      fontSize: Math.max(8, Math.min(22, Number(safetyCard.fontSize) || 10)),
+      fontIndex: Number.isFinite(Number(safetyCard.fontIndex)) ? Math.max(0, Math.floor(Number(safetyCard.fontIndex))) : 0,
+      colorIndex: Number.isFinite(Number(safetyCard.colorIndex)) ? Math.max(0, Math.floor(Number(safetyCard.colorIndex))) : 0,
+      textBgIndex: Number.isFinite(Number(safetyCard.textBgIndex)) ? Math.max(0, Math.floor(Number(safetyCard.textBgIndex))) : 0
+    };
+    setSafetyCardDraft((prev) => {
+      if (!prev) return next;
+      if (safetyCardDraggingRef.current) return prev;
+      const same =
+        Math.abs(prev.x - next.x) < 0.01 &&
+        Math.abs(prev.y - next.y) < 0.01 &&
+        Math.abs(prev.w - next.w) < 0.01 &&
+        Math.abs(prev.h - next.h) < 0.01 &&
+        Math.abs(prev.fontSize - next.fontSize) < 0.01 &&
+        prev.fontIndex === next.fontIndex &&
+        prev.colorIndex === next.colorIndex &&
+        prev.textBgIndex === next.textBgIndex;
+      return same ? prev : next;
+    });
+  }, [safetyCard]);
+  useEffect(() => {
+    if (!safetyCard?.visible) {
+      setSafetyCardSelected(false);
+      toast.dismiss(SAFETY_CARD_HELP_TOAST_ID);
+    }
+  }, [safetyCard?.visible]);
+  useEffect(() => {
+    if (!safetyCardSelected) return;
+    const hasOtherSelection =
+      !!selectedId ||
+      !!selectedRoomId ||
+      !!selectedCorridorId ||
+      !!selectedLinkId ||
+      (Array.isArray(selectedIds) && selectedIds.length > 0) ||
+      (Array.isArray(selectedRoomIds) && selectedRoomIds.length > 0);
+    if (!hasOtherSelection) return;
+    setSafetyCardSelected(false);
+    toast.dismiss(SAFETY_CARD_HELP_TOAST_ID);
+  }, [safetyCardSelected, selectedCorridorId, selectedId, selectedIds, selectedLinkId, selectedRoomId, selectedRoomIds]);
+  const adjustSafetyCardFont = useCallback(
+    (delta: number) => {
+      if (!safetyCardDraft || !onSafetyCardChange) return;
+      const nextFontSize = Math.max(8, Math.min(22, Number(safetyCardDraft.fontSize || 10) + delta));
+      if (Math.abs(nextFontSize - safetyCardDraft.fontSize) < 0.01) return;
+      const nextLayout = { ...safetyCardDraft, fontSize: nextFontSize };
+      setSafetyCardDraft(nextLayout);
+      onSafetyCardChange(nextLayout, { commit: true });
+    },
+    [onSafetyCardChange, safetyCardDraft]
+  );
+  const cycleSafetyCardFont = useCallback(
+    (delta: number) => {
+      if (!safetyCardDraft || !onSafetyCardChange || !SAFETY_CARD_FONT_VALUES.length) return;
+      const current = Number(safetyCardDraft.fontIndex) || 0;
+      const nextLayout = {
+        ...safetyCardDraft,
+        fontIndex: (current + delta + SAFETY_CARD_FONT_VALUES.length) % SAFETY_CARD_FONT_VALUES.length
+      };
+      setSafetyCardDraft(nextLayout);
+      onSafetyCardChange(nextLayout, { commit: true });
+    },
+    [onSafetyCardChange, safetyCardDraft]
+  );
+  const cycleSafetyCardColor = useCallback(() => {
+    if (!safetyCardDraft || !onSafetyCardChange) return;
+    const nextLayout = {
+      ...safetyCardDraft,
+      colorIndex: (Number(safetyCardDraft.colorIndex) + 1) % SAFETY_CARD_COLOR_VARIANTS.length
+    };
+    setSafetyCardDraft(nextLayout);
+    onSafetyCardChange(nextLayout, { commit: true });
+  }, [onSafetyCardChange, safetyCardDraft]);
+  const cycleSafetyCardTextBg = useCallback(() => {
+    if (!safetyCardDraft || !onSafetyCardChange) return;
+    const nextLayout = {
+      ...safetyCardDraft,
+      textBgIndex: (Number(safetyCardDraft.textBgIndex) + 1) % SAFETY_CARD_TEXT_BG_VARIANTS.length
+    };
+    setSafetyCardDraft(nextLayout);
+    onSafetyCardChange(nextLayout, { commit: true });
+  }, [onSafetyCardChange, safetyCardDraft]);
   const selectionOrigin = useRef<{ x: number; y: number } | null>(null);
   const boundsVersionRef = useRef(0);
   const boundsCacheRef = useRef<Map<string, { version: number; bounds: { minX: number; minY: number; maxX: number; maxY: number } | null }>>(
@@ -919,38 +1077,136 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     capacityText?: string | null;
     overCapacity?: boolean;
     labelScale?: number;
+    labelPosition?: 'top' | 'bottom' | 'left' | 'right';
   }) => {
-    const { bounds, name, showName, capacityText, overCapacity, labelScale } = options;
+    const { bounds, name, showName, capacityText, overCapacity, labelScale, labelPosition } = options;
     if (!bounds.width || !bounds.height) return null;
     const minDim = Math.max(8, Math.min(bounds.width, bounds.height));
     const padding = Math.max(3, Math.min(6, Math.round(minDim / 10)));
     const baseNameSize = Math.max(7, Math.min(12, Math.round(minDim / 7)));
     const baseCapacitySize = Math.max(6, Math.min(10, Math.round(minDim / 9)));
     const scale = Number(labelScale) > 0 ? Number(labelScale) : 1;
-    const nameFontSize = Math.max(6, Math.round(baseNameSize * scale));
-    const capacityFontSize = Math.max(6, Math.round(baseCapacitySize * scale));
+    const nameFontSize = Math.max(4, Math.round(baseNameSize * scale));
+    const capacityFontSize = Math.max(4, Math.round(baseCapacitySize * scale));
     const nameVisible = showName && !!name;
     const capacityVisible = !!capacityText;
     if (!nameVisible && !capacityVisible) return null;
+    const isVertical = labelPosition === 'left' || labelPosition === 'right';
+    if (isVertical) {
+      const verticalParts: string[] = [];
+      if (nameVisible) verticalParts.push(String(name || '').trim());
+      if (capacityVisible) verticalParts.push(String(capacityText || '').trim());
+      const verticalText = verticalParts.filter(Boolean).join(' · ');
+      if (!verticalText) return null;
+      const fontSize = Math.max(nameFontSize, capacityFontSize);
+      const boxWidth = Math.max(20, Math.round(fontSize * 1.9) + 6);
+      const maxLabelHeight = Math.max(24, bounds.height - padding * 2);
+      const preferredHeight = Math.round(estimateTextWidth(verticalText, fontSize) + 14);
+      const boxHeight = Math.max(24, Math.min(maxLabelHeight, preferredHeight));
+      const labelX =
+        labelPosition === 'left'
+          ? bounds.x + padding
+          : bounds.x + Math.max(padding, bounds.width - boxWidth - padding);
+      const labelY = clamp(
+        bounds.y + (bounds.height - boxHeight) / 2,
+        bounds.y + padding,
+        bounds.y + Math.max(padding, bounds.height - boxHeight - padding)
+      );
+      const textWidth = Math.max(10, boxHeight - 8);
+      return (
+        <>
+          <Rect
+            x={labelX - 3}
+            y={labelY - 3}
+            width={boxWidth + 6}
+            height={boxHeight + 6}
+            fill="rgba(255,255,255,0.85)"
+            stroke="rgba(148,163,184,0.6)"
+            strokeWidth={1}
+            cornerRadius={5}
+            listening={false}
+          />
+          <Text
+            x={labelX + boxWidth / 2}
+            y={labelY + boxHeight / 2}
+            width={textWidth}
+            offsetX={textWidth / 2}
+            offsetY={fontSize / 2}
+            rotation={labelPosition === 'left' ? -90 : 90}
+            text={verticalText}
+            align="center"
+            fontSize={fontSize}
+            fontStyle="bold"
+            fill={overCapacity ? '#dc2626' : '#0f172a'}
+            wrap="none"
+            ellipsis
+            lineHeight={1.05}
+            listening={false}
+          />
+        </>
+      );
+    }
     const maxWidth = Math.max(0, bounds.width - padding * 2);
+    if (!maxWidth || maxWidth <= 0) return null;
+    const maxExpandedWidth = Math.max(maxWidth, Math.min(280, Math.max(bounds.width * 1.9, maxWidth)));
     const capacityWidth = capacityVisible ? estimateTextWidth(capacityText || '', capacityFontSize) + padding : 0;
+    const nameNaturalWidth = nameVisible ? estimateTextWidth(name, nameFontSize) + padding * 2 : 0;
+    const nameAvailableBase = Math.max(24, maxWidth - (capacityVisible ? capacityWidth : 0));
+    const nameWouldWrap = nameVisible && nameNaturalWidth > nameAvailableBase;
     let useStacked = false;
-    let nameWidth = maxWidth;
+    let labelWidth = Math.min(
+      maxExpandedWidth,
+      Math.max(36, Math.max(maxWidth, capacityWidth, nameVisible ? nameNaturalWidth + (capacityVisible ? 4 : 0) : 0))
+    );
+    if (nameWouldWrap) {
+      labelWidth = Math.min(maxExpandedWidth, Math.max(labelWidth, Math.round(maxWidth * 1.35)));
+    }
+    let nameWidth = labelWidth;
     if (nameVisible && capacityVisible) {
-      nameWidth = Math.max(0, maxWidth - capacityWidth);
+      nameWidth = Math.max(0, labelWidth - capacityWidth);
       if (nameWidth < 28) useStacked = true;
     }
+    const wrapNameLines = (raw: string, maxLineWidth: number, fontSize: number) => {
+      const text = String(raw || '').trim();
+      if (!text) return { text: '', lineCount: 0 };
+      const avgChar = Math.max(1, fontSize * 0.58);
+      const maxChars = Math.max(4, Math.floor(maxLineWidth / avgChar));
+      if (text.length <= maxChars) return { text, lineCount: 1 };
+      const splitIdx = text.lastIndexOf(' ', maxChars);
+      const firstBreak = splitIdx >= Math.floor(maxChars * 0.55) ? splitIdx : maxChars;
+      const line1 = text.slice(0, firstBreak).trim() || text.slice(0, maxChars).trim();
+      let line2 = text.slice(firstBreak).trim();
+      if (line2.length > maxChars) {
+        const secondSplit = line2.lastIndexOf(' ', maxChars - 1);
+        const cutAt = secondSplit >= Math.floor(maxChars * 0.55) ? secondSplit : maxChars - 1;
+        line2 = `${line2.slice(0, cutAt).trim()}...`;
+      }
+      if (!line2) return { text: line1, lineCount: 1 };
+      return { text: `${line1}\n${line2}`, lineCount: 2 };
+    };
+    const wrappedName = nameVisible ? wrapNameLines(name, Math.max(24, useStacked ? labelWidth : nameWidth), nameFontSize) : { text: '', lineCount: 0 };
+    if (wrappedName.lineCount > 1) useStacked = true;
+    const wrappedNameForStacked =
+      nameVisible && useStacked ? wrapNameLines(name, Math.max(24, labelWidth), nameFontSize) : wrappedName;
+    const finalNameText = useStacked ? wrappedNameForStacked.text : wrappedName.text;
+    const finalNameLineCount = useStacked ? wrappedNameForStacked.lineCount : wrappedName.lineCount;
     const lineGap = 2;
+    const nameBlockHeight = nameVisible ? Math.max(nameFontSize, Math.round(nameFontSize * 1.05 * Math.max(1, finalNameLineCount))) : 0;
     const labelHeight = useStacked
-      ? nameFontSize + capacityFontSize + lineGap + 6
-      : Math.max(nameFontSize, capacityFontSize) + 6;
-    const labelWidth = Math.min(
-      maxWidth,
-      Math.max(36, useStacked ? maxWidth : Math.max(nameWidth + (capacityVisible ? capacityWidth : 0), capacityWidth))
-    );
+      ? nameBlockHeight + (capacityVisible ? capacityFontSize + lineGap : 0) + 6
+      : Math.max(nameBlockHeight || nameFontSize, capacityFontSize) + 6;
     if (!labelWidth || labelWidth <= 0) return null;
-    const labelX = nameVisible ? bounds.x + padding : bounds.x + Math.max(0, (bounds.width - labelWidth) / 2);
-    const labelY = bounds.y + padding;
+    const verticalMin = bounds.y + padding;
+    const verticalMax = bounds.y + Math.max(padding, bounds.height - labelHeight - padding);
+    const centeredY = clamp(bounds.y + (bounds.height - labelHeight) / 2, verticalMin, verticalMax);
+    const centeredX = bounds.x + (bounds.width - labelWidth) / 2;
+    const labelX = centeredX;
+    const labelY =
+      labelPosition === 'bottom'
+        ? bounds.y + Math.max(padding, bounds.height - labelHeight - padding)
+        : labelPosition === 'top'
+          ? bounds.y + padding
+          : centeredY;
     const capacityAlign = nameVisible ? 'right' : 'center';
     return (
       <>
@@ -972,19 +1228,18 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                 x={labelX}
                 y={labelY}
                 width={labelWidth}
-                text={name}
+                text={finalNameText}
                 fontSize={nameFontSize}
                 fontStyle="bold"
                 fill="#0f172a"
                 listening={false}
-                ellipsis
                 lineHeight={1.05}
               />
             ) : null}
             {capacityVisible ? (
               <Text
                 x={labelX}
-                y={labelY + nameFontSize + lineGap}
+                y={labelY + nameBlockHeight + lineGap}
                 width={labelWidth}
                 align="right"
                 text={capacityText || ''}
@@ -1002,12 +1257,11 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                 x={labelX}
                 y={labelY}
                 width={Math.max(0, labelWidth - (capacityVisible ? capacityWidth : 0))}
-                text={name}
+                text={finalNameText}
                 fontSize={nameFontSize}
                 fontStyle="bold"
                 fill="#0f172a"
                 listening={false}
-                ellipsis
                 lineHeight={1.05}
               />
             ) : null}
@@ -1231,6 +1485,17 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     transformerRef.current.nodes([selectedRoomNodeRef.current]);
     transformerRef.current.getLayer()?.batchDraw?.();
   }, [selectedRoomId, plan.rooms]);
+  useEffect(() => {
+    const transformer = safetyCardTransformerRef.current;
+    if (!transformer) return;
+    if (!safetyCard?.visible || !safetyCardSelected || readOnly || !safetyCardRectRef.current) {
+      transformer.nodes([]);
+      transformer.getLayer()?.batchDraw?.();
+      return;
+    }
+    transformer.nodes([safetyCardRectRef.current]);
+    transformer.getLayer()?.batchDraw?.();
+  }, [readOnly, safetyCard?.visible, safetyCardSelected, safetyCardDraft?.w, safetyCardDraft?.h]);
 
   useEffect(() => {
     if (!deskTransformerRef.current) return;
@@ -2208,6 +2473,17 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     onSetPrintArea?.(rect);
     return true;
   };
+  const constrainRoomPolyPoint = useCallback(
+    (world: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
+      const last = draftPolyPointsRef.current[draftPolyPointsRef.current.length - 1];
+      if (!last || options?.shiftKey) return world;
+      const dx = world.x - last.x;
+      const dy = world.y - last.y;
+      if (Math.abs(dx) >= Math.abs(dy)) return { x: world.x, y: last.y };
+      return { x: last.x, y: world.y };
+    },
+    []
+  );
 
   const backPlate = useMemo(() => {
     return (
@@ -2259,15 +2535,30 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     onCreateCorridor?.({ kind: 'poly', points: nextPoints });
     return true;
   }, [corridorDrawMode, onCreateCorridor, perfEnabled, readOnly]);
+  const undoCorridorDraftSegment = useCallback(() => {
+    if (corridorDrawMode !== 'poly' || readOnly) return false;
+    const now = Date.now();
+    if (now - lastCorridorUndoAtRef.current < 60) return true;
+    lastCorridorUndoAtRef.current = now;
+    if (!corridorDraftPolyPointsRef.current.length) return true;
+    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
+    setCorridorDraftPolyPoints((prev) => {
+      const next = prev.slice(0, -1);
+      corridorDraftPolyPointsRef.current = next;
+      return next;
+    });
+    return true;
+  }, [corridorDrawMode, perfEnabled, readOnly]);
 
-	  useEffect(() => {
-	    if (roomDrawMode !== 'poly') return;
-	    const handler = (e: KeyboardEvent) => {
-	      if ((useUIStore.getState() as any)?.clientChatOpen) return;
-	      if (e.key === 'Enter') {
-	        e.preventDefault();
-	        finalizeDraftPoly();
-	      }
+  useEffect(() => {
+    if (roomDrawMode !== 'poly') return;
+    const handler = (e: KeyboardEvent) => {
+      if (suspendKeyboardShortcuts) return;
+      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finalizeDraftPoly();
+      }
 	      if (e.key === 'Backspace') {
         if (!draftPolyPointsRef.current.length) return;
         e.preventDefault();
@@ -2281,10 +2572,11 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [finalizeDraftPoly, perfEnabled, roomDrawMode]);
+  }, [finalizeDraftPoly, perfEnabled, roomDrawMode, suspendKeyboardShortcuts]);
   useEffect(() => {
     if (corridorDrawMode !== 'poly') return;
     const handler = (e: KeyboardEvent) => {
+      if (suspendKeyboardShortcuts) return;
       if ((useUIStore.getState() as any)?.clientChatOpen) return;
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -2303,10 +2595,11 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [corridorDrawMode, finalizeCorridorDraftPoly, perfEnabled]);
+  }, [corridorDrawMode, finalizeCorridorDraftPoly, perfEnabled, suspendKeyboardShortcuts]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (suspendKeyboardShortcuts) return;
       if ((useUIStore.getState() as any)?.clientChatOpen) return;
       if (e.key !== 'Escape') return;
       const labelDrag = corridorLabelDragRef.current;
@@ -2353,7 +2646,93 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [suspendKeyboardShortcuts]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (suspendKeyboardShortcuts) return;
+      if (!safetyCardSelected || !safetyCardDraft || !safetyCard?.visible || readOnly) return;
+      if ((useUIStore.getState() as any)?.clientChatOpen) return;
+      const key = String(e.key || '');
+      if (key === '+' || key === '=' || key === '-' || key === '_') {
+        e.preventDefault();
+        e.stopPropagation();
+        adjustSafetyCardFont(key === '-' || key === '_' ? -1 : 1);
+        return;
+      }
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && key.toLowerCase() === 'c') {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleSafetyCardColor();
+        return;
+      }
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && key.toLowerCase() === 'f') {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleSafetyCardFont(e.shiftKey ? -1 : 1);
+        return;
+      }
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && key.toLowerCase() === 'b') {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleSafetyCardTextBg();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [adjustSafetyCardFont, cycleSafetyCardColor, cycleSafetyCardFont, cycleSafetyCardTextBg, readOnly, safetyCard?.visible, safetyCardDraft, safetyCardSelected, suspendKeyboardShortcuts]);
+  const showSafetyCardHelpToast = useCallback(() => {
+    toast.info(
+      <div className="text-left text-slate-900">
+        <div className="text-sm font-semibold text-slate-900">
+          {t({ it: 'Scheda sicurezza selezionata', en: 'Safety card selected' })}
+        </div>
+        <div className="mt-1.5 space-y-0.5 text-xs text-slate-700">
+          <div>
+            <strong className="font-semibold">Drag</strong> {t({ it: 'sposta', en: 'move' })}
+          </div>
+          <div>
+            <strong className="font-semibold">Resize</strong> {t({ it: 'come una stanza', en: 'like a room' })}
+          </div>
+          <div>
+            <strong className="font-semibold">+ / -</strong> {t({ it: 'dimensione testo', en: 'text size' })}
+          </div>
+          <div>
+            <strong className="font-semibold">F / Shift+F</strong> {t({ it: 'font successivo / precedente', en: 'next / previous font' })}
+          </div>
+          <div>
+            <strong className="font-semibold">C</strong> {t({ it: 'colore scheda', en: 'card color' })}
+          </div>
+          <div>
+            <strong className="font-semibold">B</strong> {t({ it: 'sfondo testo', en: 'text background' })}
+          </div>
+          <div>
+            <strong className="font-semibold">{t({ it: 'Click', en: 'Click' })}</strong> {t({ it: 'seleziona la scheda', en: 'selects the card' })}
+          </div>
+          <div>
+            <strong className="font-semibold">{t({ it: 'Doppio click', en: 'Double click' })}</strong> {t({ it: 'apre rubrica emergenze', en: 'opens emergency directory' })}
+          </div>
+          <div>
+            <strong className="font-semibold">{t({ it: 'Tasto destro', en: 'Right click' })}</strong> {t({ it: 'apre il menu scheda sicurezza', en: 'opens the safety card menu' })}
+          </div>
+          {readOnly ? (
+            <div className="pt-0.5 text-[11px] font-semibold text-amber-700">{t({ it: 'Modalita sola lettura: drag/resize disabilitati', en: 'Read-only mode: drag/resize disabled' })}</div>
+          ) : null}
+        </div>
+      </div>,
+      { id: SAFETY_CARD_HELP_TOAST_ID, duration: Infinity }
+    );
+  }, [readOnly, t]);
+  useEffect(() => {
+    if (!safetyCard?.visible) {
+      toast.dismiss(SAFETY_CARD_HELP_TOAST_ID);
+      return;
+    }
+    if (!safetyCardSelected) {
+      toast.dismiss(SAFETY_CARD_HELP_TOAST_ID);
+      return;
+    }
+    showSafetyCardHelpToast();
+  }, [safetyCard?.visible, safetyCardSelected, showSafetyCardHelpToast]);
 
   useEffect(() => {
     if (printAreaMode) return;
@@ -2529,9 +2908,14 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
       }`}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (corridorDrawMode === 'poly') {
+          undoCorridorDraftSegment();
+          return;
+        }
         // If another Konva context menu was just opened (object/link/bg), don't open map menu too.
         if (Date.now() - lastContextMenuAtRef.current < 60) return;
         if (pendingType || readOnly || toolMode) return;
+        if (roomDrawMode) return;
         if ((e as any).metaKey || (e as any).altKey) return;
         if (isBoxSelecting()) return;
         const stage = stageRef.current;
@@ -2611,7 +2995,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
           className="pointer-events-none fixed z-50 max-w-[340px] -translate-x-1/2 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-700 shadow-card backdrop-blur"
           style={{ left: doorHoverCard.clientX, top: doorHoverCard.clientY + 14 }}
         >
-          {doorHoverCard.text}
+          {doorHoverCard.content}
         </div>
       ) : null}
       <Stage
@@ -2621,7 +3005,29 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
         pixelRatio={stagePixelRatio}
         onWheel={handleWheel}
         onMouseDown={(e) => {
+          if (corridorDrawMode === 'poly' && !readOnly && isContextClick(e.evt)) {
+            e.evt.preventDefault();
+            e.cancelBubble = true;
+            undoCorridorDraftSegment();
+            return;
+          }
+          const isSafetyTransformerTarget = (() => {
+            const transformer = safetyCardTransformerRef.current;
+            if (!transformer || !safetyCardSelected) return false;
+            let cursor: any = e.target;
+            while (cursor) {
+              if (cursor === transformer) return true;
+              const parent = cursor.getParent?.();
+              if (!parent || parent === cursor) break;
+              cursor = parent;
+            }
+            return false;
+          })();
+          const isSafetyTarget = isSafetyCardNode(e.target) || isSafetyTransformerTarget;
           const isEmptyTarget = e.target === e.target.getStage() || e.target?.attrs?.name === 'bg-rect';
+          if (!isSafetyTarget && safetyCardSelected) {
+            setSafetyCardSelected(false);
+          }
           if (toolMode === 'wall' && isContextClick(e.evt)) {
             e.evt.preventDefault();
             onWallDraftContextMenu?.();
@@ -2725,12 +3131,13 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
             const pos = stage?.getPointerPosition();
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
+            const constrained = constrainRoomPolyPoint(world, { shiftKey: !!e.evt.shiftKey });
             const closeThreshold = 12 / Math.max(0.2, viewportRef.current.zoom || 1);
             const currentPoints = draftPolyPointsRef.current;
             if (currentPoints.length >= 3) {
               const first = currentPoints[0];
-              const dx = world.x - first.x;
-              const dy = world.y - first.y;
+              const dx = constrained.x - first.x;
+              const dy = constrained.y - first.y;
               if (Math.hypot(dx, dy) <= closeThreshold) {
                 finalizeDraftPoly();
                 return;
@@ -2738,7 +3145,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
             }
             if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
             setDraftPolyPoints((prev) => {
-              const next = [...prev, { x: world.x, y: world.y }];
+              const next = [...prev, { x: constrained.x, y: constrained.y }];
               draftPolyPointsRef.current = next;
               return next;
             });
@@ -2880,10 +3287,11 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
             const pos = stage?.getPointerPosition();
             if (pos) {
               const world = pointerToWorld(pos.x, pos.y);
+              const constrained = constrainRoomPolyPoint(world, { shiftKey: !!e.evt.shiftKey });
               if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
               draftPolyRaf.current = requestAnimationFrame(() => {
                 if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-                setDraftPolyPointer({ x: world.x, y: world.y });
+                setDraftPolyPointer({ x: constrained.x, y: constrained.y });
               });
             }
             return;
@@ -2947,6 +3355,10 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
           onContextMenu={(e) => {
             e.evt.preventDefault();
             e.cancelBubble = true;
+            if (corridorDrawMode === 'poly') {
+              undoCorridorDraftSegment();
+              return;
+            }
             if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
             if (toolMode === 'wall') {
               onWallDraftContextMenu?.();
@@ -3051,6 +3463,27 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                     y: Number(corridor.y || 0) + dy,
                     width: Number(corridor.width || 0),
                     height: Number(corridor.height || 0)
+                  });
+                }}
+                onMouseDown={(e) => {
+                  if (e.evt?.button !== 1) return;
+                  if (readOnly || panToolActive || !!toolMode) return;
+                  if (isDraftTarget) return;
+                  const stage = e.target.getStage();
+                  const pos = stage?.getPointerPosition();
+                  const world = pos
+                    ? pointerToWorld(pos.x, pos.y)
+                    : { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+                  e.evt.preventDefault();
+                  e.cancelBubble = true;
+                  onSelectCorridor?.(corridor.id);
+                  onSelectCorridorDoor?.(undefined);
+                  onCorridorMiddleClick?.({
+                    corridorId: corridor.id,
+                    clientX: e.evt.clientX,
+                    clientY: e.evt.clientY,
+                    worldX: world.x,
+                    worldY: world.y
                   });
                 }}
                 onClick={(e) => {
@@ -3224,6 +3657,57 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                       : null) || getCorridorEdgePoint(points, Number(connection.edgeIndex), Number(connection.t));
                   if (!point) return null;
                   const canDragConnection = isSelectedCorridor && !readOnly && !isDraftTarget;
+                  const transitionType = (connection as any)?.transitionType === 'elevator' ? 'elevator' : 'stairs';
+                  const transitionLabel =
+                    transitionType === 'elevator'
+                      ? t({ it: 'Ascensore', en: 'Elevator' })
+                      : t({ it: 'Scale', en: 'Stairs' });
+                  const connectedPlanIds = Array.from(
+                    new Set(
+                      (Array.isArray((connection as any)?.planIds) ? (connection as any).planIds : [])
+                        .map((id: any) => String(id || '').trim())
+                        .filter(Boolean)
+                    )
+                  ) as string[];
+                  const connectedPlanNames = connectedPlanIds
+                    .map((id) => String(connectionPlanNamesById?.[id] || '').trim())
+                    .filter(Boolean);
+                  const currentPlanName = String((plan as any)?.name || '').trim() || t({ it: 'Piano corrente', en: 'Current floor' });
+                  const renderPlanNames = () => {
+                    if (!connectedPlanNames.length) return <span>{t({ it: 'piani non configurati', en: 'no floors configured' })}</span>;
+                    return connectedPlanNames.map((name, idx) => (
+                      <Fragment key={`${connection.id}:${name}:${idx}`}>
+                        <strong>{name}</strong>
+                        {idx < connectedPlanNames.length - 1 ? ', ' : ''}
+                      </Fragment>
+                    ));
+                  };
+                  const connectionHoverContent = (
+                    <div className="space-y-0.5">
+                      <div>
+                        <span className="font-semibold">{transitionLabel}</span> {t({ it: 'per', en: 'to' })} {renderPlanNames()}
+                      </div>
+                      <div>
+                        {t({ it: 'Collega', en: 'Connects' })}: <strong>{currentPlanName}</strong>
+                        {connectedPlanNames.length ? (
+                          <>
+                            {' '}
+                            ↔ {renderPlanNames()}
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                  const resolveClientPoint = (e: any): { clientX: number; clientY: number } => {
+                    const cx = Number((e?.evt as any)?.clientX);
+                    const cy = Number((e?.evt as any)?.clientY);
+                    if (Number.isFinite(cx) && Number.isFinite(cy)) return { clientX: cx, clientY: cy };
+                    const stage = e?.target?.getStage?.();
+                    const pos = stage?.getPointerPosition?.();
+                    const rect = stage?.container?.()?.getBoundingClientRect?.();
+                    if (pos && rect) return { clientX: Number(rect.left + pos.x), clientY: Number(rect.top + pos.y) };
+                    return { clientX: 0, clientY: 0 };
+                  };
                   return (
                     <Group key={connection.id}>
                       <Circle
@@ -3238,6 +3722,21 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                         onClick={(e) => {
                           e.cancelBubble = true;
                           onSelectCorridor?.(corridor.id);
+                        }}
+                        onMouseEnter={(e) => {
+                          const clientPoint = resolveClientPoint(e);
+                          setDoorHoverCard({ clientX: clientPoint.clientX, clientY: clientPoint.clientY, content: connectionHoverContent });
+                        }}
+                        onMouseMove={(e) => {
+                          const clientPoint = resolveClientPoint(e);
+                          setDoorHoverCard((prev) =>
+                            prev
+                              ? { ...prev, clientX: clientPoint.clientX, clientY: clientPoint.clientY, content: connectionHoverContent }
+                              : { clientX: clientPoint.clientX, clientY: clientPoint.clientY, content: connectionHoverContent }
+                          );
+                        }}
+                        onMouseLeave={() => {
+                          setDoorHoverCard(null);
                         }}
                         onDragEnd={(e) => {
                           if (!canDragConnection) return;
@@ -3455,7 +3954,8 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                       showName,
                       capacityText,
                       overCapacity,
-                      labelScale: (room as any).labelScale
+                      labelScale: (room as any).labelScale,
+                      labelPosition: (room as any).labelPosition
                     })}
                   </Group>
                   {isSelectedRoom && !readOnly
@@ -3595,14 +4095,24 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                     });
                   }}
                 />
-                {renderRoomLabels({
-                  bounds,
-                  name: room.name,
-                  showName,
-                  capacityText,
-                  overCapacity,
-                  labelScale: (room as any).labelScale
-                })}
+                <Group
+                  listening={false}
+                  clipFunc={(ctx) => {
+                    ctx.beginPath();
+                    ctx.rect(0, 0, Number(room.width || 0), Number(room.height || 0));
+                    ctx.closePath();
+                  }}
+                >
+                  {renderRoomLabels({
+                    bounds,
+                    name: room.name,
+                    showName,
+                    capacityText,
+                    overCapacity,
+                    labelScale: (room as any).labelScale,
+                    labelPosition: (room as any).labelPosition
+                  })}
+                </Group>
               </Group>
             );
           })}
@@ -4286,19 +4796,28 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                   clientY: point.clientY
                 });
               };
-              const linkedRoomNames = Array.isArray((door as any).linkedRoomIds)
-                ? (door as any).linkedRoomIds
-                    .map((id: any) => roomNameById.get(String(id)))
-                    .filter(Boolean)
-                : [];
               const doorDescription = String((door as any).description || '').trim();
               const emergency = !!(door as any).isEmergency;
+              const isFireDoor = !!(door as any).isFireDoor;
+              const automationUrl = String((door as any).automationUrl || '').trim();
+              const mode = String((door as any).mode || 'static');
+              const modeLabel =
+                mode === 'automated'
+                  ? t({ it: 'Apertura automatizzata', en: 'Automated opening' })
+                  : mode === 'auto_sensor'
+                    ? t({ it: 'Apertura a rilevazione', en: 'Sensor opening' })
+                    : t({ it: 'Statica', en: 'Static' });
+              const lastVerificationAt = String((door as any).lastVerificationAt || '').trim();
+              const verifierCompany = String((door as any).verifierCompany || '').trim();
               const hoverTextParts = [
-                linkedRoomNames.length
-                  ? `${t({ it: 'Stanze collegate', en: 'Linked rooms' })}: ${linkedRoomNames.join(', ')}`
-                  : t({ it: 'Nessuna stanza collegata', en: 'No linked rooms' }),
+                doorDescription ? `${t({ it: 'Descrizione', en: 'Description' })}: ${doorDescription}` : t({ it: 'Porta', en: 'Door' }),
+                `${t({ it: 'Modalità', en: 'Mode' })}: ${modeLabel}`,
                 emergency ? t({ it: 'Porta emergenza', en: 'Emergency door' }) : '',
-                doorDescription ? `${t({ it: 'Descrizione', en: 'Description' })}: ${doorDescription}` : ''
+                isFireDoor ? t({ it: 'Tagliafuoco', en: 'Fire door' }) : '',
+                automationUrl ? `${t({ it: 'URL apertura', en: 'Open URL' })}: ${automationUrl}` : '',
+                emergency && (lastVerificationAt || verifierCompany)
+                  ? `${t({ it: 'Ultima revisione', en: 'Latest check' })}: ${lastVerificationAt || '—'}${verifierCompany ? ` · ${verifierCompany}` : ''}`
+                  : ''
               ].filter(Boolean);
               const hoverText = hoverTextParts.join(' · ');
               return (
@@ -4320,11 +4839,15 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                   }}
                   onMouseEnter={(e) => {
                     const point = resolveClientPoint(e);
-                    setDoorHoverCard({ clientX: point.clientX, clientY: point.clientY, text: hoverText });
+                    setDoorHoverCard({ clientX: point.clientX, clientY: point.clientY, content: hoverText });
                   }}
                   onMouseMove={(e) => {
                     const point = resolveClientPoint(e);
-                    setDoorHoverCard((prev) => (prev ? { ...prev, clientX: point.clientX, clientY: point.clientY, text: hoverText } : { clientX: point.clientX, clientY: point.clientY, text: hoverText }));
+                    setDoorHoverCard((prev) =>
+                      prev
+                        ? { ...prev, clientX: point.clientX, clientY: point.clientY, content: hoverText }
+                        : { clientX: point.clientX, clientY: point.clientY, content: hoverText }
+                    );
                   }}
                   onMouseLeave={() => {
                     setDoorHoverCard(null);
@@ -5706,6 +6229,222 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
             </>
           ) : null}
 
+          {safetyCard?.visible && safetyCardDraft ? (
+            (() => {
+              const cardW = safetyCardDraft.w;
+              const cardH = safetyCardDraft.h;
+              const headerHeight = Math.max(20, safetyCardDraft.fontSize * 1.48);
+              const bodyFontSize = Math.max(8, safetyCardDraft.fontSize);
+              const bodyLineHeight = Math.max(12, bodyFontSize * 1.22);
+              const titleFontSize = Math.max(9, safetyCardDraft.fontSize * 0.92);
+              const titleY = Math.max(4, Math.round((headerHeight - titleFontSize) / 2) + 1);
+              const bodyTop = Math.max(headerHeight + 6, Math.round((cardH - bodyLineHeight * 2) / 2 + 3));
+              const numbersText = `${safetyCard.numbersLabel}: ${safetyCard.numbersText || safetyCard.noNumbersText}`;
+              const pointsText = `${safetyCard.pointsLabel}: ${safetyCard.pointsText || safetyCard.noPointsText}`;
+              const colorVariant =
+                SAFETY_CARD_COLOR_VARIANTS[((Number(safetyCardDraft.colorIndex) % SAFETY_CARD_COLOR_VARIANTS.length) + SAFETY_CARD_COLOR_VARIANTS.length) % SAFETY_CARD_COLOR_VARIANTS.length];
+              const textBgFill =
+                SAFETY_CARD_TEXT_BG_VARIANTS[
+                  ((Number(safetyCardDraft.textBgIndex) % SAFETY_CARD_TEXT_BG_VARIANTS.length) + SAFETY_CARD_TEXT_BG_VARIANTS.length) %
+                    SAFETY_CARD_TEXT_BG_VARIANTS.length
+                ];
+              const fontFamily = SAFETY_CARD_FONT_VALUES.length
+                ? SAFETY_CARD_FONT_VALUES[
+                    ((Number(safetyCardDraft.fontIndex) % SAFETY_CARD_FONT_VALUES.length) + SAFETY_CARD_FONT_VALUES.length) %
+                      SAFETY_CARD_FONT_VALUES.length
+                  ]
+                : 'Arial, sans-serif';
+              const linePad = 3;
+              const textBgWidth = Math.max(24, cardW - 16);
+              const textBgHeight = bodyLineHeight + linePad * 2;
+              return (
+                <>
+                  <Group
+                    name="safety-card-group"
+                    x={safetyCardDraft.x}
+                    y={safetyCardDraft.y}
+                    draggable={!readOnly && !panToolActive && !toolMode && !pendingType}
+                    onMouseDown={(e) => {
+                      e.cancelBubble = true;
+                      onSelect(undefined);
+                      setSafetyCardSelected(true);
+                      showSafetyCardHelpToast();
+                    }}
+                    onClick={(e) => {
+                      e.cancelBubble = true;
+                      showSafetyCardHelpToast();
+                    }}
+                    onContextMenu={(e) => {
+                      e.evt.preventDefault();
+                      e.cancelBubble = true;
+                      lastContextMenuAtRef.current = Date.now();
+                      onSafetyCardContextMenu?.({
+                        clientX: e.evt.clientX,
+                        clientY: e.evt.clientY,
+                        worldX: Number(safetyCardDraft.x || 0),
+                        worldY: Number(safetyCardDraft.y || 0)
+                      });
+                    }}
+                    onDblClick={(e) => {
+                      e.cancelBubble = true;
+                      onSafetyCardDoubleClick?.();
+                    }}
+                    onDragStart={() => {
+                      safetyCardDraggingRef.current = true;
+                    }}
+                    onDragMove={(e) => {
+                      const nextX = e.target.x();
+                      const nextY = e.target.y();
+                      setSafetyCardDraft((prev) => (prev ? { ...prev, x: nextX, y: nextY } : prev));
+                    }}
+                    onDragEnd={(e) => {
+                      safetyCardDraggingRef.current = false;
+                      const nextX = e.target.x();
+                      const nextY = e.target.y();
+                      const nextLayout = {
+                        ...safetyCardDraft,
+                        x: nextX,
+                        y: nextY
+                      };
+                      setSafetyCardDraft(nextLayout);
+                      onSafetyCardChange?.(nextLayout, { commit: true });
+                    }}
+                  >
+                    <Rect
+                      ref={safetyCardRectRef}
+                      name="safety-card-body"
+                      x={0}
+                      y={0}
+                      width={cardW}
+                      height={cardH}
+                      cornerRadius={0}
+                      fill={colorVariant.body}
+                      stroke={safetyCardSelected ? '#0284c7' : colorVariant.border}
+                      strokeWidth={safetyCardSelected ? 2.1 : 1.5}
+                      shadowColor="#0c4a6e"
+                      shadowBlur={6}
+                      shadowOpacity={0.16}
+                      shadowOffset={{ x: 0, y: 1 }}
+                      onTransformEnd={(e) => {
+                        const node = e.target as any;
+                        const scaleX = Number(node.scaleX() || 1);
+                        const scaleY = Number(node.scaleY() || 1);
+                        const nextW = Math.max(220, Number(node.width() || cardW) * scaleX);
+                        const nextH = Math.max(56, Number(node.height() || cardH) * scaleY);
+                        node.scaleX(1);
+                        node.scaleY(1);
+                        node.width(nextW);
+                        node.height(nextH);
+                        const nextLayout = {
+                          ...safetyCardDraft,
+                          w: nextW,
+                          h: nextH
+                        };
+                        setSafetyCardDraft(nextLayout);
+                        onSafetyCardChange?.(nextLayout, { commit: true });
+                      }}
+                    />
+                    <Rect
+                      name="safety-card-header"
+                      x={1}
+                      y={1}
+                      width={Math.max(1, cardW - 2)}
+                      height={Math.max(1, headerHeight - 2)}
+                      cornerRadius={0}
+                      fill={colorVariant.header}
+                      listening={false}
+                    />
+                    <Text
+                      x={10}
+                      y={titleY}
+                      width={Math.max(20, cardW - 20)}
+                      text={String(safetyCard.title || '')}
+                      fontSize={titleFontSize}
+                      fontStyle="bold"
+                      fontFamily={fontFamily}
+                      fill={colorVariant.title}
+                      wrap="none"
+                      ellipsis
+                      listening={false}
+                    />
+                    {textBgFill !== 'transparent' ? (
+                      <>
+                        <Rect
+                          x={8}
+                          y={bodyTop - linePad}
+                          width={textBgWidth}
+                          height={textBgHeight}
+                          fill={textBgFill}
+                          cornerRadius={0}
+                          opacity={0.95}
+                          listening={false}
+                        />
+                        <Rect
+                          x={8}
+                          y={bodyTop + bodyLineHeight - linePad}
+                          width={textBgWidth}
+                          height={textBgHeight}
+                          fill={textBgFill}
+                          cornerRadius={0}
+                          opacity={0.95}
+                          listening={false}
+                        />
+                      </>
+                    ) : null}
+                    <Text
+                      x={10}
+                      y={bodyTop}
+                      width={Math.max(20, cardW - 20)}
+                      text={numbersText}
+                      fontSize={bodyFontSize}
+                      fontStyle="bold"
+                      fontFamily={fontFamily}
+                      fill={colorVariant.text}
+                      wrap="none"
+                      ellipsis
+                      listening={false}
+                    />
+                    <Text
+                      x={10}
+                      y={bodyTop + bodyLineHeight}
+                      width={Math.max(20, cardW - 20)}
+                      text={pointsText}
+                      fontSize={bodyFontSize}
+                      fontStyle="bold"
+                      fontFamily={fontFamily}
+                      fill={colorVariant.text}
+                      wrap="none"
+                      ellipsis
+                      listening={false}
+                    />
+                  </Group>
+                  {safetyCardSelected && !readOnly ? (
+                    <Transformer
+                      ref={safetyCardTransformerRef}
+                      rotateEnabled={false}
+                      keepRatio={false}
+                      ignoreStroke
+                      borderStroke="#0284c7"
+                      borderStrokeWidth={1.2}
+                      anchorStroke="#0284c7"
+                      anchorFill="#ffffff"
+                      anchorCornerRadius={0}
+                      anchorSize={8}
+                      onContextMenu={(e) => {
+                        e.evt.preventDefault();
+                        e.cancelBubble = true;
+                      }}
+                      boundBoxFunc={(oldBox: any, newBox: any) => {
+                        if (newBox.width < 220 || newBox.height < 56) return oldBox;
+                        return newBox;
+                      }}
+                    />
+                  ) : null}
+                </>
+              );
+            })()
+          ) : null}
+
           {selectionBox ? (
             <Rect
               x={selectionBox.x}
@@ -5909,10 +6648,27 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
 	        >
 	          -
 	        </button>
+          {onToggleViewsMenu ? (
+            <button
+              title={t({ it: 'Viste salvate', en: 'Saved views' })}
+              onClick={() => onToggleViewsMenu?.()}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-ink hover:bg-slate-50"
+            >
+              <Eye size={16} />
+            </button>
+          ) : null}
 	        <button
-	          title={t({ it: 'Vai alla vista predefinita', en: 'Go to default view' })}
-	          onClick={() => onGoDefaultView?.()}
-	          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-xs font-semibold text-ink hover:bg-slate-50"
+	          title={
+              hasDefaultView
+                ? t({ it: 'Vai alla vista predefinita', en: 'Go to default view' })
+                : t({ it: 'Imposta prima una vista di default', en: 'Set a default view first' })
+            }
+	          onClick={() => {
+              if (!hasDefaultView) return;
+              onGoDefaultView?.();
+            }}
+            disabled={!hasDefaultView}
+	          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-xs font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
 	        >
 	          VD
 	        </button>

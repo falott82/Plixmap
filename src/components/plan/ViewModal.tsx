@@ -9,9 +9,9 @@ interface Props {
   initialName?: string;
   initialDescription?: string;
   initialDefault?: boolean;
+  hasExistingDefault?: boolean;
+  existingDefaultName?: string;
 }
-
-const DEFAULT_VIEW_NAME = 'DEFAULT';
 
 const ViewModal = ({
   open,
@@ -19,36 +19,28 @@ const ViewModal = ({
   onSubmit,
   initialName = '',
   initialDescription = '',
-  initialDefault = false
+  initialDefault = false,
+  hasExistingDefault = false,
+  existingDefaultName = ''
 }: Props) => {
   const t = useT();
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
   const [isDefault, setIsDefault] = useState(initialDefault);
-  const [lastCustomName, setLastCustomName] = useState(initialName);
 
   useEffect(() => {
     if (!open) return;
     setName(initialName);
     setDescription(initialDescription);
     setIsDefault(initialDefault);
-    setLastCustomName(initialName);
   }, [open, initialDefault, initialDescription, initialName]);
 
-  useEffect(() => {
-    if (!open) return;
-    if (isDefault) {
-      if (name !== DEFAULT_VIEW_NAME) setName(DEFAULT_VIEW_NAME);
-    }
-  }, [isDefault, open]);
-
   const trimmedName = name.trim();
-  const isNameValid = isDefault || trimmedName.length > 0;
+  const isNameValid = trimmedName.length > 0;
 
   const handleSave = () => {
     if (!isNameValid) return;
-    const finalName = isDefault ? DEFAULT_VIEW_NAME : trimmedName;
-    onSubmit({ name: finalName, description: description.trim() || undefined, isDefault });
+    onSubmit({ name: trimmedName, description: description.trim() || undefined, isDefault });
     onClose();
   };
 
@@ -75,16 +67,42 @@ const ViewModal = ({
       }
     >
       <div className="space-y-3">
+        <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <input
+            type="checkbox"
+            checked={isDefault}
+            onChange={(e) => setIsDefault(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-primary"
+          />
+          {t({ it: 'Default', en: 'Default' })}
+        </label>
+        {isDefault ? (
+          <div className="text-xs text-slate-500">
+            {t({
+              it: 'Se impostata come default, questa vista verrà caricata automaticamente per questa planimetria.',
+              en: 'If set as default, this view will be loaded automatically for this floor plan.'
+            })}
+          </div>
+        ) : null}
+        {isDefault && hasExistingDefault ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+            {t({
+              it:
+                existingDefaultName.trim().length > 0
+                  ? `La planimetria ha già una vista di default ("${existingDefaultName}"), salvando verrà impostata questa come vista di default. La vista precedente non sarà più predefinita e, se necessario, verrà rinominata con suffisso (_1, _2, ...).`
+                  : 'La planimetria ha già una vista di default, salvando verrà impostata questa come vista di default. La vista precedente non sarà più predefinita e, se necessario, verrà rinominata con suffisso (_1, _2, ...).',
+              en:
+                existingDefaultName.trim().length > 0
+                  ? `This floor plan already has a default view ("${existingDefaultName}"); saving will set this one as default. The previous view will no longer be default and, if needed, will be renamed with suffixes (_1, _2, ...).`
+                  : 'This floor plan already has a default view; saving will set this one as default. The previous view will no longer be default and, if needed, will be renamed with suffixes (_1, _2, ...).'
+            })}
+          </div>
+        ) : null}
         <label className="block text-sm font-medium text-slate-700">
-          {t({ it: 'Nome vista', en: 'View name' })} {isDefault ? null : <span className="text-rose-600">*</span>}
+          {t({ it: 'Nome vista', en: 'View name' })} <span className="text-rose-600">*</span>
           <input
             value={name}
-            onChange={(e) => {
-              if (isDefault) return;
-              setName(e.target.value);
-              setLastCustomName(e.target.value);
-            }}
-            disabled={isDefault}
+            onChange={(e) => setName(e.target.value)}
             className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
             placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
           />
@@ -99,30 +117,6 @@ const ViewModal = ({
             rows={3}
           />
         </label>
-        <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-          <input
-            type="checkbox"
-            checked={isDefault}
-            onChange={(e) => {
-              const next = e.target.checked;
-              setIsDefault(next);
-              if (next) {
-                if (name && name !== DEFAULT_VIEW_NAME) setLastCustomName(name);
-                setName(DEFAULT_VIEW_NAME);
-              } else {
-                setName(lastCustomName || '');
-              }
-            }}
-            className="h-4 w-4 rounded border-slate-300 text-primary"
-          />
-          Default
-        </label>
-        <div className="text-xs text-slate-500">
-          {t({
-            it: 'Se impostata come default, questa vista verrà caricata automaticamente per questa planimetria.',
-            en: 'If set as default, this view will be loaded automatically for this floor plan.'
-          })}
-        </div>
       </div>
     </ModalShell>
   );

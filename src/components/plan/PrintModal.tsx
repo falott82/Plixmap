@@ -29,6 +29,7 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
   const [includeObjects, setIncludeObjects] = useState(true);
   const [includeDesks, setIncludeDesks] = useState(true);
   const [includeSafety, setIncludeSafety] = useState(true);
+  const [includeSafetySheet, setIncludeSafetySheet] = useState(true);
   const [includeLinks, setIncludeLinks] = useState(true);
   const [includeRooms, setIncludeRooms] = useState(true);
   const [includeWalls, setIncludeWalls] = useState(true);
@@ -69,7 +70,12 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
             planId: p.id,
             breadcrumb: `${cn} → ${s.name} → ${p.name}`,
             hasPrintArea: !!(p as any).printArea,
-            plan: { ...p, _clientName: cn, _clientLogoUrl: (c as any).logoUrl || '' }
+            plan: {
+              ...p,
+              _clientName: cn,
+              _clientLogoUrl: (c as any).logoUrl || '',
+              _emergencyContacts: Array.isArray((c as any).emergencyContacts) ? (c as any).emergencyContacts : []
+            }
           });
         }
       }
@@ -263,6 +269,14 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                         />
                       </label>
                       <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
+                        <span>{t({ it: 'Scheda sicurezza', en: 'Safety sheet' })}</span>
+                        <input
+                          type="checkbox"
+                          checked={includeSafetySheet}
+                          onChange={(e) => setIncludeSafetySheet(e.target.checked)}
+                        />
+                      </label>
+                      <label className="mt-3 flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
                         <span>{t({ it: 'Includi mura', en: 'Include walls' })}</span>
                         <input type="checkbox" checked={includeWalls} onChange={(e) => setIncludeWalls(e.target.checked)} />
                       </label>
@@ -346,6 +360,7 @@ const PrintModal = ({ open, onClose, mode = 'single', singlePlanId }: Props) => 
                                 includeObjects,
                                 includeDesks,
                                 includeSafety,
+                                includeSafetySheet,
                                 includeLinks,
                                 includeRooms,
                                 includeWalls,

@@ -155,6 +155,51 @@ const parseDateOnly = (value?: string) => {
   return new Date(year, month - 1, day, 0, 0, 0, 0);
 };
 
+const parseLatLngPair = (value: string): { lat: number; lng: number } | null => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90) return null;
+  if (lng < -180 || lng > 180) return null;
+  return { lat, lng };
+};
+
+const formatCoord = (value: number) => Number(value.toFixed(6)).toString();
+
+const normalizeGoogleMapsCoordsInput = (value: string) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const direct = parseLatLngPair(raw);
+  if (direct) return `${formatCoord(direct.lat)}, ${formatCoord(direct.lng)}`;
+  try {
+    const url = new URL(raw);
+    const candidates = [
+      url.searchParams.get('q'),
+      url.searchParams.get('query'),
+      url.searchParams.get('ll'),
+      url.searchParams.get('destination'),
+      url.searchParams.get('daddr')
+    ].filter(Boolean) as string[];
+    for (const candidate of candidates) {
+      const parsed = parseLatLngPair(decodeURIComponent(String(candidate)));
+      if (parsed) return `${formatCoord(parsed.lat)}, ${formatCoord(parsed.lng)}`;
+    }
+    const decodedPath = decodeURIComponent(String(url.pathname || ''));
+    const atMatch = decodedPath.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+    if (atMatch) {
+      const parsed = parseLatLngPair(`${atMatch[1]},${atMatch[2]}`);
+      if (parsed) return `${formatCoord(parsed.lat)}, ${formatCoord(parsed.lng)}`;
+    }
+  } catch {
+    // Not a URL or not parseable as a Google Maps URL.
+  }
+  return raw;
+};
+
 const ObjectModal = ({
   open,
   onClose,
@@ -287,6 +332,7 @@ const ObjectModal = ({
   const securityDocsCloseRef = useRef<HTMLButtonElement | null>(null);
   const securityHistoryFirstFieldRef = useRef<HTMLInputElement | null>(null);
   const securityHistoryCloseRef = useRef<HTMLButtonElement | null>(null);
+  const initSessionKeyRef = useRef('');
   const { hydrated, getFieldsForType, loadObjectValues } = useCustomFieldsStore();
   const isWifi = type === 'wifi';
   const isQuote = type === 'quote';
@@ -296,6 +342,7 @@ const ObjectModal = ({
   const isImageLike = isImage || isPhoto;
   const isPostIt = type === 'postit';
   const isSecurityType = isSecurityTypeId(type);
+  const isAssemblyPoint = type === 'safety_assembly_point';
   const isDesk = type ? isDeskType(type) : false;
   const isWall = typeof type === 'string' && String(type).startsWith('wall_');
   const canHaveNetworkFields =
@@ -536,111 +583,116 @@ const ObjectModal = ({
   };
 
   useEffect(() => {
-    if (open) {
-      setName(initialName);
-      setDescription(initialDescription);
-      setNotes(initialNotes || '');
-      setLastVerificationAt(initialLastVerificationAt || '');
-      setVerifierCompany(initialVerifierCompany || '');
-      setGpsCoords(initialGpsCoords || '');
-      setSecurityDocuments(Array.isArray(initialSecurityDocuments) ? initialSecurityDocuments : []);
-      setSecurityCheckHistory(Array.isArray(initialSecurityCheckHistory) ? initialSecurityCheckHistory : []);
-      setSecurityDocDraft({ name: '', validUntil: '', notes: '', archived: false });
-      setSecurityCheckDraft({ date: '', company: '', notes: '' });
-      setSecurityError('');
-      setSecurityDocumentsOpen(false);
-      setSecurityHistoryOpen(false);
-      setSecurityDocsSearch('');
-      setSecurityDocsHideExpired(false);
-      setSecurityDocsSort({ key: 'uploadedAt', dir: 'desc' });
-      setLayerIds(initialLayerIds);
-      setScale(Number.isFinite(initialScale) ? initialScale : 1);
-      setQuoteLabelScale(Number.isFinite(initialQuoteLabelScale) ? initialQuoteLabelScale : 1);
-      setQuoteLabelBg(!!initialQuoteLabelBg);
-      setQuoteLabelColor(initialQuoteLabelColor || '#0f172a');
-      setQuoteLabelOffset(
-        Number.isFinite(initialQuoteLabelOffset)
-          ? (initialQuoteLabelOffset as number)
-          : (quoteOrientation === 'horizontal' && initialQuoteLabelPos === 'below' ? 1.15 : 1)
-      );
-      setQuoteLabelOffsetTouched(false);
-      setQuoteLabelPos(initialQuoteLabelPos || 'center');
-      setQuoteDashed(!!initialQuoteDashed);
-      setQuoteEndpoint(initialQuoteEndpoint || 'arrows');
-      setQuoteColor(initialQuoteColor || '#f97316');
-      setTextFont(initialTextFont || 'Arial, sans-serif');
-      setTextSize(Number.isFinite(initialTextSize) ? (initialTextSize as number) : 18);
-      setTextColor(initialTextColor || '#000000');
-      setTextBg(!!initialTextBg);
-      setTextBgColor(initialTextBgColor || '#ffffff');
-      setImageUrl(initialImageUrl || '');
-      setImageWidth(Number.isFinite(initialImageWidth) ? (initialImageWidth as number) : 0);
-      setImageHeight(Number.isFinite(initialImageHeight) ? (initialImageHeight as number) : 0);
-      setImageError('');
-      setCustomValues({});
-      setWifiDb(initialWifiDb !== undefined ? String(initialWifiDb) : '');
-      const hasCatalog = (wifiModels || []).length > 0;
-      const hasCustomFields = !!(
-        initialWifiBrand ||
-        initialWifiModel ||
-        initialWifiModelCode ||
-        initialWifiCoverageSqm ||
-        initialWifiStandard ||
-        initialWifiBand24 ||
-        initialWifiBand5 ||
-        initialWifiBand6
-      );
-      const catalogModel =
-        hasCatalog && initialWifiCatalogId ? wifiModelsById.get(initialWifiCatalogId) : undefined;
-      const nextCatalogId = catalogModel ? String(initialWifiCatalogId) : '';
-      const nextSource: 'catalog' | 'custom' = catalogModel ? 'catalog' : 'custom';
-      const shouldBlankCustom = !catalogModel && !hasCustomFields;
-      setWifiSource(nextSource);
-      setWifiCatalogId(nextCatalogId);
-      setWifiRangeScale(
-        Number.isFinite(initialWifiRangeScale as number)
-          ? Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, Number(initialWifiRangeScale)))
-          : 1
-      );
-      if (nextSource === 'catalog' && nextCatalogId) {
-        const model = wifiModelsById.get(nextCatalogId);
-        setWifiBrand(model?.brand || '');
-        setWifiModel(model?.model || '');
-        setWifiModelCode(model?.modelCode || '');
-        setWifiCoverageSqm(model?.coverageSqm ? String(model.coverageSqm) : '');
-        setWifiStandard(model?.standard || WIFI_DEFAULT_STANDARD);
-        setWifiBand24(!!model?.band24);
-        setWifiBand5(!!model?.band5);
-        setWifiBand6(!!model?.band6);
-        setWifiShowRange(initialWifiShowRange !== undefined ? initialWifiShowRange : true);
-      } else if (!shouldBlankCustom) {
-        setWifiBrand(initialWifiBrand || '');
-        setWifiModel(initialWifiModel || '');
-        setWifiModelCode(initialWifiModelCode || '');
-        setWifiCoverageSqm(initialWifiCoverageSqm ? String(initialWifiCoverageSqm) : '');
-        setWifiStandard(initialWifiStandard || WIFI_DEFAULT_STANDARD);
-        setWifiBand24(!!initialWifiBand24);
-        setWifiBand5(!!initialWifiBand5);
-        setWifiBand6(!!initialWifiBand6);
-        setWifiShowRange(initialWifiShowRange !== undefined ? initialWifiShowRange : true);
-      } else {
-        setWifiBrand('');
-        setWifiModel('');
-        setWifiModelCode('');
-        setWifiCoverageSqm('');
-        setWifiStandard('');
-        setWifiBand24(false);
-        setWifiBand5(false);
-        setWifiBand6(false);
-        setWifiShowRange(true);
-      }
-      setWifiCatalogQuery('');
-      setWifiCatalogSearchOpen(false);
-      setWifiCatalogSelectedId('');
-      setIpAddress(initialIp || '');
-      setUrlValue(initialUrl || '');
-      window.setTimeout(() => nameRef.current?.focus(), 0);
+    if (!open) {
+      initSessionKeyRef.current = '';
+      return;
     }
+    const sessionKey = `${String(objectId || 'create')}::${String(type || '')}`;
+    if (initSessionKeyRef.current === sessionKey) return;
+    initSessionKeyRef.current = sessionKey;
+    setName(initialName);
+    setDescription(initialDescription);
+    setNotes(initialNotes || '');
+    setLastVerificationAt(initialLastVerificationAt || '');
+    setVerifierCompany(initialVerifierCompany || '');
+    setGpsCoords(initialGpsCoords || '');
+    setSecurityDocuments(Array.isArray(initialSecurityDocuments) ? initialSecurityDocuments : []);
+    setSecurityCheckHistory(Array.isArray(initialSecurityCheckHistory) ? initialSecurityCheckHistory : []);
+    setSecurityDocDraft({ name: '', validUntil: '', notes: '', archived: false });
+    setSecurityCheckDraft({ date: '', company: '', notes: '' });
+    setSecurityError('');
+    setSecurityDocumentsOpen(false);
+    setSecurityHistoryOpen(false);
+    setSecurityDocsSearch('');
+    setSecurityDocsHideExpired(false);
+    setSecurityDocsSort({ key: 'uploadedAt', dir: 'desc' });
+    setLayerIds(initialLayerIds);
+    setScale(Number.isFinite(initialScale) ? initialScale : 1);
+    setQuoteLabelScale(Number.isFinite(initialQuoteLabelScale) ? initialQuoteLabelScale : 1);
+    setQuoteLabelBg(!!initialQuoteLabelBg);
+    setQuoteLabelColor(initialQuoteLabelColor || '#0f172a');
+    setQuoteLabelOffset(
+      Number.isFinite(initialQuoteLabelOffset)
+        ? (initialQuoteLabelOffset as number)
+        : (quoteOrientation === 'horizontal' && initialQuoteLabelPos === 'below' ? 1.15 : 1)
+    );
+    setQuoteLabelOffsetTouched(false);
+    setQuoteLabelPos(initialQuoteLabelPos || 'center');
+    setQuoteDashed(!!initialQuoteDashed);
+    setQuoteEndpoint(initialQuoteEndpoint || 'arrows');
+    setQuoteColor(initialQuoteColor || '#f97316');
+    setTextFont(initialTextFont || 'Arial, sans-serif');
+    setTextSize(Number.isFinite(initialTextSize) ? (initialTextSize as number) : 18);
+    setTextColor(initialTextColor || '#000000');
+    setTextBg(!!initialTextBg);
+    setTextBgColor(initialTextBgColor || '#ffffff');
+    setImageUrl(initialImageUrl || '');
+    setImageWidth(Number.isFinite(initialImageWidth) ? (initialImageWidth as number) : 0);
+    setImageHeight(Number.isFinite(initialImageHeight) ? (initialImageHeight as number) : 0);
+    setImageError('');
+    setCustomValues({});
+    setWifiDb(initialWifiDb !== undefined ? String(initialWifiDb) : '');
+    const hasCatalog = (wifiModels || []).length > 0;
+    const hasCustomFields = !!(
+      initialWifiBrand ||
+      initialWifiModel ||
+      initialWifiModelCode ||
+      initialWifiCoverageSqm ||
+      initialWifiStandard ||
+      initialWifiBand24 ||
+      initialWifiBand5 ||
+      initialWifiBand6
+    );
+    const catalogModel =
+      hasCatalog && initialWifiCatalogId ? wifiModelsById.get(initialWifiCatalogId) : undefined;
+    const nextCatalogId = catalogModel ? String(initialWifiCatalogId) : '';
+    const nextSource: 'catalog' | 'custom' = catalogModel ? 'catalog' : 'custom';
+    const shouldBlankCustom = !catalogModel && !hasCustomFields;
+    setWifiSource(nextSource);
+    setWifiCatalogId(nextCatalogId);
+    setWifiRangeScale(
+      Number.isFinite(initialWifiRangeScale as number)
+        ? Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, Number(initialWifiRangeScale)))
+        : 1
+    );
+    if (nextSource === 'catalog' && nextCatalogId) {
+      const model = wifiModelsById.get(nextCatalogId);
+      setWifiBrand(model?.brand || '');
+      setWifiModel(model?.model || '');
+      setWifiModelCode(model?.modelCode || '');
+      setWifiCoverageSqm(model?.coverageSqm ? String(model.coverageSqm) : '');
+      setWifiStandard(model?.standard || WIFI_DEFAULT_STANDARD);
+      setWifiBand24(!!model?.band24);
+      setWifiBand5(!!model?.band5);
+      setWifiBand6(!!model?.band6);
+      setWifiShowRange(initialWifiShowRange !== undefined ? initialWifiShowRange : true);
+    } else if (!shouldBlankCustom) {
+      setWifiBrand(initialWifiBrand || '');
+      setWifiModel(initialWifiModel || '');
+      setWifiModelCode(initialWifiModelCode || '');
+      setWifiCoverageSqm(initialWifiCoverageSqm ? String(initialWifiCoverageSqm) : '');
+      setWifiStandard(initialWifiStandard || WIFI_DEFAULT_STANDARD);
+      setWifiBand24(!!initialWifiBand24);
+      setWifiBand5(!!initialWifiBand5);
+      setWifiBand6(!!initialWifiBand6);
+      setWifiShowRange(initialWifiShowRange !== undefined ? initialWifiShowRange : true);
+    } else {
+      setWifiBrand('');
+      setWifiModel('');
+      setWifiModelCode('');
+      setWifiCoverageSqm('');
+      setWifiStandard('');
+      setWifiBand24(false);
+      setWifiBand5(false);
+      setWifiBand6(false);
+      setWifiShowRange(true);
+    }
+    setWifiCatalogQuery('');
+    setWifiCatalogSearchOpen(false);
+    setWifiCatalogSelectedId('');
+    setIpAddress(initialIp || '');
+    setUrlValue(initialUrl || '');
+    window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [
     initialDescription,
     initialGpsCoords,
@@ -682,6 +734,8 @@ const ObjectModal = ({
     initialWifiRangeScale,
     initialIp,
     initialUrl,
+    objectId,
+    type,
     open,
     wifiModels,
     wifiModelsById
@@ -1012,6 +1066,7 @@ const ObjectModal = ({
     if (isSecurityType && !name.trim()) return;
     const trimmedIp = ipAddress.trim();
     const trimmedUrl = urlValue.trim();
+    const normalizedGpsCoords = normalizeGoogleMapsCoordsInput(gpsCoords);
     const dbRaw = wifiDb.trim().replace(',', '.');
     const dbValue = dbRaw ? Number(dbRaw) : undefined;
     const coverageRaw = wifiCoverageSqm.trim().replace(',', '.');
@@ -1034,7 +1089,7 @@ const ObjectModal = ({
             notes: notes.trim() || undefined,
             lastVerificationAt: lastVerificationAt.trim() || undefined,
             verifierCompany: verifierCompany.trim() || undefined,
-            gpsCoords: gpsCoords.trim() || undefined,
+            gpsCoords: normalizedGpsCoords || undefined,
             securityDocuments,
             securityCheckHistory
           }
@@ -1171,8 +1226,8 @@ const ObjectModal = ({
                       {typeLabel}
                     </div>
                   ) : null}
-                  <div className={`mt-4 ${isSecurityType ? 'grid gap-4 lg:grid-cols-2' : 'space-y-3'}`}>
-                  <label className="block text-sm font-medium text-slate-700">
+                  <div className={`mt-4 ${isSecurityType ? 'grid auto-rows-min gap-3 lg:grid-cols-2' : 'space-y-3'}`}>
+                  <label className={`block text-sm font-medium text-slate-700 ${isSecurityType ? 'lg:col-span-2' : ''}`}>
                     {isPostIt
                       ? t({ it: 'Nota', en: 'Note' })
                       : isText || isImage
@@ -1225,19 +1280,19 @@ const ObjectModal = ({
                     ) : null}
                   </label>
                   {!isText && !isImage && !isPostIt ? (
-                    <label className="block text-sm font-medium text-slate-700">
+                    <label className={`block text-sm font-medium text-slate-700 ${isSecurityType ? 'lg:col-span-2' : ''}`}>
                       {t({ it: 'Descrizione', en: 'Description' })}
                       <textarea
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
                         className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                         placeholder={t({ it: 'Facoltativa', en: 'Optional' })}
-                        rows={3}
+                        rows={isSecurityType ? 2 : 3}
                       />
                     </label>
                   ) : null}
                   {isSecurityType ? (
-                    <label className="block text-sm font-medium text-slate-700">
+                    <label className="block text-sm font-medium text-slate-700 lg:col-span-2">
                       {t({ it: 'Note', en: 'Notes' })}
                       <textarea
                         value={notes}
@@ -1246,6 +1301,18 @@ const ObjectModal = ({
                         className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                         rows={2}
                         placeholder={t({ it: 'Informazioni operative', en: 'Operational notes' })}
+                      />
+                    </label>
+                  ) : null}
+                  {isAssemblyPoint ? (
+                    <label className="block text-sm font-medium text-slate-700 lg:col-span-2">
+                      {t({ it: 'Coordinate Google Maps', en: 'Google Maps coordinates' })}
+                      <input
+                        value={gpsCoords}
+                        disabled={readOnly}
+                        onChange={(e) => setGpsCoords(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. 41.9028, 12.4964 o URL Google Maps', en: 'e.g. 41.9028, 12.4964 or Google Maps URL' })}
                       />
                     </label>
                   ) : null}
@@ -1273,16 +1340,18 @@ const ObjectModal = ({
                             placeholder={t({ it: 'Es. Safety Srl', en: 'e.g. Safety Ltd' })}
                           />
                         </label>
-                        <label className="block text-sm font-medium text-slate-700 md:col-span-2 xl:col-span-1">
-                          {t({ it: 'Coordinate GPS oggetto', en: 'Object GPS coordinates' })}
-                          <input
-                            value={gpsCoords}
-                            disabled={readOnly}
-                            onChange={(e) => setGpsCoords(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            placeholder={t({ it: 'Es. 41.9028, 12.4964', en: 'e.g. 41.9028, 12.4964' })}
-                          />
-                        </label>
+                        {!isAssemblyPoint ? (
+                          <label className="block text-sm font-medium text-slate-700 md:col-span-2 xl:col-span-1">
+                            {t({ it: 'Coordinate GPS oggetto', en: 'Object GPS coordinates' })}
+                            <input
+                              value={gpsCoords}
+                              disabled={readOnly}
+                              onChange={(e) => setGpsCoords(e.target.value)}
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                              placeholder={t({ it: 'Es. 41.9028, 12.4964', en: 'e.g. 41.9028, 12.4964' })}
+                            />
+                          </label>
+                        ) : null}
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <button
@@ -1854,7 +1923,7 @@ const ObjectModal = ({
                     </div>
                   ) : null}
                   {!isQuote && !isText && !isImageLike && !isPostIt ? (
-                    <div>
+                    <div className={isSecurityType ? 'lg:col-span-2' : ''}>
                       <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
                         {t({ it: 'Scala oggetto', en: 'Object scale' })}
                         <span className="ml-auto text-xs font-mono text-slate-500 tabular-nums">{scale.toFixed(2)}</span>
