@@ -1,8 +1,18 @@
 # Deskly - Floor Plan Management
 
-Current version: 2.8.5
+Current version: 2.9.0
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
+
+## What's new in 2.9.0
+- Escape route directions refined: the checkered flag is now used only for the final step (assembly point when present).
+- Escape route directions now include Google Maps coordinates for the assembly point.
+- Escape route PDF layout updated: `Emergency card` moved to the end (after step-by-step directions), with updated additional guidance text for assembly-point follow-up and emergency-number reminder.
+
+## What's new in 2.8.6
+- Escape route PDF: added an `Emergency card` page with useful emergency numbers and configured assembly points.
+- Escape route map/PDF: when an assembly point is configured on the destination floor, a dashed guidance line is drawn from the emergency exit to the assembly point.
+- Escape route modal: added `Fullscreen` action for the route map.
 
 ## What's new in 2.8.5
 - Doors: added new property `Esterno` in door settings to mark exits that lead outside the building.

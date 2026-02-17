@@ -607,11 +607,50 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
 
   const corridors = ((plan.corridors || []) as Corridor[]).filter(Boolean);
   if (!corridors.length) return { error: 'no-corridors' };
-  const corridorPolys = corridors.map((corridor) => corridorPolygon(corridor)).filter((poly) => poly.length >= 3);
+  const corridorEntries = corridors
+    .map((corridor) => ({ corridor, poly: corridorPolygon(corridor) }))
+    .filter((entry) => entry.poly.length >= 3);
+  const corridorPolys = corridorEntries.map((entry) => entry.poly);
   const isPointInOrOnCorridor = (point: Point) =>
     corridorPolys.some((poly) => pointInPolygon(point, poly) || pointOnPolygonBoundary(point, poly));
+  const corridorContainingPoint = (point: Point) =>
+    corridorEntries.find((entry) => pointInPolygon(point, entry.poly) || pointOnPolygonBoundary(point, entry.poly)) || null;
+  const segmentInsidePolygon = (from: Point, to: Point, poly: Point[], samples = 14) => {
+    for (let i = 0; i <= samples; i += 1) {
+      const t = i / samples;
+      const probe = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+      if (!pointInPolygon(probe, poly) && !pointOnPolygonBoundary(probe, poly)) return false;
+    }
+    return true;
+  };
   const startInsideCorridor = isPointInOrOnCorridor(startPoint);
   const targetInsideCorridor = isPointInOrOnCorridor(targetPoint);
+  const startCorridorEntry = startInsideCorridor ? corridorContainingPoint(startPoint) : null;
+  const targetCorridorEntry = targetInsideCorridor ? corridorContainingPoint(targetPoint) : null;
+  if (
+    startCorridorEntry &&
+    targetCorridorEntry &&
+    String(startCorridorEntry.corridor.id) === String(targetCorridorEntry.corridor.id) &&
+    segmentInsidePolygon(startPoint, targetPoint, startCorridorEntry.poly)
+  ) {
+    const corridorPoints = simplifyCollinear([startPoint, targetPoint]);
+    const distancePx = polylineLength(corridorPoints);
+    const metersPerPixel = Number(plan.scale?.metersPerPixel);
+    const distanceMeters = Number.isFinite(metersPerPixel) && metersPerPixel > 0 ? distancePx * metersPerPixel : undefined;
+    const etaSeconds = distanceMeters ? distanceMeters / SPEED_MPS : undefined;
+    return {
+      route: {
+        startDoor: startPoint,
+        endDoor: targetPoint,
+        approachPoints: [],
+        corridorPoints,
+        exitPoints: [],
+        distancePx,
+        distanceMeters,
+        etaSeconds
+      }
+    };
+  }
   const doors: DoorCandidate[] = [];
   for (const corridor of corridors) {
     const poly = corridorPolygon(corridor);
