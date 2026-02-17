@@ -8,6 +8,29 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.8.3',
+    date: '2026-02-17',
+    type: 'fix',
+    notes: [
+      n(
+        'Mappa interna: se partenza e destinazione sono nella stessa stanza, il percorso usa una linea tratteggiata diretta A→B anche senza corridoi configurati',
+        'Internal map: when start and destination are in the same room, route uses a direct dashed A→B line even with no configured corridors'
+      ),
+      n(
+        'Routing senza corridoi: evitato il falso errore “Nessun corridoio configurato” nei casi validi interni alla stessa stanza',
+        'No-corridor routing: avoided false “No corridors configured” errors for valid routes inside the same room'
+      ),
+      n(
+        'Visualizzazione percorso diretto stanza: nascosti i marker porta arancioni per mantenere il tracciato pulito solo tratteggiato',
+        'Direct in-room route rendering: hidden orange door markers to keep a clean dashed-only path'
+      ),
+      n(
+        'Indicazioni passo-passo (stessa stanza): semplificate in un unico step con icona arrivo “bandiera a scacchi” e testo “Partenza e destinazione sono all’interno della stessa stanza”',
+        'Step-by-step directions (same room): simplified to a single step with checkered-flag arrival icon and text “Start and destination are inside the same room”'
+      )
+    ]
+  },
+  {
     version: '2.8.2',
     date: '2026-02-17',
     type: 'fix',
