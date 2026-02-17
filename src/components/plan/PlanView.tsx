@@ -986,6 +986,7 @@ const PlanView = ({ planId }: Props) => {
   const site = useDataStore(
     useCallback((s) => s.findSiteByPlan(planId), [planId])
   );
+  const siteFloorPlans = useMemo(() => ((site?.floorPlans || []) as FloorPlan[]).filter(Boolean), [site?.floorPlans]);
   const { user, permissions } = useAuthStore();
   const logout = useAuthStore((s) => s.logout);
 
@@ -4887,8 +4888,7 @@ const PlanView = ({ planId }: Props) => {
 
   const openEscapeRouteAt = useCallback(
     (point: { x: number; y: number }, sourceKind: 'map' | 'room' | 'corridor') => {
-      const sitePlans = (site?.floorPlans || []).filter(Boolean);
-      if (!sitePlans.length) {
+      if (!siteFloorPlans.length) {
         push(t({ it: 'Nessuna planimetria disponibile per la sede selezionata.', en: 'No floor plans available for the selected site.' }), 'info');
         return;
       }
@@ -4899,7 +4899,7 @@ const PlanView = ({ planId }: Props) => {
       });
       setContextMenu(null);
     },
-    [planId, push, site?.floorPlans, t]
+    [planId, push, siteFloorPlans.length, t]
   );
   const toggleSecurityCardVisibility = useCallback(() => {
     const baseVisible = hideAllLayers
@@ -16645,7 +16645,7 @@ const PlanView = ({ planId }: Props) => {
       />
       <EscapeRouteModal
         open={!!escapeRouteModal}
-        plans={((site?.floorPlans || []) as FloorPlan[]).filter(Boolean)}
+        plans={siteFloorPlans}
         startPlanId={escapeRouteModal?.startPlanId || planId}
         startPoint={escapeRouteModal?.startPoint || null}
         sourceKind={escapeRouteModal?.sourceKind || 'map'}
