@@ -6,7 +6,7 @@ import html2canvas from 'html2canvas';
 import { Client, Corridor, FloorPlan, Room } from '../../store/types';
 import { useLang, useT } from '../../i18n/useT';
 
-type Point = { x: number; y: number };
+export type Point = { x: number; y: number };
 type Axis = 'x' | 'y';
 
 type EntryKind = 'object' | 'rack_item' | 'room' | 'corridor';
@@ -21,7 +21,7 @@ interface SearchEntry {
   roomId?: string;
 }
 
-interface RouteResult {
+export interface RouteResult {
   startDoor: Point;
   endDoor: Point;
   approachPoints: Point[];
@@ -33,9 +33,9 @@ interface RouteResult {
   directDashedOnly?: boolean;
 }
 
-type ConnectionTransitionType = 'stairs' | 'elevator';
+export type ConnectionTransitionType = 'stairs' | 'elevator';
 
-interface RoutePlanSegment {
+export interface RoutePlanSegment {
   planId: string;
   planName: string;
   startPoint: Point;
@@ -47,7 +47,7 @@ interface RoutePlanSegment {
   endTransitionType?: ConnectionTransitionType;
 }
 
-interface MultiFloorRouteResult {
+export interface MultiFloorRouteResult {
   segments: RoutePlanSegment[];
   distancePx: number;
   distanceMeters?: number;
@@ -988,17 +988,26 @@ const reverseRoute = (route: RouteResult): RouteResult => ({
   directDashedOnly: route.directDashedOnly
 });
 
-const computeMultiFloorRoute = (
+interface ComputeMultiFloorRouteOptions {
+  allowedTransitionTypes?: ConnectionTransitionType[];
+}
+
+export const computeMultiFloorRoute = (
   plans: FloorPlan[],
   startPlanId: string,
   destinationPlanId: string,
   startPoint: Point,
-  destinationPoint: Point
+  destinationPoint: Point,
+  options?: ComputeMultiFloorRouteOptions
 ): { result?: MultiFloorRouteResult; error?: string } => {
   const planById = new Map(plans.map((plan) => [plan.id, plan]));
   const startPlan = planById.get(startPlanId);
   const destinationPlan = planById.get(destinationPlanId);
   if (!startPlan || !destinationPlan) return { error: 'path-not-found' };
+  const allowedTransitionTypes =
+    options?.allowedTransitionTypes && options.allowedTransitionTypes.length
+      ? new Set(options.allowedTransitionTypes)
+      : null;
 
   if (startPlan.id === destinationPlan.id) {
     const direct = computeRoute(startPlan, startPoint, destinationPoint);
@@ -1214,30 +1223,34 @@ const computeMultiFloorRoute = (
       if (!linked) continue;
       const abType = a.transitionType;
       const baType = b.transitionType;
-      addEdge({
-        kind: 'transition',
-        fromNode: a.nodeId,
-        toNode: b.nodeId,
-        fromConnectionId: a.connectionId,
-        toConnectionId: b.connectionId,
-        fromPlanId: a.planId,
-        toPlanId: b.planId,
-        transitionType: abType,
-        seconds: transitionPenaltySeconds(abType),
-        cost: transitionCost(abType)
-      });
-      addEdge({
-        kind: 'transition',
-        fromNode: b.nodeId,
-        toNode: a.nodeId,
-        fromConnectionId: b.connectionId,
-        toConnectionId: a.connectionId,
-        fromPlanId: b.planId,
-        toPlanId: a.planId,
-        transitionType: baType,
-        seconds: transitionPenaltySeconds(baType),
-        cost: transitionCost(baType)
-      });
+      if (!allowedTransitionTypes || allowedTransitionTypes.has(abType)) {
+        addEdge({
+          kind: 'transition',
+          fromNode: a.nodeId,
+          toNode: b.nodeId,
+          fromConnectionId: a.connectionId,
+          toConnectionId: b.connectionId,
+          fromPlanId: a.planId,
+          toPlanId: b.planId,
+          transitionType: abType,
+          seconds: transitionPenaltySeconds(abType),
+          cost: transitionCost(abType)
+        });
+      }
+      if (!allowedTransitionTypes || allowedTransitionTypes.has(baType)) {
+        addEdge({
+          kind: 'transition',
+          fromNode: b.nodeId,
+          toNode: a.nodeId,
+          fromConnectionId: b.connectionId,
+          toConnectionId: a.connectionId,
+          fromPlanId: b.planId,
+          toPlanId: a.planId,
+          transitionType: baType,
+          seconds: transitionPenaltySeconds(baType),
+          cost: transitionCost(baType)
+        });
+      }
     }
   }
 

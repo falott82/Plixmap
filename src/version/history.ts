@@ -8,6 +8,33 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.8.5',
+    date: '2026-02-17',
+    type: 'minor',
+    notes: [
+      n(
+        'Porte corridoio: aggiunta opzione "Esterno" nelle proprietà porta per identificare le uscite verso l’esterno edificio',
+        'Corridor doors: added "External" option in door properties to identify exits leading outside the building'
+      ),
+      n(
+        'Nuova funzione "Via di fuga" da menu contestuale (click destro) su mappa, stanza o corridoio',
+        'New "Escape route" function from context menu (right-click) on map, room, or corridor'
+      ),
+      n(
+        'Calcolo via di fuga: selezione automatica della porta valida più vicina nel tempo con vincolo Emergenza + Esterno',
+        'Escape-route calculation: automatic selection of the nearest valid door by time with Emergency + External constraint'
+      ),
+      n(
+        'Percorsi multi-piano via di fuga: transizioni limitate alle sole scale (ascensori esclusi) mantenendo il tracciato sulla mediana dei corridoi',
+        'Multi-floor escape routes: transitions limited to stairs only (elevators excluded) while keeping centerline corridor routing'
+      ),
+      n(
+        'Via di fuga: nuova modale dedicata con freccia direzionale, navigazione per piano e anteprima/esportazione PDF multi-pagina',
+        'Escape route: new dedicated modal with direction arrow, floor navigation, and multi-page PDF preview/export'
+      )
+    ]
+  },
+  {
     version: '2.8.3',
     date: '2026-02-17',
     type: 'fix',
