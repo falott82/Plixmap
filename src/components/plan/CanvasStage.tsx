@@ -128,7 +128,7 @@ interface Props {
   onCorridorDoorContextMenu?: (payload: { corridorId: string; doorId: string; clientX: number; clientY: number }) => void;
   onCorridorDoorDblClick?: (payload: { corridorId: string; doorId: string }) => void;
   onOpenRoomDetails?: (roomId: string) => void;
-  onRoomContextMenu?: (payload: { id: string; clientX: number; clientY: number }) => void;
+  onRoomContextMenu?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onCorridorContextMenu?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onCorridorConnectionContextMenu?: (payload: {
     corridorId: string;
@@ -173,6 +173,7 @@ interface Props {
         description?: string;
         isEmergency?: boolean;
         isMainEntrance?: boolean;
+        isExternal?: boolean;
         lastVerificationAt?: string;
         verifierCompany?: string;
         verificationHistory?: Array<{ id: string; date?: string; company: string; notes?: string; createdAt: number }>;
@@ -3901,8 +3902,14 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                     e.cancelBubble = true;
                     if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
                     if (isBoxSelecting()) return;
+                    const stage = e.target.getStage();
+                    const pos = stage?.getPointerPosition();
+                    const fallbackPoint = labelBounds
+                      ? { x: Number(labelBounds.x) + Number(labelBounds.width) / 2, y: Number(labelBounds.y) + Number(labelBounds.height) / 2 }
+                      : pts[0] || { x: 0, y: 0 };
+                    const world = pos ? pointerToWorld(pos.x, pos.y) : fallbackPoint;
                     onSelectRoom?.(room.id, { keepContext: true });
-                    onRoomContextMenu?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+                    onRoomContextMenu?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY, worldX: world.x, worldY: world.y });
                   }}
                   onDragEnd={(e) => {
                     if (readOnly) return;
@@ -4039,8 +4046,13 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                   e.cancelBubble = true;
                   if ((e.evt as any)?.metaKey) return;
                   if (isBoxSelecting()) return;
+                  const stage = e.target.getStage();
+                  const pos = stage?.getPointerPosition();
+                  const world = pos
+                    ? pointerToWorld(pos.x, pos.y)
+                    : { x: Number(room.x || 0) + Number(room.width || 0) / 2, y: Number(room.y || 0) + Number(room.height || 0) / 2 };
                   onSelectRoom?.(room.id, { keepContext: true });
-                  onRoomContextMenu?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+                  onRoomContextMenu?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY, worldX: world.x, worldY: world.y });
                 }}
                 onDragEnd={(e) => {
                   if (readOnly) return;
@@ -4800,6 +4812,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
               const doorDescription = String((door as any).description || '').trim();
               const emergency = !!(door as any).isEmergency;
               const mainEntrance = !!(door as any).isMainEntrance;
+              const isExternal = !!(door as any).isExternal;
               const isFireDoor = !!(door as any).isFireDoor;
               const automationUrl = String((door as any).automationUrl || '').trim();
               const mode = String((door as any).mode || 'static');
@@ -4816,6 +4829,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                 `${t({ it: 'Modalità', en: 'Mode' })}: ${modeLabel}`,
                 emergency ? t({ it: 'Porta emergenza', en: 'Emergency door' }) : '',
                 mainEntrance ? t({ it: 'Ingresso principale', en: 'Main entrance' }) : '',
+                isExternal ? t({ it: 'Porta esterna', en: 'External door' }) : '',
                 isFireDoor ? t({ it: 'Tagliafuoco', en: 'Fire door' }) : '',
                 automationUrl ? `${t({ it: 'URL apertura', en: 'Open URL' })}: ${automationUrl}` : '',
                 emergency && (lastVerificationAt || verifierCompany)

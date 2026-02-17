@@ -79,6 +79,7 @@ import RealUserPickerModal from './RealUserPickerModal';
 import PrintModal from './PrintModal';
 import CrossPlanSearchModal, { CrossPlanSearchResult } from './CrossPlanSearchModal';
 import InternalMapModal from './InternalMapModal';
+import EscapeRouteModal from './EscapeRouteModal';
 import AllObjectTypesModal from './AllObjectTypesModal';
 import CableModal from './CableModal';
 import LinksModal from './LinksModal';
@@ -585,7 +586,7 @@ const PlanView = ({ planId }: Props) => {
   const [contextMenu, setContextMenu] = useState<
     | { kind: 'object'; id: string; x: number; y: number; wallSegmentLengthPx?: number }
     | { kind: 'link'; id: string; x: number; y: number }
-    | { kind: 'room'; id: string; x: number; y: number }
+    | { kind: 'room'; id: string; x: number; y: number; worldX: number; worldY: number }
     | { kind: 'corridor'; id: string; x: number; y: number; worldX: number; worldY: number }
     | { kind: 'corridor_door'; corridorId: string; doorId: string; x: number; y: number }
     | { kind: 'corridor_connection'; corridorId: string; connectionId: string; x: number; y: number; worldX: number; worldY: number }
@@ -619,6 +620,11 @@ const PlanView = ({ planId }: Props) => {
   const [crossPlanSearchTerm, setCrossPlanSearchTerm] = useState('');
   const [crossPlanResults, setCrossPlanResults] = useState<CrossPlanSearchResult[]>([]);
   const [internalMapOpen, setInternalMapOpen] = useState(false);
+  const [escapeRouteModal, setEscapeRouteModal] = useState<{
+    startPoint: { x: number; y: number };
+    startPlanId: string;
+    sourceKind: 'map' | 'room' | 'corridor';
+  } | null>(null);
   const [emergencyContactsOpen, setEmergencyContactsOpen] = useState(false);
   const normalizeSafetyCardLayout = useCallback((layout: any) => {
     const x = Number(layout?.x);
@@ -788,6 +794,7 @@ const PlanView = ({ planId }: Props) => {
     description: string;
     isEmergency: boolean;
     isMainEntrance: boolean;
+    isExternal: boolean;
     isFireDoor: boolean;
     lastVerificationAt: string;
     verifierCompany: string;
@@ -4583,6 +4590,7 @@ const PlanView = ({ planId }: Props) => {
               description: undefined,
               isEmergency: defaultEmergency,
               isMainEntrance: false,
+              isExternal: false,
               isFireDoor: false,
               verificationHistory: [],
               linkedRoomIds: []
@@ -4617,9 +4625,9 @@ const PlanView = ({ planId }: Props) => {
   );
 
   const handleRoomContextMenu = useCallback(
-    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) => {
+    ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
       dismissSelectionHintToasts();
-      setContextMenu({ kind: 'room', id, x: clientX, y: clientY });
+      setContextMenu({ kind: 'room', id, x: clientX, y: clientY, worldX, worldY });
     },
     [dismissSelectionHintToasts]
   );
@@ -4847,7 +4855,7 @@ const PlanView = ({ planId }: Props) => {
         setSelectedCorridorId(undefined);
         setSelectedRoomId(roomId);
         setSelectedRoomIds([roomId]);
-        setContextMenu({ kind: 'room', id: roomId, x: clientX, y: clientY });
+        setContextMenu({ kind: 'room', id: roomId, x: clientX, y: clientY, worldX, worldY });
         return;
       }
       setContextMenu({ kind: 'map', x: clientX, y: clientY, worldX, worldY });
@@ -4875,6 +4883,23 @@ const PlanView = ({ planId }: Props) => {
       setContextMenu({ kind: 'safety_card', x: clientX, y: clientY, worldX, worldY });
     },
     [dismissSelectionHintToasts]
+  );
+
+  const openEscapeRouteAt = useCallback(
+    (point: { x: number; y: number }, sourceKind: 'map' | 'room' | 'corridor') => {
+      const sitePlans = (site?.floorPlans || []).filter(Boolean);
+      if (!sitePlans.length) {
+        push(t({ it: 'Nessuna planimetria disponibile per la sede selezionata.', en: 'No floor plans available for the selected site.' }), 'info');
+        return;
+      }
+      setEscapeRouteModal({
+        startPoint: { x: Number(point.x), y: Number(point.y) },
+        startPlanId: planId,
+        sourceKind
+      });
+      setContextMenu(null);
+    },
+    [planId, push, site?.floorPlans, t]
   );
   const toggleSecurityCardVisibility = useCallback(() => {
     const baseVisible = hideAllLayers
@@ -7822,6 +7847,7 @@ const PlanView = ({ planId }: Props) => {
         description: typeof (door as any)?.description === 'string' ? String((door as any).description) : '',
         isEmergency: typeof (door as any)?.isEmergency === 'boolean' ? !!(door as any).isEmergency : defaultEmergency,
         isMainEntrance: !!(door as any)?.isMainEntrance,
+        isExternal: !!(door as any)?.isExternal,
         isFireDoor: !!(door as any)?.isFireDoor,
         lastVerificationAt: typeof (door as any)?.lastVerificationAt === 'string' ? String((door as any).lastVerificationAt) : '',
         verifierCompany: typeof (door as any)?.verifierCompany === 'string' ? String((door as any).verifierCompany) : '',
@@ -7923,6 +7949,7 @@ const PlanView = ({ planId }: Props) => {
     }
     const isEmergency = !!corridorDoorModal.isEmergency;
     const isMainEntrance = !!corridorDoorModal.isMainEntrance;
+    const isExternal = !!corridorDoorModal.isExternal;
     const isFireDoor = !!corridorDoorModal.isFireDoor;
     const description = corridorDoorModal.description.trim();
     const lastVerificationAt = corridorDoorModal.lastVerificationAt.trim();
@@ -7954,6 +7981,7 @@ const PlanView = ({ planId }: Props) => {
                 description: description || undefined,
                 isEmergency,
                 isMainEntrance,
+                isExternal,
                 isFireDoor,
                 lastVerificationAt: isEmergency ? lastVerificationAt || undefined : undefined,
                 verifierCompany: isEmergency ? verifierCompany || undefined : undefined,
@@ -10973,6 +11001,7 @@ const PlanView = ({ planId }: Props) => {
                                   typeof (door as any).description === 'string' ? String((door as any).description).trim() || undefined : undefined,
                                 isEmergency: !!(door as any).isEmergency,
                                 isMainEntrance: !!(door as any).isMainEntrance,
+                                isExternal: !!(door as any).isExternal,
                                 isFireDoor: !!(door as any).isFireDoor,
                                 lastVerificationAt:
                                   typeof (door as any).lastVerificationAt === 'string'
@@ -12467,8 +12496,8 @@ const PlanView = ({ planId }: Props) => {
                 )}
               </>
             ) : contextMenu.kind === 'room' ? (
-            <>
-              {roomContextMetrics ? (
+	            <>
+	              {roomContextMetrics ? (
                 <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
                   <div className="font-semibold text-slate-600">{t({ it: 'Info stanza', en: 'Room info' })}</div>
                   {roomContextMetrics.scaleMissing ? (
@@ -12504,10 +12533,20 @@ const PlanView = ({ planId }: Props) => {
                       ) : null}
                     </>
                   )}
-                </div>
-              ) : null}
-              {!isReadOnly ? (
-	                <button
+	                </div>
+	              ) : null}
+	              <button
+	                onClick={() => {
+	                  if (contextMenu.kind !== 'room') return;
+	                  openEscapeRouteAt({ x: contextMenu.worldX, y: contextMenu.worldY }, 'room');
+	                }}
+	                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+	                title={t({ it: 'Calcola via di fuga verso uscita esterna di emergenza', en: 'Compute escape route to nearest external emergency exit' })}
+	              >
+	                <Footprints size={14} className="text-slate-500" /> {t({ it: 'Via di fuga', en: 'Escape route' })}
+	              </button>
+	              {!isReadOnly ? (
+		                <button
 	                  onClick={() => {
 	                    openEditRoom(contextMenu.id);
 	                    setContextMenu(null);
@@ -12531,10 +12570,20 @@ const PlanView = ({ planId }: Props) => {
                 </button>
               ) : null}
             </>
-            ) : contextMenu.kind === 'corridor' ? (
-            <>
-              {!isReadOnly ? (
-                <button
+	            ) : contextMenu.kind === 'corridor' ? (
+	            <>
+              <button
+                onClick={() => {
+                  if (contextMenu.kind !== 'corridor') return;
+                  openEscapeRouteAt({ x: contextMenu.worldX, y: contextMenu.worldY }, 'corridor');
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Calcola via di fuga verso uscita esterna di emergenza', en: 'Compute escape route to nearest external emergency exit' })}
+              >
+                <Footprints size={14} className="text-slate-500" /> {t({ it: 'Via di fuga', en: 'Escape route' })}
+              </button>
+	              {!isReadOnly ? (
+	                <button
                   onClick={() => {
                     if (contextMenu.kind !== 'corridor') return;
                     openCorridorConnectionModalAt(contextMenu.id, { x: contextMenu.worldX, y: contextMenu.worldY });
@@ -12731,10 +12780,20 @@ const PlanView = ({ planId }: Props) => {
                 <Trash size={14} className="text-rose-600" /> {t({ it: 'Elimina scala', en: 'Delete scale' })}
               </button>
             </>
-          ) : (
-            <>
-              {planPhotoIds.length ? (
-                <button
+	          ) : (
+	            <>
+              <button
+                onClick={() => {
+                  if (contextMenu.kind !== 'map') return;
+                  openEscapeRouteAt({ x: contextMenu.worldX, y: contextMenu.worldY }, 'map');
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Calcola via di fuga verso uscita esterna di emergenza', en: 'Compute escape route to nearest external emergency exit' })}
+              >
+                <Footprints size={14} className="text-slate-500" /> {t({ it: 'Via di fuga', en: 'Escape route' })}
+              </button>
+	              {planPhotoIds.length ? (
+	                <button
                   onClick={() => {
                     openPhotoViewer({ id: planPhotoIds[0], selectionIds: planPhotoIds });
                     setContextMenu(null);
@@ -14556,6 +14615,29 @@ const PlanView = ({ planId }: Props) => {
                                 }
                               />
                               {t({ it: 'Ingresso principale', en: 'Main entrance' })}
+                            </label>
+                            <label
+                              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                              title={t({
+                                it: "Segna questa porta come esterna (uscita verso l'esterno edificio).",
+                                en: 'Mark this door as external (exit to outside of building).'
+                              })}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!corridorDoorModal?.isExternal}
+                                onChange={(e) =>
+                                  setCorridorDoorModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          isExternal: e.target.checked
+                                        }
+                                      : prev
+                                  )
+                                }
+                              />
+                              {t({ it: 'Esterno', en: 'External' })}
                             </label>
                             <label
                               className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
@@ -16560,6 +16642,16 @@ const PlanView = ({ planId }: Props) => {
         objectTypeLabels={objectTypeLabels}
         initialLocation={{ clientId: client?.id, siteId: site?.id, planId }}
         onClose={() => setInternalMapOpen(false)}
+      />
+      <EscapeRouteModal
+        open={!!escapeRouteModal}
+        plans={((site?.floorPlans || []) as FloorPlan[]).filter(Boolean)}
+        startPlanId={escapeRouteModal?.startPlanId || planId}
+        startPoint={escapeRouteModal?.startPoint || null}
+        sourceKind={escapeRouteModal?.sourceKind || 'map'}
+        clientName={String(client?.shortName || client?.name || '').trim()}
+        siteName={String(site?.name || '').trim()}
+        onClose={() => setEscapeRouteModal(null)}
       />
       <EmergencyContactsModal
         open={emergencyContactsOpen}
