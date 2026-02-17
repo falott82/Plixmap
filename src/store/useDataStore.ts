@@ -593,6 +593,7 @@ const snapshotRevision = (
                 catalogTypeId: typeof (d as any)?.catalogTypeId === 'string' ? String((d as any).catalogTypeId) : undefined,
                 description: typeof (d as any)?.description === 'string' ? String((d as any).description) : undefined,
                 isEmergency: !!(d as any)?.isEmergency,
+                isMainEntrance: !!(d as any)?.isMainEntrance,
                 isFireDoor: !!(d as any)?.isFireDoor,
                 lastVerificationAt: typeof (d as any)?.lastVerificationAt === 'string' ? String((d as any).lastVerificationAt) : undefined,
                 verifierCompany: typeof (d as any)?.verifierCompany === 'string' ? String((d as any).verifierCompany) : undefined,
@@ -856,6 +857,7 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
                 catalogTypeId: typeof (d as any)?.catalogTypeId === 'string' ? String((d as any).catalogTypeId).trim() || undefined : undefined,
                 description: typeof (d as any)?.description === 'string' ? String((d as any).description).trim() || undefined : undefined,
                 isEmergency: !!(d as any)?.isEmergency,
+                isMainEntrance: !!(d as any)?.isMainEntrance,
                 isFireDoor: !!(d as any)?.isFireDoor,
                 lastVerificationAt:
                   typeof (d as any)?.lastVerificationAt === 'string' ? String((d as any).lastVerificationAt).trim() || undefined : undefined,
@@ -1866,6 +1868,7 @@ export const useDataStore = create<DataState>()(
                       catalogTypeId: typeof d?.catalogTypeId === 'string' ? String(d.catalogTypeId) : undefined,
                       description: typeof d?.description === 'string' ? String(d.description) : undefined,
                       isEmergency: !!d?.isEmergency,
+                      isMainEntrance: !!d?.isMainEntrance,
                       lastVerificationAt: typeof d?.lastVerificationAt === 'string' ? String(d.lastVerificationAt) : undefined,
                       verifierCompany: typeof d?.verifierCompany === 'string' ? String(d.verifierCompany) : undefined,
                       verificationHistory: normalizeDoorVerificationHistory(d?.verificationHistory).map((entry) => ({
