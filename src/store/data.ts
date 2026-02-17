@@ -1,4 +1,5 @@
 import { Client, ObjectTypeDefinition, WifiAntennaModel } from './types';
+import { asSecurityObjectTypes, SECURITY_LAYER_ID, SECURITY_TYPE_IDS } from './security';
 
 export const SEED_CLIENT_ID = 'seed-client-acme';
 export const SEED_SITE_ID = 'seed-site-wall-street-01';
@@ -16,6 +17,7 @@ export const DEFAULT_WIFI_TYPES = ['wifi'];
 export const DEFAULT_TEXT_TYPES = ['text', 'postit'];
 export const DEFAULT_IMAGE_TYPES = ['image'];
 export const DEFAULT_PHOTO_TYPES = ['photo'];
+export const DEFAULT_SECURITY_TYPES = SECURITY_TYPE_IDS;
 export const WIFI_STANDARD_OPTIONS = [
   { id: '802.11', it: 'WiFi 1 (802.11)', en: 'WiFi 1 (802.11)' },
   { id: '802.11b', it: 'WiFi 2 (802.11b)', en: 'WiFi 2 (802.11b)' },
@@ -318,14 +320,16 @@ export const defaultData = (): Client[] => {
         { id: 'wifi', name: { it: 'WiFi', en: 'WiFi' }, color: WIFI_LAYER_COLOR, order: 4, typeIds: DEFAULT_WIFI_TYPES },
         { id: 'cctv', name: { it: 'CCTV', en: 'CCTV' }, color: '#22c55e', order: 5, typeIds: DEFAULT_CCTV_TYPES },
         { id: 'desks', name: { it: 'Scrivanie', en: 'Desks' }, color: '#8b5cf6', order: 6, typeIds: DEFAULT_DESK_TYPES },
-        { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 7 },
-        { id: 'walls', name: { it: 'Mura', en: 'Walls' }, color: WALL_LAYER_COLOR, order: 8, typeIds: DEFAULT_WALL_TYPES },
-        { id: 'quotes', name: { it: 'Quote', en: 'Quotes' }, color: QUOTE_LAYER_COLOR, order: 9 },
-        { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 10 },
-        { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 11, typeIds: DEFAULT_RACK_TYPES },
-        { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 12, typeIds: DEFAULT_TEXT_TYPES },
-        { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 13, typeIds: DEFAULT_IMAGE_TYPES },
-        { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 14, typeIds: DEFAULT_PHOTO_TYPES }
+        { id: SECURITY_LAYER_ID, name: { it: 'Sicurezza', en: 'Safety' }, color: '#ef4444', order: 7, typeIds: DEFAULT_SECURITY_TYPES },
+        { id: 'cabling', name: { it: 'Cablaggi', en: 'Cabling' }, color: '#10b981', order: 8 },
+        { id: 'walls', name: { it: 'Mura', en: 'Walls' }, color: WALL_LAYER_COLOR, order: 9, typeIds: DEFAULT_WALL_TYPES },
+        { id: 'quotes', name: { it: 'Quote', en: 'Quotes' }, color: QUOTE_LAYER_COLOR, order: 10 },
+        { id: 'rooms', name: { it: 'Stanze', en: 'Rooms' }, color: '#64748b', order: 11 },
+        { id: 'corridors', name: { it: 'Corridoi', en: 'Corridors' }, color: '#94a3b8', order: 12 },
+        { id: 'racks', name: { it: 'Rack', en: 'Racks' }, color: '#f97316', order: 13, typeIds: DEFAULT_RACK_TYPES },
+        { id: 'text', name: { it: 'Testo', en: 'Text' }, color: '#0f172a', order: 14, typeIds: DEFAULT_TEXT_TYPES },
+        { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 15, typeIds: DEFAULT_IMAGE_TYPES },
+        { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 16, typeIds: DEFAULT_PHOTO_TYPES }
       ],
       sites: [
         {
@@ -350,6 +354,7 @@ export const defaultData = (): Client[] => {
                 }
               ],
               rooms: [],
+              corridors: [],
               revisions: [],
               links: [],
               racks: [],
@@ -390,6 +395,10 @@ export const defaultObjectTypes: ObjectTypeDefinition[] = [
   { id: 'desk_trap', name: { it: 'Scrivania trapezoidale', en: 'Trapezoid desk' }, icon: 'deskTrapezoid', builtin: true },
   { id: 'desk_l', name: { it: 'Scrivania a L', en: 'L-shaped desk' }, icon: 'deskL', builtin: true },
   { id: 'desk_l_rev', name: { it: 'Scrivania a L rovesciata', en: 'Reverse L desk' }, icon: 'deskLReverse', builtin: true },
+  { id: 'door_standard', name: { it: 'Porta standard', en: 'Standard door' }, icon: 'lock', builtin: true, category: 'door', doorConfig: { isEmergency: false, trackVerification: false, remoteOpen: false } },
+  { id: 'door_emergency', name: { it: 'Porta emergenza', en: 'Emergency door' }, icon: 'shieldAlert', builtin: true, category: 'door', doorConfig: { isEmergency: true, trackVerification: true, remoteOpen: false } },
+  { id: 'door_remote', name: { it: 'Porta remota', en: 'Remote door' }, icon: 'unlock', builtin: true, category: 'door', doorConfig: { isEmergency: false, trackVerification: true, remoteOpen: true } },
+  ...asSecurityObjectTypes(),
   // Keep legacy/common types for backward compatibility with existing workspaces
   { id: 'wifi', name: { it: 'Antenna Wi‑Fi', en: 'Wi‑Fi antenna' }, icon: 'wifi', builtin: true },
   { id: 'desktop', name: { it: 'PC fisso', en: 'Desktop PC' }, icon: 'desktop', builtin: true },

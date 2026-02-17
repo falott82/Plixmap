@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, Mail, Heart } from 'lucide-react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, Mail, Heart, ShieldAlert } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import ConfirmDialog from '../ui/ConfirmDialog';
@@ -24,6 +25,7 @@ import CustomImportPanel from './CustomImportPanel';
 import EmailSettingsPanel from './EmailSettingsPanel';
 import DonationsPanel from './DonationsPanel';
 import LayersPanel from './LayersPanel';
+import SafetyPanel from './SafetyPanel';
 
 const SettingsView = () => {
   const {
@@ -63,7 +65,7 @@ const SettingsView = () => {
   const [planPreview, setPlanPreview] = useState<{ name: string; imageUrl: string } | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { selectedPlanId, setSelectedPlan } = useUIStore();
+  const { selectedPlanId, setSelectedPlan, clearSelection } = useUIStore();
   const { user } = useAuthStore();
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
   const isAdmin = !!user?.isAdmin || isSuperAdmin;
@@ -71,6 +73,7 @@ const SettingsView = () => {
     const next = new URLSearchParams(search).get('tab')?.toLowerCase() || '';
     if (next === 'account') return 'account';
     if (next === 'objects') return 'objects';
+    if (next === 'safety') return 'safety';
     if (next === 'layers' && isAdmin) return 'layers';
     if (next === 'users' && isAdmin) return 'users';
     if (next === 'logs' && isSuperAdmin) return 'logs';
@@ -82,7 +85,7 @@ const SettingsView = () => {
     if (next === 'data' && isAdmin) return 'data';
     return isAdmin ? 'data' : 'account';
   };
-  const [tab, setTab] = useState<'data' | 'objects' | 'layers' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd' | 'donations'>(
+  const [tab, setTab] = useState<'data' | 'objects' | 'safety' | 'layers' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd' | 'donations'>(
     () => resolveTab(location.search)
   );
   const setTabAndUrl = (nextTab: typeof tab) => {
@@ -107,6 +110,10 @@ const SettingsView = () => {
       setSelectedSite(clients[0]?.sites[0]?.id);
     }
   }, [clients, selectedClient, selectedSite]);
+  useEffect(() => {
+    toast.dismiss();
+    clearSelection();
+  }, [clearSelection]);
 
   const currentClient = useMemo(
     () => clients.find((c) => c.id === selectedClient) || clients[0],
@@ -306,6 +313,15 @@ const SettingsView = () => {
           </>
         ) : null}
         <button
+          onClick={() => setTabAndUrl('safety')}
+          className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+            tab === 'safety' ? 'border-rose-300 bg-rose-100 text-rose-700' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          }`}
+          title={t({ it: 'Apri tab Sicurezza', en: 'Open Safety tab' })}
+        >
+          <ShieldAlert size={16} /> {t({ it: 'Sicurezza', en: 'Safety' })}
+        </button>
+        <button
           onClick={() => setTabAndUrl('account')}
           className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
             tab === 'account' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
@@ -327,12 +343,12 @@ const SettingsView = () => {
         ) : null}
         <button
           onClick={() => setTabAndUrl('donations')}
-          className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
-            tab === 'donations' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
+          className={`flex h-10 w-10 items-center justify-center rounded-full border ${
+            tab === 'donations' ? 'border-rose-300 bg-rose-100 text-rose-700' : 'border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100'
           }`}
           title={t({ it: 'Apri tab Donazioni', en: 'Open Donations tab' })}
         >
-          <Heart size={16} /> {t({ it: 'Donazioni', en: 'Donations' })}
+          <Heart size={16} className="fill-current" />
         </button>
       </div>
 
@@ -340,6 +356,7 @@ const SettingsView = () => {
         {tab === 'account' ? <AccountPanel /> : null}
 
         {tab === 'objects' ? <ObjectTypesPanel client={currentClient} /> : null}
+        {tab === 'safety' ? <SafetyPanel /> : null}
 
         {tab === 'layers' ? (
           isAdmin ? (

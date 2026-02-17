@@ -492,6 +492,24 @@ const HelpPanel = () => {
                           en: 'You can move/resize the room; links are updated.'
                         })}
                       </li>
+                      <li>
+                        {t({
+                          it: 'Porte corridoio: tasto destro sulla porta → “Collega stanza”. Se il layer Stanze è nascosto, viene mostrato automaticamente.',
+                          en: 'Corridor doors: right-click the door → “Link room”. If the Rooms layer is hidden, it is automatically shown.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Nella modale “Collega stanza” la stanza più vicina è in cima con badge verde “(rilevata prossimità)”. Puoi cercare per nome stanza o utenti presenti nella stanza.',
+                          en: 'In the “Link room” modal, the nearest room is pinned on top with a green “(proximity detected)” badge. You can search by room name or by users present in the room.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Mouse over sulla porta: viene mostrato l’elenco delle stanze collegate.',
+                          en: 'Hover over a door: you see the list of linked rooms.'
+                        })}
+                      </li>
                     </ul>
                   </div>
 
@@ -590,6 +608,18 @@ const HelpPanel = () => {
                         {t({
                           it: 'Barra di ricerca nella vista planimetria: filtra per nome/descrizione.',
                           en: 'Search bar in the floor plan view: filters by name/description.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Pulsante "Mappa interna": apre un wizard in modale per trovare una destinazione, scegliere il punto A sulla mappa e calcolare il percorso interno su corridoi e porte.',
+                          en: '"Internal map" button: opens a modal wizard to find a destination, choose point A on the map, and calculate the internal route through corridors and doors.'
+                        })}
+                      </li>
+                      <li>
+                        {t({
+                          it: 'Il percorso viene disegnato in rosso con angoli retti; se e impostata la scala, vengono mostrati distanza in metri e tempo stimato (1,4 m/s).',
+                          en: 'The route is drawn in red with right-angle turns; when scale is set, distance in meters and estimated time (1.4 m/s) are shown.'
                         })}
                       </li>
                       <li>

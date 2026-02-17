@@ -49,7 +49,10 @@ const UserMenu = () => {
         <button
           onClick={() => toggleClientChat()}
           className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink shadow-card hover:bg-slate-50"
-          title={t({ it: 'Chat (C)', en: 'Chat (C)' })}
+          title={t({
+            it: 'Chat (C): apre la chat clienti/utenti con badge non letti e storico conversazioni.',
+            en: 'Chat (C): opens client/user chat with unread badges and conversation history.'
+          })}
           aria-label={t({ it: 'Chat', en: 'Chat' })}
         >
           <MessageSquare size={18} className="text-slate-700" />

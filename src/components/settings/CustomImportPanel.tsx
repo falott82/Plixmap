@@ -355,8 +355,8 @@ const CustomImportPanel = () => {
             <div className="text-sm font-semibold text-ink">{t({ it: 'Import WebAPI / CSV (Utenti reali)', en: 'WebAPI / CSV Import (Real users)' })}</div>
             <div className="modal-description">
               {t({
-                it: 'Ogni cliente ha la propria rubrica utenti: scegli la fonte e sincronizza da qui.',
-                en: 'Each client has its own user directory: choose the source and sync from here.'
+                it: 'Ogni cliente ha una rubrica utenti separata. Da qui puoi importare e sincronizzare una lista utenti tramite WebAPI (endpoint esterno) oppure da file CSV.',
+                en: 'Each client has a separate user directory. From here you can import and sync a user list via WebAPI (external endpoint) or from a CSV file.'
               })}
             </div>
           </div>
