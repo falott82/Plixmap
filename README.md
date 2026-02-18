@@ -9,6 +9,11 @@ Deskly is a web app to plan offices and infrastructure on floor plans using a fi
 - Added full editing flow for room-connection doors: dedicated marker on map, right-click menu, double-click to edit door properties, and delete action.
 - Routing engine update (Internal Map + Escape Route): room-door connectors are now considered when start/end points are inside rooms not directly facing a corridor.
 - Route persistence/revisions/clone now include room-connection doors to keep behavior consistent across save, restore, duplicate, and history operations.
+- Layers UX: fixed `Show all` + single-layer toggles so disabling one layer correctly hides its items.
+- User directory: `Export PDF` now opens a column-selection modal before generating the final document.
+- Link editing: fixed modal state reset while typing, so link names/descriptions can be edited without input being overwritten.
+- Safety panel: removed `Door ID` from the emergency-doors table and CSV export.
+- WebAPI import modal: moved settings gear into the helper message, removed the top-right settings button, and added guards so `Test WebAPI` / `Sync import` are disabled until WebAPI is configured; `Clear import` and `Update settings` are enabled only after at least one import.
 
 ## What's new in 2.9.0
 - Escape route directions refined: the checkered flag is now used only for the final step (assembly point when present).
@@ -120,6 +125,12 @@ Deskly is a web app to plan offices and infrastructure on floor plans using a fi
 - Export: jsPDF + html2canvas
 
 ## Quickstart
+### Clone
+```bash
+git clone https://github.com/falott82/Deskly.git
+cd Deskly
+```
+
 ### Prerequisites
 - Node.js 20+ (18+ should work)
 
