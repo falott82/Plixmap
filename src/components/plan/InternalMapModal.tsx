@@ -169,6 +169,17 @@ const getCorridorDoorAnchor = (corridor: Corridor, door: any): Point | null => {
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
 };
 
+const getPolygonEdgePoint = (points: Point[], edgeIndex: number, ratioValue: number): Point | null => {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  if (!Number.isFinite(edgeIndex)) return null;
+  const idx = ((Math.floor(edgeIndex) % points.length) + points.length) % points.length;
+  const a = points[idx];
+  const b = points[(idx + 1) % points.length];
+  if (!a || !b) return null;
+  const t = Math.max(0, Math.min(1, Number(ratioValue) || 0));
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+};
+
 const getCorridorConnectionAnchor = (corridor: Corridor, connection: any): Point | null => {
   if (Number.isFinite(Number(connection?.x)) && Number.isFinite(Number(connection?.y))) {
     return { x: Number(connection.x), y: Number(connection.y) };
@@ -569,6 +580,9 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
     connectorAxis: Axis;
     startDist: number;
     endDist: number;
+    startPath?: Point[];
+    endPathFromTarget?: Point[];
+    roomIds?: string[];
   };
 
   const buildDirectRoomRoute = (): { route: RouteResult } | null => {
@@ -605,16 +619,11 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
   const directRoomRoute = buildDirectRoomRoute();
   if (directRoomRoute) return directRoomRoute;
 
-  const corridors = ((plan.corridors || []) as Corridor[]).filter(Boolean);
-  if (!corridors.length) return { error: 'no-corridors' };
-  const corridorEntries = corridors
-    .map((corridor) => ({ corridor, poly: corridorPolygon(corridor) }))
+  const roomEntries = ((plan.rooms || []) as Room[])
+    .filter(Boolean)
+    .map((room) => ({ room, poly: roomPolygon(room) }))
     .filter((entry) => entry.poly.length >= 3);
-  const corridorPolys = corridorEntries.map((entry) => entry.poly);
-  const isPointInOrOnCorridor = (point: Point) =>
-    corridorPolys.some((poly) => pointInPolygon(point, poly) || pointOnPolygonBoundary(point, poly));
-  const corridorContainingPoint = (point: Point) =>
-    corridorEntries.find((entry) => pointInPolygon(point, entry.poly) || pointOnPolygonBoundary(point, entry.poly)) || null;
+  const roomIdSet = new Set(roomEntries.map((entry) => String(entry.room.id)));
   const segmentInsidePolygon = (from: Point, to: Point, poly: Point[], samples = 14) => {
     for (let i = 0; i <= samples; i += 1) {
       const t = i / samples;
@@ -623,6 +632,16 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
     }
     return true;
   };
+
+  const corridors = ((plan.corridors || []) as Corridor[]).filter(Boolean);
+  const corridorEntries = corridors
+    .map((corridor) => ({ corridor, poly: corridorPolygon(corridor) }))
+    .filter((entry) => entry.poly.length >= 3);
+  const corridorPolys = corridorEntries.map((entry) => entry.poly);
+  const isPointInOrOnCorridor = (point: Point) =>
+    corridorPolys.some((poly) => pointInPolygon(point, poly) || pointOnPolygonBoundary(point, poly));
+  const corridorContainingPoint = (point: Point) =>
+    corridorEntries.find((entry) => pointInPolygon(point, entry.poly) || pointOnPolygonBoundary(point, entry.poly)) || null;
   const startInsideCorridor = isPointInOrOnCorridor(startPoint);
   const targetInsideCorridor = isPointInOrOnCorridor(targetPoint);
   const startCorridorEntry = startInsideCorridor ? corridorContainingPoint(startPoint) : null;
@@ -652,6 +671,65 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
     };
   }
   const doors: DoorCandidate[] = [];
+  const distanceToRoomBoundary = (poly: Point[], point: Point) => {
+    if (poly.length < 2) return Number.POSITIVE_INFINITY;
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < poly.length; i += 1) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const dist = distancePointToSegment(point, a, b);
+      if (dist < best) best = dist;
+    }
+    return best;
+  };
+  const getDoorLinkedRoomsAtPoint = (point: Point, tolerance = 2.4, fallbackDistance = 42) => {
+    const direct = roomEntries
+      .filter((entry) => pointInPolygon(point, entry.poly) || pointOnPolygonBoundary(point, entry.poly, tolerance))
+      .map((entry) => String(entry.room.id));
+    if (direct.length) return Array.from(new Set(direct));
+    const ranked = roomEntries
+      .map((entry) => ({ id: String(entry.room.id), dist: distanceToRoomBoundary(entry.poly, point) }))
+      .filter((entry) => Number.isFinite(entry.dist))
+      .sort((a, b) => a.dist - b.dist);
+    if (!ranked.length) return [] as string[];
+    const best = ranked[0].dist;
+    const maxAllowed = Math.max(fallbackDistance, best + 2.5);
+    return ranked.filter((entry) => entry.dist <= maxAllowed).slice(0, 4).map((entry) => entry.id);
+  };
+  const getDoorLinkedRoomsByEdgeProbe = (corridorPoly: Point[], door: any, anchor: Point) => {
+    if (!Array.isArray(corridorPoly) || corridorPoly.length < 2) return [] as string[];
+    const edgeIndex = Number(door?.edgeIndex);
+    if (!Number.isFinite(edgeIndex)) return [] as string[];
+    const idx = ((Math.floor(edgeIndex) % corridorPoly.length) + corridorPoly.length) % corridorPoly.length;
+    const a = corridorPoly[idx];
+    const b = corridorPoly[(idx + 1) % corridorPoly.length];
+    if (!a || !b) return [] as string[];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len <= 0.0001) return [] as string[];
+    const nx = -dy / len;
+    const ny = dx / len;
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const probeDistances = [2, 4, 8, 12, 18, 26, 36, 48, 64];
+    const pushProbeMatches = (probe: Point, probeTolerance: number) => {
+      for (const entry of roomEntries) {
+        if (!pointInPolygon(probe, entry.poly) && !pointOnPolygonBoundary(probe, entry.poly, probeTolerance)) continue;
+        const roomId = String(entry.room.id);
+        if (seen.has(roomId)) continue;
+        seen.add(roomId);
+        out.push(roomId);
+      }
+    };
+    for (const dist of probeDistances) {
+      const probeTolerance = dist <= 12 ? 2.6 : 3.4;
+      pushProbeMatches({ x: anchor.x + nx * dist, y: anchor.y + ny * dist }, probeTolerance);
+      pushProbeMatches({ x: anchor.x - nx * dist, y: anchor.y - ny * dist }, probeTolerance);
+      if (out.length >= 2 && dist >= 18) break;
+    }
+    return out;
+  };
   for (const corridor of corridors) {
     const poly = corridorPolygon(corridor);
     if (poly.length < 3) continue;
@@ -659,14 +737,326 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
       const door = (corridor.doors || [])[doorIndex];
       const anchor = getCorridorDoorAnchor(corridor, door);
       if (!anchor) continue;
+      const explicitRoomIds: string[] = Array.isArray((door as any)?.linkedRoomIds)
+        ? Array.from(
+            new Set<string>(
+              (door as any).linkedRoomIds
+                .map((id: any) => String(id || '').trim())
+                .filter((id: string) => !!id && roomIdSet.has(id))
+            )
+          )
+        : [];
+      const inferredByProbe = getDoorLinkedRoomsByEdgeProbe(poly, door, anchor);
+      const roomIds = explicitRoomIds.length ? explicitRoomIds : inferredByProbe.length ? inferredByProbe : getDoorLinkedRoomsAtPoint(anchor);
       doors.push({
         id: `${String(corridor.id)}:${doorIndex}:${String((door as any)?.id || '')}:${String((door as any)?.edgeIndex ?? '')}:${String((door as any)?.t ?? '')}`,
         anchor,
         corridorPoly: poly,
         connectorAxis: preferredDoorAxis(poly, anchor),
         startDist: Math.hypot(startPoint.x - anchor.x, startPoint.y - anchor.y),
-        endDist: Math.hypot(targetPoint.x - anchor.x, targetPoint.y - anchor.y)
+        endDist: Math.hypot(targetPoint.x - anchor.x, targetPoint.y - anchor.y),
+        roomIds
       });
+    }
+  }
+
+  type RoomConnectorNode = {
+    nodeId: string;
+    point: Point;
+    roomIds: string[];
+    kind: 'corridor_door' | 'room_door';
+    corridorDoorId?: string;
+  };
+  const roomById = new Map<string, { room: Room; poly: Point[] }>(roomEntries.map((entry) => [String(entry.room.id), entry]));
+  const projectPointToRoomBoundary = (point: Point, poly: Point[]) => {
+    if (poly.length < 2) return null;
+    let best: { point: Point; distance: number } | null = null;
+    for (let i = 0; i < poly.length; i += 1) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lenSq = dx * dx + dy * dy;
+      const ratio = lenSq > 0.0000001 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq)) : 0;
+      const projected = { x: a.x + dx * ratio, y: a.y + dy * ratio };
+      const dist = Math.hypot(point.x - projected.x, point.y - projected.y);
+      if (!best || dist < best.distance) best = { point: projected, distance: dist };
+    }
+    return best;
+  };
+  const ROOM_CONNECTOR_SLACK = 96;
+  const roomAccessPointForNode = (roomPoly: Point[], nodePoint: Point): Point | null => {
+    const projected = projectPointToRoomBoundary(nodePoint, roomPoly);
+    if (pointInPolygon(nodePoint, roomPoly)) return nodePoint;
+    // If the point is numerically on the border keep it, otherwise snap to border
+    // so slightly-outside anchors (common after edits) still connect to the room graph.
+    if (projected && projected.distance <= 0.12) return nodePoint;
+    if (!projected || projected.distance > ROOM_CONNECTOR_SLACK) return null;
+    return projected.point;
+  };
+  const roomConnectionCost = (fromPoint: Point, toPoint: Point, roomPoly: Point[]) => {
+    if (segmentInsidePolygon(fromPoint, toPoint, roomPoly)) {
+      return { cost: Math.hypot(toPoint.x - fromPoint.x, toPoint.y - fromPoint.y), fromAccess: fromPoint, toAccess: toPoint };
+    }
+    const fromAccess = roomAccessPointForNode(roomPoly, fromPoint);
+    const toAccess = roomAccessPointForNode(roomPoly, toPoint);
+    if (!fromAccess || !toAccess) return null;
+    if (!segmentInsidePolygon(fromAccess, toAccess, roomPoly)) return null;
+    const cost =
+      Math.hypot(fromPoint.x - fromAccess.x, fromPoint.y - fromAccess.y) +
+      Math.hypot(fromAccess.x - toAccess.x, fromAccess.y - toAccess.y) +
+      Math.hypot(toPoint.x - toAccess.x, toPoint.y - toAccess.y);
+    return { cost, fromAccess, toAccess };
+  };
+  const roomConnectorNodes: RoomConnectorNode[] = [];
+  const connectorNodeById = new Map<string, RoomConnectorNode>();
+  const corridorNodeIdByDoorId = new Map<string, string>();
+  for (const door of doors) {
+    const roomIds = Array.from(new Set((door.roomIds || []).map((id) => String(id)).filter((id) => roomById.has(id))));
+    if (!roomIds.length) continue;
+    const nodeId = `cd:${door.id}`;
+    const node: RoomConnectorNode = { nodeId, point: door.anchor, roomIds, kind: 'corridor_door', corridorDoorId: door.id };
+    roomConnectorNodes.push(node);
+    connectorNodeById.set(nodeId, node);
+    corridorNodeIdByDoorId.set(door.id, nodeId);
+  }
+  const roomConnectionDoors = Array.isArray((plan as any)?.roomDoors) ? ((plan as any).roomDoors as any[]) : [];
+  for (const roomDoor of roomConnectionDoors) {
+    const roomAId = String((roomDoor as any)?.roomAId || '').trim();
+    const roomBId = String((roomDoor as any)?.roomBId || '').trim();
+    if (!roomAId || !roomBId || roomAId === roomBId) continue;
+    const anchorRoomIdRaw = String((roomDoor as any)?.anchorRoomId || '').trim();
+    const anchorRoomId = anchorRoomIdRaw === roomAId || anchorRoomIdRaw === roomBId ? anchorRoomIdRaw : roomAId;
+    const anchorRoom = roomById.get(anchorRoomId);
+    if (!anchorRoom) continue;
+    const edgePoint = getPolygonEdgePoint(anchorRoom.poly, Number((roomDoor as any)?.edgeIndex), Number((roomDoor as any)?.t));
+    if (!edgePoint) continue;
+    const roomIds = [roomAId, roomBId].filter((id) => roomById.has(id));
+    if (roomIds.length < 2) continue;
+    const nodeId = `rd:${String((roomDoor as any)?.id || '')}`;
+    if (!String((roomDoor as any)?.id || '').trim() || connectorNodeById.has(nodeId)) continue;
+    const node: RoomConnectorNode = { nodeId, point: edgePoint, roomIds, kind: 'room_door' };
+    roomConnectorNodes.push(node);
+    connectorNodeById.set(nodeId, node);
+  }
+  const roomAdj = new Map<string, Array<{ to: string; cost: number }>>();
+  const addRoomAdj = (from: string, to: string, cost: number) => {
+    if (!Number.isFinite(cost) || cost <= 0) return;
+    const list = roomAdj.get(from) || [];
+    const exists = list.some((entry) => entry.to === to);
+    if (!exists) list.push({ to, cost });
+    roomAdj.set(from, list);
+  };
+  const roomNodeIdsByRoomId = new Map<string, string[]>();
+  for (const node of roomConnectorNodes) {
+    for (const roomId of node.roomIds) {
+      const list = roomNodeIdsByRoomId.get(roomId) || [];
+      list.push(node.nodeId);
+      roomNodeIdsByRoomId.set(roomId, list);
+    }
+  }
+  for (const [roomId, nodeIds] of roomNodeIdsByRoomId.entries()) {
+    const roomEntry = roomById.get(roomId);
+    if (!roomEntry || nodeIds.length < 2) continue;
+    for (let i = 0; i < nodeIds.length; i += 1) {
+      for (let j = i + 1; j < nodeIds.length; j += 1) {
+        const aNode = connectorNodeById.get(nodeIds[i]);
+        const bNode = connectorNodeById.get(nodeIds[j]);
+        if (!aNode || !bNode) continue;
+        const link = roomConnectionCost(aNode.point, bNode.point, roomEntry.poly);
+        if (!link) continue;
+        const dist = link.cost;
+        addRoomAdj(aNode.nodeId, bNode.nodeId, dist);
+        addRoomAdj(bNode.nodeId, aNode.nodeId, dist);
+      }
+    }
+  }
+  const pointRoomIds = (point: Point, tolerance = 3) =>
+    roomEntries
+      .filter((entry) => pointInPolygon(point, entry.poly) || pointOnPolygonBoundary(point, entry.poly, tolerance))
+      .map((entry) => String(entry.room.id));
+  const buildRoomAccessToCorridorDoors = (point: Point) => {
+    const startRoomIds = pointRoomIds(point);
+    const out = new Map<string, { points: Point[]; distance: number }>();
+    if (!startRoomIds.length || !roomConnectorNodes.length) return out;
+    const startSet = new Set(startRoomIds);
+    const START = '__room_start__';
+    const startEdges: Array<{ to: string; cost: number }> = [];
+    for (const node of roomConnectorNodes) {
+      const shared = node.roomIds.filter((roomId) => startSet.has(roomId));
+      if (!shared.length) continue;
+      let bestCost = Number.POSITIVE_INFINITY;
+      for (const roomId of shared) {
+        const roomEntry = roomById.get(roomId);
+        if (!roomEntry) continue;
+        const link = roomConnectionCost(point, node.point, roomEntry.poly);
+        if (!link) continue;
+        if (link.cost < bestCost) bestCost = link.cost;
+      }
+      if (!Number.isFinite(bestCost)) continue;
+      startEdges.push({ to: node.nodeId, cost: bestCost });
+    }
+    if (!startEdges.length) return out;
+    const dist = new Map<string, number>([[START, 0]]);
+    const prev = new Map<string, string>();
+    const heap = new MinHeap();
+    heap.push({ key: START, score: 0 });
+    while (heap.size) {
+      const current = heap.pop();
+      if (!current) break;
+      const currentDist = dist.get(current.key);
+      if (currentDist === undefined) continue;
+      if (current.score > currentDist + 0.0001) continue;
+      const edges = current.key === START ? startEdges : roomAdj.get(current.key) || [];
+      for (const edge of edges) {
+        const candidate = currentDist + edge.cost;
+        const prevBest = dist.get(edge.to);
+        if (prevBest !== undefined && candidate >= prevBest - 0.0001) continue;
+        dist.set(edge.to, candidate);
+        prev.set(edge.to, current.key);
+        heap.push({ key: edge.to, score: candidate });
+      }
+    }
+    for (const door of doors) {
+      const nodeId = corridorNodeIdByDoorId.get(door.id);
+      if (!nodeId) continue;
+      const score = dist.get(nodeId);
+      if (score === undefined) continue;
+      const chain: string[] = [];
+      let cursor = nodeId;
+      while (cursor !== START) {
+        chain.push(cursor);
+        const parent = prev.get(cursor);
+        if (!parent) break;
+        cursor = parent;
+      }
+      if (cursor !== START) continue;
+      chain.reverse();
+      const points: Point[] = [point];
+      for (const nodeKey of chain) {
+        const node = connectorNodeById.get(nodeKey);
+        if (!node) continue;
+        const last = points[points.length - 1];
+        if (!last || Math.hypot(last.x - node.point.x, last.y - node.point.y) > 0.0001) points.push(node.point);
+      }
+      const simplified = simplifyCollinear(points);
+      out.set(door.id, { points: simplified, distance: polylineLength(simplified) });
+    }
+    return out;
+  };
+  const buildRoomOnlyPath = (fromPoint: Point, toPoint: Point): Point[] | null => {
+    const fromRooms = pointRoomIds(fromPoint);
+    const toRooms = pointRoomIds(toPoint);
+    if (!fromRooms.length || !toRooms.length) return null;
+    for (const roomId of fromRooms) {
+      if (!toRooms.includes(roomId)) continue;
+      const entry = roomById.get(roomId);
+      if (entry && segmentInsidePolygon(fromPoint, toPoint, entry.poly)) return simplifyCollinear([fromPoint, toPoint]);
+    }
+    if (!roomConnectorNodes.length) return null;
+    const START = '__room_path_start__';
+    const END = '__room_path_end__';
+    const fromSet = new Set(fromRooms);
+    const toSet = new Set(toRooms);
+    const startEdges: Array<{ to: string; cost: number }> = [];
+    const endEdgesByNode = new Map<string, number>();
+    for (const node of roomConnectorNodes) {
+      const sharedFrom = node.roomIds.filter((roomId) => fromSet.has(roomId));
+      if (sharedFrom.length) {
+        let bestFromCost = Number.POSITIVE_INFINITY;
+        for (const roomId of sharedFrom) {
+          const roomEntry = roomById.get(roomId);
+          if (!roomEntry) continue;
+          const link = roomConnectionCost(fromPoint, node.point, roomEntry.poly);
+          if (!link) continue;
+          if (link.cost < bestFromCost) bestFromCost = link.cost;
+        }
+        if (Number.isFinite(bestFromCost)) startEdges.push({ to: node.nodeId, cost: bestFromCost });
+      }
+      const sharedTo = node.roomIds.filter((roomId) => toSet.has(roomId));
+      if (sharedTo.length) {
+        let bestToCost = Number.POSITIVE_INFINITY;
+        for (const roomId of sharedTo) {
+          const roomEntry = roomById.get(roomId);
+          if (!roomEntry) continue;
+          const link = roomConnectionCost(toPoint, node.point, roomEntry.poly);
+          if (!link) continue;
+          if (link.cost < bestToCost) bestToCost = link.cost;
+        }
+        if (Number.isFinite(bestToCost)) endEdgesByNode.set(node.nodeId, bestToCost);
+      }
+    }
+    if (!startEdges.length || !endEdgesByNode.size) return null;
+    const dist = new Map<string, number>([[START, 0]]);
+    const prev = new Map<string, string>();
+    const heap = new MinHeap();
+    heap.push({ key: START, score: 0 });
+    while (heap.size) {
+      const current = heap.pop();
+      if (!current) break;
+      const currentDist = dist.get(current.key);
+      if (currentDist === undefined) continue;
+      if (current.score > currentDist + 0.0001) continue;
+      if (current.key === END) break;
+      const edges: Array<{ to: string; cost: number }> = [];
+      if (current.key === START) {
+        edges.push(...startEdges);
+      } else {
+        edges.push(...(roomAdj.get(current.key) || []));
+        const endCost = endEdgesByNode.get(current.key);
+        if (endCost !== undefined) edges.push({ to: END, cost: endCost });
+      }
+      for (const edge of edges) {
+        const candidate = currentDist + edge.cost;
+        const prevBest = dist.get(edge.to);
+        if (prevBest !== undefined && candidate >= prevBest - 0.0001) continue;
+        dist.set(edge.to, candidate);
+        prev.set(edge.to, current.key);
+        heap.push({ key: edge.to, score: candidate });
+      }
+    }
+    if (!dist.has(END)) return null;
+    const chain: string[] = [];
+    let cursor = END;
+    while (cursor !== START) {
+      const parent = prev.get(cursor);
+      if (!parent) return null;
+      if (cursor !== END) chain.push(cursor);
+      cursor = parent;
+    }
+    chain.reverse();
+    const points: Point[] = [fromPoint];
+    for (const nodeKey of chain) {
+      const node = connectorNodeById.get(nodeKey);
+      if (!node) continue;
+      const last = points[points.length - 1];
+      if (!last || Math.hypot(last.x - node.point.x, last.y - node.point.y) > 0.0001) points.push(node.point);
+    }
+    points.push(toPoint);
+    return simplifyCollinear(points);
+  };
+  const startRoomAccess = !startInsideCorridor ? buildRoomAccessToCorridorDoors(startPoint) : new Map<string, { points: Point[]; distance: number }>();
+  const targetRoomAccess = !targetInsideCorridor
+    ? buildRoomAccessToCorridorDoors(targetPoint)
+    : new Map<string, { points: Point[]; distance: number }>();
+  for (const door of doors) {
+    if (!startInsideCorridor) {
+      const access = startRoomAccess.get(door.id);
+      if (access) {
+        door.startPath = access.points;
+        door.startDist = access.distance;
+      } else {
+        door.startDist = Number.POSITIVE_INFINITY;
+      }
+    }
+    if (!targetInsideCorridor) {
+      const access = targetRoomAccess.get(door.id);
+      if (access) {
+        door.endPathFromTarget = access.points;
+        door.endDist = access.distance;
+      } else {
+        door.endDist = Number.POSITIVE_INFINITY;
+      }
     }
   }
 
@@ -868,16 +1258,21 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
   const buildMixedRouteOutsideToInside = (outsidePoint: Point, insidePoint: Point): { route?: RouteResult; error?: string } => {
     const insideKey = findNearestWalkableKey(insidePoint, cellSize, walkable);
     if (!insideKey) return { error: 'invalid-target' };
+    const outsideRoomIds = pointRoomIds(outsidePoint);
+    const outsideRequiresRoomPath = outsideRoomIds.length > 0;
+    const outsideAccess = outsideRequiresRoomPath ? buildRoomAccessToCorridorDoors(outsidePoint) : new Map<string, { points: Point[]; distance: number }>();
     const sortedDoors = doors
       .slice()
       .sort(
         (a, b) =>
-          Math.hypot(outsidePoint.x - a.anchor.x, outsidePoint.y - a.anchor.y) -
-          Math.hypot(outsidePoint.x - b.anchor.x, outsidePoint.y - b.anchor.y)
+          (outsideAccess.get(a.id)?.distance ?? Math.hypot(outsidePoint.x - a.anchor.x, outsidePoint.y - a.anchor.y)) -
+          (outsideAccess.get(b.id)?.distance ?? Math.hypot(outsidePoint.x - b.anchor.x, outsidePoint.y - b.anchor.y))
       );
     const limit = Math.min(24, sortedDoors.length);
     for (let i = 0; i < limit; i += 1) {
       const door = sortedDoors[i];
+      const outsidePath = outsideAccess.get(door.id)?.points;
+      if (outsideRequiresRoomPath && !outsidePath?.length) continue;
       const startKey = doorKey(door);
       if (!startKey) continue;
       const centerRoute = buildCenterRouteFromKeys(startKey, insideKey);
@@ -888,7 +1283,7 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
       for (let j = 1; j < centerRoute.length; j += 1) pushPoint(corridorPoints, centerRoute[j]);
       const centerEnd = centerRoute[centerRoute.length - 1] || insidePoint;
       const safeCorridor = simplifyCollinear(corridorPoints);
-      const approachPoints = [outsidePoint, door.anchor];
+      const approachPoints = outsidePath?.length ? outsidePath : [outsidePoint, door.anchor];
       const exitPoints = [centerEnd, insidePoint];
       const distancePx = polylineLength(approachPoints) + polylineLength(safeCorridor) + polylineLength(exitPoints);
       const metersPerPixel = Number(plan.scale?.metersPerPixel);
@@ -909,6 +1304,27 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
     }
     return { error: 'path-not-found' };
   };
+  const buildRoomOnlyRoute = (): { route: RouteResult } | null => {
+    const points = buildRoomOnlyPath(startPoint, targetPoint);
+    if (!points?.length) return null;
+    const distancePx = polylineLength(points);
+    const metersPerPixel = Number(plan.scale?.metersPerPixel);
+    const distanceMeters = Number.isFinite(metersPerPixel) && metersPerPixel > 0 ? distancePx * metersPerPixel : undefined;
+    const etaSeconds = distanceMeters ? distanceMeters / SPEED_MPS : undefined;
+    return {
+      route: {
+        startDoor: points[0],
+        endDoor: points[points.length - 1],
+        approachPoints: points,
+        corridorPoints: [],
+        exitPoints: [],
+        distancePx,
+        distanceMeters,
+        etaSeconds,
+        directDashedOnly: true
+      }
+    };
+  };
 
   if (startInsideCorridor && targetInsideCorridor) {
     return buildRouteFromWalkablePoints(startPoint, targetPoint);
@@ -926,6 +1342,9 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
 
   const allowWalkableFallback = startInsideCorridor || targetInsideCorridor;
   if (!doors.length) {
+    const roomOnly = buildRoomOnlyRoute();
+    if (roomOnly) return roomOnly;
+    if (!corridors.length) return { error: 'no-corridors' };
     if (allowWalkableFallback) {
       const fallback = buildRouteFromWalkablePoints(startPoint, targetPoint);
       if (fallback.route) return fallback;
@@ -933,8 +1352,8 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
     return { error: 'no-doors' };
   }
 
-  const startCandidates = doors.slice().sort((a, b) => a.startDist - b.startDist);
-  const endCandidates = doors.slice().sort((a, b) => a.endDist - b.endDist);
+  const startCandidates = doors.filter((door) => Number.isFinite(door.startDist)).slice().sort((a, b) => a.startDist - b.startDist);
+  const endCandidates = doors.filter((door) => Number.isFinite(door.endDist)).slice().sort((a, b) => a.endDist - b.endDist);
   type DoorPair = {
     startDoor: DoorCandidate;
     endDoor: DoorCandidate;
@@ -987,6 +1406,8 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
   }
 
   if (!bestPair) {
+    const roomOnly = buildRoomOnlyRoute();
+    if (roomOnly) return roomOnly;
     if (allowWalkableFallback) {
       const fallback = buildRouteFromWalkablePoints(startPoint, targetPoint);
       if (fallback.route) return fallback;
@@ -994,8 +1415,18 @@ const computeRoute = (plan: FloorPlan, startPoint: Point, targetPoint: Point): {
     return { error: 'path-not-found' };
   }
 
-  const approachPoints = [startPoint, bestPair.startDoor.anchor];
-  const exitPoints = [bestPair.endDoor.anchor, targetPoint];
+  const approachPoints =
+    startInsideCorridor
+      ? [startPoint, bestPair.startDoor.anchor]
+      : bestPair.startDoor.startPath?.length
+        ? bestPair.startDoor.startPath
+        : [startPoint, bestPair.startDoor.anchor];
+  const exitPoints =
+    targetInsideCorridor
+      ? [bestPair.endDoor.anchor, targetPoint]
+      : bestPair.endDoor.endPathFromTarget?.length
+        ? [...bestPair.endDoor.endPathFromTarget].reverse()
+        : [bestPair.endDoor.anchor, targetPoint];
   const distancePx = polylineLength(approachPoints) + polylineLength(bestPair.corridorPoints) + polylineLength(exitPoints);
   const metersPerPixel = Number(plan.scale?.metersPerPixel);
   const distanceMeters = Number.isFinite(metersPerPixel) && metersPerPixel > 0 ? distancePx * metersPerPixel : undefined;
@@ -2563,27 +2994,53 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
     setActiveSegmentIndex(0);
     setRouteError('');
   };
+  const getRoomLabelLayout = (room: Room, polygon: Point[]) => {
+    const minX = Math.min(...polygon.map((point) => point.x));
+    const maxX = Math.max(...polygon.map((point) => point.x));
+    const minY = Math.min(...polygon.map((point) => point.y));
+    const maxY = Math.max(...polygon.map((point) => point.y));
+    const center = polygonCentroid(polygon);
+    const labelPosition = String((room as any)?.labelPosition || '').trim();
+    const scaleRaw = Number((room as any)?.labelScale);
+    const scale = Number.isFinite(scaleRaw) ? Math.max(0.6, Math.min(3, scaleRaw)) : 1;
+    const fontSize = Math.max(8, Math.round(11 * scale));
+    const padding = Math.max(4, Math.round(fontSize * 0.45));
+    if (labelPosition === 'left') {
+      return { x: minX + padding, y: center.y, fontSize, rotate: -90 };
+    }
+    if (labelPosition === 'right') {
+      return { x: maxX - padding, y: center.y, fontSize, rotate: 90 };
+    }
+    if (labelPosition === 'top') {
+      return { x: center.x, y: minY + padding + fontSize * 0.5, fontSize, rotate: 0 };
+    }
+    if (labelPosition === 'bottom') {
+      return { x: center.x, y: maxY - padding - fontSize * 0.5, fontSize, rotate: 0 };
+    }
+    return { x: center.x, y: center.y, fontSize, rotate: 0 };
+  };
   const renderRooms = () =>
     (mapPlan?.rooms || []).map((room) => {
       const polygon = roomPolygon(room);
       if (polygon.length < 3) return null;
       const points = polygon.map((point) => `${point.x},${point.y}`).join(' ');
-      const center = polygonCentroid(polygon);
+      const layout = getRoomLabelLayout(room, polygon);
       const label = String(room.name || '').trim() || t({ it: 'Ufficio', en: 'Office' });
       return (
         <g key={`room:${room.id}`}>
           <polygon points={points} fill="rgba(59,130,246,0.12)" stroke="rgba(37,99,235,0.65)" strokeWidth={1.2} />
           <text
-            x={center.x}
-            y={center.y}
+            x={layout.x}
+            y={layout.y}
             textAnchor="middle"
             dominantBaseline="middle"
-            fontSize={11}
+            fontSize={layout.fontSize}
             fontWeight={700}
             fill="#1e3a8a"
             stroke="#ffffff"
             strokeWidth={3}
             paintOrder="stroke"
+            transform={layout.rotate ? `rotate(${layout.rotate} ${layout.x} ${layout.y})` : undefined}
             style={{ pointerEvents: 'none' }}
           >
             {label}

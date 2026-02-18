@@ -1,8 +1,14 @@
 # Deskly - Floor Plan Management
 
-Current version: 2.9.0
+Current version: 2.9.1
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
+
+## What's new in 2.9.1
+- Added `connecting doors between rooms`: select Room A + Room B, right-click a selected room, and use `Create connecting door`; placement is allowed only on an overlapping shared side.
+- Added full editing flow for room-connection doors: dedicated marker on map, right-click menu, double-click to edit door properties, and delete action.
+- Routing engine update (Internal Map + Escape Route): room-door connectors are now considered when start/end points are inside rooms not directly facing a corridor.
+- Route persistence/revisions/clone now include room-connection doors to keep behavior consistent across save, restore, duplicate, and history operations.
 
 ## What's new in 2.9.0
 - Escape route directions refined: the checkered flag is now used only for the final step (assembly point when present).

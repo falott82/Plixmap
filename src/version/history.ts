@@ -8,6 +8,29 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.9.1',
+    date: '2026-02-17',
+    type: 'minor',
+    notes: [
+      n(
+        'Stanze: introdotte le porte di collegamento tra due uffici selezionati (menu contestuale su stanza), con vincolo di posizionamento su lato condiviso sovrapposto',
+        'Rooms: added connecting doors between two selected offices (room context menu), with placement restricted to an overlapping shared side'
+      ),
+      n(
+        'Porte di collegamento stanza-stanza: supporto completo a selezione, doppio click per modifica proprietà, menu destro dedicato e rimozione',
+        'Room-to-room connection doors: full support for selection, double-click property editing, dedicated right-click menu, and deletion'
+      ),
+      n(
+        'Routing mappa interna e via di fuga: il calcolo percorso considera anche le nuove porte stanza-stanza per raggiungere corridoi/uscite da uffici non direttamente affacciati',
+        'Internal-map and escape-route routing: path calculation now considers room-to-room connecting doors to reach corridors/exits from offices not directly facing a corridor'
+      ),
+      n(
+        'Persistenza planimetria: roomDoors inclusi in salvataggio, revisioni, restore e duplicazione planimetria con remap corretto degli ID stanza',
+        'Floor plan persistence: roomDoors are now included in save, revisions, restore, and floor-plan duplication with correct room ID remapping'
+      )
+    ]
+  },
+  {
     version: '2.9.0',
     date: '2026-02-17',
     type: 'minor',

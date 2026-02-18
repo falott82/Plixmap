@@ -16,6 +16,7 @@ import {
   RackDefinition,
   RackItem,
   RackLink,
+  RoomConnectionDoor,
   Room,
   SecurityCheckEntry,
   SecurityDocumentEntry,
@@ -102,14 +103,18 @@ interface DataState {
   addFloorPlan: (siteId: string, name: string, imageUrl: string, width?: number, height?: number) => string;
   updateFloorPlan: (
     id: string,
-    payload: Partial<Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height' | 'printArea' | 'scale' | 'corridors' | 'safetyCardLayout'>>
+    payload: Partial<
+      Pick<FloorPlan, 'name' | 'imageUrl' | 'width' | 'height' | 'printArea' | 'scale' | 'corridors' | 'roomDoors' | 'safetyCardLayout'>
+    >
   ) => void;
   deleteFloorPlan: (id: string) => void;
   reorderFloorPlans: (siteId: string, movingPlanId: string, targetPlanId: string, before?: boolean) => void;
   setFloorPlanContent: (
     floorPlanId: string,
     payload: Pick<FloorPlan, 'imageUrl' | 'width' | 'height' | 'objects' | 'rooms' | 'views'> &
-      Partial<Pick<FloorPlan, 'corridors' | 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'printArea' | 'scale' | 'safetyCardLayout'>>
+      Partial<
+        Pick<FloorPlan, 'corridors' | 'roomDoors' | 'links' | 'racks' | 'rackItems' | 'rackLinks' | 'printArea' | 'scale' | 'safetyCardLayout'>
+      >
   ) => void;
   addObject: (
     floorPlanId: string,
@@ -488,6 +493,40 @@ const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[]
     .sort((a, b) => b.createdAt - a.createdAt);
 };
 
+const normalizeRoomConnectionDoor = (door: any): RoomConnectionDoor | null => {
+  const roomAId = String(door?.roomAId || '').trim();
+  const roomBId = String(door?.roomBId || '').trim();
+  if (!roomAId || !roomBId || roomAId === roomBId) return null;
+  const anchorRoomIdRaw = String(door?.anchorRoomId || '').trim();
+  const anchorRoomId = anchorRoomIdRaw === roomAId || anchorRoomIdRaw === roomBId ? anchorRoomIdRaw : roomAId;
+  const edgeIndex = Number(door?.edgeIndex);
+  const t = Number(door?.t);
+  if (!Number.isFinite(edgeIndex) || !Number.isFinite(t)) return null;
+  return {
+    ...door,
+    id: String(door?.id || nanoid()),
+    roomAId,
+    roomBId,
+    anchorRoomId,
+    edgeIndex,
+    t: Math.max(0, Math.min(1, t)),
+    mode:
+      door?.mode === 'auto_sensor' || door?.mode === 'automated' || door?.mode === 'static'
+        ? door.mode
+        : 'static',
+    automationUrl: typeof door?.automationUrl === 'string' ? String(door.automationUrl).trim() || undefined : undefined,
+    catalogTypeId: typeof door?.catalogTypeId === 'string' ? String(door.catalogTypeId).trim() || undefined : undefined,
+    description: typeof door?.description === 'string' ? String(door.description).trim() || undefined : undefined,
+    isEmergency: !!door?.isEmergency,
+    isMainEntrance: !!door?.isMainEntrance,
+    isExternal: !!door?.isExternal,
+    isFireDoor: !!door?.isFireDoor,
+    lastVerificationAt: typeof door?.lastVerificationAt === 'string' ? String(door.lastVerificationAt).trim() || undefined : undefined,
+    verifierCompany: typeof door?.verifierCompany === 'string' ? String(door.verifierCompany).trim() || undefined : undefined,
+    verificationHistory: normalizeDoorVerificationHistory(door?.verificationHistory)
+  };
+};
+
 const normalizeSecurityDocuments = (docs: any): SecurityDocumentEntry[] => {
   if (!Array.isArray(docs)) return [];
   return docs
@@ -612,6 +651,18 @@ const snapshotRevision = (
               }))
             : undefined
         }))
+      : undefined,
+    roomDoors: Array.isArray((plan as any).roomDoors)
+      ? (plan as any).roomDoors
+          .map((door: any) => {
+            const normalized = normalizeRoomConnectionDoor(door);
+            if (!normalized) return null;
+            return {
+              ...normalized,
+              verificationHistory: normalizeDoorVerificationHistory((normalized as any).verificationHistory)
+            };
+          })
+          .filter(Boolean) as RoomConnectionDoor[]
       : undefined,
     links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
     racks: plan.racks ? plan.racks.map((r) => ({ ...r })) : undefined,
@@ -887,6 +938,20 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
           : []
       };
     });
+  }
+  if (!Array.isArray(next.roomDoors)) next.roomDoors = [];
+  if (Array.isArray(next.roomDoors)) {
+    const validRoomIds = new Set(
+      (Array.isArray(next.rooms) ? next.rooms : [])
+        .map((room: any) => String(room?.id || '').trim())
+        .filter(Boolean)
+    );
+    next.roomDoors = next.roomDoors
+      .map((door: any) => normalizeRoomConnectionDoor(door))
+      .filter((door: RoomConnectionDoor | null): door is RoomConnectionDoor => {
+        if (!door) return false;
+        return validRoomIds.has(door.roomAId) && validRoomIds.has(door.roomBId);
+      });
   }
   if (!Array.isArray(next.revisions)) next.revisions = [];
   if (!Array.isArray(next.objects)) next.objects = [];
@@ -1206,6 +1271,7 @@ export const useDataStore = create<DataState>()(
               height,
               links: [],
               corridors: [],
+              roomDoors: [],
               racks: [],
               rackItems: [],
               rackLinks: [],
@@ -1272,6 +1338,7 @@ export const useDataStore = create<DataState>()(
             objects: Array.isArray(payload.objects) ? payload.objects : [],
             rooms: Array.isArray(payload.rooms) ? payload.rooms : [],
             corridors: Array.isArray((payload as any).corridors) ? (payload as any).corridors : (plan as any).corridors,
+            roomDoors: Array.isArray((payload as any).roomDoors) ? (payload as any).roomDoors : (plan as any).roomDoors,
             views: Array.isArray(payload.views) ? payload.views : [],
             links: Array.isArray((payload as any).links) ? (payload as any).links : (plan as any).links,
             racks: Array.isArray((payload as any).racks) ? (payload as any).racks : (plan as any).racks,
@@ -1527,6 +1594,7 @@ export const useDataStore = create<DataState>()(
             objects: Array.isArray(rev.objects) ? rev.objects : [],
               rooms: Array.isArray(rev.rooms) ? rev.rooms : [],
               corridors: Array.isArray((rev as any).corridors) ? (rev as any).corridors : [],
+              roomDoors: Array.isArray((rev as any).roomDoors) ? (rev as any).roomDoors : (plan as any).roomDoors,
               views: Array.isArray(rev.views) ? rev.views : [],
               links: Array.isArray((rev as any).links) ? (rev as any).links : (plan as any).links,
               racks: Array.isArray((rev as any).racks) ? (rev as any).racks : (plan as any).racks,
@@ -1896,6 +1964,31 @@ export const useDataStore = create<DataState>()(
               }))
             : [];
 
+          const nextRoomDoors = includeRooms
+            ? ((source as any).roomDoors || [])
+                .map((door: any) => {
+                  const normalized = normalizeRoomConnectionDoor(door);
+                  if (!normalized) return null;
+                  const roomAId = roomIdMap.get(String(normalized.roomAId));
+                  const roomBId = roomIdMap.get(String(normalized.roomBId));
+                  if (!roomAId || !roomBId || roomAId === roomBId) return null;
+                  const anchorRoomId =
+                    String(normalized.anchorRoomId) === String(normalized.roomBId) ? roomBId : roomAId;
+                  return {
+                    ...normalized,
+                    id: nanoid(),
+                    roomAId,
+                    roomBId,
+                    anchorRoomId,
+                    verificationHistory: normalizeDoorVerificationHistory((normalized as any).verificationHistory).map((entry) => ({
+                      ...entry,
+                      id: nanoid()
+                    }))
+                  };
+                })
+                .filter(Boolean)
+            : [];
+
           const objectIdMap = new Map<string, string>();
           const nextObjects = includeObjects
             ? (source.objects || []).map((o) => {
@@ -1979,6 +2072,7 @@ export const useDataStore = create<DataState>()(
             views: nextViews,
             rooms: nextRooms,
             corridors: nextCorridors,
+            roomDoors: nextRoomDoors,
             revisions: [],
             links: nextLinks,
             racks: nextRacks,
