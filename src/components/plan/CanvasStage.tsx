@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { Crosshair, Eye, Hand, MonitorPlay, Video } from 'lucide-react';
 import { toast } from 'sonner';
-import { Corridor, FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
+import { Corridor, FloorPlan, IconName, MapObject, MapObjectType, RoomConnectionDoor } from '../../store/types';
 import { TEXT_FONT_OPTIONS, WALL_LAYER_COLOR, WIFI_RANGE_SCALE_MAX } from '../../store/data';
 import { isSecurityTypeId } from '../../store/security';
 import { useUIStore } from '../../store/useUIStore';
@@ -112,9 +112,11 @@ interface Props {
   onLinkContextMenu?: (payload: { id: string; clientX: number; clientY: number }) => void;
   onLinkDblClick?: (id: string) => void;
   onMapContextMenu: (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) => void;
-  onSelectRoom?: (roomId?: string, options?: { keepContext?: boolean }) => void;
+  onSelectRoom?: (roomId?: string, options?: { keepContext?: boolean; multi?: boolean; preserveSelection?: boolean; worldX?: number; worldY?: number }) => void;
   onSelectCorridor?: (corridorId?: string, options?: { keepContext?: boolean }) => void;
   selectedCorridorDoor?: { corridorId: string; doorId: string } | null;
+  selectedRoomDoorId?: string | null;
+  roomDoorDraft?: { roomAId: string; roomBId: string } | null;
   corridorDoorDraft?: { corridorId: string; start?: { edgeIndex: number; t: number; x: number; y: number } } | null;
   onCorridorClick?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onCorridorMiddleClick?: (payload: { corridorId: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
@@ -125,8 +127,11 @@ interface Props {
     point: { edgeIndex: number; t: number; x: number; y: number };
   }) => void;
   onSelectCorridorDoor?: (payload?: { corridorId: string; doorId: string }) => void;
+  onSelectRoomDoor?: (doorId?: string) => void;
   onCorridorDoorContextMenu?: (payload: { corridorId: string; doorId: string; clientX: number; clientY: number }) => void;
   onCorridorDoorDblClick?: (payload: { corridorId: string; doorId: string }) => void;
+  onRoomDoorContextMenu?: (payload: { doorId: string; clientX: number; clientY: number }) => void;
+  onRoomDoorDblClick?: (doorId: string) => void;
   onOpenRoomDetails?: (roomId: string) => void;
   onRoomContextMenu?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onCorridorContextMenu?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
@@ -431,13 +436,18 @@ const CanvasStageImpl = (
   onSelectRoom,
   onSelectCorridor,
   selectedCorridorDoor = null,
+  selectedRoomDoorId = null,
+  roomDoorDraft = null,
   corridorDoorDraft = null,
   onCorridorClick,
   onCorridorMiddleClick,
   onCorridorDoorDraftPoint,
   onSelectCorridorDoor,
+  onSelectRoomDoor,
   onCorridorDoorContextMenu,
   onCorridorDoorDblClick,
+  onRoomDoorContextMenu,
+  onRoomDoorDblClick,
   onOpenRoomDetails,
   onSelectLink,
   onCreateRoom,
@@ -496,6 +506,7 @@ const CanvasStageImpl = (
   const lastBoxSelectAtRef = useRef(0);
   const [roomHighlightNow, setRoomHighlightNow] = useState(Date.now());
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [roomRectSnapHint, setRoomRectSnapHint] = useState<{ x: number; y: number } | null>(null);
   const draftOrigin = useRef<{ x: number; y: number } | null>(null);
   const [textDraftRect, setTextDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(
     null
@@ -680,13 +691,14 @@ const CanvasStageImpl = (
       !!selectedId ||
       !!selectedRoomId ||
       !!selectedCorridorId ||
+      !!selectedRoomDoorId ||
       !!selectedLinkId ||
       (Array.isArray(selectedIds) && selectedIds.length > 0) ||
       (Array.isArray(selectedRoomIds) && selectedRoomIds.length > 0);
     if (!hasOtherSelection) return;
     setSafetyCardSelected(false);
     toast.dismiss(SAFETY_CARD_HELP_TOAST_ID);
-  }, [safetyCardSelected, selectedCorridorId, selectedId, selectedIds, selectedLinkId, selectedRoomId, selectedRoomIds]);
+  }, [safetyCardSelected, selectedCorridorId, selectedId, selectedIds, selectedLinkId, selectedRoomDoorId, selectedRoomId, selectedRoomIds]);
   const adjustSafetyCardFont = useCallback(
     (delta: number) => {
       if (!safetyCardDraft || !onSafetyCardChange) return;
@@ -893,6 +905,38 @@ const getRoomBounds = (room: any) => {
   return { minX: rx, minY: ry, maxX: rx + rw, maxY: ry + rh };
 };
 
+const getRoomPolygonPoints = (room: any): { x: number; y: number }[] => {
+  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+  if (kind === 'poly') {
+    const pts = Array.isArray(room?.points) ? room.points : [];
+    if (pts.length >= 3) return pts;
+    const x = Number(room?.x || 0);
+    const y = Number(room?.y || 0);
+    const w = Number(room?.width || 0);
+    const h = Number(room?.height || 0);
+    if (w > 0 && h > 0) {
+      return [
+        { x, y },
+        { x: x + w, y },
+        { x: x + w, y: y + h },
+        { x, y: y + h }
+      ];
+    }
+    return [];
+  }
+  const x = Number(room?.x || 0);
+  const y = Number(room?.y || 0);
+  const w = Number(room?.width || 0);
+  const h = Number(room?.height || 0);
+  if (!(w > 0 && h > 0)) return [];
+  return [
+    { x, y },
+    { x: x + w, y },
+    { x: x + w, y: y + h },
+    { x, y: y + h }
+  ];
+};
+
 const getCorridorPolygonPoints = (corridor: Corridor | any): { x: number; y: number }[] => {
   const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as
     | 'rect'
@@ -956,6 +1000,19 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     if (!best || distSq < best.distSq) best = { edgeIndex: i, t, x, y, distSq };
   }
   return best;
+};
+
+const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number, t: number) => {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  const idx = Number.isFinite(edgeIndex) ? Math.floor(edgeIndex) : 0;
+  const a = points[((idx % points.length) + points.length) % points.length];
+  const b = points[(idx + 1 + points.length) % points.length];
+  if (!a || !b) return null;
+  const ratio = Math.max(0, Math.min(1, Number(t) || 0));
+  return {
+    x: a.x + (b.x - a.x) * ratio,
+    y: a.y + (b.y - a.y) * ratio
+  };
 };
 
   const distancePointToSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
@@ -1084,7 +1141,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     const { bounds, name, showName, capacityText, overCapacity, labelScale, labelPosition } = options;
     if (!bounds.width || !bounds.height) return null;
     const minDim = Math.max(8, Math.min(bounds.width, bounds.height));
-    const padding = Math.max(3, Math.min(6, Math.round(minDim / 10)));
+    const padding = Math.max(2, Math.min(4, Math.round(minDim / 12)));
     const baseNameSize = Math.max(7, Math.min(12, Math.round(minDim / 7)));
     const baseCapacitySize = Math.max(6, Math.min(10, Math.round(minDim / 9)));
     const scale = Number(labelScale) > 0 ? Number(labelScale) : 1;
@@ -1101,9 +1158,9 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
       const verticalText = verticalParts.filter(Boolean).join(' · ');
       if (!verticalText) return null;
       const fontSize = Math.max(nameFontSize, capacityFontSize);
-      const boxWidth = Math.max(20, Math.round(fontSize * 1.9) + 6);
+      const boxWidth = Math.max(16, Math.round(fontSize * 1.65) + 4);
       const maxLabelHeight = Math.max(24, bounds.height - padding * 2);
-      const preferredHeight = Math.round(estimateTextWidth(verticalText, fontSize) + 14);
+      const preferredHeight = Math.round(estimateTextWidth(verticalText, fontSize) + 8);
       const boxHeight = Math.max(24, Math.min(maxLabelHeight, preferredHeight));
       const labelX =
         labelPosition === 'left'
@@ -1114,18 +1171,18 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
         bounds.y + padding,
         bounds.y + Math.max(padding, bounds.height - boxHeight - padding)
       );
-      const textWidth = Math.max(10, boxHeight - 8);
+      const textWidth = Math.max(10, boxHeight - 4);
       return (
         <>
           <Rect
-            x={labelX - 3}
-            y={labelY - 3}
-            width={boxWidth + 6}
-            height={boxHeight + 6}
+            x={labelX - 1.5}
+            y={labelY - 1.5}
+            width={boxWidth + 3}
+            height={boxHeight + 3}
             fill="rgba(255,255,255,0.85)"
             stroke="rgba(148,163,184,0.6)"
             strokeWidth={1}
-            cornerRadius={5}
+            cornerRadius={4}
             listening={false}
           />
           <Text
@@ -1195,8 +1252,8 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     const lineGap = 2;
     const nameBlockHeight = nameVisible ? Math.max(nameFontSize, Math.round(nameFontSize * 1.05 * Math.max(1, finalNameLineCount))) : 0;
     const labelHeight = useStacked
-      ? nameBlockHeight + (capacityVisible ? capacityFontSize + lineGap : 0) + 6
-      : Math.max(nameBlockHeight || nameFontSize, capacityFontSize) + 6;
+      ? nameBlockHeight + (capacityVisible ? capacityFontSize + lineGap : 0) + 4
+      : Math.max(nameBlockHeight || nameFontSize, capacityFontSize) + 4;
     if (!labelWidth || labelWidth <= 0) return null;
     const verticalMin = bounds.y + padding;
     const verticalMax = bounds.y + Math.max(padding, bounds.height - labelHeight - padding);
@@ -1213,14 +1270,14 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     return (
       <>
         <Rect
-          x={labelX - 3}
-          y={labelY - 3}
-          width={labelWidth + 6}
+          x={labelX - 1.5}
+          y={labelY - 1.5}
+          width={labelWidth + 3}
           height={labelHeight}
           fill="rgba(255,255,255,0.85)"
           stroke="rgba(148,163,184,0.6)"
           strokeWidth={1}
-          cornerRadius={5}
+          cornerRadius={4}
           listening={false}
         />
         {useStacked ? (
@@ -2408,6 +2465,38 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     return true;
   };
 
+  const getNearestRoomCorner = useCallback(
+    (point: { x: number; y: number }) => {
+      const rooms = ((plan.rooms || []) as any[]).filter(Boolean);
+      if (!rooms.length) return null;
+      const zoomValue = Math.max(0.2, viewportRef.current.zoom || 1);
+      const snapThreshold = 14 / zoomValue;
+      const snapThresholdSq = snapThreshold * snapThreshold;
+      let best: { x: number; y: number; distSq: number } | null = null;
+      for (const room of rooms) {
+        const points = getRoomPolygonPoints(room);
+        if (!points.length) continue;
+        for (const vertex of points) {
+          const dx = vertex.x - point.x;
+          const dy = vertex.y - point.y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > snapThresholdSq) continue;
+          if (!best || distSq < best.distSq) {
+            best = { x: vertex.x, y: vertex.y, distSq };
+          }
+        }
+      }
+      if (!best) return null;
+      return { x: best.x, y: best.y };
+    },
+    [plan.rooms]
+  );
+
+  const snapRoomRectStartToCorner = useCallback(
+    (point: { x: number; y: number }) => getNearestRoomCorner(point) || point,
+    [getNearestRoomCorner]
+  );
+
   const updateDraftPrintRect = (event: any) => {
     if (!printAreaMode || readOnly) return false;
     const origin = printOrigin.current;
@@ -2450,6 +2539,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
     draftRectRaf.current = null;
     pendingDraftRectRef.current = null;
+    setRoomRectSnapHint(null);
     setDraftRect(null);
     if (rect.width < 20 || rect.height < 20) return true;
     onCreateRoom?.({ kind: 'rect', rect });
@@ -2901,6 +2991,10 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
     }
     selectedRoomIdsRef.current = Array.isArray(selectedRoomIds) ? [...selectedRoomIds] : [];
   }, [selectedRoomIds]);
+  useEffect(() => {
+    if (roomDrawMode === 'rect' && !readOnly) return;
+    setRoomRectSnapHint(null);
+  }, [readOnly, roomDrawMode]);
   const allowTool = !!toolMode && (!readOnly || toolMode === 'measure');
 
   return (
@@ -3121,7 +3215,8 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
             if (!pos) return;
-            const world = pointerToWorld(pos.x, pos.y);
+            const world = snapRoomRectStartToCorner(pointerToWorld(pos.x, pos.y));
+            setRoomRectSnapHint(null);
             draftOrigin.current = { x: world.x, y: world.y };
             pendingDraftRectRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
             if (perfEnabled) perfMetrics.draftRectUpdates += 1;
@@ -3268,6 +3363,23 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
           } else if (corridorDoorHover) {
             setCorridorDoorHover(null);
           }
+          if (roomDrawMode === 'rect' && !readOnly && !draftOrigin.current) {
+            const stage = e.target.getStage();
+            const pos = stage?.getPointerPosition();
+            if (pos) {
+              const world = pointerToWorld(pos.x, pos.y);
+              const nearestCorner = getNearestRoomCorner(world);
+              setRoomRectSnapHint((prev) => {
+                if (!nearestCorner) return prev ? null : prev;
+                if (prev && Math.hypot(prev.x - nearestCorner.x, prev.y - nearestCorner.y) < 0.001) return prev;
+                return nearestCorner;
+              });
+            } else {
+              setRoomRectSnapHint(null);
+            }
+          } else if (roomRectSnapHint) {
+            setRoomRectSnapHint(null);
+          }
           if (updateSelectionBox(e)) return;
           if (updateDraftPrintRect(e)) return;
           if (updateDraftRect(e)) return;
@@ -3348,6 +3460,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
             setPendingPreview(null);
           }
           setCorridorDoorHover(null);
+          setRoomRectSnapHint(null);
           setDoorHoverCard(null);
         }}
       >
@@ -3842,7 +3955,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
         </Layer>
 
         {/* Rooms layer */}
-        <Layer perfectDrawEnabled={false} listening={!toolMode && !corridorDoorDraftActive}>
+        <Layer perfectDrawEnabled={false} listening={!toolMode && !corridorDoorDraftActive && !roomDrawMode}>
           {(plan.rooms || []).map((room) => {
             const isSelectedRoom = selectedRoomId === room.id || (selectedRoomIds || []).includes(room.id);
             const kind = (room.kind || (room.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
@@ -3888,7 +4001,13 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                   onClick={(e) => {
                     e.cancelBubble = true;
                     if (e.evt?.button !== 0) return;
-                    onSelectRoom?.(room.id);
+                    const stage = e.target.getStage();
+                    const pos = stage?.getPointerPosition();
+                    const world = pos
+                      ? pointerToWorld(pos.x, pos.y)
+                      : pts[0] || { x: 0, y: 0 };
+                    const multi = !!((e.evt as any)?.ctrlKey || (e.evt as any)?.metaKey || (e.evt as any)?.shiftKey);
+                    onSelectRoom?.(room.id, { multi, worldX: world.x, worldY: world.y });
                   }}
                   onDblClick={(e) => {
                     e.cancelBubble = true;
@@ -3908,7 +4027,12 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                       ? { x: Number(labelBounds.x) + Number(labelBounds.width) / 2, y: Number(labelBounds.y) + Number(labelBounds.height) / 2 }
                       : pts[0] || { x: 0, y: 0 };
                     const world = pos ? pointerToWorld(pos.x, pos.y) : fallbackPoint;
-                    onSelectRoom?.(room.id, { keepContext: true });
+                    lastContextMenuAtRef.current = Date.now();
+                    const currentSelectedRoomIds = Array.isArray(selectedRoomIds) ? selectedRoomIds : [];
+                    const preserveSelection = currentSelectedRoomIds.includes(room.id) && currentSelectedRoomIds.length > 1;
+                    if (!preserveSelection) {
+                      onSelectRoom?.(room.id, { keepContext: true, preserveSelection: false, worldX: world.x, worldY: world.y });
+                    }
                     onRoomContextMenu?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY, worldX: world.x, worldY: world.y });
                   }}
                   onDragEnd={(e) => {
@@ -3966,7 +4090,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                       labelPosition: (room as any).labelPosition
                     })}
                   </Group>
-                  {isSelectedRoom && !readOnly
+                  {isSelectedRoom && !readOnly && !roomDrawMode
                     ? pts.map((p, idx) => (
                         <Circle
                           key={`${room.id}:${idx}`}
@@ -4032,7 +4156,13 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                 onClick={(e) => {
                   e.cancelBubble = true;
                   if (e.evt?.button !== 0) return;
-                  onSelectRoom?.(room.id);
+                  const stage = e.target.getStage();
+                  const pos = stage?.getPointerPosition();
+                  const world = pos
+                    ? pointerToWorld(pos.x, pos.y)
+                    : { x: Number(room.x || 0) + Number(room.width || 0) / 2, y: Number(room.y || 0) + Number(room.height || 0) / 2 };
+                  const multi = !!((e.evt as any)?.ctrlKey || (e.evt as any)?.metaKey || (e.evt as any)?.shiftKey);
+                  onSelectRoom?.(room.id, { multi, worldX: world.x, worldY: world.y });
                 }}
                 onDblClick={(e) => {
                   e.cancelBubble = true;
@@ -4051,7 +4181,12 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
                   const world = pos
                     ? pointerToWorld(pos.x, pos.y)
                     : { x: Number(room.x || 0) + Number(room.width || 0) / 2, y: Number(room.y || 0) + Number(room.height || 0) / 2 };
-                  onSelectRoom?.(room.id, { keepContext: true });
+                  lastContextMenuAtRef.current = Date.now();
+                  const currentSelectedRoomIds = Array.isArray(selectedRoomIds) ? selectedRoomIds : [];
+                  const preserveSelection = currentSelectedRoomIds.includes(room.id) && currentSelectedRoomIds.length > 1;
+                  if (!preserveSelection) {
+                    onSelectRoom?.(room.id, { keepContext: true, preserveSelection: false, worldX: world.x, worldY: world.y });
+                  }
                   onRoomContextMenu?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY, worldX: world.x, worldY: world.y });
                 }}
                 onDragEnd={(e) => {
@@ -4131,6 +4266,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
           })}
 
           {selectedRoomId &&
+          !roomDrawMode &&
           !readOnly &&
           (() => {
             const r = (plan.rooms || []).find((x) => x.id === selectedRoomId);
@@ -4203,6 +4339,32 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
               listening={false}
               cornerRadius={8}
             />
+          ) : null}
+          {roomDrawMode === 'rect'
+            ? ((plan.rooms || []) as any[]).flatMap((room: any) => {
+                const points = getRoomPolygonPoints(room);
+                if (!points.length) return [];
+                return points.map((p, idx) => (
+                  <Rect
+                    key={`room-corner-anchor:${room?.id || 'room'}:${idx}`}
+                    x={p.x - 3}
+                    y={p.y - 3}
+                    width={6}
+                    height={6}
+                    cornerRadius={1.2}
+                    fill="rgba(148,163,184,0.18)"
+                    stroke="rgba(51,65,85,0.55)"
+                    strokeWidth={0.8}
+                    listening={false}
+                  />
+                ));
+              })
+            : null}
+          {roomDrawMode === 'rect' && roomRectSnapHint ? (
+            <Group x={roomRectSnapHint.x} y={roomRectSnapHint.y} listening={false}>
+              <Rect x={-5} y={-5} width={10} height={10} cornerRadius={1.8} fill="rgba(37,99,235,0.18)" stroke="#2563eb" strokeWidth={1.2} />
+              <Rect x={-2.1} y={-2.1} width={4.2} height={4.2} cornerRadius={0.8} fill="#ffffff" stroke="#2563eb" strokeWidth={0.9} />
+            </Group>
           ) : null}
 
           {/* Draft poly */}
@@ -4769,6 +4931,78 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
               </Group>
             );
           })}
+          {/* Room connection doors */}
+          {(() => {
+            const planRoomDoors = Array.isArray((plan as any)?.roomDoors) ? (((plan as any).roomDoors as RoomConnectionDoor[]).filter(Boolean)) : [];
+            if (!planRoomDoors.length) return null;
+            const roomsById = new Map<string, any>(((plan.rooms || []) as any[]).map((room: any) => [String(room?.id || ''), room]));
+            return planRoomDoors.map((door) => {
+              const roomAId = String((door as any)?.roomAId || '').trim();
+              const roomBId = String((door as any)?.roomBId || '').trim();
+              if (!roomAId || !roomBId || roomAId === roomBId) return null;
+              const anchorRoomIdRaw = String((door as any)?.anchorRoomId || '').trim();
+              const anchorRoomId = anchorRoomIdRaw === roomAId || anchorRoomIdRaw === roomBId ? anchorRoomIdRaw : roomAId;
+              const anchorRoom = roomsById.get(anchorRoomId) || roomsById.get(roomAId) || roomsById.get(roomBId);
+              if (!anchorRoom) return null;
+              const anchorPoints = getRoomPolygonPoints(anchorRoom);
+              const anchor = getRoomEdgePoint(anchorPoints, Number((door as any)?.edgeIndex), Number((door as any)?.t));
+              if (!anchor) return null;
+              const isDoorSelected = selectedRoomDoorId === door.id;
+              const inDraftPair =
+                !!roomDoorDraft &&
+                ((roomDoorDraft.roomAId === roomAId && roomDoorDraft.roomBId === roomBId) ||
+                  (roomDoorDraft.roomAId === roomBId && roomDoorDraft.roomBId === roomAId));
+              const doorMode = (door as any).mode === 'auto_sensor' || (door as any).mode === 'automated' ? (door as any).mode : 'static';
+              const doorColor = doorMode === 'automated' ? '#16a34a' : doorMode === 'auto_sensor' ? '#2563eb' : '#0f766e';
+              const stroke = isDoorSelected ? '#f8fafc' : '#e2e8f0';
+              const openContext = (e: any) => {
+                e.evt.preventDefault();
+                e.cancelBubble = true;
+                if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
+                if (isBoxSelecting()) return;
+                lastContextMenuAtRef.current = Date.now();
+                onSelectRoomDoor?.(door.id);
+                onRoomDoorContextMenu?.({ doorId: door.id, clientX: e.evt.clientX, clientY: e.evt.clientY });
+              };
+              return (
+                <Group
+                  key={`room-door:${door.id}`}
+                  name="room-door-point"
+                  onClick={(e) => {
+                    e.cancelBubble = true;
+                    if (e.evt?.button !== 0) return;
+                    onSelectRoomDoor?.(door.id);
+                  }}
+                  onDblClick={(e) => {
+                    e.cancelBubble = true;
+                    if (e.evt?.button !== 0) return;
+                    onSelectRoomDoor?.(door.id);
+                    onRoomDoorDblClick?.(door.id);
+                  }}
+                  onContextMenu={(e) => {
+                    openContext(e);
+                  }}
+                >
+                  <Group x={anchor.x} y={anchor.y}>
+                    <Circle radius={11} fill="rgba(15,23,42,0.001)" strokeEnabled={false} />
+                    <Rect
+                      x={-3.2}
+                      y={-4.8}
+                      width={6.4}
+                      height={9.6}
+                      cornerRadius={1.1}
+                      fill={doorColor}
+                      stroke={stroke}
+                      strokeWidth={isDoorSelected ? 1.9 : 1.2}
+                    />
+                    <Line points={[0, -4.8, 0, 4.8]} stroke={stroke} strokeWidth={isDoorSelected ? 1.5 : 1.1} />
+                    {!!(door as any)?.isEmergency ? <Circle x={2.8} y={-5} radius={1.4} fill="#dc2626" stroke="#ffffff" strokeWidth={0.55} /> : null}
+                    {inDraftPair ? <Circle x={-2.8} y={-5} radius={1.4} fill="#0ea5e9" stroke="#ffffff" strokeWidth={0.55} /> : null}
+                  </Group>
+                </Group>
+              );
+            });
+          })()}
           {/* Corridor doors (kept in the same layer to reduce total layer count) */}
           {((plan.corridors || []) as Corridor[]).map((corridor) => {
             const points = getCorridorPolygonPoints(corridor);
@@ -4827,7 +5061,7 @@ const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: 
               const hoverTextParts = [
                 doorDescription ? `${t({ it: 'Descrizione', en: 'Description' })}: ${doorDescription}` : t({ it: 'Porta', en: 'Door' }),
                 `${t({ it: 'Modalità', en: 'Mode' })}: ${modeLabel}`,
-                emergency ? t({ it: 'Porta emergenza', en: 'Emergency door' }) : '',
+                emergency ? t({ it: 'Porta antipanico', en: 'Panic door' }) : '',
                 mainEntrance ? t({ it: 'Ingresso principale', en: 'Main entrance' }) : '',
                 isExternal ? t({ it: 'Porta esterna', en: 'External door' }) : '',
                 isFireDoor ? t({ it: 'Tagliafuoco', en: 'Fire door' }) : '',
