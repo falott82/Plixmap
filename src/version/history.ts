@@ -8,6 +8,87 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.9.1',
+    date: '2026-02-17',
+    type: 'minor',
+    notes: [
+      n(
+        'Stanze: introdotte le porte di collegamento tra due uffici selezionati (menu contestuale su stanza), con vincolo di posizionamento su lato condiviso sovrapposto',
+        'Rooms: added connecting doors between two selected offices (room context menu), with placement restricted to an overlapping shared side'
+      ),
+      n(
+        'Porte di collegamento stanza-stanza: supporto completo a selezione, doppio click per modifica proprietà, menu destro dedicato e rimozione',
+        'Room-to-room connection doors: full support for selection, double-click property editing, dedicated right-click menu, and deletion'
+      ),
+      n(
+        'Routing mappa interna e via di fuga: il calcolo percorso considera anche le nuove porte stanza-stanza per raggiungere corridoi/uscite da uffici non direttamente affacciati',
+        'Internal-map and escape-route routing: path calculation now considers room-to-room connecting doors to reach corridors/exits from offices not directly facing a corridor'
+      ),
+      n(
+        'Persistenza planimetria: roomDoors inclusi in salvataggio, revisioni, restore e duplicazione planimetria con remap corretto degli ID stanza',
+        'Floor plan persistence: roomDoors are now included in save, revisions, restore, and floor-plan duplication with correct room ID remapping'
+      ),
+      n(
+        'Layers: corretto comportamento "Mostra tutto" + toggle singolo layer (la disattivazione ora nasconde davvero il layer selezionato)',
+        'Layers: fixed "Show all" + single-layer toggle behavior (disabling now correctly hides the selected layer)'
+      ),
+      n(
+        'Rubrica utenti: export PDF con nuova modale di selezione colonne prima della generazione finale',
+        'User directory: PDF export now includes a column-selection modal before final generation'
+      ),
+      n(
+        'Modifica collegamenti: fix reset campi durante la digitazione nelle modali di edit (nome/descrizione non vengono più sovrascritti)',
+        'Link editing: fixed field reset while typing in edit modals (name/description are no longer overwritten)'
+      ),
+      n(
+        'Pannello Sicurezza: rimossa la colonna "ID porta" dalla tabella porte emergenza e dall’export CSV',
+        'Safety panel: removed "Door ID" column from emergency-doors table and CSV export'
+      ),
+      n(
+        'Import WebAPI: ingranaggio spostato nel messaggio guida, pulsanti Test/Sync disabilitati finché la WebAPI non è configurata; Svuota importazione e Aggiorna impostazioni abilitati solo dopo almeno una importazione',
+        'WebAPI import: gear moved into helper message, Test/Sync disabled until WebAPI is configured; Clear import and Update settings enabled only after at least one import'
+      )
+    ]
+  },
+  {
+    version: '2.9.0',
+    date: '2026-02-17',
+    type: 'minor',
+    notes: [
+      n(
+        'Via di fuga: indicazioni passo-passo aggiornate, con icona bandiera a scacchi riservata esclusivamente all’ultimo step (punto di raccolta quando presente)',
+        'Escape route: step-by-step directions updated, with checkered-flag icon reserved exclusively for the final step (assembly point when present)'
+      ),
+      n(
+        'Via di fuga: aggiunte coordinate Google Maps al punto di raccolta nelle indicazioni e nella scheda emergenza PDF',
+        'Escape route: added Google Maps coordinates for assembly points in directions and in the PDF emergency card'
+      ),
+      n(
+        'Export PDF via di fuga: la scheda emergenza è stata spostata in fondo come ultima sezione, sotto le indicazioni passo-passo, con testo “Indicazione aggiuntiva” aggiornato',
+        'Escape route PDF export: emergency card moved to the end as the last section, below step-by-step directions, with updated “Additional guidance” text'
+      )
+    ]
+  },
+  {
+    version: '2.8.6',
+    date: '2026-02-17',
+    type: 'minor',
+    notes: [
+      n(
+        'Via di fuga: aggiunta modalità Full screen nella modale per visualizzare la mappa percorso a schermo intero',
+        'Escape route: added Fullscreen mode in the modal to view the route map in full screen'
+      ),
+      n(
+        'Export PDF via di fuga: aggiunta pagina “Scheda emergenza” con numeri utili e punti di raccolta configurati',
+        'Escape route PDF export: added an “Emergency card” page with useful numbers and configured assembly points'
+      ),
+      n(
+        'Via di fuga: se è presente un punto di raccolta sul piano di arrivo, il tracciato mostra una linea tratteggiata dall’uscita al punto di raccolta (anche in PDF)',
+        'Escape route: when an assembly point exists on the arrival floor, the route now shows a dashed line from the exit to the assembly point (also in PDF)'
+      )
+    ]
+  },
+  {
     version: '2.8.5',
     date: '2026-02-17',
     type: 'minor',

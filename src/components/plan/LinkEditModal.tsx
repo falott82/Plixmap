@@ -58,7 +58,7 @@ const LinkEditModal = ({ open, initial, onClose, onSubmit, onDelete }: Props) =>
       setArrowEnd(false);
     }
     window.setTimeout(() => nameRef.current?.focus(), 0);
-  }, [initial, open]);
+  }, [open, initial?.name, initial?.description, initial?.color, initial?.width, initial?.dashed, initial?.arrow]);
 
   const submit = () => {
     const arrow = arrowStart && arrowEnd ? 'both' : arrowStart ? 'start' : arrowEnd ? 'end' : 'none';
