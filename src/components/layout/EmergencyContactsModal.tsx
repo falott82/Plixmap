@@ -9,6 +9,9 @@ interface Props {
   open: boolean;
   clientId: string | null;
   readOnly?: boolean;
+  safetyCardVisible?: boolean;
+  onToggleSafetyCard?: () => void;
+  safetyCardToggleDisabled?: boolean;
   onClose: () => void;
 }
 
@@ -46,7 +49,15 @@ const googleMapsUrlFromCoords = (rawValue: string) => {
   return `https://www.google.com/maps?q=${encodeURIComponent(`${parsed.lat},${parsed.lng}`)}`;
 };
 
-const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: Props) => {
+const EmergencyContactsModal = ({
+  open,
+  clientId,
+  readOnly = false,
+  safetyCardVisible = false,
+  onToggleSafetyCard,
+  safetyCardToggleDisabled = false,
+  onClose
+}: Props) => {
   const t = useT();
   const clients = useDataStore((s) => s.clients);
   const updateClient = useDataStore((s) => s.updateClient);
@@ -482,6 +493,38 @@ const EmergencyContactsModal = ({ open, clientId, readOnly = false, onClose }: P
                 </div>
                 <div className="mt-2 text-xs text-slate-600">
                   {client?.shortName || client?.name || '—'} · {t({ it: 'Numeri utili e punti di raccolta', en: 'Useful numbers and assembly points' })}
+                </div>
+                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  <div className="font-semibold">
+                    {t({
+                      it: 'Scheda emergenza disattiva di default.',
+                      en: 'Safety card is disabled by default.'
+                    })}
+                  </div>
+                  <div className="mt-1">
+                    {t({
+                      it: 'Per mostrarla/nasconderla: tasto destro sulla planimetria oppure usa il pulsante qui sotto.',
+                      en: 'To show/hide it: right-click on the floor plan or use the button below.'
+                    })}
+                  </div>
+                  {onToggleSafetyCard ? (
+                    <button
+                      type="button"
+                      onClick={onToggleSafetyCard}
+                      disabled={safetyCardToggleDisabled}
+                      className="mt-2 inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                      title={
+                        safetyCardVisible
+                          ? t({ it: 'Nascondi scheda emergenza', en: 'Hide safety card' })
+                          : t({ it: 'Mostra scheda emergenza', en: 'Show safety card' })
+                      }
+                    >
+                      <Crosshair size={13} />
+                      {safetyCardVisible
+                        ? t({ it: 'Nascondi scheda emergenza', en: 'Hide safety card' })
+                        : t({ it: 'Mostra scheda emergenza', en: 'Show safety card' })}
+                    </button>
+                  ) : null}
                 </div>
 
                 {!readOnly ? (

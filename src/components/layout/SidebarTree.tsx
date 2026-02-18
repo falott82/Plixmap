@@ -333,6 +333,14 @@ const SidebarTree = () => {
     },
     [planLayerIdsByPlan, visibleLayerIdsByPlan]
   );
+  const getDefaultVisiblePlanLayerIds = useMemo(
+    () => (planLayerIds: string[]) =>
+      normalizePlanLayerSelection(
+        planLayerIds,
+        planLayerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID && id !== SECURITY_LAYER_ID)
+      ),
+    [normalizePlanLayerSelection]
+  );
   const isSecurityCardVisibleForPlan = useMemo(
     () => (planId: string) => {
       if (!planId) return false;
@@ -340,12 +348,13 @@ const SidebarTree = () => {
       const layerIds = getPlanLayerIds(planId);
       const nonAllLayerIds = layerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
       const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
-      const visible = typeof current === 'undefined' ? layerIds : normalizePlanLayerSelection(layerIds, current);
+      const visible =
+        typeof current === 'undefined' ? getDefaultVisiblePlanLayerIds(layerIds) : normalizePlanLayerSelection(layerIds, current);
       const allItemsSelected = visible.includes(ALL_ITEMS_LAYER_ID);
       const effective = allItemsSelected ? nonAllLayerIds : visible.filter((id) => id !== ALL_ITEMS_LAYER_ID);
       return effective.includes(SECURITY_LAYER_ID);
     },
-    [getPlanLayerIds, hiddenLayersByPlan, normalizePlanLayerSelection, visibleLayerIdsByPlan]
+    [getDefaultVisiblePlanLayerIds, getPlanLayerIds, hiddenLayersByPlan, normalizePlanLayerSelection, visibleLayerIdsByPlan]
   );
   const toggleSecurityCardVisibilityForPlan = useMemo(
     () => (planId: string) => {
@@ -354,7 +363,8 @@ const SidebarTree = () => {
       const nonAllLayerIds = layerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
       const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
       const hideAll = !!hiddenLayersByPlan[planId];
-      const visible = typeof current === 'undefined' ? layerIds : normalizePlanLayerSelection(layerIds, current);
+      const visible =
+        typeof current === 'undefined' ? getDefaultVisiblePlanLayerIds(layerIds) : normalizePlanLayerSelection(layerIds, current);
       const allItemsSelected = visible.includes(ALL_ITEMS_LAYER_ID);
       const baseVisible = hideAll ? [] : allItemsSelected ? nonAllLayerIds : visible.filter((id) => id !== ALL_ITEMS_LAYER_ID);
       const hasSecurity = baseVisible.includes(SECURITY_LAYER_ID);
@@ -364,9 +374,27 @@ const SidebarTree = () => {
       if (hideAll) setHideAllLayers(planId, false);
       setVisibleLayerIds(planId, normalizePlanLayerSelection(layerIds, nextRaw));
     },
-    [getPlanLayerIds, hiddenLayersByPlan, normalizePlanLayerSelection, setHideAllLayers, setVisibleLayerIds, visibleLayerIdsByPlan]
+    [
+      getDefaultVisiblePlanLayerIds,
+      getPlanLayerIds,
+      hiddenLayersByPlan,
+      normalizePlanLayerSelection,
+      setHideAllLayers,
+      setVisibleLayerIds,
+      visibleLayerIdsByPlan
+    ]
   );
   const planMenuSecurityVisible = planMenu ? isSecurityCardVisibleForPlan(planMenu.planId) : false;
+  const emergencyModalPlanId = useMemo(() => {
+    if (!clientEmergencyId || !selectedPlanId) return null;
+    const entry = clients.find((client) => client.id === clientEmergencyId);
+    if (!entry) return null;
+    for (const site of entry.sites || []) {
+      if ((site.floorPlans || []).some((plan) => plan.id === selectedPlanId)) return selectedPlanId;
+    }
+    return null;
+  }, [clientEmergencyId, clients, selectedPlanId]);
+  const emergencyModalSafetyVisible = emergencyModalPlanId ? isSecurityCardVisibleForPlan(emergencyModalPlanId) : false;
 
   const canEditClientNotes = useMemo(() => {
     if (!clientNotesId) return false;
@@ -1267,6 +1295,11 @@ const SidebarTree = () => {
         open={!!clientEmergencyId}
         clientId={clientEmergencyId}
         readOnly={!canManageEmergencyDirectory}
+        safetyCardVisible={emergencyModalSafetyVisible}
+        onToggleSafetyCard={
+          emergencyModalPlanId ? () => toggleSecurityCardVisibilityForPlan(emergencyModalPlanId) : undefined
+        }
+        safetyCardToggleDisabled={!emergencyModalPlanId}
         onClose={() => setClientEmergencyId(null)}
       />
 

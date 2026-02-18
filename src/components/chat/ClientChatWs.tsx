@@ -11,6 +11,26 @@ const getWsUrl = () => {
   return `${proto}://${window.location.host}/ws`;
 };
 
+const closeSocketSafely = (socket: WebSocket | null | undefined) => {
+  if (!socket) return;
+  if (socket.readyState === WebSocket.CONNECTING) {
+    const closeLater = () => {
+      try {
+        socket.close();
+      } catch {
+        // ignore
+      }
+    };
+    socket.addEventListener('open', closeLater, { once: true });
+    return;
+  }
+  try {
+    socket.close();
+  } catch {
+    // ignore
+  }
+};
+
 const ClientChatWs = () => {
   const t = useT();
   const user = useAuthStore((s) => s.user);
@@ -46,9 +66,7 @@ const ClientChatWs = () => {
     if (!user?.id) {
       if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
       reconnectRef.current = null;
-      try {
-        wsRef.current?.close();
-      } catch {}
+      closeSocketSafely(wsRef.current);
       wsRef.current = null;
       return;
     }
@@ -58,9 +76,7 @@ const ClientChatWs = () => {
       if (!alive) return;
       if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
       reconnectRef.current = null;
-      try {
-        wsRef.current?.close();
-      } catch {}
+      closeSocketSafely(wsRef.current);
 
       const ws = new WebSocket(getWsUrl());
       wsRef.current = ws;
@@ -177,9 +193,7 @@ const ClientChatWs = () => {
         reconnectRef.current = window.setTimeout(connect, 1500);
       };
       ws.onerror = () => {
-        try {
-          ws.close();
-        } catch {}
+        closeSocketSafely(ws);
       };
     };
 
@@ -188,9 +202,7 @@ const ClientChatWs = () => {
       alive = false;
       if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
       reconnectRef.current = null;
-      try {
-        wsRef.current?.close();
-      } catch {}
+      closeSocketSafely(wsRef.current);
       wsRef.current = null;
     };
   }, [user?.id]);
