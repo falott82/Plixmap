@@ -27,6 +27,26 @@ export const releaseHistory: ReleaseNote[] = [
       n(
         'Persistenza planimetria: roomDoors inclusi in salvataggio, revisioni, restore e duplicazione planimetria con remap corretto degli ID stanza',
         'Floor plan persistence: roomDoors are now included in save, revisions, restore, and floor-plan duplication with correct room ID remapping'
+      ),
+      n(
+        'Layers: corretto comportamento "Mostra tutto" + toggle singolo layer (la disattivazione ora nasconde davvero il layer selezionato)',
+        'Layers: fixed "Show all" + single-layer toggle behavior (disabling now correctly hides the selected layer)'
+      ),
+      n(
+        'Rubrica utenti: export PDF con nuova modale di selezione colonne prima della generazione finale',
+        'User directory: PDF export now includes a column-selection modal before final generation'
+      ),
+      n(
+        'Modifica collegamenti: fix reset campi durante la digitazione nelle modali di edit (nome/descrizione non vengono più sovrascritti)',
+        'Link editing: fixed field reset while typing in edit modals (name/description are no longer overwritten)'
+      ),
+      n(
+        'Pannello Sicurezza: rimossa la colonna "ID porta" dalla tabella porte emergenza e dall’export CSV',
+        'Safety panel: removed "Door ID" column from emergency-doors table and CSV export'
+      ),
+      n(
+        'Import WebAPI: ingranaggio spostato nel messaggio guida, pulsanti Test/Sync disabilitati finché la WebAPI non è configurata; Svuota importazione e Aggiorna impostazioni abilitati solo dopo almeno una importazione',
+        'WebAPI import: gear moved into helper message, Test/Sync disabled until WebAPI is configured; Clear import and Update settings enabled only after at least one import'
       )
     ]
   },
