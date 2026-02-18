@@ -121,7 +121,9 @@ import {
   WIFI_RANGE_SCALE_MAX
 } from '../../store/data';
 import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
+import { getDefaultVisiblePlanLayerIds, normalizePlanLayerSelection } from '../../utils/layerVisibility';
 import { getWallTypeColor } from '../../utils/wallColors';
+import { closeSocketSafely, getWsUrl } from '../../utils/ws';
 import { usePresentationWebcamHands } from './presentation/usePresentationWebcamHands';
 
 interface Props {
@@ -1456,27 +1458,7 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     if (!user?.id || realtimeDisabledRef.current || realtimeDisabled) return;
     const canRequestLock = !activeRevision && planAccess === 'rw';
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${proto}://${window.location.host}/ws`;
-    const closeSocketSafely = (socket: WebSocket) => {
-      if (socket.readyState === WebSocket.CONNECTING) {
-        const closeLater = () => {
-          try {
-            socket.close();
-          } catch {
-            // ignore
-          }
-        };
-        socket.addEventListener('open', closeLater, { once: true });
-        return;
-      }
-      try {
-        socket.close();
-      } catch {
-        // ignore
-      }
-    };
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(getWsUrl());
     wsRef.current = ws;
     let closed = false;
     let opened = false;
@@ -2325,28 +2307,13 @@ const PlanView = ({ planId }: Props) => {
     [layerIds]
   );
   const defaultVisibleLayerIds = useMemo(
-    () => layerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID && id !== SECURITY_LAYER_ID),
+    () => getDefaultVisiblePlanLayerIds(layerIds, ALL_ITEMS_LAYER_ID, [SECURITY_LAYER_ID]),
     [layerIds]
   );
   const layerIdSet = useMemo(() => new Set(layerIds), [layerIds]);
   const normalizeLayerSelection = useCallback(
-    (ids: string[]) => {
-      const filtered = new Set(ids.map((id) => String(id)).filter((id) => layerIdSet.has(id)));
-      let ordered = layerIds.filter((id) => filtered.has(id));
-      if (!nonAllLayerIds.length) {
-        return layerIdSet.has(ALL_ITEMS_LAYER_ID) ? [ALL_ITEMS_LAYER_ID] : ordered;
-      }
-      const hasAll = nonAllLayerIds.every((id) => ordered.includes(id));
-      if (hasAll) {
-        if (!ordered.includes(ALL_ITEMS_LAYER_ID) && layerIdSet.has(ALL_ITEMS_LAYER_ID)) {
-          ordered = [ALL_ITEMS_LAYER_ID, ...ordered];
-        }
-      } else {
-        ordered = ordered.filter((id) => id !== ALL_ITEMS_LAYER_ID);
-      }
-      return ordered;
-    },
-    [layerIdSet, layerIds, nonAllLayerIds]
+    (ids: string[]) => normalizePlanLayerSelection(layerIds, ids, ALL_ITEMS_LAYER_ID),
+    [layerIds]
   );
   const getTypeLayerIds = useCallback(
     (typeId: string) => {
@@ -2356,6 +2323,35 @@ const PlanView = ({ planId }: Props) => {
       return matched.length ? matched : null;
     },
     [planLayers]
+  );
+  const getLayerIdsForType = useCallback(
+    (typeId: string) => {
+      const mapped = getTypeLayerIds(typeId);
+      const fallback = inferDefaultLayerIds(typeId, layerIdSet);
+      const raw = (mapped?.length ? mapped : fallback).map((id) => String(id)).filter((id) => id !== ALL_ITEMS_LAYER_ID);
+      if (typeId === 'real_user') {
+        const preferred = raw.filter((id) => id !== 'users');
+        if (preferred.length) return Array.from(new Set(preferred));
+      }
+      return Array.from(new Set(raw));
+    },
+    [getTypeLayerIds, inferDefaultLayerIds, layerIdSet]
+  );
+  const getObjectLayerIdsForVisibility = useCallback(
+    (obj: MapObject) => {
+      const explicit = (Array.isArray(obj.layerIds) ? obj.layerIds : [])
+        .map((id) => String(id))
+        .filter((id) => id !== ALL_ITEMS_LAYER_ID);
+      const typeLayers = getLayerIdsForType(obj.type);
+      if (obj.type === 'real_user') {
+        const explicitPreferred = explicit.filter((id) => id !== 'users');
+        if (explicitPreferred.length) return Array.from(new Set(explicitPreferred));
+        if (typeLayers.length) return typeLayers;
+        return explicit;
+      }
+      return explicit.length ? Array.from(new Set(explicit)) : typeLayers;
+    },
+    [getLayerIdsForType]
   );
   const prevLayerIdsByPlanRef = useRef<Record<string, string[]>>({});
   const visibleLayerIds = useMemo(() => {
@@ -2399,9 +2395,7 @@ const PlanView = ({ planId }: Props) => {
   );
   const promptRevealForObject = useCallback(
     (obj: MapObject) => {
-      const rawLayerIds =
-        Array.isArray(obj.layerIds) && obj.layerIds.length ? obj.layerIds : inferDefaultLayerIds(obj.type, layerIdSet);
-      const normalizedLayerIds = rawLayerIds.map((layerId) => String(layerId)).filter((layerId) => layerId !== ALL_ITEMS_LAYER_ID);
+      const normalizedLayerIds = getObjectLayerIdsForVisibility(obj);
       if (!normalizedLayerIds.length) return false;
       const visibleSet = new Set(effectiveVisibleLayerIds);
       const missing = hideAllLayers
@@ -2416,7 +2410,7 @@ const PlanView = ({ planId }: Props) => {
       });
       return true;
     },
-    [effectiveVisibleLayerIds, hideAllLayers, inferDefaultLayerIds, layerIdSet]
+    [effectiveVisibleLayerIds, getObjectLayerIdsForVisibility, hideAllLayers]
   );
   const getObjectBoundsForAlign = useCallback((obj: MapObject) => {
     const boundsFromStage = canvasStageRef.current?.getObjectBounds?.(obj.id);
@@ -2509,21 +2503,14 @@ const PlanView = ({ planId }: Props) => {
     }
     const showAll = allItemsSelected;
     const visible = new Set(effectiveVisibleLayerIds);
-    const normalizedLayerIdsForType = (typeId: string) => {
-      const mapped = getTypeLayerIds(typeId);
-      if (mapped?.length) return mapped;
-      const fallback = inferDefaultLayerIds(typeId, layerIdSet);
-      return fallback.length ? fallback : [];
-    };
     const objects = showAll
       ? renderPlan.objects
       : renderPlan.objects.filter((o: any) => {
-          const ids = Array.isArray(o.layerIds) && o.layerIds.length ? o.layerIds : normalizedLayerIdsForType(o.type);
+          const ids = getObjectLayerIdsForVisibility(o);
           return ids.some((id: string) => visible.has(id));
         });
-    const securityVisible = visible.has(SECURITY_LAYER_ID);
-    const rooms = showAll || securityVisible || visible.has('rooms') ? renderPlan.rooms : [];
-    const corridors = showAll || securityVisible || visible.has('corridors') ? (renderPlan as any).corridors : [];
+    const rooms = showAll || visible.has('rooms') ? renderPlan.rooms : [];
+    const corridors = showAll || visible.has('corridors') ? (renderPlan as any).corridors : [];
     const visibleObjectIds = new Set(objects.map((o: any) => o.id));
     const baseLinks = Array.isArray((renderPlan as any).links)
       ? ((renderPlan as any).links as any[]).filter((l) => {
@@ -2537,7 +2524,7 @@ const PlanView = ({ planId }: Props) => {
       : [];
     const links = [...baseLinks, ...rackLinks];
     return { ...renderPlan, objects, rooms, corridors, links };
-  }, [allItemsSelected, effectiveVisibleLayerIds, getTypeLayerIds, hideAllLayers, inferDefaultLayerIds, layerIdSet, rackOverlayLinks, renderPlan]);
+  }, [allItemsSelected, effectiveVisibleLayerIds, getObjectLayerIdsForVisibility, hideAllLayers, rackOverlayLinks, renderPlan]);
   const securityLayerVisible = useMemo(
     () => !hideAllLayers && (allItemsSelected || effectiveVisibleLayerIds.includes(SECURITY_LAYER_ID)),
     [allItemsSelected, effectiveVisibleLayerIds, hideAllLayers]
@@ -14580,6 +14567,7 @@ const PlanView = ({ planId }: Props) => {
         onSelect={(u) => {
           if (!plan || !realUserPicker || isReadOnly) return;
           markTouched();
+          const realUserLayerIds = getLayerIdsForType('real_user');
           const name = `${u.firstName} ${u.lastName}`.trim() || u.externalId;
           const desc =
             [u.role, [u.dept1, u.dept2, u.dept3].filter(Boolean).join(' / ')].filter(Boolean).join(' · ') || undefined;
@@ -14591,7 +14579,7 @@ const PlanView = ({ planId }: Props) => {
             realUserPicker.x,
             realUserPicker.y,
             defaultObjectScale,
-            ['users'],
+            realUserLayerIds,
             {
               externalClientId: client?.id,
               externalUserId: u.externalId,
@@ -14608,7 +14596,7 @@ const PlanView = ({ planId }: Props) => {
               externalIsExternal: u.isExternal
             }
           );
-          ensureObjectLayerVisible(['users'], name, 'real_user');
+          ensureObjectLayerVisible(realUserLayerIds, name, 'real_user');
           lastInsertedRef.current = { id, name };
           const roomId = getRoomIdAt((plan as FloorPlan).rooms, realUserPicker.x, realUserPicker.y);
           if (roomId) updateObject(id, { roomId });

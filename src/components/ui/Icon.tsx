@@ -86,6 +86,7 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
     width: size,
     height: size,
     viewBox: '0 0 24 24',
+    xmlns: 'http://www.w3.org/2000/svg',
     fill: 'none',
     stroke: color || 'currentColor',
     strokeWidth: strokeWidth ?? 1.8,
@@ -263,6 +264,24 @@ const Icon = ({ type, name, className, size = 18, color, strokeWidth }: Props) =
       return <Users {...common} />;
     case 'usersRound':
       return <UsersRound {...common} />;
+    case 'assemblyPoint':
+      return (
+        <svg {...svgProps} fill="none" stroke="none">
+          <rect x="1" y="1" width="22" height="22" rx="2" fill="#ffffff" stroke="#111827" strokeWidth={1} />
+          <rect x="2.2" y="2.2" width="19.6" height="19.6" rx="1.5" fill="#099b2b" />
+          <path d="M3.8 5.5h3.2v1.4h2.1v2.1H7v1.4H3.8l2.9-2.9z" fill="#ffffff" />
+          <path d="M20.2 5.5H17v1.4h-2.1v2.1H17v1.4h3.2l-2.9-2.9z" fill="#ffffff" />
+          <path d="M3.8 18.5h3.2v-1.4h2.1V15H7v-1.4H3.8l2.9 2.9z" fill="#ffffff" />
+          <path d="M20.2 18.5H17v-1.4h-2.1V15H17v-1.4h3.2l-2.9 2.9z" fill="#ffffff" />
+          <circle cx="12" cy="9.8" r="1.3" fill="#ffffff" />
+          <circle cx="9.1" cy="11.6" r="1.1" fill="#ffffff" />
+          <circle cx="14.9" cy="11.6" r="1.1" fill="#ffffff" />
+          <circle cx="12" cy="13.3" r="1.1" fill="#ffffff" />
+          <rect x="10.6" y="14.3" width="2.8" height="4.2" rx="0.9" fill="#ffffff" />
+          <rect x="7.5" y="13.9" width="2.3" height="3.8" rx="0.8" fill="#ffffff" />
+          <rect x="14.2" y="13.9" width="2.3" height="3.8" rx="0.8" fill="#ffffff" />
+        </svg>
+      );
     case 'userSearch':
       return <UserSearch {...common} />;
     case 'car':

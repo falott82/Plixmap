@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.9.3',
+    date: '2026-02-18',
+    type: 'fix',
+    notes: [
+      n(
+        'Layers: corretta la visibilità degli utenti reali; il layer "Real user" non dipende più dal layer utenti generici',
+        'Layers: fixed real-user visibility; the "Real user" layer no longer depends on generic users layer visibility'
+      ),
+      n(
+        'Layers: corretto "Mostra tutto" quando si disattiva il layer stanze; le stanze ora scompaiono correttamente dalla mappa',
+        'Layers: fixed "Show all" when disabling the Rooms layer; rooms now disappear correctly from the map'
+      ),
+      n(
+        'Audit logica layer: normalizzazione estesa per oggetti real_user legacy con assegnazione layer storica su "users"',
+        'Layer-logic audit: normalization extended for legacy real_user objects with historical "users" layer assignment'
+      )
+    ]
+  },
+  {
     version: '2.9.1',
     date: '2026-02-17',
     type: 'minor',

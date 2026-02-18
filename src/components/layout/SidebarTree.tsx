@@ -20,6 +20,10 @@ import { fetchImportSummary, ImportSummaryRow } from '../../api/customImport';
 import EmergencyContactsModal from './EmergencyContactsModal';
 import { ALL_ITEMS_LAYER_ID } from '../../store/data';
 import { SECURITY_LAYER_ID } from '../../store/security';
+import {
+  getDefaultVisiblePlanLayerIds as getDefaultVisiblePlanLayerIdsUtil,
+  normalizePlanLayerSelection as normalizePlanLayerSelectionUtil
+} from '../../utils/layerVisibility';
 
 type TreeClient = {
   id: string;
@@ -303,26 +307,8 @@ const SidebarTree = () => {
       []
     )
   );
-  const normalizePlanLayerSelection = useMemo(
-    () => (planLayerIds: string[], ids: string[]) => {
-      const orderedLayerIds = planLayerIds.map((id) => String(id));
-      const layerSet = new Set(orderedLayerIds);
-      const nonAllLayerIds = orderedLayerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
-      const filtered = Array.from(new Set(ids.map((id) => String(id)).filter((id) => layerSet.has(id))));
-      let ordered = orderedLayerIds.filter((id) => filtered.includes(id));
-      if (!nonAllLayerIds.length) {
-        return layerSet.has(ALL_ITEMS_LAYER_ID) ? [ALL_ITEMS_LAYER_ID] : ordered;
-      }
-      const hasAll = nonAllLayerIds.every((id) => ordered.includes(id));
-      if (hasAll) {
-        if (!ordered.includes(ALL_ITEMS_LAYER_ID) && layerSet.has(ALL_ITEMS_LAYER_ID)) {
-          ordered = [ALL_ITEMS_LAYER_ID, ...ordered];
-        }
-      } else {
-        ordered = ordered.filter((id) => id !== ALL_ITEMS_LAYER_ID);
-      }
-      return ordered;
-    },
+  const normalizePlanLayerSelectionForPlan = useMemo(
+    () => (planLayerIds: string[], ids: string[]) => normalizePlanLayerSelectionUtil(planLayerIds, ids, ALL_ITEMS_LAYER_ID),
     []
   );
   const getPlanLayerIds = useMemo(
@@ -335,11 +321,8 @@ const SidebarTree = () => {
   );
   const getDefaultVisiblePlanLayerIds = useMemo(
     () => (planLayerIds: string[]) =>
-      normalizePlanLayerSelection(
-        planLayerIds,
-        planLayerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID && id !== SECURITY_LAYER_ID)
-      ),
-    [normalizePlanLayerSelection]
+      getDefaultVisiblePlanLayerIdsUtil(planLayerIds, ALL_ITEMS_LAYER_ID, [SECURITY_LAYER_ID]),
+    []
   );
   const isSecurityCardVisibleForPlan = useMemo(
     () => (planId: string) => {
@@ -349,12 +332,14 @@ const SidebarTree = () => {
       const nonAllLayerIds = layerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
       const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
       const visible =
-        typeof current === 'undefined' ? getDefaultVisiblePlanLayerIds(layerIds) : normalizePlanLayerSelection(layerIds, current);
+        typeof current === 'undefined'
+          ? getDefaultVisiblePlanLayerIds(layerIds)
+          : normalizePlanLayerSelectionForPlan(layerIds, current);
       const allItemsSelected = visible.includes(ALL_ITEMS_LAYER_ID);
       const effective = allItemsSelected ? nonAllLayerIds : visible.filter((id) => id !== ALL_ITEMS_LAYER_ID);
       return effective.includes(SECURITY_LAYER_ID);
     },
-    [getDefaultVisiblePlanLayerIds, getPlanLayerIds, hiddenLayersByPlan, normalizePlanLayerSelection, visibleLayerIdsByPlan]
+    [getDefaultVisiblePlanLayerIds, getPlanLayerIds, hiddenLayersByPlan, normalizePlanLayerSelectionForPlan, visibleLayerIdsByPlan]
   );
   const toggleSecurityCardVisibilityForPlan = useMemo(
     () => (planId: string) => {
@@ -364,7 +349,9 @@ const SidebarTree = () => {
       const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
       const hideAll = !!hiddenLayersByPlan[planId];
       const visible =
-        typeof current === 'undefined' ? getDefaultVisiblePlanLayerIds(layerIds) : normalizePlanLayerSelection(layerIds, current);
+        typeof current === 'undefined'
+          ? getDefaultVisiblePlanLayerIds(layerIds)
+          : normalizePlanLayerSelectionForPlan(layerIds, current);
       const allItemsSelected = visible.includes(ALL_ITEMS_LAYER_ID);
       const baseVisible = hideAll ? [] : allItemsSelected ? nonAllLayerIds : visible.filter((id) => id !== ALL_ITEMS_LAYER_ID);
       const hasSecurity = baseVisible.includes(SECURITY_LAYER_ID);
@@ -372,13 +359,13 @@ const SidebarTree = () => {
         ? baseVisible.filter((id) => id !== SECURITY_LAYER_ID)
         : [...baseVisible, SECURITY_LAYER_ID];
       if (hideAll) setHideAllLayers(planId, false);
-      setVisibleLayerIds(planId, normalizePlanLayerSelection(layerIds, nextRaw));
+      setVisibleLayerIds(planId, normalizePlanLayerSelectionForPlan(layerIds, nextRaw));
     },
     [
       getDefaultVisiblePlanLayerIds,
       getPlanLayerIds,
       hiddenLayersByPlan,
-      normalizePlanLayerSelection,
+      normalizePlanLayerSelectionForPlan,
       setHideAllLayers,
       setVisibleLayerIds,
       visibleLayerIdsByPlan

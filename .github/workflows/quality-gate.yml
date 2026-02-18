@@ -1,0 +1,41 @@
+name: quality-gate
+run-name: quality-gate • ${{ github.ref_name }}
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+      - name: Typecheck + unit tests + build + release checks
+        run: npm run quality:check
+      - name: E2E smoke
+        run: |
+          npm start > /tmp/deskly-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          for i in $(seq 1 45); do
+            if curl -fsS "http://127.0.0.1:8787/api/auth/bootstrap-status" > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          npm run test:e2e:smoke
