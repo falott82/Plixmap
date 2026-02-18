@@ -393,6 +393,26 @@ export interface Corridor {
   connections?: CorridorConnectionPoint[];
 }
 
+export interface RoomConnectionDoor {
+  id: string;
+  roomAId: string;
+  roomBId: string;
+  anchorRoomId: string;
+  edgeIndex: number;
+  t: number; // 0..1 position along the selected edge of anchorRoomId
+  catalogTypeId?: string;
+  mode?: 'static' | 'auto_sensor' | 'automated';
+  automationUrl?: string;
+  description?: string;
+  isEmergency?: boolean;
+  isMainEntrance?: boolean;
+  isExternal?: boolean;
+  isFireDoor?: boolean;
+  lastVerificationAt?: string;
+  verifierCompany?: string;
+  verificationHistory?: DoorVerificationEntry[];
+}
+
 export interface FloorPlan {
   id: string;
   siteId: string;
@@ -416,6 +436,7 @@ export interface FloorPlan {
   revisions?: FloorPlanRevision[];
   rooms?: Room[];
   corridors?: Corridor[];
+  roomDoors?: RoomConnectionDoor[];
   links?: PlanLink[];
   racks?: RackDefinition[];
   rackItems?: RackItem[];
@@ -468,6 +489,7 @@ export interface FloorPlanRevision {
   views?: FloorPlanView[];
   rooms?: Room[];
   corridors?: Corridor[];
+  roomDoors?: RoomConnectionDoor[];
   links?: PlanLink[];
   racks?: RackDefinition[];
   rackItems?: RackItem[];

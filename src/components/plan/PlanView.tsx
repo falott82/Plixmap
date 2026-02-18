@@ -49,7 +49,23 @@ import SearchBar from './SearchBar';
 import ObjectModal from './ObjectModal';
 import RoomAllocationModal from './RoomAllocationModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { Corridor, DoorVerificationEntry, FloorPlan, FloorPlanView, IconName, LayerDefinition, MapObject, MapObjectType, ObjectTypeDefinition, PlanLink, RackItem, RackLink, RackPortKind, Room } from '../../store/types';
+import {
+  Corridor,
+  DoorVerificationEntry,
+  FloorPlan,
+  FloorPlanView,
+  IconName,
+  LayerDefinition,
+  MapObject,
+  MapObjectType,
+  ObjectTypeDefinition,
+  PlanLink,
+  RackItem,
+  RackLink,
+  RackPortKind,
+  Room,
+  RoomConnectionDoor
+} from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
@@ -156,6 +172,144 @@ const googleMapsUrlFromCoords = (rawValue: string) => {
   if (!parsed) return '';
   return `https://www.google.com/maps?q=${encodeURIComponent(`${parsed.lat},${parsed.lng}`)}`;
 };
+
+type SharedRoomSide = {
+  anchorRoomId: string;
+  otherRoomId: string;
+  edgeIndex: number;
+  otherEdgeIndex: number;
+  tMin: number;
+  tMax: number;
+  a: { x: number; y: number };
+  b: { x: number; y: number };
+};
+
+const getRoomPolygon = (room: any): Array<{ x: number; y: number }> => {
+  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+  if (kind === 'poly') {
+    const pts = Array.isArray(room?.points) ? room.points : [];
+    return pts.length >= 3 ? pts : [];
+  }
+  const x = Number(room?.x || 0);
+  const y = Number(room?.y || 0);
+  const w = Number(room?.width || 0);
+  const h = Number(room?.height || 0);
+  if (!w || !h) return [];
+  return [
+    { x, y },
+    { x: x + w, y },
+    { x: x + w, y: y + h },
+    { x, y: y + h }
+  ];
+};
+
+const projectPointToSegment = (a: { x: number; y: number }, b: { x: number; y: number }, p: { x: number; y: number }) => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 0.0000001) {
+    return { t: 0, x: a.x, y: a.y, distSq: (p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y) };
+  }
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+  const x = a.x + dx * t;
+  const y = a.y + dy * t;
+  const distSq = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+  return { t, x, y, distSq };
+};
+
+const getSharedRoomSides = (roomA: Room, roomB: Room): SharedRoomSide[] => {
+  const polyA = getRoomPolygon(roomA as any);
+  const polyB = getRoomPolygon(roomB as any);
+  if (polyA.length < 2 || polyB.length < 2) return [];
+  const out: SharedRoomSide[] = [];
+  const minOverlap = 8;
+  const collinearTolerance = 1.8;
+  const parallelTolerance = 0.03;
+  const pushShared = (
+    sourcePoly: { x: number; y: number }[],
+    sourceRoomId: string,
+    targetPoly: { x: number; y: number }[],
+    targetRoomId: string
+  ) => {
+    for (let i = 0; i < sourcePoly.length; i += 1) {
+      const a = sourcePoly[i];
+      const b = sourcePoly[(i + 1) % sourcePoly.length];
+      const ux = b.x - a.x;
+      const uy = b.y - a.y;
+      const len = Math.hypot(ux, uy);
+      if (len < 0.0001) continue;
+      const uxn = ux / len;
+      const uyn = uy / len;
+      for (let j = 0; j < targetPoly.length; j += 1) {
+        const c = targetPoly[j];
+        const d = targetPoly[(j + 1) % targetPoly.length];
+        const vx = d.x - c.x;
+        const vy = d.y - c.y;
+        const vLen = Math.hypot(vx, vy);
+        if (vLen < 0.0001) continue;
+        const cross = Math.abs(uxn * (vy / vLen) - uyn * (vx / vLen));
+        if (cross > parallelTolerance) continue;
+        const lineDistC = Math.abs((c.x - a.x) * uy - (c.y - a.y) * ux) / len;
+        const lineDistD = Math.abs((d.x - a.x) * uy - (d.y - a.y) * ux) / len;
+        if (Math.min(lineDistC, lineDistD) > collinearTolerance) continue;
+        const projC = (c.x - a.x) * uxn + (c.y - a.y) * uyn;
+        const projD = (d.x - a.x) * uxn + (d.y - a.y) * uyn;
+        const from = Math.max(0, Math.min(projC, projD));
+        const to = Math.min(len, Math.max(projC, projD));
+        const overlap = to - from;
+        if (overlap < minOverlap) continue;
+        const tMin = Math.max(0, Math.min(1, from / len));
+        const tMax = Math.max(0, Math.min(1, to / len));
+        if (tMax - tMin < 0.0001) continue;
+        out.push({
+          anchorRoomId: sourceRoomId,
+          otherRoomId: targetRoomId,
+          edgeIndex: i,
+          otherEdgeIndex: j,
+          tMin,
+          tMax,
+          a: { x: a.x + ux * tMin, y: a.y + uy * tMin },
+          b: { x: a.x + ux * tMax, y: a.y + uy * tMax }
+        });
+      }
+    }
+  };
+  pushShared(polyA, String(roomA.id), polyB, String(roomB.id));
+  pushShared(polyB, String(roomB.id), polyA, String(roomA.id));
+  return out;
+};
+
+const normalizeRoomConnectionDoorInput = (door: any): RoomConnectionDoor | null => {
+  const roomAId = String(door?.roomAId || '').trim();
+  const roomBId = String(door?.roomBId || '').trim();
+  if (!roomAId || !roomBId || roomAId === roomBId) return null;
+  const anchorRoomIdRaw = String(door?.anchorRoomId || '').trim();
+  const anchorRoomId = anchorRoomIdRaw === roomAId || anchorRoomIdRaw === roomBId ? anchorRoomIdRaw : roomAId;
+  const edgeIndex = Number(door?.edgeIndex);
+  const t = Number(door?.t);
+  if (!Number.isFinite(edgeIndex) || !Number.isFinite(t)) return null;
+  return {
+    ...door,
+    id: String(door?.id || nanoid()),
+    roomAId,
+    roomBId,
+    anchorRoomId,
+    edgeIndex: Number(edgeIndex),
+    t: Math.max(0, Math.min(1, Number(t))),
+    catalogTypeId: typeof door?.catalogTypeId === 'string' ? String(door.catalogTypeId).trim() || undefined : undefined,
+    mode: door?.mode === 'auto_sensor' || door?.mode === 'automated' ? door.mode : 'static',
+    automationUrl: typeof door?.automationUrl === 'string' ? String(door.automationUrl).trim() || undefined : undefined,
+    description: typeof door?.description === 'string' ? String(door.description).trim() || undefined : undefined,
+    isEmergency: !!door?.isEmergency,
+    isMainEntrance: !!door?.isMainEntrance,
+    isExternal: !!door?.isExternal,
+    isFireDoor: !!door?.isFireDoor,
+    lastVerificationAt: typeof door?.lastVerificationAt === 'string' ? String(door.lastVerificationAt).trim() || undefined : undefined,
+    verifierCompany: typeof door?.verifierCompany === 'string' ? String(door.verifierCompany).trim() || undefined : undefined,
+    verificationHistory: normalizeDoorVerificationHistory(door?.verificationHistory)
+  };
+};
+
 const PlanView = ({ planId }: Props) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasStageRef = useRef<CanvasStageHandle | null>(null);
@@ -589,6 +743,7 @@ const PlanView = ({ planId }: Props) => {
     | { kind: 'room'; id: string; x: number; y: number; worldX: number; worldY: number }
     | { kind: 'corridor'; id: string; x: number; y: number; worldX: number; worldY: number }
     | { kind: 'corridor_door'; corridorId: string; doorId: string; x: number; y: number }
+    | { kind: 'room_door'; doorId: string; x: number; y: number }
     | { kind: 'corridor_connection'; corridorId: string; connectionId: string; x: number; y: number; worldX: number; worldY: number }
     | { kind: 'safety_card'; x: number; y: number; worldX: number; worldY: number }
     | { kind: 'scale'; x: number; y: number }
@@ -688,6 +843,7 @@ const PlanView = ({ planId }: Props) => {
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
   const [selectedCorridorId, setSelectedCorridorId] = useState<string | undefined>(undefined);
   const [selectedCorridorDoor, setSelectedCorridorDoor] = useState<{ corridorId: string; doorId: string } | null>(null);
+  const [selectedRoomDoorId, setSelectedRoomDoorId] = useState<string | null>(null);
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [wallQuickMenu, setWallQuickMenu] = useState<{
     id: string;
@@ -704,6 +860,11 @@ const PlanView = ({ planId }: Props) => {
   const [corridorDoorDraft, setCorridorDoorDraft] = useState<{
     corridorId: string;
     start?: { edgeIndex: number; t: number; x: number; y: number };
+  } | null>(null);
+  const [roomDoorDraft, setRoomDoorDraft] = useState<{
+    roomAId: string;
+    roomBId: string;
+    sharedSides: SharedRoomSide[];
   } | null>(null);
   const [wallTypeMenu, setWallTypeMenu] = useState<{ ids: string[]; x: number; y: number } | null>(null);
   const [mapSubmenu, setMapSubmenu] = useState<null | 'view' | 'measure' | 'create' | 'print' | 'manage'>(null);
@@ -747,6 +908,7 @@ const PlanView = ({ planId }: Props) => {
   const toolClickHistoryRef = useRef<{ x: number; y: number; at: number }[]>([]);
   const scaleToastIdRef = useRef<string | number | null>(null);
   const wallToastIdRef = useRef<string | number | null>(null);
+  const measureToastIdRef = useRef<string | number | null>(null);
   useEffect(() => {
     measurePointsRef.current = measurePoints;
   }, [measurePoints]);
@@ -1674,6 +1836,7 @@ const PlanView = ({ planId }: Props) => {
       height: activeRevision.height,
       rooms: activeRevision.rooms,
       corridors: (activeRevision as any).corridors ?? (plan as any).corridors,
+      roomDoors: (activeRevision as any).roomDoors ?? (plan as any).roomDoors,
       links: (activeRevision as any).links || (plan as any).links,
       safetyCardLayout: (activeRevision as any).safetyCardLayout || (plan as any).safetyCardLayout,
       objects: activeRevision.objects,
@@ -2673,6 +2836,7 @@ const PlanView = ({ planId }: Props) => {
       views: Array.isArray(p?.views) ? p.views : [],
       rooms: Array.isArray(p?.rooms) ? p.rooms : [],
       corridors: Array.isArray((p as any)?.corridors) ? (p as any).corridors : [],
+      roomDoors: Array.isArray((p as any)?.roomDoors) ? (p as any).roomDoors : [],
       racks: Array.isArray((p as any)?.racks) ? (p as any).racks : [],
       rackItems: Array.isArray((p as any)?.rackItems) ? (p as any).rackItems : [],
       rackLinks: Array.isArray((p as any)?.rackLinks) ? (p as any).rackLinks : []
@@ -2740,6 +2904,7 @@ const PlanView = ({ planId }: Props) => {
       views?: any[];
       rooms?: any[];
       corridors?: any[];
+      roomDoors?: any[];
       racks?: any[];
       rackItems?: any[];
       rackLinks?: any[];
@@ -2754,6 +2919,7 @@ const PlanView = ({ planId }: Props) => {
       views?: any[];
       rooms?: any[];
       corridors?: any[];
+      roomDoors?: any[];
       racks?: any[];
       rackItems?: any[];
       rackLinks?: any[];
@@ -2911,6 +3077,24 @@ const PlanView = ({ planId }: Props) => {
       }
     }
 
+    const aRoomDoors = Array.isArray((current as any).roomDoors) ? ((current as any).roomDoors as any[]) : [];
+    const bRoomDoors = Array.isArray((latest as any).roomDoors) ? ((latest as any).roomDoors as any[]) : [];
+    if (aRoomDoors.length !== bRoomDoors.length) return false;
+    const bRoomDoorsById = new Map<string, any>();
+    for (const door of bRoomDoors) bRoomDoorsById.set(String((door as any)?.id || ''), door);
+    for (const door of aRoomDoors) {
+      const id = String((door as any)?.id || '');
+      const other = bRoomDoorsById.get(id);
+      if (!other) return false;
+      if (String((door as any)?.roomAId || '') !== String((other as any)?.roomAId || '')) return false;
+      if (String((door as any)?.roomBId || '') !== String((other as any)?.roomBId || '')) return false;
+      if (String((door as any)?.anchorRoomId || '') !== String((other as any)?.anchorRoomId || '')) return false;
+      if (Number((door as any)?.edgeIndex) !== Number((other as any)?.edgeIndex)) return false;
+      if (Number((door as any)?.t) !== Number((other as any)?.t)) return false;
+      if (String((door as any)?.mode || 'static') !== String((other as any)?.mode || 'static')) return false;
+      if (String((door as any)?.automationUrl || '') !== String((other as any)?.automationUrl || '')) return false;
+    }
+
     const aRacks = current.racks || [];
     const bRacks = latest.racks || [];
     if (aRacks.length !== bRacks.length) return false;
@@ -3018,6 +3202,7 @@ const PlanView = ({ planId }: Props) => {
         views: snap.views,
         rooms: snap.rooms,
         corridors: snap.corridors,
+        roomDoors: (snap as any).roomDoors,
         links: snap.links,
         racks: snap.racks,
         rackItems: snap.rackItems,
@@ -3101,6 +3286,7 @@ const PlanView = ({ planId }: Props) => {
         views: latest.views,
         rooms: latest.rooms,
         corridors: latest.corridors,
+        roomDoors: (latest as any).roomDoors,
         racks: latest.racks,
         rackItems: latest.rackItems,
         rackLinks: latest.rackLinks
@@ -3108,6 +3294,7 @@ const PlanView = ({ planId }: Props) => {
       const normalizedCurrent = {
         ...current,
         corridors: latestSnapshot.corridors === undefined ? undefined : current.corridors,
+        roomDoors: (latestSnapshot as any).roomDoors === undefined ? undefined : (current as any).roomDoors,
         racks: latestSnapshot.racks === undefined ? undefined : current.racks,
         rackItems: latestSnapshot.rackItems === undefined ? undefined : current.rackItems,
         rackLinks: latestSnapshot.rackLinks === undefined ? undefined : current.rackLinks,
@@ -4182,6 +4369,12 @@ const PlanView = ({ planId }: Props) => {
     }
   }, [selectedCorridorDoor, selectedCorridorId]);
   useEffect(() => {
+    if (!selectedRoomDoorId) return;
+    const currentRoomDoors = Array.isArray((renderPlan as any)?.roomDoors) ? (((renderPlan as any).roomDoors as RoomConnectionDoor[]).filter(Boolean)) : [];
+    const exists = currentRoomDoors.some((door) => door.id === selectedRoomDoorId);
+    if (!exists) setSelectedRoomDoorId(null);
+  }, [renderPlan, selectedRoomDoorId]);
+  useEffect(() => {
     confirmDeleteRef.current = confirmDelete;
   }, [confirmDelete]);
   useEffect(() => {
@@ -4385,7 +4578,9 @@ const PlanView = ({ planId }: Props) => {
     setSelectedRoomIds([]);
     setSelectedCorridorId(undefined);
     setSelectedCorridorDoor(null);
+    setSelectedRoomDoorId(null);
     setSelectedLinkId(null);
+    setRoomDoorDraft(null);
     setLinkFromId(null);
   }, [isReadOnly]);
 
@@ -4454,6 +4649,7 @@ const PlanView = ({ planId }: Props) => {
         setSelectedRoomIds([]);
         setSelectedCorridorId(undefined);
         setSelectedCorridorDoor(null);
+        setSelectedRoomDoorId(null);
         setCorridorQuickMenu(null);
         setSelectedLinkId(null);
       } else if (options?.multi) {
@@ -4461,6 +4657,7 @@ const PlanView = ({ planId }: Props) => {
         setSelectedRoomIds([]);
         setSelectedCorridorId(undefined);
         setSelectedCorridorDoor(null);
+        setSelectedRoomDoorId(null);
         setCorridorQuickMenu(null);
         setSelectedLinkId(null);
         toggleSelectedObject(id);
@@ -4469,6 +4666,7 @@ const PlanView = ({ planId }: Props) => {
         setSelectedRoomIds([]);
         setSelectedCorridorId(undefined);
         setSelectedCorridorDoor(null);
+        setSelectedRoomDoorId(null);
         setCorridorQuickMenu(null);
         setSelectedLinkId(null);
         const currentSelectedIds = selectedObjectIdsRef.current;
@@ -4612,6 +4810,136 @@ const PlanView = ({ planId }: Props) => {
     [corridorDoorDraft, defaultDoorCatalogId, markTouched, objectTypeById, push, t, updateFloorPlan]
   );
 
+  const createRoomDoorFromDraft = useCallback(
+    (roomId: string, point: { x: number; y: number }) => {
+      if (isReadOnlyRef.current) return false;
+      const currentPlan = planRef.current as FloorPlan | undefined;
+      const draft = roomDoorDraft;
+      if (!currentPlan || !draft) return false;
+      const normalizedRoomId = String(roomId || '').trim();
+      if (!normalizedRoomId) return false;
+      const candidateSides = draft.sharedSides.filter((side) => side.anchorRoomId === normalizedRoomId);
+      if (!candidateSides.length) return false;
+      let best:
+        | {
+            side: SharedRoomSide;
+            x: number;
+            y: number;
+            distSq: number;
+            along: number;
+          }
+        | null = null;
+      for (const side of candidateSides) {
+        const proj = projectPointToSegment(side.a, side.b, point);
+        const segLenSq = (side.b.x - side.a.x) * (side.b.x - side.a.x) + (side.b.y - side.a.y) * (side.b.y - side.a.y);
+        const along =
+          segLenSq > 0.000001
+            ? Math.max(
+                0,
+                Math.min(1, ((proj.x - side.a.x) * (side.b.x - side.a.x) + (proj.y - side.a.y) * (side.b.y - side.a.y)) / segLenSq)
+              )
+            : 0;
+        if (!best || proj.distSq < best.distSq) {
+          best = { side, x: proj.x, y: proj.y, distSq: proj.distSq, along };
+        }
+      }
+      if (!best) return false;
+      const maxSnapDist = 18;
+      if (best.distSq > maxSnapDist * maxSnapDist) {
+        push(
+          t({
+            it: 'Posiziona la porta sul lato condiviso tra le due stanze selezionate.',
+            en: 'Place the door on the shared side between the two selected rooms.'
+          }),
+          'info'
+        );
+        return true;
+      }
+      const side = best.side;
+      const tValue = side.tMin + (side.tMax - side.tMin) * best.along;
+      const roomAId = String(draft.roomAId);
+      const roomBId = String(draft.roomBId);
+      const existingDoors = Array.isArray((currentPlan as any).roomDoors) ? ((currentPlan as any).roomDoors as any[]) : [];
+      const duplicate = existingDoors.some((door) => {
+        const normalized = normalizeRoomConnectionDoorInput(door);
+        if (!normalized) return false;
+        const samePair =
+          (normalized.roomAId === roomAId && normalized.roomBId === roomBId) ||
+          (normalized.roomAId === roomBId && normalized.roomBId === roomAId);
+        if (!samePair) return false;
+        if (normalized.anchorRoomId !== side.anchorRoomId) return false;
+        if (Number(normalized.edgeIndex) !== Number(side.edgeIndex)) return false;
+        return Math.abs(Number(normalized.t) - Number(tValue)) < 0.02;
+      });
+      if (duplicate) {
+        push(t({ it: 'Porta di collegamento già presente in questo punto.', en: 'A linking door already exists at this point.' }), 'info');
+        return true;
+      }
+      const doorId = nanoid();
+      const defaultDoorType = defaultDoorCatalogId
+        ? (objectTypeById.get(defaultDoorCatalogId) as ObjectTypeDefinition | undefined)
+        : undefined;
+      const defaultEmergency = !!defaultDoorType?.doorConfig?.isEmergency;
+      const nextDoor: RoomConnectionDoor = {
+        id: doorId,
+        roomAId,
+        roomBId,
+        anchorRoomId: side.anchorRoomId,
+        edgeIndex: Number(side.edgeIndex),
+        t: Number(Math.max(0, Math.min(1, tValue)).toFixed(4)),
+        catalogTypeId: defaultDoorCatalogId || undefined,
+        mode: 'static',
+        description: undefined,
+        isEmergency: defaultEmergency,
+        isMainEntrance: false,
+        isExternal: false,
+        isFireDoor: false,
+        verificationHistory: []
+      };
+      markTouched();
+      updateFloorPlan(currentPlan.id, { roomDoors: [...existingDoors, nextDoor] as any } as any);
+      setRoomDoorDraft(null);
+      setSelectedRoomDoorId(doorId);
+      setContextMenu(null);
+      push(t({ it: 'Porta di collegamento creata', en: 'Connecting door created' }), 'success');
+      return true;
+    },
+    [defaultDoorCatalogId, markTouched, objectTypeById, projectPointToSegment, push, roomDoorDraft, t, updateFloorPlan]
+  );
+
+  const startRoomDoorDraft = useCallback(
+    (roomAId: string, roomBId: string) => {
+      if (isReadOnlyRef.current) return;
+      const currentPlan = renderPlan as FloorPlan | undefined;
+      if (!currentPlan) return;
+      const roomA = ((currentPlan.rooms || []) as Room[]).find((room) => room.id === roomAId);
+      const roomB = ((currentPlan.rooms || []) as Room[]).find((room) => room.id === roomBId);
+      if (!roomA || !roomB) return;
+      const sharedSides = getSharedRoomSides(roomA, roomB);
+      if (!sharedSides.length) {
+        push(
+          t({
+            it: 'Le due stanze devono condividere un lato sovrapposto per creare una porta di collegamento.',
+            en: 'The two rooms must share an overlapping side to create a connecting door.'
+          }),
+          'danger'
+        );
+        return;
+      }
+      setRoomDoorDraft({ roomAId, roomBId, sharedSides });
+      setSelectedRoomDoorId(null);
+      setContextMenu(null);
+      push(
+        t({
+          it: 'Seleziona sul perimetro condiviso di una delle due stanze il punto in cui inserire la porta.',
+          en: 'Select on the shared perimeter of one of the two rooms where to place the door.'
+        }),
+        'info'
+      );
+    },
+    [getSharedRoomSides, push, renderPlan, t]
+  );
+
   const toggleMapSubmenu = useCallback((section: typeof mapSubmenu) => {
     setMapSubmenu((prev) => (prev === section ? null : section));
   }, []);
@@ -4628,9 +4956,12 @@ const PlanView = ({ planId }: Props) => {
   const handleRoomContextMenu = useCallback(
     ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
       dismissSelectionHintToasts();
+      if (roomDoorDraft) {
+        if (createRoomDoorFromDraft(id, { x: worldX, y: worldY })) return;
+      }
       setContextMenu({ kind: 'room', id, x: clientX, y: clientY, worldX, worldY });
     },
-    [dismissSelectionHintToasts]
+    [createRoomDoorFromDraft, dismissSelectionHintToasts, roomDoorDraft]
   );
 
   const handleCorridorContextMenu = useCallback(
@@ -4665,6 +4996,13 @@ const PlanView = ({ planId }: Props) => {
     ({ corridorId, doorId, clientX, clientY }: { corridorId: string; doorId: string; clientX: number; clientY: number }) => {
       dismissSelectionHintToasts();
       setContextMenu({ kind: 'corridor_door', corridorId, doorId, x: clientX, y: clientY });
+    },
+    [dismissSelectionHintToasts]
+  );
+  const handleRoomDoorContextMenu = useCallback(
+    ({ doorId, clientX, clientY }: { doorId: string; clientX: number; clientY: number }) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'room_door', doorId, x: clientX, y: clientY });
     },
     [dismissSelectionHintToasts]
   );
@@ -4812,6 +5150,7 @@ const PlanView = ({ planId }: Props) => {
           setSelectedRoomId(undefined);
           setSelectedRoomIds([]);
           setSelectedCorridorId(undefined);
+          setSelectedRoomDoorId(null);
           setSelectedCorridorDoor({ corridorId: bestHit.corridorId, doorId: bestHit.doorId });
           setContextMenu({
             kind: 'corridor_door',
@@ -4830,12 +5169,14 @@ const PlanView = ({ planId }: Props) => {
         setSelectedRoomId(undefined);
         setSelectedRoomIds([]);
         setSelectedCorridorDoor(null);
+        setSelectedRoomDoorId(null);
         setSelectedCorridorId(corridorId);
         setContextMenu({ kind: 'corridor', id: corridorId, x: clientX, y: clientY, worldX, worldY });
         return;
       }
       const roomId = getRoomIdAt((renderPlan as FloorPlan | undefined)?.rooms, worldX, worldY);
       if (roomId) {
+        if (roomDoorDraft && createRoomDoorFromDraft(roomId, { x: worldX, y: worldY })) return;
         if (!effectiveVisibleLayerIds.includes('rooms')) {
           const now = Date.now();
           if (now - roomLayerNoticeRef.current > 1200) {
@@ -4854,6 +5195,8 @@ const PlanView = ({ planId }: Props) => {
         clearSelection();
         setSelectedLinkId(null);
         setSelectedCorridorId(undefined);
+        setSelectedCorridorDoor(null);
+        setSelectedRoomDoorId(null);
         setSelectedRoomId(roomId);
         setSelectedRoomIds([roomId]);
         setContextMenu({ kind: 'room', id: roomId, x: clientX, y: clientY, worldX, worldY });
@@ -4863,10 +5206,13 @@ const PlanView = ({ planId }: Props) => {
     },
     [
       clearSelection,
+      createRoomDoorFromDraft,
       dismissSelectionHintToasts,
       effectiveVisibleLayerIds,
       push,
       renderPlan,
+      roomDoorDraft,
+      setSelectedRoomDoorId,
       setSelectedCorridorDoor,
       setSelectedCorridorId,
       setSelectedLinkId,
@@ -5121,25 +5467,6 @@ const PlanView = ({ planId }: Props) => {
     getPastePoint
   });
 
-  const getRoomPolygon = (room: any) => {
-    const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-    if (kind === 'poly') {
-      const pts = Array.isArray(room?.points) ? room.points : [];
-      return pts.length >= 3 ? pts : [];
-    }
-    const x = Number(room?.x || 0);
-    const y = Number(room?.y || 0);
-    const w = Number(room?.width || 0);
-    const h = Number(room?.height || 0);
-    if (!w || !h) return [];
-    return [
-      { x, y },
-      { x: x + w, y },
-      { x: x + w, y: y + h },
-      { x, y: y + h }
-    ];
-  };
-
   const getCorridorPolygon = useCallback((corridor: any) => {
     const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
     if (kind === 'poly') {
@@ -5169,23 +5496,6 @@ const PlanView = ({ planId }: Props) => {
       { x, y: y + h }
     ];
   }, []);
-
-  const projectPointToSegment = useCallback(
-    (a: { x: number; y: number }, b: { x: number; y: number }, p: { x: number; y: number }) => {
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const lenSq = dx * dx + dy * dy;
-      if (lenSq <= 0.0000001) {
-        return { t: 0, x: a.x, y: a.y, distSq: (p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y) };
-      }
-      const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
-      const x = a.x + dx * t;
-      const y = a.y + dy * t;
-      const distSq = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
-      return { t, x, y, distSq };
-    },
-    []
-  );
 
   const getClosestCorridorEdge = useCallback(
     (corridor: Corridor, point: { x: number; y: number }) => {
@@ -5217,6 +5527,7 @@ const PlanView = ({ planId }: Props) => {
     },
     [getCorridorPolygon]
   );
+
 
   const roomContextMetrics = useMemo(() => {
     if (!contextMenu || contextMenu.kind !== 'room' || !renderPlan) return null;
@@ -5334,32 +5645,44 @@ const PlanView = ({ planId }: Props) => {
     return buildRoomPreview(points);
   }, [buildRoomPreview, roomWallTypeModal]);
 
-  const segmentsIntersect = (
+  const cross = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) =>
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+
+  const isPointOnSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
+    const tolerance = 0.25;
+    if (Math.abs(cross(a, b, p)) > tolerance) return false;
+    return (
+      p.x >= Math.min(a.x, b.x) - tolerance &&
+      p.x <= Math.max(a.x, b.x) + tolerance &&
+      p.y >= Math.min(a.y, b.y) - tolerance &&
+      p.y <= Math.max(a.y, b.y) + tolerance
+    );
+  };
+
+  const isPointOnPolygonBoundary = (point: { x: number; y: number }, polygon: { x: number; y: number }[]) => {
+    if (polygon.length < 2) return false;
+    for (let i = 0; i < polygon.length; i += 1) {
+      const a = polygon[i];
+      const b = polygon[(i + 1) % polygon.length];
+      if (isPointOnSegment(point, a, b)) return true;
+    }
+    return false;
+  };
+
+  const segmentsProperlyIntersect = (
     a: { x: number; y: number },
     b: { x: number; y: number },
     c: { x: number; y: number },
     d: { x: number; y: number }
   ) => {
-    const orient = (p: any, q: any, r: any) => {
-      const v = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-      if (Math.abs(v) < 0.000001) return 0;
-      return v > 0 ? 1 : 2;
-    };
-    const onSegment = (p: any, q: any, r: any) =>
-      Math.min(p.x, r.x) <= q.x + 0.000001 &&
-      q.x <= Math.max(p.x, r.x) + 0.000001 &&
-      Math.min(p.y, r.y) <= q.y + 0.000001 &&
-      q.y <= Math.max(p.y, r.y) + 0.000001;
-    const o1 = orient(a, b, c);
-    const o2 = orient(a, b, d);
-    const o3 = orient(c, d, a);
-    const o4 = orient(c, d, b);
-    if (o1 !== o2 && o3 !== o4) return true;
-    if (o1 === 0 && onSegment(a, c, b)) return true;
-    if (o2 === 0 && onSegment(a, d, b)) return true;
-    if (o3 === 0 && onSegment(c, a, d)) return true;
-    if (o4 === 0 && onSegment(c, b, d)) return true;
-    return false;
+    const tolerance = 0.000001;
+    const c1 = cross(a, b, c);
+    const c2 = cross(a, b, d);
+    const c3 = cross(c, d, a);
+    const c4 = cross(c, d, b);
+    const straddleAB = (c1 > tolerance && c2 < -tolerance) || (c1 < -tolerance && c2 > tolerance);
+    const straddleCD = (c3 > tolerance && c4 < -tolerance) || (c3 < -tolerance && c4 > tolerance);
+    return straddleAB && straddleCD;
   };
 
   const polygonsOverlap = (a: { x: number; y: number }[], b: { x: number; y: number }[]) => {
@@ -5388,11 +5711,17 @@ const PlanView = ({ planId }: Props) => {
       for (let j = 0; j < b.length; j += 1) {
         const b1 = b[j];
         const b2 = b[(j + 1) % b.length];
-        if (segmentsIntersect(a1, a2, b1, b2)) return true;
+        if (segmentsProperlyIntersect(a1, a2, b1, b2)) return true;
       }
     }
-    if (isPointInPoly(a, b[0].x, b[0].y)) return true;
-    if (isPointInPoly(b, a[0].x, a[0].y)) return true;
+    for (const p of a) {
+      if (isPointOnPolygonBoundary(p, b)) continue;
+      if (isPointInPoly(b, p.x, p.y)) return true;
+    }
+    for (const p of b) {
+      if (isPointOnPolygonBoundary(p, a)) continue;
+      if (isPointInPoly(a, p.x, p.y)) return true;
+    }
     return false;
   };
 
@@ -5428,6 +5757,73 @@ const PlanView = ({ planId }: Props) => {
     toast.dismiss(scaleToastIdRef.current);
     scaleToastIdRef.current = null;
   }, []);
+
+  const dismissMeasureToast = useCallback(() => {
+    if (measureToastIdRef.current == null) return;
+    toast.dismiss(measureToastIdRef.current);
+    measureToastIdRef.current = null;
+  }, []);
+
+  const formatMeasureLengthLabel = useCallback(
+    (lengthPx: number) => {
+      if (metersPerPixel) {
+        const unit = lang === 'it' ? 'ml' : 'm';
+        return `${formatNumber(lengthPx * metersPerPixel)} ${unit}`;
+      }
+      return `${formatNumber(lengthPx)} px`;
+    },
+    [formatNumber, lang, metersPerPixel]
+  );
+
+  const showMeasureToast = useCallback(
+    (points: { x: number; y: number }[], options?: { closed?: boolean; finished?: boolean }) => {
+      const closed = !!options?.closed;
+      const finished = !!options?.finished;
+      let totalPx = computePolylineLength(points);
+      if (closed && points.length > 2) {
+        const first = points[0];
+        const last = points[points.length - 1];
+        totalPx += Math.hypot(first.x - last.x, first.y - last.y);
+      }
+      const sideCount = Math.max(0, points.length - 1) + (closed && points.length > 2 ? 1 : 0);
+      const totalLabel = formatMeasureLengthLabel(totalPx);
+      const message =
+        lang === 'it' ? (
+          <span>
+            Misurazione attiva: default orizz./vert., <strong>Shift</strong> linea libera, <strong>Backspace</strong> annulla ultimo punto,{' '}
+            <strong>Invio</strong> termina, <strong>Q</strong> converte in quote.
+            <br />
+            <strong>
+              Lati: {sideCount} | Totale: {totalLabel}
+            </strong>
+            {finished ? (
+              <>
+                <br />
+                Misurazione conclusa. Premi <strong>Q</strong> per convertirla in quote.
+              </>
+            ) : null}
+          </span>
+        ) : (
+          <span>
+            Measurement active: default horizontal/vertical, <strong>Shift</strong> free line, <strong>Backspace</strong> removes last point,{' '}
+            <strong>Enter</strong> finishes, <strong>Q</strong> converts to quotes.
+            <br />
+            <strong>
+              Sides: {sideCount} | Total: {totalLabel}
+            </strong>
+            {finished ? (
+              <>
+                <br />
+                Measurement finished. Press <strong>Q</strong> to convert it into quotes.
+              </>
+            ) : null}
+          </span>
+        );
+      const toastId = toast.info(message, { duration: Infinity, id: measureToastIdRef.current || undefined });
+      measureToastIdRef.current = toastId;
+    },
+    [computePolylineLength, formatMeasureLengthLabel, lang]
+  );
 
   const computeRoomReassignments = (rooms: any[] | undefined, objects: any[]) => {
     const updates: Record<string, string | undefined> = {};
@@ -5916,12 +6312,14 @@ const PlanView = ({ planId }: Props) => {
       setScaleMode(false);
       setWallDrawMode(false);
       setPendingType(null);
+      showMeasureToast(nextPoints, { closed: false, finished: false });
     },
-    [metersPerPixel, push, t]
+    [metersPerPixel, push, showMeasureToast, t]
   );
 
   const stopMeasure = useCallback(() => {
     if (!measureMode) return;
+    dismissMeasureToast();
     setMeasureMode(false);
     setMeasurePoints([]);
     setMeasurePointer(null);
@@ -5931,7 +6329,11 @@ const PlanView = ({ planId }: Props) => {
     measureClosedRef.current = false;
     measureFinishedRef.current = false;
     push(t({ it: 'Misurazione annullata', en: 'Measurement cancelled' }), 'info');
-  }, [measureMode, push, t]);
+  }, [dismissMeasureToast, measureMode, push, t]);
+
+  useEffect(() => {
+    if (!measureMode) dismissMeasureToast();
+  }, [dismissMeasureToast, measureMode]);
 
   const startQuote = useCallback(
     (point?: { x: number; y: number }) => {
@@ -6037,16 +6439,128 @@ const PlanView = ({ planId }: Props) => {
     ]
   );
 
+  const convertMeasurementToQuotes = useCallback(() => {
+    if (!measureMode) return;
+    if (isReadOnly || !renderPlan) {
+      push(t({ it: 'Non puoi creare quote in sola lettura.', en: 'You cannot create quotes in read-only mode.' }), 'info');
+      return;
+    }
+    const points = [...measurePointsRef.current];
+    const closed = !!measureClosedRef.current;
+    const segments: Array<{ start: { x: number; y: number }; end: { x: number; y: number } }> = [];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      segments.push({ start: points[i], end: points[i + 1] });
+    }
+    if (closed && points.length > 2) {
+      segments.push({ start: points[points.length - 1], end: points[0] });
+    }
+    if (!segments.length) {
+      push(t({ it: 'Aggiungi almeno due punti per convertire in quote.', en: 'Add at least two points to convert into quotes.' }), 'info');
+      return;
+    }
+    const minSegment = 6 / Math.max(0.2, zoom || 1);
+    const quoteScale = Math.max(0.5, Math.min(1.6, Number(lastQuoteScale) || 1));
+    const quoteColor = lastQuoteColor || '#f97316';
+    const quoteLabelScale = Math.max(0.6, Math.min(2, Number(lastQuoteLabelScale) || 1));
+    const quoteLabelColor = lastQuoteLabelColor || '#0f172a';
+    const quoteLabelOffset = 1;
+    const quoteDashed = !!lastQuoteDashed;
+    const quoteEndpoint = lastQuoteEndpoint || 'arrows';
+    let created = 0;
+    markTouched();
+    for (const segment of segments) {
+      const distance = Math.hypot(segment.end.x - segment.start.x, segment.end.y - segment.start.y);
+      if (distance < minSegment) continue;
+      const orientation = getQuoteOrientation([segment.start, segment.end]);
+      const quoteLabelPos = orientation === 'vertical' ? lastQuoteLabelPosV : lastQuoteLabelPosH;
+      const quoteLabelBg = quoteLabelPos === 'center' || lastQuoteLabelBg === true;
+      addObject(
+        renderPlan.id,
+        'quote',
+        '',
+        undefined,
+        segment.start.x,
+        segment.start.y,
+        quoteScale,
+        inferDefaultLayerIds('quote', layerIdSet),
+        {
+          points: [segment.start, segment.end],
+          strokeColor: quoteColor,
+          strokeWidth: 2,
+          opacity: 1,
+          quoteLabelPos,
+          quoteLabelScale,
+          quoteLabelBg,
+          quoteLabelColor,
+          quoteLabelOffset,
+          quoteDashed,
+          quoteEndpoint
+        }
+      );
+      created += 1;
+    }
+    if (!created) {
+      push(t({ it: 'Nessun lato valido da convertire in quota.', en: 'No valid side to convert into quote.' }), 'info');
+      return;
+    }
+    ensureObjectLayerVisible(['quotes'], getTypeLabel('quote'), 'quote');
+    setMeasureMode(false);
+    setMeasurePoints([]);
+    setMeasurePointer(null);
+    setMeasureClosed(false);
+    setMeasureFinished(false);
+    measurePointsRef.current = [];
+    measureClosedRef.current = false;
+    measureFinishedRef.current = false;
+    dismissMeasureToast();
+    push(
+      t({
+        it: `Quote create dalla misurazione: ${created}.`,
+        en: `Quotes created from measurement: ${created}.`
+      }),
+      'success'
+    );
+  }, [
+    addObject,
+    dismissMeasureToast,
+    ensureObjectLayerVisible,
+    getQuoteOrientation,
+    getTypeLabel,
+    inferDefaultLayerIds,
+    isReadOnly,
+    lastQuoteColor,
+    lastQuoteDashed,
+    lastQuoteEndpoint,
+    lastQuoteLabelBg,
+    lastQuoteLabelColor,
+    lastQuoteLabelPosH,
+    lastQuoteLabelPosV,
+    lastQuoteLabelScale,
+    lastQuoteScale,
+    layerIdSet,
+    markTouched,
+    measureMode,
+    push,
+    renderPlan,
+    t,
+    zoom
+  ]);
+
   const handleMeasurePoint = useCallback(
-    (point: { x: number; y: number }) => {
+    (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
       if (!measureMode || measureFinishedRef.current) return;
       const points = measurePointsRef.current;
       if (!points.length) {
         const next = [point];
         measurePointsRef.current = next;
         setMeasurePoints(next);
+        showMeasureToast(next, { closed: false, finished: false });
         return;
       }
+      const anchor = points[points.length - 1];
+      const resolved = resolveAxisLockedPoint(point, anchor, options);
+      const minSegment = 6 / Math.max(0.2, zoom || 1);
+      if (Math.hypot(resolved.x - anchor.x, resolved.y - anchor.y) < minSegment) return;
       const closeThreshold = 12 / Math.max(0.2, zoom || 1);
       if (points.length >= 3) {
         const first = points[0];
@@ -6057,14 +6571,16 @@ const PlanView = ({ planId }: Props) => {
           measureClosedRef.current = true;
           measureFinishedRef.current = true;
           setMeasurePointer(null);
+          showMeasureToast(points, { closed: true, finished: true });
           return;
         }
       }
-      const next = [...points, point];
+      const next = [...points, resolved];
       measurePointsRef.current = next;
       setMeasurePoints(next);
+      showMeasureToast(next, { closed: false, finished: false });
     },
-    [measureMode, zoom]
+    [measureMode, resolveAxisLockedPoint, showMeasureToast, zoom]
   );
 
   const handleToolPoint = useCallback(
@@ -6082,7 +6598,7 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
       if (measureMode) {
-        handleMeasurePoint(point);
+        handleMeasurePoint(point, options);
       }
     },
     [handleMeasurePoint, handleQuotePoint, handleScalePoint, handleWallPoint, measureMode, quoteMode, scaleMode, wallDrawMode]
@@ -6118,6 +6634,8 @@ const PlanView = ({ planId }: Props) => {
       if (measureMode) {
         if (measureFinishedRef.current) return;
         const points = measurePointsRef.current;
+        const anchor = points.length ? points[points.length - 1] : null;
+        const resolved = resolveAxisLockedPoint(point, anchor, options);
         if (points.length >= 3) {
           const first = points[0];
           const closeThreshold = 12 / Math.max(0.2, zoom || 1);
@@ -6127,7 +6645,7 @@ const PlanView = ({ planId }: Props) => {
             return;
           }
         }
-        setMeasurePointer(point);
+        setMeasurePointer(resolved);
       }
     },
     [
@@ -6150,10 +6668,11 @@ const PlanView = ({ planId }: Props) => {
         setMeasureFinished(true);
         measureFinishedRef.current = true;
         setMeasurePointer(null);
+        showMeasureToast(measurePointsRef.current, { closed: true, finished: true });
       }
       return;
     }
-  }, [measureMode]);
+  }, [measureMode, showMeasureToast]);
 
   const handleWallDraftContextMenu = useCallback(() => {
     if (!wallDrawMode) return;
@@ -6384,6 +6903,12 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
+	      if (!isTyping && measureMode && e.key.toLowerCase() === 'q') {
+	        e.preventDefault();
+	        convertMeasurementToQuotes();
+	        return;
+	      }
+
 	      if (!isTyping && e.key.toLowerCase() === 'q') {
 	        e.preventDefault();
 	        if (quoteMode) {
@@ -6439,6 +6964,7 @@ const PlanView = ({ planId }: Props) => {
         const next = measurePointsRef.current.slice(0, -1);
         measurePointsRef.current = next;
         setMeasurePoints(next);
+        showMeasureToast(next, { closed: false, finished: false });
         return;
       }
 
@@ -6454,6 +6980,7 @@ const PlanView = ({ planId }: Props) => {
         setMeasureFinished(true);
         measureFinishedRef.current = true;
         setMeasurePointer(null);
+        showMeasureToast(measurePointsRef.current, { closed: measureClosedRef.current, finished: true });
         return;
       }
 
@@ -6475,6 +7002,13 @@ const PlanView = ({ planId }: Props) => {
         e.preventDefault();
         setCorridorDoorDraft(null);
         push(t({ it: 'Disegno porta corridoio annullato', en: 'Corridor door drawing cancelled' }), 'info');
+        return;
+      }
+
+      if (roomDoorDraft && e.key === 'Escape') {
+        e.preventDefault();
+        setRoomDoorDraft(null);
+        push(t({ it: 'Inserimento porta di collegamento annullato', en: 'Connecting door placement cancelled' }), 'info');
         return;
       }
 
@@ -6859,6 +7393,8 @@ const PlanView = ({ planId }: Props) => {
         const allIds = ((currentPlan as FloorPlan).objects || []).map((o) => o.id);
         const allRoomIds = ((currentPlan as FloorPlan).rooms || []).map((r) => r.id);
         setSelectedCorridorId(undefined);
+        setSelectedCorridorDoor(null);
+        setSelectedRoomDoorId(null);
         setSelection(allIds);
         setContextMenu(null);
         setSelectedRoomId(allRoomIds.length === 1 ? allRoomIds[0] : undefined);
@@ -6878,13 +7414,15 @@ const PlanView = ({ planId }: Props) => {
         if (photoViewer) {
           return;
         }
-        if (currentSelectedIds.length || selectedRoomId || selectedRoomIds.length || selectedCorridorId) {
+        if (currentSelectedIds.length || selectedRoomId || selectedRoomIds.length || selectedCorridorId || selectedCorridorDoor || selectedRoomDoorId) {
           e.preventDefault();
           setContextMenu(null);
           clearSelection();
           setSelectedRoomId(undefined);
           setSelectedRoomIds([]);
           setSelectedCorridorId(undefined);
+          setSelectedCorridorDoor(null);
+          setSelectedRoomDoorId(null);
           setSelectedLinkId(null);
         }
         return;
@@ -6970,6 +7508,17 @@ const PlanView = ({ planId }: Props) => {
         push(t({ it: 'Porta del corridoio eliminata', en: 'Corridor door deleted' }), 'info');
         return;
       }
+      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && selectedRoomDoorId && isDeleteKey && currentPlan) {
+        e.preventDefault();
+        if (isReadOnlyRef.current) return;
+        const currentDoors = Array.isArray((currentPlan as any).roomDoors) ? ((currentPlan as any).roomDoors as any[]) : [];
+        const nextDoors = currentDoors.filter((door) => String((door as any)?.id || '') !== String(selectedRoomDoorId));
+        markTouched();
+        updateFloorPlan((currentPlan as FloorPlan).id, { roomDoors: nextDoors as any } as any);
+        setSelectedRoomDoorId(null);
+        push(t({ it: 'Porta di collegamento eliminata', en: 'Connecting door deleted' }), 'info');
+        return;
+      }
       if (!currentSelectedIds.length && selectedRoomIds.length && isDeleteKey && currentPlan) {
         e.preventDefault();
         if (isReadOnlyRef.current) return;
@@ -7013,6 +7562,7 @@ const PlanView = ({ planId }: Props) => {
     allTypesOpen,
     cancelScaleMode,
     clearSelection,
+    convertMeasurementToQuotes,
     copySelection,
     deleteLink,
     deleteObject,
@@ -7033,6 +7583,7 @@ const PlanView = ({ planId }: Props) => {
     requestPaste,
     resetTouched,
     corridorDoorDraft,
+    roomDoorDraft,
     corridorDrawMode,
     corridorModal,
     corridorConnectionModal,
@@ -7043,6 +7594,7 @@ const PlanView = ({ planId }: Props) => {
     scaleMode,
     selectedCorridorId,
     selectedCorridorDoor,
+    selectedRoomDoorId,
     selectedRoomId,
     selectedRoomIds,
     setConfirmDeleteCorridorId,
@@ -7059,6 +7611,7 @@ const PlanView = ({ planId }: Props) => {
     startWallDraw,
     stopMeasure,
     stopQuote,
+    showMeasureToast,
     t,
     toSnapshot,
 	    updateFloorPlan,
@@ -7201,6 +7754,7 @@ const PlanView = ({ planId }: Props) => {
 
   const rooms = useMemo(() => renderPlan?.rooms || [], [renderPlan?.rooms]);
   const corridors = useMemo(() => (renderPlan?.corridors || []) as Corridor[], [renderPlan?.corridors]);
+  const roomDoors = useMemo(() => ((renderPlan as any)?.roomDoors || []) as RoomConnectionDoor[], [(renderPlan as any)?.roomDoors]);
   const corridorLabelHelpToastId = 'corridor-label-help';
   const corridorPolyHelpToastId = 'corridor-poly-help';
   const roomPolyHelpToastId = 'room-poly-help';
@@ -7738,16 +8292,86 @@ const PlanView = ({ planId }: Props) => {
     });
   };
 
+  const snapRoomRectToAdjacentSide = useCallback(
+    (inputRect: { x: number; y: number; width: number; height: number }) => {
+      const width = Math.max(0, Number(inputRect.width) || 0);
+      const height = Math.max(0, Number(inputRect.height) || 0);
+      if (width < 1 || height < 1) return inputRect;
+      const rect = {
+        x: Number(inputRect.x) || 0,
+        y: Number(inputRect.y) || 0,
+        width,
+        height
+      };
+      const snapThreshold = 14;
+      const minOverlap = 10;
+      type SnapCandidate = { distance: number; nextX: number; nextY: number };
+      let best: SnapCandidate | null = null;
+      const registerCandidate = (distance: number, nextX: number, nextY: number) => {
+        if (!Number.isFinite(distance) || distance > snapThreshold) return;
+        if (best && distance >= best.distance) return;
+        best = { distance, nextX, nextY };
+      };
+      const existingRooms = (((plan as FloorPlan | undefined)?.rooms || []) as Room[]).filter(Boolean);
+      for (const room of existingRooms) {
+        const points = getRoomPolygon(room as any);
+        if (points.length < 2) continue;
+        for (let i = 0; i < points.length; i += 1) {
+          const a = points[i];
+          const b = points[(i + 1) % points.length];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const isVertical = Math.abs(dx) <= Math.abs(dy) * 0.15;
+          const isHorizontal = Math.abs(dy) <= Math.abs(dx) * 0.15;
+          if (!isVertical && !isHorizontal) continue;
+          if (isVertical) {
+            const edgeX = (a.x + b.x) / 2;
+            const edgeMinY = Math.min(a.y, b.y);
+            const edgeMaxY = Math.max(a.y, b.y);
+            const overlapY = Math.min(rect.y + rect.height, edgeMaxY) - Math.max(rect.y, edgeMinY);
+            if (overlapY < minOverlap) continue;
+            registerCandidate(Math.abs(rect.x - edgeX), edgeX, rect.y);
+            registerCandidate(Math.abs(rect.x + rect.width - edgeX), edgeX - rect.width, rect.y);
+            continue;
+          }
+          const edgeY = (a.y + b.y) / 2;
+          const edgeMinX = Math.min(a.x, b.x);
+          const edgeMaxX = Math.max(a.x, b.x);
+          const overlapX = Math.min(rect.x + rect.width, edgeMaxX) - Math.max(rect.x, edgeMinX);
+          if (overlapX < minOverlap) continue;
+          registerCandidate(Math.abs(rect.y - edgeY), rect.x, edgeY);
+          registerCandidate(Math.abs(rect.y + rect.height - edgeY), rect.x, edgeY - rect.height);
+        }
+      }
+      if (!best) return rect;
+      const snapped = best as SnapCandidate;
+      return {
+        x: Number(snapped.nextX.toFixed(2)),
+        y: Number(snapped.nextY.toFixed(2)),
+        width: rect.width,
+        height: rect.height
+      };
+    },
+    [plan]
+  );
+
   const handleCreateRoomFromRect = (rect: { x: number; y: number; width: number; height: number }) => {
     if (isReadOnly) return;
-    const testRoom = { id: 'new-room', name: '', kind: 'rect', ...rect };
+    const normalizedRect = {
+      x: Number(rect.x) || 0,
+      y: Number(rect.y) || 0,
+      width: Math.max(0, Number(rect.width) || 0),
+      height: Math.max(0, Number(rect.height) || 0)
+    };
+    const snappedRect = snapRoomRectToAdjacentSide(normalizedRect);
+    const testRoom = { id: 'new-room', name: '', kind: 'rect', ...snappedRect };
     if (hasRoomOverlap(testRoom)) {
       notifyRoomOverlap();
       setRoomDrawMode(null);
       return;
     }
     setRoomDrawMode(null);
-    setRoomModal({ mode: 'create', kind: 'rect', rect });
+    setRoomModal({ mode: 'create', kind: 'rect', rect: snappedRect });
   };
 
   const handleCreateRoomFromPoly = (points: { x: number; y: number }[]) => {
@@ -7857,6 +8481,31 @@ const PlanView = ({ planId }: Props) => {
       });
     },
     [corridors, defaultDoorCatalogId, doorTypeIdSet, objectTypeById]
+  );
+  const openRoomDoorModal = useCallback(
+    (doorId: string) => {
+      const door = roomDoors.find((entry) => entry.id === doorId);
+      if (!door) return;
+      const rawCatalogTypeId = typeof (door as any)?.catalogTypeId === 'string' ? String((door as any).catalogTypeId) : '';
+      const catalogTypeId = defaultDoorCatalogId || (doorTypeIdSet.has(rawCatalogTypeId) ? rawCatalogTypeId : '');
+      const doorType = catalogTypeId ? (objectTypeById.get(catalogTypeId) as ObjectTypeDefinition | undefined) : undefined;
+      const defaultEmergency = !!(doorType as any)?.doorConfig?.isEmergency;
+      setCorridorDoorModal({
+        corridorId: '__room__',
+        doorId,
+        description: typeof (door as any)?.description === 'string' ? String((door as any).description) : '',
+        isEmergency: typeof (door as any)?.isEmergency === 'boolean' ? !!(door as any).isEmergency : defaultEmergency,
+        isMainEntrance: !!(door as any)?.isMainEntrance,
+        isExternal: !!(door as any)?.isExternal,
+        isFireDoor: !!(door as any)?.isFireDoor,
+        lastVerificationAt: typeof (door as any)?.lastVerificationAt === 'string' ? String((door as any).lastVerificationAt) : '',
+        verifierCompany: typeof (door as any)?.verifierCompany === 'string' ? String((door as any).verifierCompany) : '',
+        verificationHistory: normalizeDoorVerificationHistory((door as any)?.verificationHistory),
+        mode: door.mode === 'auto_sensor' || door.mode === 'automated' ? door.mode : 'static',
+        automationUrl: String((door as any).automationUrl || '')
+      });
+    },
+    [defaultDoorCatalogId, doorTypeIdSet, objectTypeById, roomDoors]
   );
   const openCorridorDoorLinkModal = useCallback(
     (corridorId: string, doorId: string) => {
@@ -7968,6 +8617,31 @@ const PlanView = ({ planId }: Props) => {
           ...verificationHistory
         ]);
       }
+    }
+    if (corridorDoorModal.corridorId === '__room__') {
+      const currentRoomDoors = Array.isArray((plan as any).roomDoors) ? ((plan as any).roomDoors as any[]) : [];
+      const nextRoomDoors = currentRoomDoors.map((door) =>
+        String((door as any)?.id || '') === corridorDoorModal.doorId
+          ? {
+              ...door,
+              description: description || undefined,
+              isEmergency,
+              isMainEntrance,
+              isExternal,
+              isFireDoor,
+              lastVerificationAt: isEmergency ? lastVerificationAt || undefined : undefined,
+              verifierCompany: isEmergency ? verifierCompany || undefined : undefined,
+              verificationHistory,
+              mode,
+              automationUrl: mode === 'automated' ? automationUrl || undefined : undefined
+            }
+          : door
+      );
+      markTouched();
+      updateFloorPlan(plan.id, { roomDoors: nextRoomDoors as any } as any);
+      push(t({ it: 'Proprietà porta aggiornate', en: 'Door properties updated' }), 'success');
+      setCorridorDoorModal(null);
+      return;
     }
     const current = (plan.corridors || []) as Corridor[];
     const next = current.map((corridor) => {
@@ -9793,7 +10467,11 @@ const PlanView = ({ planId }: Props) => {
                             layerId === ALL_ITEMS_LAYER_ID
                               ? allItemsLabel
                               : (layer?.name?.[lang] as string) || (layer?.name?.it as string) || layerId;
-                          const checked = hideAllLayers ? false : visibleLayerIds.includes(layerId);
+                          const checked = hideAllLayers
+                            ? false
+                            : layerId === ALL_ITEMS_LAYER_ID
+                              ? allItemsSelected
+                              : allItemsSelected || effectiveVisibleLayerIds.includes(layerId);
                           const note = getLayerNote(layer);
                           return (
                           <label
@@ -9805,7 +10483,7 @@ const PlanView = ({ planId }: Props) => {
                               className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
                               checked={checked}
                               onChange={() => {
-                                const base = hideAllLayers ? [] : visibleLayerIds;
+                                const base = hideAllLayers ? [] : effectiveVisibleLayerIds;
                                 setHideAllLayers(planId, false);
                                 if (layerId === ALL_ITEMS_LAYER_ID) {
                                   setVisibleLayerIds(planId, checked ? [] : layerIds);
@@ -10838,6 +11516,8 @@ const PlanView = ({ planId }: Props) => {
                         setSelectedRoomIds(ids);
                         setSelectedRoomId(ids.length === 1 ? ids[0] : undefined);
                         setSelectedCorridorId(undefined);
+                        setSelectedCorridorDoor(null);
+                        setSelectedRoomDoorId(null);
                       }}
 	                    onSelectLink={(id) => {
 	                      if (!id) {
@@ -10852,6 +11532,8 @@ const PlanView = ({ planId }: Props) => {
 	                        setSelectedRoomId(undefined);
                         setSelectedRoomIds([]);
                         setSelectedCorridorId(undefined);
+                        setSelectedCorridorDoor(null);
+                        setSelectedRoomDoorId(null);
 	                        return;
 	                      }
 	                      setSelectedLinkId(id || null);
@@ -10860,10 +11542,14 @@ const PlanView = ({ planId }: Props) => {
 	                      setSelectedRoomId(undefined);
                       setSelectedRoomIds([]);
                       setSelectedCorridorId(undefined);
+                      setSelectedCorridorDoor(null);
+                      setSelectedRoomDoorId(null);
 	                    }}
 	                    onSelectMany={(ids) => {
                       setSelectedLinkId(null);
                       setSelectedCorridorId(undefined);
+                      setSelectedCorridorDoor(null);
+                      setSelectedRoomDoorId(null);
 	                    setSelection(ids);
 	                    setContextMenu(null);
 	                  }}
@@ -10898,13 +11584,43 @@ const PlanView = ({ planId }: Props) => {
                       if (isReadOnly) return;
                       setLinkEditId(id);
                     }}
-		                onMapContextMenu={handleMapContextMenu}
-	                onGoDefaultView={goToDefaultView}
+                    onMapContextMenu={handleMapContextMenu}
+                    onGoDefaultView={goToDefaultView}
                     onSelectRoom={(roomId, options) => {
+                      if (roomDoorDraft && roomId && Number.isFinite(Number(options?.worldX)) && Number.isFinite(Number(options?.worldY))) {
+                        if (createRoomDoorFromDraft(roomId, { x: Number(options?.worldX), y: Number(options?.worldY) })) return;
+                      }
+                      const shouldPreserveSelection =
+                        !!roomId && selectedRoomIds.length > 1 && selectedRoomIds.includes(roomId) && (!!options?.preserveSelection || !!options?.keepContext);
+                      if (shouldPreserveSelection && roomId) {
+                        clearSelection();
+                        setSelectedLinkId(null);
+                        setSelectedCorridorId(undefined);
+                        setSelectedCorridorDoor(null);
+                        setSelectedRoomDoorId(null);
+                        setSelectedRoomId(roomId);
+                        if (!options?.keepContext) setContextMenu(null);
+                        return;
+                      }
                       clearSelection();
+                      setSelectedLinkId(null);
+                      setSelectedCorridorId(undefined);
+                      setSelectedCorridorDoor(null);
+                      setSelectedRoomDoorId(null);
+                      if (options?.multi && roomId) {
+                        setSelectedRoomIds((prev) => {
+                          const has = prev.includes(roomId);
+                          const next = has ? prev.filter((id) => id !== roomId) : Array.from(new Set([...prev, roomId]));
+                          setSelectedRoomId(next.length === 1 ? next[0] : undefined);
+                          return next;
+                        });
+                        if (!options?.keepContext) setContextMenu(null);
+                        return;
+                      }
                       setSelectedRoomId(roomId);
                       setSelectedRoomIds(roomId ? [roomId] : []);
                       setSelectedCorridorId(undefined);
+                      setSelectedRoomDoorId(null);
                       if (!options?.keepContext) setContextMenu(null);
                     }}
                     onSelectCorridor={(corridorId, options) => {
@@ -10914,6 +11630,7 @@ const PlanView = ({ planId }: Props) => {
                       setSelectedRoomIds([]);
                       setSelectedLinkId(null);
                       if (!corridorId || selectedCorridorDoor?.corridorId !== corridorId) setSelectedCorridorDoor(null);
+                      setSelectedRoomDoorId(null);
                       setSelectedCorridorId(corridorId || undefined);
                       if (!options?.keepContext) setContextMenu(null);
                     }}
@@ -10928,15 +11645,35 @@ const PlanView = ({ planId }: Props) => {
                       setSelectedLinkId(null);
                       setSelectedCorridorId(undefined);
                       setCorridorQuickMenu(null);
+                      setSelectedRoomDoorId(null);
                       setSelectedCorridorDoor(payload);
                     }}
+                    onSelectRoomDoor={(doorId) => {
+                      if (!doorId) {
+                        setSelectedRoomDoorId(null);
+                        return;
+                      }
+                      clearSelection();
+                      setSelectedRoomId(undefined);
+                      setSelectedRoomIds([]);
+                      setSelectedLinkId(null);
+                      setSelectedCorridorId(undefined);
+                      setSelectedCorridorDoor(null);
+                      setCorridorQuickMenu(null);
+                      setSelectedRoomDoorId(doorId);
+                    }}
+                    onRoomDoorContextMenu={handleRoomDoorContextMenu}
+                    onRoomDoorDblClick={(doorId) => openRoomDoorModal(doorId)}
+                    selectedRoomDoorId={selectedRoomDoorId}
                     selectedCorridorDoor={selectedCorridorDoor}
                     corridorDoorDraft={corridorDoorDraft}
+                    roomDoorDraft={roomDoorDraft ? { roomAId: roomDoorDraft.roomAId, roomBId: roomDoorDraft.roomBId } : null}
                     onOpenRoomDetails={(roomId) => {
                       setSelectedRoomId(roomId);
                       setSelectedRoomIds([roomId]);
                       setSelectedCorridorId(undefined);
                       setSelectedCorridorDoor(null);
+                      setSelectedRoomDoorId(null);
                       openEditRoom(roomId);
                     }}
                     onCreateRoom={(shape) => {
@@ -11244,7 +11981,7 @@ const PlanView = ({ planId }: Props) => {
                             <button
                               key={layerId}
                               onClick={() => {
-                                const base = hideAllLayers ? [] : visibleLayerIds;
+                                const base = hideAllLayers ? [] : effectiveVisibleLayerIds;
                                 if (hideAllLayers) setHideAllLayers(planId, false);
                                 if (layerId === ALL_ITEMS_LAYER_ID) {
                                   const showAll = hideAllLayers || !allItemsSelected;
@@ -12541,10 +13278,33 @@ const PlanView = ({ planId }: Props) => {
 	                  openEscapeRouteAt({ x: contextMenu.worldX, y: contextMenu.worldY }, 'room');
 	                }}
 	                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-	                title={t({ it: 'Calcola via di fuga verso uscita esterna di emergenza', en: 'Compute escape route to nearest external emergency exit' })}
+		                title={t({ it: 'Calcola via di fuga verso uscita esterna antipanico', en: 'Compute escape route to nearest external panic exit' })}
 	              >
 	                <Footprints size={14} className="text-slate-500" /> {t({ it: 'Via di fuga', en: 'Escape route' })}
 	              </button>
+                {!isReadOnly
+                  ? (() => {
+                      const pairIds = Array.from(new Set((selectedRoomIds || []).map((id) => String(id)).filter(Boolean)));
+                      const canCreate = pairIds.length === 2 && pairIds.includes(contextMenu.id);
+                      if (!canCreate) return null;
+                      const [roomAId, roomBId] = pairIds;
+                      return (
+                        <button
+                          onClick={() => {
+                            startRoomDoorDraft(roomAId, roomBId);
+                            setContextMenu(null);
+                          }}
+                          className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                          title={t({
+                            it: 'Crea porta di collegamento tra le due stanze selezionate',
+                            en: 'Create connecting door between the two selected rooms'
+                          })}
+                        >
+                          <DoorOpen size={14} className="text-slate-500" /> {t({ it: 'Crea porta di collegamento', en: 'Create connecting door' })}
+                        </button>
+                      );
+                    })()
+                  : null}
 	              {!isReadOnly ? (
 		                <button
 	                  onClick={() => {
@@ -12578,7 +13338,7 @@ const PlanView = ({ planId }: Props) => {
                   openEscapeRouteAt({ x: contextMenu.worldX, y: contextMenu.worldY }, 'corridor');
                 }}
                 className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                title={t({ it: 'Calcola via di fuga verso uscita esterna di emergenza', en: 'Compute escape route to nearest external emergency exit' })}
+	                title={t({ it: 'Calcola via di fuga verso uscita esterna antipanico', en: 'Compute escape route to nearest external panic exit' })}
               >
                 <Footprints size={14} className="text-slate-500" /> {t({ it: 'Via di fuga', en: 'Escape route' })}
               </button>
@@ -12672,6 +13432,72 @@ const PlanView = ({ planId }: Props) => {
                           });
                         } catch {
                           // ignore sync errors by design
+                        }
+                        push(t({ it: 'Comando apertura porta avviato.', en: 'Door opening command started.' }), 'success');
+                        setContextMenu(null);
+                      }}
+                      className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                      title={t({ it: 'Apri', en: 'Open' })}
+                    >
+                      <Link2 size={14} className="text-slate-500" /> {t({ it: 'Apri', en: 'Open' })}
+                    </button>
+                  );
+                })()
+              ) : null}
+            </>
+            ) : contextMenu.kind === 'room_door' ? (
+            <>
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    if (!plan || contextMenu.kind !== 'room_door') return;
+                    const current = Array.isArray((plan as any).roomDoors) ? ((plan as any).roomDoors as any[]) : [];
+                    const next = current.filter((door) => String((door as any)?.id || '') !== contextMenu.doorId);
+                    markTouched();
+                    updateFloorPlan(plan.id, { roomDoors: next as any } as any);
+                    setSelectedRoomDoorId(null);
+                    push(t({ it: 'Porta eliminata', en: 'Door deleted' }), 'info');
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Elimina', en: 'Delete' })}
+                >
+                  <Trash size={14} className="text-rose-600" /> {t({ it: 'Elimina', en: 'Delete' })}
+                </button>
+              ) : null}
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    if (contextMenu.kind !== 'room_door') return;
+                    openRoomDoorModal(contextMenu.doorId);
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Modifica', en: 'Edit' })}
+                >
+                  <Pencil size={14} /> {t({ it: 'Modifica', en: 'Edit' })}
+                </button>
+              ) : null}
+              {!isReadOnly ? (
+                (() => {
+                  const door = roomDoors.find((entry) => entry.id === contextMenu.doorId);
+                  const mode = door?.mode || 'static';
+                  const url = String((door as any)?.automationUrl || '').trim();
+                  const canOpen = mode === 'automated' && /^https?:\/\//i.test(url);
+                  if (!canOpen) return null;
+                  return (
+                    <button
+                      onClick={() => {
+                        try {
+                          const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_deskly_open_ts=${Date.now()}`;
+                          fetch(requestUrl, {
+                            method: 'GET',
+                            mode: 'no-cors',
+                            cache: 'no-store',
+                            keepalive: true
+                          }).catch(() => {});
+                        } catch {
+                          // ignore sync errors
                         }
                         push(t({ it: 'Comando apertura porta avviato.', en: 'Door opening command started.' }), 'success');
                         setContextMenu(null);
@@ -12788,7 +13614,7 @@ const PlanView = ({ planId }: Props) => {
                   openEscapeRouteAt({ x: contextMenu.worldX, y: contextMenu.worldY }, 'map');
                 }}
                 className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                title={t({ it: 'Calcola via di fuga verso uscita esterna di emergenza', en: 'Compute escape route to nearest external emergency exit' })}
+	                title={t({ it: 'Calcola via di fuga verso uscita esterna antipanico', en: 'Compute escape route to nearest external panic exit' })}
               >
                 <Footprints size={14} className="text-slate-500" /> {t({ it: 'Via di fuga', en: 'Escape route' })}
               </button>
@@ -12900,7 +13726,7 @@ const PlanView = ({ planId }: Props) => {
 	                      <button
 	                        key={layerId}
 	                        onClick={() => {
-	                          const base = hideAllLayers ? [] : visibleLayerIds;
+	                          const base = hideAllLayers ? [] : effectiveVisibleLayerIds;
 	                          if (hideAllLayers) setHideAllLayers(planId, false);
 	                          const nextRaw = base.includes(layerId) ? base.filter((x) => x !== layerId) : [...base, layerId];
 	                          const next = normalizeLayerSelection(nextRaw);
@@ -14573,8 +15399,8 @@ const PlanView = ({ planId }: Props) => {
                             <label
                               className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
                               title={t({
-                                it: 'Se attivo puoi registrare verifiche e storico porta emergenza.',
-                                en: 'When enabled you can record checks and emergency-door history.'
+	                                it: 'Se attivo puoi registrare verifiche e storico porta antipanico.',
+	                                en: 'When enabled you can record checks and panic-door history.'
                               })}
                             >
                               <input
@@ -14591,7 +15417,7 @@ const PlanView = ({ planId }: Props) => {
                                   )
                                 }
                               />
-                              {t({ it: 'Emergenza', en: 'Emergency' })}
+	                              {t({ it: 'Antipanico', en: 'Panic' })}
                             </label>
                             <label
                               className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
@@ -14700,7 +15526,7 @@ const PlanView = ({ planId }: Props) => {
                           {corridorDoorModal?.isEmergency ? (
                             <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3">
                               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-700">
-                                {t({ it: 'Verifiche emergenza', en: 'Emergency checks' })}
+                                {t({ it: 'Verifiche antipanico', en: 'Panic checks' })}
                               </div>
                               <div className="grid gap-3 sm:grid-cols-2">
                                 <label className="text-sm font-semibold text-slate-700">
@@ -15449,13 +16275,33 @@ const PlanView = ({ planId }: Props) => {
           if (roomDeletes.length) {
             const remainingRooms = rooms.filter((r) => !roomDeletes.includes(r.id));
             const updates = computeRoomReassignments(remainingRooms, basePlan.objects);
+            const currentRoomDoors = Array.isArray((planRef.current as any)?.roomDoors) ? ((planRef.current as any).roomDoors as any[]) : [];
             for (const roomId of roomDeletes) {
               deleteRoom(basePlan.id, roomId);
               postAuditEvent({ event: 'room_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: roomId } });
             }
+            if (currentRoomDoors.length) {
+              const nextRoomDoors = currentRoomDoors.filter((door) => {
+                const a = String((door as any)?.roomAId || '');
+                const b = String((door as any)?.roomBId || '');
+                return !roomDeletes.includes(a) && !roomDeletes.includes(b);
+              });
+              if (nextRoomDoors.length !== currentRoomDoors.length) {
+                updateFloorPlan(basePlan.id, { roomDoors: nextRoomDoors as any } as any);
+              }
+            }
             if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
             setSelectedRoomIds((prev) => prev.filter((id) => !roomDeletes.includes(id)));
             if (selectedRoomId && roomDeletes.includes(selectedRoomId)) setSelectedRoomId(undefined);
+            if (selectedRoomDoorId) {
+              const stillExists = currentRoomDoors.some(
+                (door) =>
+                  String((door as any)?.id || '') === selectedRoomDoorId &&
+                  !roomDeletes.includes(String((door as any)?.roomAId || '')) &&
+                  !roomDeletes.includes(String((door as any)?.roomBId || ''))
+              );
+              if (!stillExists) setSelectedRoomDoorId(null);
+            }
             setPendingRoomDeletes([]);
           }
           push(
@@ -15517,12 +16363,32 @@ const PlanView = ({ planId }: Props) => {
           const roomName = rooms.find((r) => r.id === confirmDeleteRoomId)?.name;
           const remainingRooms = rooms.filter((r) => r.id !== confirmDeleteRoomId);
           const updates = computeRoomReassignments(remainingRooms, basePlan.objects);
+          const currentRoomDoors = Array.isArray((planRef.current as any)?.roomDoors) ? ((planRef.current as any).roomDoors as any[]) : [];
           deleteRoom(basePlan.id, confirmDeleteRoomId);
+          if (currentRoomDoors.length) {
+            const nextRoomDoors = currentRoomDoors.filter((door) => {
+              const a = String((door as any)?.roomAId || '');
+              const b = String((door as any)?.roomBId || '');
+              return a !== confirmDeleteRoomId && b !== confirmDeleteRoomId;
+            });
+            if (nextRoomDoors.length !== currentRoomDoors.length) {
+              updateFloorPlan(basePlan.id, { roomDoors: nextRoomDoors as any } as any);
+            }
+          }
           postAuditEvent({ event: 'room_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: confirmDeleteRoomId } });
           if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
           if (selectedRoomId === confirmDeleteRoomId) setSelectedRoomId(undefined);
           if (selectedRoomIds.includes(confirmDeleteRoomId)) {
             setSelectedRoomIds(selectedRoomIds.filter((id) => id !== confirmDeleteRoomId));
+          }
+          if (selectedRoomDoorId) {
+            const stillExists = currentRoomDoors.some(
+              (door) =>
+                String((door as any)?.id || '') === selectedRoomDoorId &&
+                String((door as any)?.roomAId || '') !== confirmDeleteRoomId &&
+                String((door as any)?.roomBId || '') !== confirmDeleteRoomId
+            );
+            if (!stillExists) setSelectedRoomDoorId(null);
           }
           push(
             t({
@@ -15556,13 +16422,33 @@ const PlanView = ({ planId }: Props) => {
           const roomIds = [...confirmDeleteRoomIds];
           const remainingRooms = rooms.filter((r) => !roomIds.includes(r.id));
           const updates = computeRoomReassignments(remainingRooms, basePlan.objects);
+          const currentRoomDoors = Array.isArray((planRef.current as any)?.roomDoors) ? ((planRef.current as any).roomDoors as any[]) : [];
           for (const roomId of roomIds) {
             deleteRoom(basePlan.id, roomId);
             postAuditEvent({ event: 'room_delete', scopeType: 'plan', scopeId: basePlan.id, details: { id: roomId } });
           }
+          if (currentRoomDoors.length) {
+            const nextRoomDoors = currentRoomDoors.filter((door) => {
+              const a = String((door as any)?.roomAId || '');
+              const b = String((door as any)?.roomBId || '');
+              return !roomIds.includes(a) && !roomIds.includes(b);
+            });
+            if (nextRoomDoors.length !== currentRoomDoors.length) {
+              updateFloorPlan(basePlan.id, { roomDoors: nextRoomDoors as any } as any);
+            }
+          }
           if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
           setSelectedRoomIds((prev) => prev.filter((id) => !roomIds.includes(id)));
           if (selectedRoomId && roomIds.includes(selectedRoomId)) setSelectedRoomId(undefined);
+          if (selectedRoomDoorId) {
+            const stillExists = currentRoomDoors.some(
+              (door) =>
+                String((door as any)?.id || '') === selectedRoomDoorId &&
+                !roomIds.includes(String((door as any)?.roomAId || '')) &&
+                !roomIds.includes(String((door as any)?.roomBId || ''))
+            );
+            if (!stillExists) setSelectedRoomDoorId(null);
+          }
           push(
             t({
               it: `Stanze eliminate: ${roomIds.length}`,
@@ -16646,6 +17532,7 @@ const PlanView = ({ planId }: Props) => {
       <EscapeRouteModal
         open={!!escapeRouteModal}
         plans={siteFloorPlans}
+        emergencyContacts={safetyEmergencyContacts}
         startPlanId={escapeRouteModal?.startPlanId || planId}
         startPoint={escapeRouteModal?.startPoint || null}
         sourceKind={escapeRouteModal?.sourceKind || 'map'}

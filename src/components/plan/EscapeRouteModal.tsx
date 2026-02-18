@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ChevronLeft, ChevronRight, CornerDownRight, DoorOpen, FileDown, Flag, Footprints, Info, Navigation, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CornerDownRight, DoorOpen, FileDown, Flag, Footprints, Info, Maximize2, Minimize2, Navigation, X } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Corridor, FloorPlan, Room } from '../../store/types';
@@ -14,6 +14,7 @@ type EscapeSourceKind = 'map' | 'room' | 'corridor';
 interface Props {
   open: boolean;
   plans: FloorPlan[];
+  emergencyContacts?: Array<{ id?: string; name: string; phone: string; notes?: string }>;
   startPlanId: string;
   startPoint: Point | null;
   sourceKind: EscapeSourceKind;
@@ -37,7 +38,51 @@ interface EscapeRouteSelection {
   score: number;
 }
 
+interface EscapeAssemblyPoint {
+  id: string;
+  name: string;
+  planId: string;
+  planName: string;
+  point: Point;
+  gps: string;
+  googleCoords: string;
+  mapsUrl: string;
+}
+
 const SPEED_MPS = 1.4;
+
+const parseGoogleMapsCoordinates = (rawValue: string): { lat: number; lng: number } | null => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return null;
+  const decimal = '[-+]?\\d{1,3}(?:\\.\\d+)?';
+  const pair = new RegExp(`(${decimal})\\s*,\\s*(${decimal})`);
+  const direct = raw.match(pair);
+  const fromPair = direct || raw.match(/[@?&]q=([-+]?\d{1,3}(?:\.\d+)?),\s*([-+]?\d{1,3}(?:\.\d+)?)/);
+  if (!fromPair) return null;
+  const lat = Number(fromPair[1]);
+  const lng = Number(fromPair[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+};
+
+const googleMapsUrlFromCoords = (rawValue: string) => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const parsed = parseGoogleMapsCoordinates(raw);
+  if (!parsed) return '';
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${parsed.lat},${parsed.lng}`)}`;
+};
+
+const googleMapsCoordsLabel = (rawValue: string) => {
+  const parsed = parseGoogleMapsCoordinates(rawValue);
+  if (!parsed) return '';
+  return `${parsed.lat.toFixed(6)}, ${parsed.lng.toFixed(6)}`;
+};
+
+const getAssemblyPointCoordsLabel = (point: EscapeAssemblyPoint) =>
+  point.googleCoords || point.gps || `${Math.round(point.point.x)}, ${Math.round(point.point.y)}`;
 
 const polygonCentroid = (polygon: Point[]) => {
   if (!polygon.length) return { x: 0, y: 0 };
@@ -57,6 +102,24 @@ const polygonCentroid = (polygon: Point[]) => {
     return { x: sum.x / polygon.length, y: sum.y / polygon.length };
   }
   return { x: cx / (3 * area2), y: cy / (3 * area2) };
+};
+
+const getRoomLabelLayout = (room: Room, polygon: Point[]) => {
+  const minX = Math.min(...polygon.map((point) => point.x));
+  const maxX = Math.max(...polygon.map((point) => point.x));
+  const minY = Math.min(...polygon.map((point) => point.y));
+  const maxY = Math.max(...polygon.map((point) => point.y));
+  const center = polygonCentroid(polygon);
+  const labelPosition = String((room as any)?.labelPosition || '').trim();
+  const scaleRaw = Number((room as any)?.labelScale);
+  const scale = Number.isFinite(scaleRaw) ? Math.max(0.6, Math.min(3, scaleRaw)) : 1;
+  const fontSize = Math.max(8, Math.round(11 * scale));
+  const padding = Math.max(4, Math.round(fontSize * 0.45));
+  if (labelPosition === 'left') return { x: minX + padding, y: center.y, fontSize, rotate: -90 };
+  if (labelPosition === 'right') return { x: maxX - padding, y: center.y, fontSize, rotate: 90 };
+  if (labelPosition === 'top') return { x: center.x, y: minY + padding + fontSize * 0.5, fontSize, rotate: 0 };
+  if (labelPosition === 'bottom') return { x: center.x, y: maxY - padding - fontSize * 0.5, fontSize, rotate: 0 };
+  return { x: center.x, y: center.y, fontSize, rotate: 0 };
 };
 
 const corridorPolygon = (corridor: Corridor): Point[] => {
@@ -95,6 +158,39 @@ const roomPolygon = (room: Room): Point[] => {
     { x: x + width, y: y + height },
     { x, y: y + height }
   ];
+};
+
+const distancePointToSegment = (point: Point, a: Point, b: Point) => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= 0.0000001) return Math.hypot(point.x - a.x, point.y - a.y);
+  const ratio = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+  const projected = { x: a.x + dx * ratio, y: a.y + dy * ratio };
+  return Math.hypot(point.x - projected.x, point.y - projected.y);
+};
+
+const pointOnPolygonBoundary = (point: Point, polygon: Point[], tolerance = 1.8) => {
+  if (polygon.length < 2) return false;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    if (distancePointToSegment(point, a, b) <= tolerance) return true;
+  }
+  return false;
+};
+
+const pointInPolygon = (point: Point, polygon: Point[]) => {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    const intersects = yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi || 0.0000001) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
 };
 
 const getCorridorDoorAnchor = (corridor: Corridor, door: any): Point | null => {
@@ -167,6 +263,27 @@ const collectRouteTravelPoints = (route: RouteResult): Point[] => {
   for (const point of route.corridorPoints || []) append(point);
   for (const point of route.exitPoints || []) append(point);
   return output;
+};
+
+const computeViewportBounds = (baseWidth: number, baseHeight: number, points: Point[], padding = 72) => {
+  let minX = 0;
+  let minY = 0;
+  let maxX = Math.max(1, baseWidth);
+  let maxY = Math.max(1, baseHeight);
+  for (const point of points) {
+    if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) continue;
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+  const safePadding = Math.max(18, padding);
+  return {
+    minX: minX - safePadding,
+    minY: minY - safePadding,
+    width: Math.max(1, maxX - minX + safePadding * 2),
+    height: Math.max(1, maxY - minY + safePadding * 2)
+  };
 };
 
 const getArrowPolygonPoints = (from: Point, to: Point, tail = 14, wing = 5) => {
@@ -342,7 +459,7 @@ const buildCaptureNode = (source: HTMLElement) => {
   return { host, node: clone };
 };
 
-const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, clientName, siteName, onClose }: Props) => {
+const EscapeRouteModal = ({ open, plans, emergencyContacts = [], startPlanId, startPoint, sourceKind, clientName, siteName, onClose }: Props) => {
   const t = useT();
   const mapPanelRef = useRef<HTMLDivElement | null>(null);
   const pdfPreviewRef = useRef<HTMLDivElement | null>(null);
@@ -351,10 +468,12 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
   const [routeResult, setRouteResult] = useState<MultiFloorRouteResult | null>(null);
   const [targetDoor, setTargetDoor] = useState<EscapeDoorCandidate | null>(null);
   const [activeSegmentIndex, setActiveSegmentIndex] = useState(0);
+  const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
   const computeRunRef = useRef(0);
   const lastComputeSignatureRef = useRef('');
+  const computeTimerRef = useRef<number | null>(null);
 
   const planById = useMemo(() => new Map((plans || []).map((plan) => [plan.id, plan])), [plans]);
   const sortedPlans = useMemo(
@@ -396,6 +515,58 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
     return list;
   }, [plans]);
 
+  const assemblyPoints = useMemo(() => {
+    const out: EscapeAssemblyPoint[] = [];
+    for (const plan of plans || []) {
+      for (const obj of (plan.objects || []) as any[]) {
+        if (String(obj?.type || '') !== 'safety_assembly_point') continue;
+        const x = Number(obj?.x);
+        const y = Number(obj?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const gps = String(obj?.gpsCoords || '').trim();
+        out.push({
+          id: String(obj?.id || ''),
+          name: String(obj?.name || '').trim() || t({ it: 'Punto di raccolta', en: 'Assembly point' }),
+          planId: plan.id,
+          planName: String(plan.name || plan.id),
+          point: { x, y },
+          gps,
+          googleCoords: googleMapsCoordsLabel(gps),
+          mapsUrl: googleMapsUrlFromCoords(gps)
+        });
+      }
+    }
+    return out;
+  }, [plans, t]);
+
+  const nearestAssemblyPoint = useMemo(() => {
+    if (!targetDoor) return null;
+    const samePlan = assemblyPoints.filter((point) => point.planId === targetDoor.planId);
+    if (!samePlan.length) return null;
+    let best: EscapeAssemblyPoint | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const point of samePlan) {
+      const dist = Math.hypot(point.point.x - targetDoor.point.x, point.point.y - targetDoor.point.y);
+      if (dist < bestDistance) {
+        bestDistance = dist;
+        best = point;
+      }
+    }
+    return best;
+  }, [assemblyPoints, targetDoor]);
+
+  const safetyCardNumbers = useMemo(() => {
+    if (!emergencyContacts.length) return t({ it: 'Nessun numero', en: 'No numbers' });
+    return emergencyContacts
+      .map((entry) => `| ${String(entry?.name || '—').trim() || '—'} ${String(entry?.phone || '—').trim() || '—'}`)
+      .join(' ');
+  }, [emergencyContacts, t]);
+
+  const safetyCardPoints = useMemo(() => {
+    const currentPlanPoints = assemblyPoints.filter((point) => point.planId === startPlanId);
+    return currentPlanPoints.length ? currentPlanPoints : assemblyPoints;
+  }, [assemblyPoints, startPlanId]);
+
   const activeRouteSegment = useMemo(() => {
     if (!routeResult || !routeResult.segments.length) return null;
     const safeIndex = Math.max(0, Math.min(routeResult.segments.length - 1, activeSegmentIndex));
@@ -426,18 +597,95 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
     return t({ it: 'Punto selezionato su mappa', en: 'Selected point on map' });
   }, [sourceKind, t]);
   const targetDoorLabel = useMemo(
-    () => targetDoor?.label || t({ it: 'Uscita emergenza esterna', en: 'External emergency exit' }),
+    () => targetDoor?.label || t({ it: 'Uscita antipanico esterna', en: 'External panic-exit door' }),
     [targetDoor?.label, t]
   );
 
   const escapeInstructions = useMemo(() => {
-    if (!routeResult || !targetDoor) return [] as Array<{ icon: 'start' | 'route' | 'stairs' | 'arrival'; text: string }>;
-    const items: Array<{ icon: 'start' | 'route' | 'stairs' | 'arrival'; text: string }> = [
+    if (!routeResult || !targetDoor) return [] as Array<{ icon: 'start' | 'route' | 'stairs' | 'exit' | 'arrival'; text: string }>;
+    const traversedRooms: string[] = [];
+    const traversedRoomSet = new Set<string>();
+    if (sourceKind === 'room') {
+      for (const segment of routeResult.segments) {
+        const plan = planById.get(segment.planId);
+        if (!plan) continue;
+        const roomEntries = ((plan.rooms || []) as Room[])
+          .filter(Boolean)
+          .map((room) => ({ room, poly: roomPolygon(room) }))
+          .filter((entry) => entry.poly.length >= 3);
+        const path = segment.route.approachPoints || [];
+        if (path.length < 1 || !roomEntries.length) continue;
+        const appendRoomAtPoint = (point: Point) => {
+          const roomEntry = roomEntries.find(
+            (entry) => pointInPolygon(point, entry.poly) || pointOnPolygonBoundary(point, entry.poly, 2.4)
+          );
+          if (!roomEntry) return;
+          const roomName = String(roomEntry.room.name || '').trim() || t({ it: 'Stanza', en: 'Room' });
+          if (traversedRoomSet.has(roomName)) return;
+          traversedRoomSet.add(roomName);
+          traversedRooms.push(roomName);
+        };
+        appendRoomAtPoint(path[0]);
+        for (let i = 0; i < path.length - 1; i += 1) {
+          const a = path[i];
+          const b = path[i + 1];
+          const samples = 12;
+          for (let s = 1; s <= samples; s += 1) {
+            const ratio = s / samples;
+            appendRoomAtPoint({ x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio });
+          }
+        }
+      }
+    }
+    const startInstruction =
+      sourceKind === 'room' && traversedRooms.length
+        ? traversedRooms.length > 1
+          ? t({
+              it: `Parti da ${traversedRooms[0]}. Stanze da attraversare: ${traversedRooms.slice(1).join(' -> ')}.`,
+              en: `Start from ${traversedRooms[0]}. Rooms to cross: ${traversedRooms.slice(1).join(' -> ')}.`
+            })
+          : t({ it: `Parti da ${traversedRooms[0]}.`, en: `Start from ${traversedRooms[0]}.` })
+        : t({ it: 'Parti dal punto selezionato e segui la freccia di direzione sulla mappa.', en: 'Start from the selected point and follow the direction arrow on the map.' });
+    const items: Array<{ icon: 'start' | 'route' | 'stairs' | 'exit' | 'arrival'; text: string }> = [
       {
         icon: 'start',
-        text: t({ it: 'Parti dal punto selezionato e segui la freccia di direzione sulla mappa.', en: 'Start from the selected point and follow the direction arrow on the map.' })
+        text: startInstruction
       }
     ];
+    if (sourceKind === 'room' && routeResult.segments.length) {
+      const firstSegment = routeResult.segments[0];
+      const firstPlan = planById.get(firstSegment.planId);
+      if (firstPlan) {
+        let nearestDoor: any = null;
+        let nearestDistance = Number.POSITIVE_INFINITY;
+        for (const corridor of (firstPlan.corridors || []) as Corridor[]) {
+          for (const door of corridor.doors || []) {
+            const anchor = getCorridorDoorAnchor(corridor, door);
+            if (!anchor) continue;
+            const dist = Math.hypot(anchor.x - firstSegment.route.startDoor.x, anchor.y - firstSegment.route.startDoor.y);
+            if (dist < nearestDistance) {
+              nearestDistance = dist;
+              nearestDoor = door;
+            }
+          }
+        }
+        if (nearestDoor && nearestDistance <= 32 && !nearestDoor?.isEmergency) {
+          const doorName = String(nearestDoor?.description || '').trim();
+          items.push({
+            icon: 'route',
+            text: doorName
+              ? t({
+                  it: `Attraversa la porta non antipanico "${doorName}" per uscire dall'ufficio e raggiungere il percorso di fuga.`,
+                  en: `Pass through the non-panic door "${doorName}" to exit the office and reach the escape route.`
+                })
+              : t({
+                  it: "Attraversa una porta non antipanico per uscire dall'ufficio e raggiungere il percorso di fuga.",
+                  en: 'Pass through a non-panic door to exit the office and reach the escape route.'
+                })
+          });
+        }
+      }
+    }
     for (let i = 0; i < routeResult.segments.length; i += 1) {
       const segment = routeResult.segments[i];
       const plan = planById.get(segment.planId);
@@ -467,20 +715,42 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
         });
       }
     }
-    items.push({
-      icon: 'arrival',
-      text: t({
-        it: `Raggiungi ${targetDoor.label || t({ it: 'uscita emergenza esterna', en: 'external emergency exit' })} su ${targetDoor.planName}.`,
-        en: `Reach ${targetDoor.label || t({ it: 'uscita emergenza esterna', en: 'external emergency exit' })} on ${targetDoor.planName}.`
-      })
-    });
+    if (nearestAssemblyPoint) {
+      items.push({
+        icon: 'exit',
+        text: t({
+          it: `Raggiungi ${targetDoor.label || t({ it: 'uscita antipanico esterna', en: 'external panic-exit door' })} su ${targetDoor.planName}.`,
+          en: `Reach ${targetDoor.label || t({ it: 'uscita antipanico esterna', en: 'external panic-exit door' })} on ${targetDoor.planName}.`
+        })
+      });
+      const coords = getAssemblyPointCoordsLabel(nearestAssemblyPoint);
+      items.push({
+        icon: 'arrival',
+        text: t({
+          it: `Prosegui fino al punto di raccolta ${nearestAssemblyPoint.name} (${nearestAssemblyPoint.planName}) seguendo la linea tratteggiata. Coordinate Google Maps: ${coords}.`,
+          en: `Continue to the assembly point ${nearestAssemblyPoint.name} (${nearestAssemblyPoint.planName}) following the dashed line. Google Maps coordinates: ${coords}.`
+        })
+      });
+    } else {
+      items.push({
+        icon: 'arrival',
+        text: t({
+          it: `Raggiungi ${targetDoor.label || t({ it: 'uscita antipanico esterna', en: 'external panic-exit door' })} su ${targetDoor.planName}.`,
+          en: `Reach ${targetDoor.label || t({ it: 'uscita antipanico esterna', en: 'external panic-exit door' })} on ${targetDoor.planName}.`
+        })
+      });
+    }
     return items;
-  }, [planById, planOrder, routeResult, t, targetDoor]);
+  }, [nearestAssemblyPoint, planById, planOrder, routeResult, sourceKind, t, targetDoor]);
 
   useEffect(() => {
     if (!open) {
       computeRunRef.current += 1;
       lastComputeSignatureRef.current = '';
+      if (computeTimerRef.current !== null) {
+        window.clearTimeout(computeTimerRef.current);
+        computeTimerRef.current = null;
+      }
       setComputing(false);
       setRouteError('');
       setRouteResult(null);
@@ -491,32 +761,48 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
       return;
     }
     if (!startPoint || !startPlanId) {
+      if (computeTimerRef.current !== null) {
+        window.clearTimeout(computeTimerRef.current);
+        computeTimerRef.current = null;
+      }
+      setComputing(false);
       setRouteError(t({ it: 'Punto di partenza non valido.', en: 'Invalid start point.' }));
       setRouteResult(null);
       setTargetDoor(null);
       setActiveSegmentIndex(0);
       return;
     }
-    const signature = `${startPlanId}|${Number(startPoint.x.toFixed(2))},${Number(startPoint.y.toFixed(2))}|${plans
+    const planIdsSignature = (plans || [])
       .map((plan) => String(plan.id))
-      .join(',')}|${emergencyDoorCandidates.length}`;
+      .sort((a, b) => a.localeCompare(b))
+      .join(',');
+    const candidateSignature = emergencyDoorCandidates
+      .map((candidate) => `${candidate.planId}:${candidate.corridorId}:${candidate.doorId}`)
+      .sort((a, b) => a.localeCompare(b))
+      .join(',');
+    const signature = `${startPlanId}|${Number(startPoint.x.toFixed(2))},${Number(startPoint.y.toFixed(2))}|${planIdsSignature}|${candidateSignature}`;
     if (lastComputeSignatureRef.current === signature) return;
     lastComputeSignatureRef.current = signature;
     const runId = computeRunRef.current + 1;
     computeRunRef.current = runId;
+    if (computeTimerRef.current !== null) {
+      window.clearTimeout(computeTimerRef.current);
+      computeTimerRef.current = null;
+    }
     setRouteError('');
     setComputing(true);
     setRouteResult(null);
     setTargetDoor(null);
     setActiveSegmentIndex(0);
-    const timer = window.setTimeout(() => {
+    computeTimerRef.current = window.setTimeout(() => {
+      computeTimerRef.current = null;
       try {
         if (runId !== computeRunRef.current) return;
         if (!emergencyDoorCandidates.length) {
           setRouteError(
             t({
-              it: 'Nessuna porta con opzioni Emergenza + Esterno configurata. Imposta almeno una porta di uscita.',
-              en: 'No door configured with Emergency + External options. Configure at least one exit door.'
+              it: 'Nessuna porta con opzioni Antipanico + Esterno configurata. Imposta almeno una porta di uscita.',
+              en: 'No door configured with Panic + External options. Configure at least one exit door.'
             })
           );
           setRouteResult(null);
@@ -524,7 +810,14 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
           return;
         }
         const startPlan = planById.get(startPlanId);
-        const sameFloorCandidates = emergencyDoorCandidates.filter((candidate) => candidate.planId === startPlanId);
+        const sameFloorCandidates = emergencyDoorCandidates
+          .filter((candidate) => candidate.planId === startPlanId)
+          .map((candidate) => ({
+            candidate,
+            dist: Math.hypot(candidate.point.x - startPoint.x, candidate.point.y - startPoint.y)
+          }))
+          .sort((a, b) => a.dist - b.dist)
+          .map((entry) => entry.candidate);
         const bestByScore = (
           current: EscapeRouteSelection | null,
           candidate: EscapeDoorCandidate,
@@ -538,8 +831,8 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
 
         let best: EscapeRouteSelection | null = null;
 
-        // Fast path: if at least one valid external emergency exit is on the start floor,
-        // compute only same-floor routes first and return immediately if one is found.
+        // Fast path: if at least one valid external panic exit is on the start floor,
+        // evaluate same-floor routes first and return the best one.
         if (startPlan && sameFloorCandidates.length) {
           const localPlanSet = [startPlan];
           for (const candidate of sameFloorCandidates) {
@@ -562,6 +855,17 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
             setRouteError('');
             return;
           }
+          // If exits exist on the same floor but are not reachable through configured corridors,
+          // avoid expensive cross-floor fallback scans that can stall large datasets.
+          setRouteError(
+            t({
+              it: 'Uscita antipanico esterna presente sul piano ma non raggiungibile. Verifica corridoi e continuità del percorso.',
+              en: 'External panic exit exists on this floor but is unreachable. Check corridor continuity and routing geometry.'
+            })
+          );
+          setRouteResult(null);
+          setTargetDoor(null);
+          return;
         }
 
         const startPlanOrder = Number(planOrder.get(startPlanId) ?? 0);
@@ -577,10 +881,10 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
             };
           })
           .sort((a, b) => a.rank - b.rank)
-          .slice(0, 24)
+          .slice(0, 8)
           .map((entry) => entry.candidate);
 
-        const deadline = Date.now() + 15000;
+        const deadline = Date.now() + 6000;
         for (let i = 0; i < prioritizedOtherFloors.length; i += 1) {
           if (runId !== computeRunRef.current) return;
           if (Date.now() > deadline) break;
@@ -618,11 +922,48 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
         if (runId === computeRunRef.current) setComputing(false);
       }
     }, 0);
-    return () => window.clearTimeout(timer);
   }, [emergencyDoorCandidates, open, plans, startPlanId, startPoint, t]);
+
+  useEffect(
+    () => () => {
+      if (computeTimerRef.current !== null) {
+        window.clearTimeout(computeTimerRef.current);
+        computeTimerRef.current = null;
+      }
+      computeRunRef.current += 1;
+    },
+    []
+  );
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsMapFullscreen(Boolean(mapPanelRef.current && document.fullscreenElement === mapPanelRef.current));
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  const toggleMapFullscreen = async () => {
+    const element = mapPanelRef.current;
+    if (!element) return;
+    try {
+      if (document.fullscreenElement === element) {
+        await document.exitFullscreen();
+      } else {
+        await element.requestFullscreen();
+      }
+    } catch {
+      setRouteError(t({ it: 'Impossibile aprire la mappa a schermo intero.', en: 'Unable to open fullscreen map.' }));
+    }
+  };
 
   const close = () => {
     if (pdfExporting) return;
+    if (mapPanelRef.current && document.fullscreenElement === mapPanelRef.current) {
+      document.exitFullscreen().catch(() => {
+        // ignore fullscreen close errors
+      });
+    }
     setPdfPreviewOpen(false);
     onClose();
   };
@@ -637,12 +978,25 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
       const polygon = roomPolygon(room);
       if (polygon.length < 3) return null;
       const points = polygon.map((point) => `${point.x},${point.y}`).join(' ');
-      const center = polygonCentroid(polygon);
+      const layout = getRoomLabelLayout(room, polygon);
       const label = String(room.name || '').trim() || t({ it: 'Ufficio', en: 'Office' });
       return (
         <g key={`room:${room.id}`}>
           <polygon points={points} fill="rgba(59,130,246,0.12)" stroke="rgba(37,99,235,0.65)" strokeWidth={1.2} />
-          <text x={center.x} y={center.y} textAnchor="middle" dominantBaseline="middle" fontSize={11} fontWeight={700} fill="#1e3a8a" stroke="#ffffff" strokeWidth={3} paintOrder="stroke" style={{ pointerEvents: 'none' }}>
+          <text
+            x={layout.x}
+            y={layout.y}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={layout.fontSize}
+            fontWeight={700}
+            fill="#1e3a8a"
+            stroke="#ffffff"
+            strokeWidth={3}
+            paintOrder="stroke"
+            transform={layout.rotate ? `rotate(${layout.rotate} ${layout.x} ${layout.y})` : undefined}
+            style={{ pointerEvents: 'none' }}
+          >
             {label}
           </text>
         </g>
@@ -710,6 +1064,22 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
     return <polygon points={arrow} fill="#2563eb" stroke="#1e3a8a" strokeWidth={1} />;
   };
 
+  const renderAssemblyPointIcon = (point: Point) => (
+    <g transform={`translate(${point.x},${point.y})`} aria-label={t({ it: 'Punto di raccolta', en: 'Assembly point' })}>
+      <rect x={-16} y={-16} width={32} height={32} rx={5} fill="#16a34a" stroke="#ffffff" strokeWidth={2} />
+      <path d="M-13 -12 L-9 -12 L-12 -9 L-8 -9 L-6 -7 L-11 -7 L-11 -2 L-13 -2 Z" fill="#ffffff" />
+      <path d="M13 -12 L9 -12 L12 -9 L8 -9 L6 -7 L11 -7 L11 -2 L13 -2 Z" fill="#ffffff" />
+      <path d="M-13 12 L-9 12 L-12 9 L-8 9 L-6 7 L-11 7 L-11 2 L-13 2 Z" fill="#ffffff" />
+      <path d="M13 12 L9 12 L12 9 L8 9 L6 7 L11 7 L11 2 L13 2 Z" fill="#ffffff" />
+      <circle cx={0} cy={-2.6} r={2.3} fill="#ffffff" />
+      <circle cx={-5.1} cy={0.4} r={1.9} fill="#ffffff" />
+      <circle cx={5.1} cy={0.4} r={1.9} fill="#ffffff" />
+      <rect x={-2.4} y={1.5} width={4.8} height={6.2} rx={1.2} fill="#ffffff" />
+      <rect x={-7.5} y={2.6} width={4.2} height={4.7} rx={1.1} fill="#ffffff" />
+      <rect x={3.3} y={2.6} width={4.2} height={4.7} rx={1.1} fill="#ffffff" />
+    </g>
+  );
+
   const renderRouteSvg = (segment: RoutePlanSegment, opts?: { includeDirectionArrow?: boolean }) => {
     const plan = planById.get(segment.planId) || null;
     const width = Number(plan?.width || 0) > 0 ? Number(plan?.width) : 1600;
@@ -719,8 +1089,18 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
     const segmentIdx = routeResult?.segments.findIndex((x) => x.planId === segment.planId && x.startPoint === segment.startPoint) ?? -1;
     const isFirst = segmentIdx === 0;
     const isLast = segmentIdx === Math.max(0, (routeResult?.segments.length || 1) - 1);
+    const showAssemblyGuide = Boolean(
+      isLast && targetDoor && nearestAssemblyPoint && nearestAssemblyPoint.planId === segment.planId
+    );
+    const viewport = showAssemblyGuide && targetDoor && nearestAssemblyPoint
+      ? computeViewportBounds(width, height, [targetDoor.point, nearestAssemblyPoint.point], 96)
+      : { minX: 0, minY: 0, width, height };
     return (
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto block bg-slate-100" xmlns="http://www.w3.org/2000/svg">
+      <svg
+        viewBox={`${viewport.minX} ${viewport.minY} ${viewport.width} ${viewport.height}`}
+        className="w-full h-auto block bg-slate-100"
+        xmlns="http://www.w3.org/2000/svg"
+      >
         <defs>
           <pattern id={patternId} width="22" height="22" patternUnits="userSpaceOnUse">
             <rect width="22" height="22" fill="rgba(148,163,184,0.18)" />
@@ -736,6 +1116,18 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
         {route.approachPoints?.length ? <polyline points={route.approachPoints.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#64748b" strokeWidth={3} strokeDasharray="8 6" strokeLinecap="round" strokeLinejoin="round" /> : null}
         {route.corridorPoints?.length ? <polyline points={route.corridorPoints.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#dc2626" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" /> : null}
         {route.exitPoints?.length ? <polyline points={route.exitPoints.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#64748b" strokeWidth={3} strokeDasharray="8 6" strokeLinecap="round" strokeLinejoin="round" /> : null}
+        {showAssemblyGuide ? (
+          <line
+            x1={targetDoor!.point.x}
+            y1={targetDoor!.point.y}
+            x2={nearestAssemblyPoint!.point.x}
+            y2={nearestAssemblyPoint!.point.y}
+            stroke="#0ea5e9"
+            strokeWidth={3}
+            strokeDasharray="10 7"
+            strokeLinecap="round"
+          />
+        ) : null}
         {renderTransitionDirectionArrow(segment)}
         {opts?.includeDirectionArrow && isFirst ? renderStartDirectionArrow(segment) : null}
         {startPoint && isFirst ? (
@@ -749,6 +1141,9 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
             <circle cx={targetDoor.point.x} cy={targetDoor.point.y} r={7} fill="#16a34a" stroke="#ffffff" strokeWidth={2} />
             <text x={targetDoor.point.x + 10} y={targetDoor.point.y - 10} fontSize={12} fontWeight={700} fill="#14532d">B</text>
           </g>
+        ) : null}
+        {showAssemblyGuide ? (
+          renderAssemblyPointIcon(nearestAssemblyPoint!.point)
         ) : null}
         {!route.directDashedOnly ? (
           <>
@@ -874,8 +1269,8 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
                       <Dialog.Title className="modal-title">{t({ it: 'Via di fuga', en: 'Escape route' })}</Dialog.Title>
                       <Dialog.Description className="modal-description">
                         {t({
-                          it: 'Percorso più rapido verso la porta più vicina con Emergenza + Esterno. Nei cambi piano usa solo scale.',
-                          en: 'Fastest route to the nearest door with Emergency + External options. Floor transitions use stairs only.'
+                          it: 'Percorso più rapido verso la porta più vicina con Antipanico + Esterno. Nei cambi piano usa solo scale.',
+                          en: 'Fastest route to the nearest door with Panic + External options. Floor transitions use stairs only.'
                         })}
                       </Dialog.Description>
                     </div>
@@ -890,8 +1285,8 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
                     </span>
                     <span className="ml-2">
                       {t({
-                        it: 'Partenza dal punto selezionato con click destro. L\'algoritmo valuta tutte le uscite Emergenza+Esterno e sceglie il tempo minore.',
-                        en: 'Start from the right-click selected point. The algorithm evaluates all Emergency+External exits and picks the minimum-time route.'
+                        it: 'Partenza dal punto selezionato con click destro. L\'algoritmo valuta tutte le uscite Antipanico+Esterno e sceglie il tempo minore.',
+                        en: 'Start from the right-click selected point. The algorithm evaluates all Panic+External exits and picks the minimum-time route.'
                       })}
                     </span>
                   </div>
@@ -952,6 +1347,8 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
                                     <Navigation size={12} />
                                   ) : item.icon === 'stairs' ? (
                                     <CornerDownRight size={12} />
+                                  ) : item.icon === 'exit' ? (
+                                    <DoorOpen size={12} />
                                   ) : (
                                     <Flag size={12} />
                                   )}
@@ -1014,11 +1411,20 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
                     <div className="flex items-center gap-2 text-xs text-slate-600">
                       <DoorOpen size={14} />
                       {t({
-                        it: 'Le porte valide per la via di fuga devono avere Emergenza e Esterno attivi; i passaggi inter-piano usano esclusivamente Scale.',
-                        en: 'Valid escape doors must have Emergency and External enabled; inter-floor transitions use Stairs only.'
+                        it: 'Le porte valide per la via di fuga devono avere Antipanico e Esterno attivi; i passaggi inter-piano usano esclusivamente Scale.',
+                        en: 'Valid escape doors must have Panic and External enabled; inter-floor transitions use Stairs only.'
                       })}
                     </div>
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={toggleMapFullscreen}
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Mostra mappa a schermo intero', en: 'Show map in fullscreen' })}
+                      >
+                        {isMapFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                        {isMapFullscreen ? t({ it: 'Esci da full screen', en: 'Exit fullscreen' }) : t({ it: 'Full screen', en: 'Fullscreen' })}
+                      </button>
                       <button
                         type="button"
                         onClick={openPdfPreview}
@@ -1138,6 +1544,8 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
                                       <Navigation size={16} />
                                     ) : item.icon === 'stairs' ? (
                                       <CornerDownRight size={16} />
+                                    ) : item.icon === 'exit' ? (
+                                      <DoorOpen size={16} />
                                     ) : (
                                       <Flag size={16} />
                                     )}
@@ -1146,6 +1554,29 @@ const EscapeRouteModal = ({ open, plans, startPlanId, startPoint, sourceKind, cl
                                 </li>
                               ))}
                             </ol>
+                          </section>
+
+                          <section data-escape-pdf-page="true" className="w-[1080px] rounded-xl border border-slate-300 bg-white p-4 shadow-sm">
+                            <h3 className="text-xl font-semibold text-slate-900">{t({ it: 'Scheda emergenza', en: 'Emergency card' })}</h3>
+                            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800">
+                              <div>
+                                <strong>{t({ it: 'Numeri utili', en: 'Useful numbers' })}:</strong> {safetyCardNumbers}
+                              </div>
+                              <div className="mt-2">
+                                <strong>{t({ it: 'Punti di raccolta', en: 'Assembly points' })}:</strong>{' '}
+                                {safetyCardPoints.length
+                                  ? safetyCardPoints.map((point) => `| ${point.name} (${point.planName}) Google Maps: ${getAssemblyPointCoordsLabel(point)}`).join(' ')
+                                  : t({ it: 'Nessun punto', en: 'No points' })}
+                              </div>
+                            </div>
+                            {nearestAssemblyPoint ? (
+                              <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                                {t({
+                                  it: `Indicazione aggiuntiva: Dopo l'uscita prosegui verso il punto di raccolta ${nearestAssemblyPoint.name} (${nearestAssemblyPoint.planName}) seguendo la linea tratteggiata e contatta i numeri d'emergenza. Coordinate Google Maps: ${getAssemblyPointCoordsLabel(nearestAssemblyPoint)}.`,
+                                  en: `Additional guidance: after exiting, continue to assembly point ${nearestAssemblyPoint.name} (${nearestAssemblyPoint.planName}) following the dashed line and contact emergency numbers. Google Maps coordinates: ${getAssemblyPointCoordsLabel(nearestAssemblyPoint)}.`
+                                })}
+                              </div>
+                            ) : null}
                           </section>
                         </>
                       ) : (
