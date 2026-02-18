@@ -1254,7 +1254,7 @@ const SafetyPanel = () => {
     const header =
       type === 'devices'
         ? ['Cliente', 'Sede', 'Planimetria', 'Tipo oggetto', 'Nome', 'Descrizione', 'Note', 'Ultima revisione', 'Azienda verifica', 'Ufficio/Corridoio', 'GPS']
-        : ['Cliente', 'Sede', 'Planimetria', 'ID porta', 'Descrizione', 'Tipo porta', 'Tag', 'Ultima revisione', 'Azienda verifica', 'Corridoio', 'Ufficio vicino'];
+        : ['Cliente', 'Sede', 'Planimetria', 'Descrizione', 'Tipo porta', 'Tag', 'Ultima revisione', 'Azienda verifica', 'Corridoio', 'Ufficio vicino'];
     const lines = [
       header.join(';'),
       ...rows.map((row: any) =>
@@ -1276,7 +1276,6 @@ const SafetyPanel = () => {
               row.clientName,
               row.siteName,
               row.planName,
-              row.doorId,
               row.description,
               row.doorType,
               row.mode === 'automated' && row.isFireDoor ? '[AU+TF]' : row.mode === 'automated' ? '[AU]' : row.isFireDoor ? '[TF]' : '',
@@ -1746,11 +1745,6 @@ const SafetyPanel = () => {
                     {t({ it: 'Planimetria', en: 'Floor plan' })} {toggleSortIcon(doorSort.key === 'planName', doorSort.dir)}
                   </button>
                 </th>
-                <th className="px-3 py-2 text-left">
-                  <button type="button" onClick={() => setDoorSort((prev) => ({ key: 'doorId', dir: prev.key === 'doorId' && prev.dir === 'asc' ? 'desc' : 'asc' }))} className="inline-flex items-center gap-1">
-                    {t({ it: 'ID porta', en: 'Door ID' })} {toggleSortIcon(doorSort.key === 'doorId', doorSort.dir)}
-                  </button>
-                </th>
                 <th className="px-3 py-2 text-left">{t({ it: 'Descrizione porta', en: 'Door description' })}</th>
                 <th className="px-3 py-2 text-left">{t({ it: 'Tipo porta', en: 'Door type' })}</th>
                 <th className="px-3 py-2 text-left">
@@ -1787,7 +1781,6 @@ const SafetyPanel = () => {
                       <td className="px-3 py-2 font-semibold text-ink">{row.clientName || '—'}</td>
                       <td className="px-3 py-2 text-slate-700">{row.siteName || '—'}</td>
                       <td className="px-3 py-2 text-slate-700">{row.planName || '—'}</td>
-                      <td className="px-3 py-2 font-mono text-xs text-slate-700">{row.doorId || '—'}</td>
                       <td className="px-3 py-2 text-slate-700">{row.description || '—'}</td>
                       <td className="px-3 py-2 text-slate-700">{row.doorType || '—'}</td>
                       <td className="px-3 py-2 text-slate-700">{tag || '—'}</td>
@@ -1841,7 +1834,7 @@ const SafetyPanel = () => {
                 })
               ) : (
                 <tr>
-                  <td colSpan={13} className="px-3 py-6 text-center text-sm text-slate-500">
+                  <td colSpan={12} className="px-3 py-6 text-center text-sm text-slate-500">
                     {t({ it: 'Nessuna porta d’emergenza trovata.', en: 'No emergency doors found.' })}
                   </td>
                 </tr>

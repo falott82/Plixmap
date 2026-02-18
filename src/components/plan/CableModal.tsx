@@ -40,7 +40,7 @@ const CableModal = ({ open, initial, onClose, onSubmit }: Props) => {
     setDashed(!!initial?.dashed);
     setRoute((initial?.route as any) === 'hv' ? 'hv' : 'vh');
     window.setTimeout(() => nameRef.current?.focus(), 0);
-  }, [initial, open]);
+  }, [open, initial?.name, initial?.description, initial?.color, initial?.width, initial?.dashed, initial?.route]);
 
   const presets = useMemo(
     () => ['#2563eb', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#a855f7', '#94a3b8', '#0f172a'],

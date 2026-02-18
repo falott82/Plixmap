@@ -5,7 +5,7 @@ import { Client } from '../../store/types';
 import { useT } from '../../i18n/useT';
 import { ExternalUserRow, listExternalUsers } from '../../api/customImport';
 import { useToastStore } from '../../store/useToast';
-import { exportClientDirectoryToPdf } from '../../utils/pdf';
+import { ClientDirectoryPdfColumnKey, exportClientDirectoryToPdf } from '../../utils/pdf';
 
 interface Props {
   open: boolean;
@@ -27,6 +27,30 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
   const [sortKey, setSortKey] = useState<'lastName' | 'firstName' | 'role' | 'dept' | 'email' | 'mobile' | 'ext'>('dept');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [exportGroupBy, setExportGroupBy] = useState<'dept' | 'surname'>('dept');
+  const [pdfColumnsModalOpen, setPdfColumnsModalOpen] = useState(false);
+  const [pdfColumns, setPdfColumns] = useState<ClientDirectoryPdfColumnKey[]>([
+    'lastName',
+    'firstName',
+    'role',
+    'dept',
+    'email',
+    'mobile',
+    'ext'
+  ]);
+
+  const pdfColumnDefs = useMemo(
+    () =>
+      [
+        { key: 'lastName', label: t({ it: 'Cognome', en: 'Surname' }) },
+        { key: 'firstName', label: t({ it: 'Nome', en: 'Name' }) },
+        { key: 'role', label: t({ it: 'Ruolo', en: 'Role' }) },
+        { key: 'dept', label: t({ it: 'Reparto', en: 'Department' }) },
+        { key: 'email', label: t({ it: 'Email', en: 'Email' }) },
+        { key: 'mobile', label: t({ it: 'Cellulare', en: 'Mobile' }) },
+        { key: 'ext', label: t({ it: 'Interno', en: 'Extension' }) }
+      ] as Array<{ key: ClientDirectoryPdfColumnKey; label: string }>,
+    [t]
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -35,6 +59,11 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
     setSortKey('dept');
     setSortDir('asc');
   }, [client?.id, open]);
+
+  useEffect(() => {
+    if (open) return;
+    setPdfColumnsModalOpen(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -227,11 +256,12 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
     URL.revokeObjectURL(url);
   };
 
-  const exportPdf = () => {
+  const exportPdf = (columns: ClientDirectoryPdfColumnKey[]) => {
     if (!sorted.length) return;
     exportClientDirectoryToPdf({
       clientName: client?.shortName || client?.name || '',
       groupBy: exportGroupBy,
+      columns,
       rows: sorted.map((r) => ({
         lastName: r.lastName || '',
         firstName: r.firstName || '',
@@ -317,7 +347,7 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
                       <option value="surname">{t({ it: 'PDF per cognome', en: 'PDF by surname' })}</option>
                     </select>
                     <button
-                      onClick={exportPdf}
+                      onClick={() => setPdfColumnsModalOpen(true)}
                       disabled={!sorted.length}
                       className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                     >
@@ -451,6 +481,88 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
           </div>
         </div>
       </Dialog>
+      <Transition show={pdfColumnsModalOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-[70]" onClose={() => setPdfColumnsModalOpen(false)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-black/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <Dialog.Panel className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <Dialog.Title className="text-base font-semibold text-slate-900">
+                        {t({ it: 'Esporta PDF rubrica', en: 'Export directory PDF' })}
+                      </Dialog.Title>
+                      <Dialog.Description className="mt-1 text-sm text-slate-600">
+                        {t({ it: 'Scegli le colonne da includere nel PDF finale.', en: 'Choose the columns to include in the final PDF.' })}
+                      </Dialog.Description>
+                    </div>
+                    <button onClick={() => setPdfColumnsModalOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {pdfColumnDefs.map((col) => {
+                      const checked = pdfColumns.includes(col.key);
+                      return (
+                        <label
+                          key={col.key}
+                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                        >
+                          <span className="font-medium">{col.label}</span>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setPdfColumns((prev) =>
+                                prev.includes(col.key) ? prev.filter((key) => key !== col.key) : [...prev, col.key]
+                              )
+                            }
+                            className="h-4 w-4 rounded border-slate-300 text-primary"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                    <button
+                      onClick={() => setPdfColumns(pdfColumnDefs.map((col) => col.key))}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Seleziona tutte', en: 'Select all' })}
+                    </button>
+                    <span>{t({ it: `${pdfColumns.length} colonne selezionate`, en: `${pdfColumns.length} columns selected` })}</span>
+                  </div>
+
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      onClick={() => setPdfColumnsModalOpen(false)}
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!pdfColumns.length) return;
+                        exportPdf(pdfColumns);
+                        setPdfColumnsModalOpen(false);
+                      }}
+                      disabled={!pdfColumns.length || !sorted.length}
+                      className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {t({ it: 'Esporta PDF', en: 'Export PDF' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
     </Transition>
   );
 };

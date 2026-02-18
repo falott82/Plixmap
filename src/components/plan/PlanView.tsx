@@ -10467,7 +10467,11 @@ const PlanView = ({ planId }: Props) => {
                             layerId === ALL_ITEMS_LAYER_ID
                               ? allItemsLabel
                               : (layer?.name?.[lang] as string) || (layer?.name?.it as string) || layerId;
-                          const checked = hideAllLayers ? false : visibleLayerIds.includes(layerId);
+                          const checked = hideAllLayers
+                            ? false
+                            : layerId === ALL_ITEMS_LAYER_ID
+                              ? allItemsSelected
+                              : allItemsSelected || effectiveVisibleLayerIds.includes(layerId);
                           const note = getLayerNote(layer);
                           return (
                           <label
@@ -10479,7 +10483,7 @@ const PlanView = ({ planId }: Props) => {
                               className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
                               checked={checked}
                               onChange={() => {
-                                const base = hideAllLayers ? [] : visibleLayerIds;
+                                const base = hideAllLayers ? [] : effectiveVisibleLayerIds;
                                 setHideAllLayers(planId, false);
                                 if (layerId === ALL_ITEMS_LAYER_ID) {
                                   setVisibleLayerIds(planId, checked ? [] : layerIds);
@@ -11977,7 +11981,7 @@ const PlanView = ({ planId }: Props) => {
                             <button
                               key={layerId}
                               onClick={() => {
-                                const base = hideAllLayers ? [] : visibleLayerIds;
+                                const base = hideAllLayers ? [] : effectiveVisibleLayerIds;
                                 if (hideAllLayers) setHideAllLayers(planId, false);
                                 if (layerId === ALL_ITEMS_LAYER_ID) {
                                   const showAll = hideAllLayers || !allItemsSelected;
@@ -13722,7 +13726,7 @@ const PlanView = ({ planId }: Props) => {
 	                      <button
 	                        key={layerId}
 	                        onClick={() => {
-	                          const base = hideAllLayers ? [] : visibleLayerIds;
+	                          const base = hideAllLayers ? [] : effectiveVisibleLayerIds;
 	                          if (hideAllLayers) setHideAllLayers(planId, false);
 	                          const nextRaw = base.includes(layerId) ? base.filter((x) => x !== layerId) : [...base, layerId];
 	                          const next = normalizeLayerSelection(nextRaw);

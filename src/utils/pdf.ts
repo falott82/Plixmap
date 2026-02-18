@@ -1476,6 +1476,8 @@ export const exportClientIpMapToPdf = (params: {
   pdf.save(filename);
 };
 
+export type ClientDirectoryPdfColumnKey = 'lastName' | 'firstName' | 'role' | 'dept' | 'email' | 'mobile' | 'ext';
+
 export const exportClientDirectoryToPdf = (params: {
   clientName: string;
   groupBy: 'dept' | 'surname';
@@ -1488,6 +1490,7 @@ export const exportClientDirectoryToPdf = (params: {
     mobile: string;
     ext: string;
   }>;
+  columns?: ClientDirectoryPdfColumnKey[];
   filename?: string;
 }) => {
   const filename = params.filename || `deskly_rubrica_${new Date().toISOString().slice(0, 10)}.pdf`;
@@ -1501,7 +1504,7 @@ export const exportClientDirectoryToPdf = (params: {
   const rowPadding = 5;
   const lineHeight = 9;
 
-  const cols = [
+  const allCols: Array<{ key: ClientDirectoryPdfColumnKey; label: string; ratio: number }> = [
     { key: 'lastName', label: 'Cognome', ratio: 0.16 },
     { key: 'firstName', label: 'Nome', ratio: 0.14 },
     { key: 'role', label: 'Ruolo', ratio: 0.18 },
@@ -1510,7 +1513,19 @@ export const exportClientDirectoryToPdf = (params: {
     { key: 'mobile', label: 'Cellulare', ratio: 0.1 },
     { key: 'ext', label: 'Interno', ratio: 0.04 }
   ];
-  const colWidths = cols.map((c) => Math.floor(c.ratio * tableWidth));
+  const allowedColumnKeys = new Set<ClientDirectoryPdfColumnKey>(allCols.map((col) => col.key));
+  const selectedColumnKeys = Array.isArray(params.columns)
+    ? Array.from(new Set(params.columns.map((col) => String(col) as ClientDirectoryPdfColumnKey))).filter((col) =>
+        allowedColumnKeys.has(col)
+      )
+    : [];
+  const cols = selectedColumnKeys.length ? allCols.filter((col) => selectedColumnKeys.includes(col.key)) : allCols;
+  const totalRatio = cols.reduce((sum, col) => sum + Math.max(0, Number(col.ratio) || 0), 0) || 1;
+  const colWidths = cols.map((c) => Math.max(10, Math.floor((c.ratio / totalRatio) * tableWidth)));
+  if (colWidths.length) {
+    const used = colWidths.slice(0, -1).reduce((sum, value) => sum + value, 0);
+    colWidths[colWidths.length - 1] = Math.max(10, tableWidth - used);
+  }
   const colX = colWidths.reduce<number[]>((acc, _w, idx) => {
     if (idx === 0) return [margin];
     acc.push(acc[idx - 1] + colWidths[idx - 1]);
@@ -1634,7 +1649,7 @@ export const exportClientDirectoryToPdf = (params: {
     y += groupHeight;
 
     for (const row of list) {
-      const cells = [row.lastName, row.firstName, row.role, row.dept, row.email, row.mobile, row.ext];
+      const cells = cols.map((col) => String(row[col.key] || ''));
       const linesByCol = cells.map((cell, i) => {
         const safe = String(cell || '');
         const maxWidth = Math.max(10, colWidths[i] - rowPadding * 2);
