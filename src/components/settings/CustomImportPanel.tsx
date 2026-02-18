@@ -62,6 +62,12 @@ const CustomImportPanel = () => {
   const summaryById = useMemo(() => new Map(summaryRows.map((r) => [r.clientId, r])), [summaryRows]);
   const activeClient = useMemo(() => clients.find((c) => c.id === activeClientId) || null, [activeClientId, clients]);
   const activeSummary = useMemo(() => (activeClientId ? summaryById.get(activeClientId) || null : null), [activeClientId, summaryById]);
+  const hasImportedOnce = !!activeSummary?.lastImportAt;
+  const hasWebApiConfig = !!activeSummary?.hasConfig;
+  const canRunWebApiTest = hasWebApiConfig;
+  const canRunWebApiSync = hasWebApiConfig;
+  const canClearWebApiImport = hasImportedOnce;
+  const canSaveWebApiSettings = !hasWebApiConfig || hasImportedOnce;
   const infoClient = useMemo(() => (infoClientId ? clients.find((c) => c.id === infoClientId) || null : null), [clients, infoClientId]);
   const infoSummary = useMemo(() => (infoClientId ? summaryById.get(infoClientId) || null : null), [infoClientId, summaryById]);
   const infoCounts = useMemo(() => {
@@ -495,20 +501,9 @@ const CustomImportPanel = () => {
                         {activeClient ? activeClient.name : t({ it: 'Nessun cliente selezionato', en: 'No client selected' })}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {importMode === 'webapi' ? (
-                        <button
-                          onClick={() => setConfigExpanded((v) => !v)}
-                          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50"
-                          title={t({ it: 'Mostra/Nascondi impostazioni WebAPI', en: 'Show/Hide WebAPI settings' })}
-                        >
-                          <Settings2 size={16} />
-                        </button>
-                      ) : null}
-                      <button onClick={() => setConfigOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
-                        <X size={18} />
-                      </button>
-                    </div>
+                    <button onClick={() => setConfigOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
@@ -623,10 +618,22 @@ const CustomImportPanel = () => {
                       </div>
                     ) : (
                       <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                        {t({
-                          it: 'Apri le impostazioni WebAPI con l’icona ingranaggio per configurare URL e credenziali.',
-                          en: 'Open the WebAPI settings via the gear icon to configure URL and credentials.'
-                        })}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span>
+                            {t({
+                              it: 'Apri le impostazioni WebAPI con l’icona ingranaggio per configurare URL e credenziali.',
+                              en: 'Open the WebAPI settings via the gear icon to configure URL and credentials.'
+                            })}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setConfigExpanded(true)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                            title={t({ it: 'Apri impostazioni WebAPI', en: 'Open WebAPI settings' })}
+                          >
+                            <Settings2 size={14} />
+                          </button>
+                        </div>
                       </div>
                     )
                   ) : (
@@ -669,31 +676,54 @@ const CustomImportPanel = () => {
                       <>
                         <button
                           onClick={saveConfig}
-                          disabled={savingCfg || !activeClientId}
+                          disabled={savingCfg || !activeClientId || !canSaveWebApiSettings}
                           className="btn-primary disabled:opacity-60"
-                          title={t({ it: 'Salva configurazione WebAPI', en: 'Save WebAPI configuration' })}
+                          title={
+                            !canSaveWebApiSettings
+                              ? t({
+                                  it: 'Puoi aggiornare le impostazioni solo dopo la prima importazione.',
+                                  en: 'You can update settings only after the first import.'
+                                })
+                              : t({ it: 'Salva configurazione WebAPI', en: 'Save WebAPI configuration' })
+                          }
                         >
-                          {savingCfg ? t({ it: 'Salvataggio…', en: 'Saving…' }) : t({ it: 'Salva impostazioni', en: 'Save settings' })}
+                          {savingCfg
+                            ? t({ it: 'Salvataggio…', en: 'Saving…' })
+                            : hasWebApiConfig
+                              ? t({ it: 'Aggiorna impostazioni', en: 'Update settings' })
+                              : t({ it: 'Salva impostazioni', en: 'Save settings' })}
                         </button>
                         <button
                           onClick={runTest}
-                          disabled={testing || !activeClientId}
+                          disabled={testing || !activeClientId || !canRunWebApiTest}
                           className="flex items-center gap-2 btn-secondary disabled:opacity-60"
-                          title={t({ it: 'Verifica connessione WebAPI', en: 'Test WebAPI connection' })}
+                          title={
+                            !canRunWebApiTest
+                              ? t({
+                                  it: 'Configura prima le impostazioni WebAPI.',
+                                  en: 'Configure WebAPI settings first.'
+                                })
+                              : t({ it: 'Verifica connessione WebAPI', en: 'Test WebAPI connection' })
+                          }
                         >
                           <TestTube size={16} /> {testing ? t({ it: 'Test…', en: 'Testing…' }) : t({ it: 'Test WebAPI', en: 'Test WebAPI' })}
                         </button>
-                        {activeSummary?.hasConfig ? (
-                          <button
-                            onClick={() => activeClientId && runSync(activeClientId)}
-                            disabled={!activeClientId || syncingClientId === activeClientId}
-                            className="flex items-center gap-2 btn-secondary disabled:opacity-60"
-                            title={t({ it: 'Aggiorna importazione da WebAPI', en: 'Sync import from WebAPI' })}
-                          >
-                            <RefreshCw size={16} className={syncingClientId === activeClientId ? 'animate-spin' : ''} />
-                            {t({ it: 'Aggiorna importazione', en: 'Sync import' })}
-                          </button>
-                        ) : null}
+                        <button
+                          onClick={() => activeClientId && runSync(activeClientId)}
+                          disabled={!activeClientId || syncingClientId === activeClientId || !canRunWebApiSync}
+                          className="flex items-center gap-2 btn-secondary disabled:opacity-60"
+                          title={
+                            !canRunWebApiSync
+                              ? t({
+                                  it: 'Configura prima le impostazioni WebAPI.',
+                                  en: 'Configure WebAPI settings first.'
+                                })
+                              : t({ it: 'Aggiorna importazione da WebAPI', en: 'Sync import from WebAPI' })
+                          }
+                        >
+                          <RefreshCw size={16} className={syncingClientId === activeClientId ? 'animate-spin' : ''} />
+                          {t({ it: 'Aggiorna importazione', en: 'Sync import' })}
+                        </button>
                       </>
                     ) : null}
                     {activeSummary?.total || syncResult?.ok ? (
@@ -707,9 +737,16 @@ const CustomImportPanel = () => {
                     ) : null}
                     <button
                       onClick={() => setClearConfirmOpen(true)}
-                      disabled={!activeClientId || clearing}
+                      disabled={!activeClientId || clearing || !canClearWebApiImport}
                       className="ml-auto flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
-                      title={t({ it: 'Elimina dati importati', en: 'Clear imported data' })}
+                      title={
+                        !canClearWebApiImport
+                          ? t({
+                              it: 'Disponibile solo dopo almeno una importazione.',
+                              en: 'Available only after at least one import.'
+                            })
+                          : t({ it: 'Elimina dati importati', en: 'Clear imported data' })
+                      }
                     >
                       <Trash2 size={16} /> {clearing ? t({ it: 'Svuotamento…', en: 'Clearing…' }) : t({ it: 'Svuota importazione', en: 'Clear import' })}
                     </button>
@@ -889,17 +926,22 @@ const CustomImportPanel = () => {
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}
                     </button>
-                    {activeSummary?.hasConfig ? (
-                      <button
-                        onClick={() => activeClientId && runSync(activeClientId)}
-                        disabled={!activeClientId || syncingClientId === activeClientId}
-                        className="btn-primary inline-flex items-center gap-2 disabled:opacity-60"
-                        title={t({ it: 'Aggiorna importazione WebAPI', en: 'Sync WebAPI import' })}
-                      >
-                        <RefreshCw size={16} className={syncingClientId === activeClientId ? 'animate-spin' : ''} />
-                        {t({ it: 'Aggiorna importazione', en: 'Sync import' })}
-                      </button>
-                    ) : null}
+                    <button
+                      onClick={() => activeClientId && runSync(activeClientId)}
+                      disabled={!activeClientId || syncingClientId === activeClientId || !canRunWebApiSync}
+                      className="btn-primary inline-flex items-center gap-2 disabled:opacity-60"
+                      title={
+                        !canRunWebApiSync
+                          ? t({
+                              it: 'Configura prima le impostazioni WebAPI.',
+                              en: 'Configure WebAPI settings first.'
+                            })
+                          : t({ it: 'Aggiorna importazione WebAPI', en: 'Sync WebAPI import' })
+                      }
+                    >
+                      <RefreshCw size={16} className={syncingClientId === activeClientId ? 'animate-spin' : ''} />
+                      {t({ it: 'Aggiorna importazione', en: 'Sync import' })}
+                    </button>
                   </div>
                 </Dialog.Panel>
               </Transition.Child>
