@@ -275,8 +275,9 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
   };
 
   return (
-    <Transition show={open} as={Fragment}>
-      <Dialog as="div" className="relative z-50" onClose={onClose}>
+    <>
+      <Transition show={open} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={onClose}>
         <Transition.Child
           as={Fragment}
           enter="ease-out duration-150"
@@ -480,7 +481,8 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
             </Transition.Child>
           </div>
         </div>
-      </Dialog>
+        </Dialog>
+      </Transition>
       <Transition show={pdfColumnsModalOpen} as={Fragment}>
         <Dialog as="div" className="relative z-[70]" onClose={() => setPdfColumnsModalOpen(false)}>
           <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
@@ -563,7 +565,7 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
           </div>
         </Dialog>
       </Transition>
-    </Transition>
+    </>
   );
 };
 

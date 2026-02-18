@@ -1458,6 +1458,24 @@ const PlanView = ({ planId }: Props) => {
     const canRequestLock = !activeRevision && planAccess === 'rw';
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const wsUrl = `${proto}://${window.location.host}/ws`;
+    const closeSocketSafely = (socket: WebSocket) => {
+      if (socket.readyState === WebSocket.CONNECTING) {
+        const closeLater = () => {
+          try {
+            socket.close();
+          } catch {
+            // ignore
+          }
+        };
+        socket.addEventListener('open', closeLater, { once: true });
+        return;
+      }
+      try {
+        socket.close();
+      } catch {
+        // ignore
+      }
+    };
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
     let closed = false;
@@ -1705,7 +1723,7 @@ const PlanView = ({ planId }: Props) => {
           if (lockMineRef.current) send({ type: 'release_lock', planId });
           send({ type: 'leave', planId });
         }
-        ws.close();
+        closeSocketSafely(ws);
       } catch {
         // ignore
       } finally {
@@ -2306,6 +2324,10 @@ const PlanView = ({ planId }: Props) => {
     () => layerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID),
     [layerIds]
   );
+  const defaultVisibleLayerIds = useMemo(
+    () => layerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID && id !== SECURITY_LAYER_ID),
+    [layerIds]
+  );
   const layerIdSet = useMemo(() => new Set(layerIds), [layerIds]);
   const normalizeLayerSelection = useCallback(
     (ids: string[]) => {
@@ -2338,9 +2360,9 @@ const PlanView = ({ planId }: Props) => {
   const prevLayerIdsByPlanRef = useRef<Record<string, string[]>>({});
   const visibleLayerIds = useMemo(() => {
     const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
-    if (typeof current === 'undefined') return layerIds;
+    if (typeof current === 'undefined') return normalizeLayerSelection(defaultVisibleLayerIds);
     return normalizeLayerSelection(current);
-  }, [layerIds, normalizeLayerSelection, planId, visibleLayerIdsByPlan]);
+  }, [defaultVisibleLayerIds, normalizeLayerSelection, planId, visibleLayerIdsByPlan]);
   const hideAllLayers = !!hiddenLayersByPlan[planId];
   const allItemsSelected = visibleLayerIds.includes(ALL_ITEMS_LAYER_ID);
   const effectiveVisibleLayerIds = hideAllLayers
@@ -2461,7 +2483,8 @@ const PlanView = ({ planId }: Props) => {
     const current = visibleLayerIdsByPlan[planId] as string[] | undefined;
     const prev = prevLayerIdsByPlanRef.current[planId];
     if (typeof current === 'undefined') {
-      setVisibleLayerIds(planId, layerIds);
+      const nextDefault = normalizeLayerSelection(defaultVisibleLayerIds);
+      setVisibleLayerIds(planId, nextDefault);
       prevLayerIdsByPlanRef.current[planId] = layerIds;
       return;
     }
@@ -2477,7 +2500,7 @@ const PlanView = ({ planId }: Props) => {
       setVisibleLayerIds(planId, next);
     }
     prevLayerIdsByPlanRef.current[planId] = layerIds;
-  }, [layerIds, normalizeLayerSelection, planId, setVisibleLayerIds, visibleLayerIdsByPlan]);
+  }, [defaultVisibleLayerIds, layerIds, normalizeLayerSelection, planId, setVisibleLayerIds, visibleLayerIdsByPlan]);
 
   const canvasPlan = useMemo(() => {
     if (!renderPlan) return renderPlan;
@@ -17544,6 +17567,9 @@ const PlanView = ({ planId }: Props) => {
         open={emergencyContactsOpen}
         clientId={client?.id || null}
         readOnly={planAccess !== 'rw'}
+        safetyCardVisible={securityLayerVisible}
+        onToggleSafetyCard={toggleSecurityCardVisibility}
+        safetyCardToggleDisabled={!planId}
         onClose={() => setEmergencyContactsOpen(false)}
       />
 
