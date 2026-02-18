@@ -1,7 +1,7 @@
 {
   "name": "deskly",
   "description": "Collaborative workspace planning with floor plans, desks, racks, and network links.",
-  "version": "2.9.1",
+  "version": "2.9.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "test": "node --test scripts/*.test.cjs",
+    "test:e2e:smoke": "node scripts/e2e-smoke.cjs",
+    "test:e2e:playwright": "npx playwright test",
     "lint:i18n": "node scripts/lint-i18n.cjs",
+    "release:check": "node scripts/check-release-version.cjs",
+    "quality:check": "npm run lint && npm run test && npm run build && npm run release:check",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "start": "node server/index.cjs"
   },

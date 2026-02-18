@@ -650,6 +650,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     'headphones',
     'users',
     'usersRound',
+    'assemblyPoint',
     'userSearch',
     'car',
     'truck',

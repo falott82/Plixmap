@@ -1066,17 +1066,21 @@ const EscapeRouteModal = ({ open, plans, emergencyContacts = [], startPlanId, st
 
   const renderAssemblyPointIcon = (point: Point) => (
     <g transform={`translate(${point.x},${point.y})`} aria-label={t({ it: 'Punto di raccolta', en: 'Assembly point' })}>
-      <rect x={-16} y={-16} width={32} height={32} rx={5} fill="#16a34a" stroke="#ffffff" strokeWidth={2} />
-      <path d="M-13 -12 L-9 -12 L-12 -9 L-8 -9 L-6 -7 L-11 -7 L-11 -2 L-13 -2 Z" fill="#ffffff" />
-      <path d="M13 -12 L9 -12 L12 -9 L8 -9 L6 -7 L11 -7 L11 -2 L13 -2 Z" fill="#ffffff" />
-      <path d="M-13 12 L-9 12 L-12 9 L-8 9 L-6 7 L-11 7 L-11 2 L-13 2 Z" fill="#ffffff" />
-      <path d="M13 12 L9 12 L12 9 L8 9 L6 7 L11 7 L11 2 L13 2 Z" fill="#ffffff" />
-      <circle cx={0} cy={-2.6} r={2.3} fill="#ffffff" />
-      <circle cx={-5.1} cy={0.4} r={1.9} fill="#ffffff" />
-      <circle cx={5.1} cy={0.4} r={1.9} fill="#ffffff" />
-      <rect x={-2.4} y={1.5} width={4.8} height={6.2} rx={1.2} fill="#ffffff" />
-      <rect x={-7.5} y={2.6} width={4.2} height={4.7} rx={1.1} fill="#ffffff" />
-      <rect x={3.3} y={2.6} width={4.2} height={4.7} rx={1.1} fill="#ffffff" />
+      <rect x={-18} y={-18} width={36} height={36} rx={3.2} fill="#ffffff" stroke="#111827" strokeWidth={1.1} />
+      <rect x={-16.5} y={-16.5} width={33} height={33} rx={2.6} fill="#099b2b" />
+      <g transform="translate(-12,-12)">
+        <path d="M3.8 5.5h3.2v1.4h2.1v2.1H7v1.4H3.8l2.9-2.9z" fill="#ffffff" />
+        <path d="M20.2 5.5H17v1.4h-2.1v2.1H17v1.4h3.2l-2.9-2.9z" fill="#ffffff" />
+        <path d="M3.8 18.5h3.2v-1.4h2.1V15H7v-1.4H3.8l2.9 2.9z" fill="#ffffff" />
+        <path d="M20.2 18.5H17v-1.4h-2.1V15H17v-1.4h3.2l-2.9 2.9z" fill="#ffffff" />
+        <circle cx="12" cy="9.8" r="1.3" fill="#ffffff" />
+        <circle cx="9.1" cy="11.6" r="1.1" fill="#ffffff" />
+        <circle cx="14.9" cy="11.6" r="1.1" fill="#ffffff" />
+        <circle cx="12" cy="13.3" r="1.1" fill="#ffffff" />
+        <rect x="10.6" y="14.3" width="2.8" height="4.2" rx="0.9" fill="#ffffff" />
+        <rect x="7.5" y="13.9" width="2.3" height="3.8" rx="0.8" fill="#ffffff" />
+        <rect x="14.2" y="13.9" width="2.3" height="3.8" rx="0.8" fill="#ffffff" />
+      </g>
     </g>
   );
 

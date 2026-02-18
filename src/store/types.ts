@@ -134,6 +134,7 @@ export type IconName =
   | 'headphones'
   | 'users'
   | 'usersRound'
+  | 'assemblyPoint'
   | 'userSearch'
   | 'car'
   | 'truck'

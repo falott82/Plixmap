@@ -5,31 +5,10 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { useChatStore } from '../../store/useChatStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useT } from '../../i18n/useT';
+import { createLogger } from '../../utils/logger';
+import { closeSocketSafely, getWsUrl } from '../../utils/ws';
 
-const getWsUrl = () => {
-  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${window.location.host}/ws`;
-};
-
-const closeSocketSafely = (socket: WebSocket | null | undefined) => {
-  if (!socket) return;
-  if (socket.readyState === WebSocket.CONNECTING) {
-    const closeLater = () => {
-      try {
-        socket.close();
-      } catch {
-        // ignore
-      }
-    };
-    socket.addEventListener('open', closeLater, { once: true });
-    return;
-  }
-  try {
-    socket.close();
-  } catch {
-    // ignore
-  }
-};
+const logger = createLogger('client-chat-ws');
 
 const ClientChatWs = () => {
   const t = useT();
@@ -190,9 +169,11 @@ const ClientChatWs = () => {
 
       ws.onclose = () => {
         if (!alive) return;
+        logger.warn('Chat websocket closed, scheduling reconnect');
         reconnectRef.current = window.setTimeout(connect, 1500);
       };
       ws.onerror = () => {
+        logger.warn('Chat websocket error');
         closeSocketSafely(ws);
       };
     };

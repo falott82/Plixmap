@@ -1,8 +1,13 @@
 # Deskly - Floor Plan Management
 
-Current version: 2.9.1
+Current version: 2.9.3
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
+
+## What's new in 2.9.3
+- Layers: fixed `Real user` visibility so it no longer depends on generic user visibility; real users now resolve their dedicated layer mapping correctly.
+- Layers: fixed `Show all` behavior when disabling `Rooms`; rooms now disappear correctly from the map instead of staying visible.
+- Layer routing audit: normalized layer resolution now consistently handles legacy `real_user` objects created with old default layer assignments.
 
 ## What's new in 2.9.1
 - Added `connecting doors between rooms`: select Room A + Room B, right-click a selected room, and use `Create connecting door`; placement is allowed only on an overlapping shared side.
@@ -123,6 +128,40 @@ Deskly is a web app to plan offices and infrastructure on floor plans using a fi
 - React + TypeScript (Vite), TailwindCSS, Zustand, react-konva
 - Node.js + Express + SQLite (better-sqlite3)
 - Export: jsPDF + html2canvas
+
+## Architecture docs
+- Technical architecture: `docs/ARCHITECTURE.md`
+- Terminology reference: `docs/TERMINOLOGY.md`
+
+## Quality and testing
+```bash
+# Type safety
+npm run lint
+
+# Unit checks (node:test)
+npm run test
+
+# Build validation
+npm run build
+
+# Release consistency check (package/readme/changelog version)
+npm run release:check
+
+# Full local quality gate
+npm run quality:check
+```
+
+For runtime smoke validation against a running instance:
+```bash
+E2E_BASE_URL=http://127.0.0.1:8787 npm run test:e2e:smoke
+```
+
+Playwright scaffolding is available in `playwright.config.ts` + `e2e/`.
+```bash
+npm i -D @playwright/test
+npx playwright install --with-deps
+npm run test:e2e:playwright
+```
 
 ## Quickstart
 ### Clone

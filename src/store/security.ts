@@ -15,7 +15,7 @@ export const SECURITY_TYPE_SEEDS: SecurityTypeSeed[] = [
   { id: 'safety_fire_alarm_button', name: { it: 'Pulsante allarme antincendio', en: 'Fire alarm button' }, icon: 'bellRing' },
   { id: 'safety_first_aid_box', name: { it: 'Cassetta medica', en: 'First aid box' }, icon: 'shieldCheck' },
   { id: 'safety_defibrillator', name: { it: 'DAE', en: 'Defibrillator' }, icon: 'batteryCharging' },
-  { id: 'safety_assembly_point', name: { it: 'Punto di raccolta', en: 'Assembly point' }, icon: 'usersRound', emergencyPoint: true },
+  { id: 'safety_assembly_point', name: { it: 'Punto di raccolta', en: 'Assembly point' }, icon: 'assemblyPoint', emergencyPoint: true },
   { id: 'safety_siren', name: { it: 'Sirena', en: 'Siren' }, icon: 'volume2' },
   { id: 'safety_hydrant', name: { it: 'Idrante', en: 'Hydrant' }, icon: 'droplets' },
   { id: 'safety_smoke_detector', name: { it: 'Rilevatore fumo', en: 'Smoke detector' }, icon: 'wind' },

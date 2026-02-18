@@ -1,11 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import SidebarTree from './components/layout/SidebarTree';
-import HelpPanel from './components/layout/HelpPanel';
-import ChangelogPanel from './components/layout/ChangelogPanel';
 import ToastStack from './components/ui/ToastStack';
-import PlanView from './components/plan/PlanView';
-import SettingsView from './components/settings/SettingsView';
 import ConfirmDialog from './components/ui/ConfirmDialog';
 import { useDataStore } from './store/useDataStore';
 import { defaultData } from './store/data';
@@ -19,8 +15,21 @@ import EmptyWorkspace from './components/layout/EmptyWorkspace';
 import { useT } from './i18n/useT';
 import PerfOverlay from './components/dev/PerfOverlay';
 import { perfMetrics } from './utils/perfMetrics';
-import ClientChatDock from './components/chat/ClientChatDock';
 import ClientChatWs from './components/chat/ClientChatWs';
+
+const PlanView = lazy(() => import('./components/plan/PlanView'));
+const SettingsView = lazy(() => import('./components/settings/SettingsView'));
+const HelpPanel = lazy(() => import('./components/layout/HelpPanel'));
+const ChangelogPanel = lazy(() => import('./components/layout/ChangelogPanel'));
+const ClientChatDock = lazy(() => import('./components/chat/ClientChatDock'));
+
+const AppRouteFallback = () => (
+  <div className="flex h-screen items-center justify-center bg-mist text-ink">
+    <div className="rounded-2xl bg-white px-6 py-4 shadow-card">
+      <p className="text-sm text-slate-600">Loading…</p>
+    </div>
+  </div>
+);
 
 const PlanRoute = () => {
   const { planId } = useParams();
@@ -647,24 +656,38 @@ const App = () => {
     <div className="flex bg-mist text-ink">
       {hideSidebar ? null : <SidebarTree />}
       <main className="flex-1 overflow-hidden">
-        <Routes>
-          <Route path="/login" element={<Navigate to="/" replace />} />
-          <Route
-            path="/first-run"
-            element={
-              (user as any)?.mustChangePassword ? <FirstRunView /> : <Navigate to="/" replace />
-            }
-          />
-          <Route path="/" element={<HomeRoute />} />
-          <Route path="/plan/:planId" element={<PlanRoute />} />
-          <Route path="/settings" element={<SettingsView />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<AppRouteFallback />}>
+          <Routes>
+            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route
+              path="/first-run"
+              element={
+                (user as any)?.mustChangePassword ? <FirstRunView /> : <Navigate to="/" replace />
+              }
+            />
+            <Route path="/" element={<HomeRoute />} />
+            <Route path="/plan/:planId" element={<PlanRoute />} />
+            <Route path="/settings" element={<SettingsView />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
-      {presentationMode ? null : <HelpPanel />}
-      {presentationMode ? null : <ChangelogPanel />}
+      {presentationMode ? null : (
+        <Suspense fallback={null}>
+          <HelpPanel />
+        </Suspense>
+      )}
+      {presentationMode ? null : (
+        <Suspense fallback={null}>
+          <ChangelogPanel />
+        </Suspense>
+      )}
       <ClientChatWs />
-      {presentationMode ? null : <ClientChatDock />}
+      {presentationMode ? null : (
+        <Suspense fallback={null}>
+          <ClientChatDock />
+        </Suspense>
+      )}
       <ConfirmDialog
         open={firstRunPromptOpen}
         title={t({ it: 'Superadmin creato con successo', en: 'Superadmin created successfully' })}
