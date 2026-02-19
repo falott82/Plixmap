@@ -9,4 +9,5 @@ yarn.lock
 data/*.sqlite
 data/*.sqlite-*
 data/uploads
+data/backups/
 !data/.gitkeep
