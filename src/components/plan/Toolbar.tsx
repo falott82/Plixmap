@@ -55,13 +55,13 @@ const Toolbar = ({ defs, order, onSelectType, onRemoveFromPalette, activeType, a
 
   type GroupId = 'desks' | 'notes' | 'people' | 'network' | 'walls' | 'other';
   const grouped = useMemo(() => {
-    const resolveGroup = (def: ObjectTypeDefinition): GroupId => {
-      const id = String(def.id || '');
-      if (id.startsWith('desk_')) return 'desks';
-      if (id === 'user') return 'people';
-      if (id === 'text' || id === 'image' || id === 'photo' || id === 'postit') return 'notes';
-      if (def.category === 'wall' || id.startsWith('wall_')) return 'walls';
-      if (id === 'wifi' || id === 'camera' || id === 'router' || id === 'switch' || id === 'server') return 'network';
+      const resolveGroup = (def: ObjectTypeDefinition): GroupId => {
+        const id = String(def.id || '');
+        if (id.startsWith('desk_')) return 'desks';
+      if (id === 'user' || id === 'real_user' || id === 'generic_user') return 'people';
+        if (id === 'text' || id === 'image' || id === 'photo' || id === 'postit') return 'notes';
+        if (def.category === 'wall' || id.startsWith('wall_')) return 'walls';
+        if (id === 'wifi' || id === 'camera' || id === 'router' || id === 'switch' || id === 'server') return 'network';
       return 'other';
     };
     const buckets = new Map<GroupId, ObjectTypeDefinition[]>();

@@ -8393,6 +8393,18 @@ const PlanView = ({ planId }: Props) => {
       for (const room of existingRooms) {
         const points = getRoomPolygon(room as any);
         if (points.length < 2) continue;
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const point of points) {
+          minX = Math.min(minX, point.x);
+          minY = Math.min(minY, point.y);
+          maxX = Math.max(maxX, point.x);
+          maxY = Math.max(maxY, point.y);
+        }
+        const roomCenterX = (minX + maxX) / 2;
+        const roomCenterY = (minY + maxY) / 2;
         for (let i = 0; i < points.length; i += 1) {
           const a = points[i];
           const b = points[(i + 1) % points.length];
@@ -8407,8 +8419,11 @@ const PlanView = ({ planId }: Props) => {
             const edgeMaxY = Math.max(a.y, b.y);
             const overlapY = Math.min(rect.y + rect.height, edgeMaxY) - Math.max(rect.y, edgeMinY);
             if (overlapY < minOverlap) continue;
-            registerCandidate(Math.abs(rect.x - edgeX), edgeX, rect.y);
-            registerCandidate(Math.abs(rect.x + rect.width - edgeX), edgeX - rect.width, rect.y);
+            if (roomCenterX <= edgeX) {
+              registerCandidate(Math.abs(rect.x - edgeX), edgeX, rect.y);
+            } else {
+              registerCandidate(Math.abs(rect.x + rect.width - edgeX), edgeX - rect.width, rect.y);
+            }
             continue;
           }
           const edgeY = (a.y + b.y) / 2;
@@ -8416,8 +8431,11 @@ const PlanView = ({ planId }: Props) => {
           const edgeMaxX = Math.max(a.x, b.x);
           const overlapX = Math.min(rect.x + rect.width, edgeMaxX) - Math.max(rect.x, edgeMinX);
           if (overlapX < minOverlap) continue;
-          registerCandidate(Math.abs(rect.y - edgeY), rect.x, edgeY);
-          registerCandidate(Math.abs(rect.y + rect.height - edgeY), rect.x, edgeY - rect.height);
+          if (roomCenterY <= edgeY) {
+            registerCandidate(Math.abs(rect.y - edgeY), rect.x, edgeY);
+          } else {
+            registerCandidate(Math.abs(rect.y + rect.height - edgeY), rect.x, edgeY - rect.height);
+          }
         }
       }
       if (!best) return rect;
@@ -8441,14 +8459,15 @@ const PlanView = ({ planId }: Props) => {
       height: Math.max(0, Number(rect.height) || 0)
     };
     const snappedRect = snapRoomRectToAdjacentSide(normalizedRect);
-    const testRoom = { id: 'new-room', name: '', kind: 'rect', ...snappedRect };
-    if (hasRoomOverlap(testRoom)) {
+    const candidates = [snappedRect, normalizedRect];
+    const accepted = candidates.find((candidate) => !hasRoomOverlap({ id: 'new-room', name: '', kind: 'rect', ...candidate }));
+    if (!accepted) {
       notifyRoomOverlap();
       setRoomDrawMode(null);
       return;
     }
     setRoomDrawMode(null);
-    setRoomModal({ mode: 'create', kind: 'rect', rect: snappedRect });
+    setRoomModal({ mode: 'create', kind: 'rect', rect: accepted });
   };
 
   const handleCreateRoomFromPoly = (points: { x: number; y: number }[]) => {
