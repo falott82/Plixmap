@@ -1,7 +1,7 @@
 {
   "name": "plixmap",
   "description": "Collaborative workspace planning with floor plans, desks, racks, and network links.",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,8 +15,11 @@
     "test:e2e:playwright": "npx playwright test",
     "lint:i18n": "node scripts/lint-i18n.cjs",
     "backup:db": "node scripts/db-backup.cjs",
+    "sensitive:check": "node scripts/check-sensitive-data.cjs",
+    "sensitive:check:staged": "node scripts/check-sensitive-data.cjs --staged",
+    "hooks:install": "git config core.hooksPath .githooks",
     "release:check": "node scripts/check-release-version.cjs",
-    "quality:check": "npm run lint && npm run test && npm run build && npm run release:check",
+    "quality:check": "npm run sensitive:check && npm run lint && npm run test && npm run build && npm run release:check",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "start": "node server/index.cjs"
   },

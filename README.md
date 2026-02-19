@@ -1,8 +1,14 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.0.0
+Current version: 3.0.1
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
+
+## What's new in 3.0.1
+- Repository hygiene/security: removed historical `data/` runtime artifacts from Git history (SQLite DB/WAL/SHM, uploads, backups).
+- Added sensitive-data guard script (`npm run sensitive:check`) and wired it into CI quality gate.
+- Added versioned pre-commit hook (`.githooks/pre-commit`) to block staged SQLite/backup/upload files and likely plaintext SMTP/WebAPI/import secrets.
+- Hardened ignore rules so operational instance data under `data/` remains local-only (`data/.gitkeep` excluded).
 
 ## What's new in 3.0.0
 - Brand migration step 2 completed: project identity is now Plixmap across runtime/UI/PWA assets.
@@ -196,6 +202,7 @@ cd Plixmap
 ### Development
 ```bash
 npm install
+npm run hooks:install
 
 # Terminal 1 - API + SQLite
 npm run dev:api

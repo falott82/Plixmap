@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.0.1',
+    date: '2026-02-19',
+    type: 'fix',
+    notes: [
+      n(
+        'Pulizia repository: rimossi dalla history Git gli artefatti runtime in `data/` (SQLite, WAL/SHM, upload e backup) per evitare esposizione dati personali',
+        'Repository cleanup: removed runtime `data/` artifacts from Git history (SQLite, WAL/SHM, uploads, backups) to prevent personal-data exposure'
+      ),
+      n(
+        'Hardening privacy: introdotto controllo automatico `sensitive:check` per bloccare file/valori sensibili prima di CI e release',
+        'Privacy hardening: added automatic `sensitive:check` guard to block sensitive files/values before CI and release'
+      ),
+      n(
+        'Hook pre-commit versionato: blocco su file locali d’istanza (`data/*`) e rilevazione di possibili segreti SMTP/WebAPI/import in chiaro',
+        'Versioned pre-commit hook: blocks local instance files (`data/*`) and detects likely plaintext SMTP/WebAPI/import secrets'
+      )
+    ]
+  },
+  {
     version: '3.0.0',
     date: '2026-02-19',
     type: 'major',

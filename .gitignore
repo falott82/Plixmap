@@ -6,8 +6,7 @@ pnpm-lock.yaml
 yarn.lock
 /.vite
 .env
-data/*.sqlite
-data/*.sqlite-*
-data/uploads
-data/backups/
+.env.*
+!.env.example
+data/*
 !data/.gitkeep
