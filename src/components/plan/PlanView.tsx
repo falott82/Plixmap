@@ -7352,7 +7352,7 @@ const PlanView = ({ planId }: Props) => {
           push(t({ it: 'Le foto non possono essere collegate', en: 'Photos cannot be linked' }), 'info');
           return;
         }
-        if (objA.type === 'rack' || objB.type === 'rack' || isDeskType(objA.type) || isDeskType(objB.type)) {
+        if (isDeskType(objA.type) || isDeskType(objB.type)) {
           push(t({ it: 'Questi oggetti non possono essere collegati', en: 'These objects cannot be linked' }), 'info');
           return;
         }

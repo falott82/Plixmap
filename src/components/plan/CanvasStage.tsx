@@ -1,5 +1,5 @@
 import { Fragment, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Arrow, Circle, FastLayer, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
+import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { Crosshair, Eye, Hand, MonitorPlay, Video } from 'lucide-react';
@@ -3501,51 +3501,10 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
           setDoorHoverCard(null);
         }}
       >
-        {/* Static background layer (FastLayer avoids hit graph work and improves pan/drag fluidity). */}
-        <FastLayer perfectDrawEnabled={false} listening={false}>
+        {/* Static background layer (non-listening to avoid hit graph work and keep pan/drag fluidity). */}
+        <Layer perfectDrawEnabled={false} listening={false}>
           {backPlate}
           {gridLines}
-        </FastLayer>
-
-        {/* Background interaction layer */}
-        <Layer
-          perfectDrawEnabled={false}
-          onContextMenu={(e) => {
-            e.evt.preventDefault();
-            e.cancelBubble = true;
-            if (corridorDrawMode === 'poly') {
-              undoCorridorDraftSegment();
-              return;
-            }
-            if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
-            if (toolMode === 'wall') {
-              onWallDraftContextMenu?.();
-              return;
-            }
-            if (isBoxSelecting()) return;
-            lastContextMenuAtRef.current = Date.now();
-            if (pendingType || readOnly || toolMode || roomDrawMode || corridorDrawMode) return;
-            const stage = stageRef.current;
-            const pos = stage?.getPointerPosition();
-            if (!pos) return;
-            const world = pointerToWorld(pos.x, pos.y);
-            onMapContextMenu({ clientX: e.evt.clientX, clientY: e.evt.clientY, worldX: world.x, worldY: world.y });
-          }}
-          onMouseDown={(e) => {
-            // Never pan / clear selection while box-selecting.
-            if (isBoxSelecting()) return;
-            if (isContextClick(e.evt)) return;
-            if (roomDrawMode || corridorDrawMode || printAreaMode || allowTool) return;
-            if (e.target?.attrs?.name === 'bg-rect' && !pendingType) {
-              if (isPanGesture(e.evt)) startPan(e);
-              return;
-            }
-            if (!pendingType && e.target?.attrs?.name === 'bg-rect') {
-              onSelect(undefined);
-            }
-          }}
-        >
-          <Rect name="bg-rect" x={0} y={0} width={baseWidth} height={baseHeight} fill="rgba(15,23,42,0.001)" />
         </Layer>
 
         {/* Corridors layer */}

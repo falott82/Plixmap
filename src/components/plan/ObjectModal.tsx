@@ -292,7 +292,6 @@ const ObjectModal = ({
   const [quoteLabelBg, setQuoteLabelBg] = useState<boolean>(!!initialQuoteLabelBg);
   const [quoteLabelColor, setQuoteLabelColor] = useState<string>(initialQuoteLabelColor);
   const [quoteLabelOffset, setQuoteLabelOffset] = useState<number>(Number.isFinite(initialQuoteLabelOffset) ? (initialQuoteLabelOffset as number) : 1);
-  const [quoteLabelOffsetTouched, setQuoteLabelOffsetTouched] = useState<boolean>(false);
   const [quoteLabelPos, setQuoteLabelPos] = useState<'center' | 'above' | 'below' | 'left' | 'right'>(initialQuoteLabelPos);
   const [quoteDashed, setQuoteDashed] = useState<boolean>(!!initialQuoteDashed);
   const [quoteEndpoint, setQuoteEndpoint] = useState<'arrows' | 'dots' | 'none'>(initialQuoteEndpoint);
@@ -479,7 +478,6 @@ const ObjectModal = ({
     }
     return quoteLabelPos === 'above' || quoteLabelPos === 'below' || quoteLabelPos === 'center' ? quoteLabelPos : 'center';
   }, [isQuote, quoteLabelPos, quoteOrientation]);
-  const defaultQuoteLabelOffset = useMemo(() => 1, []);
   const quotePreview = (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
       <div className="text-xs font-semibold text-slate-600">{t({ it: 'Anteprima', en: 'Preview' })}</div>
@@ -620,7 +618,6 @@ const ObjectModal = ({
         ? (initialQuoteLabelOffset as number)
         : (quoteOrientation === 'horizontal' && initialQuoteLabelPos === 'below' ? 1.15 : 1)
     );
-    setQuoteLabelOffsetTouched(false);
     setQuoteLabelPos(initialQuoteLabelPos || 'center');
     setQuoteDashed(!!initialQuoteDashed);
     setQuoteEndpoint(initialQuoteEndpoint || 'arrows');
@@ -826,12 +823,6 @@ const ObjectModal = ({
     if (!wifiBrand || !wifiModel) return;
     setName(`${wifiBrand} ${wifiModel}`);
   }, [isWifi, name, open, wifiBrand, wifiModel, wifiSource]);
-
-  useEffect(() => {
-    if (!isQuote) return;
-    if (quoteLabelOffsetTouched) return;
-    setQuoteLabelOffset(defaultQuoteLabelOffset);
-  }, [defaultQuoteLabelOffset, isQuote, quoteLabelOffsetTouched]);
 
   const closeWifiCatalogSearch = useCallback(() => {
     setWifiCatalogSearchOpen(false);
@@ -2007,7 +1998,6 @@ const ObjectModal = ({
                             disabled={readOnly}
                             onChange={(e) => {
                               setQuoteLabelOffset(Number(e.target.value));
-                              setQuoteLabelOffsetTouched(true);
                             }}
                             className="mt-1 w-full"
                           />
