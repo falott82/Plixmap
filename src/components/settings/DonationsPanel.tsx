@@ -21,20 +21,6 @@ const DonationsPanel = () => {
       </p>
       <p className="mt-3 text-sm text-slate-700">
         {t({
-          it: 'Sito ufficiale del progetto:',
-          en: 'Official project website:'
-        })}{' '}
-        <a
-          href={PLIXMAP_WEBSITE_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="font-semibold text-rose-700 underline decoration-rose-400 underline-offset-2 hover:text-rose-800"
-        >
-          www.plixmap.com
-        </a>
-      </p>
-      <p className="mt-3 text-sm text-slate-700">
-        {t({
           it: 'Se desiderate sostenere il progetto e il mio lavoro, potete farlo con una donazione tramite PayPal',
           en: 'If you would like to support the project and my work, you can do so with a PayPal donation'
         })}
@@ -52,6 +38,20 @@ const DonationsPanel = () => {
           it: 'Vi ringrazio di cuore per il vostro supporto.',
           en: 'Thank you from the bottom of my heart for your support.'
         })}
+      </p>
+      <p className="mt-3 text-sm text-slate-700">
+        {t({
+          it: 'Sito ufficiale del progetto:',
+          en: 'Official project website:'
+        })}{' '}
+        <a
+          href={PLIXMAP_WEBSITE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold text-rose-700 underline decoration-rose-400 underline-offset-2 hover:text-rose-800"
+        >
+          www.plixmap.com
+        </a>
       </p>
     </div>
   );
