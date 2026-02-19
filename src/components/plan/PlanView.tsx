@@ -5677,23 +5677,6 @@ const PlanView = ({ planId }: Props) => {
   const cross = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) =>
     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 
-  const isPointOnSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
-    // Use geometric distance from segment so tolerance is stable regardless of segment length.
-    const tolerancePx = 0.6;
-    const projected = projectPointToSegment(a, b, p);
-    return projected.distSq <= tolerancePx * tolerancePx;
-  };
-
-  const isPointOnPolygonBoundary = (point: { x: number; y: number }, polygon: { x: number; y: number }[]) => {
-    if (polygon.length < 2) return false;
-    for (let i = 0; i < polygon.length; i += 1) {
-      const a = polygon[i];
-      const b = polygon[(i + 1) % polygon.length];
-      if (isPointOnSegment(point, a, b)) return true;
-    }
-    return false;
-  };
-
   const segmentsProperlyIntersect = (
     a: { x: number; y: number },
     b: { x: number; y: number },
@@ -5708,6 +5691,20 @@ const PlanView = ({ planId }: Props) => {
     const straddleAB = (c1 > tolerance && c2 < -tolerance) || (c1 < -tolerance && c2 > tolerance);
     const straddleCD = (c3 > tolerance && c4 < -tolerance) || (c3 < -tolerance && c4 > tolerance);
     return straddleAB && straddleCD;
+  };
+
+  const isPointStrictlyInsidePolygon = (point: { x: number; y: number }, polygon: { x: number; y: number }[]) => {
+    if (polygon.length < 3) return false;
+    if (!isPointInPoly(polygon, point.x, point.y)) return false;
+    const interiorTolerancePx = 0.75;
+    let minDistSq = Infinity;
+    for (let i = 0; i < polygon.length; i += 1) {
+      const a = polygon[i];
+      const b = polygon[(i + 1) % polygon.length];
+      const projected = projectPointToSegment(a, b, point);
+      if (projected.distSq < minDistSq) minDistSq = projected.distSq;
+    }
+    return minDistSq > interiorTolerancePx * interiorTolerancePx;
   };
 
   const polygonsOverlap = (a: { x: number; y: number }[], b: { x: number; y: number }[]) => {
@@ -5740,12 +5737,10 @@ const PlanView = ({ planId }: Props) => {
       }
     }
     for (const p of a) {
-      if (isPointOnPolygonBoundary(p, b)) continue;
-      if (isPointInPoly(b, p.x, p.y)) return true;
+      if (isPointStrictlyInsidePolygon(p, b)) return true;
     }
     for (const p of b) {
-      if (isPointOnPolygonBoundary(p, a)) continue;
-      if (isPointInPoly(a, p.x, p.y)) return true;
+      if (isPointStrictlyInsidePolygon(p, a)) return true;
     }
     return false;
   };
