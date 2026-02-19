@@ -2,6 +2,10 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.0.3 - 2026-02-19
+- Documentation refresh: expanded `README.md` screenshot gallery with new workflow captures for workspace, internal map route, escape route modal, and escape route PDF preview.
+- Release alignment: bumped project version references to `3.0.3` across package metadata and release history.
+
 ## 3.0.2 - 2026-02-19
 - First setup: renamed seed client from `ACME` to `PlayGround`.
 - First setup: post-login prompt now explains that the visible customer is an example customer and can be removed from `Settings > Clients`.

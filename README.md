@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.0.2
+Current version: 3.0.3
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -56,6 +56,18 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - You can block/unblock users (WhatsApp-like behavior). When blocked, messages stay with a single check while the block is active.
 
 ## Screenshots
+### Workspace overview + Internal Chat Service
+![Workspace overview + Internal Chat Service](docs/screenshots/workspace-overview.png)
+
+### Internal map route wizard
+![Internal map route wizard](docs/screenshots/internal-map-route.png)
+
+### Escape route modal
+![Escape route modal](docs/screenshots/escape-route-modal.png)
+
+### Escape route PDF preview
+![Escape route PDF preview](docs/screenshots/escape-route-pdf-preview.png)
+
 ### Rack editor
 ![Rack editor](docs/screenshots/rack-editor.png)
 

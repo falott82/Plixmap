@@ -8,6 +8,21 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.0.3',
+    date: '2026-02-19',
+    type: 'fix',
+    notes: [
+      n(
+        'README: aggiunta gallery screenshot aggiornata con workspace, routing mappa interna, modale via di fuga e anteprima PDF',
+        'README: added updated screenshot gallery covering workspace, internal map routing, escape route modal, and PDF preview'
+      ),
+      n(
+        'Release metadata allineata alla versione 3.0.3',
+        'Release metadata aligned to version 3.0.3'
+      )
+    ]
+  },
+  {
     version: '3.0.2',
     date: '2026-02-19',
     type: 'minor',
