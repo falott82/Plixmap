@@ -4097,7 +4097,7 @@ const PlanView = ({ planId }: Props) => {
     selectedObjectIdsRef.current = selectedObjectIds;
   }, [selectedObjectIds]);
   useEffect(() => {
-    if (!renderPlan || selectedObjectIds.length < 2) {
+    if (contextMenu || !renderPlan || selectedObjectIds.length < 2) {
       multiToastKeyRef.current = '';
       if (multiToastIdRef.current != null) {
         toast.dismiss(multiToastIdRef.current);
@@ -4134,9 +4134,9 @@ const PlanView = ({ planId }: Props) => {
       ),
       { duration: Infinity }
     );
-  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
+  }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
-    if (!renderPlan || selectedObjectIds.length !== 1) {
+    if (contextMenu || !renderPlan || selectedObjectIds.length !== 1) {
       deskToastKeyRef.current = '';
       if (deskToastIdRef.current != null) {
         toast.dismiss(deskToastIdRef.current);
@@ -4174,9 +4174,9 @@ const PlanView = ({ planId }: Props) => {
       ),
       { duration: Infinity }
     );
-  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
+  }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
-    if (!renderPlan || selectedObjectIds.length !== 1) {
+    if (contextMenu || !renderPlan || selectedObjectIds.length !== 1) {
       quoteToastKeyRef.current = '';
       if (quoteToastIdRef.current != null) {
         toast.dismiss(quoteToastIdRef.current);
@@ -4221,9 +4221,9 @@ const PlanView = ({ planId }: Props) => {
       ),
       { duration: Infinity }
     );
-  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
+  }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
-    if (!renderPlan || selectedObjectIds.length !== 1) {
+    if (contextMenu || !renderPlan || selectedObjectIds.length !== 1) {
       mediaToastKeyRef.current = '';
       if (mediaToastIdRef.current != null) {
         toast.dismiss(mediaToastIdRef.current);
@@ -4330,9 +4330,9 @@ const PlanView = ({ planId }: Props) => {
                 return renderKeybindToast({ it: 'Annotazioni selezionate', en: 'Annotations selected' }, base);
               })();
     mediaToastIdRef.current = toast.info(message, { duration: Infinity });
-  }, [renderKeybindToast, renderPlan, selectedObjectIds]);
+  }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
-    if (!renderPlan || selectedObjectIds.length !== 1) {
+    if (contextMenu || !renderPlan || selectedObjectIds.length !== 1) {
       selectionToastKeyRef.current = '';
       if (selectionToastIdRef.current != null) {
         toast.dismiss(selectionToastIdRef.current);
@@ -4380,7 +4380,7 @@ const PlanView = ({ planId }: Props) => {
       ),
       { duration: Infinity }
     );
-  }, [getTypeLabel, renderKeybindToast, renderPlan, selectedObjectIds, t]);
+  }, [contextMenu, getTypeLabel, renderKeybindToast, renderPlan, selectedObjectIds, t]);
   useEffect(() => {
     selectedLinkIdRef.current = selectedLinkId;
   }, [selectedLinkId]);
