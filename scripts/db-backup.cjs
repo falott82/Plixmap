@@ -27,6 +27,6 @@ const run = async () => {
 };
 
 run().catch((error) => {
-  console.error(`[deskly] backup failed: ${error?.message || error}`);
+  console.error(`[plixmap] backup failed: ${error?.message || error}`);
   process.exitCode = 1;
 });

@@ -931,7 +931,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     const a = document.createElement('a');
     a.href = url;
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    a.download = `deskly-porte-${stamp}.csv`;
+    a.download = `plixmap-porte-${stamp}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -953,7 +953,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
         return;
       }
       try {
-        const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_deskly_open_ts=${Date.now()}`;
+        const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_plixmap_open_ts=${Date.now()}`;
         fetch(requestUrl, { method: 'GET', mode: 'no-cors', cache: 'no-store', keepalive: true }).catch(() => {});
         push(t({ it: 'Comando apertura inviato.', en: 'Open command sent.' }), 'success');
       } catch {

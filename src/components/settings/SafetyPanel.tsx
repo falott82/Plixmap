@@ -936,7 +936,7 @@ const SafetyPanel = () => {
       labels.style.gap = '2px';
 
       const appLine = document.createElement('div');
-      appLine.textContent = 'Deskly';
+      appLine.textContent = 'Plixmap';
       appLine.style.fontSize = '13px';
       appLine.style.fontWeight = '700';
       appLine.style.color = '#0369a1';

@@ -484,7 +484,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                                 clientLabel: `${label} — ${selected?.title || ''}`.trim(),
                                 notesHtml: sanitizeHtmlBasic(html),
                                 lang,
-                                filename: `deskly_client_notes_${label.replace(/[^\w-]+/g, '_')}_${(selected?.title || 'note').replace(/[^\w-]+/g, '_')}.pdf`
+                                filename: `plixmap_client_notes_${label.replace(/[^\w-]+/g, '_')}_${(selected?.title || 'note').replace(/[^\w-]+/g, '_')}.pdf`
                               });
                             }}
                             className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"

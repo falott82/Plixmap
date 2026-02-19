@@ -10,19 +10,19 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
-      includeAssets: ['favicon.svg', 'seed/acme-floor0.svg'],
+      includeAssets: ['favicon.svg', 'plixmap-logo.png', 'seed/acme-floor0.svg'],
       manifest: {
-        name: 'Deskly',
-        short_name: 'Deskly',
-        description: 'Deskly — floor plan & asset mapping',
+        name: 'Plixmap',
+        short_name: 'Plixmap',
+        description: 'Plixmap — floor plan & asset mapping',
         theme_color: '#2563eb',
         background_color: '#f8fafc',
         display: 'standalone',
         icons: [
           {
-            src: '/favicon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
+            src: '/plixmap-logo.png',
+            sizes: '1024x1024',
+            type: 'image/png',
             purpose: 'any'
           }
         ]

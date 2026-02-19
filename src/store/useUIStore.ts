@@ -3,6 +3,8 @@ import { persist } from 'zustand/middleware';
 import { HighlightState } from './types';
 import { perfMetrics } from '../utils/perfMetrics';
 
+const UI_STORE_KEY = 'plixmap-ui';
+
 interface UIState {
   selectedPlanId?: string;
   selectedObjectId?: string;
@@ -385,7 +387,7 @@ export const useUIStore = create<UIState>()(
         })
     }),
 	    {
-	      name: 'deskly-ui',
+	      name: UI_STORE_KEY,
 	      version: 10,
 	      migrate: (persistedState: any, _version: number) => {
         if (persistedState && typeof persistedState === 'object') {

@@ -134,6 +134,8 @@ interface Props {
 }
 
 const isRackLinkId = (id?: string | null) => typeof id === 'string' && id.startsWith('racklink:');
+const UNLOCK_REQUEST_EVENT = 'plixmap_unlock_request';
+const FORCE_UNLOCK_EVENT = 'plixmap_force_unlock';
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
 const DEFAULT_SAFETY_CARD_LAYOUT = { x: 24, y: 24, w: 420, h: 84, fontSize: 10, fontIndex: 0, colorIndex: 0, textBgIndex: 0 } as const;
 const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[] => {
@@ -3787,8 +3789,10 @@ const PlanView = ({ planId }: Props) => {
         ]
 	      });
 	    };
-	    window.addEventListener('deskly_unlock_request', handler as EventListener);
-	    return () => window.removeEventListener('deskly_unlock_request', handler as EventListener);
+	    window.addEventListener(UNLOCK_REQUEST_EVENT, handler as EventListener);
+	    return () => {
+	      window.removeEventListener(UNLOCK_REQUEST_EVENT, handler as EventListener);
+	    };
 	  }, [user?.id]);
 
 	  useEffect(() => {
@@ -3810,8 +3814,10 @@ const PlanView = ({ planId }: Props) => {
 	        avatarUrl: String(detail.avatarUrl || '')
 	      });
 	    };
-	    window.addEventListener('deskly_force_unlock', handler as EventListener);
-	    return () => window.removeEventListener('deskly_force_unlock', handler as EventListener);
+	    window.addEventListener(FORCE_UNLOCK_EVENT, handler as EventListener);
+	    return () => {
+	      window.removeEventListener(FORCE_UNLOCK_EVENT, handler as EventListener);
+	    };
 	  }, [isSuperAdmin]);
 
 	  useEffect(() => {
@@ -10342,19 +10348,16 @@ const PlanView = ({ planId }: Props) => {
 		                      <button
 		                        onClick={() => {
 		                          setLockInfoOpen(false);
-		                          window.dispatchEvent(
-		                            new CustomEvent('deskly_unlock_request', {
-		                              detail: {
-		                                planId,
-		                                planName: renderPlan.name,
-		                                clientName: client?.shortName || client?.name,
-		                                siteName: site?.name,
-		                                userId: lockState.lockedBy?.userId,
-		                                username: lockState.lockedBy?.username,
-		                                avatarUrl: (lockState.lockedBy as any)?.avatarUrl || ''
-		                              }
-		                            })
-		                          );
+                              const detail = {
+                                planId,
+                                planName: renderPlan.name,
+                                clientName: client?.shortName || client?.name,
+                                siteName: site?.name,
+                                userId: lockState.lockedBy?.userId,
+                                username: lockState.lockedBy?.username,
+                                avatarUrl: (lockState.lockedBy as any)?.avatarUrl || ''
+                              };
+                              window.dispatchEvent(new CustomEvent(UNLOCK_REQUEST_EVENT, { detail }));
 		                        }}
 		                        className="mt-3 flex w-full items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100"
 		                        title={t({ it: 'Chiedi unlock', en: 'Request unlock' })}
@@ -10366,19 +10369,16 @@ const PlanView = ({ planId }: Props) => {
 		                      <button
 		                        onClick={() => {
 		                          setLockInfoOpen(false);
-		                          window.dispatchEvent(
-		                            new CustomEvent('deskly_force_unlock', {
-		                              detail: {
-		                                planId,
-		                                planName: renderPlan.name,
-		                                clientName: client?.shortName || client?.name,
-		                                siteName: site?.name,
-		                                userId: lockState.lockedBy?.userId,
-		                                username: lockState.lockedBy?.username,
-		                                avatarUrl: (lockState.lockedBy as any)?.avatarUrl || ''
-		                              }
-		                            })
-		                          );
+                              const detail = {
+                                planId,
+                                planName: renderPlan.name,
+                                clientName: client?.shortName || client?.name,
+                                siteName: site?.name,
+                                userId: lockState.lockedBy?.userId,
+                                username: lockState.lockedBy?.username,
+                                avatarUrl: (lockState.lockedBy as any)?.avatarUrl || ''
+                              };
+                              window.dispatchEvent(new CustomEvent(FORCE_UNLOCK_EVENT, { detail }));
 		                        }}
 		                        className="mt-2 flex w-full items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
 		                        title={t({ it: 'Force unlock (Superadmin)', en: 'Force unlock (Superadmin)' })}
@@ -11889,7 +11889,7 @@ const PlanView = ({ planId }: Props) => {
                       <button
                         draggable
                         onDragStart={(e) => {
-                          e.dataTransfer.setData('application/deskly-type', 'text');
+                          e.dataTransfer.setData('application/plixmap-type', 'text');
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
                         onClick={() => {
@@ -11913,7 +11913,7 @@ const PlanView = ({ planId }: Props) => {
                       <button
                         draggable
                         onDragStart={(e) => {
-                          e.dataTransfer.setData('application/deskly-type', 'image');
+                          e.dataTransfer.setData('application/plixmap-type', 'image');
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
                         onClick={() => {
@@ -11937,7 +11937,7 @@ const PlanView = ({ planId }: Props) => {
                       <button
                         draggable
                         onDragStart={(e) => {
-                          e.dataTransfer.setData('application/deskly-type', 'photo');
+                          e.dataTransfer.setData('application/plixmap-type', 'photo');
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
                         onClick={() => {
@@ -11961,7 +11961,7 @@ const PlanView = ({ planId }: Props) => {
                       <button
                         draggable
                         onDragStart={(e) => {
-                          e.dataTransfer.setData('application/deskly-type', 'postit');
+                          e.dataTransfer.setData('application/plixmap-type', 'postit');
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
                         onClick={() => {
@@ -13490,7 +13490,7 @@ const PlanView = ({ planId }: Props) => {
                       onClick={() => {
                         // Trigger automated door endpoint in background, without opening a new tab/window.
                         try {
-                          const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_deskly_open_ts=${Date.now()}`;
+                          const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_plixmap_open_ts=${Date.now()}`;
                           fetch(requestUrl, {
                             method: 'GET',
                             mode: 'no-cors',
@@ -13558,7 +13558,7 @@ const PlanView = ({ planId }: Props) => {
                     <button
                       onClick={() => {
                         try {
-                          const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_deskly_open_ts=${Date.now()}`;
+                          const requestUrl = `${url}${url.includes('?') ? '&' : '?'}_plixmap_open_ts=${Date.now()}`;
                           fetch(requestUrl, {
                             method: 'GET',
                             mode: 'no-cors',
@@ -15758,7 +15758,7 @@ const PlanView = ({ planId }: Props) => {
                                 onClick={() => {
                                   const requestUrl = `${String(corridorDoorModal?.automationUrl || '').trim()}${
                                     String(corridorDoorModal?.automationUrl || '').includes('?') ? '&' : '?'
-                                  }_deskly_open_ts=${Date.now()}`;
+                                  }_plixmap_open_ts=${Date.now()}`;
                                   fetch(requestUrl, {
                                     method: 'GET',
                                     mode: 'no-cors',

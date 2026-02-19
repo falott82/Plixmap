@@ -30,7 +30,7 @@ const decryptSecret = (authSecretB64, blob) => {
 };
 
 const generateTotpSecret = (username) => {
-  return speakeasy.generateSecret({ name: `Deskly (${username})`, length: 20 });
+  return speakeasy.generateSecret({ name: `Plixmap (${username})`, length: 20 });
 };
 
 const verifyTotp = (secretBase32, token) => {
@@ -43,4 +43,3 @@ const verifyTotp = (secretBase32, token) => {
 };
 
 module.exports = { encryptSecret, decryptSecret, generateTotpSecret, verifyTotp };
-

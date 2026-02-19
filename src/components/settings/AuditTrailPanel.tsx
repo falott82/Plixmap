@@ -146,7 +146,7 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
           <button
             onClick={() => {
               const csv = toCsv(rows);
-              downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `deskly-audit-${new Date().toISOString().slice(0, 10)}.csv`);
+              downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `plixmap-audit-${new Date().toISOString().slice(0, 10)}.csv`);
             }}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             title={t({ it: 'Esporta CSV', en: 'Export CSV' })}

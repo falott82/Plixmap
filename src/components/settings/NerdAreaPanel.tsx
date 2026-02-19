@@ -162,8 +162,8 @@ const NerdAreaPanel = () => {
         <div className="text-sm font-semibold text-ink">{t({ it: 'Nerd Area (superadmin)', en: 'Nerd Area (superadmin)' })}</div>
         <div className="modal-description">
           {t({
-            it: 'Stack e dipendenze usate per sviluppare Deskly, con versione e scopo. Include anche strumenti di integrazione avanzata.',
-            en: 'Stack and dependencies used to build Deskly, with version and purpose. Includes advanced integration tools.'
+            it: 'Stack e dipendenze usate per sviluppare Plixmap, con versione e scopo. Include anche strumenti di integrazione avanzata.',
+            en: 'Stack and dependencies used to build Plixmap, with version and purpose. Includes advanced integration tools.'
           })}
         </div>
         <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -340,7 +340,7 @@ const NerdAreaPanel = () => {
             <button
               onClick={() => {
                 const lines = filteredPkgs.map((d) => `${d.name}\t${String(d.version)}\t${d.scope}\t${purposes[d.name] || '-'}`);
-                downloadText(`deskly-nerd-packages.txt`, ['Package\tVersion\tScope\tPurpose', ...lines].join('\n'));
+                downloadText(`plixmap-nerd-packages.txt`, ['Package\tVersion\tScope\tPurpose', ...lines].join('\n'));
               }}
               className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-ink hover:bg-slate-50"
               title={t({ it: 'Esporta elenco pacchetti', en: 'Export package list' })}

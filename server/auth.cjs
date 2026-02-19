@@ -88,23 +88,29 @@ const appendSetCookie = (res, value) => {
   res.setHeader('Set-Cookie', next);
 };
 
-const setSessionCookie = (res, token, maxAgeSeconds = 60 * 60 * 24 * 30, options = {}) => {
+const PRIMARY_SESSION_COOKIE = 'plixmap_session';
+
+const buildSessionCookie = (name, token, maxAgeSeconds, secure) => {
   const parts = [
-    `deskly_session=${encodeURIComponent(token)}`,
+    `${name}=${encodeURIComponent(token)}`,
     `Path=/`,
     `HttpOnly`,
     `SameSite=Lax`,
     `Max-Age=${maxAgeSeconds}`
   ];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+};
+
+const setSessionCookie = (res, token, maxAgeSeconds = 60 * 60 * 24 * 30, options = {}) => {
   const secure = Object.prototype.hasOwnProperty.call(options, 'secure')
     ? !!options.secure
     : process.env.NODE_ENV === 'production';
-  if (secure) parts.push('Secure');
-  appendSetCookie(res, parts.join('; '));
+  appendSetCookie(res, buildSessionCookie(PRIMARY_SESSION_COOKIE, token, maxAgeSeconds, secure));
 };
 
 const clearSessionCookie = (res) => {
-  appendSetCookie(res, `deskly_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  appendSetCookie(res, `${PRIMARY_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 };
 
 const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
@@ -168,5 +174,6 @@ module.exports = {
   verifySession,
   setSessionCookie,
   clearSessionCookie,
-  ensureBootstrapAdmins
+  ensureBootstrapAdmins,
+  PRIMARY_SESSION_COOKIE
 };

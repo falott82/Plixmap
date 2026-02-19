@@ -5,7 +5,7 @@ const getCookie = (name: string): string | null => {
   return match ? decodeURIComponent(match[1]) : null;
 };
 
-const getCsrfToken = (): string | null => getCookie('deskly_csrf');
+const getCsrfToken = (): string | null => getCookie('plixmap_csrf');
 
 export const apiFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const method = String(init.method || 'GET').toUpperCase();

@@ -221,7 +221,7 @@ const BackupPanel = () => {
     setBusy(true);
     try {
       const payload: any = {
-        kind: 'deskly-workspace',
+        kind: 'plixmap-workspace',
         version: 2,
         exportedAt: Date.now(),
         objectTypes,
@@ -266,7 +266,7 @@ const BackupPanel = () => {
       }
 
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      downloadBlob(blob, `deskly-workspace-${new Date().toISOString().slice(0, 10)}.json`);
+      downloadBlob(blob, `plixmap-workspace-${new Date().toISOString().slice(0, 10)}.json`);
       push(t({ it: 'Esportazione completata', en: 'Export completed' }), 'success');
     } catch {
       push(t({ it: 'Errore esportazione', en: 'Export failed' }), 'danger');
@@ -489,7 +489,7 @@ const BackupPanel = () => {
       ];
 
       const xml = buildSpreadsheetXml(sheets);
-      downloadBlob(new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' }), 'deskly-workspace.xls');
+      downloadBlob(new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' }), 'plixmap-workspace.xls');
       push(t({ it: 'Excel esportato', en: 'Excel exported' }), 'success');
     } catch {
       push(t({ it: 'Errore export Excel', en: 'Excel export failed' }), 'danger');
@@ -504,7 +504,8 @@ const BackupPanel = () => {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      if (!parsed || parsed.kind !== 'deskly-workspace' || !Array.isArray(parsed.clients)) {
+      const kind = String(parsed?.kind || '').trim();
+      if (!parsed || !Array.isArray(parsed.clients) || (kind !== 'plixmap-workspace' && kind !== 'deskly-workspace')) {
         push(t({ it: 'File non valido', en: 'Invalid file' }), 'danger');
         return;
       }

@@ -75,11 +75,18 @@ const LoginView = () => {
       <div className="pointer-events-none absolute bottom-0 left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-blue-200/40 blur-3xl" />
       <div className="relative w-full max-w-md rounded-[28px] border border-white/50 bg-white/85 p-8 shadow-[0_30px_80px_-30px_rgba(15,23,42,0.55)] backdrop-blur">
         <div className="flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-sky-500 via-blue-500 to-indigo-500 text-white shadow-card">
-            D
-          </div>
+          <img
+            src="/plixmap-logo.png"
+            alt="Plixmap"
+            className="h-[4.5rem] w-[4.5rem] rounded-2xl border border-slate-200 object-cover shadow-card"
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (target.src.endsWith('/favicon.svg')) return;
+              target.src = '/favicon.svg';
+            }}
+          />
           <div>
-            <div className="text-sm font-semibold uppercase tracking-wide text-slate-500">Deskly</div>
+            <div className="text-sm font-semibold uppercase tracking-wide text-slate-500">Plixmap</div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold">{t({ it: 'Login', en: 'Login' })}</h1>
               {version ? <span className="text-xs font-semibold text-slate-400">v{version}</span> : null}

@@ -18,7 +18,8 @@ const {
   verifySession,
   setSessionCookie,
   clearSessionCookie,
-  ensureBootstrapAdmins
+  ensureBootstrapAdmins,
+  PRIMARY_SESSION_COOKIE
 } = require('./auth.cjs');
 const { getUserWithPermissions, computePlanAccess, filterStateForUser, mergeWritablePlanContent } = require('./permissions.cjs');
 const { writeAuthLog, requestMeta } = require('./log.cjs');
@@ -48,6 +49,9 @@ const { getEmailConfigSafe, getEmailConfig, upsertEmailConfig, logEmailAttempt, 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 const STARTED_AT = Date.now();
+const APP_BRAND = 'Plixmap';
+
+const readEnv = (name) => process.env[name];
 
 const isEnabled = (value, fallback = false) => {
   if (typeof value !== 'string') return fallback;
@@ -58,7 +62,7 @@ const isEnabled = (value, fallback = false) => {
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 const SERVER_LOG_LEVEL = (() => {
-  const requested = String(process.env.DESKLY_LOG_LEVEL || 'info').trim().toLowerCase();
+  const requested = String(readEnv('PLIXMAP_LOG_LEVEL') || 'info').trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(LOG_LEVELS, requested) ? requested : 'info';
 })();
 
@@ -78,8 +82,8 @@ const serverLog = (level, event, context = {}) => {
 };
 
 const buildCspHeader = () => {
-  const allowMediaPipe = isEnabled(process.env.DESKLY_CSP_ALLOW_MEDIAPIPE, false);
-  const allowEval = isEnabled(process.env.DESKLY_CSP_ALLOW_EVAL, false) || allowMediaPipe;
+  const allowMediaPipe = isEnabled(readEnv('PLIXMAP_CSP_ALLOW_MEDIAPIPE'), false);
+  const allowEval = isEnabled(readEnv('PLIXMAP_CSP_ALLOW_EVAL'), false) || allowMediaPipe;
   const scriptSrc = ["'self'"];
   const connectSrc = ["'self'", 'ws:', 'wss:'];
   const workerSrc = ["'self'", 'blob:'];
@@ -151,7 +155,7 @@ const allowPrivateImportForRequest = (req) => {
 
 const app = express();
 app.use(express.json({ limit: '80mb' }));
-const trustProxyValue = process.env.DESKLY_TRUST_PROXY;
+const trustProxyValue = readEnv('PLIXMAP_TRUST_PROXY');
 if (typeof trustProxyValue === 'string' && trustProxyValue.trim() !== '') {
   const normalized = trustProxyValue.trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) {
@@ -186,7 +190,7 @@ app.use((req, res, next) => {
   next();
 });
 const resolveSecureCookie = (req) => {
-  const override = process.env.DESKLY_COOKIE_SECURE;
+  const override = readEnv('PLIXMAP_COOKIE_SECURE');
   if (typeof override === 'string' && override.trim() !== '') {
     return ['1', 'true', 'yes', 'on'].includes(override.trim().toLowerCase());
   }
@@ -219,7 +223,7 @@ app.use('/api', (_req, res, next) => {
   next();
 });
 
-const CSRF_COOKIE = 'deskly_csrf';
+const CSRF_COOKIE = 'plixmap_csrf';
 const CSRF_HEADER = 'x-csrf-token';
 const CSRF_MAX_AGE = 60 * 60 * 24 * 30;
 const csrfExemptPaths = new Set(['/auth/login', '/auth/bootstrap-status']);
@@ -239,14 +243,17 @@ const appendSetCookie = (res, value) => {
 };
 
 const setCsrfCookie = (res, token, secure) => {
-  const parts = [
-    `${CSRF_COOKIE}=${encodeURIComponent(token)}`,
-    'Path=/',
-    'SameSite=Lax',
-    `Max-Age=${CSRF_MAX_AGE}`
-  ];
-  if (secure) parts.push('Secure');
-  appendSetCookie(res, parts.join('; '));
+  const buildCookie = (name) => {
+    const parts = [
+      `${name}=${encodeURIComponent(token)}`,
+      'Path=/',
+      'SameSite=Lax',
+      `Max-Age=${CSRF_MAX_AGE}`
+    ];
+    if (secure) parts.push('Secure');
+    return parts.join('; ');
+  };
+  appendSetCookie(res, buildCookie(CSRF_COOKIE));
 };
 
 const clearCsrfCookie = (res) => {
@@ -833,11 +840,11 @@ const extForMime = (mime) => {
 };
 
 const MAX_IMAGE_BYTES = (() => {
-  const raw = Number(process.env.DESKLY_UPLOAD_MAX_IMAGE_MB || '');
+  const raw = Number(readEnv('PLIXMAP_UPLOAD_MAX_IMAGE_MB') || '');
   return Number.isFinite(raw) && raw > 0 ? raw * 1024 * 1024 : 12 * 1024 * 1024;
 })();
 const MAX_PDF_BYTES = (() => {
-  const raw = Number(process.env.DESKLY_UPLOAD_MAX_PDF_MB || '');
+  const raw = Number(readEnv('PLIXMAP_UPLOAD_MAX_PDF_MB') || '');
   return Number.isFinite(raw) && raw > 0 ? raw * 1024 * 1024 : 20 * 1024 * 1024;
 })();
 const allowedDataMimes = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'application/pdf']);
@@ -1167,7 +1174,7 @@ const writeState = (payload) => {
 
 const requireAuth = (req, res, next) => {
   const cookies = parseCookies(req.headers.cookie);
-  const token = cookies.deskly_session;
+  const token = cookies[PRIMARY_SESSION_COOKIE];
   const session = verifySession(authSecret, token);
   if (!session?.userId || !session?.tokenVersion || !session?.sid) {
     res.status(401).json({ error: 'Unauthorized' });
@@ -1224,7 +1231,7 @@ app.use(
 
 const getWsAuthContext = (req) => {
   const cookies = parseCookies(req.headers.cookie);
-  const token = cookies.deskly_session;
+  const token = cookies[PRIMARY_SESSION_COOKIE];
   const session = verifySession(authSecret, token);
   if (!session?.userId || !session?.tokenVersion || !session?.sid) return null;
   if (session.sid !== serverInstanceId) return null;
@@ -1491,7 +1498,7 @@ app.post('/api/auth/login', (req, res) => {
 
 app.post('/api/auth/logout', (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
-  const session = verifySession(authSecret, cookies.deskly_session);
+  const session = verifySession(authSecret, cookies[PRIMARY_SESSION_COOKIE]);
   clearSessionCookie(res);
   clearCsrfCookie(res);
   if (session?.userId) {
@@ -2382,7 +2389,7 @@ app.post('/api/settings/email/test', requireAuth, rateByUser('email_test', 5 * 6
       from: fromLabel,
       to: recipient,
       subject,
-      text: 'This is a test email from Deskly.'
+      text: `This is a test email from ${APP_BRAND}.`
     });
     logEmailAttempt(db, {
       userId: req.userId,
@@ -3677,7 +3684,7 @@ const CHAT_MAX_TOTAL_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 // Voice notes (recorded in-app) can be larger than generic attachments.
 // They are still bounded to avoid huge base64 JSON payloads.
 const CHAT_VOICE_MAX_ATTACHMENT_BYTES = (() => {
-  const raw = Number(process.env.DESKLY_CHAT_MAX_VOICE_MB || '');
+  const raw = Number(readEnv('PLIXMAP_CHAT_MAX_VOICE_MB') || '');
   return Number.isFinite(raw) && raw > 0 ? raw * 1024 * 1024 : 40 * 1024 * 1024;
 })();
 const CHAT_VOICE_MAX_TOTAL_ATTACHMENT_BYTES = CHAT_VOICE_MAX_ATTACHMENT_BYTES;
@@ -6104,12 +6111,12 @@ const hostHint = HOST === '0.0.0.0' ? 'localhost' : HOST;
 serverLog('info', 'server_started', {
   host: hostHint,
   port: PORT,
-  cspAllowEval: isEnabled(process.env.DESKLY_CSP_ALLOW_EVAL, false),
-  cspAllowMediaPipe: isEnabled(process.env.DESKLY_CSP_ALLOW_MEDIAPIPE, false),
+  cspAllowEval: isEnabled(readEnv('PLIXMAP_CSP_ALLOW_EVAL'), false),
+  cspAllowMediaPipe: isEnabled(readEnv('PLIXMAP_CSP_ALLOW_MEDIAPIPE'), false),
   backupDir: resolveBackupDir(),
   backupRetention: resolveBackupRetention()
 });
-console.log(`[deskly] API listening on http://${hostHint}:${PORT}`);
+console.log(`[plixmap] API listening on http://${hostHint}:${PORT}`);
 if (HOST === '0.0.0.0') {
-  console.log(`[deskly] API listening on all interfaces (http://0.0.0.0:${PORT})`);
+  console.log(`[plixmap] API listening on all interfaces (http://0.0.0.0:${PORT})`);
 }

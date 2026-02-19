@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_BACKUP_RETENTION = 20;
+const readEnv = (name) => process.env[name];
 
 const normalizeRetention = (value) => {
   const parsed = Number(value);
@@ -9,8 +10,8 @@ const normalizeRetention = (value) => {
   return Math.max(1, Math.min(365, Math.round(parsed)));
 };
 
-const resolveBackupDir = () => process.env.DESKLY_BACKUP_DIR || path.join(process.cwd(), 'data', 'backups');
-const resolveBackupRetention = () => normalizeRetention(process.env.DESKLY_BACKUP_KEEP || DEFAULT_BACKUP_RETENTION);
+const resolveBackupDir = () => readEnv('PLIXMAP_BACKUP_DIR') || path.join(process.cwd(), 'data', 'backups');
+const resolveBackupRetention = () => normalizeRetention(readEnv('PLIXMAP_BACKUP_KEEP') || DEFAULT_BACKUP_RETENTION);
 
 const ensureBackupDir = () => {
   const dir = resolveBackupDir();
@@ -66,7 +67,7 @@ const pruneOldBackups = () => {
 const createDatabaseBackup = async (db, options = {}) => {
   const dir = ensureBackupDir();
   const stamp = formatStamp();
-  const prefix = String(options.prefix || 'deskly').replace(/[^a-zA-Z0-9_-]+/g, '-');
+  const prefix = String(options.prefix || 'plixmap').replace(/[^a-zA-Z0-9_-]+/g, '-');
   const fileName = `${prefix}-${stamp}.sqlite`;
   const tmpPath = path.join(dir, `${fileName}.tmp`);
   const finalPath = path.join(dir, fileName);

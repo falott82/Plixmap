@@ -29,7 +29,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // we keep a simple local hint that a login has previously succeeded.
       const sessionHint = (() => {
         try {
-          return window.localStorage.getItem('deskly_session_hint') === '1';
+          const next = window.localStorage.getItem('plixmap_session_hint');
+          if (next === '1' || next === '0') return next === '1';
+          return true;
         } catch {
           return true;
         }
@@ -45,13 +47,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         visibleLayers && typeof visibleLayers === 'object' && !Array.isArray(visibleLayers) ? visibleLayers : {}
       );
       try {
-        window.localStorage.setItem('deskly_session_hint', '1');
+        window.localStorage.setItem('plixmap_session_hint', '1');
       } catch {}
       // Load per-user custom fields in background.
       useCustomFieldsStore.getState().hydrate().catch(() => {});
     } catch {
       try {
-        window.localStorage.setItem('deskly_session_hint', '0');
+        window.localStorage.setItem('plixmap_session_hint', '0');
       } catch {}
       set({ user: null, permissions: [], hydrated: true });
     }
@@ -66,7 +68,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       visibleLayers && typeof visibleLayers === 'object' && !Array.isArray(visibleLayers) ? visibleLayers : {}
     );
     try {
-      window.localStorage.setItem('deskly_session_hint', '1');
+      window.localStorage.setItem('plixmap_session_hint', '1');
     } catch {}
     useCustomFieldsStore.getState().hydrate().catch(() => {});
   },
@@ -75,7 +77,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       await apiLogout();
     } finally {
       try {
-        window.localStorage.setItem('deskly_session_hint', '0');
+        window.localStorage.setItem('plixmap_session_hint', '0');
       } catch {}
       get().setAuth(null);
     }

@@ -14,7 +14,7 @@ const getArgValue = (flag) => {
 
 const printUsage = () => {
   console.log('Usage: node server/reset-superadmin.cjs [--password <pwd>]');
-  console.log('Env: DESKLY_NEW_PASSWORD=<pwd>, DESKLY_DB_PATH=/path/to/deskly.sqlite');
+  console.log('Env: PLIXMAP_NEW_PASSWORD=<pwd> (fallback DESKLY_NEW_PASSWORD), PLIXMAP_DB_PATH=/path/to/plixmap.sqlite');
 };
 
 const askHidden = (prompt) =>
@@ -48,12 +48,12 @@ const run = async () => {
     process.exit(0);
   }
   const argPassword = getArgValue('--password');
-  const envPassword = process.env.DESKLY_NEW_PASSWORD;
+  const envPassword = process.env.PLIXMAP_NEW_PASSWORD || process.env.DESKLY_NEW_PASSWORD;
   let password = argPassword || envPassword || '';
   if (!password) {
     if (!process.stdin.isTTY) {
       printUsage();
-      console.error('Missing password (use --password or DESKLY_NEW_PASSWORD).');
+      console.error('Missing password (use --password or PLIXMAP_NEW_PASSWORD / DESKLY_NEW_PASSWORD).');
       process.exit(1);
     }
     const prompted = await promptPassword();
@@ -88,7 +88,7 @@ const run = async () => {
       'Super',
       'Admin',
       '',
-      'superadmin@deskly.local',
+      'superadmin@plixmap.local',
       now,
       now
     );

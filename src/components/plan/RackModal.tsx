@@ -476,7 +476,8 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
     evt.preventDefault();
     if (readOnly) return;
     dropAcceptedRef.current = true;
-    const droppedType = evt.dataTransfer.getData('application/deskly-rack-type') as RackItemType | '';
+    const droppedType =
+      evt.dataTransfer.getData('application/plixmap-rack-type') as RackItemType | '';
     if (droppedType) {
       const container = rackRef.current;
       if (!container) {
@@ -1234,8 +1235,8 @@ const RackModal = ({ open, plan, rackObjectId, rackObjectName, readOnly = false,
                             disabled={readOnly}
                             draggable
                             onDragStart={(e) => {
-                              e.dataTransfer.setData('application/deskly-rack-type', type);
-                              e.dataTransfer.effectAllowed = 'copy';
+                              e.dataTransfer.setData('application/plixmap-rack-type', type);
+                                                            e.dataTransfer.effectAllowed = 'copy';
                             }}
                             className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                             style={{ borderLeftColor: typeColors[type] || '#cbd5f5', borderLeftWidth: 4 }}

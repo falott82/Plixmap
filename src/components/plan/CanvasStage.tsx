@@ -2393,7 +2393,8 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     if (readOnly) return;
-    const type = event.dataTransfer.getData('application/deskly-type') as MapObjectType;
+    const type =
+      event.dataTransfer.getData('application/plixmap-type') as MapObjectType;
     if (!type) return;
     const { x, y } = toStageCoords(event.clientX, event.clientY);
     onPlaceNew(type, x, y);

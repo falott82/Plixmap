@@ -251,7 +251,7 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
     const a = document.createElement('a');
     a.href = url;
     const safeClient = String(client?.shortName || client?.name || 'client').replace(/[^\w-]+/g, '_');
-    a.download = `deskly_rubrica_${safeClient}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `plixmap_rubrica_${safeClient}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };

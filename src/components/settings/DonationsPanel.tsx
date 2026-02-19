@@ -10,7 +10,7 @@ const DonationsPanel = () => {
       <Heart size={24} className="pointer-events-none absolute bottom-3 right-8 animate-bounce fill-rose-300 text-rose-300" />
       <div className="flex items-center gap-2 text-sm font-semibold text-rose-700">
         <Heart size={16} className="fill-rose-500 text-rose-500" />
-        {t({ it: 'Supporta Deskly', en: 'Support Deskly' })}
+        {t({ it: 'Supporta Plixmap', en: 'Support Plixmap' })}
       </div>
       <p className="mt-3 text-sm text-slate-700">
         {t({

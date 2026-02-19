@@ -32,6 +32,8 @@ type TreeClient = {
   logoUrl?: string;
   sites: { id: string; name: string; coords?: string; floorPlans: { id: string; name: string; order?: number; printArea?: any }[] }[];
 };
+const UNLOCK_REQUEST_EVENT = 'plixmap_unlock_request';
+const FORCE_UNLOCK_EVENT = 'plixmap_force_unlock';
 
 const parseCoords = (value: string | undefined): { lat: number; lng: number } | null => {
   const s = String(value || '').trim();
@@ -516,8 +518,17 @@ const SidebarTree = () => {
   if (sidebarCollapsed) {
     return (
       <aside className="flex h-screen w-14 flex-col items-center gap-4 border-r border-slate-200 bg-white py-4">
-        <Link to="/" className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary to-accent text-white grid place-items-center text-sm shadow-card">
-          D
+        <Link to="/" className="h-[3.75rem] w-[3.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+          <img
+            src="/plixmap-logo.png"
+            alt="Plixmap"
+            className="h-full w-full object-cover"
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (target.src.endsWith('/favicon.svg')) return;
+              target.src = '/favicon.svg';
+            }}
+          />
         </Link>
         <button
           onClick={toggleSidebar}
@@ -535,10 +546,19 @@ const SidebarTree = () => {
     <aside className="flex h-screen w-72 flex-col border-r border-slate-200 bg-white">
       <div className="flex items-center justify-between px-4 py-4">
         <Link to="/" className="flex items-center gap-2 text-lg font-semibold text-ink">
-          <span className="h-8 w-8 rounded-xl bg-gradient-to-br from-primary to-accent text-white grid place-items-center text-sm shadow-card">
-            D
+          <span className="h-12 w-12 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+            <img
+              src="/plixmap-logo.png"
+              alt="Plixmap"
+              className="h-full w-full object-cover"
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (target.src.endsWith('/favicon.svg')) return;
+                target.src = '/favicon.svg';
+              }}
+            />
           </span>
-          Deskly
+          Plixmap
         </Link>
         <div className="flex items-center gap-2">
           <button
@@ -827,8 +847,8 @@ const SidebarTree = () => {
                                   {isDefault ? (
                                     <span
                                       title={t({
-                                        it: 'Planimetria predefinita: all’avvio Deskly caricherà automaticamente questa planimetria.',
-                                        en: 'Default floor plan: on startup, Deskly will automatically load this floor plan.'
+                                        it: 'Planimetria predefinita: all’avvio Plixmap caricherà automaticamente questa planimetria.',
+                                        en: 'Default floor plan: on startup, Plixmap will automatically load this floor plan.'
                                       })}
                                     >
                                       <Star size={14} className="text-amber-500" />
@@ -1216,20 +1236,17 @@ const SidebarTree = () => {
 	          {lockMenu.kind !== 'grant' && lockMenu.userId && lockMenu.userId !== String(user?.id || '') ? (
 	            <button
 	              onClick={() => {
-	                window.dispatchEvent(
-	                  new CustomEvent('deskly_unlock_request', {
-	                    detail: {
-	                      planId: lockMenu.planId,
-	                      planName: lockMenu.planName,
-	                      clientName: lockMenu.clientName,
-	                      siteName: lockMenu.siteName,
-	                      userId: lockMenu.userId,
-	                      username: lockMenu.username,
-	                      avatarUrl: lockMenu.avatarUrl || ''
-	                    }
-	                  })
-	                );
-	                setLockMenu(null);
+                  const detail = {
+                    planId: lockMenu.planId,
+                    planName: lockMenu.planName,
+                    clientName: lockMenu.clientName,
+                    siteName: lockMenu.siteName,
+                    userId: lockMenu.userId,
+                    username: lockMenu.username,
+                    avatarUrl: lockMenu.avatarUrl || ''
+                  };
+                  window.dispatchEvent(new CustomEvent(UNLOCK_REQUEST_EVENT, { detail }));
+                  	                setLockMenu(null);
 	              }}
 	              className="mt-3 flex w-full items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100"
 	              title={t({ it: 'Chiedi unlock', en: 'Request unlock' })}
@@ -1240,20 +1257,17 @@ const SidebarTree = () => {
 		          {isSuperAdmin && lockMenu.kind !== 'grant' && lockMenu.userId && lockMenu.userId !== String(user?.id || '') ? (
 		            <button
 		              onClick={() => {
-		                window.dispatchEvent(
-		                  new CustomEvent('deskly_force_unlock', {
-		                    detail: {
-	                      planId: lockMenu.planId,
-	                      planName: lockMenu.planName,
-	                      clientName: lockMenu.clientName,
-	                      siteName: lockMenu.siteName,
-	                      userId: lockMenu.userId,
-	                      username: lockMenu.username,
-	                      avatarUrl: lockMenu.avatarUrl || ''
-	                    }
-	                  })
-	                );
-	                setLockMenu(null);
+                    const detail = {
+                      planId: lockMenu.planId,
+                      planName: lockMenu.planName,
+                      clientName: lockMenu.clientName,
+                      siteName: lockMenu.siteName,
+                      userId: lockMenu.userId,
+                      username: lockMenu.username,
+                      avatarUrl: lockMenu.avatarUrl || ''
+                    };
+                    window.dispatchEvent(new CustomEvent(FORCE_UNLOCK_EVENT, { detail }));
+                    	                setLockMenu(null);
 	              }}
 	              className="mt-2 flex w-full items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
 	              title={t({ it: 'Force unlock (Superadmin)', en: 'Force unlock (Superadmin)' })}

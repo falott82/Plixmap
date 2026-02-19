@@ -8,6 +8,16 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.0.0',
+    date: '2026-02-19',
+    type: 'major',
+    notes: [
+      n('Brand migration step 2: identita progetto consolidata su Plixmap (UI, favicon/PWA, export naming e runtime keys)', 'Brand migration step 2: project identity consolidated to Plixmap (UI, favicon/PWA, export naming, runtime keys)'),
+      n('Compatibilita legacy attiva rimossa dai path runtime principali (cookie/sessione/CSRF/eventi drag unlock) e standardizzazione su prefissi plixmap', 'Removed active legacy compatibility from core runtime paths (cookie/session/CSRF/drag unlock events) and standardized on plixmap prefixes'),
+      n('Documentazione aggiornata alla release 3.0.0 con naming Plixmap e variabili ambiente PLIXMAP_*', 'Documentation updated for release 3.0.0 with Plixmap naming and PLIXMAP_* environment variables')
+    ]
+  },
+  {
     version: '2.9.5',
     date: '2026-02-19',
     type: 'minor',

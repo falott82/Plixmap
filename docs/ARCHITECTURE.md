@@ -1,4 +1,4 @@
-# Deskly Architecture
+# Plixmap Architecture
 
 ## Runtime split
 - `src/`: frontend React + Zustand + Konva editor.
@@ -32,8 +32,8 @@
 ## Data reliability
 - SQLite backups are generated server-side using atomic `db.backup(...)` snapshots.
 - Backup directory/retention are configurable via:
-  - `DESKLY_BACKUP_DIR`
-  - `DESKLY_BACKUP_KEEP`
+  - `PLIXMAP_BACKUP_DIR`
+  - `PLIXMAP_BACKUP_KEEP`
 - Backup API (superadmin):
   - `GET /api/settings/backups`
   - `POST /api/settings/backups`
@@ -41,7 +41,7 @@
 
 ## Security hardening
 - Secret resolution supports direct env values and Docker/Kubernetes style file mounts (`*_FILE`).
-- Strict secret policy can be enabled with `DESKLY_REQUIRE_ENV_SECRETS=1`.
+- Strict secret policy can be enabled with `PLIXMAP_REQUIRE_ENV_SECRETS=1`.
 - CSP defaults are strict; optional allowances for MediaPipe/eval are explicit env toggles.
 
 ## Build and quality gates

@@ -119,8 +119,8 @@ const Toolbar = ({ defs, order, onSelectType, onRemoveFromPalette, activeType, a
                   <button
                     draggable
                     onDragStart={(e) => {
-                      e.dataTransfer.setData('application/deskly-type', def.id);
-                      e.dataTransfer.effectAllowed = 'copy';
+                      e.dataTransfer.setData('application/plixmap-type', def.id);
+                                            e.dataTransfer.effectAllowed = 'copy';
                     }}
                     onClick={() => onSelectType(def.id)}
                     onContextMenu={(e) => {

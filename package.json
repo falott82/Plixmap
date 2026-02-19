@@ -1,7 +1,7 @@
 {
-  "name": "deskly",
+  "name": "plixmap",
   "description": "Collaborative workspace planning with floor plans, desks, racks, and network links.",
-  "version": "2.9.5",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "scripts": {

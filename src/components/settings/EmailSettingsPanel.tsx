@@ -239,7 +239,7 @@ const EmailSettingsPanel = () => {
               <input
                 value={form.fromName}
                 onChange={(e) => setForm((prev) => ({ ...prev, fromName: e.target.value }))}
-                placeholder="Deskly"
+                placeholder="Plixmap"
                 className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
               />
             </div>
@@ -272,7 +272,7 @@ const EmailSettingsPanel = () => {
           <div>
             <div className="text-sm font-semibold text-ink">{t({ it: 'Email di test', en: 'Test email' })}</div>
             <div className="mt-1 text-xs text-slate-600">
-              {t({ it: 'Oggetto: "Test Deskly Email".', en: 'Subject: "Test Deskly Email".' })}
+              {t({ it: 'Oggetto: "Test Plixmap Email".', en: 'Subject: "Test Plixmap Email".' })}
             </div>
           </div>
           <button

@@ -855,7 +855,7 @@ export const exportPlansToPdf = async (
   } = {}
 ) => {
   const includeIndex = options.includeIndex ?? true;
-  const filename = options.filename || `deskly_print_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = options.filename || `plixmap_print_${new Date().toISOString().slice(0, 10)}.pdf`;
   const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4', compress: true });
   const margin = 18;
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -936,10 +936,10 @@ export const exportPlansToPdf = async (
   }
 
   if (includeIndex) {
-    // Load Deskly logo (best effort) for the first page
+    // Load Plixmap logo (best effort) for the first page
     let desklyLogo: string | null = null;
     try {
-      const img = await loadImage('/favicon.svg');
+      const img = await loadImage('/plixmap-logo.png').catch(() => loadImage('/favicon.svg'));
       const c = document.createElement('canvas');
       const max = 96;
       const w = img.naturalWidth || (img as any).width || max;
@@ -1008,7 +1008,7 @@ export const exportPlansToPdf = async (
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(22);
         pdf.setTextColor(15, 23, 42); // slate-900
-        pdf.text('Deskly', margin + 14 + (desklyLogo ? logoSize + 10 : 0), margin + 38);
+        pdf.text('Plixmap', margin + 14 + (desklyLogo ? logoSize + 10 : 0), margin + 38);
 
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(11);
@@ -1135,7 +1135,7 @@ export const exportChangelogToPdf = (
   options: { lang?: 'it' | 'en'; filename?: string } = {}
 ) => {
   const lang = options.lang === 'en' ? 'en' : 'it';
-  const filename = options.filename || 'deskly_changelog.pdf';
+  const filename = options.filename || 'plixmap_changelog.pdf';
   const pdf = new jsPDF('p', 'pt', 'a4');
   const margin = 32;
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -1144,7 +1144,7 @@ export const exportChangelogToPdf = (
   let y = 44;
 
   pdf.setFontSize(18);
-  pdf.text('Deskly — Changelog', margin, y);
+  pdf.text('Plixmap — Changelog', margin, y);
   y += 22;
 
   pdf.setFontSize(10);
@@ -1197,7 +1197,7 @@ export const exportClientNotesToPdf = async (params: {
   filename?: string;
 }) => {
   const lang = params.lang === 'en' ? 'en' : 'it';
-  const filename = params.filename || `deskly_client_notes_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = params.filename || `plixmap_client_notes_${new Date().toISOString().slice(0, 10)}.pdf`;
 
   const wrapper = document.createElement('div');
   wrapper.style.position = 'fixed';
@@ -1212,10 +1212,10 @@ export const exportClientNotesToPdf = async (params: {
   const safeHtml = sanitizeHtmlBasic(String(params.notesHtml || ''));
   const date = new Date().toISOString().slice(0, 10);
 
-  // Load Deskly logo (best effort) for the header
+  // Load Plixmap logo (best effort) for the header
   let desklyLogo: string | null = null;
   try {
-    const img = await loadImage('/favicon.svg');
+    const img = await loadImage('/plixmap-logo.png').catch(() => loadImage('/favicon.svg'));
     const c = document.createElement('canvas');
     const max = 96;
     const w = img.naturalWidth || (img as any).width || max;
@@ -1260,7 +1260,7 @@ export const exportClientNotesToPdf = async (params: {
   header.innerHTML = `
     ${desklyLogo ? `<img src="${desklyLogo}" style="width:30px;height:30px" />` : ''}
     <div>
-      <div class="deskly-title">Deskly</div>
+      <div class="deskly-title">Plixmap</div>
       <div class="deskly-sub">${lang === 'en' ? 'Client notes' : 'Note cliente'}</div>
     </div>
     <div class="deskly-meta">
@@ -1387,7 +1387,7 @@ export const exportClientIpMapToPdf = (params: {
   }>;
   filename?: string;
 }) => {
-  const filename = params.filename || `deskly_ip_map_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = params.filename || `plixmap_ip_map_${new Date().toISOString().slice(0, 10)}.pdf`;
   const pdf = new jsPDF({ orientation: 'l', unit: 'pt', format: 'a4', compress: true });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
@@ -1415,7 +1415,7 @@ export const exportClientIpMapToPdf = (params: {
   let y = margin;
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(16);
-  pdf.text(`Deskly — IP Map`, margin, y + 12);
+  pdf.text(`Plixmap — IP Map`, margin, y + 12);
   pdf.setFontSize(11);
   pdf.setFont('helvetica', 'normal');
   pdf.setTextColor(90);
@@ -1493,7 +1493,7 @@ export const exportClientDirectoryToPdf = (params: {
   columns?: ClientDirectoryPdfColumnKey[];
   filename?: string;
 }) => {
-  const filename = params.filename || `deskly_rubrica_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = params.filename || `plixmap_rubrica_${new Date().toISOString().slice(0, 10)}.pdf`;
   const pdf = new jsPDF({ orientation: 'l', unit: 'pt', format: 'a4', compress: true });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();

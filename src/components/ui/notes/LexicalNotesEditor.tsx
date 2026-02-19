@@ -1120,7 +1120,7 @@ const LexicalNotesEditor = forwardRef<LexicalNotesEditorHandle, Props>(
   ({ initialStateJson, initialHtml, readOnly, className, onDirtyChange, onRequestFocus }, ref) => {
   const initialConfig = useMemo(
     () => ({
-      namespace: 'DesklyClientNotes',
+      namespace: 'PlixmapClientNotes',
       nodes: [
         HeadingNode,
         QuoteNode,

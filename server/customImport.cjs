@@ -2,12 +2,14 @@ const crypto = require('crypto');
 const dns = require('dns').promises;
 const net = require('net');
 
+const readEnv = (name) => process.env[name];
+
 const MAX_IMPORT_RESPONSE_BYTES = (() => {
-  const raw = Number(process.env.DESKLY_IMPORT_MAX_BYTES || '');
+  const raw = Number(readEnv('PLIXMAP_IMPORT_MAX_BYTES') || '');
   return Number.isFinite(raw) && raw > 0 ? raw : 2 * 1024 * 1024;
 })();
 const ALLOW_PRIVATE_IMPORT = (() => {
-  const raw = String(process.env.DESKLY_IMPORT_ALLOW_PRIVATE || '').trim().toLowerCase();
+  const raw = String(readEnv('PLIXMAP_IMPORT_ALLOW_PRIVATE') || '').trim().toLowerCase();
   return ['1', 'true', 'yes', 'on'].includes(raw);
 })();
 

@@ -7,6 +7,7 @@ import { fetchLogsMeta, LogsMeta } from '../../api/logs';
 import { useToastStore } from '../../store/useToast';
 
 type LogsTab = 'auth' | 'mail' | 'audit';
+const LOGS_TAB_KEY = 'plixmap_logs_tab';
 
 const LogsTabsPanel = () => {
   const t = useT();
@@ -25,7 +26,7 @@ const LogsTabsPanel = () => {
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem('deskly_logs_tab');
+      const stored = window.localStorage.getItem(LOGS_TAB_KEY);
       if (stored === 'auth' || stored === 'mail' || stored === 'audit') setTab(stored);
     } catch {
       // ignore
@@ -34,7 +35,7 @@ const LogsTabsPanel = () => {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem('deskly_logs_tab', tab);
+      window.localStorage.setItem(LOGS_TAB_KEY, tab);
     } catch {
       // ignore
     }

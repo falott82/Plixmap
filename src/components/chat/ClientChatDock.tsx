@@ -1148,15 +1148,15 @@ const ClientChatDock = () => {
       return;
     }
     // Chrome (and most browsers) require a secure context for getUserMedia unless on localhost.
-    // When running Deskly on plain http://<lan-ip>, the browser will deny without prompting.
+    // When running Plixmap on plain http://<lan-ip>, the browser will deny without prompting.
     if (!window.isSecureContext) {
       const host = window.location?.hostname || '';
       const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
       if (!isLocalhost) {
         setErr(
           t({
-            it: `Il microfono in Chrome funziona solo su HTTPS (o su http://localhost). Apri Deskly in HTTPS per usare i vocali. Origin: ${window.location?.origin || ''}`,
-            en: `Microphone requires HTTPS (or http://localhost). Open Deskly in HTTPS to record voice notes. Origin: ${window.location?.origin || ''}`
+            it: `Il microfono in Chrome funziona solo su HTTPS (o su http://localhost). Apri Plixmap in HTTPS per usare i vocali. Origin: ${window.location?.origin || ''}`,
+            en: `Microphone requires HTTPS (or http://localhost). Open Plixmap in HTTPS to record voice notes. Origin: ${window.location?.origin || ''}`
           })
         );
         return;

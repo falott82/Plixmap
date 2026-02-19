@@ -138,7 +138,7 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
                   <div className="flex items-center gap-2 text-rose-700">
                     <Heart size={18} className="fill-rose-500 text-rose-500" />
                     <Dialog.Title className="text-base font-bold">
-                      {t({ it: 'Supporta Deskly', en: 'Support Deskly' })}
+                      {t({ it: 'Supporta Plixmap', en: 'Support Plixmap' })}
                     </Dialog.Title>
                   </div>
                   <p className="mt-4 text-sm leading-relaxed text-slate-700">

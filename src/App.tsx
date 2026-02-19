@@ -398,14 +398,15 @@ const App = () => {
     if (!authHydrated || !user) return;
     let shouldShow = false;
     try {
-      shouldShow = window.sessionStorage.getItem('deskly_first_run_success') === '1';
+      const marker = window.sessionStorage.getItem('plixmap_first_run_success');
+      shouldShow = marker === '1';
     } catch {
       shouldShow = false;
     }
     if (!shouldShow) return;
     setFirstRunPromptOpen(true);
     try {
-      window.sessionStorage.removeItem('deskly_first_run_success');
+      window.sessionStorage.removeItem('plixmap_first_run_success');
     } catch {}
   }, [authHydrated, user]);
 

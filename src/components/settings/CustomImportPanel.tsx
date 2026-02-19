@@ -319,7 +319,7 @@ const CustomImportPanel = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'deskly-users-template.csv';
+    a.download = 'plixmap-users-template.csv';
     a.click();
     URL.revokeObjectURL(url);
   };

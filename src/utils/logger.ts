@@ -18,7 +18,7 @@ const sanitizeContext = (value: Record<string, unknown> | undefined) => {
 
 const writeConsole = (level: LogLevel, payload: LogPayload) => {
   const target = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
-  target(`[deskly:${payload.scope}] ${payload.message}`, payload.context || {});
+  target(`[plixmap:${payload.scope}] ${payload.message}`, payload.context || {});
 };
 
 export const createLogger = (scope: string) => {

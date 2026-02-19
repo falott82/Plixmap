@@ -44,7 +44,7 @@ const FirstRunView = () => {
       const me = await fetchMe();
       useAuthStore.setState({ user: me.user, permissions: me.permissions, hydrated: true });
       try {
-        window.sessionStorage.setItem('deskly_first_run_success', '1');
+        window.sessionStorage.setItem('plixmap_first_run_success', '1');
       } catch {}
       navigate('/', { replace: true });
     } catch {
@@ -63,11 +63,18 @@ const FirstRunView = () => {
     <div className="flex h-screen items-center justify-center bg-mist px-4 text-ink">
       <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-8 shadow-card">
         <div className="flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-primary to-accent text-white shadow-card">
-            D
-          </div>
+          <img
+            src="/plixmap-logo.png"
+            alt="Plixmap"
+            className="h-12 w-12 rounded-2xl border border-slate-200 object-cover shadow-card"
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (target.src.endsWith('/favicon.svg')) return;
+              target.src = '/favicon.svg';
+            }}
+          />
           <div>
-            <div className="text-sm font-semibold uppercase tracking-wide text-slate-500">Deskly</div>
+            <div className="text-sm font-semibold uppercase tracking-wide text-slate-500">Plixmap</div>
             <h1 className="text-2xl font-semibold">{t({ it: 'Configurazione iniziale', en: 'First-run setup' })}</h1>
           </div>
         </div>

@@ -235,7 +235,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                             className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                             placeholder=""
                             autoComplete="new-username"
-                            name="deskly_new_username"
+                            name="plixmap_new_username"
                           />
                         </label>
                         <label className="block text-sm font-medium text-slate-700">
@@ -248,7 +248,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                             type="password"
                             placeholder=""
                             autoComplete="new-password"
-                            name="deskly_new_password"
+                            name="plixmap_new_password"
                           />
                         </label>
                         <label className="block text-sm font-medium text-slate-700">
@@ -262,7 +262,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                             type="password"
                             placeholder="••••••••"
                             autoComplete="new-password"
-                            name="deskly_new_password_confirm"
+                            name="plixmap_new_password_confirm"
                           />
                           {confirmPassword && password !== confirmPassword ? (
                             <div className="mt-1 text-xs font-semibold text-rose-700">

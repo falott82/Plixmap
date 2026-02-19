@@ -14,7 +14,7 @@ precacheAndRoute(self.__WB_MANIFEST);
 registerRoute(
   ({ url }) => url.pathname.startsWith('/uploads/'),
   new CacheFirst({
-    cacheName: 'deskly-uploads',
+    cacheName: 'plixmap-uploads',
     plugins: [new ExpirationPlugin({ maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 })]
   })
 );
@@ -22,7 +22,7 @@ registerRoute(
 registerRoute(
   ({ url }) => url.pathname.startsWith('/seed/'),
   new CacheFirst({
-    cacheName: 'deskly-seed',
+    cacheName: 'plixmap-seed',
     plugins: [new ExpirationPlugin({ maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 * 365 })]
   })
 );

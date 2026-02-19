@@ -80,7 +80,7 @@ const HelpPanel = () => {
         cursorY += renderHeight + 12;
       }
 
-      pdf.save(`deskly_quick_help_v${latestVersion}.pdf`);
+      pdf.save(`plixmap_quick_help_v${latestVersion}.pdf`);
     } catch {
       // ignore
     } finally {
@@ -270,8 +270,8 @@ const HelpPanel = () => {
 	                    <ul className="ml-5 list-disc space-y-1 pt-2">
 	                      <li>
 	                        {t({
-	                          it: 'Quando apri una planimetria con permessi di modifica (RW), Deskly prova a prendere un lock esclusivo: solo un utente alla volta puo modificare.',
-	                          en: 'When you open a floor plan with edit permissions (RW), Deskly tries to acquire an exclusive lock: only one user at a time can edit.'
+	                          it: 'Quando apri una planimetria con permessi di modifica (RW), Plixmap prova a prendere un lock esclusivo: solo un utente alla volta puo modificare.',
+	                          en: 'When you open a floor plan with edit permissions (RW), Plixmap tries to acquire an exclusive lock: only one user at a time can edit.'
 	                        })}
 	                      </li>
 	                      <li>

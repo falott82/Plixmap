@@ -1,8 +1,15 @@
-# Deskly - Floor Plan Management
+# Plixmap - Floor Plan Management
 
-Current version: 2.9.5
+Current version: 3.0.0
 
-Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
+Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
+
+## What's new in 3.0.0
+- Brand migration step 2 completed: project identity is now Plixmap across runtime/UI/PWA assets.
+- Session/CSRF/runtime keys are now standardized on 'plixmap_*' (legacy Deskly fallbacks removed in active paths).
+- Runtime cache/export/log prefixes updated from Deskly to Plixmap (files, CSV/PDF exports, service-worker caches, logger scope).
+- Backup workspace export now uses 'plixmap-workspace' kind (import still accepts legacy 'deskly-workspace').
+- Login and sidebar now use the new PNG logo (public/plixmap-logo.png) with favicon/PWA icon alignment.
 
 ## What's new in 2.9.5
 - Rooms: improved label rendering so newly created room labels stay inside room bounds and auto-wrap better without manual shrinking.
@@ -17,7 +24,7 @@ Deskly is a web app to plan offices and infrastructure on floor plans using a fi
 - Layer routing audit: normalized layer resolution now consistently handles legacy `real_user` objects created with old default layer assignments.
 - Reliability: added server-side atomic SQLite backups (`sqlite backup`) with retention policy and downloadable backup list in Settings -> Backup.
 - Reliability: added health probes (`/api/health/live`, `/api/health/ready`) and DB migration status endpoint (`/api/settings/db/migrations`).
-- Security: secrets hardening with support for `*_FILE` env vars and optional strict mode `DESKLY_REQUIRE_ENV_SECRETS=1`.
+- Security: secrets hardening with support for `*_FILE` env vars and optional strict mode `PLIXMAP_REQUIRE_ENV_SECRETS=1`.
 - Security: CSP is now stricter by default; MediaPipe/eval allowances are opt-in via env flags.
 - Performance: PlanView now lazy-loads heavy routing/gallery modals; CanvasStage now uses `FastLayer` for static background and viewport culling for offscreen objects.
 - Security hardening on export stack: removed `exceljs` and migrated table export to Excel-compatible SpreadsheetML (`.xls`) to eliminate runtime dependency chain vulnerabilities (`archiver/minimatch`).
@@ -179,8 +186,8 @@ npm run test:e2e:playwright
 ## Quickstart
 ### Clone
 ```bash
-git clone https://github.com/falott82/Deskly.git
-cd Deskly
+git clone https://github.com/falott82/Plixmap.git
+cd Plixmap
 ```
 
 ### Prerequisites
@@ -226,22 +233,22 @@ You are forced to change the password on first login.
 ## Environment variables
 - `PORT` (default `8787`)
 - `HOST` (default `0.0.0.0`)
-- `DESKLY_DB_PATH` (default `data/deskly.sqlite`)
-- `DESKLY_AUTH_SECRET` (optional; recommended in production)
-- `DESKLY_AUTH_SECRET_FILE` (optional path alternative to `DESKLY_AUTH_SECRET`)
-- `DESKLY_DATA_SECRET` (optional; recommended in production)
-- `DESKLY_DATA_SECRET_FILE` (optional path alternative to `DESKLY_DATA_SECRET`)
-- `DESKLY_REQUIRE_ENV_SECRETS` (optional, `1/true` to require secrets from env/file and fail fast if missing)
-- `DESKLY_SECRET_MIN_LENGTH` (optional, default `32`)
-- `DESKLY_BACKUP_DIR` (optional, default `data/backups`)
-- `DESKLY_BACKUP_KEEP` (optional, default `20`)
-- `DESKLY_CSP_ALLOW_MEDIAPIPE` (optional, default `false`; enables jsdelivr/storage + wasm/eval allowances)
-- `DESKLY_CSP_ALLOW_EVAL` (optional, default `false`; enables `unsafe-eval`/`wasm-unsafe-eval`)
+- `PLIXMAP_DB_PATH` (default `data/plixmap.sqlite`)
+- `PLIXMAP_AUTH_SECRET` (optional; recommended in production)
+- `PLIXMAP_AUTH_SECRET_FILE` (optional path alternative to `PLIXMAP_AUTH_SECRET`)
+- `PLIXMAP_DATA_SECRET` (optional; recommended in production)
+- `PLIXMAP_DATA_SECRET_FILE` (optional path alternative to `PLIXMAP_DATA_SECRET`)
+- `PLIXMAP_REQUIRE_ENV_SECRETS` (optional, `1/true` to require secrets from env/file and fail fast if missing)
+- `PLIXMAP_SECRET_MIN_LENGTH` (optional, default `32`)
+- `PLIXMAP_BACKUP_DIR` (optional, default `data/backups`)
+- `PLIXMAP_BACKUP_KEEP` (optional, default `20`)
+- `PLIXMAP_CSP_ALLOW_MEDIAPIPE` (optional, default `false`; enables jsdelivr/storage + wasm/eval allowances)
+- `PLIXMAP_CSP_ALLOW_EVAL` (optional, default `false`; enables `unsafe-eval`/`wasm-unsafe-eval`)
 
 ## Storage notes
-- SQLite DB and uploads live in `./data` (or `DESKLY_DB_PATH`).
+- SQLite DB and uploads live in `./data` (or `PLIXMAP_DB_PATH`).
 - Floor plan images, client logos, and PDFs are stored on disk and referenced by URL.
-- Database backups are stored in `DESKLY_BACKUP_DIR` (default `./data/backups`).
+- Database backups are stored in `PLIXMAP_BACKUP_DIR` (default `./data/backups`).
 
 ## Operations
 - Create backup from CLI: `npm run backup:db`
