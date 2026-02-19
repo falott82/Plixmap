@@ -4,6 +4,7 @@ import { Github, Heart, Mail, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { releaseHistory } from '../../version/history';
 import { useUIStore } from '../../store/useUIStore';
+import { PLIXMAP_PAYPAL_URL, PLIXMAP_REPO_URL, PLIXMAP_WEBSITE_URL } from '../../constants/links';
 
 interface Props {
   variant?: 'sidebar' | 'collapsed';
@@ -26,7 +27,7 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
           v{latest}
         </button>
         <a
-          href="https://github.com/falott82"
+          href={PLIXMAP_REPO_URL}
           target="_blank"
           rel="noreferrer"
           className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-ink"
@@ -67,7 +68,7 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
           </div>
           <div className="flex items-center gap-1.5">
             <a
-              href="https://github.com/falott82"
+              href={PLIXMAP_REPO_URL}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-slate-700 hover:bg-slate-100 hover:text-ink"
@@ -149,11 +150,25 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
                   </p>
                   <p className="mt-3 text-sm leading-relaxed text-slate-700">
                     {t({
+                      it: 'Sito ufficiale del progetto:',
+                      en: 'Official project website:'
+                    })}{' '}
+                    <a
+                      href={PLIXMAP_WEBSITE_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-semibold text-rose-700 underline decoration-rose-400 underline-offset-2 hover:text-rose-800"
+                    >
+                      www.plixmap.com
+                    </a>
+                  </p>
+                  <p className="mt-3 text-sm leading-relaxed text-slate-700">
+                    {t({
                       it: 'Se desiderate sostenere il progetto e il mio lavoro, potete farlo con una donazione tramite PayPal',
                       en: 'If you would like to support the project and my work, you can do so with a PayPal donation'
                     })}{' '}
                     <a
-                      href="https://paypal.me/falott82"
+                      href={PLIXMAP_PAYPAL_URL}
                       target="_blank"
                       rel="noreferrer"
                       className="font-semibold text-rose-700 underline decoration-rose-400 underline-offset-2 hover:text-rose-800"

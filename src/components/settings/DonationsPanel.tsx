@@ -1,5 +1,6 @@
 import { Heart } from 'lucide-react';
 import { useT } from '../../i18n/useT';
+import { PLIXMAP_PAYPAL_URL, PLIXMAP_WEBSITE_URL } from '../../constants/links';
 
 const DonationsPanel = () => {
   const t = useT();
@@ -20,12 +21,26 @@ const DonationsPanel = () => {
       </p>
       <p className="mt-3 text-sm text-slate-700">
         {t({
+          it: 'Sito ufficiale del progetto:',
+          en: 'Official project website:'
+        })}{' '}
+        <a
+          href={PLIXMAP_WEBSITE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold text-rose-700 underline decoration-rose-400 underline-offset-2 hover:text-rose-800"
+        >
+          www.plixmap.com
+        </a>
+      </p>
+      <p className="mt-3 text-sm text-slate-700">
+        {t({
           it: 'Se desiderate sostenere il progetto e il mio lavoro, potete farlo con una donazione tramite PayPal',
           en: 'If you would like to support the project and my work, you can do so with a PayPal donation'
         })}
         {' '}
         <a
-          href="https://paypal.me/falott82"
+          href={PLIXMAP_PAYPAL_URL}
           target="_blank"
           rel="noreferrer"
           className="font-semibold text-rose-700 underline decoration-rose-400 underline-offset-2 hover:text-rose-800"

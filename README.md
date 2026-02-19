@@ -4,6 +4,11 @@ Current version: 3.0.3
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
+## Project links
+- Official website: [www.plixmap.com](https://www.plixmap.com)
+- GitHub repository: [falott82/Plixmap](https://github.com/falott82/Plixmap)
+- Issue tracker: [GitHub Issues](https://github.com/falott82/Plixmap/issues)
+
 ## Release notes
 - Full release notes: [`CHANGELOG.md`](CHANGELOG.md)
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
@@ -206,3 +211,25 @@ The reset invalidates active sessions and asks for a new strong password.
 - Prod: `http://<YOUR_PC_IP>:8787`
 
 All users on the LAN share the same SQLite data on the server machine.
+
+## License
+Plixmap is open source software distributed under the [MIT License](LICENSE).
+
+## Free use and voluntary support
+- Plixmap can be downloaded, used, and adapted freely according to the MIT License terms.
+- The portal is free to use; financial support is optional.
+- If you want to support the project, you can donate via PayPal: <https://www.paypal.com/paypalme/falott82>.
+
+## Disclaimer
+This software is provided "as is", without warranties of any kind. The author does not assume responsibility for bugs, malfunctions, data loss, service interruptions, or any direct/indirect damages related to its use.
+
+## Bug reports and information requests
+Use GitHub collaboration tools to report anomalies, bugs, or request information:
+- `Issues`: open a new issue with clear title, reproduction steps, expected behavior, actual behavior, screenshots/logs, and environment details.
+- `Pull Requests`: propose fixes or improvements directly, referencing related issues when available.
+- Before opening a new issue, search existing ones to avoid duplicates.
+
+Main links:
+- Issues: <https://github.com/falott82/Plixmap/issues>
+- New issue: <https://github.com/falott82/Plixmap/issues/new>
+- Pull requests: <https://github.com/falott82/Plixmap/pulls>

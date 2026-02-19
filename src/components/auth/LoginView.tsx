@@ -5,6 +5,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { useT } from '../../i18n/useT';
 import { fetchBootstrapStatus, MFARequiredError } from '../../api/auth';
 import { releaseHistory } from '../../version/history';
+import { PLIXMAP_WEBSITE_URL } from '../../constants/links';
 
 const LoginView = () => {
   const navigate = useNavigate();
@@ -75,22 +76,32 @@ const LoginView = () => {
       <div className="pointer-events-none absolute bottom-0 left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-blue-200/40 blur-3xl" />
       <div className="relative w-full max-w-md rounded-[28px] border border-white/50 bg-white/85 p-8 shadow-[0_30px_80px_-30px_rgba(15,23,42,0.55)] backdrop-blur">
         <div className="flex items-center gap-3">
-          <img
-            src="/plixmap-logo.png"
-            alt="Plixmap"
-            className="h-[4.5rem] w-[4.5rem] rounded-2xl border border-slate-200 object-cover shadow-card"
-            onError={(e) => {
-              const target = e.currentTarget;
-              if (target.src.endsWith('/favicon.svg')) return;
-              target.src = '/favicon.svg';
-            }}
-          />
+          <a href={PLIXMAP_WEBSITE_URL} target="_blank" rel="noreferrer" title="www.plixmap.com">
+            <img
+              src="/plixmap-logo.png"
+              alt="Plixmap"
+              className="h-[4.5rem] w-[4.5rem] rounded-2xl border border-slate-200 object-cover shadow-card"
+              onError={(e) => {
+                const target = e.currentTarget;
+                if (target.src.endsWith('/favicon.svg')) return;
+                target.src = '/favicon.svg';
+              }}
+            />
+          </a>
           <div>
             <div className="text-sm font-semibold uppercase tracking-wide text-slate-500">Plixmap</div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold">{t({ it: 'Login', en: 'Login' })}</h1>
               {version ? <span className="text-xs font-semibold text-slate-400">v{version}</span> : null}
             </div>
+            <a
+              href={PLIXMAP_WEBSITE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-flex text-xs font-medium text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-800"
+            >
+              www.plixmap.com
+            </a>
           </div>
         </div>
 

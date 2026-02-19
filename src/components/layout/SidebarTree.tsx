@@ -1,4 +1,4 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, Eye, EyeOff, FileText, History, Hourglass, Image as ImageIcon, Info, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, Search, ShieldAlert, Star, Trash, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
@@ -20,6 +20,7 @@ import { fetchImportSummary, ImportSummaryRow } from '../../api/customImport';
 import EmergencyContactsModal from './EmergencyContactsModal';
 import { ALL_ITEMS_LAYER_ID } from '../../store/data';
 import { SECURITY_LAYER_ID } from '../../store/security';
+import { PLIXMAP_WEBSITE_URL } from '../../constants/links';
 import {
   getDefaultVisiblePlanLayerIds as getDefaultVisiblePlanLayerIdsUtil,
   normalizePlanLayerSelection as normalizePlanLayerSelectionUtil
@@ -518,7 +519,13 @@ const SidebarTree = () => {
   if (sidebarCollapsed) {
     return (
       <aside className="flex h-screen w-14 flex-col items-center gap-4 border-r border-slate-200 bg-white py-4">
-        <Link to="/" className="h-[3.75rem] w-[3.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+        <a
+          href={PLIXMAP_WEBSITE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="h-[3.75rem] w-[3.75rem] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card"
+          title={t({ it: 'Apri sito ufficiale Plixmap', en: 'Open official Plixmap website' })}
+        >
           <img
             src="/plixmap-logo.png"
             alt="Plixmap"
@@ -529,7 +536,7 @@ const SidebarTree = () => {
               target.src = '/favicon.svg';
             }}
           />
-        </Link>
+        </a>
         <button
           onClick={toggleSidebar}
           className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
@@ -545,7 +552,13 @@ const SidebarTree = () => {
   return (
     <aside className="flex h-screen w-72 flex-col border-r border-slate-200 bg-white">
       <div className="flex items-center justify-between px-4 py-4">
-        <Link to="/" className="flex items-center gap-2 text-lg font-semibold text-ink">
+        <a
+          href={PLIXMAP_WEBSITE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2 text-lg font-semibold text-ink"
+          title={t({ it: 'Apri sito ufficiale Plixmap', en: 'Open official Plixmap website' })}
+        >
           <span className="h-12 w-12 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
             <img
               src="/plixmap-logo.png"
@@ -559,7 +572,7 @@ const SidebarTree = () => {
             />
           </span>
           Plixmap
-        </Link>
+        </a>
         <div className="flex items-center gap-2">
           <button
             onClick={toggleSidebar}

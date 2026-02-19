@@ -2,6 +2,19 @@
   "name": "plixmap",
   "description": "Collaborative workspace planning with floor plans, desks, racks, and network links.",
   "version": "3.0.3",
+  "license": "MIT",
+  "homepage": "https://www.plixmap.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/falott82/Plixmap.git"
+  },
+  "bugs": {
+    "url": "https://github.com/falott82/Plixmap/issues"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://www.paypal.com/paypalme/falott82"
+  },
   "private": true,
   "type": "module",
   "scripts": {

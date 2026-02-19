@@ -5,6 +5,9 @@ All notable changes are listed here in reverse chronological order.
 ## 3.0.3 - 2026-02-19
 - Documentation refresh: expanded `README.md` screenshot gallery with new workflow captures for workspace, internal map route, escape route modal, and escape route PDF preview.
 - Release alignment: bumped project version references to `3.0.3` across package metadata and release history.
+- Branding/UI links: top-left sidebar logo now opens `www.plixmap.com`; login and Donations areas now include an explicit website reference.
+- Donations/support links aligned to the new PayPal URL: `https://www.paypal.com/paypalme/falott82`.
+- Governance/docs: added `MIT` license, plus README sections for open-source licensing, free usage terms, voluntary support, disclaimer, and GitHub issue/PR reporting flow.
 
 ## 3.0.2 - 2026-02-19
 - First setup: renamed seed client from `ACME` to `PlayGround`.

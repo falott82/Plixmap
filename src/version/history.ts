@@ -19,6 +19,14 @@ export const releaseHistory: ReleaseNote[] = [
       n(
         'Release metadata allineata alla versione 3.0.3',
         'Release metadata aligned to version 3.0.3'
+      ),
+      n(
+        'Branding/UI: logo sidebar, login e pagina donazioni aggiornati con riferimenti al sito ufficiale www.plixmap.com',
+        'Branding/UI: sidebar logo, login, and donations page now include references to the official website www.plixmap.com'
+      ),
+      n(
+        'Governance progetto: aggiunta licenza MIT e sezione README su uso gratuito, supporto volontario, disclaimer e canali GitHub per bug/richieste',
+        'Project governance: added MIT license and README sections for free usage, voluntary support, disclaimer, and GitHub channels for bugs/requests'
       )
     ]
   },
