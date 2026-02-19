@@ -377,9 +377,13 @@ const ObjectModal = ({
     if (!isWifi) return true;
     const coverageRaw = wifiCoverageSqm.trim().replace(',', '.');
     const coverageValue = coverageRaw ? Number(coverageRaw) : undefined;
-    if (wifiSource === 'catalog' && !wifiCatalogId) return false;
+    if (wifiSource === 'custom') {
+      if (!coverageRaw) return true;
+      return Number.isFinite(coverageValue as number) && (coverageValue as number) > 0;
+    }
+    if (!wifiCatalogId) return false;
     if (!wifiBrand.trim()) return false;
-    if (wifiSource === 'catalog' && !wifiModel.trim()) return false;
+    if (!wifiModel.trim()) return false;
     if (!wifiModelCode.trim()) return false;
     if (!wifiStandard) return false;
     if (!(wifiBand24 || wifiBand5 || wifiBand6)) return false;
@@ -1072,13 +1076,17 @@ const ObjectModal = ({
     const coverageRaw = wifiCoverageSqm.trim().replace(',', '.');
     const coverageValue = coverageRaw ? Number(coverageRaw) : undefined;
     if (isWifi) {
-      if (wifiSource === 'catalog' && !wifiCatalogId) return;
-      if (!wifiBrand.trim()) return;
-      if (wifiSource === 'catalog' && !wifiModel.trim()) return;
-      if (!wifiModelCode.trim()) return;
-      if (!wifiStandard) return;
-      if (!(wifiBand24 || wifiBand5 || wifiBand6)) return;
-      if (!Number.isFinite(coverageValue as number) || (coverageValue as number) <= 0) return;
+      if (wifiSource === 'custom') {
+        if (coverageRaw && (!Number.isFinite(coverageValue as number) || (coverageValue as number) <= 0)) return;
+      } else {
+        if (!wifiCatalogId) return;
+        if (!wifiBrand.trim()) return;
+        if (!wifiModel.trim()) return;
+        if (!wifiModelCode.trim()) return;
+        if (!wifiStandard) return;
+        if (!(wifiBand24 || wifiBand5 || wifiBand6)) return;
+        if (!Number.isFinite(coverageValue as number) || (coverageValue as number) <= 0) return;
+      }
     }
     const safeName = name.trim();
     onSubmit({
