@@ -26,6 +26,7 @@ import EmailSettingsPanel from './EmailSettingsPanel';
 import DonationsPanel from './DonationsPanel';
 import LayersPanel from './LayersPanel';
 import SafetyPanel from './SafetyPanel';
+import { SEED_CLIENT_ID } from '../../store/data';
 
 const SettingsView = () => {
   const {
@@ -450,7 +451,14 @@ const SettingsView = () => {
                         <Home size={14} className="text-primary" />
                       )}
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-ink">{client.shortName || client.name}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="truncate text-sm font-semibold text-ink">{client.shortName || client.name}</div>
+                          {client.id === SEED_CLIENT_ID ? (
+                            <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                              {t({ it: 'cliente di esempio', en: 'example client' })}
+                            </span>
+                          ) : null}
+                        </div>
                         {client.vatId || client.pecEmail ? (
                           <div className="truncate text-xs text-slate-500">
                             {client.vatId ? `P.IVA ${client.vatId}` : ''}{client.vatId && client.pecEmail ? ' • ' : ''}{client.pecEmail || ''}

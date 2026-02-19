@@ -693,8 +693,8 @@ const App = () => {
         open={firstRunPromptOpen}
         title={t({ it: 'Superadmin creato con successo', en: 'Superadmin created successfully' })}
         description={t({
-          it: 'Questo utente servirà per gestire tutti gli altri utenti del portale. Vuoi procedere alla creazione degli utenti?',
-          en: 'This user will manage all other portal users. Do you want to proceed to user creation?'
+          it: 'Questo utente servirà per gestire tutti gli altri utenti del portale. Quello che vedi ora è un cliente d’esempio: puoi usarlo per fare dimestichezza con il portale e, se vuoi, eliminarlo da Impostazioni > Clienti. Vuoi procedere alla creazione degli utenti?',
+          en: 'This user will manage all other portal users. What you currently see is an example client: you can use it to get familiar with the portal and remove it later from Settings > Clients. Do you want to proceed to user creation?'
         })}
         confirmLabel={t({ it: 'Sì, crea utenti', en: 'Yes, create users' })}
         cancelLabel={t({ it: 'No, più tardi', en: 'No, later' })}

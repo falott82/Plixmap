@@ -10,7 +10,7 @@ import { isSecurityTypeId } from '../../store/security';
 import { useUIStore } from '../../store/useUIStore';
 import { clamp } from '../../utils/geometry';
 import Icon from '../ui/Icon';
-import { useT } from '../../i18n/useT';
+import { useLang, useT } from '../../i18n/useT';
 import { perfMetrics } from '../../utils/perfMetrics';
 import { isDeskType } from './deskTypes';
 import { getWallTypeColor } from '../../utils/wallColors';
@@ -497,6 +497,16 @@ const CanvasStageImpl = (
   ref: React.ForwardedRef<CanvasStageHandle>
 ) => {
   const t = useT();
+  const lang = useLang();
+  const getLocalizedName = useCallback(
+    (entity: { name?: string; nameEn?: string }, fallback = '') => {
+      const itName = String(entity?.name || '').trim();
+      const enName = String(entity?.nameEn || '').trim();
+      if (lang === 'en') return enName || itName || fallback;
+      return itName || enName || fallback;
+    },
+    [lang]
+  );
   const stageRef = useRef<any>(null);
   const renderStartRef = useRef(0);
   renderStartRef.current = performance.now();
@@ -3550,7 +3560,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
             const fillColor = hexToRgba(baseColor, isSelectedCorridor ? 0.24 : 0.18);
             const strokeColor = isSelectedCorridor ? '#0f766e' : '#64748b';
             const strokeWidth = isSelectedCorridor ? 2.2 : 1.3;
-            const label = corridor.showName !== false ? String(corridor.name || '').trim() : '';
+            const label = corridor.showName !== false ? getLocalizedName(corridor as any) : '';
             const labelScale = clamp(Number((corridor as any).labelScale || 1), 0.6, 3);
             const labelCenterX = Number.isFinite(Number((corridor as any).labelX))
               ? Number((corridor as any).labelX)
@@ -3999,6 +4009,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
             const capacityText = capacity ? `${userCount}/${capacity}` : null;
             const overCapacity = capacity ? userCount > capacity : false;
             const showName = (room as any).showName !== false;
+            const roomName = getLocalizedName(room as any);
             const highlightActive = !!(
               highlightRoomId &&
               highlightRoomUntil &&
@@ -4114,7 +4125,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
                   >
                     {renderRoomLabels({
                       bounds: labelBounds,
-                      name: room.name,
+                      name: roomName,
                       showName,
                       capacityText,
                       overCapacity,
@@ -4283,10 +4294,10 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
                     ctx.closePath();
                   }}
                 >
-                  {renderRoomLabels({
-                    bounds,
-                    name: room.name,
-                    showName,
+                    {renderRoomLabels({
+                      bounds,
+                      name: roomName,
+                      showName,
                     capacityText,
                     overCapacity,
                     labelScale: (room as any).labelScale,

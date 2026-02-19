@@ -9,6 +9,7 @@ import { IconName, MapObject } from '../../store/types';
 interface Props {
   open: boolean;
   initialName?: string;
+  initialNameEn?: string;
   initialColor?: string;
   initialCapacity?: number;
   initialLabelScale?: number;
@@ -38,6 +39,7 @@ interface Props {
   onClose: () => void;
   onSubmit: (payload: {
     name: string;
+    nameEn?: string;
     color?: string;
     capacity?: number;
     labelScale?: number;
@@ -53,6 +55,7 @@ const COLORS = ['#64748b', '#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed'
 const RoomModal = ({
   open,
   initialName = '',
+  initialNameEn = '',
   initialColor = COLORS[0],
   initialCapacity,
   initialLabelScale,
@@ -76,6 +79,7 @@ const RoomModal = ({
 }: Props) => {
   const t = useT();
   const [name, setName] = useState(initialName);
+  const [nameEn, setNameEn] = useState(initialNameEn);
   const [color, setColor] = useState(initialColor);
   const [capacity, setCapacity] = useState('');
   const [showName, setShowName] = useState(initialShowName);
@@ -102,6 +106,7 @@ const RoomModal = ({
   useEffect(() => {
     if (!open) return;
     setName(initialName);
+    setNameEn(initialNameEn);
     setColor(initialColor || COLORS[0]);
     setCapacity(Number.isFinite(initialCapacity) && (initialCapacity || 0) > 0 ? String(initialCapacity) : '');
     setLabelScale(Number.isFinite(initialLabelScale) && (initialLabelScale || 0) > 0 ? Number(initialLabelScale) : 1);
@@ -112,7 +117,7 @@ const RoomModal = ({
     setActiveTab('info');
     setNameError('');
     window.setTimeout(() => nameRef.current?.focus(), 0);
-  }, [initialColor, initialName, initialCapacity, initialShowName, initialSurfaceSqm, initialNotes, initialLogical, open]);
+  }, [initialColor, initialLogical, initialName, initialNameEn, initialCapacity, initialNotes, initialShowName, initialSurfaceSqm, open]);
 
   const submit = () => {
     if (!name.trim()) {
@@ -126,8 +131,10 @@ const RoomModal = ({
     const rawSurface = Number(surfaceSqm);
     const finalSurface = Number.isFinite(rawSurface) && rawSurface > 0 ? rawSurface : undefined;
     const finalNotes = notes.trim() ? notes.trim() : undefined;
+    const finalNameEn = nameEn.trim() ? nameEn.trim() : undefined;
     const saved = onSubmit({
       name: name.trim(),
+      nameEn: finalNameEn,
       color: color || COLORS[0],
       capacity: finalCapacity,
       labelScale: finalLabelScale,
@@ -348,6 +355,21 @@ const RoomModal = ({
                           placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
                         />
                         {nameError ? <div className="mt-1 text-xs font-semibold text-rose-600">{nameError}</div> : null}
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        {t({ it: 'Nome stanza (EN)', en: 'Room name (EN)' })}
+                        <input
+                          value={nameEn}
+                          onChange={(e) => setNameEn(e.target.value)}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          placeholder={t({ it: 'Es. Meeting room', en: 'e.g. Meeting room' })}
+                        />
+                        <div className="mt-1 text-xs text-slate-500">
+                          {t({
+                            it: 'Opzionale: usato quando il portale è in inglese.',
+                            en: 'Optional: used when the portal language is English.'
+                          })}
+                        </div>
                       </label>
                       <label className="block text-sm font-medium text-slate-700">
                         {t({ it: 'Capienza postazioni', en: 'Seat capacity' })}

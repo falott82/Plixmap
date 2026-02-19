@@ -8,6 +8,33 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.0.2',
+    date: '2026-02-19',
+    type: 'minor',
+    notes: [
+      n(
+        'Primo setup: cliente d’esempio rinominato in "PlayGround", badge "cliente di esempio" in Impostazioni > Clienti e messaggio guidato al primo accesso su uso/rimozione demo',
+        'First setup: demo client renamed to "PlayGround", added "example client" badge in Settings > Clients, and guided first-login prompt about demo use/removal'
+      ),
+      n(
+        'Planimetria: per stanze e corridoi aggiunto nome inglese opzionale con rendering etichetta localizzato (IT/EN) su mappa e ricerca',
+        'Floor plan: added optional English name for rooms and corridors, with localized label rendering (IT/EN) on map and search'
+      ),
+      n(
+        'Antenne WiFi custom: il campo modello non è più obbligatorio',
+        'Custom WiFi antennas: model field is no longer required'
+      ),
+      n(
+        'Documentazione: README snellito, sezione "What\'s new" spostata in `CHANGELOG.md` con link GitHub',
+        'Documentation: streamlined README, moved "What\'s new" content to `CHANGELOG.md` with GitHub link'
+      ),
+      n(
+        'README: sezione chat rinominata in "Internal Chat Service", highlights aggiornati e recovery password superadmin documentato (Docker + npm)',
+        'README: chat section renamed to "Internal Chat Service", highlights updated, and superadmin password recovery documented (Docker + npm)'
+      )
+    ]
+  },
+  {
     version: '3.0.1',
     date: '2026-02-19',
     type: 'fix',

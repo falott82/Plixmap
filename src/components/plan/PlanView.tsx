@@ -938,6 +938,7 @@ const PlanView = ({ planId }: Props) => {
         mode: 'edit';
         roomId: string;
         initialName: string;
+        initialNameEn?: string;
         initialCapacity?: number;
         initialShowName?: boolean;
         initialSurfaceSqm?: number;
@@ -950,11 +951,19 @@ const PlanView = ({ planId }: Props) => {
   const [confirmDeleteRoomIds, setConfirmDeleteRoomIds] = useState<string[] | null>(null);
   const [confirmDeleteCorridorId, setConfirmDeleteCorridorId] = useState<string | null>(null);
   const [corridorModal, setCorridorModal] = useState<
-    | { mode: 'create'; kind: 'poly'; points: { x: number; y: number }[]; initialName?: string; initialShowName?: boolean }
-    | { mode: 'edit'; corridorId: string; initialName: string; initialShowName?: boolean }
+    | {
+        mode: 'create';
+        kind: 'poly';
+        points: { x: number; y: number }[];
+        initialName?: string;
+        initialNameEn?: string;
+        initialShowName?: boolean;
+      }
+    | { mode: 'edit'; corridorId: string; initialName: string; initialNameEn?: string; initialShowName?: boolean }
     | null
   >(null);
   const [corridorNameInput, setCorridorNameInput] = useState('');
+  const [corridorNameEnInput, setCorridorNameEnInput] = useState('');
   const corridorNameInputRef = useRef<HTMLInputElement | null>(null);
   const [corridorShowNameInput, setCorridorShowNameInput] = useState(true);
   const [corridorDoorModal, setCorridorDoorModal] = useState<{
@@ -1019,6 +1028,7 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     if (!corridorModal) return;
     setCorridorNameInput(corridorModal.initialName || '');
+    setCorridorNameEnInput(corridorModal.initialNameEn || '');
     setCorridorShowNameInput(corridorModal.initialShowName !== false);
   }, [corridorModal]);
   useEffect(() => {
@@ -8359,6 +8369,7 @@ const PlanView = ({ planId }: Props) => {
       mode: 'edit',
       roomId,
       initialName: room.name,
+      initialNameEn: (room as any).nameEn,
       initialCapacity: room.capacity,
       initialShowName: room.showName,
       initialSurfaceSqm: room.surfaceSqm,
@@ -8469,9 +8480,11 @@ const PlanView = ({ planId }: Props) => {
         mode: 'edit',
         corridorId,
         initialName: corridor.name || '',
+        initialNameEn: (corridor as any).nameEn || '',
         initialShowName: corridor.showName !== false
       });
       setCorridorNameInput(corridor.name || '');
+      setCorridorNameEnInput((corridor as any).nameEn || '');
       setCorridorShowNameInput(corridor.showName !== false);
     },
     [corridors, isReadOnly]
@@ -8487,9 +8500,11 @@ const PlanView = ({ planId }: Props) => {
         kind: 'poly',
         points,
         initialName: t({ it: `Corridoio ${nextIndex}`, en: `Corridor ${nextIndex}` }),
+        initialNameEn: `Corridor ${nextIndex}`,
         initialShowName: true
       });
       setCorridorNameInput(t({ it: `Corridoio ${nextIndex}`, en: `Corridor ${nextIndex}` }));
+      setCorridorNameEnInput(`Corridor ${nextIndex}`);
       setCorridorShowNameInput(true);
     },
     [isReadOnly, plan, t]
@@ -8498,11 +8513,13 @@ const PlanView = ({ planId }: Props) => {
   const saveCorridorModal = useCallback(() => {
     if (!plan || !corridorModal || isReadOnly) return;
     const nextName = corridorNameInput.trim() || t({ it: 'Corridoio', en: 'Corridor' });
+    const nextNameEn = corridorNameEnInput.trim() || undefined;
     const current = (plan.corridors || []) as Corridor[];
     if (corridorModal.mode === 'create') {
       const next: Corridor = {
         id: nanoid(),
         name: nextName,
+        nameEn: nextNameEn,
         showName: corridorShowNameInput,
         color: '#94a3b8',
         kind: corridorModal.kind,
@@ -8512,24 +8529,27 @@ const PlanView = ({ planId }: Props) => {
       };
       markTouched();
       updateFloorPlan(plan.id, { corridors: [...current, next] } as any);
-      postAuditEvent({ event: 'corridor_create', scopeType: 'plan', scopeId: plan.id, details: { id: next.id, name: nextName } });
+      postAuditEvent({ event: 'corridor_create', scopeType: 'plan', scopeId: plan.id, details: { id: next.id, name: nextName, nameEn: nextNameEn || null } });
       setSelectedCorridorId(next.id);
       push(t({ it: 'Corridoio creato', en: 'Corridor created' }), 'success');
     } else {
-      const next = current.map((c) => (c.id === corridorModal.corridorId ? { ...c, name: nextName, showName: corridorShowNameInput } : c));
+      const next = current.map((c) =>
+        c.id === corridorModal.corridorId ? { ...c, name: nextName, nameEn: nextNameEn, showName: corridorShowNameInput } : c
+      );
       markTouched();
       updateFloorPlan(plan.id, { corridors: next } as any);
       postAuditEvent({
         event: 'corridor_update',
         scopeType: 'plan',
         scopeId: plan.id,
-        details: { id: corridorModal.corridorId, name: nextName }
+        details: { id: corridorModal.corridorId, name: nextName, nameEn: nextNameEn || null }
       });
       push(t({ it: 'Corridoio aggiornato', en: 'Corridor updated' }), 'success');
     }
     setCorridorModal(null);
     setCorridorNameInput('');
-  }, [corridorModal, corridorNameInput, corridorShowNameInput, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
+    setCorridorNameEnInput('');
+  }, [corridorModal, corridorNameEnInput, corridorNameInput, corridorShowNameInput, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
 
   const openCorridorDoorModal = useCallback(
     (corridorId: string, doorId: string) => {
@@ -14982,6 +15002,7 @@ const PlanView = ({ planId }: Props) => {
       <RoomModal
         open={!!roomModal}
         initialName={roomModal?.mode === 'edit' ? roomModal.initialName : ''}
+        initialNameEn={roomModal?.mode === 'edit' ? roomModal.initialNameEn : ''}
         initialColor={
           roomModal?.mode === 'edit'
             ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.color
@@ -15038,17 +15059,17 @@ const PlanView = ({ planId }: Props) => {
           skipRoomWallTypesRef.current = false;
           setRoomModal(null);
         }}
-        onSubmit={({ name, color, capacity, labelScale, showName, surfaceSqm, notes, logical }) => {
+        onSubmit={({ name, nameEn, color, capacity, labelScale, showName, surfaceSqm, notes, logical }) => {
           if (!roomModal || isReadOnly) return false;
           if (roomModal.mode === 'edit') {
             const existing = (basePlan.rooms || []).find((r) => r.id === roomModal.roomId);
-            const nextRoom = { ...(existing || {}), name, color, capacity, labelScale, showName, surfaceSqm, notes, logical };
+            const nextRoom = { ...(existing || {}), name, nameEn, color, capacity, labelScale, showName, surfaceSqm, notes, logical };
             if (hasRoomOverlap(nextRoom, roomModal.roomId)) {
               notifyRoomOverlap();
               return false;
             }
             markTouched();
-            updateRoom(basePlan.id, roomModal.roomId, { name, color, capacity, labelScale, showName, surfaceSqm, notes, logical });
+            updateRoom(basePlan.id, roomModal.roomId, { name, nameEn, color, capacity, labelScale, showName, surfaceSqm, notes, logical });
             push(
               t({ it: `Stanza aggiornata: ${name}`, en: `Room updated: ${name}` }),
               'success'
@@ -15060,6 +15081,7 @@ const PlanView = ({ planId }: Props) => {
               details: {
                 id: roomModal.roomId,
                 name,
+                nameEn: nameEn ?? null,
                 color: color || null,
                 capacity: capacity ?? null,
                 labelScale: labelScale ?? null,
@@ -15080,6 +15102,7 @@ const PlanView = ({ planId }: Props) => {
               ? {
                   id: 'new-room',
                   name,
+                  nameEn,
                   color,
                   capacity,
                   labelScale,
@@ -15093,6 +15116,7 @@ const PlanView = ({ planId }: Props) => {
               : {
                   id: 'new-room',
                   name,
+                  nameEn,
                   color,
                   capacity,
                   labelScale,
@@ -15112,6 +15136,7 @@ const PlanView = ({ planId }: Props) => {
             roomModal.kind === 'rect'
               ? addRoom(basePlan.id, {
                   name,
+                  nameEn,
                   color,
                   capacity,
                   labelScale,
@@ -15124,6 +15149,7 @@ const PlanView = ({ planId }: Props) => {
                 })
               : addRoom(basePlan.id, {
                   name,
+                  nameEn,
                   color,
                   capacity,
                   labelScale,
@@ -15141,6 +15167,7 @@ const PlanView = ({ planId }: Props) => {
             details: {
               id,
               name,
+              nameEn: nameEn ?? null,
               kind: roomModal.kind,
               color: color || null,
               capacity: capacity ?? null,
@@ -15243,6 +15270,15 @@ const PlanView = ({ planId }: Props) => {
                             saveCorridorModal();
                           }
                         }}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-semibold text-slate-700">
+                      {t({ it: 'Nome corridoio (EN)', en: 'Corridor name (EN)' })}
+                      <input
+                        value={corridorNameEnInput}
+                        onChange={(e) => setCorridorNameEnInput(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. Main corridor', en: 'e.g. Main corridor' })}
                       />
                     </label>
                     <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">

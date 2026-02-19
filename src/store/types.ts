@@ -285,6 +285,7 @@ export interface PlanLink {
 export interface Room {
   id: string;
   name: string;
+  nameEn?: string;
   color?: string;
   capacity?: number;
   labelScale?: number;
@@ -377,6 +378,7 @@ export interface CorridorConnectionPoint {
 export interface Corridor {
   id: string;
   name: string;
+  nameEn?: string;
   showName?: boolean;
   labelX?: number;
   labelY?: number;

@@ -307,10 +307,10 @@ export const defaultData = (): Client[] => {
   return [
     {
       id: SEED_CLIENT_ID,
-      name: 'ACME Inc.',
-      shortName: 'ACME',
+      name: 'PlayGround',
+      shortName: 'PlayGround',
       address: 'Wall Street 01',
-      description: 'Seed workspace',
+      description: 'Example workspace',
       logoUrl: undefined,
       wifiAntennaModels: DEFAULT_WIFI_ANTENNA_MODELS,
       layers: [

@@ -379,7 +379,7 @@ const ObjectModal = ({
     const coverageValue = coverageRaw ? Number(coverageRaw) : undefined;
     if (wifiSource === 'catalog' && !wifiCatalogId) return false;
     if (!wifiBrand.trim()) return false;
-    if (!wifiModel.trim()) return false;
+    if (wifiSource === 'catalog' && !wifiModel.trim()) return false;
     if (!wifiModelCode.trim()) return false;
     if (!wifiStandard) return false;
     if (!(wifiBand24 || wifiBand5 || wifiBand6)) return false;
@@ -1074,7 +1074,7 @@ const ObjectModal = ({
     if (isWifi) {
       if (wifiSource === 'catalog' && !wifiCatalogId) return;
       if (!wifiBrand.trim()) return;
-      if (!wifiModel.trim()) return;
+      if (wifiSource === 'catalog' && !wifiModel.trim()) return;
       if (!wifiModelCode.trim()) return;
       if (!wifiStandard) return;
       if (!(wifiBand24 || wifiBand5 || wifiBand6)) return;
@@ -1135,7 +1135,7 @@ const ObjectModal = ({
             wifiBand5,
             wifiBand6,
             wifiBrand: wifiBrand.trim(),
-            wifiModel: wifiModel.trim(),
+            wifiModel: wifiModel.trim() || undefined,
             wifiModelCode: wifiModelCode.trim(),
             wifiCoverageSqm: Number.isFinite(coverageValue as number) ? (coverageValue as number) : undefined,
 	            wifiCatalogId: wifiSource === 'catalog' ? wifiCatalogId : undefined,
@@ -1881,8 +1881,8 @@ const ObjectModal = ({
                           {!wifiFormValid ? (
                             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                               {t({
-                                it: 'Completa tutti i campi dell’antenna.',
-                                en: 'Complete all antenna fields.'
+                                it: 'Completa i campi obbligatori dell’antenna.',
+                                en: 'Complete the required antenna fields.'
                               })}
                             </div>
                           ) : null}

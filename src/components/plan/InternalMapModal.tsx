@@ -1828,6 +1828,18 @@ const escapeHtml = (value: string) =>
 const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, onClose }: Props) => {
   const t = useT();
   const lang = useLang();
+  const getRoomLabel = (room: Room, fallback = '') => {
+    const itName = String(room?.name || '').trim();
+    const enName = String((room as any)?.nameEn || '').trim();
+    if (lang === 'en') return enName || itName || fallback;
+    return itName || enName || fallback;
+  };
+  const getCorridorLabel = (corridor: Corridor, fallback = '') => {
+    const itName = String(corridor?.name || '').trim();
+    const enName = String((corridor as any)?.nameEn || '').trim();
+    if (lang === 'en') return enName || itName || fallback;
+    return itName || enName || fallback;
+  };
   const patternId = useId().replace(/:/g, '-');
   const svgRef = useRef<SVGSVGElement | null>(null);
   const mapPanelRef = useRef<HTMLDivElement | null>(null);
@@ -1968,9 +1980,13 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
     if (!plan) return [] as SearchEntry[];
     const entries: SearchEntry[] = [];
     const roomNameById = new Map<string, string>();
+    const roomAltNameById = new Map<string, string>();
     const roomUserNamesById = new Map<string, string[]>();
     for (const room of plan.rooms || []) {
-      roomNameById.set(room.id, String(room.name || '').trim());
+      const roomName = getRoomLabel(room);
+      roomNameById.set(room.id, roomName);
+      const altRoomName = lang === 'en' ? String(room?.name || '').trim() : String((room as any)?.nameEn || '').trim();
+      roomAltNameById.set(room.id, altRoomName);
     }
     for (const obj of plan.objects || []) {
       const roomId = String(obj.roomId || '').trim();
@@ -1992,11 +2008,12 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
       const realUserName = `${first} ${last}`.trim();
       const label = obj.type === 'real_user' && realUserName ? realUserName : String(obj.name || '').trim() || objectTypeLabels[obj.type] || obj.type;
       const roomName = obj.roomId ? roomNameById.get(String(obj.roomId)) || '' : '';
+      const roomAltName = obj.roomId ? roomAltNameById.get(String(obj.roomId)) || '' : '';
       const typeLabel = objectTypeLabels[obj.type] || obj.type;
       const subtitle = roomName
         ? `${typeLabel} - ${t({ it: 'Stanza', en: 'Room' })}: ${roomName}`
         : `${typeLabel} - ${t({ it: 'Oggetto mappa', en: 'Map object' })}`;
-      const search = `${label} ${obj.name || ''} ${obj.description || ''} ${typeLabel} ${roomName} ${realUserName}`.toLowerCase();
+      const search = `${label} ${obj.name || ''} ${obj.description || ''} ${typeLabel} ${roomName} ${roomAltName} ${realUserName}`.toLowerCase();
       entries.push({
         id: `obj:${obj.id}`,
         kind: 'object',
@@ -2015,10 +2032,11 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
       const label = String(rackItem.name || '').trim() || `${t({ it: 'Apparato rack', en: 'Rack item' })} ${rackItem.type}`;
       const rackName = String(rackObject.name || '').trim() || t({ it: 'Rack', en: 'Rack' });
       const roomName = rackObject.roomId ? roomNameById.get(String(rackObject.roomId)) || '' : '';
+      const roomAltName = rackObject.roomId ? roomAltNameById.get(String(rackObject.roomId)) || '' : '';
       const subtitle = roomName
         ? `${rackName} - ${t({ it: 'Stanza', en: 'Room' })}: ${roomName}`
         : rackName;
-      const search = `${label} ${rackItem.type || ''} ${rackItem.model || ''} ${rackItem.brand || ''} ${rackName} ${roomName}`.toLowerCase();
+      const search = `${label} ${rackItem.type || ''} ${rackItem.model || ''} ${rackItem.brand || ''} ${rackName} ${roomName} ${roomAltName}`.toLowerCase();
       entries.push({
         id: `rack_item:${rackItem.id}`,
         kind: 'rack_item',
@@ -2038,11 +2056,13 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
         it: `Stanza - utenti: ${users.length}`,
         en: `Room - users: ${users.length}`
       });
-      const search = `${String(room.name || '')} ${users.join(' ')}`.toLowerCase();
+      const label = getRoomLabel(room, t({ it: 'Stanza senza nome', en: 'Unnamed room' }));
+      const altLabel = lang === 'en' ? String(room?.name || '').trim() : String((room as any)?.nameEn || '').trim();
+      const search = `${label} ${altLabel} ${users.join(' ')}`.toLowerCase();
       entries.push({
         id: `room:${room.id}`,
         kind: 'room',
-        label: String(room.name || '').trim() || t({ it: 'Stanza senza nome', en: 'Unnamed room' }),
+        label,
         subtitle,
         search,
         point: center,
@@ -2054,13 +2074,14 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
       const polygon = corridorPolygon(corridor);
       if (!polygon.length) continue;
       const center = polygonCentroid(polygon);
-      const label = String(corridor.name || '').trim() || t({ it: 'Corridoio', en: 'Corridor' });
+      const label = getCorridorLabel(corridor, t({ it: 'Corridoio', en: 'Corridor' }));
+      const altLabel = lang === 'en' ? String(corridor?.name || '').trim() : String((corridor as any)?.nameEn || '').trim();
       entries.push({
         id: `corridor:${corridor.id}`,
         kind: 'corridor',
         label,
         subtitle: t({ it: 'Corridoio', en: 'Corridor' }),
-        search: `${label} corridor corridoio`.toLowerCase(),
+        search: `${label} ${altLabel} corridor corridoio`.toLowerCase(),
         point: center
       });
     }
@@ -2068,8 +2089,8 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
     return entries;
   };
 
-  const startSearchEntries = useMemo(() => buildSearchEntries(startPlan), [objectTypeLabels, startPlan, t]);
-  const destinationSearchEntries = useMemo(() => buildSearchEntries(destinationPlan), [destinationPlan, objectTypeLabels, t]);
+  const startSearchEntries = useMemo(() => buildSearchEntries(startPlan), [lang, objectTypeLabels, startPlan, t]);
+  const destinationSearchEntries = useMemo(() => buildSearchEntries(destinationPlan), [destinationPlan, lang, objectTypeLabels, t]);
 
   const normalizedStartQuery = startQuery.trim().toLowerCase();
   const filteredStartEntries = useMemo(() => {
@@ -2406,7 +2427,7 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
         const poly = roomPolygon(room);
         if (poly.length < 3) continue;
         if (pointInPolygon(point, poly) || pointOnPolygonBoundary(point, poly)) {
-          const name = String(room.name || '').trim();
+          const name = getRoomLabel(room);
           if (name) return name;
         }
       }
@@ -2438,7 +2459,7 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
       for (const corridor of (plan.corridors || []) as Corridor[]) {
         const polygon = corridorPolygon(corridor);
         if (polygon.length < 3) continue;
-        const name = String(corridor.name || '').trim() || t({ it: 'corridoio', en: 'corridor' });
+        const name = getCorridorLabel(corridor, t({ it: 'corridoio', en: 'corridor' }));
         if (pointInPolygon(midPoint, polygon) || pointOnPolygonBoundary(midPoint, polygon)) return name;
         const center = polygonCentroid(polygon);
         const dist = Math.hypot(center.x - midPoint.x, center.y - midPoint.y);
@@ -2504,7 +2525,7 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
           if (polygon.length < 3) return '';
           const points = fmtPoints(polygon);
           const center = polygonCentroid(polygon);
-          const label = escapeHtml(String(room.name || '').trim() || t({ it: 'Ufficio', en: 'Office' }));
+          const label = escapeHtml(getRoomLabel(room, t({ it: 'Ufficio', en: 'Office' })));
           return `
             <g>
               <polygon points="${points}" fill="rgba(59,130,246,0.12)" stroke="rgba(37,99,235,0.65)" stroke-width="1.2" />
@@ -3025,7 +3046,7 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
       if (polygon.length < 3) return null;
       const points = polygon.map((point) => `${point.x},${point.y}`).join(' ');
       const layout = getRoomLabelLayout(room, polygon);
-      const label = String(room.name || '').trim() || t({ it: 'Ufficio', en: 'Office' });
+      const label = getRoomLabel(room, t({ it: 'Ufficio', en: 'Office' }));
       return (
         <g key={`room:${room.id}`}>
           <polygon points={points} fill="rgba(59,130,246,0.12)" stroke="rgba(37,99,235,0.65)" strokeWidth={1.2} />
