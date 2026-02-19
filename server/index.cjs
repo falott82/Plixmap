@@ -7,7 +7,8 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { WebSocketServer } = require('ws');
 const nodemailer = require('nodemailer');
-const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret } = require('./db.cjs');
+const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret, listMigrationStatus } = require('./db.cjs');
+const { createDatabaseBackup, listBackups, resolveBackupDir, resolveBackupRetention } = require('./backup.cjs');
 const {
   parseCookies,
   verifyPassword,
@@ -46,6 +47,64 @@ const { getEmailConfigSafe, getEmailConfig, upsertEmailConfig, logEmailAttempt, 
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
+const STARTED_AT = Date.now();
+
+const isEnabled = (value, fallback = false) => {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(normalized);
+};
+
+const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
+const SERVER_LOG_LEVEL = (() => {
+  const requested = String(process.env.DESKLY_LOG_LEVEL || 'info').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(LOG_LEVELS, requested) ? requested : 'info';
+})();
+
+const shouldLogLevel = (level) => LOG_LEVELS[level] >= LOG_LEVELS[SERVER_LOG_LEVEL];
+const serverLog = (level, event, context = {}) => {
+  if (!shouldLogLevel(level)) return;
+  const payload = {
+    at: new Date().toISOString(),
+    level,
+    event,
+    ...context
+  };
+  const json = JSON.stringify(payload);
+  if (level === 'error') console.error(json);
+  else if (level === 'warn') console.warn(json);
+  else console.log(json);
+};
+
+const buildCspHeader = () => {
+  const allowMediaPipe = isEnabled(process.env.DESKLY_CSP_ALLOW_MEDIAPIPE, false);
+  const allowEval = isEnabled(process.env.DESKLY_CSP_ALLOW_EVAL, false) || allowMediaPipe;
+  const scriptSrc = ["'self'"];
+  const connectSrc = ["'self'", 'ws:', 'wss:'];
+  const workerSrc = ["'self'", 'blob:'];
+  if (allowEval) scriptSrc.push("'unsafe-eval'", "'wasm-unsafe-eval'");
+  if (allowMediaPipe) {
+    scriptSrc.push('https://cdn.jsdelivr.net');
+    connectSrc.push('https://cdn.jsdelivr.net', 'https://storage.googleapis.com');
+    workerSrc.push('https://cdn.jsdelivr.net');
+  }
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data: blob:",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    `script-src ${scriptSrc.join(' ')}`,
+    `connect-src ${connectSrc.join(' ')}`,
+    "font-src 'self' data: https://fonts.gstatic.com",
+    `worker-src ${workerSrc.join(' ')}`
+  ].join('; ');
+};
+
+const CSP_HEADER_VALUE = buildCspHeader();
 
 const normalizeIp = (ip) => {
   if (!ip) return '';
@@ -103,6 +162,29 @@ if (typeof trustProxyValue === 'string' && trustProxyValue.trim() !== '') {
     app.set('trust proxy', trustProxyValue);
   }
 }
+app.use((req, res, next) => {
+  const forwarded = req.headers['x-request-id'];
+  const candidate = typeof forwarded === 'string' ? forwarded.trim() : Array.isArray(forwarded) ? String(forwarded[0] || '').trim() : '';
+  const requestId =
+    candidate && candidate.length <= 120 ? candidate : crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex');
+  req.requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
+  const startedAt = Date.now();
+  res.on('finish', () => {
+    const durationMs = Date.now() - startedAt;
+    if (!String(req.originalUrl || '').startsWith('/api') && res.statusCode < 400) return;
+    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    serverLog(level, 'http_request', {
+      requestId,
+      method: req.method || '',
+      path: req.originalUrl || req.url || '',
+      status: res.statusCode,
+      durationMs,
+      userId: req.userId || null
+    });
+  });
+  next();
+});
 const resolveSecureCookie = (req) => {
   const override = process.env.DESKLY_COOKIE_SECURE;
   if (typeof override === 'string' && override.trim() !== '') {
@@ -124,13 +206,7 @@ app.use((req, res, next) => {
   // Browser permission prompts still apply; this only controls whether the feature is allowed at all.
   res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-  res.setHeader(
-    'Content-Security-Policy',
-    // Allow MediaPipe Tasks (webcam gestures) runtime assets.
-    // NOTE: MediaPipe Tasks uses WebAssembly; Chrome may require `unsafe-eval` / `wasm-unsafe-eval` to instantiate it.
-    // We keep the allowance scoped to `script-src` only (other directives remain strict).
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://storage.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; worker-src 'self' blob: https://cdn.jsdelivr.net; frame-ancestors 'none'"
-  );
+  res.setHeader('Content-Security-Policy', CSP_HEADER_VALUE);
   if (resolveSecureCookie(req)) {
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
   }
@@ -1627,6 +1703,116 @@ app.post('/api/settings/npm-audit', requireAuth, rateByUser('npm_audit', 10 * 60
       });
     }
   );
+});
+
+app.get('/api/health/live', (_req, res) => {
+  res.json({
+    ok: true,
+    status: 'live',
+    uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000),
+    ts: Date.now()
+  });
+});
+
+app.get('/api/health/ready', (_req, res) => {
+  try {
+    db.prepare('SELECT 1').get();
+    const migration = listMigrationStatus(db);
+    res.json({
+      ok: true,
+      status: 'ready',
+      db: 'ok',
+      schemaVersion: migration.schemaVersion,
+      latestVersion: migration.latestVersion,
+      wsClients: Number((wss?.clients && wss.clients.size) || 0),
+      ts: Date.now()
+    });
+  } catch (error) {
+    res.status(503).json({
+      ok: false,
+      status: 'not_ready',
+      error: error?.message || 'readiness check failed',
+      ts: Date.now()
+    });
+  }
+});
+
+app.get('/api/settings/db/migrations', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  res.json(listMigrationStatus(db));
+});
+
+app.get('/api/settings/backups', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const backups = listBackups().map((entry) => ({
+    fileName: entry.fileName,
+    sizeBytes: entry.sizeBytes,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt
+  }));
+  res.json({
+    backupDir: resolveBackupDir(),
+    retention: resolveBackupRetention(),
+    backups
+  });
+});
+
+app.post('/api/settings/backups', requireAuth, rateByUser('db_backup', 60 * 1000, 6), async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  try {
+    const result = await createDatabaseBackup(db, { reason: 'api_manual' });
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'db_backup_create',
+      userId: req.userId,
+      username: req.username,
+      ...requestMeta(req),
+      details: { fileName: result.fileName, sizeBytes: result.sizeBytes, pruned: result.pruned || [] }
+    });
+    res.json({
+      ok: true,
+      backup: {
+        fileName: result.fileName,
+        sizeBytes: result.sizeBytes,
+        createdAt: result.createdAt,
+        pruned: result.pruned || []
+      }
+    });
+  } catch (error) {
+    serverLog('error', 'db_backup_failed', {
+      requestId: req.requestId || null,
+      userId: req.userId || null,
+      message: error?.message || 'backup failed'
+    });
+    res.status(500).json({ error: 'Backup failed' });
+  }
+});
+
+app.get('/api/settings/backups/:fileName', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const fileName = String(req.params.fileName || '').trim();
+  if (!fileName || fileName !== path.basename(fileName) || !fileName.endsWith('.sqlite')) {
+    res.status(400).json({ error: 'Invalid file name' });
+    return;
+  }
+  const fullPath = path.join(resolveBackupDir(), fileName);
+  if (!fs.existsSync(fullPath)) {
+    res.status(404).json({ error: 'Backup not found' });
+    return;
+  }
+  res.download(fullPath, fileName);
 });
 
 // --- Custom Import: external "real users" per client (superadmin) ---
@@ -5889,9 +6075,40 @@ wss.on('close', () => {
   clearInterval(lockCleanupTimer);
 });
 
+app.use((err, req, res, _next) => {
+  serverLog('error', 'api_unhandled_error', {
+    requestId: req?.requestId || null,
+    method: req?.method || '',
+    path: req?.originalUrl || req?.url || '',
+    message: err?.message || 'Unhandled error'
+  });
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => {
+  serverLog('error', 'process_unhandled_rejection', {
+    reason: String(reason || '')
+  });
+});
+
+process.on('uncaughtException', (error) => {
+  serverLog('error', 'process_uncaught_exception', {
+    message: error?.message || 'unknown'
+  });
+});
+
 server.listen(PORT, HOST, () => {
 });
 const hostHint = HOST === '0.0.0.0' ? 'localhost' : HOST;
+serverLog('info', 'server_started', {
+  host: hostHint,
+  port: PORT,
+  cspAllowEval: isEnabled(process.env.DESKLY_CSP_ALLOW_EVAL, false),
+  cspAllowMediaPipe: isEnabled(process.env.DESKLY_CSP_ALLOW_MEDIAPIPE, false),
+  backupDir: resolveBackupDir(),
+  backupRetention: resolveBackupRetention()
+});
 console.log(`[deskly] API listening on http://${hostHint}:${PORT}`);
 if (HOST === '0.0.0.0') {
   console.log(`[deskly] API listening on all interfaces (http://0.0.0.0:${PORT})`);

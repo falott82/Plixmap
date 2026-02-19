@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
@@ -90,18 +90,15 @@ import RackModal from './RackModal';
 import RackPortsModal from './RackPortsModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
 import BulkEditSelectionModal from './BulkEditSelectionModal';
-import SelectedObjectsModal from './SelectedObjectsModal';
 import RealUserPickerModal from './RealUserPickerModal';
 import PrintModal from './PrintModal';
-import CrossPlanSearchModal, { CrossPlanSearchResult } from './CrossPlanSearchModal';
-import InternalMapModal from './InternalMapModal';
-import EscapeRouteModal from './EscapeRouteModal';
 import AllObjectTypesModal from './AllObjectTypesModal';
 import CableModal from './CableModal';
 import LinksModal from './LinksModal';
 import LinkEditModal from './LinkEditModal';
 import RealUserDetailsModal from './RealUserDetailsModal';
-import PhotoViewerModal, { PhotoItem } from './PhotoViewerModal';
+import type { CrossPlanSearchResult } from './CrossPlanSearchModal';
+import type { PhotoItem } from './PhotoViewerModal';
 import { useClipboard } from './useClipboard';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
@@ -125,6 +122,12 @@ import { getDefaultVisiblePlanLayerIds, normalizePlanLayerSelection } from '../.
 import { getWallTypeColor } from '../../utils/wallColors';
 import { closeSocketSafely, getWsUrl } from '../../utils/ws';
 import { usePresentationWebcamHands } from './presentation/usePresentationWebcamHands';
+
+const SelectedObjectsModal = lazy(() => import('./SelectedObjectsModal'));
+const CrossPlanSearchModal = lazy(() => import('./CrossPlanSearchModal'));
+const InternalMapModal = lazy(() => import('./InternalMapModal'));
+const EscapeRouteModal = lazy(() => import('./EscapeRouteModal'));
+const PhotoViewerModal = lazy(() => import('./PhotoViewerModal'));
 
 interface Props {
   planId: string;
@@ -6936,6 +6939,61 @@ const PlanView = ({ planId }: Props) => {
 	        return;
 	      }
 
+      if (!isTyping && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'r') {
+        if (isReadOnlyRef.current) return;
+        e.preventDefault();
+        if (roomCatalogOpen) {
+          setPendingType(null);
+          setRoomDrawMode('rect');
+          setRoomsOpen(false);
+          setNewRoomMenuOpen(false);
+          setContextMenu(null);
+          setRoomCatalogOpen(false);
+          push(
+            t({
+              it: 'Disegna un rettangolo sulla mappa per creare una stanza',
+              en: 'Draw a rectangle on the map to create a room'
+            }),
+            'info'
+          );
+          return;
+        }
+        setPendingType(null);
+        setRoomDrawMode(null);
+        setCorridorDrawMode(null);
+        setRoomsOpen(false);
+        setNewRoomMenuOpen(false);
+        setContextMenu(null);
+        setRoomCatalogOpen(true);
+        push(
+          t({
+            it: 'Seleziona modalità stanza: premi R per rettangolo o P per poligono.',
+            en: 'Select room mode: press R for rectangle or P for polygon.'
+          }),
+          'info'
+        );
+        return;
+      }
+
+      if (!isTyping && !e.ctrlKey && !e.metaKey && !e.altKey && roomCatalogOpen && e.key.toLowerCase() === 'p') {
+        if (isReadOnlyRef.current) return;
+        e.preventDefault();
+        setPendingType(null);
+        setRoomDrawMode('poly');
+        setRoomsOpen(false);
+        setNewRoomMenuOpen(false);
+        setContextMenu(null);
+        setRoomCatalogOpen(false);
+        push(
+          t({
+            it: 'Clicca più punti per disegnare un poligono. Clicca sul primo punto (o premi Invio) per chiudere.',
+            en: 'Click multiple points to draw a polygon. Click the first point (or press Enter) to close.'
+          }),
+          'info'
+        );
+        return;
+      }
+
       if (!isTyping && e.key.toLowerCase() === 'w') {
         e.preventDefault();
         if (wallDrawMode) {
@@ -7600,6 +7658,7 @@ const PlanView = ({ planId }: Props) => {
     corridorDoorModal,
     corridorDoorLinkModal,
     roomDrawMode,
+    roomCatalogOpen,
     saveRevisionOpen,
     scaleMode,
     selectedCorridorId,
@@ -14500,63 +14559,65 @@ const PlanView = ({ planId }: Props) => {
             onSubmit={modalState?.mode === 'edit' ? handleUpdate : handleCreate}
           />
 
-      <SelectedObjectsModal
-        open={selectedObjectsModalOpen}
-        objects={
-          selectedObjectIds
-            .map((id) => renderPlan.objects.find((o) => o.id === id))
-            .filter(Boolean) as MapObject[]
-        }
-        links={linksInSelection}
-        getTypeLabel={getTypeLabel}
-        getTypeIcon={getTypeIcon}
-        getObjectName={getObjectNameById}
-        onPickObject={openEditFromSelectionList}
-        onPickLink={openLinkEditFromSelectionList}
-        onPreviewObject={(objectId) => {
-          if (!renderPlan) return;
-          const obj = renderPlan.objects.find((o) => o.id === objectId);
-          if (!obj) return;
-          if (obj.type !== 'photo' && obj.type !== 'image') return;
-          returnToSelectionListRef.current = true;
-          setSelectedObjectsModalOpen(false);
-          if (obj.type === 'photo') {
-            openPhotoViewer({ id: objectId, selectionIds: [objectId] });
-          } else {
-            openImageViewer({ id: objectId, selectionIds: [objectId] });
+      <Suspense fallback={null}>
+        <SelectedObjectsModal
+          open={selectedObjectsModalOpen}
+          objects={
+            selectedObjectIds
+              .map((id) => renderPlan.objects.find((o) => o.id === id))
+              .filter(Boolean) as MapObject[]
           }
-        }}
-        onRemoveFromSelection={(objectId) => {
-          const next = selectedObjectIds.filter((id) => id !== objectId);
-          setSelection(next);
-          if (selectedObjectId === objectId) {
-            setSelectedObject(next[0]);
-          }
-        }}
-        onFocusObject={(objectId) => {
-          setSelectedObjectsModalOpen(false);
-          setSelectedObject(objectId);
-          triggerHighlight(objectId);
-        }}
-        readOnly={isReadOnly}
-        onSetScaleAll={(scale) => {
-          if (isReadOnly) return;
-          if (!basePlan) return;
-          const next = Math.max(0.2, Math.min(3, Number(scale) || 1));
-          if (!selectedObjectIds.length) return;
-          markTouched();
-          useUIStore.getState().setLastObjectScale(next);
-          for (const id of selectedObjectIds) {
-            updateObject(id, { scale: next });
-          }
-          push(t({ it: 'Scala aggiornata', en: 'Scale updated' }), 'success');
-        }}
-        onRequestDeleteObject={(objectId) => {
-          if (isReadOnly) return;
-          setConfirmDelete([objectId]);
-        }}
-        onClose={() => setSelectedObjectsModalOpen(false)}
-      />
+          links={linksInSelection}
+          getTypeLabel={getTypeLabel}
+          getTypeIcon={getTypeIcon}
+          getObjectName={getObjectNameById}
+          onPickObject={openEditFromSelectionList}
+          onPickLink={openLinkEditFromSelectionList}
+          onPreviewObject={(objectId) => {
+            if (!renderPlan) return;
+            const obj = renderPlan.objects.find((o) => o.id === objectId);
+            if (!obj) return;
+            if (obj.type !== 'photo' && obj.type !== 'image') return;
+            returnToSelectionListRef.current = true;
+            setSelectedObjectsModalOpen(false);
+            if (obj.type === 'photo') {
+              openPhotoViewer({ id: objectId, selectionIds: [objectId] });
+            } else {
+              openImageViewer({ id: objectId, selectionIds: [objectId] });
+            }
+          }}
+          onRemoveFromSelection={(objectId) => {
+            const next = selectedObjectIds.filter((id) => id !== objectId);
+            setSelection(next);
+            if (selectedObjectId === objectId) {
+              setSelectedObject(next[0]);
+            }
+          }}
+          onFocusObject={(objectId) => {
+            setSelectedObjectsModalOpen(false);
+            setSelectedObject(objectId);
+            triggerHighlight(objectId);
+          }}
+          readOnly={isReadOnly}
+          onSetScaleAll={(scale) => {
+            if (isReadOnly) return;
+            if (!basePlan) return;
+            const next = Math.max(0.2, Math.min(3, Number(scale) || 1));
+            if (!selectedObjectIds.length) return;
+            markTouched();
+            useUIStore.getState().setLastObjectScale(next);
+            for (const id of selectedObjectIds) {
+              updateObject(id, { scale: next });
+            }
+            push(t({ it: 'Scala aggiornata', en: 'Scale updated' }), 'success');
+          }}
+          onRequestDeleteObject={(objectId) => {
+            if (isReadOnly) return;
+            setConfirmDelete([objectId]);
+          }}
+          onClose={() => setSelectedObjectsModalOpen(false)}
+        />
+      </Suspense>
 
       <RealUserPickerModal
         open={!!realUserPicker}
@@ -14794,7 +14855,7 @@ const PlanView = ({ planId }: Props) => {
                 <Dialog.Panel className="w-full max-w-lg modal-panel">
                   <div className="flex items-center justify-between">
                     <Dialog.Title className="modal-title">
-                      {t({ it: 'Catalogo stanze', en: 'Room catalog' })}
+                      {t({ it: 'Crea stanza', en: 'Create room' })}
                     </Dialog.Title>
                     <button
                       onClick={() => setRoomCatalogOpen(false)}
@@ -14806,8 +14867,8 @@ const PlanView = ({ planId }: Props) => {
                   </div>
                   <Dialog.Description className="mt-2 text-sm text-slate-600">
                     {t({
-                      it: 'Scegli la tipologia di stanza da creare.',
-                      en: 'Choose the room type you want to create.'
+                      it: 'Scegli la modalità di creazione stanza. Da tastiera: R per rettangolo, P per poligono.',
+                      en: 'Choose the room creation mode. Keyboard: R for rectangle, P for polygon.'
                     })}
                   </Dialog.Description>
                   <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -14820,7 +14881,9 @@ const PlanView = ({ planId }: Props) => {
                       className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                       title={t({ it: 'Rettangolo', en: 'Rectangle' })}
                     >
-                      <Square size={16} className="text-slate-500" /> {t({ it: 'Rettangolo', en: 'Rectangle' })}
+                      <Square size={16} className="text-slate-500" />
+                      {t({ it: 'Rettangolo', en: 'Rectangle' })}
+                      <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-bold text-slate-600">R</span>
                     </button>
                     <button
                       onClick={() => {
@@ -14831,7 +14894,9 @@ const PlanView = ({ planId }: Props) => {
                       className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                       title={t({ it: 'Poligono', en: 'Polygon' })}
                     >
-                      <Square size={16} className="text-slate-500" /> {t({ it: 'Poligono', en: 'Polygon' })}
+                      <Square size={16} className="text-slate-500" />
+                      {t({ it: 'Poligono', en: 'Polygon' })}
+                      <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-bold text-slate-600">P</span>
                     </button>
                   </div>
                 </Dialog.Panel>
@@ -17294,26 +17359,28 @@ const PlanView = ({ planId }: Props) => {
 	        </Dialog>
 	      </Transition>
 
-	      <PhotoViewerModal
-	        open={!!photoViewer}
-	        photos={photoViewer?.photos || []}
-        initialId={photoViewer?.initialId}
-        title={photoViewer?.title}
-        countLabel={photoViewer?.countLabel}
-        itemLabel={photoViewer?.itemLabel}
-        emptyLabel={photoViewer?.emptyLabel}
-        onFocus={focusPhotoFromGallery}
-        onClose={() => {
-          setPhotoViewer(null);
-          if (returnToBulkEditRef.current) {
-            returnToBulkEditRef.current = false;
-            window.setTimeout(() => {
-              setBulkEditSelectionOpen(true);
-            }, 0);
-          }
-          closeReturnToSelectionList();
-        }}
-      />
+      <Suspense fallback={null}>
+        <PhotoViewerModal
+          open={!!photoViewer}
+          photos={photoViewer?.photos || []}
+          initialId={photoViewer?.initialId}
+          title={photoViewer?.title}
+          countLabel={photoViewer?.countLabel}
+          itemLabel={photoViewer?.itemLabel}
+          emptyLabel={photoViewer?.emptyLabel}
+          onFocus={focusPhotoFromGallery}
+          onClose={() => {
+            setPhotoViewer(null);
+            if (returnToBulkEditRef.current) {
+              returnToBulkEditRef.current = false;
+              window.setTimeout(() => {
+                setBulkEditSelectionOpen(true);
+              }, 0);
+            }
+            closeReturnToSelectionList();
+          }}
+        />
+      </Suspense>
 
       <AllObjectTypesModal
         open={allTypesOpen}
@@ -17499,58 +17566,64 @@ const PlanView = ({ planId }: Props) => {
         }}
       />
 
-      <CrossPlanSearchModal
-        open={crossPlanSearchOpen}
-        currentPlanId={planId}
-        term={crossPlanSearchTerm}
-        results={crossPlanResults}
-        objectTypeIcons={objectTypeIcons}
-        objectTypeLabels={objectTypeLabels}
-        onClose={() => {
-          setCrossPlanSearchOpen(false);
-          setCrossPlanSearchTerm('');
-          setCrossPlanResults([]);
-        }}
-        onPick={(r) => {
-          setCrossPlanSearchOpen(false);
-          setCrossPlanSearchTerm('');
-          setCrossPlanResults([]);
-          if (r.planId !== planId) {
-            setSelectedPlan(r.planId);
-            if (r.kind === 'object') navigate(`/plan/${r.planId}?focusObject=${encodeURIComponent(r.objectId)}`);
-            else navigate(`/plan/${r.planId}?focusRoom=${encodeURIComponent(r.roomId)}`);
-            return;
-          }
-          if (r.kind === 'object') {
-            setSelectedObject(r.objectId);
-            triggerHighlight(r.objectId);
-          } else {
-            clearSelection();
-            setSelectedRoomId(r.roomId);
-            setSelectedRoomIds([r.roomId]);
-            setHighlightRoom({ roomId: r.roomId, until: Date.now() + 3200 });
-          }
-        }}
-      />
+      <Suspense fallback={null}>
+        <CrossPlanSearchModal
+          open={crossPlanSearchOpen}
+          currentPlanId={planId}
+          term={crossPlanSearchTerm}
+          results={crossPlanResults}
+          objectTypeIcons={objectTypeIcons}
+          objectTypeLabels={objectTypeLabels}
+          onClose={() => {
+            setCrossPlanSearchOpen(false);
+            setCrossPlanSearchTerm('');
+            setCrossPlanResults([]);
+          }}
+          onPick={(r) => {
+            setCrossPlanSearchOpen(false);
+            setCrossPlanSearchTerm('');
+            setCrossPlanResults([]);
+            if (r.planId !== planId) {
+              setSelectedPlan(r.planId);
+              if (r.kind === 'object') navigate(`/plan/${r.planId}?focusObject=${encodeURIComponent(r.objectId)}`);
+              else navigate(`/plan/${r.planId}?focusRoom=${encodeURIComponent(r.roomId)}`);
+              return;
+            }
+            if (r.kind === 'object') {
+              setSelectedObject(r.objectId);
+              triggerHighlight(r.objectId);
+            } else {
+              clearSelection();
+              setSelectedRoomId(r.roomId);
+              setSelectedRoomIds([r.roomId]);
+              setHighlightRoom({ roomId: r.roomId, until: Date.now() + 3200 });
+            }
+          }}
+        />
+      </Suspense>
 
-      <InternalMapModal
-        open={internalMapOpen}
-        clients={allClients}
-        objectTypeLabels={objectTypeLabels}
-        initialLocation={{ clientId: client?.id, siteId: site?.id, planId }}
-        onClose={() => setInternalMapOpen(false)}
-      />
-      <EscapeRouteModal
-        open={!!escapeRouteModal}
-        plans={siteFloorPlans}
-        emergencyContacts={safetyEmergencyContacts}
-        startPlanId={escapeRouteModal?.startPlanId || planId}
-        startPoint={escapeRouteModal?.startPoint || null}
-        sourceKind={escapeRouteModal?.sourceKind || 'map'}
-        clientName={String(client?.shortName || client?.name || '').trim()}
-        siteName={String(site?.name || '').trim()}
-        onClose={() => setEscapeRouteModal(null)}
-      />
+      <Suspense fallback={null}>
+        <InternalMapModal
+          open={internalMapOpen}
+          clients={allClients}
+          objectTypeLabels={objectTypeLabels}
+          initialLocation={{ clientId: client?.id, siteId: site?.id, planId }}
+          onClose={() => setInternalMapOpen(false)}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <EscapeRouteModal
+          open={!!escapeRouteModal}
+          plans={siteFloorPlans}
+          emergencyContacts={safetyEmergencyContacts}
+          startPlanId={escapeRouteModal?.startPlanId || planId}
+          startPoint={escapeRouteModal?.startPoint || null}
+          sourceKind={escapeRouteModal?.sourceKind || 'map'}
+          clientName={String(client?.shortName || client?.name || '').trim()}
+          siteName={String(site?.name || '').trim()}
+          onClose={() => setEscapeRouteModal(null)}
+        />
+      </Suspense>
       <EmergencyContactsModal
         open={emergencyContactsOpen}
         clientId={client?.id || null}

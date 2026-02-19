@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronRight, Download, FileSpreadsheet, Info, Upload } from 'lucide-react';
-import ExcelJS from 'exceljs';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ChevronDown, ChevronRight, Database, Download, FileSpreadsheet, Info, RefreshCw, Upload } from 'lucide-react';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
 import { useT } from '../../i18n/useT';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { createCustomField } from '../../api/customFields';
 import { saveState } from '../../api/state';
+import { createServerBackup, fetchServerBackups, getServerBackupDownloadUrl, type ServerBackupRow } from '../../api/backup';
+
+type SpreadsheetColumn = { header: string; key: string; width?: number };
+type SpreadsheetRow = Record<string, unknown>;
+type SpreadsheetSheet = { name: string; columns: SpreadsheetColumn[]; rows: SpreadsheetRow[] };
 
 const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
@@ -30,6 +34,73 @@ const fetchAsDataUrl = async (url: string) => {
   });
 };
 
+const escapeXml = (value: unknown) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+
+const sanitizeWorksheetName = (name: string) => {
+  const cleaned = String(name || '')
+    .replace(/[\\/*?:[\]]/g, '_')
+    .trim();
+  if (!cleaned) return 'Sheet';
+  return cleaned.slice(0, 31);
+};
+
+const renderSpreadsheetCell = (value: unknown, header = false) => {
+  const style = header ? ' ss:StyleID="Header"' : '';
+  if (value === null || value === undefined || value === '') return `<Cell${style}/>`;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `<Cell${style}><Data ss:Type="Number">${String(value)}</Data></Cell>`;
+  }
+  if (typeof value === 'boolean') {
+    return `<Cell${style}><Data ss:Type="Boolean">${value ? '1' : '0'}</Data></Cell>`;
+  }
+  return `<Cell${style}><Data ss:Type="String">${escapeXml(value)}</Data></Cell>`;
+};
+
+const buildSpreadsheetXml = (sheets: SpreadsheetSheet[]) => {
+  const worksheetXml = sheets
+    .map((sheet) => {
+      const columns = sheet.columns
+        .map((column) => {
+          const width = Number(column.width || 0);
+          const resolvedWidth = width > 0 ? Math.max(48, width * 6.6) : 110;
+          return `<Column ss:AutoFitWidth="0" ss:Width="${resolvedWidth.toFixed(2)}"/>`;
+        })
+        .join('');
+      const headerRow = `<Row>${sheet.columns.map((column) => renderSpreadsheetCell(column.header, true)).join('')}</Row>`;
+      const rows = sheet.rows
+        .map((row) => `<Row>${sheet.columns.map((column) => renderSpreadsheetCell(row[column.key])).join('')}</Row>`)
+        .join('');
+      return `<Worksheet ss:Name="${escapeXml(sanitizeWorksheetName(sheet.name))}"><Table>${columns}${headerRow}${rows}</Table></Worksheet>`;
+    })
+    .join('');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="Default" ss:Name="Normal">
+   <Alignment ss:Vertical="Bottom"/>
+   <Font/>
+  </Style>
+  <Style ss:ID="Header">
+   <Font ss:Bold="1"/>
+   <Interior ss:Color="#EEF2FF" ss:Pattern="Solid"/>
+  </Style>
+ </Styles>
+ ${worksheetXml}
+</Workbook>`;
+};
+
 const BackupPanel = () => {
   const t = useT();
   const push = useToastStore((s) => s.push);
@@ -37,6 +108,10 @@ const BackupPanel = () => {
   const customFields = useCustomFieldsStore((s) => s.fields);
   const [exportAssets, setExportAssets] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [serverBackupBusy, setServerBackupBusy] = useState(false);
+  const [serverBackupDir, setServerBackupDir] = useState('');
+  const [serverBackupRetention, setServerBackupRetention] = useState(0);
+  const [serverBackups, setServerBackups] = useState<ServerBackupRow[]>([]);
 
   const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
   const [expandedSites, setExpandedSites] = useState<Record<string, boolean>>({});
@@ -61,6 +136,34 @@ const BackupPanel = () => {
   }, [clients]);
 
   const selectedCount = useMemo(() => Object.values(selectedPlanIds).filter(Boolean).length, [selectedPlanIds]);
+  const formatBytes = useCallback((bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = bytes;
+    let unitIdx = 0;
+    while (size >= 1024 && unitIdx < units.length - 1) {
+      size /= 1024;
+      unitIdx += 1;
+    }
+    return `${size.toFixed(unitIdx === 0 ? 0 : 1)} ${units[unitIdx]}`;
+  }, []);
+
+  const loadServerBackups = useCallback(async () => {
+    try {
+      const data = await fetchServerBackups();
+      setServerBackupDir(data.backupDir || '');
+      setServerBackupRetention(Number(data.retention || 0) || 0);
+      setServerBackups(Array.isArray(data.backups) ? data.backups : []);
+    } catch {
+      setServerBackups([]);
+      setServerBackupDir('');
+      setServerBackupRetention(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadServerBackups();
+  }, [loadServerBackups]);
 
   const filteredClients = useMemo(() => {
     const selected = new Set(Object.entries(selectedPlanIds).filter(([, v]) => !!v).map(([id]) => id));
@@ -84,6 +187,31 @@ const BackupPanel = () => {
     }
     return next.filter((c) => (c.sites || []).length);
   }, [clients, selectedPlanIds]);
+
+  const handleCreateServerBackup = async () => {
+    if (serverBackupBusy) return;
+    setServerBackupBusy(true);
+    try {
+      const result = await createServerBackup();
+      const pruned = Array.isArray(result?.backup?.pruned) ? result.backup.pruned.length : 0;
+      push(
+        t({
+          it: pruned
+            ? `Backup creato (${result.backup.fileName}), puliti ${pruned} vecchi backup`
+            : `Backup creato (${result.backup.fileName})`,
+          en: pruned
+            ? `Backup created (${result.backup.fileName}), pruned ${pruned} old backups`
+            : `Backup created (${result.backup.fileName})`
+        }),
+        'success'
+      );
+      await loadServerBackups();
+    } catch {
+      push(t({ it: 'Errore creazione backup server', en: 'Server backup failed' }), 'danger');
+    } finally {
+      setServerBackupBusy(false);
+    }
+  };
 
   const exportJson = async () => {
     if (!selectedCount) {
@@ -154,47 +282,19 @@ const BackupPanel = () => {
     }
     setBusy(true);
     try {
-      const wb = new ExcelJS.Workbook();
-      wb.creator = 'Deskly';
-      wb.created = new Date();
+      const addSheet = (name: string, columns: SpreadsheetColumn[], rows: SpreadsheetRow[]): SpreadsheetSheet => ({
+        name,
+        columns,
+        rows
+      });
 
-      const addSheet = (name: string, columns: { header: string; key: string; width?: number }[], rows: any[]) => {
-        const ws = wb.addWorksheet(name);
-        ws.columns = columns as any;
-        ws.getRow(1).font = { bold: true };
-        ws.addRows(rows);
-      };
-
-      addSheet(
-        'ObjectTypes',
-        [
-          { header: 'id', key: 'id', width: 18 },
-          { header: 'name_it', key: 'name_it', width: 22 },
-          { header: 'name_en', key: 'name_en', width: 22 },
-          { header: 'icon', key: 'icon', width: 14 },
-          { header: 'builtin', key: 'builtin', width: 10 }
-        ],
-        objectTypes.map((o) => ({ id: o.id, name_it: o.name.it, name_en: o.name.en, icon: o.icon, builtin: !!o.builtin }))
-      );
-
-      addSheet(
-        'CustomFields',
-        [
-          { header: 'typeId', key: 'typeId', width: 18 },
-          { header: 'fieldKey', key: 'fieldKey', width: 18 },
-          { header: 'label', key: 'label', width: 26 },
-          { header: 'valueType', key: 'valueType', width: 10 }
-        ],
-        (customFields || []).map((f) => ({ typeId: f.typeId, fieldKey: f.fieldKey, label: f.label, valueType: f.valueType }))
-      );
-
-      const clientsRows: any[] = [];
-      const sitesRows: any[] = [];
-      const plansRows: any[] = [];
-      const layersRows: any[] = [];
-      const roomsRows: any[] = [];
-      const viewsRows: any[] = [];
-      const objectsRows: any[] = [];
+      const clientsRows: SpreadsheetRow[] = [];
+      const sitesRows: SpreadsheetRow[] = [];
+      const plansRows: SpreadsheetRow[] = [];
+      const layersRows: SpreadsheetRow[] = [];
+      const roomsRows: SpreadsheetRow[] = [];
+      const viewsRows: SpreadsheetRow[] = [];
+      const objectsRows: SpreadsheetRow[] = [];
 
       for (const c of filteredClients) {
         clientsRows.push({
@@ -268,7 +368,29 @@ const BackupPanel = () => {
         }
       }
 
-      addSheet(
+      const sheets: SpreadsheetSheet[] = [
+        addSheet(
+          'ObjectTypes',
+          [
+            { header: 'id', key: 'id', width: 18 },
+            { header: 'name_it', key: 'name_it', width: 22 },
+            { header: 'name_en', key: 'name_en', width: 22 },
+            { header: 'icon', key: 'icon', width: 14 },
+            { header: 'builtin', key: 'builtin', width: 10 }
+          ],
+          objectTypes.map((o) => ({ id: o.id, name_it: o.name.it, name_en: o.name.en, icon: o.icon, builtin: !!o.builtin }))
+        ),
+        addSheet(
+          'CustomFields',
+          [
+            { header: 'typeId', key: 'typeId', width: 18 },
+            { header: 'fieldKey', key: 'fieldKey', width: 18 },
+            { header: 'label', key: 'label', width: 26 },
+            { header: 'valueType', key: 'valueType', width: 10 }
+          ],
+          (customFields || []).map((f) => ({ typeId: f.typeId, fieldKey: f.fieldKey, label: f.label, valueType: f.valueType }))
+        ),
+        addSheet(
         'Clients',
         [
           { header: 'id', key: 'id', width: 22 },
@@ -283,7 +405,7 @@ const BackupPanel = () => {
           { header: 'logoUrl', key: 'logoUrl', width: 28 }
         ],
         clientsRows
-      );
+      ),
       addSheet(
         'Sites',
         [
@@ -293,7 +415,7 @@ const BackupPanel = () => {
           { header: 'coords', key: 'coords', width: 22 }
         ],
         sitesRows
-      );
+      ),
       addSheet(
         'FloorPlans',
         [
@@ -306,7 +428,7 @@ const BackupPanel = () => {
           { header: 'order', key: 'order', width: 8 }
         ],
         plansRows
-      );
+      ),
       addSheet(
         'Layers',
         [
@@ -318,7 +440,7 @@ const BackupPanel = () => {
           { header: 'order', key: 'order', width: 8 }
         ],
         layersRows
-      );
+      ),
       addSheet(
         'Rooms',
         [
@@ -333,7 +455,7 @@ const BackupPanel = () => {
           { header: 'points', key: 'points', width: 30 }
         ],
         roomsRows
-      );
+      ),
       addSheet(
         'Views',
         [
@@ -347,7 +469,7 @@ const BackupPanel = () => {
           { header: 'isDefault', key: 'isDefault', width: 10 }
         ],
         viewsRows
-      );
+      ),
       addSheet(
         'Objects',
         [
@@ -363,10 +485,11 @@ const BackupPanel = () => {
           { header: 'layerIds', key: 'layerIds', width: 22 }
         ],
         objectsRows
-      );
+      )
+      ];
 
-      const buf = await wb.xlsx.writeBuffer();
-      downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'deskly-workspace.xlsx');
+      const xml = buildSpreadsheetXml(sheets);
+      downloadBlob(new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' }), 'deskly-workspace.xls');
       push(t({ it: 'Excel esportato', en: 'Excel exported' }), 'success');
     } catch {
       push(t({ it: 'Errore export Excel', en: 'Excel export failed' }), 'danger');
@@ -460,6 +583,77 @@ const BackupPanel = () => {
             <div className="text-sm font-semibold text-ink">{t({ it: 'Backup & Import/Export', en: 'Backup & Import/Export' })}</div>
             <div className="modal-description">{infoBox}</div>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <Database size={16} /> {t({ it: 'Backup database server (SQLite)', en: 'Server database backup (SQLite)' })}
+            </div>
+            <div className="modal-description">
+              {t({
+                it: 'Backup atomico del database con retention automatica lato server.',
+                en: 'Atomic database backup with automatic retention on server side.'
+              })}
+            </div>
+            <div className="mt-2 text-xs text-slate-600">
+              {t({ it: 'Directory', en: 'Directory' })}: <span className="font-mono">{serverBackupDir || '—'}</span>
+              {' · '}
+              {t({ it: 'Retention', en: 'Retention' })}: {serverBackupRetention || 0}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void loadServerBackups()}
+              disabled={serverBackupBusy}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-50"
+              title={t({ it: 'Ricarica elenco backup', en: 'Reload backups list' })}
+            >
+              <RefreshCw size={15} /> {t({ it: 'Aggiorna', en: 'Refresh' })}
+            </button>
+            <button
+              onClick={handleCreateServerBackup}
+              disabled={serverBackupBusy}
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:opacity-50"
+              title={t({ it: 'Crea backup server', en: 'Create server backup' })}
+            >
+              <Download size={15} />
+              {serverBackupBusy ? t({ it: 'In corso…', en: 'Running…' }) : t({ it: 'Crea backup', en: 'Create backup' })}
+            </button>
+          </div>
+        </div>
+        <div className="mt-3 max-h-44 overflow-auto rounded-xl border border-slate-200">
+          {serverBackups.length ? (
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="px-3 py-2">{t({ it: 'File', en: 'File' })}</th>
+                  <th className="px-3 py-2">{t({ it: 'Dimensione', en: 'Size' })}</th>
+                  <th className="px-3 py-2">{t({ it: 'Data', en: 'Date' })}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {serverBackups.map((backup) => (
+                  <tr key={backup.fileName} className="text-slate-700">
+                    <td className="px-3 py-2">
+                      <a
+                        href={getServerBackupDownloadUrl(backup.fileName)}
+                        className="font-mono text-[11px] font-semibold text-primary hover:underline"
+                      >
+                        {backup.fileName}
+                      </a>
+                    </td>
+                    <td className="px-3 py-2">{formatBytes(backup.sizeBytes)}</td>
+                    <td className="px-3 py-2">{new Date(backup.updatedAt || backup.createdAt).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="px-3 py-3 text-xs text-slate-500">{t({ it: 'Nessun backup disponibile.', en: 'No backups available.' })}</div>
+          )}
         </div>
       </div>
 

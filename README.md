@@ -1,13 +1,26 @@
 # Deskly - Floor Plan Management
 
-Current version: 2.9.3
+Current version: 2.9.5
 
 Deskly is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
+
+## What's new in 2.9.5
+- Rooms: improved label rendering so newly created room labels stay inside room bounds and auto-wrap better without manual shrinking.
+- Rooms: refined room label panel spacing and adaptive text layout for clearer readability across narrow/small rooms.
+- Keyboard UX: pressing `R` on the map now opens the room-creation mode modal.
+- Keyboard UX in room-creation modal: press `R` to start `Rectangle` room drawing or `P` to start `Polygon` room drawing.
+- Room creation modal copy/UI refreshed with explicit keyboard hints (`R`/`P`) for faster workflow.
 
 ## What's new in 2.9.3
 - Layers: fixed `Real user` visibility so it no longer depends on generic user visibility; real users now resolve their dedicated layer mapping correctly.
 - Layers: fixed `Show all` behavior when disabling `Rooms`; rooms now disappear correctly from the map instead of staying visible.
 - Layer routing audit: normalized layer resolution now consistently handles legacy `real_user` objects created with old default layer assignments.
+- Reliability: added server-side atomic SQLite backups (`sqlite backup`) with retention policy and downloadable backup list in Settings -> Backup.
+- Reliability: added health probes (`/api/health/live`, `/api/health/ready`) and DB migration status endpoint (`/api/settings/db/migrations`).
+- Security: secrets hardening with support for `*_FILE` env vars and optional strict mode `DESKLY_REQUIRE_ENV_SECRETS=1`.
+- Security: CSP is now stricter by default; MediaPipe/eval allowances are opt-in via env flags.
+- Performance: PlanView now lazy-loads heavy routing/gallery modals; CanvasStage now uses `FastLayer` for static background and viewport culling for offscreen objects.
+- Security hardening on export stack: removed `exceljs` and migrated table export to Excel-compatible SpreadsheetML (`.xls`) to eliminate runtime dependency chain vulnerabilities (`archiver/minimatch`).
 
 ## What's new in 2.9.1
 - Added `connecting doors between rooms`: select Room A + Room B, right-click a selected room, and use `Create connecting door`; placement is allowed only on an overlapping shared side.
@@ -214,11 +227,26 @@ You are forced to change the password on first login.
 - `PORT` (default `8787`)
 - `HOST` (default `0.0.0.0`)
 - `DESKLY_DB_PATH` (default `data/deskly.sqlite`)
-- `DESKLY_AUTH_SECRET` (optional; if not provided it is stored in DB in production)
+- `DESKLY_AUTH_SECRET` (optional; recommended in production)
+- `DESKLY_AUTH_SECRET_FILE` (optional path alternative to `DESKLY_AUTH_SECRET`)
+- `DESKLY_DATA_SECRET` (optional; recommended in production)
+- `DESKLY_DATA_SECRET_FILE` (optional path alternative to `DESKLY_DATA_SECRET`)
+- `DESKLY_REQUIRE_ENV_SECRETS` (optional, `1/true` to require secrets from env/file and fail fast if missing)
+- `DESKLY_SECRET_MIN_LENGTH` (optional, default `32`)
+- `DESKLY_BACKUP_DIR` (optional, default `data/backups`)
+- `DESKLY_BACKUP_KEEP` (optional, default `20`)
+- `DESKLY_CSP_ALLOW_MEDIAPIPE` (optional, default `false`; enables jsdelivr/storage + wasm/eval allowances)
+- `DESKLY_CSP_ALLOW_EVAL` (optional, default `false`; enables `unsafe-eval`/`wasm-unsafe-eval`)
 
 ## Storage notes
 - SQLite DB and uploads live in `./data` (or `DESKLY_DB_PATH`).
 - Floor plan images, client logos, and PDFs are stored on disk and referenced by URL.
+- Database backups are stored in `DESKLY_BACKUP_DIR` (default `./data/backups`).
+
+## Operations
+- Create backup from CLI: `npm run backup:db`
+- API liveness probe: `GET /api/health/live`
+- API readiness probe: `GET /api/health/ready`
 
 ## LAN access
 - Dev: `http://<YOUR_PC_IP>:5173`

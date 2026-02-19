@@ -25,6 +25,24 @@
 - Global app boundary: `src/components/app/AppErrorBoundary.tsx`.
 - Structured logger: `src/utils/logger.ts`.
 - Browser-level listeners in `src/main.tsx` capture unhandled errors/rejections.
+- Server request tracing: `X-Request-Id` is generated/preserved on each request and logged with status/duration.
+- Runtime probes: `GET /api/health/live` and `GET /api/health/ready`.
+- Migration status probe (superadmin): `GET /api/settings/db/migrations`.
+
+## Data reliability
+- SQLite backups are generated server-side using atomic `db.backup(...)` snapshots.
+- Backup directory/retention are configurable via:
+  - `DESKLY_BACKUP_DIR`
+  - `DESKLY_BACKUP_KEEP`
+- Backup API (superadmin):
+  - `GET /api/settings/backups`
+  - `POST /api/settings/backups`
+  - `GET /api/settings/backups/:fileName`
+
+## Security hardening
+- Secret resolution supports direct env values and Docker/Kubernetes style file mounts (`*_FILE`).
+- Strict secret policy can be enabled with `DESKLY_REQUIRE_ENV_SECRETS=1`.
+- CSP defaults are strict; optional allowances for MediaPipe/eval are explicit env toggles.
 
 ## Build and quality gates
 - `npm run lint`: TypeScript typecheck.

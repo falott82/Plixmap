@@ -1,5 +1,5 @@
 import { Fragment, forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
+import { Arrow, Circle, FastLayer, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { Crosshair, Eye, Hand, MonitorPlay, Video } from 'lucide-react';
@@ -266,6 +266,7 @@ const TEXT_BOX_MIN_WIDTH = 80;
 const TEXT_BOX_MIN_HEIGHT = 32;
 const TEXT_BOX_DEFAULT_WIDTH = 160;
 const TEXT_BOX_DEFAULT_HEIGHT = 56;
+const OBJECT_CULL_MARGIN = 420;
 const PHOTO_ICON_BASE_SIZE = 34;
 const SELECTION_STROKE_SCALE = 0.6;
 const SELECTION_COLOR = '#2563eb';
@@ -338,6 +339,29 @@ const getRotatedRectBounds = (centerX: number, centerY: number, width: number, h
     maxY = Math.max(maxY, ry);
   }
   return { minX, minY, maxX, maxY };
+};
+
+const getViewportWorldBounds = (
+  dimensions: { width: number; height: number },
+  pan: { x: number; y: number },
+  zoom: number
+) => {
+  const safeZoom = Math.max(0.001, Number(zoom) || 1);
+  const minX = (0 - pan.x) / safeZoom;
+  const minY = (0 - pan.y) / safeZoom;
+  const maxX = (dimensions.width - pan.x) / safeZoom;
+  const maxY = (dimensions.height - pan.y) / safeZoom;
+  return { minX, minY, maxX, maxY };
+};
+
+const isObjectPotentiallyVisible = (
+  obj: MapObject,
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
+  margin = OBJECT_CULL_MARGIN
+) => {
+  const x = Number(obj?.x || 0);
+  const y = Number(obj?.y || 0);
+  return x >= bounds.minX - margin && x <= bounds.maxX + margin && y >= bounds.minY - margin && y <= bounds.maxY + margin;
 };
 
 const intersectRaySegment = (
@@ -1158,9 +1182,10 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
       const verticalText = verticalParts.filter(Boolean).join(' · ');
       if (!verticalText) return null;
       const fontSize = Math.max(nameFontSize, capacityFontSize);
-      const boxWidth = Math.max(16, Math.round(fontSize * 1.65) + 4);
+      const labelPad = Math.max(1, Math.min(8, Math.round(fontSize * 0.16)));
+      const boxWidth = Math.max(12, Math.round(fontSize + labelPad * 2 + 1));
       const maxLabelHeight = Math.max(24, bounds.height - padding * 2);
-      const preferredHeight = Math.round(estimateTextWidth(verticalText, fontSize) + 8);
+      const preferredHeight = Math.round(estimateTextWidth(verticalText, fontSize) + labelPad * 2 + 1);
       const boxHeight = Math.max(24, Math.min(maxLabelHeight, preferredHeight));
       const labelX =
         labelPosition === 'left'
@@ -1171,18 +1196,18 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
         bounds.y + padding,
         bounds.y + Math.max(padding, bounds.height - boxHeight - padding)
       );
-      const textWidth = Math.max(10, boxHeight - 4);
+      const textWidth = Math.max(10, boxHeight - labelPad * 2);
       return (
         <>
           <Rect
-            x={labelX - 1.5}
-            y={labelY - 1.5}
-            width={boxWidth + 3}
-            height={boxHeight + 3}
+            x={labelX}
+            y={labelY}
+            width={boxWidth}
+            height={boxHeight}
             fill="rgba(255,255,255,0.85)"
             stroke="rgba(148,163,184,0.6)"
-            strokeWidth={1}
-            cornerRadius={4}
+            strokeWidth={0.9}
+            cornerRadius={3}
             listening={false}
           />
           <Text
@@ -1206,25 +1231,12 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
       );
     }
     const maxWidth = Math.max(0, bounds.width - padding * 2);
-    if (!maxWidth || maxWidth <= 0) return null;
-    const maxExpandedWidth = Math.max(maxWidth, Math.min(280, Math.max(bounds.width * 1.9, maxWidth)));
-    const capacityWidth = capacityVisible ? estimateTextWidth(capacityText || '', capacityFontSize) + padding : 0;
-    const nameNaturalWidth = nameVisible ? estimateTextWidth(name, nameFontSize) + padding * 2 : 0;
-    const nameAvailableBase = Math.max(24, maxWidth - (capacityVisible ? capacityWidth : 0));
-    const nameWouldWrap = nameVisible && nameNaturalWidth > nameAvailableBase;
-    let useStacked = false;
-    let labelWidth = Math.min(
-      maxExpandedWidth,
-      Math.max(36, Math.max(maxWidth, capacityWidth, nameVisible ? nameNaturalWidth + (capacityVisible ? 4 : 0) : 0))
-    );
-    if (nameWouldWrap) {
-      labelWidth = Math.min(maxExpandedWidth, Math.max(labelWidth, Math.round(maxWidth * 1.35)));
-    }
-    let nameWidth = labelWidth;
-    if (nameVisible && capacityVisible) {
-      nameWidth = Math.max(0, labelWidth - capacityWidth);
-      if (nameWidth < 28) useStacked = true;
-    }
+    const maxHeight = Math.max(0, bounds.height - padding * 2);
+    if (!maxWidth || maxWidth <= 0 || !maxHeight || maxHeight <= 0) return null;
+    const maxLabelFont = Math.max(nameFontSize, capacityFontSize);
+    const innerPadX = Math.max(1, Math.min(10, Math.round(maxLabelFont * 0.18)));
+    const innerPadY = Math.max(1, Math.min(8, Math.round(maxLabelFont * 0.14)));
+    const capacityWidth = capacityVisible ? estimateTextWidth(capacityText || '', capacityFontSize) + innerPadX * 2 : 0;
     const wrapNameLines = (raw: string, maxLineWidth: number, fontSize: number) => {
       const text = String(raw || '').trim();
       if (!text) return { text: '', lineCount: 0 };
@@ -1243,23 +1255,30 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
       if (!line2) return { text: line1, lineCount: 1 };
       return { text: `${line1}\n${line2}`, lineCount: 2 };
     };
-    const wrappedName = nameVisible ? wrapNameLines(name, Math.max(24, useStacked ? labelWidth : nameWidth), nameFontSize) : { text: '', lineCount: 0 };
+    const labelWidth = maxWidth;
+    const inlineNameWidth = Math.max(24, labelWidth - (capacityVisible ? capacityWidth : 0) - innerPadX * 2);
+    const wrappedName = nameVisible ? wrapNameLines(name, inlineNameWidth, nameFontSize) : { text: '', lineCount: 0 };
+    let useStacked = false;
+    if (nameVisible && capacityVisible) {
+      const inlineNameNaturalWidth = estimateTextWidth(name, nameFontSize) + innerPadX * 2;
+      useStacked = wrappedName.lineCount > 1 || inlineNameNaturalWidth + capacityWidth > labelWidth;
+    }
     if (wrappedName.lineCount > 1) useStacked = true;
     const wrappedNameForStacked =
-      nameVisible && useStacked ? wrapNameLines(name, Math.max(24, labelWidth), nameFontSize) : wrappedName;
+      nameVisible && useStacked ? wrapNameLines(name, Math.max(24, labelWidth - innerPadX * 2), nameFontSize) : wrappedName;
     const finalNameText = useStacked ? wrappedNameForStacked.text : wrappedName.text;
     const finalNameLineCount = useStacked ? wrappedNameForStacked.lineCount : wrappedName.lineCount;
-    const lineGap = 2;
+    const lineGap = Math.max(1, Math.round(maxLabelFont * 0.08));
     const nameBlockHeight = nameVisible ? Math.max(nameFontSize, Math.round(nameFontSize * 1.05 * Math.max(1, finalNameLineCount))) : 0;
-    const labelHeight = useStacked
-      ? nameBlockHeight + (capacityVisible ? capacityFontSize + lineGap : 0) + 4
-      : Math.max(nameBlockHeight || nameFontSize, capacityFontSize) + 4;
+    const naturalHeight = useStacked
+      ? nameBlockHeight + (capacityVisible ? capacityFontSize + lineGap : 0) + innerPadY * 2
+      : Math.max(nameBlockHeight || nameFontSize, capacityFontSize) + innerPadY * 2;
+    const labelHeight = Math.max(12, Math.min(maxHeight, naturalHeight));
     if (!labelWidth || labelWidth <= 0) return null;
     const verticalMin = bounds.y + padding;
     const verticalMax = bounds.y + Math.max(padding, bounds.height - labelHeight - padding);
     const centeredY = clamp(bounds.y + (bounds.height - labelHeight) / 2, verticalMin, verticalMax);
-    const centeredX = bounds.x + (bounds.width - labelWidth) / 2;
-    const labelX = centeredX;
+    const labelX = bounds.x + (bounds.width - labelWidth) / 2;
     const labelY =
       labelPosition === 'bottom'
         ? bounds.y + Math.max(padding, bounds.height - labelHeight - padding)
@@ -1267,39 +1286,41 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
           ? bounds.y + padding
           : centeredY;
     const capacityAlign = nameVisible ? 'right' : 'center';
+    const textInnerWidth = Math.max(10, labelWidth - innerPadX * 2);
     return (
       <>
         <Rect
-          x={labelX - 1.5}
-          y={labelY - 1.5}
-          width={labelWidth + 3}
+          x={labelX}
+          y={labelY}
+          width={labelWidth}
           height={labelHeight}
           fill="rgba(255,255,255,0.85)"
           stroke="rgba(148,163,184,0.6)"
-          strokeWidth={1}
-          cornerRadius={4}
+          strokeWidth={0.9}
+          cornerRadius={3}
           listening={false}
         />
         {useStacked ? (
           <>
             {nameVisible ? (
               <Text
-                x={labelX}
-                y={labelY}
-                width={labelWidth}
+                x={labelX + innerPadX}
+                y={labelY + innerPadY}
+                width={textInnerWidth}
                 text={finalNameText}
                 fontSize={nameFontSize}
                 fontStyle="bold"
                 fill="#0f172a"
                 listening={false}
                 lineHeight={1.05}
+                align="center"
               />
             ) : null}
             {capacityVisible ? (
               <Text
-                x={labelX}
-                y={labelY + nameBlockHeight + lineGap}
-                width={labelWidth}
+                x={labelX + innerPadX}
+                y={labelY + innerPadY + nameBlockHeight + lineGap}
+                width={textInnerWidth}
                 align="right"
                 text={capacityText || ''}
                 fontSize={capacityFontSize}
@@ -1313,9 +1334,9 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
           <>
             {nameVisible ? (
               <Text
-                x={labelX}
-                y={labelY}
-                width={Math.max(0, labelWidth - (capacityVisible ? capacityWidth : 0))}
+                x={labelX + innerPadX}
+                y={labelY + innerPadY}
+                width={Math.max(0, labelWidth - innerPadX * 2 - (capacityVisible ? capacityWidth : 0))}
                 text={finalNameText}
                 fontSize={nameFontSize}
                 fontStyle="bold"
@@ -1326,9 +1347,9 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
             ) : null}
             {capacityVisible ? (
               <Text
-                x={labelX}
-                y={labelY}
-                width={labelWidth}
+                x={labelX + innerPadX}
+                y={labelY + innerPadY}
+                width={textInnerWidth}
                 align={capacityAlign}
                 text={capacityText || ''}
                 fontSize={capacityFontSize}
@@ -2859,6 +2880,11 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
     }
     return [walls, quotes, others];
   }, [objects, wallTypeIdSet]);
+  const viewportWorldBounds = useMemo(() => getViewportWorldBounds(dimensions, pan, zoom), [dimensions, pan, zoom]);
+  const visibleRegularObjects = useMemo(
+    () => regularObjects.filter((obj) => isObjectPotentiallyVisible(obj, viewportWorldBounds)),
+    [regularObjects, viewportWorldBounds]
+  );
   const wallSegments = useMemo(() => {
     if (!wallObjects.length) return [] as Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }>;
     const segments: Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }> = [];
@@ -3464,7 +3490,13 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
           setDoorHoverCard(null);
         }}
       >
-        {/* Background layer (kept separate so dragging objects doesn't re-draw the full image every frame) */}
+        {/* Static background layer (FastLayer avoids hit graph work and improves pan/drag fluidity). */}
+        <FastLayer perfectDrawEnabled={false} listening={false}>
+          {backPlate}
+          {gridLines}
+        </FastLayer>
+
+        {/* Background interaction layer */}
         <Layer
           perfectDrawEnabled={false}
           onContextMenu={(e) => {
@@ -3502,8 +3534,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
             }
           }}
         >
-          {backPlate}
-          {gridLines}
+          <Rect name="bg-rect" x={0} y={0} width={baseWidth} height={baseHeight} fill="rgba(15,23,42,0.001)" />
         </Layer>
 
         {/* Corridors layer */}
@@ -5191,7 +5222,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
 
         {/* Objects layer */}
         <Layer perfectDrawEnabled={false} ref={objectsLayerRef} listening={!toolMode && !corridorDoorDraftActive}>
-          {regularObjects.map((obj) => {
+          {visibleRegularObjects.map((obj) => {
             const isSelected = selectedIds ? selectedIds.includes(obj.id) : selectedId === obj.id;
             const highlightActive = !!(highlightId && highlightUntil && highlightId === obj.id && highlightUntil > highlightNow);
             const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(highlightNow / 80) : 0;

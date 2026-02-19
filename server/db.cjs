@@ -6,6 +6,45 @@ const crypto = require('crypto');
 const dbPath = process.env.DESKLY_DB_PATH || path.join(process.cwd(), 'data', 'deskly.sqlite');
 
 const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
+const DEFAULT_MIN_SECRET_LENGTH = 32;
+
+const isEnabled = (value, fallback = false) => {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(normalized);
+};
+
+const requireEnvSecrets = () => isEnabled(process.env.DESKLY_REQUIRE_ENV_SECRETS, false);
+const minSecretLength = () => {
+  const raw = Number(process.env.DESKLY_SECRET_MIN_LENGTH || DEFAULT_MIN_SECRET_LENGTH);
+  return Number.isFinite(raw) && raw >= 16 ? Math.round(raw) : DEFAULT_MIN_SECRET_LENGTH;
+};
+
+const readSecretInput = (baseName) => {
+  const fileVar = process.env[`${baseName}_FILE`];
+  if (typeof fileVar === 'string' && fileVar.trim()) {
+    const filePath = fileVar.trim();
+    try {
+      return fs.readFileSync(filePath, 'utf8').trim();
+    } catch (error) {
+      throw new Error(`${baseName}_FILE unreadable (${filePath}): ${error?.message || 'read failed'}`);
+    }
+  }
+  const direct = process.env[baseName];
+  if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  return '';
+};
+
+const ensureSecretStrength = (value, name) => {
+  const secret = String(value || '').trim();
+  const min = minSecretLength();
+  if (!secret) return '';
+  if (secret.length < min) {
+    throw new Error(`${name} must be at least ${min} characters`);
+  }
+  return secret;
+};
 
 const getSchemaVersion = (db) => {
   try {
@@ -226,11 +265,61 @@ const migrations = [
   }
 ];
 
-const runMigrations = (db) => {
-  let current = getSchemaVersion(db);
+const ensureMigrationTable = (db) => {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      appliedAt INTEGER NOT NULL
+    );
+  `);
+};
+
+const getAppliedMigrations = (db) => {
+  ensureMigrationTable(db);
+  const rows = db.prepare('SELECT version, name, appliedAt FROM schema_migrations ORDER BY version ASC').all();
+  return rows.map((row) => ({
+    version: Number(row.version) || 0,
+    name: String(row.name || ''),
+    appliedAt: Number(row.appliedAt) || 0
+  }));
+};
+
+const validateMigrations = () => {
+  let previousVersion = 0;
+  const seen = new Set();
   for (const migration of migrations) {
-    if (migration.version <= current) continue;
-    db.transaction(() => migration.up(db))();
+    const version = Number(migration?.version || 0);
+    if (!Number.isInteger(version) || version <= 0) {
+      throw new Error(`Invalid migration version: ${String(migration?.version || '')}`);
+    }
+    if (seen.has(version)) {
+      throw new Error(`Duplicate migration version: ${String(version)}`);
+    }
+    if (version <= previousVersion) {
+      throw new Error(`Migrations are not strictly increasing at version ${String(version)}`);
+    }
+    seen.add(version);
+    previousVersion = version;
+  }
+};
+
+const runMigrations = (db) => {
+  ensureMigrationTable(db);
+  validateMigrations();
+  let current = getSchemaVersion(db);
+  const appliedVersions = new Set(getAppliedMigrations(db).map((entry) => entry.version));
+  for (const migration of migrations) {
+    const shouldRun = migration.version > current || !appliedVersions.has(migration.version);
+    if (!shouldRun) continue;
+    db.transaction(() => {
+      migration.up(db);
+      db.prepare(
+        `INSERT INTO schema_migrations (version, name, appliedAt)
+         VALUES (?, ?, ?)
+         ON CONFLICT(version) DO UPDATE SET name=excluded.name, appliedAt=excluded.appliedAt`
+      ).run(migration.version, String(migration.name || `migration_${migration.version}`), Date.now());
+    })();
     setSchemaVersion(db, migration.version);
     current = migration.version;
   }
@@ -250,6 +339,11 @@ const openDb = () => {
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      appliedAt INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -443,29 +537,61 @@ const openDb = () => {
 };
 
 const getOrCreateAuthSecret = (db) => {
-  const envSecret = process.env.DESKLY_AUTH_SECRET;
-  if (envSecret && typeof envSecret === 'string' && envSecret.trim().length >= 32) return envSecret.trim();
+  const strictEnv = requireEnvSecrets();
+  const secretName = 'DESKLY_AUTH_SECRET';
+  const envSecret = ensureSecretStrength(readSecretInput(secretName), secretName);
+  if (envSecret) return envSecret;
+  if (strictEnv) throw new Error(`${secretName} is required when DESKLY_REQUIRE_ENV_SECRETS=1`);
   // In development, rotate the signing secret on each server start so a restart always forces re-login.
   // In production (NODE_ENV=production, e.g. Dockerfile), keep a stable secret in DB for persistent sessions.
   if (process.env.NODE_ENV !== 'production') {
     return crypto.randomBytes(32).toString('base64');
   }
   const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('authSecret');
-  if (row?.value) return row.value;
+  const persisted = String(row?.value || '').trim();
+  if (persisted.length >= minSecretLength()) return persisted;
   const secret = crypto.randomBytes(32).toString('base64');
-  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('authSecret', secret);
+  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(
+    'authSecret',
+    secret
+  );
   return secret;
 };
 
 // Stable secret for encrypting stored credentials (e.g. Custom Import password) that must survive restarts.
 const getOrCreateDataSecret = (db) => {
-  const envSecret = process.env.DESKLY_DATA_SECRET;
-  if (envSecret && typeof envSecret === 'string' && envSecret.trim().length >= 32) return envSecret.trim();
+  const strictEnv = requireEnvSecrets();
+  const secretName = 'DESKLY_DATA_SECRET';
+  const envSecret = ensureSecretStrength(readSecretInput(secretName), secretName);
+  if (envSecret) return envSecret;
+  if (strictEnv) throw new Error(`${secretName} is required when DESKLY_REQUIRE_ENV_SECRETS=1`);
   const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('dataSecret');
-  if (row?.value) return row.value;
+  const persisted = String(row?.value || '').trim();
+  if (persisted.length >= minSecretLength()) return persisted;
   const secret = crypto.randomBytes(32).toString('base64');
-  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('dataSecret', secret);
+  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(
+    'dataSecret',
+    secret
+  );
   return secret;
 };
 
-module.exports = { openDb, dbPath, getOrCreateAuthSecret, getOrCreateDataSecret };
+const listMigrationStatus = (db) => {
+  const applied = getAppliedMigrations(db);
+  const latestVersion = migrations.length ? migrations[migrations.length - 1].version : 0;
+  return {
+    schemaVersion: getSchemaVersion(db),
+    latestVersion,
+    upToDate: getSchemaVersion(db) >= latestVersion,
+    applied
+  };
+};
+
+module.exports = {
+  openDb,
+  dbPath,
+  migrations,
+  listMigrationStatus,
+  getOrCreateAuthSecret,
+  getOrCreateDataSecret
+};
