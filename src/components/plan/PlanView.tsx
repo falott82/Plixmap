@@ -5678,14 +5678,10 @@ const PlanView = ({ planId }: Props) => {
     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 
   const isPointOnSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
-    const tolerance = 0.25;
-    if (Math.abs(cross(a, b, p)) > tolerance) return false;
-    return (
-      p.x >= Math.min(a.x, b.x) - tolerance &&
-      p.x <= Math.max(a.x, b.x) + tolerance &&
-      p.y >= Math.min(a.y, b.y) - tolerance &&
-      p.y <= Math.max(a.y, b.y) + tolerance
-    );
+    // Use geometric distance from segment so tolerance is stable regardless of segment length.
+    const tolerancePx = 0.6;
+    const projected = projectPointToSegment(a, b, p);
+    return projected.distSq <= tolerancePx * tolerancePx;
   };
 
   const isPointOnPolygonBoundary = (point: { x: number; y: number }, polygon: { x: number; y: number }[]) => {
