@@ -35,4 +35,34 @@ export const runNpmAudit = async (): Promise<NpmAuditResult> => {
   }
   return res.json();
 };
+
+export interface ReadinessStatus {
+  ok: boolean;
+  status: string;
+  db?: string;
+  schemaVersion?: number;
+  latestVersion?: number;
+  wsClients?: number;
+  ts?: number;
+  error?: string;
+}
+
+export interface MigrationStatus {
+  schemaVersion: number;
+  latestVersion: number;
+  upToDate: boolean;
+  applied: Array<{ version: number; name: string; appliedAt: number }>;
+}
+
+export const fetchReadiness = async (): Promise<ReadinessStatus> => {
+  const res = await apiFetch('/api/health/ready', { credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to fetch readiness (${res.status})`);
+  return res.json();
+};
+
+export const fetchMigrationStatus = async (): Promise<MigrationStatus> => {
+  const res = await apiFetch('/api/settings/db/migrations', { credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to fetch migrations (${res.status})`);
+  return res.json();
+};
 import { apiFetch } from './client';

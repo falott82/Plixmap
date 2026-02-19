@@ -3,7 +3,15 @@ import pkg from '../../../package.json';
 import { Download, ShieldCheck } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { useUIStore } from '../../store/useUIStore';
-import { fetchNpmAuditStatus, runNpmAudit, NpmAuditResult } from '../../api/nerd';
+import {
+  fetchMigrationStatus,
+  fetchNpmAuditStatus,
+  fetchReadiness,
+  runNpmAudit,
+  MigrationStatus,
+  NpmAuditResult,
+  ReadinessStatus
+} from '../../api/nerd';
 import { useToastStore } from '../../store/useToast';
 
 const purposes: Record<string, string> = {
@@ -28,7 +36,6 @@ const purposes: Record<string, string> = {
   speakeasy: 'TOTP MFA',
   qrcode: 'QR code for MFA',
   'vite-plugin-pwa': 'PWA (service worker + install)',
-  exceljs: 'Excel export',
   lexical: 'Rich text editor engine (Client notes)',
   '@lexical/react': 'Lexical React bindings (Client notes)',
   '@lexical/rich-text': 'Rich text nodes for Lexical (Client notes)',
@@ -55,6 +62,9 @@ const NerdAreaPanel = () => {
   const [auditLastCheckAt, setAuditLastCheckAt] = useState<number | null>(null);
   const [auditLastCheckBy, setAuditLastCheckBy] = useState<string | null>(null);
   const [auditDetailsOpen, setAuditDetailsOpen] = useState(false);
+  const [readiness, setReadiness] = useState<ReadinessStatus | null>(null);
+  const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
+  const [opsBusy, setOpsBusy] = useState(false);
   const { push } = useToastStore();
   const { perfOverlayEnabled, togglePerfOverlay } = useUIStore(
     (s) => ({ perfOverlayEnabled: (s as any).perfOverlayEnabled, togglePerfOverlay: (s as any).togglePerfOverlay })
@@ -91,6 +101,25 @@ const NerdAreaPanel = () => {
         setAuditLastCheckBy(res.lastCheckBy || null);
       })
       .catch(() => {});
+  }, []);
+
+  const loadOps = async () => {
+    if (opsBusy) return;
+    setOpsBusy(true);
+    try {
+      const [ready, migration] = await Promise.all([fetchReadiness(), fetchMigrationStatus()]);
+      setReadiness(ready);
+      setMigrationStatus(migration);
+    } catch {
+      setReadiness(null);
+      setMigrationStatus(null);
+    } finally {
+      setOpsBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadOps();
   }, []);
 
   const handleRunAudit = async () => {
@@ -173,6 +202,39 @@ const NerdAreaPanel = () => {
               />
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-ink">{t({ it: 'Stato runtime', en: 'Runtime status' })}</div>
+            <div className="mt-1 text-xs text-slate-600">
+              {t({
+                it: 'Readiness API, client WebSocket connessi e stato migrazioni database.',
+                en: 'API readiness, connected WebSocket clients and database migration status.'
+              })}
+            </div>
+          </div>
+          <button
+            onClick={() => void loadOps()}
+            disabled={opsBusy}
+            className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {opsBusy ? t({ it: 'Aggiornamento…', en: 'Refreshing…' }) : t({ it: 'Aggiorna stato', en: 'Refresh status' })}
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold">
+          <span className={`rounded-full px-2 py-1 ${readiness?.ok ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+            {t({ it: 'Readiness', en: 'Readiness' })}: {readiness?.ok ? 'OK' : 'N/A'}
+          </span>
+          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">
+            WS: {Number(readiness?.wsClients || 0)}
+          </span>
+          <span className={`rounded-full px-2 py-1 ${migrationStatus?.upToDate ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+            {t({ it: 'Migrazioni', en: 'Migrations' })}:{' '}
+            {migrationStatus ? `${migrationStatus.schemaVersion}/${migrationStatus.latestVersion}` : 'N/A'}
+          </span>
         </div>
       </div>
 

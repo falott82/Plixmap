@@ -1,7 +1,7 @@
 {
   "name": "deskly",
   "description": "Collaborative workspace planning with floor plans, desks, racks, and network links.",
-  "version": "2.9.3",
+  "version": "2.9.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "test:e2e:smoke": "node scripts/e2e-smoke.cjs",
     "test:e2e:playwright": "npx playwright test",
     "lint:i18n": "node scripts/lint-i18n.cjs",
+    "backup:db": "node scripts/db-backup.cjs",
     "release:check": "node scripts/check-release-version.cjs",
     "quality:check": "npm run lint && npm run test && npm run build && npm run release:check",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
@@ -32,7 +33,6 @@
     "@lexical/utils": "^0.39.0",
     "better-sqlite3": "^12.5.0",
     "classnames": "^2.5.1",
-    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.0.0",
@@ -49,7 +49,6 @@
     "sonner": "^1.7.0",
     "speakeasy": "^2.0.0",
     "use-image": "^1.1.1",
-    "vite-plugin-pwa": "^1.2.0",
     "ws": "^8.18.3",
     "zustand": "^4.4.7"
   },
@@ -67,7 +66,8 @@
     "postcss": "^8.4.32",
     "tailwindcss": "^3.3.6",
     "typescript": "^5.3.3",
-    "vite": "^7.3.0"
+    "vite": "^7.3.0",
+    "vite-plugin-pwa": "^1.2.0"
   },
   "overrides": {
     "qs": "^6.14.1",

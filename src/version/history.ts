@@ -8,6 +8,33 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '2.9.5',
+    date: '2026-02-19',
+    type: 'minor',
+    notes: [
+      n(
+        'Stanze: ottimizzato il rendering etichette per mantenere nome/capienza sempre dentro i bounds della stanza con wrapping più robusto',
+        'Rooms: optimized label rendering to keep name/capacity inside room bounds with more robust wrapping'
+      ),
+      n(
+        'Stanze: migliorata la leggibilità etichetta con spaziature interne adattive e layout più stabile su stanze strette o piccole',
+        'Rooms: improved label readability with adaptive inner spacing and a more stable layout on narrow/small rooms'
+      ),
+      n(
+        'Shortcut mappa: premendo `R` si apre ora una modale dedicata alla scelta modalità di creazione stanza',
+        'Map shortcut: pressing `R` now opens a dedicated modal to choose room creation mode'
+      ),
+      n(
+        'Modale creazione stanza: shortcut dirette `R` (rettangolo) e `P` (poligono) per avviare subito il disegno',
+        'Room creation modal: direct shortcuts `R` (rectangle) and `P` (polygon) to start drawing immediately'
+      ),
+      n(
+        'UX modale stanza: testi e pulsanti aggiornati con hint tastiera espliciti per un flusso più rapido',
+        'Room modal UX: refreshed copy/buttons with explicit keyboard hints for a faster workflow'
+      )
+    ]
+  },
+  {
     version: '2.9.3',
     date: '2026-02-18',
     type: 'fix',
@@ -23,6 +50,38 @@ export const releaseHistory: ReleaseNote[] = [
       n(
         'Audit logica layer: normalizzazione estesa per oggetti real_user legacy con assegnazione layer storica su "users"',
         'Layer-logic audit: normalization extended for legacy real_user objects with historical "users" layer assignment'
+      ),
+      n(
+        'Affidabilità: backup SQLite atomico lato server con retention configurabile, elenco backup e download diretto da Impostazioni > Backup',
+        'Reliability: added atomic server-side SQLite backup with configurable retention, backup listing and direct download in Settings > Backup'
+      ),
+      n(
+        'Migrazioni DB: introdotta tabella `schema_migrations` con ledger applicazioni e validazione sequenza versioni',
+        'DB migrations: introduced `schema_migrations` ledger with applied-migration tracking and strict version sequence validation'
+      ),
+      n(
+        'Sicurezza: gestione secret hardenizzata con supporto `*_FILE`, lunghezza minima configurabile e modalità strict (`DESKLY_REQUIRE_ENV_SECRETS`)',
+        'Security: hardened secret handling with `*_FILE` support, configurable minimum length, and strict mode (`DESKLY_REQUIRE_ENV_SECRETS`)'
+      ),
+      n(
+        'Observability: aggiunti request-id, log strutturato richieste API, endpoint health (`live/ready`) e stato migrazioni DB via API',
+        'Observability: added request-id, structured API request logging, health endpoints (`live/ready`) and DB migration status API'
+      ),
+      n(
+        'Performance frontend: lazy-load dei modali pesanti di ricerca/percorso/foto in PlanView per ridurre il carico iniziale',
+        'Frontend performance: lazy-load for heavy search/route/photo modals in PlanView to reduce initial load'
+      ),
+      n(
+        'Performance canvas: background spostato su FastLayer statico e culling viewport per oggetti fuori schermo',
+        'Canvas performance: moved background to static FastLayer and added viewport culling for off-screen objects'
+      ),
+      n(
+        'CSP: policy più restrittiva di default, con eccezioni MediaPipe/eval abilitate solo tramite variabili ambiente dedicate',
+        'CSP: stricter policy by default, with MediaPipe/eval allowances enabled only through dedicated environment variables'
+      ),
+      n(
+        'Export tabellare: rimosso ExcelJS (catena archiver/minimatch) e migrato l’export “Excel” a SpreadsheetML multi-foglio (.xls) senza dipendenze vulnerabili runtime',
+        'Tabular export: removed ExcelJS (archiver/minimatch chain) and migrated “Excel” export to multi-sheet SpreadsheetML (.xls) with no vulnerable runtime dependencies'
       )
     ]
   },
