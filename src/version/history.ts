@@ -8,6 +8,37 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.1.0',
+    date: '2026-02-20',
+    type: 'minor',
+    notes: [
+      n(
+        'Dashboard capienza: nuova vista statistica per cliente/sede/piano con capienza totale, saturazione, densità utenti e stanze oltre soglia',
+        'Capacity dashboard: new analytics view by client/site/floor with total capacity, occupancy, user density, and over-capacity rooms'
+      ),
+      n(
+        'Trend storico capienza: grafico temporale per sede alimentato da snapshot server-side in app_settings',
+        'Capacity history trend: time chart per site backed by server-side snapshots in app_settings'
+      ),
+      n(
+        'Nuove API capienza: GET /api/capacity/history (filtrato per permessi) e POST /api/capacity/snapshot (solo superadmin)',
+        'New capacity APIs: GET /api/capacity/history (permission-filtered) and POST /api/capacity/snapshot (superadmin-only)'
+      ),
+      n(
+        'Trova sistemazione: flusso guidato per cliente/sede/reparto con fallback progressivo su uffici vuoti e uffici di altri reparti',
+        'Find placement: guided client/site/department flow with progressive fallback to empty offices and other-department offices'
+      ),
+      n(
+        'Stanze: aggiunta associazione multi-reparto (`departmentTags`) con suggerimenti dai reparti importati degli utenti reali',
+        'Rooms: added multi-department mapping (`departmentTags`) with suggestions from imported real-user departments'
+      ),
+      n(
+        'Documentazione tecnica: nuovo documento docs/CAPACITY_WORKFLOW.md con modello dati, algoritmi e endpoint',
+        'Technical documentation: added docs/CAPACITY_WORKFLOW.md covering data model, algorithms, and endpoints'
+      )
+    ]
+  },
+  {
     version: '3.0.4',
     date: '2026-02-20',
     type: 'fix',

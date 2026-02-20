@@ -286,6 +286,7 @@ export interface Room {
   id: string;
   name: string;
   nameEn?: string;
+  departmentTags?: string[];
   color?: string;
   capacity?: number;
   labelScale?: number;

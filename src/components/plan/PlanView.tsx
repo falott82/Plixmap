@@ -26,8 +26,9 @@ import {
 		Save,
 		Cog,
 	  EyeOff,
-	  CornerDownRight,
-	  Link2,
+  CornerDownRight,
+  Link2,
+  BarChart3,
   User,
   LocateFixed,
   Footprints,
@@ -86,6 +87,7 @@ import SaveRevisionModal from './SaveRevisionModal';
 import { DESK_TYPE_IDS, isDeskType } from './deskTypes';
 import RoomModal from './RoomModal';
 import RoomShapePreview from './RoomShapePreview';
+import CapacityDashboardModal from './CapacityDashboardModal';
 import RackModal from './RackModal';
 import RackPortsModal from './RackPortsModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
@@ -104,7 +106,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
 import { shallow } from 'zustand/shallow';
 import { postAuditEvent } from '../../api/audit';
-import { hasExternalUsers } from '../../api/customImport';
+import { hasExternalUsers, listExternalUsers } from '../../api/customImport';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
 import { nanoid } from 'nanoid';
@@ -836,6 +838,8 @@ const PlanView = ({ planId }: Props) => {
   const [objectListQuery, setObjectListQuery] = useState('');
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [roomAllocationOpen, setRoomAllocationOpen] = useState(false);
+  const [capacityDashboardOpen, setCapacityDashboardOpen] = useState(false);
+  const [roomDepartmentOptions, setRoomDepartmentOptions] = useState<string[]>([]);
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement | null>(null);
   const presenceRef = useRef<HTMLDivElement | null>(null);
@@ -1166,6 +1170,65 @@ const PlanView = ({ planId }: Props) => {
     useCallback((s) => s.findSiteByPlan(planId), [planId])
   );
   const siteFloorPlans = useMemo(() => ((site?.floorPlans || []) as FloorPlan[]).filter(Boolean), [site?.floorPlans]);
+  useEffect(() => {
+    let cancelled = false;
+    const clientId = String(client?.id || '').trim();
+    if (!clientId) {
+      setRoomDepartmentOptions([]);
+      return;
+    }
+    const fallbackSet = new Map<string, string>();
+    const clientEntry = (allClients || []).find((entry) => entry.id === clientId);
+    for (const siteEntry of clientEntry?.sites || []) {
+      for (const floor of siteEntry.floorPlans || []) {
+        for (const room of floor.rooms || []) {
+          for (const tag of (room as any)?.departmentTags || []) {
+            const normalized = String(tag || '').trim();
+            if (!normalized) continue;
+            const folded = normalized.toLocaleLowerCase();
+            if (!fallbackSet.has(folded)) fallbackSet.set(folded, normalized);
+          }
+        }
+        for (const obj of floor.objects || []) {
+          if (String(obj.type) !== 'real_user') continue;
+          for (const dept of [obj.externalDept1, obj.externalDept2, obj.externalDept3]) {
+            const normalized = String(dept || '').trim();
+            if (!normalized) continue;
+            const folded = normalized.toLocaleLowerCase();
+            if (!fallbackSet.has(folded)) fallbackSet.set(folded, normalized);
+          }
+        }
+      }
+    }
+    const applyFallback = () => {
+      const fallback = Array.from(fallbackSet.values()).sort((a, b) => a.localeCompare(b));
+      if (!cancelled) setRoomDepartmentOptions(fallback);
+    };
+    void (async () => {
+      try {
+        const res = await listExternalUsers({ clientId, includeHidden: true, includeMissing: true, limit: 5000 });
+        const fromImport = new Map<string, string>();
+        for (const row of res.rows || []) {
+          for (const dept of [row.dept1, row.dept2, row.dept3]) {
+            const normalized = String(dept || '').trim();
+            if (!normalized) continue;
+            const folded = normalized.toLocaleLowerCase();
+            if (!fromImport.has(folded)) fromImport.set(folded, normalized);
+          }
+        }
+        for (const [key, value] of fallbackSet.entries()) {
+          if (!fromImport.has(key)) fromImport.set(key, value);
+        }
+        if (cancelled) return;
+        setRoomDepartmentOptions(Array.from(fromImport.values()).sort((a, b) => a.localeCompare(b)));
+      } catch {
+        applyFallback();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [allClients, client?.id]);
   const { user, permissions } = useAuthStore();
   const logout = useAuthStore((s) => s.logout);
 
@@ -10802,6 +10865,14 @@ const PlanView = ({ planId }: Props) => {
 	                    >
                       <Users size={16} /> {t({ it: 'Trova capienza', en: 'Find capacity' })}
                     </button>
+                    <button
+                      onClick={() => setCapacityDashboardOpen(true)}
+                      disabled={!rooms.length}
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-60"
+                      title={t({ it: 'Stato capienza', en: 'Capacity dashboard' })}
+                    >
+                      <BarChart3 size={16} /> {t({ it: 'Stato capienza', en: 'Capacity dashboard' })}
+                    </button>
                   </div>
                   <div className="max-h-[28rem] space-y-3 overflow-auto px-3 pb-3">
                     {rooms.length ? (
@@ -15013,6 +15084,12 @@ const PlanView = ({ planId }: Props) => {
         open={!!roomModal}
         initialName={roomModal?.mode === 'edit' ? roomModal.initialName : ''}
         initialNameEn={roomModal?.mode === 'edit' ? roomModal.initialNameEn : ''}
+        initialDepartmentTags={
+          roomModal?.mode === 'edit'
+            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.departmentTags
+            : undefined
+        }
+        departmentOptions={roomDepartmentOptions}
         initialColor={
           roomModal?.mode === 'edit'
             ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.color
@@ -15069,17 +15146,17 @@ const PlanView = ({ planId }: Props) => {
           skipRoomWallTypesRef.current = false;
           setRoomModal(null);
         }}
-        onSubmit={({ name, nameEn, color, capacity, labelScale, showName, surfaceSqm, notes, logical }) => {
+        onSubmit={({ name, nameEn, departmentTags, color, capacity, labelScale, showName, surfaceSqm, notes, logical }) => {
           if (!roomModal || isReadOnly) return false;
           if (roomModal.mode === 'edit') {
             const existing = (basePlan.rooms || []).find((r) => r.id === roomModal.roomId);
-            const nextRoom = { ...(existing || {}), name, nameEn, color, capacity, labelScale, showName, surfaceSqm, notes, logical };
+            const nextRoom = { ...(existing || {}), name, nameEn, departmentTags, color, capacity, labelScale, showName, surfaceSqm, notes, logical };
             if (hasRoomOverlap(nextRoom, roomModal.roomId)) {
               notifyRoomOverlap();
               return false;
             }
             markTouched();
-            updateRoom(basePlan.id, roomModal.roomId, { name, nameEn, color, capacity, labelScale, showName, surfaceSqm, notes, logical });
+            updateRoom(basePlan.id, roomModal.roomId, { name, nameEn, departmentTags, color, capacity, labelScale, showName, surfaceSqm, notes, logical });
             push(
               t({ it: `Stanza aggiornata: ${name}`, en: `Room updated: ${name}` }),
               'success'
@@ -15092,6 +15169,7 @@ const PlanView = ({ planId }: Props) => {
                 id: roomModal.roomId,
                 name,
                 nameEn: nameEn ?? null,
+                departmentTags: departmentTags || null,
                 color: color || null,
                 capacity: capacity ?? null,
                 labelScale: labelScale ?? null,
@@ -15113,6 +15191,7 @@ const PlanView = ({ planId }: Props) => {
                   id: 'new-room',
                   name,
                   nameEn,
+                  departmentTags,
                   color,
                   capacity,
                   labelScale,
@@ -15127,6 +15206,7 @@ const PlanView = ({ planId }: Props) => {
                   id: 'new-room',
                   name,
                   nameEn,
+                  departmentTags,
                   color,
                   capacity,
                   labelScale,
@@ -15147,6 +15227,7 @@ const PlanView = ({ planId }: Props) => {
               ? addRoom(basePlan.id, {
                   name,
                   nameEn,
+                  departmentTags,
                   color,
                   capacity,
                   labelScale,
@@ -15160,6 +15241,7 @@ const PlanView = ({ planId }: Props) => {
               : addRoom(basePlan.id, {
                   name,
                   nameEn,
+                  departmentTags,
                   color,
                   capacity,
                   labelScale,
@@ -15178,6 +15260,7 @@ const PlanView = ({ planId }: Props) => {
               id,
               name,
               nameEn: nameEn ?? null,
+              departmentTags: departmentTags || null,
               kind: roomModal.kind,
               color: color || null,
               capacity: capacity ?? null,
@@ -16242,14 +16325,29 @@ const PlanView = ({ planId }: Props) => {
 
       <RoomAllocationModal
         open={roomAllocationOpen}
-        rooms={rooms}
-        roomStatsById={roomStatsById}
-        onHighlight={(roomId) => {
+        clients={allClients}
+        currentClientId={client?.id}
+        currentSiteId={site?.id}
+        onHighlight={({ planId: targetPlanId, roomId }) => {
+          if (targetPlanId !== planId) {
+            setRoomAllocationOpen(false);
+            setSelectedPlan(targetPlanId);
+            navigate(`/plan/${targetPlanId}?focusRoom=${encodeURIComponent(roomId)}`);
+            return;
+          }
           setSelectedRoomId(roomId);
           setSelectedRoomIds([roomId]);
           setHighlightRoom({ roomId, until: Date.now() + 3200 });
         }}
         onClose={() => setRoomAllocationOpen(false)}
+      />
+
+      <CapacityDashboardModal
+        open={capacityDashboardOpen}
+        clients={allClients}
+        currentClientId={client?.id}
+        currentSiteId={site?.id}
+        onClose={() => setCapacityDashboardOpen(false)}
       />
 
       {/* kept for potential future use */}

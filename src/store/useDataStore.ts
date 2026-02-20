@@ -868,6 +868,21 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
   if (Array.isArray(next.rooms)) {
     next.rooms = next.rooms.map((room: Room) => ({
       ...room,
+      departmentTags: Array.isArray((room as any)?.departmentTags)
+        ? Array.from(
+            new Set(
+              ((room as any).departmentTags || [])
+                .map((entry: any) => String(entry || '').trim())
+                .filter(Boolean)
+                .map((entry: string) => entry.toLocaleLowerCase())
+            )
+          ).map((folded) => {
+            const found = ((room as any).departmentTags || []).find(
+              (entry: any) => String(entry || '').trim().toLocaleLowerCase() === folded
+            );
+            return String(found || '').trim();
+          })
+        : [],
       labelScale: Number.isFinite(Number((room as any)?.labelScale))
         ? Math.max(0.3, Math.min(3, Number((room as any).labelScale)))
         : undefined,

@@ -2,6 +2,19 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.1.0 - 2026-02-20
+- Added `Capacity dashboard` in PlanView rooms menu with aggregated metrics across client/site/floor: total capacity, occupancy, room saturation, density (`users/mq`, `mq/user`), and over-capacity indicators.
+- Added historical capacity trend chart by site, backed by server snapshots persisted in `app_settings` (`capacityHistoryV1`).
+- Added backend capacity APIs:
+  - `GET /api/capacity/history` (RBAC-filtered visibility)
+  - `POST /api/capacity/snapshot` (superadmin-only, rate-limited)
+- Reworked `Trova capienza` into a guided `Trova sistemazione` flow:
+  - selection by `client -> site -> department`
+  - requested headcount input
+  - progressive fallback to empty offices and cross-department offices when no direct match exists
+- Extended room model with department tags (`room.departmentTags`) and added room-modal UX to assign one or more departments, with suggestions sourced from imported real-user departments.
+- Added technical documentation: `docs/CAPACITY_WORKFLOW.md`.
+
 ## 3.0.4 - 2026-02-20
 - Update check UX moved from `Settings > Account` to the user menu (`Superadmin`) with a dedicated modal.
 - Update checks are now enforced as superadmin-only also on backend API (`GET /api/update/latest` returns `403` for non-superadmin users).

@@ -10,6 +10,8 @@ interface Props {
   open: boolean;
   initialName?: string;
   initialNameEn?: string;
+  initialDepartmentTags?: string[];
+  departmentOptions?: string[];
   initialColor?: string;
   initialCapacity?: number;
   initialLabelScale?: number;
@@ -40,6 +42,7 @@ interface Props {
   onSubmit: (payload: {
     name: string;
     nameEn?: string;
+    departmentTags?: string[];
     color?: string;
     capacity?: number;
     labelScale?: number;
@@ -56,6 +59,8 @@ const RoomModal = ({
   open,
   initialName = '',
   initialNameEn = '',
+  initialDepartmentTags,
+  departmentOptions,
   initialColor = COLORS[0],
   initialCapacity,
   initialLabelScale,
@@ -80,6 +85,8 @@ const RoomModal = ({
   const t = useT();
   const [name, setName] = useState(initialName);
   const [nameEn, setNameEn] = useState(initialNameEn);
+  const [departmentTags, setDepartmentTags] = useState<string[]>([]);
+  const [departmentInput, setDepartmentInput] = useState('');
   const [color, setColor] = useState(initialColor);
   const [capacity, setCapacity] = useState('');
   const [showName, setShowName] = useState(initialShowName);
@@ -107,6 +114,22 @@ const RoomModal = ({
     if (!open) return;
     setName(initialName);
     setNameEn(initialNameEn);
+    setDepartmentTags(
+      Array.isArray(initialDepartmentTags)
+        ? Array.from(
+            new Set(
+              initialDepartmentTags
+                .map((entry) => String(entry || '').trim())
+                .filter(Boolean)
+                .map((entry) => entry.toLocaleLowerCase())
+            )
+          ).map((folded) => {
+            const found = initialDepartmentTags.find((entry) => String(entry || '').trim().toLocaleLowerCase() === folded);
+            return String(found || '').trim();
+          })
+        : []
+    );
+    setDepartmentInput('');
     setColor(initialColor || COLORS[0]);
     setCapacity(Number.isFinite(initialCapacity) && (initialCapacity || 0) > 0 ? String(initialCapacity) : '');
     setLabelScale(Number.isFinite(initialLabelScale) && (initialLabelScale || 0) > 0 ? Number(initialLabelScale) : 1);
@@ -117,7 +140,33 @@ const RoomModal = ({
     setActiveTab('info');
     setNameError('');
     window.setTimeout(() => nameRef.current?.focus(), 0);
-  }, [initialColor, initialLogical, initialName, initialNameEn, initialCapacity, initialNotes, initialShowName, initialSurfaceSqm, open]);
+  }, [
+    initialColor,
+    initialDepartmentTags,
+    initialLogical,
+    initialName,
+    initialNameEn,
+    initialCapacity,
+    initialNotes,
+    initialShowName,
+    initialSurfaceSqm,
+    open
+  ]);
+
+  const addDepartmentTag = (raw: string) => {
+    const next = String(raw || '').trim();
+    if (!next) return;
+    const folded = next.toLocaleLowerCase();
+    setDepartmentTags((prev) => {
+      if (prev.some((entry) => entry.toLocaleLowerCase() === folded)) return prev;
+      return [...prev, next];
+    });
+  };
+
+  const removeDepartmentTag = (raw: string) => {
+    const target = String(raw || '').trim().toLocaleLowerCase();
+    setDepartmentTags((prev) => prev.filter((entry) => entry.toLocaleLowerCase() !== target));
+  };
 
   const submit = () => {
     if (!name.trim()) {
@@ -132,9 +181,14 @@ const RoomModal = ({
     const finalSurface = Number.isFinite(rawSurface) && rawSurface > 0 ? rawSurface : undefined;
     const finalNotes = notes.trim() ? notes.trim() : undefined;
     const finalNameEn = nameEn.trim() ? nameEn.trim() : undefined;
+    const finalDepartmentTags = departmentTags
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .filter((entry, index, list) => list.findIndex((candidate) => candidate.toLocaleLowerCase() === entry.toLocaleLowerCase()) === index);
     const saved = onSubmit({
       name: name.trim(),
       nameEn: finalNameEn,
+      departmentTags: finalDepartmentTags.length ? finalDepartmentTags : undefined,
       color: color || COLORS[0],
       capacity: finalCapacity,
       labelScale: finalLabelScale,
@@ -390,6 +444,79 @@ const RoomModal = ({
                           })}
                         </div>
                       </label>
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-sm font-medium text-slate-700">
+                          {t({ it: 'Reparti associati', en: 'Assigned departments' })}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {t({
+                            it: 'Puoi associare uno o più reparti (dati importazione utenti reali).',
+                            en: 'You can link one or more departments (from imported real users).'
+                          })}
+                        </div>
+                        {departmentTags.length ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {departmentTags.map((tag) => (
+                              <button
+                                key={tag}
+                                type="button"
+                                onClick={() => removeDepartmentTag(tag)}
+                                className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+                                title={t({ it: 'Rimuovi reparto', en: 'Remove department' })}
+                              >
+                                <span>{tag}</span>
+                                <X size={12} />
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="mt-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500">
+                            {t({ it: 'Nessun reparto associato.', en: 'No department assigned.' })}
+                          </div>
+                        )}
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            value={departmentInput}
+                            onChange={(e) => setDepartmentInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter' && e.key !== ',') return;
+                              e.preventDefault();
+                              addDepartmentTag(departmentInput);
+                              setDepartmentInput('');
+                            }}
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Aggiungi reparto e premi Invio', en: 'Add department and press Enter' })}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              addDepartmentTag(departmentInput);
+                              setDepartmentInput('');
+                            }}
+                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            {t({ it: 'Aggiungi', en: 'Add' })}
+                          </button>
+                        </div>
+                        {Array.isArray(departmentOptions) && departmentOptions.length ? (
+                          <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto">
+                            {departmentOptions
+                              .filter((option) => !departmentTags.some((entry) => entry.toLocaleLowerCase() === option.toLocaleLowerCase()))
+                              .slice(0, 30)
+                              .map((option) => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  onClick={() => addDepartmentTag(option)}
+                                  className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                  title={option}
+                                >
+                                  {option}
+                                </button>
+                              ))}
+                          </div>
+                        ) : null}
+                      </div>
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                         <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                           {t({ it: 'Scala etichette', en: 'Label scale' })}

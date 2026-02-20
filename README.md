@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.0.4
+Current version: 3.1.0
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -24,6 +24,9 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - Internal messaging system with a dedicated interface.
 - Real-user import via Web API and a centralized corporate directory and CSV files.
 - Rack configurator and structured cabling management.
+- Capacity dashboard: client/site/floor analytics with occupancy, density (`users/mq`, `mq/user`), over-capacity alerts, and historical trend chart per site.
+- Guided placement wizard (`Trova sistemazione`): filter by client/site/department and request size, with progressive fallback to empty offices and cross-department options.
+- Room department mapping: each room can now be linked to one or more departments sourced from imported real-user data.
 - Corridor doors with room linking: right-click a door to link one or more rooms, with nearest-room preselection and door hover info for linked rooms.
 - Internal map routing wizard: find a destination (users/devices/racks/rooms), set a start point, and compute a red orthogonal route through corridors and linked doors, with distance and ETA when scale is configured.
 - Scaled measurements and dimensions directly on the floor plan.
@@ -87,6 +90,7 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 ## Architecture docs
 - Technical architecture: `docs/ARCHITECTURE.md`
 - Terminology reference: `docs/TERMINOLOGY.md`
+- Capacity workflow and APIs: `docs/CAPACITY_WORKFLOW.md`
 
 ## Quality and testing
 ```bash
@@ -208,6 +212,8 @@ The reset invalidates active sessions and asks for a new strong password.
 - API liveness probe: `GET /api/health/live`
 - API readiness probe: `GET /api/health/ready`
 - Update check probe (superadmin only): `GET /api/update/latest`
+- Capacity history (RBAC-filtered): `GET /api/capacity/history`
+- Capacity snapshot (superadmin): `POST /api/capacity/snapshot`
 
 ## LAN access
 - Dev: `http://<YOUR_PC_IP>:5173`
