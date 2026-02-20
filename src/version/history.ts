@@ -8,6 +8,44 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.1.2',
+    date: '2026-02-20',
+    type: 'fix',
+    notes: [
+      n(
+        'Trova sistemazione: apertura da menu cliente/sede ora mantiene la planimetria corrente e non forza più il cambio piano',
+        'Find placement: opening from client/site context menu now keeps the current floor plan and no longer forces a plan switch'
+      ),
+      n(
+        'Dashboard capienza: rimosso export PDF instabile e riorganizzato il layout con planimetrie in fascia orizzontale (no scroll verticale principale)',
+        'Capacity dashboard: removed unstable PDF export and reworked layout with floor plans in a horizontal strip (no primary vertical scroll)'
+      ),
+      n(
+        'Toaster selezione oggetti: risolto il caso in cui poteva rimanere persistente dopo click destro su un oggetto selezionato',
+        'Object selection toaster: fixed case where it could remain persistent after right-clicking a selected object'
+      )
+    ]
+  },
+  {
+    version: '3.1.1',
+    date: '2026-02-20',
+    type: 'fix',
+    notes: [
+      n(
+        'Dashboard capienza PDF: risolto il taglio dei valori nelle combobox (cliente/sede/planimetria) durante l’esportazione',
+        'Capacity dashboard PDF: fixed clipped combobox values (client/site/floor plan) during export'
+      ),
+      n(
+        'Export PDF dashboard: migliorata la paginazione per evitare pagine finali vuote e blocchi metriche parzialmente tagliati',
+        'Dashboard PDF export: improved pagination to prevent trailing blank pages and partially clipped metric blocks'
+      ),
+      n(
+        'Dettaglio planimetrie dashboard: card ampliate con gauge dedicato per ogni singola planimetria',
+        'Dashboard floor-plan details: expanded cards with a dedicated gauge for each individual floor plan'
+      )
+    ]
+  },
+  {
     version: '3.1.0',
     date: '2026-02-20',
     type: 'minor',

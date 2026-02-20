@@ -892,7 +892,11 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
       labelPosition:
         (room as any)?.labelPosition === 'bottom' || (room as any)?.labelPosition === 'left' || (room as any)?.labelPosition === 'right'
           ? (room as any).labelPosition
-          : 'top'
+          : 'top',
+      noWindows: !!(room as any)?.noWindows,
+      storageRoom: !!(room as any)?.storageRoom,
+      bathroom: !!(room as any)?.bathroom,
+      technicalRoom: !!(room as any)?.technicalRoom
     }));
   }
   if (!Array.isArray(next.corridors)) next.corridors = [];

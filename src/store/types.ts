@@ -295,6 +295,11 @@ export interface Room {
   surfaceSqm?: number;
   notes?: string;
   logical?: boolean;
+  meetingRoom?: boolean;
+  noWindows?: boolean;
+  storageRoom?: boolean;
+  bathroom?: boolean;
+  technicalRoom?: boolean;
   kind?: 'rect' | 'poly';
   // rect
   x?: number;

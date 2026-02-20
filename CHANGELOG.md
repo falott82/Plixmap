@@ -2,6 +2,17 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.1.2 - 2026-02-20
+- `Find placement`: opening from client/site context menu now keeps the current floor plan instead of auto-switching to another one.
+- `Capacity dashboard`: removed unstable PDF export and reworked the modal layout to avoid main vertical scrolling.
+- `Capacity dashboard`: selected floor plans are now shown in a horizontal scrolling strip at the bottom.
+- Selection hint toaster: fixed persistence after right-click on an already selected object.
+
+## 3.1.1 - 2026-02-20
+- Capacity dashboard PDF export now preserves combobox values correctly (no clipped text in `Client/Site/Floor plan` filters).
+- Capacity dashboard PDF export pagination refined to avoid empty trailing pages and keep field blocks intact.
+- Capacity dashboard UI now includes larger floor-plan detail cards with dedicated gauges for each floor plan.
+
 ## 3.1.0 - 2026-02-20
 - Added `Capacity dashboard` in PlanView rooms menu with aggregated metrics across client/site/floor: total capacity, occupancy, room saturation, density (`users/mq`, `mq/user`), and over-capacity indicators.
 - Added historical capacity trend chart by site, backed by server snapshots persisted in `app_settings` (`capacityHistoryV1`).

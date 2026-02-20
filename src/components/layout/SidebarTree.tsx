@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, Eye, EyeOff, FileText, History, Hourglass, Image as ImageIcon, Info, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, Search, ShieldAlert, Star, Trash, Users, X } from 'lucide-react';
+import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Copy, Crop, Eye, EyeOff, FileText, History, Hourglass, Image as ImageIcon, Info, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, Search, ShieldAlert, Star, Trash, Users, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -179,9 +179,9 @@ const SidebarTree = () => {
   const defaultPlanId = (user as any)?.defaultPlanId as string | null | undefined;
   const clientOrder = (((user as any)?.clientOrder || []) as string[]).filter((x) => typeof x === 'string');
   const [treeQuery, setTreeQuery] = useState('');
-  const [planMenu, setPlanMenu] = useState<{ planId: string; coords?: string; x: number; y: number } | null>(null);
+  const [planMenu, setPlanMenu] = useState<{ planId: string; clientId?: string; siteId?: string; coords?: string; x: number; y: number } | null>(null);
   const [clientMenu, setClientMenu] = useState<{ clientId: string; x: number; y: number } | null>(null);
-  const [siteMenu, setSiteMenu] = useState<{ siteName: string; coords?: string; x: number; y: number } | null>(null);
+  const [siteMenu, setSiteMenu] = useState<{ clientId: string; siteId: string; siteName: string; coords?: string; x: number; y: number } | null>(null);
   const [clientInfoId, setClientInfoId] = useState<string | null>(null);
   const [clientNotesId, setClientNotesId] = useState<string | null>(null);
   const [clientAttachmentsId, setClientAttachmentsId] = useState<string | null>(null);
@@ -516,6 +516,63 @@ const SidebarTree = () => {
     setExpandedSites({});
   };
 
+  const findFirstPlanForClient = (clientId: string): { planId: string; siteId: string } | null => {
+    const entry = clients.find((client) => client.id === clientId);
+    if (!entry) return null;
+    for (const site of entry.sites || []) {
+      const first = [...(site.floorPlans || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0];
+      if (first?.id) return { planId: first.id, siteId: site.id };
+    }
+    return null;
+  };
+
+  const findFirstPlanForSite = (clientId: string, siteId: string): string | null => {
+    const entry = clients.find((client) => client.id === clientId);
+    const site = entry?.sites.find((s) => s.id === siteId);
+    const first = [...(site?.floorPlans || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0];
+    return first?.id || null;
+  };
+
+  const openCapacityDashboard = (
+    targetPlanId: string,
+    filters?: { clientId?: string; siteId?: string },
+    options?: { keepCurrentPlan?: boolean }
+  ) => {
+    const effectivePlanId = options?.keepCurrentPlan && selectedPlanId ? selectedPlanId : targetPlanId;
+    const params = new URLSearchParams();
+    params.set('cd', '1');
+    if (filters?.clientId) params.set('cdClient', filters.clientId);
+    if (filters?.siteId) params.set('cdSite', filters.siteId);
+    const to = `/plan/${effectivePlanId}?${params.toString()}`;
+    setPlanMenu(null);
+    setClientMenu(null);
+    setSiteMenu(null);
+    if (selectedPlanId && selectedPlanId !== effectivePlanId && dirtyByPlan[selectedPlanId]) {
+      requestSaveAndNavigate?.(to);
+      return;
+    }
+    setSelectedPlan(effectivePlanId);
+    navigate(to);
+  };
+
+  const openFindCapacity = (targetPlanId: string, filters?: { clientId?: string; siteId?: string }) => {
+    const effectivePlanId = selectedPlanId || targetPlanId;
+    const params = new URLSearchParams();
+    params.set('fa', '1');
+    if (filters?.clientId) params.set('faClient', filters.clientId);
+    if (filters?.siteId) params.set('faSite', filters.siteId);
+    const to = `/plan/${effectivePlanId}?${params.toString()}`;
+    setPlanMenu(null);
+    setClientMenu(null);
+    setSiteMenu(null);
+    if (selectedPlanId && selectedPlanId !== effectivePlanId && dirtyByPlan[selectedPlanId]) {
+      requestSaveAndNavigate?.(to);
+      return;
+    }
+    setSelectedPlan(effectivePlanId);
+    navigate(to);
+  };
+
   if (sidebarCollapsed) {
     return (
       <aside className="flex h-screen w-14 flex-col items-center gap-4 border-r border-slate-200 bg-white py-4">
@@ -736,7 +793,7 @@ const SidebarTree = () => {
                         onContextMenu={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          setSiteMenu({ siteName: site.name, coords: site.coords, x: e.clientX, y: e.clientY });
+                          setSiteMenu({ clientId: client.id, siteId: site.id, siteName: site.name, coords: site.coords, x: e.clientX, y: e.clientY });
                         }}
                       >
                         <button
@@ -787,7 +844,14 @@ const SidebarTree = () => {
                                   onContextMenu={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    setPlanMenu({ planId: plan.id, coords: site.coords, x: e.clientX, y: e.clientY });
+                                    setPlanMenu({
+                                      planId: plan.id,
+                                      clientId: client.id,
+                                      siteId: site.id,
+                                      coords: site.coords,
+                                      x: e.clientX,
+                                      y: e.clientY
+                                    });
                                   }}
                                   draggable={!!user?.isAdmin}
                                   onDragStart={() => {
@@ -917,6 +981,16 @@ const SidebarTree = () => {
                   {t({ it: 'Apri su Google Maps', en: 'View in Google Maps' })}
                 </a>
               ) : null}
+              <button
+                onClick={() => {
+                  openCapacityDashboard(planMenu.planId, { clientId: planMenu.clientId, siteId: planMenu.siteId });
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({ it: 'Apri dashboard capienza', en: 'Open capacity dashboard' })}
+              >
+                <BarChart3 size={14} className="text-slate-600" />
+                {t({ it: 'Dashboard capienza', en: 'Capacity dashboard' })}
+              </button>
               {planMenuPhotoCount ? (
                 <button
                   onClick={() => {
@@ -1065,6 +1139,23 @@ const SidebarTree = () => {
               <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">
                 {t({ it: 'Cliente', en: 'Client' })}
               </div>
+              <button
+                onClick={() => {
+                  const target = findFirstPlanForClient(clientMenu.clientId);
+                  if (!target) {
+                    const label = clients.find((c) => c.id === clientMenu.clientId)?.shortName || clients.find((c) => c.id === clientMenu.clientId)?.name || clientMenu.clientId;
+                    setMissingPlansNotice({ clientName: label });
+                    setClientMenu(null);
+                    return;
+                  }
+                  openCapacityDashboard(target.planId, { clientId: clientMenu.clientId, siteId: target.siteId }, { keepCurrentPlan: true });
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({ it: 'Apri dashboard capienza', en: 'Open capacity dashboard' })}
+              >
+                <BarChart3 size={14} className="text-slate-600" />
+                {t({ it: 'Dashboard capienza', en: 'Capacity dashboard' })}
+              </button>
               {canChatClientIds.has(clientMenu.clientId) ? (
                 <button
                   onClick={() => {
@@ -1175,6 +1266,40 @@ const SidebarTree = () => {
               <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">
                 {t({ it: 'Sede', en: 'Site' })}
               </div>
+              <button
+                onClick={() => {
+                  const targetPlanId = findFirstPlanForSite(siteMenu.clientId, siteMenu.siteId);
+                  if (!targetPlanId) {
+                    const clientLabel = clients.find((c) => c.id === siteMenu.clientId)?.shortName || clients.find((c) => c.id === siteMenu.clientId)?.name || siteMenu.siteName;
+                    setMissingPlansNotice({ clientName: clientLabel });
+                    setSiteMenu(null);
+                    return;
+                  }
+                  openCapacityDashboard(targetPlanId, { clientId: siteMenu.clientId, siteId: siteMenu.siteId });
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({ it: 'Apri dashboard capienza', en: 'Open capacity dashboard' })}
+              >
+                <BarChart3 size={14} className="text-slate-600" />
+                {t({ it: 'Dashboard capienza', en: 'Capacity dashboard' })}
+              </button>
+              <button
+                onClick={() => {
+                  const targetPlanId = findFirstPlanForSite(siteMenu.clientId, siteMenu.siteId);
+                  if (!targetPlanId) {
+                    const clientLabel = clients.find((c) => c.id === siteMenu.clientId)?.shortName || clients.find((c) => c.id === siteMenu.clientId)?.name || siteMenu.siteName;
+                    setMissingPlansNotice({ clientName: clientLabel });
+                    setSiteMenu(null);
+                    return;
+                  }
+                  openFindCapacity(targetPlanId, { clientId: siteMenu.clientId, siteId: siteMenu.siteId });
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                title={t({ it: 'Trova capienza', en: 'Find capacity' })}
+              >
+                <Users size={14} className="text-slate-600" />
+                {t({ it: 'Trova capienza', en: 'Find capacity' })}
+              </button>
               {parseCoords(siteMenu.coords) ? (
                 <a
                   href={`https://www.google.com/maps?q=${parseCoords(siteMenu.coords)!.lat},${parseCoords(siteMenu.coords)!.lng}`}

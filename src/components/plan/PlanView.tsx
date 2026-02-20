@@ -122,6 +122,7 @@ import {
 import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 import { getDefaultVisiblePlanLayerIds, normalizePlanLayerSelection } from '../../utils/layerVisibility';
 import { getWallTypeColor } from '../../utils/wallColors';
+import { isNonPeopleRoom } from '../../utils/roomProperties';
 import { closeSocketSafely, getWsUrl } from '../../utils/ws';
 import { usePresentationWebcamHands } from './presentation/usePresentationWebcamHands';
 
@@ -735,10 +736,20 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     capacityConfirmRef.current = capacityConfirm;
   }, [capacityConfirm]);
+  const [roomDepartmentConfirm, setRoomDepartmentConfirm] = useState<{
+    objectId: string;
+    userName: string;
+    x: number;
+    y: number;
+    roomId: string;
+    roomName: string;
+    departmentToAdd: string;
+  } | null>(null);
   const [undoConfirm, setUndoConfirm] = useState<{ id: string; name: string } | null>(null);
   const [overlapNotice, setOverlapNotice] = useState<string | null>(null);
   const roomOverlapNoticeRef = useRef(0);
   const roomLayerNoticeRef = useRef(0);
+  const nonPeopleRoomNoticeRef = useRef(0);
   const [allTypesOpen, setAllTypesOpen] = useState(false);
   const [allTypesDefaultTab, setAllTypesDefaultTab] = useState<'all' | 'objects' | 'desks' | 'walls' | 'text' | 'notes' | 'security'>(
     'objects'
@@ -838,7 +849,9 @@ const PlanView = ({ planId }: Props) => {
   const [objectListQuery, setObjectListQuery] = useState('');
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [roomAllocationOpen, setRoomAllocationOpen] = useState(false);
+  const [roomAllocationPreset, setRoomAllocationPreset] = useState<{ clientId?: string; siteId?: string } | null>(null);
   const [capacityDashboardOpen, setCapacityDashboardOpen] = useState(false);
+  const [capacityDashboardPreset, setCapacityDashboardPreset] = useState<{ clientId?: string; siteId?: string } | null>(null);
   const [roomDepartmentOptions, setRoomDepartmentOptions] = useState<string[]>([]);
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement | null>(null);
@@ -941,6 +954,7 @@ const PlanView = ({ planId }: Props) => {
     | {
         mode: 'edit';
         roomId: string;
+        openDepartments?: boolean;
         initialName: string;
         initialNameEn?: string;
         initialCapacity?: number;
@@ -948,6 +962,11 @@ const PlanView = ({ planId }: Props) => {
         initialSurfaceSqm?: number;
         initialNotes?: string;
         initialLogical?: boolean;
+        initialMeetingRoom?: boolean;
+        initialNoWindows?: boolean;
+        initialStorageRoom?: boolean;
+        initialBathroom?: boolean;
+        initialTechnicalRoom?: boolean;
       }
     | null
   >(null);
@@ -1097,12 +1116,24 @@ const PlanView = ({ planId }: Props) => {
   const quoteToastIdRef = useRef<string | number | null>(null);
   const mediaToastKeyRef = useRef('');
   const mediaToastIdRef = useRef<string | number | null>(null);
+  const selectionHintToastIds = useRef({
+    selection: 'plixmap-selection-hint',
+    desk: 'plixmap-desk-hint',
+    multi: 'plixmap-multi-hint',
+    quote: 'plixmap-quote-hint',
+    media: 'plixmap-media-hint'
+  });
   const zoomRef = useRef<number>(zoom);
   const renderStartRef = useRef(0);
   const layerVisibilitySyncRef = useRef<string>('');
   renderStartRef.current = performance.now();
 
   const dismissSelectionHintToasts = useCallback(() => {
+    toast.dismiss(selectionHintToastIds.current.selection);
+    toast.dismiss(selectionHintToastIds.current.desk);
+    toast.dismiss(selectionHintToastIds.current.multi);
+    toast.dismiss(selectionHintToastIds.current.quote);
+    toast.dismiss(selectionHintToastIds.current.media);
     selectionToastKeyRef.current = '';
     if (selectionToastIdRef.current != null) {
       toast.dismiss(selectionToastIdRef.current);
@@ -3071,6 +3102,52 @@ const PlanView = ({ planId }: Props) => {
       return true;
     };
 
+    const normalizeForCompare = (value: any): any => {
+      if (value === undefined) return undefined;
+      if (value === null) return null;
+      if (Array.isArray(value)) return value.map((entry) => normalizeForCompare(entry));
+      if (typeof value === 'number' && !Number.isFinite(value)) return null;
+      if (typeof value !== 'object') return value;
+      const out: Record<string, any> = {};
+      const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
+      for (const key of keys) {
+        const next = normalizeForCompare(value[key]);
+        if (next === undefined) continue;
+        out[key] = next;
+      }
+      return out;
+    };
+
+    const normalizeRoomForCompare = (room: any) => {
+      const base = room || {};
+      const normalized: Record<string, any> = {};
+      const keys = Object.keys(base).sort((a, b) => a.localeCompare(b));
+      for (const key of keys) {
+        const value = (base as any)[key];
+        if (value === undefined) continue;
+        if (key === 'departmentTags') {
+          normalized[key] = Array.isArray(value)
+            ? value
+                .map((entry: any) => String(entry || '').trim())
+                .filter(Boolean)
+                .sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+            : [];
+          continue;
+        }
+        if (key === 'points') {
+          normalized[key] = Array.isArray(value)
+            ? value.map((point: any) => ({
+                x: Number(point?.x ?? 0),
+                y: Number(point?.y ?? 0)
+              }))
+            : [];
+          continue;
+        }
+        normalized[key] = normalizeForCompare(value);
+      }
+      return normalized;
+    };
+
     const aObjs = current.objects || [];
     const bObjs = latest.objects || [];
     if (aObjs.length !== bObjs.length) return false;
@@ -3079,12 +3156,7 @@ const PlanView = ({ planId }: Props) => {
     for (const o of aObjs) {
       const other = bById.get(o.id);
       if (!other) return false;
-      if (o.type !== other.type) return false;
-      if (o.name !== other.name) return false;
-      if ((o.description || '') !== (other.description || '')) return false;
-      if (o.x !== other.x || o.y !== other.y) return false;
-      if ((o.scale ?? 1) !== (other.scale ?? 1)) return false;
-      if ((o.roomId ?? null) !== (other.roomId ?? null)) return false;
+      if (JSON.stringify(normalizeForCompare(o)) !== JSON.stringify(normalizeForCompare(other))) return false;
     }
 
     const aViews = current.views || [];
@@ -3111,9 +3183,7 @@ const PlanView = ({ planId }: Props) => {
     for (const r of aRooms) {
       const other = bRoomsById.get(r.id);
       if (!other) return false;
-      if (r.name !== other.name) return false;
-      if (r.x !== other.x || r.y !== other.y) return false;
-      if (r.width !== other.width || r.height !== other.height) return false;
+      if (JSON.stringify(normalizeRoomForCompare(r)) !== JSON.stringify(normalizeRoomForCompare(other))) return false;
     }
 
     const aCorridors = current.corridors || [];
@@ -3649,6 +3719,40 @@ const PlanView = ({ planId }: Props) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('cd') !== '1') return;
+    const presetClientId = String(params.get('cdClient') || '').trim();
+    const presetSiteId = String(params.get('cdSite') || '').trim();
+    setCapacityDashboardPreset({
+      clientId: presetClientId || undefined,
+      siteId: presetSiteId || undefined
+    });
+    setCapacityDashboardOpen(true);
+    params.delete('cd');
+    params.delete('cdClient');
+    params.delete('cdSite');
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  }, [location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('fa') !== '1') return;
+    const presetClientId = String(params.get('faClient') || '').trim();
+    const presetSiteId = String(params.get('faSite') || '').trim();
+    setRoomAllocationPreset({
+      clientId: presetClientId || undefined,
+      siteId: presetSiteId || undefined
+    });
+    setRoomAllocationOpen(true);
+    params.delete('fa');
+    params.delete('faClient');
+    params.delete('faSite');
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
+  }, [location.pathname, location.search, navigate]);
+
 		  useEffect(() => {
 		    if (!printAreaMode) return;
 		    const onKey = (e: KeyboardEvent) => {
@@ -4066,6 +4170,7 @@ const PlanView = ({ planId }: Props) => {
   const contextIsQuote = contextObject?.type === 'quote';
   const contextIsWifi = contextObject?.type === 'wifi';
   const contextIsPhoto = contextObject?.type === 'photo';
+  const contextIsText = contextObject?.type === 'text';
   const contextIsAssemblyPoint = contextObject?.type === 'safety_assembly_point';
   const contextAssemblyGps = contextIsAssemblyPoint ? String((contextObject as any)?.gpsCoords || '') : '';
   const contextAssemblyMapsUrl = useMemo(() => googleMapsUrlFromCoords(contextAssemblyGps), [contextAssemblyGps]);
@@ -4215,7 +4320,7 @@ const PlanView = ({ planId }: Props) => {
         { it: `${count} oggetti selezionati`, en: `${count} objects selected` },
         items
       ),
-      { duration: Infinity }
+      { duration: Infinity, id: selectionHintToastIds.current.multi }
     );
   }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
@@ -4255,7 +4360,7 @@ const PlanView = ({ planId }: Props) => {
           { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
         ]
       ),
-      { duration: Infinity }
+      { duration: Infinity, id: selectionHintToastIds.current.desk }
     );
   }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
@@ -4302,7 +4407,7 @@ const PlanView = ({ planId }: Props) => {
           { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
         ]
       ),
-      { duration: Infinity }
+      { duration: Infinity, id: selectionHintToastIds.current.quote }
     );
   }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
@@ -4412,7 +4517,7 @@ const PlanView = ({ planId }: Props) => {
                 }
                 return renderKeybindToast({ it: 'Annotazioni selezionate', en: 'Annotations selected' }, base);
               })();
-    mediaToastIdRef.current = toast.info(message, { duration: Infinity });
+    mediaToastIdRef.current = toast.info(message, { duration: Infinity, id: selectionHintToastIds.current.media });
   }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
   useEffect(() => {
     if (contextMenu || !renderPlan || selectedObjectIds.length !== 1) {
@@ -4461,7 +4566,7 @@ const PlanView = ({ planId }: Props) => {
           { cmd: 'E', it: 'modifica', en: 'edit' }
         ]
       ),
-      { duration: Infinity }
+      { duration: Infinity, id: selectionHintToastIds.current.selection }
     );
   }, [contextMenu, getTypeLabel, renderKeybindToast, renderPlan, selectedObjectIds, t]);
   useEffect(() => {
@@ -4513,6 +4618,7 @@ const PlanView = ({ planId }: Props) => {
 
   useEffect(() => {
     if (!contextMenu) return;
+    dismissSelectionHintToasts();
     setWallQuickMenu(null);
     setWallTypeMenu(null);
     setCorridorQuickMenu(null);
@@ -4521,7 +4627,7 @@ const PlanView = ({ planId }: Props) => {
     if (contextMenu.kind === 'map') {
       setMapSubmenu(null);
     }
-  }, [contextMenu]);
+  }, [contextMenu, dismissSelectionHintToasts]);
 
   useEffect(() => {
     if (contextMenu) return;
@@ -4784,7 +4890,9 @@ const PlanView = ({ planId }: Props) => {
         const currentSelectedIds = selectedObjectIdsRef.current;
         const currentSelectedId = selectedObjectIdRef.current;
         if (currentSelectedIds.length === 1 && currentSelectedId === id) {
-          clearSelection();
+          if (!options?.keepContext) {
+            clearSelection();
+          }
         } else {
           setSelectedObject(id);
         }
@@ -5545,6 +5653,30 @@ const PlanView = ({ planId }: Props) => {
     return undefined;
   }
 
+  const isUserType = (type: unknown) => {
+    const value = String(type || '');
+    return value === 'user' || value === 'real_user' || value === 'generic_user';
+  };
+
+  const isRoomAssignableForUsers = useCallback(
+    (roomId: string | undefined | null, roomList?: Room[]) => {
+      if (!roomId) return true;
+      const source = Array.isArray(roomList) ? roomList : (renderPlan?.rooms || []);
+      const room = (source || []).find((entry) => entry.id === roomId);
+      if (!room) return true;
+      return !isNonPeopleRoom(room);
+    },
+    [renderPlan?.rooms]
+  );
+
+  const resolveRoomAssignmentForObject = useCallback(
+    (roomId: string | undefined | null, objectType: unknown, roomList?: Room[]) => {
+      if (!isUserType(objectType)) return roomId || undefined;
+      return isRoomAssignableForUsers(roomId || undefined, roomList) ? roomId || undefined : undefined;
+    },
+    [isRoomAssignableForUsers]
+  );
+
   function getCorridorIdAt(corridors: any[] | undefined, x: number, y: number) {
     const list = corridors || [];
     for (let i = list.length - 1; i >= 0; i--) {
@@ -5851,6 +5983,19 @@ const PlanView = ({ planId }: Props) => {
     setOverlapNotice(message);
   }, [t]);
 
+  const notifyNonPeopleRoomBlocked = useCallback(() => {
+    const now = Date.now();
+    if (now - nonPeopleRoomNoticeRef.current < 1200) return;
+    nonPeopleRoomNoticeRef.current = now;
+    push(
+      t({
+        it: 'Questa stanza non è occupabile (ripostiglio/bagno/locale tecnico): spostamento utente non consentito.',
+        en: 'This room is non-occupiable (storage/bathroom/technical): user placement is not allowed.'
+      }),
+      'info'
+    );
+  }, [push, t]);
+
   const resetToolClickHistory = useCallback(() => {
     toolClickHistoryRef.current = [];
   }, []);
@@ -5931,7 +6076,8 @@ const PlanView = ({ planId }: Props) => {
   const computeRoomReassignments = (rooms: any[] | undefined, objects: any[]) => {
     const updates: Record<string, string | undefined> = {};
     for (const obj of objects) {
-      const nextRoomId = getRoomIdAt(rooms, obj.x, obj.y);
+      const rawRoomId = getRoomIdAt(rooms, obj.x, obj.y);
+      const nextRoomId = resolveRoomAssignmentForObject(rawRoomId, obj.type, (rooms || []) as Room[]);
       const current = obj.roomId ?? undefined;
       if (current !== nextRoomId) {
         updates[obj.id] = nextRoomId;
@@ -7641,7 +7787,12 @@ const PlanView = ({ planId }: Props) => {
           }
           const nextX = obj.x + dx;
           const nextY = obj.y + dy;
-          const nextRoomId = getRoomIdAt((currentPlan as FloorPlan).rooms, nextX, nextY);
+          const rawNextRoomId = getRoomIdAt((currentPlan as FloorPlan).rooms, nextX, nextY);
+          const nextRoomId = resolveRoomAssignmentForObject(rawNextRoomId, obj.type, ((currentPlan as FloorPlan).rooms || []) as Room[]);
+          if (rawNextRoomId && !nextRoomId && isUserType(obj.type)) {
+            notifyNonPeopleRoomBlocked();
+            continue;
+          }
           const currentRoomId = obj.roomId ?? undefined;
           moveObject(id, nextX, nextY);
           if (currentRoomId !== nextRoomId) {
@@ -7733,6 +7884,7 @@ const PlanView = ({ planId }: Props) => {
     markTouched,
     measureMode,
     moveObject,
+    notifyNonPeopleRoomBlocked,
     performRedo,
     performUndo,
     postAuditEvent,
@@ -7773,6 +7925,7 @@ const PlanView = ({ planId }: Props) => {
     showMeasureToast,
     t,
     toSnapshot,
+    resolveRoomAssignmentForObject,
 	    updateFloorPlan,
 	    updateObject,
     updateRoom,
@@ -7910,6 +8063,20 @@ const PlanView = ({ planId }: Props) => {
     },
     [t]
   );
+  const collectUserDepartments = useCallback((obj: MapObject) => {
+    const source = [(obj as any).externalDept1, (obj as any).externalDept2, (obj as any).externalDept3];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of source) {
+      const normalized = String(raw || '').trim();
+      if (!normalized) continue;
+      const folded = normalized.toLocaleLowerCase();
+      if (seen.has(folded)) continue;
+      seen.add(folded);
+      out.push(normalized);
+    }
+    return out;
+  }, []);
 
   const rooms = useMemo(() => renderPlan?.rooms || [], [renderPlan?.rooms]);
   const corridors = useMemo(() => (renderPlan?.corridors || []) as Corridor[], [renderPlan?.corridors]);
@@ -8201,8 +8368,15 @@ const PlanView = ({ planId }: Props) => {
           return true;
         }
       }
-      const nextRoomId = !isReadOnlyRef.current && currentPlan ? getRoomIdAt(currentPlan.rooms, x, y) : undefined;
+      const rawNextRoomId = !isReadOnlyRef.current && currentPlan ? getRoomIdAt(currentPlan.rooms, x, y) : undefined;
+      const nextRoomId = currentPlan
+        ? resolveRoomAssignmentForObject(rawNextRoomId, currentObj.type, (currentPlan.rooms || []) as Room[])
+        : rawNextRoomId;
       const currentRoomId = currentObj.roomId ?? undefined;
+      if (rawNextRoomId && !nextRoomId && isUserType(currentObj.type)) {
+        notifyNonPeopleRoomBlocked();
+        return false;
+      }
       if (
         nextRoomId &&
         nextRoomId !== currentRoomId &&
@@ -8228,6 +8402,27 @@ const PlanView = ({ planId }: Props) => {
           });
           return false;
         }
+        const roomDepartmentTags = Array.isArray((room as any)?.departmentTags)
+          ? ((room as any).departmentTags as any[])
+              .map((tag) => String(tag || '').trim())
+              .filter(Boolean)
+          : [];
+        const roomDepartmentSet = new Set(roomDepartmentTags.map((tag) => tag.toLocaleLowerCase()));
+        const missingDepartment = collectUserDepartments(currentObj).find(
+          (dept) => !roomDepartmentSet.has(dept.toLocaleLowerCase())
+        );
+        if (missingDepartment) {
+          setRoomDepartmentConfirm({
+            objectId: String(currentObj.id || ''),
+            userName: getUserObjectLabel(currentObj),
+            x,
+            y,
+            roomId: nextRoomId,
+            roomName: room?.name || t({ it: 'Stanza', en: 'Room' }),
+            departmentToAdd: missingDepartment
+          });
+          return false;
+        }
       }
       moveObject(id, x, y);
       if (currentRoomId !== nextRoomId) {
@@ -8236,7 +8431,17 @@ const PlanView = ({ planId }: Props) => {
       dragStartRef.current.delete(id);
       return true;
     },
-    [markTouched, moveObject, roomStatsById, t, updateObject]
+    [
+      collectUserDepartments,
+      getUserObjectLabel,
+      markTouched,
+      moveObject,
+      notifyNonPeopleRoomBlocked,
+      resolveRoomAssignmentForObject,
+      roomStatsById,
+      t,
+      updateObject
+    ]
   );
 
   const handleWallMove = useCallback(
@@ -8433,19 +8638,25 @@ const PlanView = ({ planId }: Props) => {
     setContextMenu(null);
   };
 
-  const openEditRoom = (roomId: string) => {
+  const openEditRoom = (roomId: string, options?: { openDepartments?: boolean }) => {
     const room = rooms.find((r) => r.id === roomId);
     if (!room || isReadOnly) return;
     setRoomModal({
       mode: 'edit',
       roomId,
+      openDepartments: !!options?.openDepartments,
       initialName: room.name,
       initialNameEn: (room as any).nameEn,
       initialCapacity: room.capacity,
       initialShowName: room.showName,
       initialSurfaceSqm: room.surfaceSqm,
       initialNotes: room.notes,
-      initialLogical: room.logical
+      initialLogical: room.logical,
+      initialMeetingRoom: !!(room as any).meetingRoom,
+      initialNoWindows: !!(room as any).noWindows,
+      initialStorageRoom: !!(room as any).storageRoom,
+      initialBathroom: !!(room as any).bathroom,
+      initialTechnicalRoom: !!(room as any).technicalRoom
     });
   };
 
@@ -9230,6 +9441,10 @@ const PlanView = ({ planId }: Props) => {
       const roomId = getRoomIdAt((plan as FloorPlan)?.rooms, x, y);
       if (!roomId) return false;
       const room = (rooms || []).find((r) => r.id === roomId);
+      if (room && isNonPeopleRoom(room)) {
+        notifyNonPeopleRoomBlocked();
+        return true;
+      }
       const rawCapacity = Number(room?.capacity);
       const capacity = Number.isFinite(rawCapacity) ? Math.max(0, Math.floor(rawCapacity)) : 0;
       const userCount = roomStatsById.get(roomId)?.userCount || 0;
@@ -9245,7 +9460,7 @@ const PlanView = ({ planId }: Props) => {
       });
       return true;
     },
-    [plan, roomStatsById, rooms, t]
+    [notifyNonPeopleRoomBlocked, plan, roomStatsById, rooms, t]
   );
 
   const handlePlaceNew = (
@@ -9467,7 +9682,9 @@ const PlanView = ({ planId }: Props) => {
       }
       lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
-      if (roomId) updateObject(id, { roomId });
+      const resolvedRoomId = resolveRoomAssignmentForObject(roomId, modalState.type, ((plan as FloorPlan).rooms || []) as Room[]);
+      if (roomId && !resolvedRoomId && isUserType(modalState.type)) notifyNonPeopleRoomBlocked();
+      if (resolvedRoomId) updateObject(id, { roomId: resolvedRoomId });
       if (payload.customValues && Object.keys(payload.customValues).length) {
         saveCustomValues(id, modalState.type, payload.customValues).catch(() => {});
       }
@@ -9479,7 +9696,7 @@ const PlanView = ({ planId }: Props) => {
         event: 'object_create',
         scopeType: 'plan',
         scopeId: plan.id,
-        details: { id, type: modalState.type, name: payload.name, roomId: roomId || null }
+        details: { id, type: modalState.type, name: payload.name, roomId: resolvedRoomId || null }
       });
     }
     if (modalState.mode === 'duplicate') {
@@ -9591,7 +9808,9 @@ const PlanView = ({ planId }: Props) => {
       }
       lastInsertedRef.current = { id, name: payload.name };
       const roomId = getRoomIdAt((plan as FloorPlan).rooms, modalState.coords.x, modalState.coords.y);
-      if (roomId) updateObject(id, { roomId });
+      const resolvedRoomId = resolveRoomAssignmentForObject(roomId, base?.type || 'user', ((plan as FloorPlan).rooms || []) as Room[]);
+      if (roomId && !resolvedRoomId && isUserType(base?.type || 'user')) notifyNonPeopleRoomBlocked();
+      if (resolvedRoomId) updateObject(id, { roomId: resolvedRoomId });
       if (payload.customValues && Object.keys(payload.customValues).length) {
         saveCustomValues(id, base?.type || 'user', payload.customValues).catch(() => {});
       }
@@ -9603,7 +9822,7 @@ const PlanView = ({ planId }: Props) => {
         event: 'object_duplicate',
         scopeType: 'plan',
         scopeId: plan.id,
-        details: { fromId: modalState.objectId, id, type: base?.type, name: payload.name, roomId: roomId || null }
+        details: { fromId: modalState.objectId, id, type: base?.type, name: payload.name, roomId: resolvedRoomId || null }
       });
     }
   };
@@ -10874,7 +11093,10 @@ const PlanView = ({ planId }: Props) => {
                       </div>
                     ) : null}
 	                    <button
-	                      onClick={() => setRoomAllocationOpen(true)}
+	                      onClick={() => {
+	                        setRoomAllocationPreset(null);
+	                        setRoomAllocationOpen(true);
+	                      }}
 	                      disabled={!rooms.length}
 	                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-60"
 	                      title={t({ it: 'Trova capienza', en: 'Find capacity' })}
@@ -10882,7 +11104,10 @@ const PlanView = ({ planId }: Props) => {
                       <Users size={16} /> {t({ it: 'Trova capienza', en: 'Find capacity' })}
                     </button>
                     <button
-                      onClick={() => setCapacityDashboardOpen(true)}
+                      onClick={() => {
+                        setCapacityDashboardPreset(null);
+                        setCapacityDashboardOpen(true);
+                      }}
                       disabled={!rooms.length}
                       className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:opacity-60"
                       title={t({ it: 'Stato capienza', en: 'Capacity dashboard' })}
@@ -12644,7 +12869,8 @@ const PlanView = ({ planId }: Props) => {
           contextMenu.kind !== 'corridor' &&
           contextMenu.kind !== 'corridor_connection' &&
           contextMenu.kind !== 'corridor_door' &&
-          contextMenu.kind !== 'safety_card' ? (
+          contextMenu.kind !== 'safety_card' &&
+          !(contextMenu.kind === 'object' && contextIsText) ? (
             <button
               onClick={() => setLayersContextMenu((prev) => (prev ? null : { x: contextMenu.x, y: contextMenu.y }))}
               className="mt-2 flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
@@ -12979,7 +13205,7 @@ const PlanView = ({ planId }: Props) => {
                             })}
                           </button>
                         ) : null}
-                        {!contextIsRack && !contextIsDesk && !contextIsWall && !contextIsPhoto ? (
+                        {!contextIsRack && !contextIsDesk && !contextIsWall && !contextIsPhoto && !contextIsText ? (
                           <>
                             <div className="my-2 h-px bg-slate-100" />
                             <button
@@ -13008,7 +13234,7 @@ const PlanView = ({ planId }: Props) => {
                             </button>
                           </>
                         ) : null}
-                        {!contextIsWall ? (
+                        {!contextIsWall && !contextIsText ? (
                           <>
                             <div className="my-2 h-px bg-slate-100" />
                             <button
@@ -13489,7 +13715,19 @@ const PlanView = ({ planId }: Props) => {
                       );
                     })()
                   : null}
-	              {!isReadOnly ? (
+              {!isReadOnly ? (
+                <button
+                  onClick={() => {
+                    openEditRoom(contextMenu.id, { openDepartments: true });
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Gestione reparti', en: 'Department management' })}
+                >
+                  <Users size={14} /> {t({ it: 'Gestione reparti', en: 'Department management' })}
+                </button>
+              ) : null}
+              {!isReadOnly ? (
 		                <button
 	                  onClick={() => {
 	                    openEditRoom(contextMenu.id);
@@ -14775,13 +15013,15 @@ const PlanView = ({ planId }: Props) => {
           ensureObjectLayerVisible(realUserLayerIds, name, 'real_user');
           lastInsertedRef.current = { id, name };
           const roomId = getRoomIdAt((plan as FloorPlan).rooms, realUserPicker.x, realUserPicker.y);
-          if (roomId) updateObject(id, { roomId });
+          const resolvedRoomId = resolveRoomAssignmentForObject(roomId, 'real_user', ((plan as FloorPlan).rooms || []) as Room[]);
+          if (roomId && !resolvedRoomId) notifyNonPeopleRoomBlocked();
+          if (resolvedRoomId) updateObject(id, { roomId: resolvedRoomId });
           push(t({ it: 'Utente reale inserito', en: 'Real user placed' }), 'success');
           postAuditEvent({
             event: 'real_user_place',
             scopeType: 'plan',
             scopeId: plan.id,
-            details: { id, externalId: u.externalId, name, roomId: roomId || null }
+            details: { id, externalId: u.externalId, name, roomId: resolvedRoomId || null }
           });
           setRealUserPicker(null);
           setPendingType(null);
@@ -15096,6 +15336,7 @@ const PlanView = ({ planId }: Props) => {
 
       <RoomModal
         open={!!roomModal}
+        initialDepartmentsOpen={roomModal?.mode === 'edit' ? !!roomModal.openDepartments : false}
         initialName={roomModal?.mode === 'edit' ? roomModal.initialName : ''}
         initialNameEn={roomModal?.mode === 'edit' ? roomModal.initialNameEn : ''}
         initialDepartmentTags={
@@ -15142,6 +15383,31 @@ const PlanView = ({ planId }: Props) => {
             ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.logical
             : undefined
         }
+        initialMeetingRoom={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingRoom
+            : undefined
+        }
+        initialNoWindows={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.noWindows
+            : undefined
+        }
+        initialStorageRoom={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.storageRoom
+            : undefined
+        }
+        initialBathroom={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.bathroom
+            : undefined
+        }
+        initialTechnicalRoom={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.technicalRoom
+            : undefined
+        }
         objects={roomModal?.mode === 'edit' ? roomStatsById.get(roomModal.roomId)?.items || [] : undefined}
         getTypeLabel={getTypeLabel}
         getTypeIcon={getTypeIcon}
@@ -15160,17 +15426,66 @@ const PlanView = ({ planId }: Props) => {
           skipRoomWallTypesRef.current = false;
           setRoomModal(null);
         }}
-        onSubmit={({ name, nameEn, departmentTags, color, capacity, labelScale, showName, surfaceSqm, notes, logical }) => {
+        onSubmit={({
+          name,
+          nameEn,
+          departmentTags,
+          color,
+          capacity,
+          labelScale,
+          showName,
+          surfaceSqm,
+          notes,
+          logical,
+          meetingRoom,
+          noWindows,
+          storageRoom,
+          bathroom,
+          technicalRoom
+        }) => {
           if (!roomModal || isReadOnly) return false;
           if (roomModal.mode === 'edit') {
             const existing = (basePlan.rooms || []).find((r) => r.id === roomModal.roomId);
-            const nextRoom = { ...(existing || {}), name, nameEn, departmentTags, color, capacity, labelScale, showName, surfaceSqm, notes, logical };
+            const nextRoom = {
+              ...(existing || {}),
+              name,
+              nameEn,
+              departmentTags,
+              color,
+              capacity,
+              labelScale,
+              showName,
+              surfaceSqm,
+              notes,
+              logical,
+              meetingRoom,
+              noWindows,
+              storageRoom,
+              bathroom,
+              technicalRoom
+            };
             if (hasRoomOverlap(nextRoom, roomModal.roomId)) {
               notifyRoomOverlap();
               return false;
             }
             markTouched();
-            updateRoom(basePlan.id, roomModal.roomId, { name, nameEn, departmentTags, color, capacity, labelScale, showName, surfaceSqm, notes, logical });
+            updateRoom(basePlan.id, roomModal.roomId, {
+              name,
+              nameEn,
+              departmentTags,
+              color,
+              capacity,
+              labelScale,
+              showName,
+              surfaceSqm,
+              notes,
+              logical,
+              meetingRoom,
+              noWindows,
+              storageRoom,
+              bathroom,
+              technicalRoom
+            });
             push(
               t({ it: `Stanza aggiornata: ${name}`, en: `Room updated: ${name}` }),
               'success'
@@ -15190,7 +15505,12 @@ const PlanView = ({ planId }: Props) => {
                 showName,
                 surfaceSqm: surfaceSqm ?? null,
                 notes: notes ?? null,
-                logical: logical ?? null
+                logical: logical ?? null,
+                meetingRoom: meetingRoom ?? null,
+                noWindows: noWindows ?? null,
+                storageRoom: storageRoom ?? null,
+                bathroom: bathroom ?? null,
+                technicalRoom: technicalRoom ?? null
               }
             });
             setSelectedRoomId(roomModal.roomId);
@@ -15213,6 +15533,11 @@ const PlanView = ({ planId }: Props) => {
                   surfaceSqm,
                   notes,
                   logical,
+                  meetingRoom,
+                  noWindows,
+                  storageRoom,
+                  bathroom,
+                  technicalRoom,
                   kind: 'rect',
                   ...roomModal.rect
                 }
@@ -15228,6 +15553,11 @@ const PlanView = ({ planId }: Props) => {
                   surfaceSqm,
                   notes,
                   logical,
+                  meetingRoom,
+                  noWindows,
+                  storageRoom,
+                  bathroom,
+                  technicalRoom,
                   kind: 'poly',
                   points: roomModal.points
                 };
@@ -15249,6 +15579,11 @@ const PlanView = ({ planId }: Props) => {
                   surfaceSqm,
                   notes,
                   logical,
+                  meetingRoom,
+                  noWindows,
+                  storageRoom,
+                  bathroom,
+                  technicalRoom,
                   kind: 'rect',
                   ...roomModal.rect
                 })
@@ -15263,6 +15598,11 @@ const PlanView = ({ planId }: Props) => {
                   surfaceSqm,
                   notes,
                   logical,
+                  meetingRoom,
+                  noWindows,
+                  storageRoom,
+                  bathroom,
+                  technicalRoom,
                   kind: 'poly',
                   points: roomModal.points
                 });
@@ -15282,13 +15622,19 @@ const PlanView = ({ planId }: Props) => {
               showName,
               surfaceSqm: surfaceSqm ?? null,
               notes: notes ?? null,
-              logical: logical ?? null
+              logical: logical ?? null,
+              meetingRoom: meetingRoom ?? null,
+              noWindows: noWindows ?? null,
+              storageRoom: storageRoom ?? null,
+              bathroom: bathroom ?? null,
+              technicalRoom: technicalRoom ?? null
             }
           });
           const updates: Record<string, string | undefined> = {};
+          const roomsForAssignment = [{ ...(testRoom as any), id }, ...((basePlan.rooms || []) as Room[])];
           for (const obj of basePlan.objects) {
             if (isPointInRoom({ ...testRoom, id }, obj.x, obj.y)) {
-              updates[obj.id] = id;
+              updates[obj.id] = resolveRoomAssignmentForObject(id, obj.type, roomsForAssignment);
             }
           }
           if (Object.keys(updates).length) setObjectRoomIds(basePlan.id, updates);
@@ -16287,6 +16633,57 @@ const PlanView = ({ planId }: Props) => {
       />
 
       <ConfirmDialog
+        open={!!roomDepartmentConfirm}
+        title={t({ it: 'Allineare reparto stanza?', en: 'Align room department?' })}
+        description={
+          roomDepartmentConfirm
+            ? t({
+                it: `L'utente "${roomDepartmentConfirm.userName}" appartiene al reparto "${roomDepartmentConfirm.departmentToAdd}", che non è presente nella stanza "${roomDepartmentConfirm.roomName}". Vuoi aggiungere questo reparto alla stanza?`,
+                en: `User "${roomDepartmentConfirm.userName}" belongs to department "${roomDepartmentConfirm.departmentToAdd}", which is not currently assigned to room "${roomDepartmentConfirm.roomName}". Do you want to add this department to the room?`
+              })
+            : undefined
+        }
+        confirmLabel={t({ it: 'Aggiungi reparto', en: 'Add department' })}
+        cancelLabel={t({ it: 'Non aggiungere', en: 'Do not add' })}
+        onCancel={() => {
+          const current = roomDepartmentConfirm;
+          if (current?.objectId) {
+            markTouched();
+            moveObject(current.objectId, current.x, current.y);
+            updateObject(current.objectId, { roomId: current.roomId });
+            dragStartRef.current.delete(current.objectId);
+          }
+          setRoomDepartmentConfirm(null);
+        }}
+        onConfirm={() => {
+          const current = roomDepartmentConfirm;
+          if (!current?.objectId) return;
+          const currentPlan = planRef.current as FloorPlan | undefined;
+          if (currentPlan) {
+            const room = (currentPlan.rooms || []).find((entry) => entry.id === current.roomId);
+            if (room) {
+              const existingTags = Array.isArray((room as any)?.departmentTags)
+                ? ((room as any).departmentTags as any[])
+                    .map((tag) => String(tag || '').trim())
+                    .filter(Boolean)
+                : [];
+              const exists = existingTags.some(
+                (tag) => tag.toLocaleLowerCase() === String(current.departmentToAdd || '').trim().toLocaleLowerCase()
+              );
+              if (!exists) {
+                updateRoom(currentPlan.id, room.id, { departmentTags: [...existingTags, current.departmentToAdd] } as any);
+              }
+            }
+          }
+          markTouched();
+          moveObject(current.objectId, current.x, current.y);
+          updateObject(current.objectId, { roomId: current.roomId });
+          dragStartRef.current.delete(current.objectId);
+          setRoomDepartmentConfirm(null);
+        }}
+      />
+
+      <ConfirmDialog
         open={!!undoConfirm}
         title={t({ it: 'Annullare inserimento?', en: 'Undo placement?' })}
         description={
@@ -16340,11 +16737,13 @@ const PlanView = ({ planId }: Props) => {
       <RoomAllocationModal
         open={roomAllocationOpen}
         clients={allClients}
-        currentClientId={client?.id}
-        currentSiteId={site?.id}
+        departmentOptions={roomDepartmentOptions}
+        currentClientId={roomAllocationPreset?.clientId || client?.id}
+        currentSiteId={roomAllocationPreset?.siteId || site?.id}
         onHighlight={({ planId: targetPlanId, roomId }) => {
           if (targetPlanId !== planId) {
             setRoomAllocationOpen(false);
+            setRoomAllocationPreset(null);
             setSelectedPlan(targetPlanId);
             navigate(`/plan/${targetPlanId}?focusRoom=${encodeURIComponent(roomId)}`);
             return;
@@ -16353,15 +16752,22 @@ const PlanView = ({ planId }: Props) => {
           setSelectedRoomIds([roomId]);
           setHighlightRoom({ roomId, until: Date.now() + 3200 });
         }}
-        onClose={() => setRoomAllocationOpen(false)}
+        onClose={() => {
+          setRoomAllocationOpen(false);
+          setRoomAllocationPreset(null);
+          setRoomsOpen(false);
+        }}
       />
 
       <CapacityDashboardModal
         open={capacityDashboardOpen}
         clients={allClients}
-        currentClientId={client?.id}
-        currentSiteId={site?.id}
-        onClose={() => setCapacityDashboardOpen(false)}
+        currentClientId={capacityDashboardPreset?.clientId || client?.id}
+        currentSiteId={capacityDashboardPreset?.siteId || site?.id}
+        onClose={() => {
+          setCapacityDashboardOpen(false);
+          setCapacityDashboardPreset(null);
+        }}
       />
 
       {/* kept for potential future use */}

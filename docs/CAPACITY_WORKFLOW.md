@@ -1,7 +1,7 @@
 # Capacity Workflow
 
 ## Overview
-Plixmap 3.1.0 introduces a full capacity workflow built around three connected features:
+Plixmap 3.1.2 introduces a full capacity workflow built around three connected features:
 - Capacity dashboard by `Client -> Site -> Floor`.
 - Guided placement wizard (`Trova sistemazione`) for new technicians.
 - Room-level department mapping linked to imported real-user directories.

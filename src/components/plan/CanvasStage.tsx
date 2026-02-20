@@ -13,6 +13,7 @@ import Icon from '../ui/Icon';
 import { useLang, useT } from '../../i18n/useT';
 import { perfMetrics } from '../../utils/perfMetrics';
 import { isDeskType } from './deskTypes';
+import { getRoomSpecialType, isRoomWithoutWindows } from '../../utils/roomProperties';
 import { getWallTypeColor } from '../../utils/wallColors';
 
 interface Props {
@@ -3961,6 +3962,21 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
             const isSelectedRoom = selectedRoomId === room.id || (selectedRoomIds || []).includes(room.id);
             const kind = (room.kind || (room.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
             const baseColor = (room as any).color || '#64748b';
+            const roomSpecialType = getRoomSpecialType(room as any);
+            const roomWithoutWindows = isRoomWithoutWindows(room as any);
+            const specialPalette =
+              roomSpecialType === 'bathroom'
+                ? { fill: '#0ea5e9', stroke: '#0284c7' }
+                : roomSpecialType === 'technical'
+                  ? { fill: '#334155', stroke: '#0f172a' }
+                  : roomSpecialType === 'storage'
+                    ? { fill: '#f59e0b', stroke: '#b45309' }
+                    : roomWithoutWindows
+                      ? { fill: '#94a3b8', stroke: '#475569' }
+                      : null;
+            const fillBaseColor = specialPalette?.fill || baseColor;
+            const strokeBaseColor = specialPalette?.stroke || baseColor;
+            const fillOpacity = specialPalette ? 0.17 : 0.08;
             const stats = roomStatsById?.get(room.id);
             const userCount = stats?.userCount || 0;
             const rawCapacity = Number((room as any).capacity);
@@ -3976,7 +3992,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
               highlightRoomUntil > roomHighlightNow
             );
             const pulse = highlightActive ? 0.6 + 0.4 * Math.sin(roomHighlightNow / 80) : 0;
-            const stroke = highlightActive ? '#22d3ee' : isSelectedRoom ? '#2563eb' : baseColor;
+            const stroke = highlightActive ? '#22d3ee' : isSelectedRoom ? '#2563eb' : strokeBaseColor;
             const strokeWidth = highlightActive ? 2 + 0.8 * pulse : isSelectedRoom ? 2 : 1.1;
             if (kind === 'poly') {
               const pts = room.points || [];
@@ -4064,7 +4080,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
                     }}
                     points={flat}
                     closed
-                    fill={hexToRgba(baseColor, 0.08)}
+                    fill={hexToRgba(fillBaseColor, fillOpacity)}
                     stroke={stroke}
                     strokeWidth={strokeWidth}
                     dash={[5, 4]}
@@ -4220,7 +4236,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
                   y={0}
                   width={room.width || 0}
                   height={room.height || 0}
-                  fill={hexToRgba(baseColor, 0.08)}
+                  fill={hexToRgba(fillBaseColor, fillOpacity)}
                   stroke={stroke}
                   strokeWidth={strokeWidth}
                   dash={[5, 4]}

@@ -1,4 +1,5 @@
 import { Client, MapObject, Room } from '../store/types';
+import { isNonPeopleRoom } from './roomProperties';
 
 const USER_TYPE_SET = new Set(['user', 'real_user', 'generic_user']);
 
@@ -58,6 +59,7 @@ export interface CapacityRoomMetric {
   usersPerSqm: number | null;
   sqmPerUser: number | null;
   departmentTags: string[];
+  nonPeopleRoom: boolean;
 }
 
 export interface CapacityFloorMetric {
@@ -196,7 +198,8 @@ export const buildCapacityMetrics = (clients: Client[]): CapacityMetricsSummary 
           const roomId = String(room?.id || '');
           if (!roomId) continue;
           const roomName = normalizeLabel((room as any)?.nameEn) || normalizeLabel(room.name) || roomId;
-          const capacity = toFiniteNonNegativeInt((room as any)?.capacity);
+          const nonPeopleRoom = isNonPeopleRoom(room as any);
+          const capacity = nonPeopleRoom ? 0 : toFiniteNonNegativeInt((room as any)?.capacity);
           const surfaceSqm = toFinitePositive((room as any)?.surfaceSqm);
           const stats = roomStats.get(roomId);
           const userCount = Number(stats?.users || 0);
@@ -230,7 +233,8 @@ export const buildCapacityMetrics = (clients: Client[]): CapacityMetricsSummary 
             surfaceSqm,
             usersPerSqm,
             sqmPerUser,
-            departmentTags
+            departmentTags,
+            nonPeopleRoom
           });
 
           floorCapacity += capacity;

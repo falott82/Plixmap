@@ -1,13 +1,17 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ChevronLeft, ChevronRight, HelpCircle, Image as ImageIcon, Search, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsRight, HelpCircle, Image as ImageIcon, Search, Trash2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { useT } from '../../i18n/useT';
 import RoomShapePreview from './RoomShapePreview';
 import Icon from '../ui/Icon';
+import CapacityGauge from '../ui/CapacityGauge';
 import { IconName, MapObject } from '../../store/types';
 
 interface Props {
   open: boolean;
+  initialDepartmentsOpen?: boolean;
   initialName?: string;
   initialNameEn?: string;
   initialDepartmentTags?: string[];
@@ -19,6 +23,11 @@ interface Props {
   initialSurfaceSqm?: number;
   initialNotes?: string;
   initialLogical?: boolean;
+  initialMeetingRoom?: boolean;
+  initialNoWindows?: boolean;
+  initialStorageRoom?: boolean;
+  initialBathroom?: boolean;
+  initialTechnicalRoom?: boolean;
   surfaceLocked?: boolean;
   measurements?: {
     scaleMissing?: boolean;
@@ -50,13 +59,54 @@ interface Props {
     surfaceSqm?: number;
     notes?: string;
     logical?: boolean;
+    meetingRoom?: boolean;
+    noWindows?: boolean;
+    storageRoom?: boolean;
+    bathroom?: boolean;
+    technicalRoom?: boolean;
   }) => boolean | void;
 }
 
 const COLORS = ['#64748b', '#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0ea5e9', '#14b8a6'];
 
+const IosSwitch = ({
+  label,
+  description,
+  checked,
+  onChange
+}: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) => (
+  <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+    <div>
+      <div className="text-sm font-semibold text-ink">{label}</div>
+      {description ? <div className="mt-0.5 text-xs text-slate-500">{description}</div> : null}
+    </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative mt-0.5 h-6 w-11 rounded-full transition ${
+        checked ? 'bg-primary' : 'bg-slate-300'
+      }`}
+      title={label}
+    >
+      <span
+        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+          checked ? 'left-[22px]' : 'left-0.5'
+        }`}
+      />
+    </button>
+  </div>
+);
+
 const RoomModal = ({
   open,
+  initialDepartmentsOpen = false,
   initialName = '',
   initialNameEn = '',
   initialDepartmentTags,
@@ -68,6 +118,11 @@ const RoomModal = ({
   initialSurfaceSqm,
   initialNotes,
   initialLogical = false,
+  initialMeetingRoom = false,
+  initialNoWindows = false,
+  initialStorageRoom = false,
+  initialBathroom = false,
+  initialTechnicalRoom = false,
   surfaceLocked = false,
   measurements,
   shapePreview,
@@ -93,26 +148,59 @@ const RoomModal = ({
   const [notes, setNotes] = useState('');
   const [labelScale, setLabelScale] = useState(1);
   const [logical, setLogical] = useState(initialLogical);
+  const [meetingRoom, setMeetingRoom] = useState(initialMeetingRoom);
+  const [noWindows, setNoWindows] = useState(initialNoWindows);
+  const [storageRoom, setStorageRoom] = useState(initialStorageRoom);
+  const [bathroom, setBathroom] = useState(initialBathroom);
+  const [technicalRoom, setTechnicalRoom] = useState(initialTechnicalRoom);
   const [nameError, setNameError] = useState('');
   const [capacityError, setCapacityError] = useState('');
   const [departmentsModalOpen, setDepartmentsModalOpen] = useState(false);
+  const [propertiesModalOpen, setPropertiesModalOpen] = useState(false);
   const [departmentQuery, setDepartmentQuery] = useState('');
   const [availableSelection, setAvailableSelection] = useState<string[]>([]);
   const [selectedSelection, setSelectedSelection] = useState<string[]>([]);
+  const [availableActiveIndex, setAvailableActiveIndex] = useState(0);
+  const [availableAnchorIndex, setAvailableAnchorIndex] = useState<number | null>(null);
+  const [selectedAnchorIndex, setSelectedAnchorIndex] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'objects' | 'photos' | 'notes'>('info');
   const nameRef = useRef<HTMLInputElement | null>(null);
+  const departmentSearchRef = useRef<HTMLInputElement | null>(null);
   const roomObjects = objects || [];
   const shouldShowContents = typeof objects !== 'undefined';
   const resolveIsUser = (typeId: string) => (isUserObject ? isUserObject(typeId) : typeId === 'user' || typeId === 'real_user');
   const users = roomObjects.filter((o) => resolveIsUser(o.type));
   const otherObjects = roomObjects.filter((o) => !resolveIsUser(o.type));
   const roomPhotos = roomObjects.filter((o) => o.type === 'photo' && Boolean((o as any).imageUrl));
+  const roomCapacityValue = Number.isFinite(Number(capacity)) && Number(capacity) >= 0 ? Math.floor(Number(capacity)) : 0;
   const canOpenRoomPhotos = roomPhotos.length > 0 && !!onOpenPhotos;
   const openRoomPhotos = (id?: string) => {
     if (!onOpenPhotos || !roomPhotos.length) return;
     const ids = roomPhotos.map((photo) => photo.id);
     onOpenPhotos({ id: id || ids[0], selectionIds: ids });
   };
+  const focusDepartmentSearch = useCallback((selectText = false) => {
+    const tryFocus = () => {
+      const input = departmentSearchRef.current;
+      if (!input) return false;
+      input.focus();
+      if (selectText) {
+        try {
+          input.select();
+        } catch {
+          // ignore
+        }
+      }
+      return document.activeElement === input;
+    };
+    if (tryFocus()) return;
+    window.setTimeout(() => {
+      if (tryFocus()) return;
+      window.setTimeout(() => {
+        tryFocus();
+      }, 40);
+    }, 0);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -140,26 +228,58 @@ const RoomModal = ({
     setSurfaceSqm(Number.isFinite(initialSurfaceSqm) && (initialSurfaceSqm || 0) > 0 ? String(initialSurfaceSqm) : '');
     setNotes(initialNotes || '');
     setLogical(!!initialLogical);
+    setMeetingRoom(!!initialMeetingRoom);
+    setNoWindows(!!initialNoWindows);
+    setStorageRoom(!!initialStorageRoom);
+    setBathroom(!!initialBathroom);
+    setTechnicalRoom(!!initialTechnicalRoom);
     setActiveTab('info');
     setNameError('');
     setCapacityError('');
-    setDepartmentsModalOpen(false);
+    setDepartmentsModalOpen(!!initialDepartmentsOpen);
+    setPropertiesModalOpen(false);
     setDepartmentQuery('');
     setAvailableSelection([]);
     setSelectedSelection([]);
-    window.setTimeout(() => nameRef.current?.focus(), 0);
+    setAvailableActiveIndex(0);
+    setAvailableAnchorIndex(null);
+    setSelectedAnchorIndex(null);
+    window.setTimeout(() => {
+      if (initialDepartmentsOpen) {
+        focusDepartmentSearch(true);
+        return;
+      }
+      nameRef.current?.focus();
+    }, 0);
   }, [
+    initialDepartmentsOpen,
     initialColor,
     initialDepartmentTags,
     initialLogical,
+    initialMeetingRoom,
+    initialNoWindows,
+    initialStorageRoom,
+    initialBathroom,
+    initialTechnicalRoom,
     initialName,
     initialNameEn,
     initialCapacity,
     initialNotes,
     initialShowName,
     initialSurfaceSqm,
+    focusDepartmentSearch,
     open
   ]);
+
+  useEffect(() => {
+    if (!open || !departmentsModalOpen) return;
+    focusDepartmentSearch();
+  }, [departmentsModalOpen, focusDepartmentSearch, open]);
+
+  useEffect(() => {
+    if (!open || !departmentsModalOpen) return;
+    toast.dismiss();
+  }, [departmentsModalOpen, open]);
 
   const canonicalDepartmentTags = (input: string[]) =>
     Array.from(
@@ -185,6 +305,13 @@ const RoomModal = ({
     String(entry).toLocaleLowerCase().includes(String(departmentQuery || '').trim().toLocaleLowerCase())
   );
 
+  useEffect(() => {
+    setAvailableActiveIndex((prev) => {
+      if (!filteredAvailableDepartments.length) return 0;
+      return Math.min(Math.max(0, prev), filteredAvailableDepartments.length - 1);
+    });
+  }, [filteredAvailableDepartments.length]);
+
   const addDepartmentTag = (raw: string) => {
     const next = String(raw || '').trim();
     if (!next) return;
@@ -207,6 +334,7 @@ const RoomModal = ({
     if (!toMove.length) return;
     setDepartmentTags((prev) => canonicalDepartmentTags([...prev, ...toMove]));
     setAvailableSelection([]);
+    setAvailableAnchorIndex(null);
   };
 
   const removeSelectedDepartments = () => {
@@ -214,18 +342,137 @@ const RoomModal = ({
     if (!normalized.size) return;
     setDepartmentTags((prev) => prev.filter((entry) => !normalized.has(entry.toLocaleLowerCase())));
     setSelectedSelection([]);
+    setSelectedAnchorIndex(null);
+  };
+
+  const moveAllAvailableDepartments = () => {
+    if (!availableDepartments.length) return;
+    setDepartmentTags((prev) => canonicalDepartmentTags([...prev, ...availableDepartments]));
+    setAvailableSelection([]);
+    setAvailableAnchorIndex(null);
+    setAvailableActiveIndex(0);
   };
 
   const addFilteredDepartments = () => {
-    if (filteredAvailableDepartments.length) {
-      setDepartmentTags((prev) => canonicalDepartmentTags([...prev, ...filteredAvailableDepartments]));
-      setAvailableSelection([]);
+    if (availableSelection.length) {
+      moveSelectedDepartments();
       return;
     }
     const raw = String(departmentQuery || '').trim();
     if (!raw) return;
+    const active = filteredAvailableDepartments[availableActiveIndex] || filteredAvailableDepartments[0];
+    if (active) {
+      addDepartmentTag(active);
+      return;
+    }
     addDepartmentTag(raw);
   };
+
+  const applyRangeSelection = (
+    list: string[],
+    current: string[],
+    clickedIndex: number,
+    anchorIndex: number | null,
+    append: boolean
+  ) => {
+    const from = anchorIndex === null ? clickedIndex : Math.min(anchorIndex, clickedIndex);
+    const to = anchorIndex === null ? clickedIndex : Math.max(anchorIndex, clickedIndex);
+    const range = list.slice(from, to + 1);
+    if (!append) return range;
+    const normalized = new Set(current.map((entry) => entry.toLocaleLowerCase()));
+    const merged = [...current];
+    for (const entry of range) {
+      const folded = entry.toLocaleLowerCase();
+      if (normalized.has(folded)) continue;
+      normalized.add(folded);
+      merged.push(entry);
+    }
+    return merged;
+  };
+
+  const onAvailableRowClick = (entry: string, index: number, event: ReactMouseEvent<HTMLButtonElement>) => {
+    const isAppend = event.ctrlKey || event.metaKey;
+    if (event.shiftKey) {
+      setAvailableSelection((prev) => applyRangeSelection(filteredAvailableDepartments, prev, index, availableAnchorIndex, isAppend));
+      setAvailableActiveIndex(index);
+      if (availableAnchorIndex === null) setAvailableAnchorIndex(index);
+      return;
+    }
+    if (isAppend) {
+      setAvailableSelection((prev) => {
+        const exists = prev.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase());
+        if (exists) return prev.filter((item) => item.toLocaleLowerCase() !== entry.toLocaleLowerCase());
+        return [...prev, entry];
+      });
+      setAvailableAnchorIndex(index);
+      setAvailableActiveIndex(index);
+      return;
+    }
+    setAvailableSelection([entry]);
+    setAvailableAnchorIndex(index);
+    setAvailableActiveIndex(index);
+  };
+
+  const onSelectedRowClick = (entry: string, index: number, event: ReactMouseEvent<HTMLButtonElement>) => {
+    const isAppend = event.ctrlKey || event.metaKey;
+    if (event.shiftKey) {
+      setSelectedSelection((prev) => applyRangeSelection(filteredSelectedDepartments, prev, index, selectedAnchorIndex, isAppend));
+      if (selectedAnchorIndex === null) setSelectedAnchorIndex(index);
+      return;
+    }
+    if (isAppend) {
+      setSelectedSelection((prev) => {
+        const exists = prev.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase());
+        if (exists) return prev.filter((item) => item.toLocaleLowerCase() !== entry.toLocaleLowerCase());
+        return [...prev, entry];
+      });
+      setSelectedAnchorIndex(index);
+      return;
+    }
+    setSelectedSelection([entry]);
+    setSelectedAnchorIndex(index);
+  };
+
+  useEffect(() => {
+    if (!open || !departmentsModalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = String(target?.tagName || '').toLowerCase();
+      const isTyping = tag === 'input' || tag === 'textarea' || !!(target as any)?.isContentEditable;
+      if (!isTyping && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        focusDepartmentSearch(true);
+        return;
+      }
+      if (tag !== 'input') return;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (!filteredAvailableDepartments.length) return;
+        event.preventDefault();
+        const delta = event.key === 'ArrowDown' ? 1 : -1;
+        const nextIndex =
+          ((availableActiveIndex + delta) % filteredAvailableDepartments.length + filteredAvailableDepartments.length) %
+          filteredAvailableDepartments.length;
+        const entry = filteredAvailableDepartments[nextIndex];
+        setAvailableActiveIndex(nextIndex);
+        setAvailableSelection([entry]);
+        setAvailableAnchorIndex(nextIndex);
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        addFilteredDepartments();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    addFilteredDepartments,
+    availableActiveIndex,
+    departmentsModalOpen,
+    filteredAvailableDepartments,
+    focusDepartmentSearch,
+    open
+  ]);
 
   const submit = () => {
     if (!name.trim()) {
@@ -262,7 +509,12 @@ const RoomModal = ({
       showName,
       surfaceSqm: finalSurface,
       notes: finalNotes,
-      logical
+      logical,
+      meetingRoom,
+      noWindows,
+      storageRoom,
+      bathroom,
+      technicalRoom
     });
     if (saved !== false) onClose();
   };
@@ -298,8 +550,13 @@ const RoomModal = ({
 
   return (
     <>
-      <Transition show={open} as={Fragment}>
-      <Dialog as="div" className="relative z-50" onClose={onClose} initialFocus={nameRef}>
+      <Transition show={open && !departmentsModalOpen && !propertiesModalOpen} as={Fragment}>
+      <Dialog
+        as="div"
+        className="relative z-50"
+        onClose={onClose}
+        initialFocus={nameRef}
+      >
         <Transition.Child
           as={Fragment}
           enter="ease-out duration-150"
@@ -434,6 +691,40 @@ const RoomModal = ({
                           </div>
                         </div>
                       ) : null}
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium text-slate-700">
+                              {t({ it: 'Proprietà stanza', en: 'Room properties' })}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {t({
+                                it: 'Nome visibile, room logica, meeting room, tipologia e colori.',
+                                en: 'Show name, logical room, meeting room, room type and colors.'
+                              })}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setPropertiesModalOpen(true)}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            {t({ it: 'Apri proprietà', en: 'Open properties' })}
+                          </button>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                          {showName ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Nome in mappa', en: 'Name on map' })}</span> : null}
+                          {logical ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Room logica', en: 'Logical room' })}</span> : null}
+                          {meetingRoom ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Meeting room', en: 'Meeting room' })}</span> : null}
+                          {noWindows ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Senza finestre', en: 'No windows' })}</span> : null}
+                          {storageRoom ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Ripostiglio', en: 'Storage room' })}</span> : null}
+                          {bathroom ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Bagno', en: 'Bathroom' })}</span> : null}
+                          {technicalRoom ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Locale tecnico', en: 'Technical room' })}</span> : null}
+                          {!showName && !logical && !meetingRoom && !noWindows && !storageRoom && !bathroom && !technicalRoom ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">{t({ it: 'Nessuna opzione attiva', en: 'No active option' })}</span>
+                          ) : null}
+                        </div>
+                      </div>
                       {canCreateWalls && onCreateWalls ? (
                         <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                           <div className="text-xs font-semibold text-slate-600">
@@ -456,43 +747,45 @@ const RoomModal = ({
                           </div>
                         </div>
                       ) : null}
-                      <label className="block text-sm font-medium text-slate-700">
-                        {t({ it: 'Nome stanza', en: 'Room name' })}
-                        <input
-                          ref={nameRef}
-                          value={name}
-                          onChange={(e) => {
-                            setName(e.target.value);
-                            if (nameError) setNameError('');
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              submit();
-                            }
-                          }}
-                          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${
-                            nameError ? 'border-rose-300 ring-rose-200' : 'border-slate-200'
-                          }`}
-                          placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
-                        />
-                        {nameError ? <div className="mt-1 text-xs font-semibold text-rose-600">{nameError}</div> : null}
-                      </label>
-                      <label className="block text-sm font-medium text-slate-700">
-                        {t({ it: 'Nome stanza (EN)', en: 'Room name (EN)' })}
-                        <input
-                          value={nameEn}
-                          onChange={(e) => setNameEn(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                          placeholder={t({ it: 'Es. Meeting room', en: 'e.g. Meeting room' })}
-                        />
-                        <div className="mt-1 text-xs text-slate-500">
-                          {t({
-                            it: 'Opzionale: usato quando il portale è in inglese.',
-                            en: 'Optional: used when the portal language is English.'
-                          })}
-                        </div>
-                      </label>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Nome stanza', en: 'Room name' })}
+                          <input
+                            ref={nameRef}
+                            value={name}
+                            onChange={(e) => {
+                              setName(e.target.value);
+                              if (nameError) setNameError('');
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                submit();
+                              }
+                            }}
+                            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${
+                              nameError ? 'border-rose-300 ring-rose-200' : 'border-slate-200'
+                            }`}
+                            placeholder={t({ it: 'Es. Sala riunioni', en: 'e.g. Meeting room' })}
+                          />
+                          {nameError ? <div className="mt-1 text-xs font-semibold text-rose-600">{nameError}</div> : null}
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Nome stanza (EN)', en: 'Room name (EN)' })}
+                          <input
+                            value={nameEn}
+                            onChange={(e) => setNameEn(e.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                            placeholder={t({ it: 'Es. Meeting room', en: 'e.g. Meeting room' })}
+                          />
+                          <div className="mt-1 text-xs text-slate-500">
+                            {t({
+                              it: 'Opzionale: usato quando il portale è in inglese.',
+                              en: 'Optional: used when the portal language is English.'
+                            })}
+                          </div>
+                        </label>
+                      </div>
                       <label className="block text-sm font-medium text-slate-700">
                         {t({ it: 'Capienza postazioni', en: 'Seat capacity' })}
                         <input
@@ -518,6 +811,26 @@ const RoomModal = ({
                           })}
                         </div>
                       </label>
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-sm font-medium text-slate-700">{t({ it: 'Stato capienza', en: 'Capacity status' })}</div>
+                        <div className="mt-2 flex flex-col items-center gap-3 md:flex-row md:items-center md:justify-between">
+                          <CapacityGauge value={users.length} total={roomCapacityValue} size={170} />
+                          <div className="w-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 md:w-52">
+                            <div className="flex items-center justify-between gap-2">
+                              <span>{t({ it: 'Utenti presenti', en: 'Users present' })}</span>
+                              <span className="font-semibold text-ink">{users.length}</span>
+                            </div>
+                            <div className="mt-1 flex items-center justify-between gap-2">
+                              <span>{t({ it: 'Capienza impostata', en: 'Configured capacity' })}</span>
+                              <span className="font-semibold text-ink">{roomCapacityValue}</span>
+                            </div>
+                            <div className="mt-1 flex items-center justify-between gap-2">
+                              <span>{t({ it: 'Disponibilità', en: 'Availability' })}</span>
+                              <span className="font-semibold text-ink">{Math.max(0, roomCapacityValue - users.length)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                         <div className="flex items-center justify-between gap-2">
                           <div>
@@ -598,75 +911,6 @@ const RoomModal = ({
                           </div>
                         ) : null}
                       </label>
-                      <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={showName}
-                          onChange={(e) => setShowName(e.target.checked)}
-                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
-                        />
-                        <span>
-                          {t({ it: 'Nome visibile in mappa', en: 'Show name on map' })}
-                          <span className="mt-1 block text-xs font-normal text-slate-500">
-                            {t({
-                              it: 'Mostra il nome della stanza direttamente sulla planimetria.',
-                              en: 'Displays the room name directly on the floor plan.'
-                            })}
-                          </span>
-                        </span>
-                      </label>
-                      <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={logical}
-                          onChange={(e) => setLogical(e.target.checked)}
-                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary"
-                        />
-                        <span>
-                          <span className="inline-flex items-center gap-2">
-                            {t({ it: 'Room logica', en: 'Logical room' })}
-                            <span className="group relative inline-flex items-center">
-                              <HelpCircle size={14} className="text-slate-400" />
-                              <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 w-64 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-lg transition group-hover:opacity-100">
-                                {t({
-                                  it: "Logica = gruppo funzionale (es. 'Marketing' su piu stanze). Normale = stanza fisica disegnata (es. 'Sala riunioni 1').",
-                                  en: "Logical = functional group (e.g. 'Marketing' across rooms). Normal = physical room drawn on the plan (e.g. 'Meeting room 1')."
-                                })}
-                              </span>
-                            </span>
-                          </span>
-                          <span className="mt-1 block text-xs font-normal text-slate-500">
-                            {t({
-                              it: "Usa 'logica' per gruppi non legati a una singola stanza fisica (es. Team IT su piu ambienti).",
-                              en: "Use 'logical' for groups not tied to a single physical room (e.g. IT team across rooms)."
-                            })}
-                          </span>
-                        </span>
-                      </label>
-                      <div>
-                        <div className="text-sm font-medium text-slate-700">{t({ it: 'Colore', en: 'Color' })}</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {COLORS.map((c) => {
-                            const active = (color || COLORS[0]).toLowerCase() === c.toLowerCase();
-                            return (
-                              <button
-                                key={c}
-                                type="button"
-                                onClick={() => setColor(c)}
-                                className={`h-9 w-9 rounded-xl border ${active ? 'border-ink ring-2 ring-primary/30' : 'border-slate-200'}`}
-                                style={{ background: c }}
-                                title={c}
-                              />
-                            );
-                          })}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          {t({
-                            it: 'Il colore viene usato per evidenziare l’area della stanza.',
-                            en: 'The color is used to highlight the room area.'
-                          })}
-                        </div>
-                      </div>
                     </div>
                   ) : null}
 
@@ -800,8 +1044,143 @@ const RoomModal = ({
       </Dialog>
       </Transition>
 
-      <Transition show={departmentsModalOpen && open} as={Fragment}>
-        <Dialog as="div" className="relative z-[60]" onClose={() => setDepartmentsModalOpen(false)}>
+      <Transition show={propertiesModalOpen && open} as={Fragment}>
+        <Dialog as="div" className="relative z-[60]" onClose={() => setPropertiesModalOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <div className="modal-header items-center">
+                    <div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Proprietà stanza', en: 'Room properties' })}</Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {t({ it: 'Stanza', en: 'Room' })}: <span className="font-semibold text-slate-700">{name.trim() || initialName || '-'}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setPropertiesModalOpen(false)}
+                      className="icon-button"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <IosSwitch
+                      label={t({ it: 'Nome visibile in mappa', en: 'Show name on map' })}
+                      description={t({
+                        it: 'Mostra il nome della stanza direttamente sulla planimetria.',
+                        en: 'Displays the room name directly on the floor plan.'
+                      })}
+                      checked={showName}
+                      onChange={setShowName}
+                    />
+                    <IosSwitch
+                      label={t({ it: 'Room logica', en: 'Logical room' })}
+                      description={t({
+                        it: "Usa 'logica' per gruppi non legati a una singola stanza fisica.",
+                        en: "Use 'logical' for groups not tied to a single physical room."
+                      })}
+                      checked={logical}
+                      onChange={setLogical}
+                    />
+                    <IosSwitch
+                      label={t({ it: 'Meeting room', en: 'Meeting room' })}
+                      description={t({
+                        it: 'Esclusa dalla ricerca collocazione salvo opzione dedicata.',
+                        en: 'Excluded from placement search unless explicitly enabled.'
+                      })}
+                      checked={meetingRoom}
+                      onChange={setMeetingRoom}
+                    />
+                    <IosSwitch
+                      label={t({ it: 'Stanza senza finestre', en: 'Room without windows' })}
+                      checked={noWindows}
+                      onChange={setNoWindows}
+                    />
+                    <IosSwitch
+                      label={t({ it: 'Ripostiglio', en: 'Storage room' })}
+                      description={t({
+                        it: 'Non occupabile da utenti e utenti reali.',
+                        en: 'Users and real users cannot be placed here.'
+                      })}
+                      checked={storageRoom}
+                      onChange={setStorageRoom}
+                    />
+                    <IosSwitch
+                      label={t({ it: 'Bagno', en: 'Bathroom' })}
+                      description={t({
+                        it: 'Non occupabile da utenti e utenti reali.',
+                        en: 'Users and real users cannot be placed here.'
+                      })}
+                      checked={bathroom}
+                      onChange={setBathroom}
+                    />
+                    <IosSwitch
+                      label={t({ it: 'Locale tecnico', en: 'Technical room' })}
+                      description={t({
+                        it: 'Non occupabile da utenti e utenti reali.',
+                        en: 'Users and real users cannot be placed here.'
+                      })}
+                      checked={technicalRoom}
+                      onChange={setTechnicalRoom}
+                    />
+                  </div>
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3">
+                    <div className="text-sm font-medium text-slate-700">{t({ it: 'Colore stanza', en: 'Room color' })}</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {COLORS.map((c) => {
+                        const active = (color || COLORS[0]).toLowerCase() === c.toLowerCase();
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setColor(c)}
+                            className={`h-9 w-9 rounded-xl border ${active ? 'border-ink ring-2 ring-primary/30' : 'border-slate-200'}`}
+                            style={{ background: c }}
+                            title={c}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPropertiesModalOpen(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={departmentsModalOpen && open} as={Fragment} afterEnter={() => focusDepartmentSearch()}>
+        <Dialog as="div" className="relative z-[60]" onClose={() => setDepartmentsModalOpen(false)} initialFocus={departmentSearchRef}>
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-150"
@@ -826,7 +1205,12 @@ const RoomModal = ({
               >
                 <Dialog.Panel className="w-full max-w-5xl modal-panel">
                   <div className="modal-header items-center">
-                    <Dialog.Title className="modal-title">{t({ it: 'Associa reparti', en: 'Assign departments' })}</Dialog.Title>
+                    <div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Associa reparti', en: 'Assign departments' })}</Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {t({ it: 'Stanza', en: 'Room' })}: <span className="font-semibold text-slate-700">{name.trim() || initialName || '-'}</span>
+                      </div>
+                    </div>
                     <button
                       onClick={() => setDepartmentsModalOpen(false)}
                       className="icon-button"
@@ -837,10 +1221,23 @@ const RoomModal = ({
                   </div>
                   <div className="mt-4">
                     <label className="block text-sm font-medium text-slate-700">
-                      {t({ it: 'Ricerca reparto', en: 'Department search' })}
+                      <span className="inline-flex items-center gap-2">
+                        {t({ it: 'Ricerca reparto', en: 'Department search' })}
+                        <span className="group relative inline-flex items-center">
+                          <HelpCircle size={14} className="text-slate-400" />
+                          <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 w-72 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+                            {t({
+                              it: 'Shortcut: F torna alla ricerca. Frecce Su/Giù scorrono i risultati. Invio aggiunge la selezione. Shift/Ctrl (o Cmd) per selezione multipla.',
+                              en: 'Shortcut: F focuses search. Up/Down arrows move results. Enter adds selection. Shift/Ctrl (or Cmd) for multi-select.'
+                            })}
+                          </span>
+                        </span>
+                      </span>
                       <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
                         <Search size={14} className="text-slate-400" />
                         <input
+                          ref={departmentSearchRef}
+                          autoFocus
                           value={departmentQuery}
                           onChange={(e) => setDepartmentQuery(e.target.value)}
                           onKeyDown={(e) => {
@@ -849,7 +1246,10 @@ const RoomModal = ({
                             addFilteredDepartments();
                           }}
                           className="w-full text-sm outline-none"
-                          placeholder={t({ it: 'Digita per filtrare. Invio aggiunge i risultati ai selezionati.', en: 'Type to filter. Enter adds results to selected.' })}
+                          placeholder={t({
+                            it: 'Digita per filtrare (F = focus, frecce = naviga, Invio = aggiungi selezione).',
+                            en: 'Type to filter (F = focus, arrows = navigate, Enter = add selection).'
+                          })}
                         />
                       </div>
                     </label>
@@ -861,23 +1261,21 @@ const RoomModal = ({
                       </div>
                       <div className="mt-2 max-h-80 space-y-1 overflow-y-auto">
                         {filteredAvailableDepartments.length ? (
-                          filteredAvailableDepartments.map((entry) => {
+                          filteredAvailableDepartments.map((entry, index) => {
                             const selected = availableSelection.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase());
+                            const active = index === availableActiveIndex;
                             return (
                               <button
                                 type="button"
                                 key={entry}
-                                onClick={() =>
-                                  setAvailableSelection((prev) => {
-                                    if (prev.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase())) {
-                                      return prev.filter((item) => item.toLocaleLowerCase() !== entry.toLocaleLowerCase());
-                                    }
-                                    return [...prev, entry];
-                                  })
-                                }
+                                onClick={(event) => onAvailableRowClick(entry, index, event)}
                                 onDoubleClick={() => addDepartmentTag(entry)}
                                 className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm ${
-                                  selected ? 'bg-primary/10 text-primary' : 'hover:bg-slate-50 text-slate-700'
+                                  selected
+                                    ? 'bg-primary/10 text-primary'
+                                    : active
+                                      ? 'bg-slate-100 text-slate-800'
+                                      : 'hover:bg-slate-50 text-slate-700'
                                 }`}
                               >
                                 <span className="truncate">{entry}</span>
@@ -893,6 +1291,14 @@ const RoomModal = ({
                       </div>
                     </div>
                     <div className="flex flex-row items-center justify-center gap-2 md:flex-col">
+                      <button
+                        type="button"
+                        onClick={moveAllAvailableDepartments}
+                        className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Svuota colonna sinistra', en: 'Clear left column' })}
+                      >
+                        <ChevronsRight size={16} />
+                      </button>
                       <button
                         type="button"
                         onClick={moveSelectedDepartments}
@@ -916,20 +1322,13 @@ const RoomModal = ({
                       </div>
                       <div className="mt-2 max-h-80 space-y-1 overflow-y-auto">
                         {filteredSelectedDepartments.length ? (
-                          filteredSelectedDepartments.map((entry) => {
+                          filteredSelectedDepartments.map((entry, index) => {
                             const selected = selectedSelection.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase());
                             return (
                               <button
                                 type="button"
                                 key={entry}
-                                onClick={() =>
-                                  setSelectedSelection((prev) => {
-                                    if (prev.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase())) {
-                                      return prev.filter((item) => item.toLocaleLowerCase() !== entry.toLocaleLowerCase());
-                                    }
-                                    return [...prev, entry];
-                                  })
-                                }
+                                onClick={(event) => onSelectedRowClick(entry, index, event)}
                                 onDoubleClick={() => removeDepartmentTag(entry)}
                                 className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm ${
                                   selected ? 'bg-primary/10 text-primary' : 'hover:bg-slate-50 text-slate-700'
