@@ -50,6 +50,17 @@ const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 const STARTED_AT = Date.now();
 const APP_BRAND = 'Plixmap';
+const DEFAULT_UPDATE_MANIFEST_URL = 'https://www.plixmap.com/updates/latest.json';
+const UPDATE_CHECK_TIMEOUT_MS = 5000;
+const APP_VERSION = (() => {
+  try {
+    const raw = fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    return String(parsed?.version || '').trim() || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 const readEnv = (name) => process.env[name];
 
@@ -59,6 +70,43 @@ const isEnabled = (value, fallback = false) => {
   if (!normalized) return fallback;
   return ['1', 'true', 'yes', 'on'].includes(normalized);
 };
+
+const SEMVER_REGEX = /^\d+\.\d+\.\d+$/;
+const normalizeSemver = (value) => {
+  const raw = String(value || '').trim();
+  return SEMVER_REGEX.test(raw) ? raw : null;
+};
+const compareSemver = (a, b) => {
+  const aParts = String(a || '')
+    .split('.')
+    .map((part) => Number(part));
+  const bParts = String(b || '')
+    .split('.')
+    .map((part) => Number(part));
+  for (let i = 0; i < 3; i += 1) {
+    const left = Number.isFinite(aParts[i]) ? aParts[i] : 0;
+    const right = Number.isFinite(bParts[i]) ? bParts[i] : 0;
+    if (left > right) return 1;
+    if (left < right) return -1;
+  }
+  return 0;
+};
+const normalizeHttpUrl = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+};
+const resolveUpdateManifestUrl = () => {
+  const requested = normalizeHttpUrl(readEnv('PLIXMAP_UPDATE_MANIFEST_URL'));
+  return requested || DEFAULT_UPDATE_MANIFEST_URL;
+};
+const UPDATE_MANIFEST_URL = resolveUpdateManifestUrl();
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 const SERVER_LOG_LEVEL = (() => {
@@ -1710,6 +1758,72 @@ app.post('/api/settings/npm-audit', requireAuth, rateByUser('npm_audit', 10 * 60
       });
     }
   );
+});
+
+app.get('/api/update/latest', requireAuth, rateByUser('update_check', 60 * 1000, 30), async (req, res) => {
+  const checkedAt = Date.now();
+  const basePayload = {
+    ok: false,
+    currentVersion: APP_VERSION,
+    latestVersion: null,
+    minSupportedVersion: null,
+    updateAvailable: false,
+    unsupported: false,
+    mandatory: false,
+    downloadUrl: null,
+    releaseNotesUrl: null,
+    publishedAt: null,
+    checkedAt
+  };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
+  try {
+    const response = await fetch(UPDATE_MANIFEST_URL, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      res.json({ ...basePayload, error: `Manifest not reachable (${response.status})` });
+      return;
+    }
+    const payload = await response.json();
+    const latestVersion = normalizeSemver(payload?.latestVersion);
+    if (!latestVersion) {
+      res.json({ ...basePayload, error: 'Manifest missing valid latestVersion' });
+      return;
+    }
+    const minSupportedVersion = normalizeSemver(payload?.minSupportedVersion);
+    const currentVersion = normalizeSemver(APP_VERSION) || APP_VERSION;
+    const updateAvailable = compareSemver(latestVersion, currentVersion) > 0;
+    const unsupported = !!(minSupportedVersion && compareSemver(currentVersion, minSupportedVersion) < 0);
+    const publishedAt =
+      typeof payload?.publishedAt === 'string' && !Number.isNaN(Date.parse(payload.publishedAt))
+        ? new Date(payload.publishedAt).toISOString()
+        : null;
+    res.json({
+      ok: true,
+      currentVersion,
+      latestVersion,
+      minSupportedVersion: minSupportedVersion || null,
+      updateAvailable,
+      unsupported,
+      mandatory: !!payload?.mandatory || unsupported,
+      downloadUrl: normalizeHttpUrl(payload?.downloadUrl),
+      releaseNotesUrl: normalizeHttpUrl(payload?.releaseNotesUrl),
+      publishedAt,
+      checkedAt
+    });
+  } catch (error) {
+    serverLog('warn', 'update_check_failed', {
+      userId: req.userId || null,
+      requestId: req.requestId || null,
+      error: error?.message || 'unknown_error'
+    });
+    res.json({ ...basePayload, error: 'Unable to check updates right now' });
+  } finally {
+    clearTimeout(timeout);
+  }
 });
 
 app.get('/api/health/live', (_req, res) => {

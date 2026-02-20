@@ -195,6 +195,7 @@ The reset invalidates active sessions and asks for a new strong password.
 - `PLIXMAP_BACKUP_KEEP` (optional, default `20`)
 - `PLIXMAP_CSP_ALLOW_MEDIAPIPE` (optional, default `false`; enables jsdelivr/storage + wasm/eval allowances)
 - `PLIXMAP_CSP_ALLOW_EVAL` (optional, default `false`; enables `unsafe-eval`/`wasm-unsafe-eval`)
+- `PLIXMAP_UPDATE_MANIFEST_URL` (optional, default `https://www.plixmap.com/updates/latest.json`)
 
 ## Storage notes
 - SQLite DB and uploads live in `./data` (or `PLIXMAP_DB_PATH`).
@@ -205,6 +206,7 @@ The reset invalidates active sessions and asks for a new strong password.
 - Create backup from CLI: `npm run backup:db`
 - API liveness probe: `GET /api/health/live`
 - API readiness probe: `GET /api/health/ready`
+- Update check probe (auth required): `GET /api/update/latest`
 
 ## LAN access
 - Dev: `http://<YOUR_PC_IP>:5173`
