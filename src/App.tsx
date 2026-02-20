@@ -21,6 +21,7 @@ const PlanView = lazy(() => import('./components/plan/PlanView'));
 const SettingsView = lazy(() => import('./components/settings/SettingsView'));
 const HelpPanel = lazy(() => import('./components/layout/HelpPanel'));
 const ChangelogPanel = lazy(() => import('./components/layout/ChangelogPanel'));
+const UpdateCheckModal = lazy(() => import('./components/layout/UpdateCheckModal'));
 const ClientChatDock = lazy(() => import('./components/chat/ClientChatDock'));
 
 const AppRouteFallback = () => (
@@ -681,6 +682,11 @@ const App = () => {
       {presentationMode ? null : (
         <Suspense fallback={null}>
           <ChangelogPanel />
+        </Suspense>
+      )}
+      {presentationMode ? null : (
+        <Suspense fallback={null}>
+          <UpdateCheckModal />
         </Suspense>
       )}
       <ClientChatWs />

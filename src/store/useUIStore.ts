@@ -16,6 +16,7 @@ interface UIState {
   highlight?: HighlightState;
   helpOpen: boolean;
   changelogOpen: boolean;
+  updateCheckOpen: boolean;
   sidebarCollapsed: boolean;
   presentationMode: boolean;
   presentationWebcamEnabled: boolean;
@@ -94,6 +95,8 @@ interface UIState {
   closeHelp: () => void;
   openChangelog: () => void;
   closeChangelog: () => void;
+  openUpdateCheck: () => void;
+  closeUpdateCheck: () => void;
   triggerHighlight: (objectId: string, durationMs?: number) => void;
   toggleSidebar: () => void;
   setPresentationMode: (enabled: boolean) => void;
@@ -175,6 +178,7 @@ export const useUIStore = create<UIState>()(
       selectedRevisionByPlan: {},
       helpOpen: false,
       changelogOpen: false,
+      updateCheckOpen: false,
       sidebarCollapsed: false,
       presentationMode: false,
       presentationWebcamEnabled: false,
@@ -254,6 +258,8 @@ export const useUIStore = create<UIState>()(
       closeHelp: () => set({ helpOpen: false }),
       openChangelog: () => set({ changelogOpen: true }),
       closeChangelog: () => set({ changelogOpen: false }),
+      openUpdateCheck: () => set({ updateCheckOpen: true }),
+      closeUpdateCheck: () => set({ updateCheckOpen: false }),
       triggerHighlight: (objectId, durationMs = 3200) =>
         set({ highlight: { objectId, until: Date.now() + durationMs } }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed }))

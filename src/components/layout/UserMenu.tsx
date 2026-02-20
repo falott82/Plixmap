@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Cog, History, Info, LogOut, MessageSquare } from 'lucide-react';
+import { Check, Cog, History, Info, LogOut, MessageSquare, RefreshCw } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
@@ -14,17 +14,19 @@ const UserMenu = () => {
   const location = useLocation();
   const ref = useRef<HTMLDivElement | null>(null);
   const t = useT();
-  const { dirtyByPlan, setPendingPostSaveAction, requestSaveAndNavigate, openHelp, openChangelog, toggleClientChat, chatUnreadSenderIds } = useUIStore((s) => ({
+  const { dirtyByPlan, setPendingPostSaveAction, requestSaveAndNavigate, openHelp, openChangelog, openUpdateCheck, toggleClientChat, chatUnreadSenderIds } = useUIStore((s) => ({
     dirtyByPlan: s.dirtyByPlan,
     setPendingPostSaveAction: s.setPendingPostSaveAction,
     requestSaveAndNavigate: s.requestSaveAndNavigate,
     openHelp: s.openHelp,
     openChangelog: s.openChangelog,
+    openUpdateCheck: s.openUpdateCheck,
     toggleClientChat: (s as any).toggleClientChat,
     chatUnreadSenderIds: (s as any).chatUnreadSenderIds || {}
   }));
   const hasDirtyPlans = useMemo(() => Object.values(dirtyByPlan || {}).some(Boolean), [dirtyByPlan]);
   const unreadSendersCount = useMemo(() => Object.keys(chatUnreadSenderIds || {}).length, [chatUnreadSenderIds]);
+  const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -151,6 +153,19 @@ const UserMenu = () => {
             <History size={16} className="text-slate-500" />
             {t({ it: 'Changelog', en: 'Changelog' })}
           </button>
+          {isSuperAdmin ? (
+            <button
+              onClick={() => {
+                setOpen(false);
+                openUpdateCheck();
+              }}
+              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-ink hover:bg-slate-50"
+              title={t({ it: 'Controlla aggiornamenti', en: 'Check updates' })}
+            >
+              <RefreshCw size={16} className="text-slate-500" />
+              {t({ it: 'Check updates', en: 'Check updates' })}
+            </button>
+          ) : null}
           <button
             onClick={async () => {
               setOpen(false);

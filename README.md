@@ -207,7 +207,7 @@ The reset invalidates active sessions and asks for a new strong password.
 - Create backup from CLI: `npm run backup:db`
 - API liveness probe: `GET /api/health/live`
 - API readiness probe: `GET /api/health/ready`
-- Update check probe (auth required): `GET /api/update/latest`
+- Update check probe (superadmin only): `GET /api/update/latest`
 
 ## LAN access
 - Dev: `http://<YOUR_PC_IP>:5173`

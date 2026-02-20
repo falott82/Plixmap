@@ -1767,6 +1767,10 @@ app.post('/api/settings/npm-audit', requireAuth, rateByUser('npm_audit', 10 * 60
 });
 
 app.get('/api/update/latest', requireAuth, rateByUser('update_check', 60 * 1000, 30), async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
   const checkedAt = Date.now();
   const manifestUrls = [UPDATE_MANIFEST_URL, UPDATE_MANIFEST_FALLBACK_URL].filter((url, idx, list) => !!url && list.indexOf(url) === idx);
   const basePayload = {
