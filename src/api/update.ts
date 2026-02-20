@@ -12,6 +12,7 @@ export interface UpdateStatusResponse {
   releaseNotesUrl: string | null;
   publishedAt: string | null;
   checkedAt: number;
+  source?: string;
   error?: string;
 }
 

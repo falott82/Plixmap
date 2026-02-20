@@ -51,6 +51,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 const STARTED_AT = Date.now();
 const APP_BRAND = 'Plixmap';
 const DEFAULT_UPDATE_MANIFEST_URL = 'https://www.plixmap.com/updates/latest.json';
+const DEFAULT_UPDATE_MANIFEST_FALLBACK_URL = 'https://raw.githubusercontent.com/falott82/plixmap.com/main/updates/latest.json';
 const UPDATE_CHECK_TIMEOUT_MS = 5000;
 const APP_VERSION = (() => {
   try {
@@ -106,7 +107,12 @@ const resolveUpdateManifestUrl = () => {
   const requested = normalizeHttpUrl(readEnv('PLIXMAP_UPDATE_MANIFEST_URL'));
   return requested || DEFAULT_UPDATE_MANIFEST_URL;
 };
+const resolveUpdateManifestFallbackUrl = () => {
+  const requested = normalizeHttpUrl(readEnv('PLIXMAP_UPDATE_MANIFEST_FALLBACK_URL'));
+  return requested || DEFAULT_UPDATE_MANIFEST_FALLBACK_URL;
+};
 const UPDATE_MANIFEST_URL = resolveUpdateManifestUrl();
+const UPDATE_MANIFEST_FALLBACK_URL = resolveUpdateManifestFallbackUrl();
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 const SERVER_LOG_LEVEL = (() => {
@@ -1762,6 +1768,7 @@ app.post('/api/settings/npm-audit', requireAuth, rateByUser('npm_audit', 10 * 60
 
 app.get('/api/update/latest', requireAuth, rateByUser('update_check', 60 * 1000, 30), async (req, res) => {
   const checkedAt = Date.now();
+  const manifestUrls = [UPDATE_MANIFEST_URL, UPDATE_MANIFEST_FALLBACK_URL].filter((url, idx, list) => !!url && list.indexOf(url) === idx);
   const basePayload = {
     ok: false,
     currentVersion: APP_VERSION,
@@ -1778,41 +1785,59 @@ app.get('/api/update/latest', requireAuth, rateByUser('update_check', 60 * 1000,
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
   try {
-    const response = await fetch(UPDATE_MANIFEST_URL, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      res.json({ ...basePayload, error: `Manifest not reachable (${response.status})` });
+    let chosenPayload = null;
+    let chosenSource = '';
+    let lastError = '';
+    for (const manifestUrl of manifestUrls) {
+      try {
+        const response = await fetch(manifestUrl, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          lastError = `Manifest not reachable (${response.status}) from ${manifestUrl}`;
+          continue;
+        }
+        const payload = await response.json();
+        const latestVersion = normalizeSemver(payload?.latestVersion);
+        if (!latestVersion) {
+          lastError = `Manifest missing valid latestVersion at ${manifestUrl}`;
+          continue;
+        }
+        chosenPayload = payload;
+        chosenSource = manifestUrl;
+        break;
+      } catch (error) {
+        lastError = `Manifest request failed for ${manifestUrl}: ${error?.message || 'unknown_error'}`;
+      }
+    }
+    if (!chosenPayload) {
+      res.json({ ...basePayload, error: lastError || 'Manifest not reachable' });
       return;
     }
-    const payload = await response.json();
-    const latestVersion = normalizeSemver(payload?.latestVersion);
-    if (!latestVersion) {
-      res.json({ ...basePayload, error: 'Manifest missing valid latestVersion' });
-      return;
-    }
-    const minSupportedVersion = normalizeSemver(payload?.minSupportedVersion);
+    const latestVersion = normalizeSemver(chosenPayload?.latestVersion);
+    const minSupportedVersion = normalizeSemver(chosenPayload?.minSupportedVersion);
     const currentVersion = normalizeSemver(APP_VERSION) || APP_VERSION;
-    const updateAvailable = compareSemver(latestVersion, currentVersion) > 0;
+    const updateAvailable = !!latestVersion && compareSemver(latestVersion, currentVersion) > 0;
     const unsupported = !!(minSupportedVersion && compareSemver(currentVersion, minSupportedVersion) < 0);
     const publishedAt =
-      typeof payload?.publishedAt === 'string' && !Number.isNaN(Date.parse(payload.publishedAt))
-        ? new Date(payload.publishedAt).toISOString()
+      typeof chosenPayload?.publishedAt === 'string' && !Number.isNaN(Date.parse(chosenPayload.publishedAt))
+        ? new Date(chosenPayload.publishedAt).toISOString()
         : null;
     res.json({
       ok: true,
       currentVersion,
-      latestVersion,
+      latestVersion: latestVersion || null,
       minSupportedVersion: minSupportedVersion || null,
       updateAvailable,
       unsupported,
-      mandatory: !!payload?.mandatory || unsupported,
-      downloadUrl: normalizeHttpUrl(payload?.downloadUrl),
-      releaseNotesUrl: normalizeHttpUrl(payload?.releaseNotesUrl),
+      mandatory: !!chosenPayload?.mandatory || unsupported,
+      downloadUrl: normalizeHttpUrl(chosenPayload?.downloadUrl),
+      releaseNotesUrl: normalizeHttpUrl(chosenPayload?.releaseNotesUrl),
       publishedAt,
-      checkedAt
+      checkedAt,
+      source: chosenSource
     });
   } catch (error) {
     serverLog('warn', 'update_check_failed', {
