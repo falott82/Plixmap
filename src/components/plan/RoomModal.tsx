@@ -297,7 +297,8 @@ const RoomModal = ({
   };
 
   return (
-    <Transition show={open} as={Fragment}>
+    <>
+      <Transition show={open} as={Fragment}>
       <Dialog as="div" className="relative z-50" onClose={onClose} initialFocus={nameRef}>
         <Transition.Child
           as={Fragment}
@@ -797,8 +798,9 @@ const RoomModal = ({
           </div>
         </div>
       </Dialog>
+      </Transition>
 
-      <Transition show={departmentsModalOpen} as={Fragment}>
+      <Transition show={departmentsModalOpen && open} as={Fragment}>
         <Dialog as="div" className="relative z-[60]" onClose={() => setDepartmentsModalOpen(false)}>
           <Transition.Child
             as={Fragment}
@@ -961,7 +963,7 @@ const RoomModal = ({
           </div>
         </Dialog>
       </Transition>
-    </Transition>
+    </>
   );
 };
 
