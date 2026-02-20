@@ -33,6 +33,7 @@ const UpdateCheckModal = () => {
     return 'upToDate';
   })();
   const canDownload = !!updateStatus?.downloadUrl && (updateState === 'available' || updateState === 'mandatory');
+  const showUpdateGuide = updateState === 'available' || updateState === 'mandatory';
 
   const runUpdateCheck = async (opts?: { force?: boolean }) => {
     if (!isSuperAdmin) return;
@@ -236,6 +237,46 @@ const UpdateCheckModal = () => {
                       </a>
                     ) : null}
                   </div>
+
+                  {showUpdateGuide ? (
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                      <div className="text-sm font-semibold text-ink">
+                        {t({ it: 'Come aggiornare in sicurezza', en: 'How to update safely' })}
+                      </div>
+                      <ol className="ml-5 mt-2 list-decimal space-y-1 text-sm text-slate-700">
+                        <li>
+                          {t({
+                            it: 'Esegui prima un backup dal pannello Backup (consigliato).',
+                            en: 'Run a backup first from the Backup panel (recommended).'
+                          })}
+                        </li>
+                        <li>
+                          {t({
+                            it: 'Aggiorna i file dell’app alla release piu recente (Git pull / nuova build).',
+                            en: 'Update app files to the latest release (Git pull / new build).'
+                          })}
+                        </li>
+                        <li>
+                          {t({
+                            it: 'Riavvia il servizio Plixmap.',
+                            en: 'Restart the Plixmap service.'
+                          })}
+                        </li>
+                        <li>
+                          {t({
+                            it: 'Al primo avvio la piattaforma esegue automaticamente l’allineamento del database.',
+                            en: 'On first start, the platform automatically aligns the database.'
+                          })}
+                        </li>
+                      </ol>
+                      <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                        {t({
+                          it: 'Dettaglio tecnico: il database SQLite non viene ricreato. All’avvio il server legge la versione schema corrente e la tabella schema_migrations, poi applica solo le migrazioni mancanti in ordine. Ogni migrazione gira in transazione atomica: se una migrazione fallisce viene fatto rollback, evitando stati parziali. Per questo, anche partendo da versioni piu vecchie, i dati restano preservati e il DB viene portato alla versione attesa.',
+                          en: 'Technical detail: the SQLite database is not recreated. At startup, the server reads the current schema version and the schema_migrations table, then applies only missing migrations in order. Each migration runs in an atomic transaction: if one fails, it is rolled back, preventing partial states. This is why, even from older versions, data remains preserved while the DB is brought to the expected version.'
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </Dialog.Panel>
             </Transition.Child>
