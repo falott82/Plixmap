@@ -8,6 +8,29 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.0.4',
+    date: '2026-02-20',
+    type: 'fix',
+    notes: [
+      n(
+        'Update check: controllo aggiornamenti ora disponibile dal menu utente solo per superadmin, con modale dedicata',
+        'Update check: update verification moved to the user menu and limited to superadmin, with a dedicated modal'
+      ),
+      n(
+        'Sicurezza aggiornamenti: endpoint update limitato lato server al superadmin con fallback manifest remoto se il sito principale non risponde',
+        'Update security: update endpoint is now superadmin-only server-side, with fallback remote manifest when the main website endpoint is unavailable'
+      ),
+      n(
+        'Dipendenze: aggiornato jsPDF a 4.2.0 per mitigare advisory di sicurezza note',
+        'Dependencies: upgraded jsPDF to 4.2.0 to mitigate known security advisories'
+      ),
+      n(
+        'Modale update: aggiunte istruzioni operative e spiegazione tecnica della gestione migrazioni database senza perdita dati',
+        'Update modal: added operational upgrade guidance and technical explanation of database migration safety without data loss'
+      )
+    ]
+  },
+  {
     version: '3.0.3',
     date: '2026-02-19',
     type: 'fix',

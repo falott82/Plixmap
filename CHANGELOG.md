@@ -2,6 +2,14 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.0.4 - 2026-02-20
+- Update check UX moved from `Settings > Account` to the user menu (`Superadmin`) with a dedicated modal.
+- Update checks are now enforced as superadmin-only also on backend API (`GET /api/update/latest` returns `403` for non-superadmin users).
+- Added resilient update manifest resolution with fallback to raw GitHub manifest when `www.plixmap.com/updates/latest.json` is temporarily unavailable.
+- Update modal now includes explicit safe-upgrade guidance and technical notes about migration behavior and data preservation.
+- Security patch: upgraded `jspdf` to `4.2.0` to address known advisories.
+- Release metadata aligned to version `3.0.4`.
+
 ## 3.0.3 - 2026-02-19
 - Documentation refresh: expanded `README.md` screenshot gallery with new workflow captures for workspace, internal map route, escape route modal, and escape route PDF preview.
 - Release alignment: bumped project version references to `3.0.3` across package metadata and release history.

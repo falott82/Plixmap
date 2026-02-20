@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.0.3
+Current version: 3.0.4
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
