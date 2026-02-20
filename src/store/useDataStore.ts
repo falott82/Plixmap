@@ -868,6 +868,9 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
   if (Array.isArray(next.rooms)) {
     next.rooms = next.rooms.map((room: Room) => ({
       ...room,
+      capacity: Number.isFinite(Number((room as any)?.capacity))
+        ? Math.max(0, Math.floor(Number((room as any).capacity)))
+        : 0,
       departmentTags: Array.isArray((room as any)?.departmentTags)
         ? Array.from(
             new Set(

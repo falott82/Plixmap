@@ -2,9 +2,9 @@ import { Client, MapObject, Room } from '../store/types';
 
 const USER_TYPE_SET = new Set(['user', 'real_user', 'generic_user']);
 
-const toFinitePositiveInt = (value: unknown): number | null => {
+const toFiniteNonNegativeInt = (value: unknown): number => {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
   return Math.floor(numeric);
 };
 
@@ -196,13 +196,13 @@ export const buildCapacityMetrics = (clients: Client[]): CapacityMetricsSummary 
           const roomId = String(room?.id || '');
           if (!roomId) continue;
           const roomName = normalizeLabel((room as any)?.nameEn) || normalizeLabel(room.name) || roomId;
-          const capacity = toFinitePositiveInt((room as any)?.capacity);
+          const capacity = toFiniteNonNegativeInt((room as any)?.capacity);
           const surfaceSqm = toFinitePositive((room as any)?.surfaceSqm);
           const stats = roomStats.get(roomId);
           const userCount = Number(stats?.users || 0);
-          const freeSeats = capacity === null ? null : Math.max(capacity - userCount, 0);
-          const overCapacity = capacity !== null && userCount > capacity;
-          const saturationPct = capacity !== null && capacity > 0 ? (userCount / capacity) * 100 : null;
+          const freeSeats = Math.max(capacity - userCount, 0);
+          const overCapacity = userCount > capacity;
+          const saturationPct = capacity > 0 ? (userCount / capacity) * 100 : null;
           const usersPerSqm = surfaceSqm && surfaceSqm > 0 ? userCount / surfaceSqm : null;
           const sqmPerUser = userCount > 0 && surfaceSqm && surfaceSqm > 0 ? surfaceSqm / userCount : null;
           const departmentTags = normalizeTagList([...(room as any)?.departmentTags || [], ...(stats?.departments || [])]);
@@ -233,8 +233,7 @@ export const buildCapacityMetrics = (clients: Client[]): CapacityMetricsSummary 
             departmentTags
           });
 
-          if (capacity !== null) floorCapacity += capacity;
-          else floorUnlimitedRooms += 1;
+          floorCapacity += capacity;
           floorUsers += userCount;
           floorSurface += surfaceSqm || 0;
           if (overCapacity) floorOverCapacity += 1;

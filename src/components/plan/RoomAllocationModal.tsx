@@ -65,9 +65,9 @@ const RoomAllocationModal = ({ open, clients, currentClientId, currentSiteId, on
     return selectedSite.floors
       .flatMap((floor) =>
         floor.rooms.map((room) => {
-          const capacity = room.capacity;
-          const seatsAfterRequest = capacity === null ? null : capacity - room.userCount - requestedCount;
-          if (capacity !== null && seatsAfterRequest !== null && seatsAfterRequest < 0) return null;
+          const capacity = Number.isFinite(Number(room.capacity)) ? Math.max(0, Math.floor(Number(room.capacity))) : 0;
+          const seatsAfterRequest = capacity - room.userCount - requestedCount;
+          if (seatsAfterRequest < 0) return null;
 
           const roomDeptSet = new Set(room.departmentTags.map((entry) => entry.toLocaleLowerCase()));
           const matchesDepartment = !departmentNorm || roomDeptSet.has(departmentNorm);
@@ -77,14 +77,15 @@ const RoomAllocationModal = ({ open, clients, currentClientId, currentSiteId, on
             if (!matchesDepartment && !(includeEmptyRooms && isEmptyRoom) && !includeOtherDepartments) return null;
           }
 
-          const fitScore = capacity === null ? 10_000 : Math.max(0, seatsAfterRequest || 0);
+          const fitScore = Math.max(0, seatsAfterRequest || 0);
           const deptRank = !departmentNorm ? 0 : matchesDepartment ? 0 : isEmptyRoom ? 1 : 2;
 
           return {
             ...room,
             deptRank,
             fitScore,
-            availableSeats: capacity === null ? null : Math.max(0, capacity - room.userCount),
+            availableSeats: Math.max(0, capacity - room.userCount),
+            capacity,
             floorOccupancyPct: floor.occupancyPct,
             matchesDepartment,
             isEmptyRoom
@@ -273,14 +274,11 @@ const RoomAllocationModal = ({ open, clients, currentClientId, currentSiteId, on
                   ) : candidates.length ? (
                     <div className="max-h-[24rem] space-y-2 overflow-auto">
                       {candidates.map((room: any) => {
-                        const saturationLabel =
-                          room.capacity === null
-                            ? t({ it: 'Illimitata', en: 'Unlimited' })
-                            : `${room.userCount}/${room.capacity}`;
-                        const availableLabel =
-                          room.availableSeats === null
-                            ? t({ it: 'Disponibilità illimitata', en: 'Unlimited availability' })
-                            : t({ it: `${room.availableSeats} posti liberi`, en: `${room.availableSeats} seats free` });
+                        const saturationLabel = `${room.userCount}/${room.capacity}`;
+                        const availableLabel = t({
+                          it: `${room.availableSeats} posti liberi`,
+                          en: `${room.availableSeats} seats free`
+                        });
                         return (
                           <button
                             key={`${room.planId}:${room.roomId}`}

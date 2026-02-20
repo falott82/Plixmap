@@ -3964,9 +3964,9 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
             const stats = roomStatsById?.get(room.id);
             const userCount = stats?.userCount || 0;
             const rawCapacity = Number((room as any).capacity);
-            const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
-            const capacityText = capacity ? `${userCount}/${capacity}` : null;
-            const overCapacity = capacity ? userCount > capacity : false;
+            const capacity = Number.isFinite(rawCapacity) ? Math.max(0, Math.floor(rawCapacity)) : 0;
+            const capacityText = `${userCount}/${capacity}`;
+            const overCapacity = userCount > capacity;
             const showName = (room as any).showName !== false;
             const roomName = getLocalizedName(room as any);
             const highlightActive = !!(

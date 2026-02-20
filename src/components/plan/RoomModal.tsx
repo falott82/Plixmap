@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { HelpCircle, Image as ImageIcon, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, HelpCircle, Image as ImageIcon, Search, Trash2, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import RoomShapePreview from './RoomShapePreview';
 import Icon from '../ui/Icon';
@@ -86,7 +86,6 @@ const RoomModal = ({
   const [name, setName] = useState(initialName);
   const [nameEn, setNameEn] = useState(initialNameEn);
   const [departmentTags, setDepartmentTags] = useState<string[]>([]);
-  const [departmentInput, setDepartmentInput] = useState('');
   const [color, setColor] = useState(initialColor);
   const [capacity, setCapacity] = useState('');
   const [showName, setShowName] = useState(initialShowName);
@@ -95,6 +94,11 @@ const RoomModal = ({
   const [labelScale, setLabelScale] = useState(1);
   const [logical, setLogical] = useState(initialLogical);
   const [nameError, setNameError] = useState('');
+  const [capacityError, setCapacityError] = useState('');
+  const [departmentsModalOpen, setDepartmentsModalOpen] = useState(false);
+  const [departmentQuery, setDepartmentQuery] = useState('');
+  const [availableSelection, setAvailableSelection] = useState<string[]>([]);
+  const [selectedSelection, setSelectedSelection] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'objects' | 'photos' | 'notes'>('info');
   const nameRef = useRef<HTMLInputElement | null>(null);
   const roomObjects = objects || [];
@@ -129,9 +133,8 @@ const RoomModal = ({
           })
         : []
     );
-    setDepartmentInput('');
     setColor(initialColor || COLORS[0]);
-    setCapacity(Number.isFinite(initialCapacity) && (initialCapacity || 0) > 0 ? String(initialCapacity) : '');
+    setCapacity(Number.isFinite(initialCapacity) && Number(initialCapacity) >= 0 ? String(Math.floor(Number(initialCapacity))) : '');
     setLabelScale(Number.isFinite(initialLabelScale) && (initialLabelScale || 0) > 0 ? Number(initialLabelScale) : 1);
     setShowName(initialShowName !== false);
     setSurfaceSqm(Number.isFinite(initialSurfaceSqm) && (initialSurfaceSqm || 0) > 0 ? String(initialSurfaceSqm) : '');
@@ -139,6 +142,11 @@ const RoomModal = ({
     setLogical(!!initialLogical);
     setActiveTab('info');
     setNameError('');
+    setCapacityError('');
+    setDepartmentsModalOpen(false);
+    setDepartmentQuery('');
+    setAvailableSelection([]);
+    setSelectedSelection([]);
     window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [
     initialColor,
@@ -152,6 +160,30 @@ const RoomModal = ({
     initialSurfaceSqm,
     open
   ]);
+
+  const canonicalDepartmentTags = (input: string[]) =>
+    Array.from(
+      new Set(
+        (input || [])
+          .map((entry) => String(entry || '').trim())
+          .filter(Boolean)
+          .map((entry) => entry.toLocaleLowerCase())
+      )
+    ).map((folded) => {
+      const found = (input || []).find((entry) => String(entry || '').trim().toLocaleLowerCase() === folded);
+      return String(found || '').trim();
+    });
+
+  const allDepartments = canonicalDepartmentTags([...(departmentOptions || []), ...departmentTags]).sort((a, b) => a.localeCompare(b));
+  const availableDepartments = allDepartments.filter(
+    (entry) => !departmentTags.some((tag) => tag.toLocaleLowerCase() === entry.toLocaleLowerCase())
+  );
+  const filteredAvailableDepartments = availableDepartments.filter((entry) =>
+    String(entry).toLocaleLowerCase().includes(String(departmentQuery || '').trim().toLocaleLowerCase())
+  );
+  const filteredSelectedDepartments = departmentTags.filter((entry) =>
+    String(entry).toLocaleLowerCase().includes(String(departmentQuery || '').trim().toLocaleLowerCase())
+  );
 
   const addDepartmentTag = (raw: string) => {
     const next = String(raw || '').trim();
@@ -168,14 +200,49 @@ const RoomModal = ({
     setDepartmentTags((prev) => prev.filter((entry) => entry.toLocaleLowerCase() !== target));
   };
 
+  const moveSelectedDepartments = () => {
+    const normalized = new Set(availableSelection.map((entry) => String(entry || '').trim().toLocaleLowerCase()).filter(Boolean));
+    if (!normalized.size) return;
+    const toMove = availableDepartments.filter((entry) => normalized.has(entry.toLocaleLowerCase()));
+    if (!toMove.length) return;
+    setDepartmentTags((prev) => canonicalDepartmentTags([...prev, ...toMove]));
+    setAvailableSelection([]);
+  };
+
+  const removeSelectedDepartments = () => {
+    const normalized = new Set(selectedSelection.map((entry) => String(entry || '').trim().toLocaleLowerCase()).filter(Boolean));
+    if (!normalized.size) return;
+    setDepartmentTags((prev) => prev.filter((entry) => !normalized.has(entry.toLocaleLowerCase())));
+    setSelectedSelection([]);
+  };
+
+  const addFilteredDepartments = () => {
+    if (filteredAvailableDepartments.length) {
+      setDepartmentTags((prev) => canonicalDepartmentTags([...prev, ...filteredAvailableDepartments]));
+      setAvailableSelection([]);
+      return;
+    }
+    const raw = String(departmentQuery || '').trim();
+    if (!raw) return;
+    addDepartmentTag(raw);
+  };
+
   const submit = () => {
     if (!name.trim()) {
       setNameError(t({ it: 'Il nome della stanza è obbligatorio.', en: 'Room name is required.' }));
       window.setTimeout(() => nameRef.current?.focus(), 0);
       return;
     }
+    if (!String(capacity).trim()) {
+      setCapacityError(t({ it: 'La capienza è obbligatoria.', en: 'Capacity is required.' }));
+      return;
+    }
     const rawCapacity = Number(capacity);
-    const finalCapacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
+    if (!Number.isFinite(rawCapacity) || rawCapacity < 0) {
+      setCapacityError(t({ it: 'Inserisci una capienza valida (>= 0).', en: 'Enter a valid capacity (>= 0).' }));
+      return;
+    }
+    const finalCapacity = Math.floor(rawCapacity);
     const finalLabelScale = Number.isFinite(labelScale) && labelScale > 0 ? Math.min(2, Math.max(0.2, labelScale)) : 1;
     const rawSurface = Number(surfaceSqm);
     const finalSurface = Number.isFinite(rawSurface) && rawSurface > 0 ? rawSurface : undefined;
@@ -429,44 +496,57 @@ const RoomModal = ({
                         {t({ it: 'Capienza postazioni', en: 'Seat capacity' })}
                         <input
                           value={capacity}
-                          onChange={(e) => setCapacity(e.target.value)}
+                          onChange={(e) => {
+                            setCapacity(e.target.value);
+                            if (capacityError) setCapacityError('');
+                          }}
                           inputMode="numeric"
                           type="number"
-                          min={1}
+                          min={0}
                           step={1}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                          placeholder={t({ it: 'Lascia vuoto per illimitata', en: 'Leave empty for unlimited' })}
+                          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${
+                            capacityError ? 'border-rose-300 ring-rose-200' : 'border-slate-200'
+                          }`}
+                          placeholder={t({ it: 'Es. 12 (obbligatorio)', en: 'e.g. 12 (required)' })}
                         />
+                        {capacityError ? <div className="mt-1 text-xs font-semibold text-rose-600">{capacityError}</div> : null}
                         <div className="mt-1 text-xs text-slate-500">
                           {t({
-                            it: 'La capienza indica il numero massimo di utenti consigliati.',
-                            en: 'Capacity indicates the recommended maximum number of users.'
+                            it: 'Campo obbligatorio. Le stanze senza capienza vengono considerate 0/0.',
+                            en: 'Required field. Rooms without capacity are treated as 0/0.'
                           })}
                         </div>
                       </label>
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
-                        <div className="text-sm font-medium text-slate-700">
-                          {t({ it: 'Reparti associati', en: 'Assigned departments' })}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          {t({
-                            it: 'Puoi associare uno o più reparti (dati importazione utenti reali).',
-                            en: 'You can link one or more departments (from imported real users).'
-                          })}
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium text-slate-700">
+                              {t({ it: 'Reparti associati', en: 'Assigned departments' })}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {t({
+                                it: 'Gestisci l’associazione da una modale dedicata a doppia colonna.',
+                                en: 'Manage assignment from a dedicated dual-column modal.'
+                              })}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setDepartmentsModalOpen(true)}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            {t({ it: 'Gestisci reparti', en: 'Manage departments' })}
+                          </button>
                         </div>
                         {departmentTags.length ? (
-                          <div className="mt-2 flex flex-wrap gap-2">
+                          <div className="mt-2 flex max-h-28 flex-wrap gap-2 overflow-y-auto">
                             {departmentTags.map((tag) => (
-                              <button
+                              <span
                                 key={tag}
-                                type="button"
-                                onClick={() => removeDepartmentTag(tag)}
-                                className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100"
-                                title={t({ it: 'Rimuovi reparto', en: 'Remove department' })}
+                                className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700"
                               >
-                                <span>{tag}</span>
-                                <X size={12} />
-                              </button>
+                                {tag}
+                              </span>
                             ))}
                           </div>
                         ) : (
@@ -474,48 +554,6 @@ const RoomModal = ({
                             {t({ it: 'Nessun reparto associato.', en: 'No department assigned.' })}
                           </div>
                         )}
-                        <div className="mt-2 flex items-center gap-2">
-                          <input
-                            value={departmentInput}
-                            onChange={(e) => setDepartmentInput(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key !== 'Enter' && e.key !== ',') return;
-                              e.preventDefault();
-                              addDepartmentTag(departmentInput);
-                              setDepartmentInput('');
-                            }}
-                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
-                            placeholder={t({ it: 'Aggiungi reparto e premi Invio', en: 'Add department and press Enter' })}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              addDepartmentTag(departmentInput);
-                              setDepartmentInput('');
-                            }}
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                          >
-                            {t({ it: 'Aggiungi', en: 'Add' })}
-                          </button>
-                        </div>
-                        {Array.isArray(departmentOptions) && departmentOptions.length ? (
-                          <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto">
-                            {departmentOptions
-                              .filter((option) => !departmentTags.some((entry) => entry.toLocaleLowerCase() === option.toLocaleLowerCase()))
-                              .slice(0, 30)
-                              .map((option) => (
-                                <button
-                                  key={option}
-                                  type="button"
-                                  onClick={() => addDepartmentTag(option)}
-                                  className="rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                                  title={option}
-                                >
-                                  {option}
-                                </button>
-                              ))}
-                          </div>
-                        ) : null}
                       </div>
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                         <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
@@ -759,6 +797,170 @@ const RoomModal = ({
           </div>
         </div>
       </Dialog>
+
+      <Transition show={departmentsModalOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-[60]" onClose={() => setDepartmentsModalOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-5xl modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">{t({ it: 'Associa reparti', en: 'Assign departments' })}</Dialog.Title>
+                    <button
+                      onClick={() => setDepartmentsModalOpen(false)}
+                      className="icon-button"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Ricerca reparto', en: 'Department search' })}
+                      <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                        <Search size={14} className="text-slate-400" />
+                        <input
+                          value={departmentQuery}
+                          onChange={(e) => setDepartmentQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return;
+                            e.preventDefault();
+                            addFilteredDepartments();
+                          }}
+                          className="w-full text-sm outline-none"
+                          placeholder={t({ it: 'Digita per filtrare. Invio aggiunge i risultati ai selezionati.', en: 'Type to filter. Enter adds results to selected.' })}
+                        />
+                      </div>
+                    </label>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-[1fr,auto,1fr]">
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t({ it: 'Tutti i reparti disponibili', en: 'All available departments' })}
+                      </div>
+                      <div className="mt-2 max-h-80 space-y-1 overflow-y-auto">
+                        {filteredAvailableDepartments.length ? (
+                          filteredAvailableDepartments.map((entry) => {
+                            const selected = availableSelection.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase());
+                            return (
+                              <button
+                                type="button"
+                                key={entry}
+                                onClick={() =>
+                                  setAvailableSelection((prev) => {
+                                    if (prev.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase())) {
+                                      return prev.filter((item) => item.toLocaleLowerCase() !== entry.toLocaleLowerCase());
+                                    }
+                                    return [...prev, entry];
+                                  })
+                                }
+                                onDoubleClick={() => addDepartmentTag(entry)}
+                                className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm ${
+                                  selected ? 'bg-primary/10 text-primary' : 'hover:bg-slate-50 text-slate-700'
+                                }`}
+                              >
+                                <span className="truncate">{entry}</span>
+                                {selected ? <span className="text-[11px] font-semibold">✓</span> : null}
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-500">
+                            {t({ it: 'Nessun reparto disponibile con questo filtro.', en: 'No available department for this filter.' })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-row items-center justify-center gap-2 md:flex-col">
+                      <button
+                        type="button"
+                        onClick={moveSelectedDepartments}
+                        className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Aggiungi selezionati', en: 'Add selected' })}
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={removeSelectedDepartments}
+                        className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Rimuovi selezionati', en: 'Remove selected' })}
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t({ it: 'Reparti selezionati', en: 'Selected departments' })}
+                      </div>
+                      <div className="mt-2 max-h-80 space-y-1 overflow-y-auto">
+                        {filteredSelectedDepartments.length ? (
+                          filteredSelectedDepartments.map((entry) => {
+                            const selected = selectedSelection.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase());
+                            return (
+                              <button
+                                type="button"
+                                key={entry}
+                                onClick={() =>
+                                  setSelectedSelection((prev) => {
+                                    if (prev.some((item) => item.toLocaleLowerCase() === entry.toLocaleLowerCase())) {
+                                      return prev.filter((item) => item.toLocaleLowerCase() !== entry.toLocaleLowerCase());
+                                    }
+                                    return [...prev, entry];
+                                  })
+                                }
+                                onDoubleClick={() => removeDepartmentTag(entry)}
+                                className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm ${
+                                  selected ? 'bg-primary/10 text-primary' : 'hover:bg-slate-50 text-slate-700'
+                                }`}
+                              >
+                                <span className="truncate">{entry}</span>
+                                {selected ? <span className="text-[11px] font-semibold">✓</span> : null}
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-500">
+                            {t({ it: 'Nessun reparto selezionato.', en: 'No selected departments.' })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDepartmentsModalOpen(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
     </Transition>
   );
 };

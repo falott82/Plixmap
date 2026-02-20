@@ -1206,21 +1206,41 @@ const PlanView = ({ planId }: Props) => {
     };
     void (async () => {
       try {
-        const res = await listExternalUsers({ clientId, includeHidden: true, includeMissing: true, limit: 5000 });
         const fromImport = new Map<string, string>();
-        for (const row of res.rows || []) {
-          for (const dept of [row.dept1, row.dept2, row.dept3]) {
-            const normalized = String(dept || '').trim();
-            if (!normalized) continue;
-            const folded = normalized.toLocaleLowerCase();
-            if (!fromImport.has(folded)) fromImport.set(folded, normalized);
+        const pageSize = 1000;
+        let offset = 0;
+        for (let page = 0; page < 50; page += 1) {
+          const res = await listExternalUsers({
+            clientId,
+            includeHidden: true,
+            includeMissing: true,
+            limit: pageSize,
+            offset
+          });
+          const rows = Array.isArray(res.rows) ? res.rows : [];
+          for (const row of rows) {
+            for (const dept of [row.dept1, row.dept2, row.dept3]) {
+              const normalized = String(dept || '').trim();
+              if (!normalized) continue;
+              const folded = normalized.toLocaleLowerCase();
+              if (!fromImport.has(folded)) fromImport.set(folded, normalized);
+            }
           }
+          if (rows.length < pageSize) break;
+          offset += rows.length;
+          if (cancelled) return;
         }
         for (const [key, value] of fallbackSet.entries()) {
           if (!fromImport.has(key)) fromImport.set(key, value);
         }
+        if (!fromImport.size) {
+          applyFallback();
+          return;
+        }
         if (cancelled) return;
-        setRoomDepartmentOptions(Array.from(fromImport.values()).sort((a, b) => a.localeCompare(b)));
+        setRoomDepartmentOptions(
+          Array.from(fromImport.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+        );
       } catch {
         applyFallback();
       }
@@ -8190,25 +8210,23 @@ const PlanView = ({ planId }: Props) => {
       ) {
         const room = (currentPlan?.rooms || []).find((r) => r.id === nextRoomId);
         const rawCapacity = Number(room?.capacity);
-        const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
-        if (capacity) {
-          const userCount = roomStatsById.get(nextRoomId)?.userCount || 0;
-          if (userCount >= capacity) {
-            setCapacityConfirm({
-              mode: 'move',
-              type: currentObj.type,
-              x,
-              y,
-              roomId: nextRoomId,
-              roomName: room?.name || t({ it: 'Stanza', en: 'Room' }),
-              capacity,
-              objectId: currentObj.id,
-              prevX: prev.x,
-              prevY: prev.y,
-              prevRoomId: prev.roomId
-            });
-            return false;
-          }
+        const capacity = Number.isFinite(rawCapacity) ? Math.max(0, Math.floor(rawCapacity)) : 0;
+        const userCount = roomStatsById.get(nextRoomId)?.userCount || 0;
+        if (userCount >= capacity) {
+          setCapacityConfirm({
+            mode: 'move',
+            type: currentObj.type,
+            x,
+            y,
+            roomId: nextRoomId,
+            roomName: room?.name || t({ it: 'Stanza', en: 'Room' }),
+            capacity,
+            objectId: currentObj.id,
+            prevX: prev.x,
+            prevY: prev.y,
+            prevRoomId: prev.roomId
+          });
+          return false;
         }
       }
       moveObject(id, x, y);
@@ -8260,7 +8278,7 @@ const PlanView = ({ planId }: Props) => {
     let prevKey = '';
     for (const room of rooms) {
       const rawCapacity = Number(room.capacity);
-      const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
+      const capacity = Number.isFinite(rawCapacity) ? Math.max(0, Math.floor(rawCapacity)) : 0;
       const userCount = roomStatsById.get(room.id)?.userCount || 0;
       nextState[room.id] = { userCount, capacity };
       nextKey += `|${room.id}:${userCount}:${capacity ?? ''}`;
@@ -8268,7 +8286,6 @@ const PlanView = ({ planId }: Props) => {
         const prev = prevState[room.id];
         prevKey += `|${room.id}:${prev?.userCount ?? ''}:${prev?.capacity ?? ''}`;
       }
-      if (!capacity) continue;
       if (!prevState) continue;
     }
     if (nextKey === prevKey) return;
@@ -9214,8 +9231,7 @@ const PlanView = ({ planId }: Props) => {
       if (!roomId) return false;
       const room = (rooms || []).find((r) => r.id === roomId);
       const rawCapacity = Number(room?.capacity);
-      const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
-      if (!capacity) return false;
+      const capacity = Number.isFinite(rawCapacity) ? Math.max(0, Math.floor(rawCapacity)) : 0;
       const userCount = roomStatsById.get(roomId)?.userCount || 0;
       if (userCount < capacity) return false;
       setCapacityConfirm({
@@ -10882,9 +10898,9 @@ const PlanView = ({ planId }: Props) => {
                           roomStatsById.get(room.id) || ({ items: [], userCount: 0, otherCount: 0, totalCount: 0 } as const);
                         const assigned = stats.items;
                         const rawCapacity = Number(room.capacity);
-                        const capacity = Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.floor(rawCapacity) : undefined;
-                        const capacityLabel = capacity ? `${stats.userCount}/${capacity}` : null;
-                        const overCapacity = capacity ? stats.userCount > capacity : false;
+                        const capacity = Number.isFinite(rawCapacity) ? Math.max(0, Math.floor(rawCapacity)) : 0;
+                        const capacityLabel = `${stats.userCount}/${capacity}`;
+                        const overCapacity = stats.userCount > capacity;
                         return (
                           <div key={room.id} className="rounded-xl border border-slate-100">
                             <div className="flex items-center gap-3 px-4 py-3">
@@ -10903,15 +10919,13 @@ const PlanView = ({ planId }: Props) => {
 	                              >
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="truncate">{room.name}</div>
-                                  {capacityLabel ? (
-                                    <span
-                                      className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                        overCapacity ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-700'
-                                      }`}
-                                    >
-                                      {capacityLabel}
-                                    </span>
-                                  ) : null}
+                                  <span
+                                    className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                      overCapacity ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-700'
+                                    }`}
+                                  >
+                                    {capacityLabel}
+                                  </span>
                                 </div>
                                 <div className="text-xs text-slate-500">
                                   {t({
