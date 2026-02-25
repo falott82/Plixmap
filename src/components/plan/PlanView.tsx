@@ -1347,7 +1347,16 @@ const PlanView = ({ planId }: Props) => {
     return [...byExternalId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
   }, [siteFloorPlans]);
   const roomMeetingEditParticipantCandidates = useMemo(() => {
-    const byExternalId = new Map<string, { externalId: string; fullName: string; email: string | null }>();
+    const byExternalId = new Map<
+      string,
+      {
+        externalId: string;
+        fullName: string;
+        email: string | null;
+        department?: string | null;
+        phone?: string | null;
+      }
+    >();
     for (const row of siteMeetingParticipantCandidates) byExternalId.set(String(row.externalId), row);
     for (const row of roomMeetingEditExternalCandidates) {
       const id = String(row.externalId || '').trim();
@@ -1600,9 +1609,12 @@ const PlanView = ({ planId }: Props) => {
       const timestamps = tsMap || {};
       const clientLogo = String((client as any)?.logoUrl || '').trim() || null;
       const businessPartners = Array.isArray((client as any)?.businessPartners) ? ((client as any).businessPartners as any[]) : [];
-      const businessPartnerByName = new Map(
-        businessPartners.map((bp) => [String(bp?.name || '').trim().toLowerCase(), bp]).filter(([k]) => !!k)
-      );
+      const businessPartnerByName = new Map<string, any>();
+      for (const bp of businessPartners) {
+        const key = String(bp?.name || '').trim().toLowerCase();
+        if (!key) continue;
+        businessPartnerByName.set(key, bp);
+      }
       const participants = Array.isArray(booking?.participants) ? booking.participants : [];
 
       const internal = participants
@@ -1896,26 +1908,6 @@ const PlanView = ({ planId }: Props) => {
       setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, saving: false, error: err?.message || 'Update failed' } : prev));
     }
   }, [push, reloadRoomMeetingsTimeline, roomMeetingsTimelineBookingDetail, roomMeetingsTimelineModal, t]);
-
-  const deleteRoomMeetingBooking = useCallback(async () => {
-    const detail = roomMeetingsTimelineBookingDetail;
-    const modal = roomMeetingsTimelineModal;
-    if (!detail || !modal) return;
-    setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, deleting: true, error: null } : prev));
-    try {
-      await cancelMeeting(detail.booking.id);
-      push(
-        detail.booking.sendEmail
-          ? t({ it: 'Meeting eliminato. Notifica email inviata ai partecipanti.', en: 'Meeting deleted. Email notification sent to participants.' })
-          : t({ it: 'Meeting eliminato.', en: 'Meeting deleted.' }),
-        'success'
-      );
-      closeRoomMeetingBookingDetail();
-      await reloadRoomMeetingsTimeline(modal.roomId, modal.day);
-    } catch (err: any) {
-      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, deleting: false, error: err?.message || 'Delete failed' } : prev));
-    }
-  }, [closeRoomMeetingBookingDetail, push, reloadRoomMeetingsTimeline, roomMeetingsTimelineBookingDetail, roomMeetingsTimelineModal, t]);
 
   const deleteRoomMeetingBookingDirect = useCallback(
     async (booking: MeetingBooking) => {
@@ -4243,7 +4235,6 @@ const PlanView = ({ planId }: Props) => {
     [samePlanSnapshot, toSnapshot]
   );
 
-  const hasUnsavedChanges = useMemo(() => getPlanUnsavedChanges(plan), [getPlanUnsavedChanges, plan]);
   const { canUndo, canRedo } = useMemo(
     () => ({
       canUndo: undoStackRef.current.length > 0,

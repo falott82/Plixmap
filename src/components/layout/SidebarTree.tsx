@@ -154,36 +154,6 @@ const todayIso = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const getMeetingCheckInStats = (booking: MeetingBooking, checkMap: Record<string, true> | undefined) => {
-  const participants = Array.isArray(booking?.participants) ? booking.participants : [];
-  const externalGuestsDetailed = Array.isArray((booking as any)?.externalGuestsDetails) ? ((booking as any).externalGuestsDetails as any[]) : [];
-
-  const internalOnSite = participants.filter((p) => p?.kind === 'real_user' && !p?.remote);
-  const remoteInternal = participants.filter((p) => p?.kind === 'real_user' && !!p?.remote);
-  const externalOnSite = externalGuestsDetailed.filter((g) => !g?.remote);
-  const remoteExternal = externalGuestsDetailed.filter((g) => !!g?.remote);
-
-  const checkedSet = new Set<string>(Object.keys(checkMap || {}));
-  const checkedInternal = internalOnSite.filter((p) => checkedSet.has(`real:${String(p?.externalId || '')}`)).length;
-  const checkedExternal = externalOnSite.filter((g, idx) => {
-    const byName = `guest:${String(g?.name || '').trim().toLowerCase()}:${String(g?.email || '').trim().toLowerCase()}`;
-    const byLegacyIndex = `guest-index:${idx}`;
-    return checkedSet.has(byName) || checkedSet.has(byLegacyIndex);
-  }).length;
-
-  const total = internalOnSite.length + externalOnSite.length;
-  const checked = checkedInternal + checkedExternal;
-  const percent = total > 0 ? Math.round((checked / total) * 100) : 0;
-  return {
-    checked,
-    total,
-    percent,
-    internalOnSite: internalOnSite.length,
-    externalOnSite: externalOnSite.length,
-    remoteParticipants: remoteInternal.length + remoteExternal.length
-  };
-};
-
 const sameTree = (a: TreeClient[], b: TreeClient[]) => {
   if (a === b) return true;
   if (!Array.isArray(a) || !Array.isArray(b)) return false;
@@ -951,9 +921,12 @@ const SidebarTree = () => {
     const businessPartners = Array.isArray((selectedClientForMeetingsFull as any)?.businessPartners)
       ? (((selectedClientForMeetingsFull as any).businessPartners as any[]) || [])
       : [];
-    const businessPartnerByName = new Map(
-      businessPartners.map((bp) => [String(bp?.name || '').trim().toLowerCase(), bp]).filter(([k]) => !!k)
-    );
+    const businessPartnerByName = new Map<string, any>();
+    for (const bp of businessPartners) {
+      const key = String(bp?.name || '').trim().toLowerCase();
+      if (!key) continue;
+      businessPartnerByName.set(key, bp);
+    }
     const participants = Array.isArray(booking?.participants) ? booking.participants : [];
     const internal = participants
       .filter((p: any) => (p?.kind || 'real_user') !== 'manual' && !p?.remote)

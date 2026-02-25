@@ -1134,7 +1134,7 @@ const MeetingManagerModal = ({
         'success'
       );
       if (Array.isArray((result as any)?.warnings)) {
-        for (const warning of (result as any).warnings) push(String(warning), 'warning');
+        for (const warning of (result as any).warnings) push(String(warning), 'info');
       }
       setSubject('');
       setMeetingNotes('');

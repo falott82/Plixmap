@@ -59,7 +59,6 @@ const importUserSearchIndex = (row: SearchableImportUser | SearchablePreviewUser
     .toLowerCase();
 const matchesImportUserQuery = (row: SearchableImportUser | SearchablePreviewUser, query: string) =>
   !query || importUserSearchIndex(row).includes(query);
-const importPreviewStatusRank = (status?: string) => (status === 'new' ? 0 : status === 'update' ? 1 : 2);
 const importPreviewVariationRank = (variation?: string) => (variation === 'remove' ? 0 : variation === 'update' ? 1 : 2);
 
 const CustomImportPanel = (
@@ -147,7 +146,6 @@ const CustomImportPanel = (
   const hasImportedOnce = !!activeSummary?.lastImportAt;
   const hasWebApiConfig = !!activeSummary?.hasConfig;
   const canRunWebApiTest = hasWebApiConfig;
-  const canRunWebApiSync = hasWebApiConfig;
   const canOpenWebApiImportPreview = !!(
     activeClientId &&
     hasWebApiConfig &&
@@ -314,17 +312,6 @@ const CustomImportPanel = (
     });
     return list;
   }, [filteredUsers, usersSortHiddenFirst]);
-
-  const webApiPreviewRemoteFiltered = useMemo(() => {
-    const q = normalizeSearchText(webApiPreviewRightQuery);
-    const base = [...webApiPreviewRemoteRows].sort((a, b) => {
-      const d = importPreviewStatusRank(a.importStatus) - importPreviewStatusRank(b.importStatus);
-      if (d) return d;
-      return comparePeopleByName(a, b);
-    });
-    if (!q) return base;
-    return base.filter((r) => matchesImportUserQuery(r, q));
-  }, [webApiPreviewRightQuery, webApiPreviewRemoteRows]);
 
   const webApiPreviewExistingFiltered = useMemo(() => {
     const q = normalizeSearchText(webApiPreviewLeftQuery);
@@ -568,7 +555,7 @@ const CustomImportPanel = (
               it: 'Import WebAPI completato con possibili duplicati. Apri la lista e gestisci i record.',
               en: 'WebAPI import completed with possible duplicates. Open the list and review records.'
             }),
-            'warning'
+            'info'
           );
         }
       } else {
@@ -716,7 +703,7 @@ const CustomImportPanel = (
             it: 'Import CSV completato con possibili duplicati. Apri la lista e gestisci i record.',
             en: 'CSV import completed with possible duplicates. Open the list and review records.'
           }),
-          'warning'
+          'info'
         );
       }
       if (mode === 'replace') {
@@ -759,7 +746,7 @@ const CustomImportPanel = (
           it: 'Possibile duplicato rilevato (stessa email oppure nome+cognome). Modifica il record esistente o cambia i dati.',
           en: 'Possible duplicate detected (same email or same first+last name). Edit the existing record or change the data.'
         }),
-        'warning'
+        'info'
       );
       return;
     }
@@ -1549,7 +1536,6 @@ const CustomImportPanel = (
                           const variationType = String(r.variationType || '');
                           const isAdd = variationType === 'add';
                           const isUpdate = variationType === 'update';
-                          const isRemove = variationType === 'remove';
                           const tagClass = isAdd ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : isUpdate ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-rose-200 bg-rose-50 text-rose-700';
                           return (
                             <div key={`remote:${r.externalId}`} className="border-t border-slate-100 px-4 py-3 text-sm">
