@@ -13,7 +13,7 @@ import Icon from '../ui/Icon';
 import { useLang, useT } from '../../i18n/useT';
 import { perfMetrics } from '../../utils/perfMetrics';
 import { isDeskType } from './deskTypes';
-import { getRoomSpecialType, isRoomWithoutWindows } from '../../utils/roomProperties';
+import { getRoomSpecialType } from '../../utils/roomProperties';
 import { getWallTypeColor } from '../../utils/wallColors';
 
 interface Props {
@@ -32,6 +32,7 @@ interface Props {
   highlightUntil?: number;
   highlightRoomId?: string;
   highlightRoomUntil?: number;
+  meetingRoomStatusById?: Record<string, { hasMeetingToday?: boolean; inProgress?: boolean; hasFutureToday?: boolean }>;
   roomStatsById?: Map<string, { items: MapObject[]; userCount: number; otherCount: number; totalCount: number }>;
   focusTarget?: { x: number; y: number; zoom?: number; nonce: number };
   pendingType?: MapObjectType | null;
@@ -135,6 +136,8 @@ interface Props {
   onRoomDoorDblClick?: (doorId: string) => void;
   onOpenRoomDetails?: (roomId: string) => void;
   onRoomContextMenu?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
+  onMeetingBadgeContextMenu?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
+  onMeetingBadgeDblClick?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onCorridorContextMenu?: (payload: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => void;
   onCorridorConnectionContextMenu?: (payload: {
     corridorId: string;
@@ -399,6 +402,7 @@ const CanvasStageImpl = (
   highlightUntil,
   highlightRoomId,
   highlightRoomUntil,
+  meetingRoomStatusById = {},
   roomStatsById,
   focusTarget,
   pendingType,
@@ -474,6 +478,7 @@ const CanvasStageImpl = (
   onRoomDoorContextMenu,
   onRoomDoorDblClick,
   onOpenRoomDetails,
+  onMeetingBadgeDblClick,
   onSelectLink,
   onCreateRoom,
   onCreateCorridor,
@@ -3963,26 +3968,31 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
             const kind = (room.kind || (room.points?.length ? 'poly' : 'rect')) as 'rect' | 'poly';
             const baseColor = (room as any).color || '#64748b';
             const roomSpecialType = getRoomSpecialType(room as any);
-            const roomWithoutWindows = isRoomWithoutWindows(room as any);
             const specialPalette =
               roomSpecialType === 'bathroom'
                 ? { fill: '#0ea5e9', stroke: '#0284c7' }
                 : roomSpecialType === 'technical'
                   ? { fill: '#334155', stroke: '#0f172a' }
-                  : roomSpecialType === 'storage'
-                    ? { fill: '#f59e0b', stroke: '#b45309' }
-                    : roomWithoutWindows
-                      ? { fill: '#94a3b8', stroke: '#475569' }
-                      : null;
+                : roomSpecialType === 'storage'
+                  ? { fill: '#f59e0b', stroke: '#b45309' }
+                    : null;
             const fillBaseColor = specialPalette?.fill || baseColor;
             const strokeBaseColor = specialPalette?.stroke || baseColor;
-            const fillOpacity = specialPalette ? 0.17 : 0.08;
+            const baseFillOpacity = specialPalette ? 0.17 : 0.08;
+            const roomFillOpacity = Number.isFinite(Number((room as any)?.fillOpacity))
+              ? Math.max(0.05, Math.min(1, Number((room as any).fillOpacity)))
+              : baseFillOpacity;
             const stats = roomStatsById?.get(room.id);
             const userCount = stats?.userCount || 0;
             const rawCapacity = Number((room as any).capacity);
             const capacity = Number.isFinite(rawCapacity) ? Math.max(0, Math.floor(rawCapacity)) : 0;
             const capacityText = `${userCount}/${capacity}`;
             const overCapacity = userCount > capacity;
+            const meetingStatus = meetingRoomStatusById?.[room.id] || {};
+            const showMeetingBadge = !!(room as any)?.meetingRoom;
+            const meetingInProgress = !!meetingStatus?.inProgress;
+            const meetingHasFutureToday = !!meetingStatus?.hasFutureToday;
+            const meetingHasAnyToday = !!meetingStatus?.hasMeetingToday;
             const showName = (room as any).showName !== false;
             const roomName = getLocalizedName(room as any);
             const highlightActive = !!(
@@ -4080,7 +4090,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
                     }}
                     points={flat}
                     closed
-                    fill={hexToRgba(fillBaseColor, fillOpacity)}
+                    fill={hexToRgba(fillBaseColor, roomFillOpacity)}
                     stroke={stroke}
                     strokeWidth={strokeWidth}
                     dash={[5, 4]}
@@ -4108,6 +4118,95 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
                       labelPosition: (room as any).labelPosition
                     })}
                   </Group>
+                  {showMeetingBadge && labelBounds ? (
+                    <Group
+                      x={labelBounds.x + Math.max(10, labelBounds.width - 12)}
+                      y={labelBounds.y + 12}
+                      onMouseEnter={(e) => {
+                        const cx = Number((e?.evt as any)?.clientX);
+                        const cy = Number((e?.evt as any)?.clientY);
+                        const stage = e?.target?.getStage?.();
+                        const pos = stage?.getPointerPosition?.();
+                        const rect = stage?.container?.()?.getBoundingClientRect?.();
+                        const clientPoint =
+                          Number.isFinite(cx) && Number.isFinite(cy)
+                            ? { clientX: cx, clientY: cy }
+                            : pos && rect
+                              ? { clientX: Number(rect.left + pos.x), clientY: Number(rect.top + pos.y) }
+                              : { clientX: 0, clientY: 0 };
+                        setDoorHoverCard({
+                          clientX: clientPoint.clientX,
+                          clientY: clientPoint.clientY,
+                          content: (
+                            <div className="space-y-0.5">
+                              <div className="font-semibold">
+                              {meetingInProgress
+                                ? t({ it: 'Meeting in corso in questa sala', en: 'Meeting in progress in this room' })
+                                : meetingHasFutureToday
+                                  ? t({ it: 'Meeting futuri oggi in questa sala', en: 'Future meetings today in this room' })
+                                  : meetingHasAnyToday
+                                    ? t({ it: 'Meeting di oggi già conclusi in questa sala', en: 'Today meetings already finished in this room' })
+                                    : t({ it: 'Nessun meeting oggi in questa sala', en: 'No meetings today in this room' })}
+                            </div>
+                              <div>{t({ it: 'Doppio click: timeline sala.', en: 'Double click: room timeline.' })}</div>
+                            </div>
+                          )
+                        });
+                      }}
+                      onMouseMove={(e) => {
+                        const cx = Number((e?.evt as any)?.clientX);
+                        const cy = Number((e?.evt as any)?.clientY);
+                        const stage = e?.target?.getStage?.();
+                        const pos = stage?.getPointerPosition?.();
+                        const rect = stage?.container?.()?.getBoundingClientRect?.();
+                        const clientPoint =
+                          Number.isFinite(cx) && Number.isFinite(cy)
+                            ? { clientX: cx, clientY: cy }
+                            : pos && rect
+                              ? { clientX: Number(rect.left + pos.x), clientY: Number(rect.top + pos.y) }
+                              : { clientX: 0, clientY: 0 };
+                        setDoorHoverCard((prev) =>
+                          prev
+                            ? { ...prev, clientX: clientPoint.clientX, clientY: clientPoint.clientY }
+                            : prev
+                        );
+                      }}
+                      onMouseLeave={() => setDoorHoverCard(null)}
+                      onDblClick={(e) => {
+                        e.cancelBubble = true;
+                        const stage = e.target.getStage();
+                        const pos = stage?.getPointerPosition();
+                        const world = pos ? pointerToWorld(pos.x, pos.y) : { x: labelBounds.x + labelBounds.width, y: labelBounds.y };
+                        onMeetingBadgeDblClick?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY, worldX: world.x, worldY: world.y });
+                      }}
+                      onContextMenu={(e) => {
+                        e.evt.preventDefault();
+                        e.cancelBubble = true;
+                      }}
+                    >
+                      {(() => {
+                        const badgeFill = meetingInProgress
+                          ? '#16a34a'
+                          : meetingHasFutureToday
+                            ? '#f59e0b'
+                            : '#94a3b8';
+                        return (
+                          <>
+                            <Rect x={-9} y={-9} width={18} height={18} cornerRadius={5} fill={badgeFill} stroke="#ffffff" strokeWidth={1.25} shadowColor="rgba(2,6,23,0.35)" shadowBlur={4} shadowOffset={{ x: 0, y: 1 }} />
+                            <Rect x={-9} y={-9} width={18} height={5.2} cornerRadius={5} fill="rgba(255,255,255,0.28)" />
+                            <Circle x={-4.2} y={-5.4} radius={1.05} fill="#ffffff" />
+                            <Circle x={4.2} y={-5.4} radius={1.05} fill="#ffffff" />
+                            <Line points={[-6.2, -1.2, 6.2, -1.2]} stroke="#ffffff" strokeWidth={1.05} opacity={0.95} />
+                            <Line points={[-6, 2.4, 2.2, 2.4]} stroke="#ffffff" strokeWidth={0.95} opacity={0.9} />
+                            <Line points={[-6, 5.4, 0.5, 5.4]} stroke="#ffffff" strokeWidth={0.95} opacity={0.9} lineCap="round" />
+                            <Circle x={4.8} y={4.6} radius={2.35} stroke="#ffffff" strokeWidth={0.95} fill="rgba(255,255,255,0.08)" />
+                            <Line points={[4.8, 4.6, 4.8, 3.4]} stroke="#ffffff" strokeWidth={0.85} lineCap="round" />
+                            <Line points={[4.8, 4.6, 5.7, 5.15]} stroke="#ffffff" strokeWidth={0.85} lineCap="round" />
+                          </>
+                        );
+                      })()}
+                    </Group>
+                  ) : null}
                   {isSelectedRoom && !readOnly && !roomDrawMode
                     ? pts.map((p, idx) => (
                         <Circle
@@ -4236,7 +4335,7 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
                   y={0}
                   width={room.width || 0}
                   height={room.height || 0}
-                  fill={hexToRgba(fillBaseColor, fillOpacity)}
+                  fill={hexToRgba(fillBaseColor, roomFillOpacity)}
                   stroke={stroke}
                   strokeWidth={strokeWidth}
                   dash={[5, 4]}
@@ -4279,6 +4378,97 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
                     labelPosition: (room as any).labelPosition
                   })}
                 </Group>
+                {showMeetingBadge ? (
+                  <Group
+                    x={Math.max(10, Number(room.width || 0) - 12)}
+                    y={12}
+                    onMouseEnter={(e) => {
+                      const cx = Number((e?.evt as any)?.clientX);
+                      const cy = Number((e?.evt as any)?.clientY);
+                      const stage = e?.target?.getStage?.();
+                      const pos = stage?.getPointerPosition?.();
+                      const rect = stage?.container?.()?.getBoundingClientRect?.();
+                      const clientPoint =
+                        Number.isFinite(cx) && Number.isFinite(cy)
+                          ? { clientX: cx, clientY: cy }
+                          : pos && rect
+                            ? { clientX: Number(rect.left + pos.x), clientY: Number(rect.top + pos.y) }
+                            : { clientX: 0, clientY: 0 };
+                      setDoorHoverCard({
+                        clientX: clientPoint.clientX,
+                        clientY: clientPoint.clientY,
+                        content: (
+                          <div className="space-y-0.5">
+                            <div className="font-semibold">
+                              {meetingInProgress
+                                ? t({ it: 'Meeting in corso in questa sala', en: 'Meeting in progress in this room' })
+                                : meetingHasFutureToday
+                                  ? t({ it: 'Meeting futuri oggi in questa sala', en: 'Future meetings today in this room' })
+                                  : meetingHasAnyToday
+                                    ? t({ it: 'Meeting di oggi già conclusi in questa sala', en: 'Today meetings already finished in this room' })
+                                    : t({ it: 'Nessun meeting oggi in questa sala', en: 'No meetings today in this room' })}
+                            </div>
+                            <div>{t({ it: 'Doppio click: timeline sala. Click destro: pianifica meeting.', en: 'Double click: room timeline. Right click: schedule meeting.' })}</div>
+                          </div>
+                        )
+                      });
+                    }}
+                    onMouseMove={(e) => {
+                      const cx = Number((e?.evt as any)?.clientX);
+                      const cy = Number((e?.evt as any)?.clientY);
+                      const stage = e?.target?.getStage?.();
+                      const pos = stage?.getPointerPosition?.();
+                      const rect = stage?.container?.()?.getBoundingClientRect?.();
+                      const clientPoint =
+                        Number.isFinite(cx) && Number.isFinite(cy)
+                          ? { clientX: cx, clientY: cy }
+                          : pos && rect
+                            ? { clientX: Number(rect.left + pos.x), clientY: Number(rect.top + pos.y) }
+                            : { clientX: 0, clientY: 0 };
+                      setDoorHoverCard((prev) =>
+                        prev
+                          ? { ...prev, clientX: clientPoint.clientX, clientY: clientPoint.clientY }
+                          : prev
+                      );
+                    }}
+                    onMouseLeave={() => setDoorHoverCard(null)}
+                    onDblClick={(e) => {
+                      e.cancelBubble = true;
+                      const stage = e.target.getStage();
+                      const pos = stage?.getPointerPosition();
+                      const world = pos
+                        ? pointerToWorld(pos.x, pos.y)
+                        : { x: Number(room.x || 0) + Number(room.width || 0), y: Number(room.y || 0) };
+                      onMeetingBadgeDblClick?.({ id: room.id, clientX: e.evt.clientX, clientY: e.evt.clientY, worldX: world.x, worldY: world.y });
+                    }}
+                    onContextMenu={(e) => {
+                      e.evt.preventDefault();
+                      e.cancelBubble = true;
+                    }}
+                  >
+                    {(() => {
+                      const badgeFill = meetingInProgress
+                        ? '#16a34a'
+                        : meetingHasFutureToday
+                          ? '#f59e0b'
+                          : '#94a3b8';
+                      return (
+                        <>
+                          <Rect x={-9} y={-9} width={18} height={18} cornerRadius={5} fill={badgeFill} stroke="#ffffff" strokeWidth={1.25} shadowColor="rgba(2,6,23,0.35)" shadowBlur={4} shadowOffset={{ x: 0, y: 1 }} />
+                          <Rect x={-9} y={-9} width={18} height={5.2} cornerRadius={5} fill="rgba(255,255,255,0.28)" />
+                          <Circle x={-4.2} y={-5.4} radius={1.05} fill="#ffffff" />
+                          <Circle x={4.2} y={-5.4} radius={1.05} fill="#ffffff" />
+                          <Line points={[-6.2, -1.2, 6.2, -1.2]} stroke="#ffffff" strokeWidth={1.05} opacity={0.95} />
+                          <Line points={[-6, 2.4, 2.2, 2.4]} stroke="#ffffff" strokeWidth={0.95} opacity={0.9} />
+                          <Line points={[-6, 5.4, 0.5, 5.4]} stroke="#ffffff" strokeWidth={0.95} opacity={0.9} lineCap="round" />
+                          <Circle x={4.8} y={4.6} radius={2.35} stroke="#ffffff" strokeWidth={0.95} fill="rgba(255,255,255,0.08)" />
+                          <Line points={[4.8, 4.6, 4.8, 3.4]} stroke="#ffffff" strokeWidth={0.85} lineCap="round" />
+                          <Line points={[4.8, 4.6, 5.7, 5.15]} stroke="#ffffff" strokeWidth={0.85} lineCap="round" />
+                        </>
+                      );
+                    })()}
+                  </Group>
+                ) : null}
               </Group>
             );
           })}
@@ -5527,10 +5717,8 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
                   if ((e.evt as any)?.metaKey || (e.evt as any)?.altKey) return;
                   if (isBoxSelecting()) return;
                   lastContextMenuAtRef.current = Date.now();
-                  // If the object is already within a multi-selection, keep the selection as-is.
-                  // Otherwise select it (single) before opening the context menu.
-                  const multiSelected = (selectedIds || []).length > 1;
-                  if (!isSelected || !multiSelected) {
+                  // Keep current selection if object is already selected; select only when needed.
+                  if (!isSelected) {
                     onSelect(obj.id, { keepContext: true });
                   }
                   if (pendingType || readOnly) return;

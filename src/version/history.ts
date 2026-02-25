@@ -8,7 +8,34 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
-    version: '3.1.2',
+    version: '3.3.0',
+    date: '2026-02-25',
+    type: 'minor',
+    notes: [
+      n(
+        'Meeting room: nuovo flusso completo con timeline “Mostra meetings”, pianificazione da stanza/sede, modifica rapida, supporto multi-giorno e dettaglio check-in',
+        'Meeting room: new end-to-end workflow with “Show meetings” timeline, room/site scheduling, quick edit actions, multi-day support, and check-in details'
+      ),
+      n(
+        'Kiosk mode meeting room: schermata tablet/web dedicata con progress riunione, check-in sincronizzato lato server, pianificazione giornaliera, support/help e logo cliente/business partner',
+        'Meeting room kiosk mode: dedicated tablet/web screen with meeting progress, server-synced check-in, day planning, support/help actions, and client/business-partner branding'
+      ),
+      n(
+        'Notifiche meeting: SMTP per singolo cliente (con email generica portale separata), warning espliciti se il cliente non è configurato e mail meeting con informazioni complete',
+        'Meeting notifications: per-client SMTP (with separate generic portal email), explicit warnings when the client is not configured, and richer meeting emails'
+      ),
+      n(
+        'Import utenti reali per cliente: gestione WebAPI/CSV/Manuale riprogettata con preview differenze (aggiungi/aggiorna/elimina), controlli duplicati e strumenti per utenti mancanti/nascosti',
+        'Per-client real-user import: redesigned WebAPI/CSV/Manual workflow with diff preview (add/update/delete), duplicate checks, and controls for missing/hidden users'
+      ),
+      n(
+        'Allocamento/capienza: rifiniture UX e integrazione meeting-room per migliorare suggerimenti, badge e percorsi operativi senza cambiare la compatibilità del workspace',
+        'Placement/capacity: UX refinements and meeting-room integration to improve suggestions, badges, and workflows without changing workspace compatibility'
+      )
+    ]
+  },
+  {
+    version: '3.2.0',
     date: '2026-02-20',
     type: 'fix',
     notes: [

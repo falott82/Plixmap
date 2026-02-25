@@ -140,12 +140,12 @@ const EmailSettingsPanel = () => {
           <div>
             <div className="flex items-center gap-2 text-sm font-semibold text-ink">
               <Mail size={16} className="text-primary" />
-              {t({ it: 'Email (superadmin)', en: 'Email (superadmin)' })}
+              {t({ it: 'Email generica del portale', en: 'Portal generic email' })}
             </div>
             <div className="mt-1 text-xs text-slate-600">
               {t({
-                it: 'Configura SMTP per inviare email di test. Salva prima di inviare.',
-                en: 'Configure SMTP to send test emails. Save before sending.'
+                it: 'SMTP generico del portale: usato per comunicazioni generali e come fallback quando un cliente non ha un SMTP dedicato. Salva prima di inviare la mail di test.',
+                en: 'Portal generic SMTP: used for general communications and as fallback when a client has no dedicated SMTP. Save before sending a test email.'
               })}
             </div>
           </div>

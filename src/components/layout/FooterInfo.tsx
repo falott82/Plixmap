@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { Github, Heart, Mail, X } from 'lucide-react';
+import { Github, Globe, Heart, Mail, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { releaseHistory } from '../../version/history';
 import { useUIStore } from '../../store/useUIStore';
@@ -44,6 +44,15 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
           <span className="sr-only">{t({ it: 'Supporta il progetto', en: 'Support the project' })}</span>
         </button>
         <a
+          href={PLIXMAP_WEBSITE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-ink"
+          title={t({ it: 'Apri sito web', en: 'Open website' })}
+        >
+          <Globe size={16} />
+        </a>
+        <a
           href="mailto:ottavio.falsini@me.com"
           className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-ink"
           title={t({ it: 'Invia email', en: 'Send email' })}
@@ -85,6 +94,16 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
               <Heart size={14} className="fill-rose-500 text-rose-500" />
               <span className="sr-only">{t({ it: 'Supporta il progetto', en: 'Support the project' })}</span>
             </button>
+            <a
+              href={PLIXMAP_WEBSITE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-slate-700 hover:bg-slate-100 hover:text-ink"
+              title={t({ it: 'Apri sito web', en: 'Open website' })}
+            >
+              <Globe size={14} />
+              <span className="sr-only">Web</span>
+            </a>
             <a
               href="mailto:ottavio.falsini@me.com"
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-slate-700 hover:bg-slate-100 hover:text-ink"

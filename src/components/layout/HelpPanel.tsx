@@ -703,9 +703,6 @@ const HelpPanel = () => {
                         <KeyHint>B</KeyHint> {t({ it: 'mostra o nasconde il background del testo selezionato.', en: 'toggle background for the selected text.' })}
                       </li>
                       <li>
-                        <KeyHint>L</KeyHint> {t({ it: 'collega 2 oggetti selezionati (se compatibili).', en: 'link 2 selected objects (if compatible).' })}
-                      </li>
-                      <li>
                         <KeyHint>N</KeyHint> {t({ it: 'rinomina l’oggetto selezionato (se ha un nome).', en: 'rename the selected object (if it has a name).' })}
                       </li>
                       <li>

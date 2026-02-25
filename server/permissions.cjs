@@ -1,7 +1,7 @@
 const getUserWithPermissions = (db, userId) => {
   const user = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, defaultPlanId, clientOrderJson, paletteFavoritesJson, visibleLayerIdsByPlanJson, mustChangePassword, tokenVersion, avatarUrl, firstName, lastName, phone, email, chatLayoutJson, lastOnlineAt, createdAt, updatedAt FROM users WHERE id = ?'
+      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, canCreateMeetings, canManageBusinessPartners, isMeetingOperator, defaultPlanId, clientOrderJson, paletteFavoritesJson, visibleLayerIdsByPlanJson, mustChangePassword, tokenVersion, avatarUrl, firstName, lastName, phone, email, chatLayoutJson, lastOnlineAt, createdAt, updatedAt FROM users WHERE id = ?'
     )
     .get(userId);
   if (!user) return null;
@@ -83,7 +83,10 @@ const getUserWithPermissions = (db, userId) => {
       isAdmin,
       isSuperAdmin,
       disabled: !!user.disabled,
-      mustChangePassword: !!user.mustChangePassword
+      mustChangePassword: !!user.mustChangePassword,
+      canCreateMeetings: user.canCreateMeetings === undefined ? true : !!user.canCreateMeetings,
+      canManageBusinessPartners: user.canManageBusinessPartners === undefined ? false : !!user.canManageBusinessPartners,
+      isMeetingOperator: user.isMeetingOperator === undefined ? false : !!user.isMeetingOperator
     },
     permissions
   };
@@ -113,8 +116,9 @@ const computePlanAccess = (clients, permissions) => {
   return planIdToAccess;
 };
 
-const filterStateForUser = (clients, planIdToAccess, isAdmin) => {
+const filterStateForUser = (clients, planIdToAccess, isAdmin, options = {}) => {
   if (isAdmin) return clients;
+  const meetingOperatorOnly = !!options?.meetingOperatorOnly;
   const out = [];
   for (const client of clients || []) {
     const nextClient = { ...client, sites: [] };
@@ -123,7 +127,21 @@ const filterStateForUser = (clients, planIdToAccess, isAdmin) => {
       for (const plan of site.floorPlans || []) {
         const access = planIdToAccess.get(plan.id);
         if (!access) continue;
-        nextSite.floorPlans.push(plan);
+        if (!meetingOperatorOnly) {
+          nextSite.floorPlans.push(plan);
+          continue;
+        }
+        const meetingRooms = (plan.rooms || []).filter((room) => !!room?.meetingRoom);
+        if (!meetingRooms.length) continue;
+        nextSite.floorPlans.push({
+          ...plan,
+          rooms: meetingRooms,
+          objects: [],
+          links: [],
+          racks: [],
+          rackItems: [],
+          rackLinks: []
+        });
       }
       if (nextSite.floorPlans.length) nextClient.sites.push(nextSite);
     }

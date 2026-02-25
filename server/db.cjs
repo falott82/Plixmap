@@ -272,6 +272,128 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_dm_chat_messages_toUser_deliveredAt ON dm_chat_messages(toUserId, deliveredAt);
       `);
     }
+  },
+  {
+    version: 12,
+    up: (db) => {
+      const userCols = db.prepare("PRAGMA table_info('users')").all().map((c) => c.name);
+      if (!userCols.includes('canCreateMeetings')) {
+        db.exec('ALTER TABLE users ADD COLUMN canCreateMeetings INTEGER NOT NULL DEFAULT 1');
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS meeting_bookings (
+          id TEXT PRIMARY KEY,
+          status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected','cancelled')),
+          approvalRequired INTEGER NOT NULL DEFAULT 0,
+          clientId TEXT NOT NULL,
+          siteId TEXT NOT NULL,
+          floorPlanId TEXT NOT NULL,
+          roomId TEXT NOT NULL,
+          roomName TEXT NOT NULL DEFAULT '',
+          subject TEXT NOT NULL,
+          requestedSeats INTEGER NOT NULL,
+          roomCapacity INTEGER NOT NULL DEFAULT 0,
+          equipmentJson TEXT NOT NULL DEFAULT '[]',
+          participantsJson TEXT NOT NULL DEFAULT '[]',
+          externalGuests INTEGER NOT NULL DEFAULT 0,
+          externalGuestsJson TEXT NOT NULL DEFAULT '[]',
+          externalGuestsDetailsJson TEXT NOT NULL DEFAULT '[]',
+          sendEmail INTEGER NOT NULL DEFAULT 0,
+          technicalSetup INTEGER NOT NULL DEFAULT 0,
+          technicalEmail TEXT NOT NULL DEFAULT '',
+          notes TEXT NOT NULL DEFAULT '',
+          videoConferenceLink TEXT NOT NULL DEFAULT '',
+          setupBufferBeforeMin INTEGER NOT NULL DEFAULT 0,
+          setupBufferAfterMin INTEGER NOT NULL DEFAULT 0,
+          startAt INTEGER NOT NULL,
+          endAt INTEGER NOT NULL,
+          effectiveStartAt INTEGER NOT NULL,
+          effectiveEndAt INTEGER NOT NULL,
+          multiDayGroupId TEXT,
+          occurrenceDate TEXT NOT NULL DEFAULT '',
+          requestedById TEXT NOT NULL,
+          requestedByUsername TEXT NOT NULL,
+          requestedByEmail TEXT NOT NULL DEFAULT '',
+          requestedAt INTEGER NOT NULL,
+          reviewedAt INTEGER,
+          reviewedById TEXT,
+          reviewedByUsername TEXT,
+          rejectReason TEXT,
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_meeting_bookings_site_time ON meeting_bookings(siteId, effectiveStartAt, effectiveEndAt);
+        CREATE INDEX IF NOT EXISTS idx_meeting_bookings_room_time ON meeting_bookings(roomId, effectiveStartAt, effectiveEndAt);
+        CREATE INDEX IF NOT EXISTS idx_meeting_bookings_status ON meeting_bookings(status, requestedAt);
+        CREATE INDEX IF NOT EXISTS idx_meeting_bookings_requester ON meeting_bookings(requestedById, requestedAt);
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS meeting_audit_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          bookingId TEXT NOT NULL,
+          event TEXT NOT NULL,
+          actorUserId TEXT,
+          actorUsername TEXT,
+          detailsJson TEXT NOT NULL DEFAULT '{}',
+          ts INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_meeting_audit_booking_ts ON meeting_audit_log(bookingId, ts DESC);
+      `);
+    }
+  },
+  {
+    version: 13,
+    up: (db) => {
+      const meetingCols = db.prepare("PRAGMA table_info('meeting_bookings')").all().map((c) => String(c.name || ''));
+      if (!meetingCols.includes('notes')) {
+        db.exec("ALTER TABLE meeting_bookings ADD COLUMN notes TEXT NOT NULL DEFAULT ''");
+      }
+      if (!meetingCols.includes('videoConferenceLink')) {
+        db.exec("ALTER TABLE meeting_bookings ADD COLUMN videoConferenceLink TEXT NOT NULL DEFAULT ''");
+      }
+    }
+  },
+  {
+    version: 14,
+    up: (db) => {
+      const meetingCols = db.prepare("PRAGMA table_info('meeting_bookings')").all().map((c) => String(c.name || ''));
+      if (!meetingCols.includes('externalGuestsDetailsJson')) {
+        db.exec("ALTER TABLE meeting_bookings ADD COLUMN externalGuestsDetailsJson TEXT NOT NULL DEFAULT '[]'");
+      }
+    }
+  },
+  {
+    version: 15,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS meeting_checkins (
+          meetingId TEXT NOT NULL,
+          entryKey TEXT NOT NULL,
+          checked INTEGER NOT NULL DEFAULT 1,
+          updatedAt INTEGER NOT NULL,
+          PRIMARY KEY (meetingId, entryKey)
+        );
+        CREATE INDEX IF NOT EXISTS idx_meeting_checkins_meeting ON meeting_checkins(meetingId, updatedAt DESC);
+      `);
+    }
+  },
+  {
+    version: 16,
+    up: (db) => {
+      const userCols = db.prepare("PRAGMA table_info('users')").all().map((c) => String(c.name || ''));
+      if (!userCols.includes('canManageBusinessPartners')) {
+        db.exec('ALTER TABLE users ADD COLUMN canManageBusinessPartners INTEGER NOT NULL DEFAULT 0');
+      }
+    }
+  },
+  {
+    version: 17,
+    up: (db) => {
+      const userCols = db.prepare("PRAGMA table_info('users')").all().map((c) => String(c.name || ''));
+      if (!userCols.includes('isMeetingOperator')) {
+        db.exec('ALTER TABLE users ADD COLUMN isMeetingOperator INTEGER NOT NULL DEFAULT 0');
+      }
+    }
   }
 ];
 
@@ -365,6 +487,9 @@ const openDb = () => {
       isSuperAdmin INTEGER NOT NULL DEFAULT 0,
       disabled INTEGER NOT NULL DEFAULT 0,
       language TEXT NOT NULL DEFAULT 'it',
+      canCreateMeetings INTEGER NOT NULL DEFAULT 1,
+      canManageBusinessPartners INTEGER NOT NULL DEFAULT 0,
+      isMeetingOperator INTEGER NOT NULL DEFAULT 0,
       defaultPlanId TEXT,
       clientOrderJson TEXT NOT NULL DEFAULT '[]',
       paletteFavoritesJson TEXT NOT NULL DEFAULT '[]',
@@ -525,6 +650,69 @@ const openDb = () => {
       reason TEXT,
       finalPayloadJson TEXT
     );
+    CREATE TABLE IF NOT EXISTS meeting_bookings (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected','cancelled')),
+      approvalRequired INTEGER NOT NULL DEFAULT 0,
+      clientId TEXT NOT NULL,
+      siteId TEXT NOT NULL,
+      floorPlanId TEXT NOT NULL,
+      roomId TEXT NOT NULL,
+      roomName TEXT NOT NULL DEFAULT '',
+      subject TEXT NOT NULL,
+      requestedSeats INTEGER NOT NULL,
+      roomCapacity INTEGER NOT NULL DEFAULT 0,
+      equipmentJson TEXT NOT NULL DEFAULT '[]',
+      participantsJson TEXT NOT NULL DEFAULT '[]',
+      externalGuests INTEGER NOT NULL DEFAULT 0,
+      externalGuestsJson TEXT NOT NULL DEFAULT '[]',
+      externalGuestsDetailsJson TEXT NOT NULL DEFAULT '[]',
+      sendEmail INTEGER NOT NULL DEFAULT 0,
+      technicalSetup INTEGER NOT NULL DEFAULT 0,
+      technicalEmail TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      videoConferenceLink TEXT NOT NULL DEFAULT '',
+      setupBufferBeforeMin INTEGER NOT NULL DEFAULT 0,
+      setupBufferAfterMin INTEGER NOT NULL DEFAULT 0,
+      startAt INTEGER NOT NULL,
+      endAt INTEGER NOT NULL,
+      effectiveStartAt INTEGER NOT NULL,
+      effectiveEndAt INTEGER NOT NULL,
+      multiDayGroupId TEXT,
+      occurrenceDate TEXT NOT NULL DEFAULT '',
+      requestedById TEXT NOT NULL,
+      requestedByUsername TEXT NOT NULL,
+      requestedByEmail TEXT NOT NULL DEFAULT '',
+      requestedAt INTEGER NOT NULL,
+      reviewedAt INTEGER,
+      reviewedById TEXT,
+      reviewedByUsername TEXT,
+      rejectReason TEXT,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_meeting_bookings_site_time ON meeting_bookings(siteId, effectiveStartAt, effectiveEndAt);
+    CREATE INDEX IF NOT EXISTS idx_meeting_bookings_room_time ON meeting_bookings(roomId, effectiveStartAt, effectiveEndAt);
+    CREATE INDEX IF NOT EXISTS idx_meeting_bookings_status ON meeting_bookings(status, requestedAt);
+    CREATE INDEX IF NOT EXISTS idx_meeting_bookings_requester ON meeting_bookings(requestedById, requestedAt);
+    CREATE TABLE IF NOT EXISTS meeting_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bookingId TEXT NOT NULL,
+      event TEXT NOT NULL,
+      actorUserId TEXT,
+      actorUsername TEXT,
+      detailsJson TEXT NOT NULL DEFAULT '{}',
+      ts INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_meeting_audit_booking_ts ON meeting_audit_log(bookingId, ts DESC);
+    CREATE TABLE IF NOT EXISTS meeting_checkins (
+      meetingId TEXT NOT NULL,
+      entryKey TEXT NOT NULL,
+      checked INTEGER NOT NULL DEFAULT 1,
+      updatedAt INTEGER NOT NULL,
+      PRIMARY KEY (meetingId, entryKey)
+    );
+    CREATE INDEX IF NOT EXISTS idx_meeting_checkins_meeting ON meeting_checkins(meetingId, updatedAt DESC);
   `);
 
   runMigrations(db);

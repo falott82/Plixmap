@@ -23,6 +23,7 @@ const HelpPanel = lazy(() => import('./components/layout/HelpPanel'));
 const ChangelogPanel = lazy(() => import('./components/layout/ChangelogPanel'));
 const UpdateCheckModal = lazy(() => import('./components/layout/UpdateCheckModal'));
 const ClientChatDock = lazy(() => import('./components/chat/ClientChatDock'));
+const MeetingRoomDisplayPage = lazy(() => import('./components/meetings/MeetingRoomDisplayPage'));
 
 const AppRouteFallback = () => (
   <div className="flex h-screen items-center justify-center bg-mist text-ink">
@@ -116,7 +117,9 @@ const App = () => {
   const { user, hydrated: authHydrated, hydrate: hydrateAuth } = useAuthStore();
   const location = useLocation();
   const navigate = useNavigate();
-  const hideSidebar = presentationMode || location.pathname.startsWith('/settings');
+  const isMeetingRoomRoute = location.pathname.startsWith('/meetingroom/');
+  const isMeetingOperator = !!(user as any)?.isMeetingOperator && !user?.isAdmin && !user?.isSuperAdmin;
+  const hideSidebar = presentationMode || location.pathname.startsWith('/settings') || isMeetingRoomRoute || isMeetingOperator;
   const perfEnabled = (() => {
     try {
       const queryEnabled = new URLSearchParams(location.search || '').get('perf') === '1';
@@ -188,8 +191,31 @@ const App = () => {
   }, [(user as any)?.language]);
 
   useEffect(() => {
+    if (isMeetingRoomRoute) return;
     hydrateAuth();
-  }, [hydrateAuth]);
+  }, [hydrateAuth, isMeetingRoomRoute]);
+
+  useEffect(() => {
+    if (isMeetingRoomRoute) return;
+    const path = location.pathname || '/';
+    if (!(path === '/' || path === '/index.html')) return;
+    let standalone = false;
+    try {
+      standalone =
+        (typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)')?.matches) ||
+        (typeof navigator !== 'undefined' && (navigator as any).standalone === true);
+    } catch {
+      standalone = false;
+    }
+    if (!standalone) return;
+    try {
+      const kioskRoomId = String(window.localStorage.getItem('plixmap:kiosk:lastRoomId') || '').trim();
+      if (!kioskRoomId) return;
+      navigate(`/meetingroom/${encodeURIComponent(kioskRoomId)}`, { replace: true });
+    } catch {
+      // ignore storage access errors
+    }
+  }, [isMeetingRoomRoute, location.pathname, navigate]);
 
   useEffect(() => {
     // Track camera permission state so we can decide whether to prompt before entering presentation mode.
@@ -622,6 +648,21 @@ const App = () => {
     defaultPlanRedirectAppliedForUserId.current = user.id;
   }, [clients, hydrated, location.pathname, navigate, setSelectedPlan, user]);
 
+  if (isMeetingRoomRoute) {
+    return (
+      <>
+        <Suspense fallback={<AppRouteFallback />}>
+          <Routes>
+            <Route path="/meetingroom/:roomId" element={<MeetingRoomDisplayPage />} />
+            <Route path="*" element={<Navigate to="/meetingroom/unknown" replace />} />
+          </Routes>
+        </Suspense>
+        <ToastStack />
+        <PerfOverlay enabled={perfEnabled} />
+      </>
+    );
+  }
+
   if (!authHydrated || !hydrated) {
     return (
       <div className="flex h-screen items-center justify-center bg-mist text-ink">
@@ -632,12 +673,16 @@ const App = () => {
     );
   }
 
-  if (!user && location.pathname !== '/login') {
+  if (!user && location.pathname !== '/login' && !isMeetingRoomRoute) {
     return <Navigate to="/login" replace />;
   }
 
   if (user && (user as any).mustChangePassword && location.pathname !== '/first-run') {
     return <Navigate to="/first-run" replace />;
+  }
+
+  if (user && isMeetingOperator && location.pathname.startsWith('/settings')) {
+    return <Navigate to="/" replace />;
   }
 
   if (!user && location.pathname === '/login') {
@@ -669,28 +714,29 @@ const App = () => {
             />
             <Route path="/" element={<HomeRoute />} />
             <Route path="/plan/:planId" element={<PlanRoute />} />
-            <Route path="/settings" element={<SettingsView />} />
+            <Route path="/settings" element={isMeetingOperator ? <Navigate to="/" replace /> : <SettingsView />} />
+            <Route path="/meetingroom/:roomId" element={<MeetingRoomDisplayPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
       </main>
-      {presentationMode ? null : (
+      {presentationMode || isMeetingOperator ? null : (
         <Suspense fallback={null}>
           <HelpPanel />
         </Suspense>
       )}
-      {presentationMode ? null : (
+      {presentationMode || isMeetingOperator ? null : (
         <Suspense fallback={null}>
           <ChangelogPanel />
         </Suspense>
       )}
-      {presentationMode ? null : (
+      {presentationMode || isMeetingOperator ? null : (
         <Suspense fallback={null}>
           <UpdateCheckModal />
         </Suspense>
       )}
-      <ClientChatWs />
-      {presentationMode ? null : (
+      {isMeetingOperator ? null : <ClientChatWs />}
+      {presentationMode || isMeetingOperator ? null : (
         <Suspense fallback={null}>
           <ClientChatDock />
         </Suspense>

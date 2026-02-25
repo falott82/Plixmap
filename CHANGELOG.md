@@ -2,6 +2,16 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.3.0 - 2026-02-25
+- Meetings: introduced a full meeting-room management workflow with room timelines (`Mostra meetings`), room-level scheduling, quick actions, and multi-day edit support.
+- Meetings/Kiosk: added kiosk mode for meeting rooms (tablet/web), synchronized check-in (server-side), meeting progress, support/help requests, and room service/equipment visibility.
+- Meetings: check-in reporting is now available in meeting details with timestamps, logos, and participant/guest breakdowns.
+- Meetings: participant management improved with conflict warnings, remote/optional flags, business-partner integration for external guests, and richer edit workflows.
+- SMTP: customer-specific SMTP configuration added (generic portal SMTP remains for generic portal communications); meeting/help notifications now require customer SMTP when client-scoped.
+- Real users import: client-scoped import management reworked (WebAPI / CSV / Manual), WebAPI preview/diff with add/update/remove actions, duplicate detection, and better missing/hidden user handling.
+- Capacity / placement: multiple refinements to placement suggestions, room metadata, and meeting-room aware workflows.
+- UX/stability: several fixes for nested modals, focus management, kiosk fullscreen startup, and meeting timeline rendering/status colors.
+
 ## 3.1.2 - 2026-02-20
 - `Find placement`: opening from client/site context menu now keeps the current floor plan instead of auto-switching to another one.
 - `Capacity dashboard`: removed unstable PDF export and reworked the modal layout to avoid main vertical scrolling.

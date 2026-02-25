@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.1.2
+Current version: 3.3.0
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -12,6 +12,13 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 ## Release notes
 - Full release notes: [`CHANGELOG.md`](CHANGELOG.md)
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
+
+## What's new in 3.3.0
+- Meeting management system extended with room availability timeline, meeting-room scheduler, kiosk mode, check-in tracking, and room-level support/help flows.
+- Kiosk mode now supports synchronized check-in, meeting progress, day planning, business partner logos, and tablet-friendly fullscreen behavior.
+- Customer-scoped SMTP settings for meeting/help notifications (generic portal SMTP remains available for non-customer communications).
+- Customer-scoped real-user import tooling reworked (WebAPI/CSV/Manual) with preview, diff actions (add/update/remove), and duplicate checks.
+- Placement/capacity workflows refined with guided alternatives, richer room metadata, and improved context-menu entry points.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.

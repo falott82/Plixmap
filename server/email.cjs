@@ -1,6 +1,7 @@
 const { encryptString, decryptString } = require('./customImport.cjs');
 
 const SETTINGS_KEY = 'emailConfig';
+const clientSettingsKey = (clientId) => `emailConfig:client:${String(clientId || '').trim()}`;
 
 const safeJson = (obj) => {
   try {
@@ -39,8 +40,7 @@ const normalizeConfig = (raw, fallbackPort) => {
   };
 };
 
-const getConfigRow = (db) =>
-  db.prepare('SELECT value, updatedAt FROM app_settings WHERE key = ?').get(SETTINGS_KEY);
+const getConfigRow = (db, key = SETTINGS_KEY) => db.prepare('SELECT value, updatedAt FROM app_settings WHERE key = ?').get(String(key));
 
 const parseConfigRow = (row) => {
   if (!row?.value) return null;
@@ -51,8 +51,8 @@ const parseConfigRow = (row) => {
   }
 };
 
-const getEmailConfigSafe = (db) => {
-  const row = getConfigRow(db);
+const getEmailConfigSafeByKey = (db, key = SETTINGS_KEY) => {
+  const row = getConfigRow(db, key);
   const parsed = parseConfigRow(row);
   if (!parsed) return null;
   const cfg = normalizeConfig(parsed);
@@ -69,8 +69,8 @@ const getEmailConfigSafe = (db) => {
   };
 };
 
-const getEmailConfig = (db, dataSecret) => {
-  const row = getConfigRow(db);
+const getEmailConfigByKey = (db, dataSecret, key = SETTINGS_KEY) => {
+  const row = getConfigRow(db, key);
   const parsed = parseConfigRow(row);
   if (!parsed) return null;
   const cfg = normalizeConfig(parsed);
@@ -78,9 +78,9 @@ const getEmailConfig = (db, dataSecret) => {
   return { ...cfg, password };
 };
 
-const upsertEmailConfig = (db, dataSecret, payload) => {
+const upsertEmailConfigByKey = (db, dataSecret, payload, key = SETTINGS_KEY) => {
   const now = Date.now();
-  const prevRow = getConfigRow(db);
+  const prevRow = getConfigRow(db, key);
   const prevParsed = parseConfigRow(prevRow) || {};
   const prev = normalizeConfig(prevParsed);
   const next = { ...prev };
@@ -113,9 +113,31 @@ const upsertEmailConfig = (db, dataSecret, payload) => {
   db.prepare(
     `INSERT INTO app_settings (key, value, updatedAt) VALUES (?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET value=excluded.value, updatedAt=excluded.updatedAt`
-  ).run(SETTINGS_KEY, safeJson(next), now);
+  ).run(String(key), safeJson(next), now);
 
-  return getEmailConfigSafe(db);
+  return getEmailConfigSafeByKey(db, key);
+};
+
+const getEmailConfigSafe = (db) => getEmailConfigSafeByKey(db, SETTINGS_KEY);
+const getEmailConfig = (db, dataSecret) => getEmailConfigByKey(db, dataSecret, SETTINGS_KEY);
+const upsertEmailConfig = (db, dataSecret, payload) => upsertEmailConfigByKey(db, dataSecret, payload, SETTINGS_KEY);
+
+const getClientEmailConfigSafe = (db, clientId) => {
+  const cid = String(clientId || '').trim();
+  if (!cid) return null;
+  return getEmailConfigSafeByKey(db, clientSettingsKey(cid));
+};
+
+const getClientEmailConfig = (db, dataSecret, clientId) => {
+  const cid = String(clientId || '').trim();
+  if (!cid) return null;
+  return getEmailConfigByKey(db, dataSecret, clientSettingsKey(cid));
+};
+
+const upsertClientEmailConfig = (db, dataSecret, clientId, payload) => {
+  const cid = String(clientId || '').trim();
+  if (!cid) return null;
+  return upsertEmailConfigByKey(db, dataSecret, payload, clientSettingsKey(cid));
 };
 
 const logEmailAttempt = (db, payload) => {
@@ -172,4 +194,13 @@ const listEmailLogs = (db, params = {}) => {
   return { rows, limit, offset, total };
 };
 
-module.exports = { getEmailConfigSafe, getEmailConfig, upsertEmailConfig, logEmailAttempt, listEmailLogs };
+module.exports = {
+  getEmailConfigSafe,
+  getEmailConfig,
+  upsertEmailConfig,
+  getClientEmailConfigSafe,
+  getClientEmailConfig,
+  upsertClientEmailConfig,
+  logEmailAttempt,
+  listEmailLogs
+};

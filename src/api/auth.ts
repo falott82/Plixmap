@@ -10,6 +10,9 @@ export interface AuthUser {
   username: string;
   isAdmin: boolean;
   isSuperAdmin: boolean;
+  canCreateMeetings?: boolean;
+  canManageBusinessPartners?: boolean;
+  isMeetingOperator?: boolean;
   disabled?: boolean;
   language: 'it' | 'en';
   defaultPlanId?: string | null;
@@ -113,6 +116,9 @@ export interface AdminUserRow {
   username: string;
   isAdmin: boolean;
   isSuperAdmin: boolean;
+  canCreateMeetings?: boolean;
+  canManageBusinessPartners?: boolean;
+  isMeetingOperator?: boolean;
   disabled: boolean;
   lockedUntil?: number | null;
   language: 'it' | 'en';
@@ -141,6 +147,9 @@ export const adminCreateUser = async (payload: {
   email: string;
   language: 'it' | 'en';
   isAdmin: boolean;
+  canCreateMeetings?: boolean;
+  canManageBusinessPartners?: boolean;
+  isMeetingOperator?: boolean;
   permissions: Permission[];
 }): Promise<{ ok: boolean; id: string }> => {
   const normalizedUsername = String(payload.username || '').trim().toLowerCase();
@@ -163,6 +172,9 @@ export const adminUpdateUser = async (
     email: string;
     language: 'it' | 'en';
     isAdmin: boolean;
+    canCreateMeetings?: boolean;
+    canManageBusinessPartners?: boolean;
+    isMeetingOperator?: boolean;
     disabled: boolean;
     permissions: Permission[];
   }

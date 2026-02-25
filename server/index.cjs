@@ -1,5 +1,6 @@
 const fs = require('fs');
 const net = require('net');
+const os = require('os');
 const path = require('path');
 const http = require('http');
 const express = require('express');
@@ -41,10 +42,23 @@ const {
   upsertImportConfig,
   upsertExternalUsers,
   listExternalUsers,
+  getExternalUser,
   setExternalUserHidden,
-  listImportSummary
+  listImportSummary,
+  isManualExternalId,
+  upsertManualExternalUser,
+  deleteManualExternalUser
 } = require('./customImport.cjs');
-const { getEmailConfigSafe, getEmailConfig, upsertEmailConfig, logEmailAttempt, listEmailLogs } = require('./email.cjs');
+const {
+  getEmailConfigSafe,
+  getEmailConfig,
+  upsertEmailConfig,
+  getClientEmailConfigSafe,
+  getClientEmailConfig,
+  upsertClientEmailConfig,
+  logEmailAttempt,
+  listEmailLogs
+} = require('./email.cjs');
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -91,6 +105,77 @@ const compareSemver = (a, b) => {
     if (left < right) return -1;
   }
   return 0;
+};
+
+const getPreferredLanIPv4 = () => {
+  try {
+    const nets = os.networkInterfaces ? os.networkInterfaces() : {};
+    const candidates = [];
+    for (const entries of Object.values(nets || {})) {
+      for (const entry of entries || []) {
+        if (!entry || entry.internal) continue;
+        if (entry.family !== 'IPv4' && entry.family !== 4) continue;
+        const addr = String(entry.address || '').trim();
+        if (!addr) continue;
+        candidates.push(addr);
+      }
+    }
+    const privateFirst =
+      candidates.find((ip) => /^192\.168\./.test(ip)) ||
+      candidates.find((ip) => /^10\./.test(ip)) ||
+      candidates.find((ip) => /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) ||
+      candidates[0];
+    return privateFirst || null;
+  } catch {
+    return null;
+  }
+};
+
+const buildKioskPublicUrl = (req, roomId) => {
+  const encoded = encodeURIComponent(String(roomId || '').trim());
+  const hostHeader = String(req.headers.host || '').trim();
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
+  let hostname = '';
+  let port = '';
+  if (hostHeader.startsWith('[')) {
+    const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(hostHeader);
+    hostname = String(m?.[1] || '');
+    port = String(m?.[2] || '');
+  } else {
+    const [h, p] = hostHeader.split(':');
+    hostname = String(h || '');
+    port = String(p || '');
+  }
+  if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+    hostname = getPreferredLanIPv4() || hostname || 'localhost';
+  }
+  const portPart = port ? `:${port}` : '';
+  return `${proto}://${hostname}${portPart}/meetingroom/${encoded}`;
+};
+const buildKioskPublicUploadUrl = (req, rawUrl) => {
+  const raw = String(rawUrl || '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (!raw.startsWith('/uploads/')) return raw;
+  const hostHeader = String(req.headers.host || '').trim();
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
+  let hostname = '';
+  let port = '';
+  if (hostHeader.startsWith('[')) {
+    const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(hostHeader);
+    hostname = String(m?.[1] || '');
+    port = String(m?.[2] || '');
+  } else {
+    const [h, p] = hostHeader.split(':');
+    hostname = String(h || '');
+    port = String(p || '');
+  }
+  if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+    hostname = getPreferredLanIPv4() || hostname || 'localhost';
+  }
+  const portPart = port ? `:${port}` : '';
+  return `${proto}://${hostname}${portPart}/public-uploads/${raw.slice('/uploads/'.length)}`;
 };
 const normalizeHttpUrl = (value) => {
   const raw = String(value || '').trim();
@@ -327,6 +412,12 @@ app.use('/api', (req, res, next) => {
   const method = String(req.method || '').toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
   if (csrfExemptPaths.has(req.path)) return next();
+  if (
+    req.path.startsWith('/meeting-room/') &&
+    (req.path.endsWith('/checkin-toggle') || req.path.endsWith('/help-request'))
+  ) {
+    return next();
+  }
   const cookies = parseCookies(req.headers.cookie);
   const cookieToken = cookies[CSRF_COOKIE];
   const headerToken = req.headers[CSRF_HEADER];
@@ -424,7 +515,7 @@ const resolveVisibleClientsForRequest = (req, allClients) => {
   const ctx = getUserWithPermissions(db, req.userId);
   if (!ctx) return [];
   const access = computePlanAccess(allClients, ctx.permissions || []);
-  return filterStateForUser(allClients, access, false) || [];
+  return filterStateForUser(allClients, access, false, { meetingOperatorOnly: !!ctx?.user?.isMeetingOperator }) || [];
 };
 
 const buildCapacityTrendSnapshot = (clients, at = Date.now()) => {
@@ -1464,6 +1555,13 @@ const requireAuth = (req, res, next) => {
 };
 
 app.use(
+  '/public-uploads',
+  express.static(uploadsDir, {
+    maxAge: '365d',
+    immutable: true
+  })
+);
+app.use(
   '/uploads',
   requireAuth,
   express.static(uploadsDir, {
@@ -2362,6 +2460,33 @@ const clearImportDataForClient = (cid) => {
   const updatedAt = writeState(payload);
   return { removedUsers, removedObjects, updatedAt };
 };
+
+const deleteImportedExternalUserForClient = (cid, externalId) => {
+  const eid = String(externalId || '').trim();
+  if (!cid || !eid) return { removedUsers: 0, removedObjects: 0, updatedAt: null };
+  const removedUsers = db.prepare('DELETE FROM external_users WHERE clientId = ? AND externalId = ?').run(cid, eid).changes || 0;
+  const state = readState();
+  let removedObjects = 0;
+  const nextClients = (state.clients || []).map((c) => {
+    if (c.id !== cid) return c;
+    return {
+      ...c,
+      sites: (c.sites || []).map((s) => ({
+        ...s,
+        floorPlans: (s.floorPlans || []).map((p) => {
+          const prevCount = (p.objects || []).length;
+          const nextObjects = (p.objects || []).filter((o) => !(o.type === 'real_user' && o.externalClientId === cid && String(o.externalUserId || '') === eid));
+          removedObjects += prevCount - nextObjects.length;
+          return { ...p, objects: nextObjects };
+        })
+      }))
+    };
+  });
+  const payload = { clients: nextClients, objectTypes: state.objectTypes };
+  const updatedAt = writeState(payload);
+  return { removedUsers, removedObjects, updatedAt };
+};
+
 app.get('/api/import/config', requireAuth, (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
@@ -2551,6 +2676,66 @@ app.post('/api/import/csv', requireAuth, rateByUser('import_csv', 60 * 1000, 10)
   res.json({ ok: true, ...sync, cleanup });
 });
 
+const normalizeImportText = (value) => String(value || '').trim();
+
+const mapImportedEmployeeForPreview = (employee) => ({
+  externalId: String(employee?.externalId || ''),
+  firstName: String(employee?.firstName || ''),
+  lastName: String(employee?.lastName || ''),
+  role: String(employee?.role || ''),
+  dept1: String(employee?.dept1 || ''),
+  dept2: String(employee?.dept2 || ''),
+  dept3: String(employee?.dept3 || ''),
+  email: String(employee?.email || ''),
+  mobile: String(employee?.mobile || ''),
+  ext1: String(employee?.ext1 || ''),
+  ext2: String(employee?.ext2 || ''),
+  ext3: String(employee?.ext3 || ''),
+  isExternal: !!employee?.isExternal
+});
+
+const mapExternalUserDbRowForPreview = (row, { includeFlags = false } = {}) => ({
+  externalId: String(row?.externalId || ''),
+  firstName: String(row?.firstName || ''),
+  lastName: String(row?.lastName || ''),
+  role: String(row?.role || ''),
+  dept1: String(row?.dept1 || ''),
+  dept2: String(row?.dept2 || ''),
+  dept3: String(row?.dept3 || ''),
+  email: String(row?.email || ''),
+  mobile: String(row?.mobile || ''),
+  ext1: String(row?.ext1 || ''),
+  ext2: String(row?.ext2 || ''),
+  ext3: String(row?.ext3 || ''),
+  isExternal: Number(row?.isExternal || 0) === 1,
+  ...(includeFlags
+    ? {
+        hidden: Number(row?.hidden || 0) === 1,
+        present: Number(row?.present || 0) === 1,
+        updatedAt: row?.updatedAt || null
+      }
+    : {})
+});
+
+const importedUserChangedAgainstRemote = (previous, remoteUser) => {
+  if (!previous || !remoteUser) return true;
+  return (
+    normalizeImportText(previous.firstName) !== normalizeImportText(remoteUser.firstName) ||
+    normalizeImportText(previous.lastName) !== normalizeImportText(remoteUser.lastName) ||
+    normalizeImportText(previous.role) !== normalizeImportText(remoteUser.role) ||
+    normalizeImportText(previous.dept1) !== normalizeImportText(remoteUser.dept1) ||
+    normalizeImportText(previous.dept2) !== normalizeImportText(remoteUser.dept2) ||
+    normalizeImportText(previous.dept3) !== normalizeImportText(remoteUser.dept3) ||
+    normalizeImportText(previous.email) !== normalizeImportText(remoteUser.email) ||
+    normalizeImportText(previous.mobile) !== normalizeImportText(remoteUser.mobile) ||
+    normalizeImportText(previous.ext1) !== normalizeImportText(remoteUser.ext1) ||
+    normalizeImportText(previous.ext2) !== normalizeImportText(remoteUser.ext2) ||
+    normalizeImportText(previous.ext3) !== normalizeImportText(remoteUser.ext3) ||
+    Number(previous.isExternal || 0) !== (remoteUser.isExternal ? 1 : 0) ||
+    Number(previous.present || 1) !== 1
+  );
+};
+
 app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 10), async (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
@@ -2571,12 +2756,13 @@ app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 1
     res.status(400).json({ ok: false, status: result.status, error: result.error || 'Request failed', contentType: result.contentType || '', rawSnippet: result.rawSnippet || '' });
     return;
   }
-  const remote = result.employees || [];
+  const remote = (result.employees || []).map(mapImportedEmployeeForPreview);
   const existing = db
     .prepare(
       'SELECT externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, present FROM external_users WHERE clientId = ?'
     )
-    .all(cid);
+    .all(cid)
+    .map((row) => mapExternalUserDbRowForPreview(row, { includeFlags: true }));
   const byId = new Map(existing.map((r) => [String(r.externalId), r]));
   const remoteIds = new Set(remote.map((e) => String(e.externalId)));
   let newCount = 0;
@@ -2585,7 +2771,6 @@ app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 1
   const missingSample = [];
   const newSample = [];
 
-  const norm = (s) => String(s || '').trim();
   for (const e of remote) {
     const id = String(e.externalId);
     const prev = byId.get(id);
@@ -2594,20 +2779,7 @@ app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 1
       if (newSample.length < 10) newSample.push({ externalId: id, firstName: e.firstName || '', lastName: e.lastName || '' });
       continue;
     }
-    const changed =
-      norm(prev.firstName) !== norm(e.firstName) ||
-      norm(prev.lastName) !== norm(e.lastName) ||
-      norm(prev.role) !== norm(e.role) ||
-      norm(prev.dept1) !== norm(e.dept1) ||
-      norm(prev.dept2) !== norm(e.dept2) ||
-      norm(prev.dept3) !== norm(e.dept3) ||
-      norm(prev.email) !== norm(e.email) ||
-      norm(prev.mobile) !== norm(e.mobile) ||
-      norm(prev.ext1) !== norm(e.ext1) ||
-      norm(prev.ext2) !== norm(e.ext2) ||
-      norm(prev.ext3) !== norm(e.ext3) ||
-      Number(prev.isExternal || 0) !== (e.isExternal ? 1 : 0) ||
-      Number(prev.present || 1) !== 1;
+    const changed = importedUserChangedAgainstRemote(prev, e);
     if (changed) updatedCount += 1;
   }
   for (const prev of existing) {
@@ -2627,6 +2799,132 @@ app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 1
     newSample,
     missingSample
   });
+});
+
+app.post('/api/import/preview', requireAuth, rateByUser('import_preview', 60 * 1000, 10), async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const cid = String(req.body?.clientId || '').trim();
+  if (!cid) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const cfg = getImportConfig(db, dataSecret, cid);
+  if (!cfg || !cfg.url || !cfg.username) {
+    res.status(400).json({ error: 'Missing import config (url/username)' });
+    return;
+  }
+  const result = await fetchEmployeesFromApi({ ...cfg, allowPrivate: allowPrivateImportForRequest(req) });
+  if (!result.ok) {
+    res.status(400).json({
+      ok: false,
+      status: result.status,
+      error: result.error || 'Request failed',
+      contentType: result.contentType || '',
+      rawSnippet: result.rawSnippet || ''
+    });
+    return;
+  }
+  const remote = (result.employees || []).map(mapImportedEmployeeForPreview);
+  const existing = db
+    .prepare(
+      'SELECT externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present, updatedAt FROM external_users WHERE clientId = ? ORDER BY lastName COLLATE NOCASE, firstName COLLATE NOCASE'
+    )
+    .all(cid)
+    .map((row) => mapExternalUserDbRowForPreview(row, { includeFlags: true }));
+  const existingById = new Map(existing.map((r) => [String(r.externalId), r]));
+  const remoteRows = remote.map((e) => {
+    const prev = existingById.get(String(e.externalId));
+    if (!prev) return { ...e, importStatus: 'new' };
+    const changed = importedUserChangedAgainstRemote(prev, e);
+    return { ...e, importStatus: changed ? 'update' : 'existing' };
+  });
+  res.json({
+    ok: true,
+    clientId: cid,
+    remoteCount: remoteRows.length,
+    existingCount: existing.length,
+    remoteRows,
+    existingRows: existing
+  });
+});
+
+app.post('/api/import/import-one', requireAuth, rateByUser('import_one', 60 * 1000, 30), async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const cid = String(req.body?.clientId || '').trim();
+  const externalId = String(req.body?.externalId || '').trim();
+  if (!cid || !externalId) {
+    res.status(400).json({ error: 'Missing clientId/externalId' });
+    return;
+  }
+  let employee = null;
+  const candidate = req.body?.user && typeof req.body.user === 'object' ? req.body.user : null;
+  if (candidate && String(candidate.externalId || '').trim() === externalId) {
+    employee = mapImportedEmployeeForPreview({ ...candidate, externalId });
+  }
+  if (!employee) {
+    const cfg = getImportConfig(db, dataSecret, cid);
+    if (!cfg || !cfg.url || !cfg.username) {
+      res.status(400).json({ error: 'Missing import config (url/username)' });
+      return;
+    }
+    const result = await fetchEmployeesFromApi({ ...cfg, allowPrivate: allowPrivateImportForRequest(req) });
+    if (!result.ok) {
+      res.status(400).json({
+        ok: false,
+        status: result.status,
+        error: result.error || 'Request failed',
+        contentType: result.contentType || '',
+        rawSnippet: result.rawSnippet || ''
+      });
+      return;
+    }
+    employee = (result.employees || []).find((e) => String(e.externalId) === externalId);
+  }
+  if (!employee) {
+    res.status(404).json({ error: 'Remote user not found' });
+    return;
+  }
+  const sync = upsertExternalUsers(db, cid, [employee], { markMissing: false });
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'import_one',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: cid,
+    ...requestMeta(req),
+    details: { externalId, created: sync.summary?.created || 0, updated: sync.summary?.updated || 0 }
+  });
+  res.json({ ok: true, externalId, summary: sync.summary, created: sync.created || [], updated: sync.updated || [] });
+});
+
+app.post('/api/import/delete-one', requireAuth, rateByUser('import_delete_one', 60 * 1000, 30), (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const cid = String(req.body?.clientId || '').trim();
+  const externalId = String(req.body?.externalId || '').trim();
+  if (!cid || !externalId) {
+    res.status(400).json({ error: 'Missing clientId/externalId' });
+    return;
+  }
+  const cleanup = deleteImportedExternalUserForClient(cid, externalId);
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'import_delete_one',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: cid,
+    ...requestMeta(req),
+    details: { externalId, removedUsers: cleanup.removedUsers, removedObjects: cleanup.removedObjects }
+  });
+  res.json({ ok: true, externalId, ...cleanup });
 });
 
 app.post('/api/import/clear', requireAuth, rateByUser('import_clear', 60 * 1000, 10), (req, res) => {
@@ -2655,7 +2953,7 @@ app.get('/api/external-users', requireAuth, (req, res) => {
     // Non-admin users can list external users only for clients they can see (ro/rw).
     const ctx = getUserWithPermissions(db, req.userId);
     const access = computePlanAccess(serverState.clients, ctx?.permissions || []);
-    const filtered = filterStateForUser(serverState.clients, access, false);
+    const filtered = filterStateForUser(serverState.clients, access, false, { meetingOperatorOnly: !!ctx?.user?.isMeetingOperator });
     const allowed = (filtered || []).some((c) => c.id === clientId);
     if (!allowed) {
       res.status(403).json({ error: 'Forbidden' });
@@ -2701,6 +2999,125 @@ app.post('/api/external-users/hide', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/external-users/manual', requireAuth, rateByUser('external_user_manual_create', 60 * 1000, 30), (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const { clientId, user } = req.body || {};
+  const cid = String(clientId || '').trim();
+  if (!cid) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  try {
+    const row = upsertManualExternalUser(db, cid, user || {});
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'external_user_manual_create',
+      userId: req.userId,
+      scopeType: 'client',
+      scopeId: cid,
+      ...requestMeta(req),
+      details: { externalId: row?.externalId, name: `${row?.firstName || ''} ${row?.lastName || ''}`.trim() }
+    });
+    res.json({ ok: true, row });
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      res.status(400).json({ error: err.message || 'Invalid payload' });
+      return;
+    }
+    if (String(err?.message || '').toLowerCase().includes('unique')) {
+      res.status(409).json({ error: 'Duplicate externalId for client' });
+      return;
+    }
+    res.status(500).json({ error: 'Unable to create manual user' });
+  }
+});
+
+app.put('/api/external-users/manual', requireAuth, rateByUser('external_user_manual_update', 60 * 1000, 60), (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const { clientId, externalId, user } = req.body || {};
+  const cid = String(clientId || '').trim();
+  const eid = String(externalId || '').trim();
+  if (!cid || !eid) {
+    res.status(400).json({ error: 'Missing clientId/externalId' });
+    return;
+  }
+  if (!isManualExternalId(eid)) {
+    res.status(400).json({ error: 'Only manual users can be updated' });
+    return;
+  }
+  try {
+    const row = upsertManualExternalUser(db, cid, { ...(user || {}), externalId: eid }, { externalId: eid });
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'external_user_manual_update',
+      userId: req.userId,
+      scopeType: 'client',
+      scopeId: cid,
+      ...requestMeta(req),
+      details: { externalId: eid }
+    });
+    res.json({ ok: true, row });
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      res.status(400).json({ error: err.message || 'Invalid payload' });
+      return;
+    }
+    if (err?.code === 'NOT_FOUND') {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    if (String(err?.message || '').toLowerCase().includes('unique')) {
+      res.status(409).json({ error: 'Duplicate externalId for client' });
+      return;
+    }
+    res.status(500).json({ error: 'Unable to update manual user' });
+  }
+});
+
+app.delete('/api/external-users/manual', requireAuth, rateByUser('external_user_manual_delete', 60 * 1000, 60), (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const { clientId, externalId } = req.body || {};
+  const cid = String(clientId || '').trim();
+  const eid = String(externalId || '').trim();
+  if (!cid || !eid) {
+    res.status(400).json({ error: 'Missing clientId/externalId' });
+    return;
+  }
+  if (!isManualExternalId(eid)) {
+    res.status(400).json({ error: 'Only manual users can be deleted' });
+    return;
+  }
+  try {
+    const existing = getExternalUser(db, cid, eid);
+    if (!existing) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    const result = deleteManualExternalUser(db, cid, eid);
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'external_user_manual_delete',
+      userId: req.userId,
+      scopeType: 'client',
+      scopeId: cid,
+      ...requestMeta(req),
+      details: { externalId: eid }
+    });
+    res.json({ ok: true, removed: result.removed || 0 });
+  } catch {
+    res.status(500).json({ error: 'Unable to delete manual user' });
+  }
+});
+
 app.put('/api/settings/audit', requireAuth, (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
@@ -2718,6 +3135,36 @@ app.get('/api/settings/email', requireAuth, (req, res) => {
     return;
   }
   res.json({ config: getEmailConfigSafe(db) });
+});
+
+app.get('/api/clients/:clientId/email-settings', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const clientId = String(req.params.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  res.json({ config: getClientEmailConfigSafe(db, clientId) });
+});
+
+app.get('/api/clients/email-settings-summary', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const state = readState();
+  const clients = Array.isArray(state?.clients) ? state.clients : [];
+  const byClientId = {};
+  for (const client of clients) {
+    const cid = String(client?.id || '').trim();
+    if (!cid) continue;
+    const cfg = getClientEmailConfigSafe(db, cid);
+    byClientId[cid] = !!(cfg && String(cfg.host || '').trim());
+  }
+  res.json({ byClientId });
 });
 
 app.put('/api/settings/email', requireAuth, (req, res) => {
@@ -2741,6 +3188,40 @@ app.put('/api/settings/email', requireAuth, (req, res) => {
     event: 'email_settings_update',
     userId: req.userId,
     username: req.username,
+    ...requestMeta(req),
+    details: { host: updated?.host || null, port: updated?.port || null, securityMode: updated?.securityMode || null }
+  });
+  res.json({ ok: true, config: updated });
+});
+
+app.put('/api/clients/:clientId/email-settings', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const clientId = String(req.params.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  const payload = req.body || {};
+  const updated = upsertClientEmailConfig(db, dataSecret, clientId, {
+    host: payload.host,
+    port: payload.port,
+    secure: payload.secure,
+    securityMode: payload.securityMode,
+    username: payload.username,
+    password: payload.password,
+    fromName: payload.fromName,
+    fromEmail: payload.fromEmail
+  });
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'client_email_settings_update',
+    userId: req.userId,
+    username: req.username,
+    scopeType: 'client',
+    scopeId: clientId,
     ...requestMeta(req),
     details: { host: updated?.host || null, port: updated?.port || null, securityMode: updated?.securityMode || null }
   });
@@ -2831,6 +3312,63 @@ app.post('/api/settings/email/test', requireAuth, rateByUser('email_test', 5 * 6
   }
 });
 
+app.post('/api/clients/:clientId/email-settings/test', requireAuth, rateByUser('client_email_test', 5 * 60 * 1000, 10), async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const clientId = String(req.params.clientId || '').trim();
+  const recipient = String(req.body?.recipient || '').trim();
+  const subjectInput = String(req.body?.subject || '').trim();
+  if (!clientId || !recipient) {
+    res.status(400).json({ error: 'Missing parameters' });
+    return;
+  }
+  const state = readState();
+  const clientName =
+    (state.clients || []).find((c) => String(c?.id || '') === clientId)?.shortName ||
+    (state.clients || []).find((c) => String(c?.id || '') === clientId)?.name ||
+    clientId;
+  const config = getClientEmailConfig(db, dataSecret, clientId);
+  if (!config || !config.host) return res.status(400).json({ error: `SMTP non configurato per il cliente ${clientName}.` });
+  if (config.username && !config.password) return res.status(400).json({ error: `SMTP non completato per il cliente ${clientName} (password mancante).` });
+  const fromEmail = config.fromEmail || config.username;
+  if (!fromEmail) return res.status(400).json({ error: `SMTP non completato per il cliente ${clientName} (mittente mancante).` });
+  const subject = subjectInput || 'Client SMTP Test Email';
+  const fromLabel = config.fromName ? `"${config.fromName.replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
+  const securityMode = config.securityMode || (config.secure ? 'ssl' : 'starttls');
+  const transport = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: securityMode === 'ssl',
+    requireTLS: securityMode === 'starttls',
+    ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
+  });
+  try {
+    const info = await transport.sendMail({ from: fromLabel, to: recipient, subject, text: `This is a client-scoped SMTP test email from ${APP_BRAND}.` });
+    logEmailAttempt(db, {
+      userId: req.userId,
+      username: req.username,
+      recipient,
+      subject,
+      success: true,
+      details: { kind: 'client_email_test', clientId, messageId: info?.messageId || null }
+    });
+    res.json({ ok: true, messageId: info?.messageId || null });
+  } catch (err) {
+    logEmailAttempt(db, {
+      userId: req.userId,
+      username: req.username,
+      recipient,
+      subject,
+      success: false,
+      error: err?.message || 'Failed to send',
+      details: { kind: 'client_email_test', clientId }
+    });
+    res.status(500).json({ error: 'Failed to send test email', detail: err?.message || null });
+  }
+});
+
 app.get('/api/settings/email/logs', requireAuth, (req, res) => {
   if (!req.isSuperAdmin) {
     res.status(403).json({ error: 'Forbidden' });
@@ -2902,6 +3440,8 @@ app.get('/api/audit', requireAuth, (req, res) => {
   }
   const q = String(req.query.q || '').trim().toLowerCase();
   const level = String(req.query.level || 'all');
+  const scopeType = String(req.query.scopeType || '').trim().toLowerCase();
+  const scopeId = String(req.query.scopeId || '').trim();
   const limit = Math.max(1, Math.min(200, Number(req.query.limit || 100)));
   const offset = Math.max(0, Number(req.query.offset || 0));
   const where = [];
@@ -2913,6 +3453,14 @@ app.get('/api/audit', requireAuth, (req, res) => {
   if (q) {
     where.push(`(LOWER(event) LIKE @q OR LOWER(COALESCE(username,'')) LIKE @q OR LOWER(COALESCE(details,'')) LIKE @q OR LOWER(COALESCE(scopeId,'')) LIKE @q)`);
     params.q = `%${q}%`;
+  }
+  if (scopeType) {
+    where.push('LOWER(COALESCE(scopeType, \'\')) = @scopeType');
+    params.scopeType = scopeType;
+  }
+  if (scopeId) {
+    where.push('COALESCE(scopeId, \'\') = @scopeId');
+    params.scopeId = scopeId;
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = Number(
@@ -3293,7 +3841,7 @@ app.get('/api/state', requireAuth, (req, res) => {
   }
   const ctx = getUserWithPermissions(db, req.userId);
   const access = computePlanAccess(state.clients, ctx?.permissions || []);
-  const filtered = filterStateForUser(state.clients, access, false);
+  const filtered = filterStateForUser(state.clients, access, false, { meetingOperatorOnly: !!ctx?.user?.isMeetingOperator });
   res.json({ clients: filtered, objectTypes: state.objectTypes, updatedAt: state.updatedAt });
 });
 
@@ -3415,8 +3963,1664 @@ app.put('/api/state', requireAuth, rateByUser('state_save', 60 * 1000, 240), (re
   const nextClients = mergeWritablePlanContent(serverState.clients, body.clients, writablePlanIds);
   const payload = { clients: nextClients, objectTypes: serverState.objectTypes };
   const updatedAt = writeState(payload);
-  const filtered = filterStateForUser(payload.clients, access, false);
+  const filtered = filterStateForUser(payload.clients, access, false, { meetingOperatorOnly: !!ctx?.user?.isMeetingOperator });
   res.json({ ok: true, updatedAt, clients: filtered, objectTypes: payload.objectTypes });
+});
+
+const MEETING_ACTIVE_STATUSES = new Set(['pending', 'approved']);
+const ROOM_PEOPLE_TYPE_IDS = new Set(['user', 'real_user']);
+const ROOM_EQUIPMENT_LABELS = {
+  tv: 'TV',
+  desktop: 'PC',
+  laptop: 'Laptop',
+  tablet: 'Tablet',
+  camera: 'Camera',
+  mic: 'Microphone',
+  phone: 'Phone',
+  videoIntercom: 'Video intercom',
+  intercom: 'Intercom',
+  wifi: 'Wi-Fi',
+  scanner: 'Scanner',
+  printer: 'Printer'
+};
+const ROOM_MEETING_FEATURE_LABELS = {
+  meetingProjector: 'Projector',
+  meetingTv: 'TV',
+  meetingVideoConf: 'Autonomous video conference',
+  meetingCoffeeService: 'Coffee service',
+  meetingWhiteboard: 'Whiteboard',
+  wifiAvailable: 'Guest Wifi',
+  fridgeAvailable: 'Fridge'
+};
+
+const safeJsonParse = (raw, fallback) => {
+  try {
+    const parsed = JSON.parse(String(raw || ''));
+    return parsed === undefined ? fallback : parsed;
+  } catch {
+    return fallback;
+  }
+};
+
+const parseIsoDay = (value) => {
+  const raw = String(value || '').trim();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { year, month, day, value: `${m[1]}-${m[2]}-${m[3]}` };
+};
+
+const parseClockTime = (value) => {
+  const raw = String(value || '').trim();
+  const m = raw.match(/^(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  const hours = Number(m[1]);
+  const minutes = Number(m[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return { hours, minutes, value: `${m[1]}:${m[2]}` };
+};
+
+const toLocalTs = (day, time) => new Date(day.year, day.month - 1, day.day, time.hours, time.minutes, 0, 0).getTime();
+
+const dayRangeFromIso = (value) => {
+  const day = parseIsoDay(value);
+  if (!day) return null;
+  const start = new Date(day.year, day.month - 1, day.day, 0, 0, 0, 0).getTime();
+  const end = start + 24 * 60 * 60 * 1000;
+  return { day: day.value, start, end };
+};
+
+const clampMeetingBuffer = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(60, Math.floor(parsed)));
+};
+
+const getVisibleClientsForMeetings = (req, state) => {
+  if (req.isAdmin || req.isSuperAdmin) return state.clients || [];
+  const ctx = getUserWithPermissions(db, req.userId);
+  const access = computePlanAccess(state.clients || [], ctx?.permissions || []);
+  return filterStateForUser(state.clients || [], access, false, { meetingOperatorOnly: !!ctx?.user?.isMeetingOperator });
+};
+
+const listMeetingRoomsFromClients = (clients, filters = {}) => {
+  const out = [];
+  const clientIdFilter = String(filters.clientId || '').trim();
+  const siteIdFilter = String(filters.siteId || '').trim();
+  const planIdFilter = String(filters.floorPlanId || '').trim();
+  const includeNonMeeting = !!filters.includeNonMeeting;
+  for (const client of clients || []) {
+    if (!client?.id) continue;
+    if (clientIdFilter && String(client.id) !== clientIdFilter) continue;
+    for (const site of client.sites || []) {
+      if (!site?.id) continue;
+      if (siteIdFilter && String(site.id) !== siteIdFilter) continue;
+      for (const plan of site.floorPlans || []) {
+        if (!plan?.id) continue;
+        if (planIdFilter && String(plan.id) !== planIdFilter) continue;
+        for (const room of plan.rooms || []) {
+          if (!room?.id) continue;
+          const isMeetingRoom = !!room.meetingRoom;
+          if (!isMeetingRoom && !includeNonMeeting) continue;
+          // Legacy/inconsistent data may keep special-room flags enabled together with meetingRoom.
+          // When a room is explicitly a meeting room, keep it visible in meeting management.
+          if (!isMeetingRoom && (room.storageRoom || room.bathroom || room.technicalRoom)) continue;
+          const rawCapacity = Number(room.capacity);
+          const capacity = Number.isFinite(rawCapacity) ? Math.max(0, Math.floor(rawCapacity)) : 0;
+          const roomId = String(room.id);
+          const equipmentSet = new Set();
+          for (const [featureKey, featureLabel] of Object.entries(ROOM_MEETING_FEATURE_LABELS)) {
+            if ((room || {})[featureKey]) equipmentSet.add(featureLabel);
+          }
+          let currentPeople = 0;
+          for (const obj of plan.objects || []) {
+            if (String(obj?.roomId || '') !== roomId) continue;
+            const typeId = String(obj?.type || '').trim();
+            if (ROOM_PEOPLE_TYPE_IDS.has(typeId)) currentPeople += 1;
+            const label = ROOM_EQUIPMENT_LABELS[typeId];
+            if (label) equipmentSet.add(label);
+          }
+          out.push({
+            clientId: String(client.id),
+            clientName: String(client.shortName || client.name || ''),
+            clientLogoUrl: String(client.logoUrl || '').trim() || null,
+            businessPartners: Array.isArray(client.businessPartners)
+              ? client.businessPartners
+                  .map((bp) => ({
+                    id: String(bp?.id || ''),
+                    name: String(bp?.name || '').trim(),
+                    logoUrl: String(bp?.logoUrl || '').trim() || null
+                  }))
+                  .filter((bp) => bp.name)
+              : [],
+            siteId: String(site.id),
+            siteName: String(site.name || ''),
+            siteSupportContacts: site.supportContacts || null,
+            floorPlanId: String(plan.id),
+            floorPlanName: String(plan.name || ''),
+            roomId,
+            roomName: String(room.name || ''),
+            isMeetingRoom,
+            capacity,
+            currentPeople,
+            availableSeats: Math.max(0, capacity - currentPeople),
+            equipment: Array.from(equipmentSet).sort((a, b) => a.localeCompare(b)),
+            surfaceSqm: Number.isFinite(Number(room?.surfaceSqm)) ? Number(room.surfaceSqm) : null,
+            shape:
+              String(room?.kind || '') === 'poly' && Array.isArray(room?.points) && room.points.length >= 3
+                ? {
+                    kind: 'poly',
+                    points: room.points
+                      .filter((p) => Number.isFinite(Number(p?.x)) && Number.isFinite(Number(p?.y)))
+                      .map((p) => ({ x: Number(p.x), y: Number(p.y) }))
+                  }
+                : {
+                    kind: 'rect',
+                    x: Number(room?.x || 0),
+                    y: Number(room?.y || 0),
+                    width: Number(room?.width || 0),
+                    height: Number(room?.height || 0)
+                  }
+          });
+        }
+      }
+    }
+  }
+  return out;
+};
+
+const mapMeetingRow = (row) => {
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    status: String(row.status || 'pending'),
+    approvalRequired: Number(row.approvalRequired) === 1,
+    clientId: String(row.clientId || ''),
+    siteId: String(row.siteId || ''),
+    floorPlanId: String(row.floorPlanId || ''),
+    roomId: String(row.roomId || ''),
+    roomName: String(row.roomName || ''),
+    subject: String(row.subject || ''),
+    requestedSeats: Number(row.requestedSeats) || 0,
+    roomCapacity: Number(row.roomCapacity) || 0,
+    equipment: safeJsonParse(row.equipmentJson || '[]', []),
+    participants: safeJsonParse(row.participantsJson || '[]', []),
+    externalGuests: Number(row.externalGuests) === 1,
+    externalGuestsList: safeJsonParse(row.externalGuestsJson || '[]', []),
+    externalGuestsDetails: safeJsonParse(row.externalGuestsDetailsJson || '[]', []),
+    sendEmail: Number(row.sendEmail) === 1,
+    technicalSetup: Number(row.technicalSetup) === 1,
+    technicalEmail: String(row.technicalEmail || ''),
+    notes: String(row.notes || ''),
+    videoConferenceLink: String(row.videoConferenceLink || ''),
+    setupBufferBeforeMin: Number(row.setupBufferBeforeMin) || 0,
+    setupBufferAfterMin: Number(row.setupBufferAfterMin) || 0,
+    startAt: Number(row.startAt) || 0,
+    endAt: Number(row.endAt) || 0,
+    effectiveStartAt: Number(row.effectiveStartAt) || 0,
+    effectiveEndAt: Number(row.effectiveEndAt) || 0,
+    multiDayGroupId: row.multiDayGroupId ? String(row.multiDayGroupId) : null,
+    occurrenceDate: String(row.occurrenceDate || ''),
+    requestedById: String(row.requestedById || ''),
+    requestedByUsername: String(row.requestedByUsername || ''),
+    requestedByEmail: String(row.requestedByEmail || ''),
+    requestedAt: Number(row.requestedAt) || 0,
+    reviewedAt: row.reviewedAt ? Number(row.reviewedAt) : null,
+    reviewedById: row.reviewedById ? String(row.reviewedById) : null,
+    reviewedByUsername: row.reviewedByUsername ? String(row.reviewedByUsername) : null,
+    rejectReason: row.rejectReason ? String(row.rejectReason) : null,
+    createdAt: Number(row.createdAt) || 0,
+    updatedAt: Number(row.updatedAt) || 0
+  };
+};
+
+const getMeetingConflicts = (roomId, effectiveStartAt, effectiveEndAt, excludeBookingId) => {
+  const rid = String(roomId || '').trim();
+  if (!rid) return [];
+  const start = Number(effectiveStartAt);
+  const end = Number(effectiveEndAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+  const rows = excludeBookingId
+    ? db
+        .prepare(
+          `SELECT * FROM meeting_bookings
+           WHERE roomId = ?
+             AND status IN ('pending','approved')
+             AND id <> ?
+             AND effectiveStartAt < ?
+             AND effectiveEndAt > ?
+           ORDER BY startAt ASC`
+        )
+        .all(rid, String(excludeBookingId), end, start)
+    : db
+        .prepare(
+          `SELECT * FROM meeting_bookings
+           WHERE roomId = ?
+             AND status IN ('pending','approved')
+             AND effectiveStartAt < ?
+             AND effectiveEndAt > ?
+           ORDER BY startAt ASC`
+        )
+        .all(rid, end, start);
+  return rows.map(mapMeetingRow).filter(Boolean);
+};
+
+const writeMeetingAuditLog = (bookingId, event, actorUserId, actorUsername, details) => {
+  const id = String(bookingId || '').trim();
+  const evt = String(event || '').trim();
+  if (!id || !evt) return;
+  let json = '{}';
+  try {
+    json = JSON.stringify(details || {});
+  } catch {
+    json = '{}';
+  }
+  db.prepare(
+    `INSERT INTO meeting_audit_log (bookingId, event, actorUserId, actorUsername, detailsJson, ts)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(id, evt, actorUserId ? String(actorUserId) : null, actorUsername ? String(actorUsername) : null, json, Date.now());
+};
+
+const listActiveAdmins = () =>
+  db
+    .prepare(
+      `SELECT id, username, email
+       FROM users
+       WHERE disabled = 0
+         AND (isAdmin = 1 OR isSuperAdmin = 1)`
+    )
+    .all()
+    .map((row) => ({
+      id: String(row.id),
+      username: String(row.username || '').toLowerCase(),
+      email: String(row.email || '')
+    }));
+
+const isUserOnline = (userId) => {
+  const uid = String(userId || '').trim();
+  if (!uid) return false;
+  for (const info of wsClientInfo.values()) {
+    if (String(info?.userId || '') === uid) return true;
+  }
+  return false;
+};
+
+const pushMeetingDm = (fromUserId, toUserId, text) => {
+  const fromId = String(fromUserId || '').trim();
+  const toId = String(toUserId || '').trim();
+  const body = String(text || '').trim();
+  if (!fromId || !toId || !body) return null;
+  const fromUser = db.prepare('SELECT id, username, avatarUrl, disabled FROM users WHERE id = ?').get(fromId);
+  const toUser = db.prepare('SELECT id, disabled FROM users WHERE id = ?').get(toId);
+  if (!fromUser || !toUser) return null;
+  if (Number(fromUser.disabled) === 1 || Number(toUser.disabled) === 1) return null;
+  if (userHasBlocked(toId, fromId) || userHasBlocked(fromId, toId)) return null;
+  const [a, b] = fromId < toId ? [fromId, toId] : [toId, fromId];
+  const pairKey = `${a}:${b}`;
+  const threadId = `dm:${pairKey}`;
+  const now = Date.now();
+  const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex');
+  const deliveredAt = isUserOnline(toId) ? now : null;
+  db.prepare(
+    `INSERT INTO dm_chat_messages (id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deliveredAt, readAt, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, NULL, '[]', '[]', '{}', ?, 0, ?, NULL, ?, ?)`
+  ).run(id, pairKey, fromId, toId, String(fromUser.username || '').toLowerCase(), String(fromUser.avatarUrl || ''), body, deliveredAt, now, now);
+  const row = db
+    .prepare(
+      `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+       FROM dm_chat_messages
+       WHERE id = ?`
+    )
+    .get(id);
+  const message = normalizeDmChatMessageRow(row);
+  if (!message) return null;
+  sendToUser(fromId, { type: 'dm_chat_new', threadId, message });
+  if (deliveredAt) sendToUser(toId, { type: 'dm_chat_new', threadId, message });
+  return { id, threadId, message };
+};
+
+const pendingMeetingCount = () => Number(db.prepare("SELECT COUNT(1) as c FROM meeting_bookings WHERE status = 'pending'").get()?.c || 0);
+
+const notifyAdminsForMeetingRequest = (booking) => {
+  const admins = listActiveAdmins();
+  const count = pendingMeetingCount();
+  for (const admin of admins) {
+    if (!admin?.id) continue;
+    sendToUser(admin.id, {
+      type: 'meeting_request_new',
+      booking,
+      pendingCount: count
+    });
+    if (String(admin.id) === String(booking?.requestedById || '')) continue;
+    pushMeetingDm(
+      String(booking?.requestedById || ''),
+      admin.id,
+      `MEETING_REQUEST:${String(booking?.id || '')}\n${booking?.subject || 'Meeting'}\nRoom: ${booking?.roomName || booking?.roomId || '-'}\nUse meeting panel or chat actions to approve/reject.`
+    );
+  }
+};
+
+const broadcastMeetingPendingSummary = () => {
+  const admins = listActiveAdmins();
+  const count = pendingMeetingCount();
+  for (const admin of admins) {
+    if (!admin?.id) continue;
+    sendToUser(admin.id, { type: 'meeting_pending_summary', pendingCount: count });
+  }
+};
+
+const notifyMeetingReviewToRequester = (booking, action, reason) => {
+  if (!booking?.requestedById) return;
+  sendToUser(String(booking.requestedById), {
+    type: 'meeting_request_reviewed',
+    bookingId: booking.id,
+    action,
+    reason: reason ? String(reason) : null
+  });
+  if (booking.reviewedById && String(booking.reviewedById) !== String(booking.requestedById)) {
+    const title = action === 'approved' ? 'approved' : 'rejected';
+    const reasonPart = reason ? `\nReason: ${String(reason)}` : '';
+    pushMeetingDm(
+      String(booking.reviewedById),
+      String(booking.requestedById),
+      `[MEETING ${title.toUpperCase()}]\n${booking.subject || booking.id}${reasonPart}`
+    );
+  }
+};
+
+const sendMeetingMail = async ({ recipients, subject, text, actorUserId, actorUsername, details, attachments, clientId }) => {
+  const list = Array.from(new Set((recipients || []).map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)));
+  if (!list.length) return { ok: false, skipped: true, reason: 'no_recipients' };
+  const cid = String(clientId || '').trim();
+  const state = readState();
+  const clientName =
+    cid && Array.isArray(state?.clients)
+      ? String(
+          (state.clients.find((c) => String(c?.id || '') === cid)?.shortName ||
+            state.clients.find((c) => String(c?.id || '') === cid)?.name ||
+            cid)
+        )
+      : null;
+  const config = cid ? getClientEmailConfig(db, dataSecret, cid) : getEmailConfig(db, dataSecret);
+  if (!config || !config.host) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: cid ? 'smtp_client_not_configured' : 'smtp_not_configured',
+      clientId: cid || null,
+      clientName
+    };
+  }
+  if (config.username && !config.password) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: cid ? 'smtp_client_missing_password' : 'smtp_missing_password',
+      clientId: cid || null,
+      clientName
+    };
+  }
+  const fromEmail = config.fromEmail || config.username;
+  if (!fromEmail) return { ok: false, skipped: true, reason: 'smtp_missing_from' };
+  const fromLabel = config.fromName ? `"${config.fromName.replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
+  const securityMode = config.securityMode || (config.secure ? 'ssl' : 'starttls');
+  const transport = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: securityMode === 'ssl',
+    requireTLS: securityMode === 'starttls',
+    ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
+  });
+  try {
+    const info = await transport.sendMail({
+      from: fromLabel,
+      to: list.join(', '),
+      subject: String(subject || 'Meeting notification'),
+      text: String(text || ''),
+      attachments: Array.isArray(attachments) ? attachments : undefined
+    });
+    logEmailAttempt(db, {
+      userId: actorUserId ? String(actorUserId) : null,
+      username: actorUsername ? String(actorUsername) : null,
+      recipient: list.join(', '),
+      subject: String(subject || ''),
+      success: true,
+      details: {
+        ...(details || {}),
+        clientId: cid || null,
+        messageId: info?.messageId || null,
+        recipients: list.length,
+        attachments: Array.isArray(attachments) ? attachments.length : 0
+      }
+    });
+    return { ok: true, recipients: list.length, messageId: info?.messageId || null };
+  } catch (error) {
+    logEmailAttempt(db, {
+      userId: actorUserId ? String(actorUserId) : null,
+      username: actorUsername ? String(actorUsername) : null,
+      recipient: list.join(', '),
+      subject: String(subject || ''),
+      success: false,
+      error: error?.message || 'meeting_mail_failed',
+      details: details || {}
+    });
+    return { ok: false, skipped: false, reason: error?.message || 'send_failed' };
+  }
+};
+
+const resolveParticipantEmails = (clientId, participants) => {
+  const cid = String(clientId || '').trim();
+  const byExternalId = new Map();
+  if (cid) {
+    const rows = db
+      .prepare(
+        `SELECT externalId, firstName, lastName, email
+         FROM external_users
+         WHERE clientId = ?`
+      )
+      .all(cid);
+    for (const row of rows) {
+      byExternalId.set(String(row.externalId || ''), {
+        fullName: `${String(row.firstName || '').trim()} ${String(row.lastName || '').trim()}`.trim(),
+        email: String(row.email || '').trim()
+      });
+    }
+  }
+  const normalized = [];
+  const emails = [];
+  const missingEmails = [];
+  for (const entry of Array.isArray(participants) ? participants : []) {
+    const kind = entry?.kind === 'manual' ? 'manual' : 'real_user';
+    const externalId = String(entry?.externalId || '').trim();
+    let fullName = String(entry?.fullName || entry?.name || '').trim();
+    let email = String(entry?.email || '').trim();
+    const optional = !!entry?.optional;
+    const remote = !!entry?.remote;
+    const company = String(entry?.company || '').trim() || null;
+    if (kind === 'real_user' && externalId && byExternalId.has(externalId)) {
+      const found = byExternalId.get(externalId);
+      if (!fullName) fullName = String(found?.fullName || '').trim();
+      if (!email) email = String(found?.email || '').trim();
+    }
+    const row = { kind, externalId: externalId || null, fullName, email: email || null, optional, remote, company };
+    normalized.push(row);
+    if (email) emails.push(email);
+    else if (kind === 'real_user' || fullName) missingEmails.push(fullName || externalId || 'participant');
+  }
+  return { normalized, emails, missingEmails };
+};
+
+const createMeetingOccurrences = ({ startDate, endDate, startTime, endTime, maxDays = 30 }) => {
+  const startDay = parseIsoDay(startDate);
+  const endDay = parseIsoDay(endDate || startDate);
+  const startClock = parseClockTime(startTime);
+  const endClock = parseClockTime(endTime);
+  if (!startDay || !endDay || !startClock || !endClock) return { error: 'Invalid date/time' };
+  const startDateObj = new Date(startDay.year, startDay.month - 1, startDay.day, 0, 0, 0, 0);
+  const endDateObj = new Date(endDay.year, endDay.month - 1, endDay.day, 0, 0, 0, 0);
+  if (endDateObj.getTime() < startDateObj.getTime()) return { error: 'Invalid date range' };
+  const occurrences = [];
+  const cursor = new Date(startDateObj.getTime());
+  while (cursor.getTime() <= endDateObj.getTime()) {
+    if (occurrences.length >= maxDays) return { error: 'Too many days selected' };
+    const day = {
+      year: cursor.getFullYear(),
+      month: cursor.getMonth() + 1,
+      day: cursor.getDate(),
+      value: `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`
+    };
+    const startAt = toLocalTs(day, startClock);
+    const endAt = toLocalTs(day, endClock);
+    if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || endAt <= startAt) {
+      return { error: 'Invalid time range' };
+    }
+    occurrences.push({ day: day.value, startAt, endAt });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  if (!occurrences.length) return { error: 'No meeting occurrences' };
+  return { occurrences };
+};
+
+const meetingSummaryText = (booking, actionLabel) => {
+  const start = Number(booking?.startAt || 0);
+  const end = Number(booking?.endAt || 0);
+  const when = start && end ? `${new Date(start).toLocaleString()} - ${new Date(end).toLocaleTimeString()}` : '-';
+  let locationPath = '';
+  try {
+    const state = readState();
+    const client = (state?.clients || []).find((c) => String(c?.id || '') === String(booking?.clientId || ''));
+    const site = (client?.sites || []).find((s) => String(s?.id || '') === String(booking?.siteId || ''));
+    const plan = (site?.floorPlans || []).find((p) => String(p?.id || '') === String(booking?.floorPlanId || ''));
+    const clientName = String(client?.shortName || client?.name || '').trim();
+    const siteName = String(site?.name || '').trim();
+    const planName = String(plan?.name || '').trim();
+    locationPath = [clientName, siteName, planName].filter(Boolean).join(' -> ');
+  } catch {
+    locationPath = '';
+  }
+  const internalParticipants = (Array.isArray(booking?.participants) ? booking.participants : [])
+    .map((p) => {
+      const label = String(p?.fullName || p?.externalId || '-').trim() || '-';
+      const flags = [];
+      if (p?.remote) flags.push('remote');
+      if (p?.optional) flags.push('optional');
+      return flags.length ? `${label} (${flags.join(', ')})` : label;
+    })
+    .filter(Boolean);
+  const externalParticipants = (Array.isArray(booking?.externalGuestsDetails) ? booking.externalGuestsDetails : [])
+    .map((g) => `${String(g?.name || '-')}${g?.remote ? ' (remote)' : ' (on-site)'}${g?.email ? ` <${String(g.email)}>` : ''}`)
+    .filter(Boolean);
+  return [
+    `${actionLabel}`,
+    '',
+    `Subject: ${booking?.subject || '-'}`,
+    locationPath ? `Location: ${locationPath}` : null,
+    `Room: ${booking?.roomName || booking?.roomId || '-'}`,
+    `When: ${when}`,
+    `Seats: ${booking?.requestedSeats || 0}`,
+    `Room capacity: ${booking?.roomCapacity || 0}`,
+    internalParticipants.length ? `Internal participants: ${internalParticipants.join(', ')}` : null,
+    externalParticipants.length ? `External participants: ${externalParticipants.join(', ')}` : null,
+    `Setup pre-meeting (min): ${Number(booking?.setupBufferBeforeMin) || 0}`,
+    `Setup post-meeting (min): ${Number(booking?.setupBufferAfterMin) || 0}`,
+    `Technical setup: ${booking?.technicalSetup ? 'Yes' : 'No'}`,
+    booking?.technicalSetup && booking?.technicalEmail ? `Technical contact: ${booking.technicalEmail}` : null,
+    booking?.videoConferenceLink ? `Video link: ${booking.videoConferenceLink}` : null,
+    booking?.notes ? `Notes: ${booking.notes}` : null
+  ].filter(Boolean).join('\n');
+};
+
+const meetingNotificationRecipientsFromBooking = (booking) => {
+  const internal = (Array.isArray(booking?.participants) ? booking.participants : [])
+    .map((p) => String(p?.email || '').trim().toLowerCase())
+    .filter(Boolean);
+  const external = (Array.isArray(booking?.externalGuestsDetails) ? booking.externalGuestsDetails : [])
+    .filter((g) => g?.sendEmail && g?.email)
+    .map((g) => String(g.email || '').trim().toLowerCase())
+    .filter(Boolean);
+  return Array.from(new Set([...internal, ...external]));
+};
+
+const meetingChangeSummaryText = (before, after) => {
+  const lines = [];
+  if (String(before?.subject || '') !== String(after?.subject || '')) {
+    lines.push(`Subject: "${before?.subject || '-'}" -> "${after?.subject || '-'}"`);
+  }
+  if (Number(before?.startAt || 0) !== Number(after?.startAt || 0) || Number(before?.endAt || 0) !== Number(after?.endAt || 0)) {
+    const prevRange = `${new Date(Number(before?.startAt || 0)).toLocaleString()} - ${new Date(Number(before?.endAt || 0)).toLocaleTimeString()}`;
+    const nextRange = `${new Date(Number(after?.startAt || 0)).toLocaleString()} - ${new Date(Number(after?.endAt || 0)).toLocaleTimeString()}`;
+    lines.push(`Schedule: ${prevRange} -> ${nextRange}`);
+  }
+  if (String(before?.notes || '') !== String(after?.notes || '')) {
+    lines.push('Notes updated');
+  }
+  if (String(before?.videoConferenceLink || '') !== String(after?.videoConferenceLink || '')) {
+    lines.push('Video conference link updated');
+  }
+  const beforeParticipants = Array.isArray(before?.participants) ? before.participants : [];
+  const afterParticipants = Array.isArray(after?.participants) ? after.participants : [];
+  const beforeParticipantSig = beforeParticipants
+    .map((p) => `${String(p?.fullName || p?.externalId || '-')}${p?.remote ? ' [remote]' : ''}${p?.optional ? ' [opt]' : ''}`)
+    .join(', ');
+  const afterParticipantSig = afterParticipants
+    .map((p) => `${String(p?.fullName || p?.externalId || '-')}${p?.remote ? ' [remote]' : ''}${p?.optional ? ' [opt]' : ''}`)
+    .join(', ');
+  if (beforeParticipantSig !== afterParticipantSig) {
+    lines.push(`Participants updated (${beforeParticipants.length} -> ${afterParticipants.length})`);
+  }
+  if (
+    Number(before?.setupBufferBeforeMin || 0) !== Number(after?.setupBufferBeforeMin || 0) ||
+    Number(before?.setupBufferAfterMin || 0) !== Number(after?.setupBufferAfterMin || 0)
+  ) {
+    lines.push(
+      `Setup buffers: pre ${Number(before?.setupBufferBeforeMin || 0)}m / post ${Number(before?.setupBufferAfterMin || 0)}m -> pre ${Number(after?.setupBufferBeforeMin || 0)}m / post ${Number(after?.setupBufferAfterMin || 0)}m`
+    );
+  }
+  return lines;
+};
+
+const parseInlinePngDataUrl = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const m = /^data:image\/png;base64,([a-z0-9+/=\s]+)$/i.exec(raw);
+  if (!m) return null;
+  try {
+    const base64 = String(m[1] || '').replace(/\s+/g, '');
+    const content = Buffer.from(base64, 'base64');
+    if (!content.length) return null;
+    if (content.length > 8 * 1024 * 1024) return null;
+    return {
+      filename: 'meeting-room-layout.png',
+      contentType: 'image/png',
+      content
+    };
+  } catch {
+    return null;
+  }
+};
+
+const getMeetingCheckInMap = (meetingId) => {
+  const id = String(meetingId || '').trim();
+  if (!id) return {};
+  const rows = db.prepare('SELECT entryKey, checked FROM meeting_checkins WHERE meetingId = ?').all(id);
+  const out = {};
+  for (const row of rows) {
+    if (Number(row.checked) === 1) out[String(row.entryKey || '')] = true;
+  }
+  return out;
+};
+
+const getMeetingCheckInMapByMeetingIds = (meetingIds) => {
+  const ids = Array.from(new Set((meetingIds || []).map((v) => String(v || '').trim()).filter(Boolean)));
+  const out = {};
+  if (!ids.length) return out;
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db
+    .prepare(`SELECT meetingId, entryKey, checked FROM meeting_checkins WHERE meetingId IN (${placeholders})`)
+    .all(...ids);
+  for (const row of rows) {
+    const mid = String(row.meetingId || '').trim();
+    if (!mid) continue;
+    if (!out[mid]) out[mid] = {};
+    if (Number(row.checked) === 1) out[mid][String(row.entryKey || '')] = true;
+  }
+  return out;
+};
+
+const getMeetingCheckInTimestampsByMeetingIds = (meetingIds) => {
+  const ids = Array.from(new Set((meetingIds || []).map((v) => String(v || '').trim()).filter(Boolean)));
+  const out = {};
+  if (!ids.length) return out;
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db
+    .prepare(`SELECT meetingId, entryKey, checked, updatedAt FROM meeting_checkins WHERE meetingId IN (${placeholders})`)
+    .all(...ids);
+  for (const row of rows) {
+    const mid = String(row.meetingId || '').trim();
+    const entryKey = String(row.entryKey || '').trim();
+    if (!mid || !entryKey) continue;
+    if (Number(row.checked) !== 1) continue;
+    if (!out[mid]) out[mid] = {};
+    out[mid][entryKey] = Number(row.updatedAt || 0) || Date.now();
+  }
+  return out;
+};
+
+app.get('/api/meetings/overview', requireAuth, (req, res) => {
+  const state = readState();
+  const visibleClients = getVisibleClientsForMeetings(req, state);
+  const clientId = String(req.query.clientId || '').trim();
+  const siteId = String(req.query.siteId || '').trim();
+  const floorPlanId = String(req.query.floorPlanId || '').trim();
+  const dayRaw = String(req.query.day || '').trim();
+  const includeNonMeeting = String(req.query.includeNonMeeting || '') === '1';
+  if (!siteId) {
+    res.status(400).json({ error: 'Missing siteId' });
+    return;
+  }
+  const roomRows = listMeetingRoomsFromClients(visibleClients, {
+    clientId: clientId || undefined,
+    siteId,
+    floorPlanId: floorPlanId || undefined,
+    includeNonMeeting
+  });
+  if (!roomRows.length) {
+    const dayRangeEmpty = dayRaw ? dayRangeFromIso(dayRaw) : null;
+    const startOfDayEmpty = dayRangeEmpty ? dayRangeEmpty.start : new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+    const endOfDayEmpty = dayRangeEmpty ? dayRangeEmpty.end : startOfDayEmpty + 24 * 60 * 60 * 1000;
+    const startClockEmpty = parseClockTime(req.query.startTime);
+    const endClockEmpty = parseClockTime(req.query.endTime);
+    const beforeMinEmpty = clampMeetingBuffer(req.query.setupBufferBeforeMin);
+    const afterMinEmpty = clampMeetingBuffer(req.query.setupBufferAfterMin);
+    res.json({
+      rooms: [],
+      checkInStatusByMeetingId: {},
+      checkInTimestampsByMeetingId: {},
+      meta: {
+        day: dayRangeEmpty ? dayRangeEmpty.day : new Date(startOfDayEmpty).toISOString().slice(0, 10),
+        siteId,
+        floorPlanId: floorPlanId || null,
+        slot:
+          startClockEmpty && endClockEmpty
+            ? {
+                startTime: startClockEmpty.value,
+                endTime: endClockEmpty.value,
+                setupBufferBeforeMin: beforeMinEmpty,
+                setupBufferAfterMin: afterMinEmpty
+              }
+            : null
+      }
+    });
+    return;
+  }
+  const dayRange = dayRaw ? dayRangeFromIso(dayRaw) : null;
+  const now = Date.now();
+  const startOfDay = dayRange ? dayRange.start : new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+  const endOfDay = dayRange ? dayRange.end : startOfDay + 24 * 60 * 60 * 1000;
+  const bookings = db
+    .prepare(
+      `SELECT * FROM meeting_bookings
+       WHERE siteId = ?
+         AND status IN ('pending','approved')
+         AND effectiveStartAt < ?
+         AND effectiveEndAt > ?
+       ORDER BY startAt ASC`
+    )
+    .all(siteId, endOfDay, startOfDay)
+    .map(mapMeetingRow)
+    .filter(Boolean);
+  const byRoom = new Map();
+  for (const booking of bookings) {
+    const rid = String(booking.roomId || '');
+    const list = byRoom.get(rid) || [];
+    list.push(booking);
+    byRoom.set(rid, list);
+  }
+  const startClock = parseClockTime(req.query.startTime);
+  const endClock = parseClockTime(req.query.endTime);
+  const beforeMin = clampMeetingBuffer(req.query.setupBufferBeforeMin);
+  const afterMin = clampMeetingBuffer(req.query.setupBufferAfterMin);
+  const dayForSlot = dayRange ? parseIsoDay(dayRange.day) : parseIsoDay(new Date().toISOString().slice(0, 10));
+  const hasSlot = !!(dayForSlot && startClock && endClock);
+  const slotStartAt = hasSlot ? toLocalTs(dayForSlot, startClock) : null;
+  const slotEndAt = hasSlot ? toLocalTs(dayForSlot, endClock) : null;
+  const slotEffectiveStart = hasSlot ? Number(slotStartAt) - beforeMin * 60_000 : null;
+  const slotEffectiveEnd = hasSlot ? Number(slotEndAt) + afterMin * 60_000 : null;
+  const rooms = roomRows.map((room) => {
+    const entries = byRoom.get(room.roomId) || [];
+    const inProgress = entries.some((row) => Number(row.startAt) <= now && Number(row.endAt) > now);
+    const hasToday = entries.length > 0;
+    const slotConflicts =
+      hasSlot && Number(slotEffectiveEnd) > Number(slotEffectiveStart)
+        ? entries.filter((row) => Number(row.effectiveStartAt) < Number(slotEffectiveEnd) && Number(row.effectiveEndAt) > Number(slotEffectiveStart))
+        : [];
+    return {
+      ...room,
+      hasMeetingToday: hasToday,
+      inProgress,
+      bookings: entries,
+      slotConflicts
+    };
+  });
+  const checkInStatusByMeetingId = getMeetingCheckInMapByMeetingIds(bookings.map((b) => b.id));
+  const checkInTimestampsByMeetingId = getMeetingCheckInTimestampsByMeetingIds(bookings.map((b) => b.id));
+  res.json({
+    rooms,
+    checkInStatusByMeetingId,
+    checkInTimestampsByMeetingId,
+    meta: {
+      day: dayRange ? dayRange.day : new Date(startOfDay).toISOString().slice(0, 10),
+      siteId,
+      floorPlanId: floorPlanId || null,
+      slot: hasSlot
+        ? {
+            startTime: startClock.value,
+            endTime: endClock.value,
+            setupBufferBeforeMin: beforeMin,
+            setupBufferAfterMin: afterMin
+          }
+        : null
+    }
+  });
+});
+
+app.get('/api/meetings', requireAuth, (req, res) => {
+  const state = readState();
+  const visibleClients = getVisibleClientsForMeetings(req, state);
+  const visibleRoomIds = new Set(listMeetingRoomsFromClients(visibleClients, { includeNonMeeting: true }).map((room) => room.roomId));
+  const siteId = String(req.query.siteId || '').trim();
+  const roomId = String(req.query.roomId || '').trim();
+  const statusCsv = String(req.query.status || '').trim();
+  const fromAt = Number(req.query.fromAt);
+  const toAt = Number(req.query.toAt);
+  const where = [];
+  const params = [];
+  if (siteId) {
+    where.push('siteId = ?');
+    params.push(siteId);
+  }
+  if (roomId) {
+    where.push('roomId = ?');
+    params.push(roomId);
+  }
+  if (Number.isFinite(fromAt)) {
+    where.push('effectiveEndAt >= ?');
+    params.push(Math.floor(fromAt));
+  }
+  if (Number.isFinite(toAt)) {
+    where.push('effectiveStartAt <= ?');
+    params.push(Math.floor(toAt));
+  }
+  if (statusCsv) {
+    const requested = statusCsv
+      .split(',')
+      .map((v) => String(v || '').trim().toLowerCase())
+      .filter((v) => ['pending', 'approved', 'rejected', 'cancelled'].includes(v));
+    if (requested.length) {
+      where.push(`status IN (${requested.map(() => '?').join(',')})`);
+      params.push(...requested);
+    }
+  }
+  const sql = `SELECT * FROM meeting_bookings ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY startAt ASC LIMIT 1500`;
+  const rows = db.prepare(sql).all(...params).map(mapMeetingRow).filter(Boolean);
+  const visibleRows = req.isAdmin ? rows : rows.filter((row) => visibleRoomIds.has(String(row.roomId || '')));
+  res.json({ meetings: visibleRows });
+});
+
+app.get('/api/meetings/pending', requireAuth, (req, res) => {
+  if (!req.isAdmin && !req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const rows = db
+    .prepare("SELECT * FROM meeting_bookings WHERE status = 'pending' ORDER BY requestedAt ASC LIMIT 500")
+    .all()
+    .map(mapMeetingRow)
+    .filter(Boolean);
+  res.json({ pending: rows, pendingCount: rows.length });
+});
+
+app.get('/api/meetings/log', requireAuth, (req, res) => {
+  if (!req.isAdmin && !req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const format = String(req.query.format || '').trim().toLowerCase();
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(2000, Math.floor(limitRaw))) : 400;
+  const rows = db
+    .prepare(
+      `SELECT l.id, l.bookingId, l.event, l.actorUserId, l.actorUsername, l.detailsJson, l.ts, b.subject, b.roomName, b.status
+       FROM meeting_audit_log l
+       LEFT JOIN meeting_bookings b ON b.id = l.bookingId
+       ORDER BY l.ts DESC
+       LIMIT ?`
+    )
+    .all(limit)
+    .map((row) => ({
+      id: Number(row.id) || 0,
+      bookingId: String(row.bookingId || ''),
+      event: String(row.event || ''),
+      actorUserId: row.actorUserId ? String(row.actorUserId) : null,
+      actorUsername: row.actorUsername ? String(row.actorUsername) : null,
+      ts: Number(row.ts) || 0,
+      subject: String(row.subject || ''),
+      roomName: String(row.roomName || ''),
+      bookingStatus: String(row.status || ''),
+      details: safeJsonParse(row.detailsJson || '{}', {})
+    }))
+    .filter((row) => {
+      if (!q) return true;
+      return (
+        row.bookingId.toLowerCase().includes(q) ||
+        row.event.toLowerCase().includes(q) ||
+        row.subject.toLowerCase().includes(q) ||
+        row.roomName.toLowerCase().includes(q) ||
+        String(row.actorUsername || '').toLowerCase().includes(q)
+      );
+    });
+  if (format === 'csv') {
+    const esc = (value) => `"${String(value || '').replace(/"/g, '""')}"`;
+    const lines = [
+      'id,bookingId,event,actorUsername,subject,roomName,bookingStatus,timestamp',
+      ...rows.map((row) =>
+        [
+          row.id,
+          esc(row.bookingId),
+          esc(row.event),
+          esc(row.actorUsername || ''),
+          esc(row.subject || ''),
+          esc(row.roomName || ''),
+          esc(row.bookingStatus || ''),
+          row.ts
+        ].join(',')
+      )
+    ];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="plixmap-meeting-log-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(lines.join('\n'));
+    return;
+  }
+  res.json({ rows, total: rows.length });
+});
+
+app.post('/api/meetings', requireAuth, async (req, res) => {
+  const payload = req.body || {};
+  const clientId = String(payload.clientId || '').trim();
+  const siteId = String(payload.siteId || '').trim();
+  const floorPlanId = String(payload.floorPlanId || '').trim();
+  const roomId = String(payload.roomId || '').trim();
+  const subject = String(payload.subject || '').trim();
+  const requestedSeatsRaw = Number(payload.requestedSeats);
+  const requestedSeats = Number.isFinite(requestedSeatsRaw) ? Math.max(1, Math.floor(requestedSeatsRaw)) : 0;
+  const setupBufferBeforeMin = clampMeetingBuffer(payload.setupBufferBeforeMin);
+  const setupBufferAfterMin = clampMeetingBuffer(payload.setupBufferAfterMin);
+  const sendEmail = !!payload.sendEmail;
+  const technicalSetup = !!payload.technicalSetup;
+  const technicalEmail = String(payload.technicalEmail || '').trim().toLowerCase();
+  const notes = String(payload.notes || '').trim();
+  const videoConferenceLink = String(payload.videoConferenceLink || '').trim();
+  const roomSnapshotAttachment = parseInlinePngDataUrl(payload.roomSnapshotPngDataUrl);
+  const externalGuests = !!payload.externalGuests;
+  const externalGuestsDetails = Array.isArray(payload.externalGuestsDetails)
+    ? payload.externalGuestsDetails
+        .map((row) => ({
+          name: String(row?.name || '').trim(),
+          email: String(row?.email || '').trim().toLowerCase() || null,
+          sendEmail: !!row?.sendEmail,
+          remote: !!row?.remote
+        }))
+        .filter((row) => row.name)
+    : [];
+  const externalGuestsList = Array.isArray(payload.externalGuestsList)
+    ? payload.externalGuestsList.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (!clientId || !siteId || !roomId || !subject || !requestedSeats) {
+    res.status(400).json({ error: 'Missing required fields' });
+    return;
+  }
+  const state = readState();
+  const visibleClients = getVisibleClientsForMeetings(req, state);
+  const rooms = listMeetingRoomsFromClients(visibleClients, { clientId, siteId, includeNonMeeting: true });
+  const room = rooms.find((entry) => entry.roomId === roomId && (!floorPlanId || entry.floorPlanId === floorPlanId));
+  if (!room) {
+    res.status(403).json({ error: 'Room not accessible' });
+    return;
+  }
+  if (!room.isMeetingRoom) {
+    res.status(400).json({ error: 'Selected room is not marked as meeting room' });
+    return;
+  }
+  const occurrenceResult = createMeetingOccurrences({
+    startDate: payload.startDate,
+    endDate: payload.endDate || payload.startDate,
+    startTime: payload.startTime,
+    endTime: payload.endTime
+  });
+  if (occurrenceResult.error) {
+    res.status(400).json({ error: occurrenceResult.error });
+    return;
+  }
+  const participantResolution = resolveParticipantEmails(clientId, payload.participants);
+  if (sendEmail && participantResolution.missingEmails.length) {
+    res.status(400).json({ error: 'Missing participant emails', missingEmails: participantResolution.missingEmails });
+    return;
+  }
+  if (technicalSetup && !technicalEmail) {
+    res.status(400).json({ error: 'Technical setup email required' });
+    return;
+  }
+  const actor = db
+    .prepare('SELECT id, username, email, canCreateMeetings, isAdmin, isSuperAdmin, disabled FROM users WHERE id = ?')
+    .get(req.userId);
+  if (!actor || Number(actor.disabled) === 1) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const canCreateAutonomously = req.isAdmin || req.isSuperAdmin || Number(actor.canCreateMeetings) === 1;
+  const status = canCreateAutonomously ? 'approved' : 'pending';
+  const approvalRequired = canCreateAutonomously ? 0 : 1;
+  const conflictsByDay = [];
+  for (const occ of occurrenceResult.occurrences) {
+    const effectiveStartAt = Number(occ.startAt) - setupBufferBeforeMin * 60_000;
+    const effectiveEndAt = Number(occ.endAt) + setupBufferAfterMin * 60_000;
+    const conflicts = getMeetingConflicts(room.roomId, effectiveStartAt, effectiveEndAt, null);
+    if (conflicts.length) conflictsByDay.push({ day: occ.day, conflicts });
+  }
+  if (conflictsByDay.length) {
+    res.status(409).json({ error: 'Time slot not available', conflictsByDay });
+    return;
+  }
+  const now = Date.now();
+  const multiDayGroupId = occurrenceResult.occurrences.length > 1 ? (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex')) : null;
+  const createdIds = [];
+  const insert = db.prepare(
+    `INSERT INTO meeting_bookings
+      (id, status, approvalRequired, clientId, siteId, floorPlanId, roomId, roomName, subject, requestedSeats, roomCapacity, equipmentJson, participantsJson, externalGuests, externalGuestsJson, externalGuestsDetailsJson, sendEmail, technicalSetup, technicalEmail, notes, videoConferenceLink, setupBufferBeforeMin, setupBufferAfterMin, startAt, endAt, effectiveStartAt, effectiveEndAt, multiDayGroupId, occurrenceDate, requestedById, requestedByUsername, requestedByEmail, requestedAt, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  const equipmentJson = JSON.stringify(room.equipment || []);
+  const participantsJson = JSON.stringify(participantResolution.normalized || []);
+  const normalizedExternalGuestsDetails = externalGuests
+    ? externalGuestsDetails
+    : [];
+  const externalGuestEmailsFromDetails = normalizedExternalGuestsDetails
+    .filter((row) => row.sendEmail && row.email)
+    .map((row) => String(row.email || '').trim().toLowerCase())
+    .filter(Boolean);
+  const effectiveExternalGuestsList = externalGuestEmailsFromDetails.length ? externalGuestEmailsFromDetails : externalGuestsList;
+  const externalGuestsJson = JSON.stringify(externalGuestsList);
+  const externalGuestsDetailsJson = JSON.stringify(normalizedExternalGuestsDetails);
+  const requestedByUsername = String(actor.username || '').toLowerCase();
+  const requestedByEmail = String(actor.email || '').trim().toLowerCase();
+  const tx = db.transaction(() => {
+    for (const occ of occurrenceResult.occurrences) {
+      const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex');
+      const effectiveStartAt = Number(occ.startAt) - setupBufferBeforeMin * 60_000;
+      const effectiveEndAt = Number(occ.endAt) + setupBufferAfterMin * 60_000;
+      insert.run(
+        id,
+        status,
+        approvalRequired,
+        clientId,
+        siteId,
+        room.floorPlanId,
+        room.roomId,
+        room.roomName,
+        subject,
+        requestedSeats,
+        room.capacity || 0,
+        equipmentJson,
+        participantsJson,
+        externalGuests ? 1 : 0,
+        JSON.stringify(effectiveExternalGuestsList),
+        externalGuestsDetailsJson,
+        sendEmail ? 1 : 0,
+        technicalSetup ? 1 : 0,
+        technicalEmail,
+        notes,
+        videoConferenceLink,
+        setupBufferBeforeMin,
+        setupBufferAfterMin,
+        Number(occ.startAt),
+        Number(occ.endAt),
+        effectiveStartAt,
+        effectiveEndAt,
+        multiDayGroupId,
+        occ.day,
+        req.userId,
+        requestedByUsername,
+        requestedByEmail,
+        now,
+        now,
+        now
+      );
+      createdIds.push(id);
+      writeMeetingAuditLog(id, 'created', req.userId, req.username, {
+        status,
+        approvalRequired: !!approvalRequired,
+        roomId: room.roomId,
+        roomName: room.roomName,
+        siteId,
+        floorPlanId: room.floorPlanId
+      });
+    }
+  });
+  tx();
+  const createdBookings = createdIds
+    .map((id) => db.prepare('SELECT * FROM meeting_bookings WHERE id = ?').get(id))
+    .map(mapMeetingRow)
+    .filter(Boolean);
+  if (!canCreateAutonomously) {
+    for (const booking of createdBookings) notifyAdminsForMeetingRequest(booking);
+    broadcastMeetingPendingSummary();
+  }
+  if (canCreateAutonomously && sendEmail) {
+    const recipients = [...participantResolution.emails, ...effectiveExternalGuestsList];
+    const mailWarnings = [];
+    for (const booking of createdBookings) {
+      const mailRes = await sendMeetingMail({
+        recipients,
+        subject: `[${APP_BRAND}] Meeting invitation: ${booking.subject || ''}`,
+        text: meetingSummaryText(booking, 'Meeting scheduled'),
+        attachments: roomSnapshotAttachment ? [roomSnapshotAttachment] : undefined,
+        clientId: booking.clientId,
+        actorUserId: req.userId,
+        actorUsername: req.username,
+        details: { kind: 'meeting_invite', bookingId: booking.id }
+      });
+      if (!mailRes?.ok && (mailRes?.reason === 'smtp_client_not_configured' || mailRes?.reason === 'smtp_client_missing_password')) {
+        const label = String(mailRes?.clientName || booking.clientName || booking.clientId || 'cliente');
+        const msg =
+          mailRes?.reason === 'smtp_client_missing_password'
+            ? `SMTP non completato per il cliente ${label} (password mancante).`
+            : `SMTP non configurato per il cliente ${label}.`;
+        if (!mailWarnings.includes(msg)) mailWarnings.push(msg);
+      }
+    }
+    if (mailWarnings.length) {
+      res.json({
+        ok: true,
+        status,
+        approvalRequired: !!approvalRequired,
+        bookings: createdBookings,
+        warnings: mailWarnings
+      });
+      return;
+    }
+  }
+  if (technicalSetup && technicalEmail) {
+    for (const booking of createdBookings) {
+      await sendMeetingMail({
+        recipients: [technicalEmail],
+        subject: `[${APP_BRAND}] Technical setup required`,
+        text: `${meetingSummaryText(booking, 'Technical setup requested')}\n\nRequester: ${requestedByUsername}`,
+        attachments: roomSnapshotAttachment ? [roomSnapshotAttachment] : undefined,
+        clientId: booking.clientId,
+        actorUserId: req.userId,
+        actorUsername: req.username,
+        details: { kind: 'meeting_technical_setup', bookingId: booking.id }
+      });
+    }
+    const techUser = db.prepare('SELECT id FROM users WHERE lower(email) = ? AND disabled = 0 LIMIT 1').get(technicalEmail);
+    if (techUser?.id && String(techUser.id) !== String(req.userId)) {
+      for (const booking of createdBookings) {
+        pushMeetingDm(
+          req.userId,
+          String(techUser.id),
+          `[TECH SETUP]\n${booking.subject || booking.id}\nRoom: ${booking.roomName || '-'}\n${new Date(Number(booking.startAt)).toLocaleString()}`
+        );
+      }
+    }
+  }
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'meeting_created',
+    userId: req.userId,
+    username: req.username,
+    scopeType: 'site',
+    scopeId: siteId,
+    ...requestMeta(req),
+    details: { count: createdBookings.length, status, roomId: room.roomId, roomName: room.roomName }
+  });
+  res.json({
+    ok: true,
+    status,
+    approvalRequired: !!approvalRequired,
+    bookings: createdBookings
+  });
+});
+
+app.post('/api/meetings/:id/review', requireAuth, async (req, res) => {
+  if (!req.isAdmin && !req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const bookingId = String(req.params.id || '').trim();
+  const action = String(req.body?.action || '').trim().toLowerCase();
+  const reason = String(req.body?.reason || '').trim();
+  if (!bookingId || (action !== 'approve' && action !== 'reject')) {
+    res.status(400).json({ error: 'Invalid request' });
+    return;
+  }
+  if (action === 'reject' && !reason) {
+    res.status(400).json({ error: 'Reason is required when rejecting' });
+    return;
+  }
+  const current = db.prepare('SELECT * FROM meeting_bookings WHERE id = ?').get(bookingId);
+  const row = mapMeetingRow(current);
+  if (!row) {
+    res.status(404).json({ error: 'Meeting not found' });
+    return;
+  }
+  if (row.status === 'cancelled' || row.status === 'rejected') {
+    res.status(400).json({ error: 'Meeting already closed' });
+    return;
+  }
+  if (action === 'approve') {
+    const conflicts = getMeetingConflicts(row.roomId, row.effectiveStartAt, row.effectiveEndAt, row.id);
+    if (conflicts.length) {
+      res.status(409).json({ error: 'Cannot approve due to overlap', conflicts });
+      return;
+    }
+  }
+  const nextStatus = action === 'approve' ? 'approved' : 'rejected';
+  const now = Date.now();
+  db.prepare(
+    `UPDATE meeting_bookings
+     SET status = ?, reviewedAt = ?, reviewedById = ?, reviewedByUsername = ?, rejectReason = ?, updatedAt = ?
+     WHERE id = ?`
+  ).run(nextStatus, now, req.userId, req.username, action === 'reject' ? reason : null, now, bookingId);
+  const updated = mapMeetingRow(db.prepare('SELECT * FROM meeting_bookings WHERE id = ?').get(bookingId));
+  writeMeetingAuditLog(bookingId, action === 'approve' ? 'approved' : 'rejected', req.userId, req.username, {
+    reason: action === 'reject' ? reason : null
+  });
+  notifyMeetingReviewToRequester({ ...updated, reviewedById: req.userId }, nextStatus, reason || null);
+  if (nextStatus === 'approved' && updated?.sendEmail) {
+    const participantEmails = (updated?.participants || [])
+      .map((p) => String(p?.email || '').trim().toLowerCase())
+      .filter(Boolean);
+    const guestEmailsDetailed = (updated?.externalGuestsDetails || [])
+      .filter((g) => g?.sendEmail && g?.email)
+      .map((g) => String(g?.email || '').trim().toLowerCase())
+      .filter(Boolean);
+    const guestEmails = guestEmailsDetailed.length
+      ? guestEmailsDetailed
+      : (updated?.externalGuestsList || []).map((v) => String(v || '').trim().toLowerCase()).filter(Boolean);
+    await sendMeetingMail({
+      recipients: [...participantEmails, ...guestEmails],
+      subject: `[${APP_BRAND}] Meeting approved: ${updated.subject || ''}`,
+      text: meetingSummaryText(updated, 'Meeting approved'),
+      clientId: updated.clientId,
+      actorUserId: req.userId,
+      actorUsername: req.username,
+      details: { kind: 'meeting_approved', bookingId: updated.id }
+    });
+  }
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'meeting_reviewed',
+    userId: req.userId,
+    username: req.username,
+    scopeType: 'meeting',
+    scopeId: bookingId,
+    ...requestMeta(req),
+    details: { action: nextStatus, reason: reason || null }
+  });
+  const pendingCount = pendingMeetingCount();
+  broadcastMeetingPendingSummary();
+  res.json({ ok: true, booking: updated, pendingCount });
+});
+
+app.post('/api/meetings/:id/cancel', requireAuth, (req, res) => {
+  const bookingId = String(req.params.id || '').trim();
+  if (!bookingId) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const current = mapMeetingRow(db.prepare('SELECT * FROM meeting_bookings WHERE id = ?').get(bookingId));
+  if (!current) {
+    res.status(404).json({ error: 'Meeting not found' });
+    return;
+  }
+  const canCancel = req.isAdmin || req.isSuperAdmin || String(current.requestedById || '') === String(req.userId || '');
+  if (!canCancel) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  if (current.status === 'cancelled' || current.status === 'rejected') {
+    res.json({ ok: true, booking: current });
+    return;
+  }
+  const now = Date.now();
+  db.prepare('UPDATE meeting_bookings SET status = ?, updatedAt = ? WHERE id = ?').run('cancelled', now, bookingId);
+  writeMeetingAuditLog(bookingId, 'cancelled', req.userId, req.username, {});
+  broadcastMeetingPendingSummary();
+  const updated = mapMeetingRow(db.prepare('SELECT * FROM meeting_bookings WHERE id = ?').get(bookingId));
+  if (updated?.sendEmail) {
+    const recipients = meetingNotificationRecipientsFromBooking(updated);
+    if (recipients.length) {
+      void sendMeetingMail({
+        recipients,
+        subject: `[Plixmap] Meeting cancelled: ${updated.subject || updated.roomName || updated.id}`,
+        text: `${meetingSummaryText(updated, 'Meeting cancelled')}\n\nThis meeting has been cancelled.`,
+        clientId: updated.clientId,
+        actorUserId: req.userId,
+        actorUsername: req.username,
+        details: { kind: 'meeting_cancelled', bookingId: updated.id }
+      });
+    }
+  }
+  res.json({ ok: true, booking: updated });
+});
+
+app.put('/api/meetings/:id', requireAuth, express.json({ limit: '256kb' }), async (req, res) => {
+  const bookingId = String(req.params.id || '').trim();
+  if (!bookingId) {
+    res.status(400).json({ error: 'Missing id' });
+    return;
+  }
+  const current = mapMeetingRow(db.prepare('SELECT * FROM meeting_bookings WHERE id = ?').get(bookingId));
+  if (!current) {
+    res.status(404).json({ error: 'Meeting not found' });
+    return;
+  }
+  if (!MEETING_ACTIVE_STATUSES.has(String(current.status || ''))) {
+    res.status(400).json({ error: 'Meeting is not editable' });
+    return;
+  }
+  const canEdit = req.isAdmin || req.isSuperAdmin || String(current.requestedById || '') === String(req.userId || '');
+  if (!canEdit) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const body = req.body || {};
+  const applyToSeries = !!body.applyToSeries && !!current.multiDayGroupId;
+  const subject = body.subject !== undefined ? String(body.subject || '').trim() : String(current.subject || '');
+  if (!subject) {
+    res.status(400).json({ error: 'Missing subject' });
+    return;
+  }
+  const occurrenceDate = body.day !== undefined ? String(body.day || '').trim() : String(current.occurrenceDate || '').trim();
+  const requestedDay = parseIsoDay(occurrenceDate);
+  const startTimeParsed = parseClockTime(body.startTime !== undefined ? body.startTime : new Date(Number(current.startAt || 0)).toTimeString().slice(0, 5));
+  const endTimeParsed = parseClockTime(body.endTime !== undefined ? body.endTime : new Date(Number(current.endAt || 0)).toTimeString().slice(0, 5));
+  if ((!applyToSeries && !requestedDay) || !startTimeParsed || !endTimeParsed) {
+    res.status(400).json({ error: 'Invalid date/time' });
+    return;
+  }
+  const setupBufferBeforeMin = body.setupBufferBeforeMin !== undefined ? clampMeetingBuffer(body.setupBufferBeforeMin) : Number(current.setupBufferBeforeMin || 0);
+  const setupBufferAfterMin = body.setupBufferAfterMin !== undefined ? clampMeetingBuffer(body.setupBufferAfterMin) : Number(current.setupBufferAfterMin || 0);
+  const notes = body.notes !== undefined ? String(body.notes || '') : String(current.notes || '');
+  const videoConferenceLink = body.videoConferenceLink !== undefined ? String(body.videoConferenceLink || '') : String(current.videoConferenceLink || '');
+  const participantInput = body.participants !== undefined ? body.participants : current.participants;
+  const participantResolution = resolveParticipantEmails(current.clientId, participantInput);
+  const participantsNormalized = Array.isArray(participantResolution.normalized) ? participantResolution.normalized : [];
+  const manualParticipants = participantsNormalized.filter((p) => p && p.kind === 'manual');
+  const existingExternalByKey = new Map(
+    (Array.isArray(current.externalGuestsDetails) ? current.externalGuestsDetails : []).map((g) => [
+      `${String(g?.name || '').trim().toLowerCase()}|${String(g?.email || '').trim().toLowerCase()}`,
+      g
+    ])
+  );
+  const externalGuestsDetails = Array.isArray(body.externalGuestsDetails)
+    ? body.externalGuestsDetails.map((row) => ({
+        name: String(row?.name || '').trim(),
+        email: String(row?.email || '').trim() || null,
+        sendEmail: !!row?.sendEmail,
+        remote: !!row?.remote
+      })).filter((row) => row.name)
+    : manualParticipants.map((p) => {
+        const key = `${String(p?.fullName || '').trim().toLowerCase()}|${String(p?.email || '').trim().toLowerCase()}`;
+        const prev = existingExternalByKey.get(key);
+        return {
+          name: String(p?.fullName || '').trim(),
+          email: p?.email ? String(p.email).trim() : null,
+          sendEmail: prev ? !!prev.sendEmail : false,
+          remote: !!p?.remote
+        };
+      }).filter((row) => row.name);
+  const externalGuests = externalGuestsDetails.length > 0;
+  const externalGuestsList = externalGuestsDetails.map((g) => String(g.name || '').trim()).filter(Boolean);
+  const requestedSeats =
+    participantsNormalized.filter((p) => !p?.remote).length +
+    externalGuestsDetails.filter((g) => !g?.remote).length;
+  const participantsJson = JSON.stringify(participantsNormalized);
+  const externalGuestsJson = JSON.stringify(externalGuestsList);
+  const externalGuestsDetailsJson = JSON.stringify(externalGuestsDetails);
+  const now = Date.now();
+  const updateStmt = db.prepare(
+    `UPDATE meeting_bookings
+     SET subject = ?, notes = ?, videoConferenceLink = ?, requestedSeats = ?, participantsJson = ?, externalGuests = ?, externalGuestsJson = ?, externalGuestsDetailsJson = ?, setupBufferBeforeMin = ?, setupBufferAfterMin = ?, startAt = ?, endAt = ?, effectiveStartAt = ?, effectiveEndAt = ?, occurrenceDate = ?, updatedAt = ?
+     WHERE id = ?`
+  );
+
+  const targets = applyToSeries
+    ? db
+        .prepare(
+          `SELECT * FROM meeting_bookings
+           WHERE multiDayGroupId = ?
+             AND status IN ('pending','approved')
+           ORDER BY startAt ASC`
+        )
+        .all(String(current.multiDayGroupId))
+        .map(mapMeetingRow)
+        .filter(Boolean)
+    : [current];
+  if (!targets.length) {
+    res.status(404).json({ error: 'Meeting series not found' });
+    return;
+  }
+
+  const planned = [];
+  for (const row of targets) {
+    const rowDay = applyToSeries ? parseIsoDay(String(row.occurrenceDate || '')) : requestedDay;
+    if (!rowDay) {
+      res.status(400).json({ error: 'Invalid occurrence date in series' });
+      return;
+    }
+    const startAt = toLocalTs(rowDay, startTimeParsed);
+    const endAt = toLocalTs(rowDay, endTimeParsed);
+    if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || endAt <= startAt) {
+      res.status(400).json({ error: 'Invalid time range' });
+      return;
+    }
+    const effectiveStartAt = startAt - setupBufferBeforeMin * 60 * 1000;
+    const effectiveEndAt = endAt + setupBufferAfterMin * 60 * 1000;
+    const conflicts = getMeetingConflicts(row.roomId, effectiveStartAt, effectiveEndAt, row.id);
+    if (conflicts.length) {
+      res.status(409).json({ error: 'Meeting conflicts detected', conflicts, bookingId: row.id, applyToSeries });
+      return;
+    }
+    planned.push({
+      row,
+      occurrenceDate: rowDay.value,
+      startAt,
+      endAt,
+      effectiveStartAt,
+      effectiveEndAt
+    });
+  }
+
+  const tx = db.transaction(() => {
+    for (const item of planned) {
+      updateStmt.run(
+        subject,
+        notes,
+        videoConferenceLink,
+        requestedSeats,
+        participantsJson,
+        externalGuests ? 1 : 0,
+        externalGuestsJson,
+        externalGuestsDetailsJson,
+        setupBufferBeforeMin,
+        setupBufferAfterMin,
+        item.startAt,
+        item.endAt,
+        item.effectiveStartAt,
+        item.effectiveEndAt,
+        item.occurrenceDate,
+        now,
+        item.row.id
+      );
+    }
+  });
+  tx();
+
+  const updatedRows = planned
+    .map((item) => mapMeetingRow(db.prepare('SELECT * FROM meeting_bookings WHERE id = ?').get(item.row.id)))
+    .filter(Boolean);
+  const updated = updatedRows.find((row) => String(row.id) === bookingId) || updatedRows[0] || null;
+  for (const row of updatedRows) {
+    const before = targets.find((t) => String(t.id) === String(row.id)) || current;
+    const changeLines = meetingChangeSummaryText(before, row);
+    writeMeetingAuditLog(row.id, 'updated', req.userId, req.username, { changes: changeLines, applyToSeries });
+    if (row?.sendEmail) {
+      const recipients = meetingNotificationRecipientsFromBooking(row);
+      if (recipients.length) {
+        void sendMeetingMail({
+          recipients,
+          subject: `[Plixmap] Meeting updated: ${row.subject || row.roomName || row.id}`,
+          text: `${meetingSummaryText(row, 'Meeting updated')}\n\nChanges:\n${changeLines.length ? changeLines.map((line) => `- ${line}`).join('\n') : '- Minor updates'}\n`,
+          clientId: row.clientId,
+          actorUserId: req.userId,
+          actorUsername: req.username,
+          details: { kind: 'meeting_updated', bookingId: row.id, changedFields: changeLines, applyToSeries }
+        });
+      }
+    }
+  }
+
+  res.json({ ok: true, booking: updated, updatedCount: updatedRows.length, applyToSeries });
+});
+
+app.get('/manifest-kiosk/:roomId.webmanifest', (req, res) => {
+  const roomId = String(req.params.roomId || '').trim();
+  const safeRoomId = encodeURIComponent(roomId || 'unknown');
+  res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    name: 'Plixmap Kiosk',
+    short_name: 'Plixmap Kiosk',
+    description: 'Plixmap meeting room kiosk mode',
+    start_url: `/meetingroom/${safeRoomId}`,
+    scope: '/meetingroom/',
+    display: 'standalone',
+    background_color: '#020617',
+    theme_color: '#020617',
+    lang: 'en',
+    icons: [{ src: '/plixmap-logo.png', sizes: '1024x1024', type: 'image/png', purpose: 'any' }]
+  });
+});
+
+app.get('/api/meeting-room/:roomId/schedule', (req, res) => {
+  const roomId = String(req.params.roomId || '').trim();
+  if (!roomId) {
+    res.status(400).json({ error: 'Missing roomId' });
+    return;
+  }
+  const state = readState();
+  const rooms = listMeetingRoomsFromClients(state.clients || [], { includeNonMeeting: true });
+  const room = rooms.find((entry) => entry.roomId === roomId);
+  if (!room) {
+    res.status(404).json({ error: 'Room not found' });
+    return;
+  }
+  const publicRoom = {
+    ...room,
+    clientLogoUrl: buildKioskPublicUploadUrl(req, room.clientLogoUrl) || null,
+    businessPartners: Array.isArray(room.businessPartners)
+      ? room.businessPartners.map((bp) => ({
+          ...bp,
+          logoUrl: buildKioskPublicUploadUrl(req, bp.logoUrl) || null
+        }))
+      : []
+  };
+  const now = Date.now();
+  const start = now - 12 * 60 * 60 * 1000;
+  const end = now + 7 * 24 * 60 * 60 * 1000;
+  const startOfToday = new Date(new Date(now).setHours(0, 0, 0, 0)).getTime();
+  const endOfToday = startOfToday + 24 * 60 * 60 * 1000;
+  const rows = db
+    .prepare(
+      `SELECT * FROM meeting_bookings
+       WHERE roomId = ?
+         AND status IN ('pending','approved')
+         AND effectiveStartAt < ?
+         AND effectiveEndAt > ?
+       ORDER BY startAt ASC`
+    )
+    .all(roomId, end, start)
+    .map(mapMeetingRow)
+    .filter(Boolean);
+  const inProgress = rows.find((row) => Number(row.startAt) <= now && Number(row.endAt) > now) || null;
+  const upcoming = rows.filter((row) => Number(row.startAt) > now).slice(0, 20);
+  const daySchedule = rows
+    .filter((row) => Number(row.endAt) > startOfToday && Number(row.startAt) < endOfToday)
+    .sort((a, b) => Number(a.startAt) - Number(b.startAt));
+  const checkInStatusByMeetingId = getMeetingCheckInMapByMeetingIds(rows.map((row) => row.id));
+  const checkInTimestampsByMeetingId = getMeetingCheckInTimestampsByMeetingIds(rows.map((row) => row.id));
+  res.json({
+    room: publicRoom,
+    now,
+    inProgress,
+    upcoming,
+    daySchedule,
+    checkInStatusByMeetingId,
+    checkInTimestampsByMeetingId,
+    kioskPublicUrl: buildKioskPublicUrl(req, roomId)
+  });
+});
+
+app.post('/api/meeting-room/:roomId/checkin-toggle', express.json({ limit: '256kb' }), (req, res) => {
+  const roomId = String(req.params.roomId || '').trim();
+  const meetingId = String(req.body?.meetingId || '').trim();
+  const key = String(req.body?.key || '').trim();
+  const checked = !!req.body?.checked;
+  if (!roomId || !meetingId || !key) {
+    res.status(400).json({ error: 'Missing check-in parameters' });
+    return;
+  }
+  const booking = db
+    .prepare(`SELECT id, roomId, status, startAt, endAt FROM meeting_bookings WHERE id = ? LIMIT 1`)
+    .get(meetingId);
+  if (!booking || String(booking.roomId || '') !== roomId) {
+    res.status(404).json({ error: 'Meeting not found for room' });
+    return;
+  }
+  if (!['approved', 'pending'].includes(String(booking.status || ''))) {
+    res.status(409).json({ error: 'Meeting not active for check-in' });
+    return;
+  }
+  const now = Date.now();
+  if (checked) {
+    db.prepare(
+      `INSERT INTO meeting_checkins (meetingId, entryKey, checked, updatedAt)
+       VALUES (?, ?, 1, ?)
+       ON CONFLICT(meetingId, entryKey) DO UPDATE SET checked = excluded.checked, updatedAt = excluded.updatedAt`
+    ).run(meetingId, key, now);
+  } else {
+    db.prepare('DELETE FROM meeting_checkins WHERE meetingId = ? AND entryKey = ?').run(meetingId, key);
+  }
+  res.json({
+    ok: true,
+    meetingId,
+    checkInMap: getMeetingCheckInMap(meetingId),
+    checkInTimestamps: getMeetingCheckInTimestampsByMeetingIds([meetingId])[meetingId] || {}
+  });
+});
+
+app.post('/api/meeting-room/:roomId/help-request', express.json({ limit: '64kb' }), async (req, res) => {
+  const roomId = String(req.params.roomId || '').trim();
+  const service = String(req.body?.service || '').trim().toLowerCase();
+  if (!roomId || !['it', 'cleaning', 'coffee'].includes(service)) {
+    res.status(400).json({ error: 'Invalid help request' });
+    return;
+  }
+  const state = readState();
+  const rooms = listMeetingRoomsFromClients(state.clients || [], { includeNonMeeting: true });
+  const room = rooms.find((entry) => entry.roomId === roomId);
+  if (!room) {
+    res.status(404).json({ error: 'Room not found' });
+    return;
+  }
+  const support = room.siteSupportContacts || {};
+  const target =
+    service === 'it'
+      ? support.it
+      : service === 'cleaning'
+        ? support.cleaning
+        : support.coffee;
+  const recipient = String(target?.email || '').trim();
+  if (!recipient) {
+    res.status(400).json({ error: 'Support email not configured' });
+    return;
+  }
+  const serviceLabel =
+    service === 'it'
+      ? 'IT Service'
+      : service === 'cleaning'
+        ? 'Cleaning Service'
+        : 'Coffee Service';
+  const roomName = String(room.roomName || roomId);
+  const locationPath = [room.clientName, room.siteName, room.floorPlanName].filter(Boolean).join(' -> ');
+  const helpMailResult = await sendMeetingMail({
+    recipients: [recipient],
+    subject: `Need ${serviceLabel} room ${roomName}`,
+    text: [
+      `Need ${serviceLabel} room ${roomName}`,
+      locationPath ? `Location: ${locationPath}` : null,
+      `Requested at: ${new Date().toLocaleString()}`,
+      `Source: Kiosk mode`
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    clientId: room.clientId,
+    actorUserId: null,
+    actorUsername: 'kiosk',
+    details: { kind: 'meeting_room_help_request', roomId, service }
+  });
+  if (!helpMailResult?.ok) {
+    if (helpMailResult?.reason === 'smtp_client_not_configured' || helpMailResult?.reason === 'smtp_client_missing_password') {
+      const clientLabel = String(helpMailResult?.clientName || room.clientName || room.clientId || 'cliente');
+      res.status(400).json({
+        error:
+          helpMailResult?.reason === 'smtp_client_missing_password'
+            ? `SMTP non completato per il cliente ${clientLabel} (password mancante).`
+            : `SMTP non configurato per il cliente ${clientLabel}.`
+      });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to send help request', detail: helpMailResult?.reason || null });
+    return;
+  }
+  res.json({ ok: true, service });
 });
 
 // Object type requests (custom object creation)
@@ -3663,7 +5867,7 @@ app.get('/api/users', requireAuth, (req, res) => {
   }
   const users = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, avatarUrl, firstName, lastName, phone, email, createdAt, updatedAt FROM users ORDER BY createdAt DESC'
+      'SELECT id, username, isAdmin, isSuperAdmin, canCreateMeetings, canManageBusinessPartners, isMeetingOperator, disabled, language, avatarUrl, firstName, lastName, phone, email, createdAt, updatedAt FROM users ORDER BY createdAt DESC'
     )
     .all()
     .map((u) => {
@@ -3673,6 +5877,9 @@ app.get('/api/users', requireAuth, (req, res) => {
         username: normalizedUsername,
         isAdmin: !!u.isAdmin,
         isSuperAdmin: !!u.isSuperAdmin && normalizedUsername === 'superadmin',
+        canCreateMeetings: u.canCreateMeetings === undefined ? true : !!u.canCreateMeetings,
+        canManageBusinessPartners: u.canManageBusinessPartners === undefined ? false : !!u.canManageBusinessPartners,
+        isMeetingOperator: u.isMeetingOperator === undefined ? false : !!u.isMeetingOperator,
         disabled: !!u.disabled
       };
     });
@@ -3783,6 +5990,9 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
     email = '',
     language = 'it',
     isAdmin = false,
+    canCreateMeetings = true,
+    canManageBusinessPartners = false,
+    isMeetingOperator = false,
     permissions = []
   } = req.body || {};
   const normalizedUsername = normalizeLoginKey(username);
@@ -3802,6 +6012,7 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
     res.status(403).json({ error: 'Only superadmin can create admin users' });
     return;
   }
+  const meetingOperator = !!isMeetingOperator && !isAdmin;
   const existing = db.prepare('SELECT id FROM users WHERE lower(username) = ?').get(normalizedUsername);
   if (existing) {
     res.status(400).json({ error: 'Username already exists' });
@@ -3813,8 +6024,8 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
   const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
   try {
     db.prepare(
-      `INSERT INTO users (id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, language, paletteFavoritesJson, firstName, lastName, phone, email, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, 1, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO users (id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin, disabled, language, canCreateMeetings, canManageBusinessPartners, isMeetingOperator, paletteFavoritesJson, firstName, lastName, phone, email, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, 1, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
       normalizedUsername,
@@ -3822,6 +6033,9 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
       hash,
       isAdmin ? 1 : 0,
       String(language),
+      meetingOperator ? 1 : canCreateMeetings === false ? 0 : 1,
+      canManageBusinessPartners ? 1 : 0,
+      meetingOperator ? 1 : 0,
       defaultPaletteFavoritesJson,
       String(firstName || ''),
       String(lastName || ''),
@@ -3839,7 +6053,7 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
   );
   for (const p of Array.isArray(permissions) ? permissions : []) {
     if (!p?.scopeType || !p?.scopeId || !p?.access) continue;
-    insertPerm.run(id, p.scopeType, p.scopeId, p.access, p?.chat ? 1 : 0);
+    insertPerm.run(id, p.scopeType, p.scopeId, meetingOperator ? 'ro' : p.access, p?.chat ? 1 : 0);
   }
   writeAuditLog(db, {
     level: 'important',
@@ -3849,7 +6063,7 @@ app.post('/api/users', requireAuth, rateByUser('users_create', 10 * 60 * 1000, 3
     scopeType: 'user',
     scopeId: id,
     ...requestMeta(req),
-    details: { username: normalizedUsername, isAdmin: !!isAdmin, permissions: Array.isArray(permissions) ? permissions.length : 0 }
+      details: { username: normalizedUsername, isAdmin: !!isAdmin, isMeetingOperator: meetingOperator, canManageBusinessPartners: !!canManageBusinessPartners, permissions: Array.isArray(permissions) ? permissions.length : 0 }
   });
   res.json({ ok: true, id });
 });
@@ -3861,7 +6075,7 @@ app.put('/api/users/:id', requireAuth, rateByUser('users_update', 10 * 60 * 1000
   }
   const userId = req.params.id;
   const target = db
-    .prepare('SELECT id, username, isAdmin, isSuperAdmin, disabled, language, firstName, lastName, phone, email FROM users WHERE id = ?')
+    .prepare('SELECT id, username, isAdmin, isSuperAdmin, canCreateMeetings, canManageBusinessPartners, isMeetingOperator, disabled, language, firstName, lastName, phone, email FROM users WHERE id = ?')
     .get(userId);
   if (!target) {
     res.status(404).json({ error: 'Not found' });
@@ -3871,7 +6085,7 @@ app.put('/api/users/:id', requireAuth, rateByUser('users_update', 10 * 60 * 1000
     res.status(403).json({ error: 'Cannot modify superadmin' });
     return;
   }
-  const { firstName, lastName, phone, email, isAdmin, disabled, language, permissions } = req.body || {};
+  const { firstName, lastName, phone, email, isAdmin, canCreateMeetings, canManageBusinessPartners, isMeetingOperator, disabled, language, permissions } = req.body || {};
   if (isAdmin && !req.isSuperAdmin) {
     res.status(403).json({ error: 'Only superadmin can promote admin' });
     return;
@@ -3882,10 +6096,14 @@ app.put('/api/users/:id', requireAuth, rateByUser('users_update', 10 * 60 * 1000
   }
   const now = Date.now();
   const lockedDisabled = target.isSuperAdmin ? 0 : (disabled ? 1 : 0);
+  const meetingOperator = !!isMeetingOperator && !isAdmin;
   db.prepare(
-    'UPDATE users SET isAdmin = ?, disabled = ?, language = COALESCE(?, language), firstName = ?, lastName = ?, phone = ?, email = ?, updatedAt = ? WHERE id = ?'
+    'UPDATE users SET isAdmin = ?, canCreateMeetings = ?, canManageBusinessPartners = ?, isMeetingOperator = ?, disabled = ?, language = COALESCE(?, language), firstName = ?, lastName = ?, phone = ?, email = ?, updatedAt = ? WHERE id = ?'
   ).run(
     isAdmin ? 1 : 0,
+    meetingOperator ? 1 : canCreateMeetings === undefined ? (Number(target.canCreateMeetings || 1) ? 1 : 0) : canCreateMeetings ? 1 : 0,
+    canManageBusinessPartners === undefined ? (Number(target.canManageBusinessPartners || 0) ? 1 : 0) : canManageBusinessPartners ? 1 : 0,
+    meetingOperator ? 1 : 0,
     lockedDisabled,
     language || null,
     String(firstName || ''),
@@ -3902,11 +6120,14 @@ app.put('/api/users/:id', requireAuth, rateByUser('users_update', 10 * 60 * 1000
     );
     for (const p of permissions) {
       if (!p?.scopeType || !p?.scopeId || !p?.access) continue;
-      insertPerm.run(userId, p.scopeType, p.scopeId, p.access, p?.chat ? 1 : 0);
+      insertPerm.run(userId, p.scopeType, p.scopeId, meetingOperator ? 'ro' : p.access, p?.chat ? 1 : 0);
     }
   }
   const changes = [];
   if (typeof isAdmin === 'boolean' && Number(target.isAdmin) !== (isAdmin ? 1 : 0)) changes.push('isAdmin');
+  if (typeof canCreateMeetings === 'boolean' && Number(target.canCreateMeetings || 1) !== (canCreateMeetings ? 1 : 0)) changes.push('canCreateMeetings');
+  if (typeof canManageBusinessPartners === 'boolean' && Number(target.canManageBusinessPartners || 0) !== (canManageBusinessPartners ? 1 : 0)) changes.push('canManageBusinessPartners');
+  if (typeof isMeetingOperator === 'boolean' && Number(target.isMeetingOperator || 0) !== (meetingOperator ? 1 : 0)) changes.push('isMeetingOperator');
   if (typeof disabled === 'boolean' && Number(target.disabled) !== (disabled ? 1 : 0)) changes.push('disabled');
   if (language && String(language) !== String(target.language)) changes.push('language');
   const profileChanged =
@@ -5788,8 +8009,48 @@ app.post('/api/admin/logs/clear', requireAuth, (req, res) => {
 // Serve built frontend (optional, for docker/prod)
 const distDir = path.join(process.cwd(), 'dist');
 if (fs.existsSync(distDir)) {
-  app.use(express.static(distDir));
-  app.get(/.*/, (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
+  const readIndexHtml = () => {
+    return fs.readFileSync(path.join(distDir, 'index.html'), 'utf8');
+  };
+  const renderKioskIndexHtml = (roomId) => {
+    const rid = encodeURIComponent(String(roomId || '').trim());
+    let html = readIndexHtml();
+    const kioskManifestHref = `/manifest-kiosk/${rid}.webmanifest`;
+    if (html.includes('rel="manifest"')) {
+      html = html.replace(/<link\s+rel="manifest"\s+href="[^"]*"\s*\/?>/i, `<link rel="manifest" href="${kioskManifestHref}">`);
+    } else {
+      html = html.replace(/<\/head>/i, `  <link rel="manifest" href="${kioskManifestHref}"></head>`);
+    }
+    return html;
+  };
+
+  app.get(/^\/meetingroom\/([^/]+)\/?$/, (req, res) => {
+    try {
+      const roomId = String(req.params?.[0] || '').trim();
+      if (!roomId) return res.sendFile(path.join(distDir, 'index.html'));
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(renderKioskIndexHtml(roomId));
+    } catch {
+      res.sendFile(path.join(distDir, 'index.html'));
+    }
+  });
+  const distAssetsDir = path.join(distDir, 'assets');
+  if (fs.existsSync(distAssetsDir)) {
+    app.use(
+      '/assets',
+      express.static(distAssetsDir, {
+        fallthrough: false,
+        maxAge: '1y',
+        immutable: true
+      })
+    );
+  }
+  app.use(express.static(distDir, { maxAge: 0 }));
+  app.get(/.*/, (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
 }
 
 const server = http.createServer(app);
@@ -5817,6 +8078,9 @@ wss.on('connection', (ws, req) => {
     plans: new Map()
   });
   jsonSend(ws, { type: 'hello', userId: auth.userId, username: auth.username, avatarUrl: auth.avatarUrl || '' });
+  if (auth.isAdmin || auth.isSuperAdmin) {
+    jsonSend(ws, { type: 'meeting_pending_summary', pendingCount: pendingMeetingCount() });
+  }
   // Deliver pending DM messages (turns 1 gray tick into 2 gray ticks when the recipient connects).
   deliverPendingDmMessagesToUser(auth.userId);
   emitGlobalPresence();

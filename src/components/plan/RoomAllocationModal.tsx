@@ -95,29 +95,37 @@ const YesNoToggle = ({
   label,
   value,
   onChange,
+  disabled = false,
   yesLabel,
   noLabel
 }: {
   label: string;
   value: boolean;
   onChange: (next: boolean) => void;
+  disabled?: boolean;
   yesLabel: string;
   noLabel: string;
 }) => (
-  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+  <div className={`rounded-xl border border-slate-200 bg-white px-3 py-2 ${disabled ? 'opacity-60' : ''}`}>
     <div className="text-xs font-semibold text-slate-600">{label}</div>
     <div className="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 p-0.5">
       <button
         type="button"
+        disabled={disabled}
         onClick={() => onChange(true)}
-        className={`rounded-full px-3 py-1 text-xs font-semibold transition ${value ? 'bg-primary text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'}`}
+        className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+          value ? 'bg-primary text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+        } ${disabled ? 'cursor-not-allowed' : ''}`}
       >
         {yesLabel}
       </button>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => onChange(false)}
-        className={`rounded-full px-3 py-1 text-xs font-semibold transition ${!value ? 'bg-primary text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'}`}
+        className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+          !value ? 'bg-primary text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+        } ${disabled ? 'cursor-not-allowed' : ''}`}
       >
         {noLabel}
       </button>
@@ -460,8 +468,18 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
   }, [hasDepartmentFilter, selectedClientRaw, selectedDepartmentSet, selectedSiteRaw]);
 
   const eligibleRoomCandidates = useMemo(
-    () => roomCandidates.filter((room) => !room.isNonPeopleRoom && (includeMeetingRooms ? true : !room.isMeetingRoom)),
+    () =>
+      roomCandidates.filter((room) => {
+        if (room.isNonPeopleRoom) return false;
+        if (room.isMeetingRoom && room.userCount > 0) return false;
+        return includeMeetingRooms ? true : !room.isMeetingRoom;
+      }),
     [includeMeetingRooms, roomCandidates]
+  );
+
+  const blockedMeetingCandidates = useMemo(
+    () => roomCandidates.filter((room) => room.isMeetingRoom && room.userCount > 0),
+    [roomCandidates]
   );
 
   const directCandidates = useMemo(() => {
@@ -720,12 +738,12 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
 
     const used = new Set<string>();
     let remaining = requestedCount;
-    const allocations: Array<{ room: string; seats: number }> = [];
+    const allocations: Array<{ room: string; seats: number; roomId: string; planId: string }> = [];
 
     for (const room of primaryPool) {
       const seats = Math.min(remaining, Math.max(0, room.freeSeats));
       if (seats <= 0) continue;
-      allocations.push({ room: room.roomName, seats });
+      allocations.push({ room: room.roomName, seats, roomId: room.roomId, planId: room.planId });
       used.add(roomKey(room));
       remaining -= seats;
       if (remaining <= 0) break;
@@ -744,7 +762,7 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
         })[0];
 
       if (singleFit) {
-        allocations.push({ room: singleFit.roomName, seats: remaining });
+        allocations.push({ room: singleFit.roomName, seats: remaining, roomId: singleFit.roomId, planId: singleFit.planId });
         used.add(roomKey(singleFit));
         remaining = 0;
       } else {
@@ -760,7 +778,7 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
         for (const room of splitCandidates) {
           const seats = Math.min(remaining, Math.max(0, room.freeSeats));
           if (seats <= 0) continue;
-          allocations.push({ room: room.roomName, seats });
+          allocations.push({ room: room.roomName, seats, roomId: room.roomId, planId: room.planId });
           used.add(roomKey(room));
           remaining -= seats;
           if (remaining <= 0) break;
@@ -785,6 +803,39 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
     requestedCount,
     searchAlternatives
   ]);
+
+  const hasEmptyOfficesAvailable = useMemo(
+    () => eligibleRoomCandidates.some((room) => room.isEmptyRoom && room.freeSeats > 0),
+    [eligibleRoomCandidates]
+  );
+
+  useEffect(() => {
+    if (!hasEmptyOfficesAvailable && includeEmptyOffices) setIncludeEmptyOffices(false);
+  }, [hasEmptyOfficesAvailable, includeEmptyOffices]);
+
+  const summaryRoomOrder = useMemo(() => {
+    const map = new Map<string, number>();
+    (allocationSummary?.allocations || []).forEach((entry, index) => {
+      map.set(`${entry.planId}:${entry.roomId}`, index);
+    });
+    return map;
+  }, [allocationSummary]);
+
+  const displayedCandidatesOrdered = useMemo(() => {
+    const list = [...displayedCandidates];
+    list.sort((a, b) => {
+      const aKey = `${a.planId}:${a.roomId}`;
+      const bKey = `${b.planId}:${b.roomId}`;
+      const aIdx = summaryRoomOrder.has(aKey) ? Number(summaryRoomOrder.get(aKey)) : Number.POSITIVE_INFINITY;
+      const bIdx = summaryRoomOrder.has(bKey) ? Number(summaryRoomOrder.get(bKey)) : Number.POSITIVE_INFINITY;
+      if (aIdx !== bIdx) return aIdx - bIdx;
+      const aDist = (a as any).distanceMeters ?? Number.POSITIVE_INFINITY;
+      const bDist = (b as any).distanceMeters ?? Number.POSITIVE_INFINITY;
+      if (aDist !== bDist) return aDist - bDist;
+      return a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' });
+    });
+    return list;
+  }, [displayedCandidates, summaryRoomOrder]);
 
   const showCrossFloorEmptyHint =
     searchAlternatives &&
@@ -905,33 +956,6 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
         writeLine(`• ${entry.room}: ${entry.seats}`, { size: 10 });
       }
       spacer(4);
-
-      writeLine(t({ it: 'Opzioni candidate mostrate', en: 'Displayed candidate options' }), { size: 12, bold: true, gap: 16 });
-      if (!displayedCandidates.length) {
-        writeLine(t({ it: 'Nessuna opzione disponibile.', en: 'No options available.' }));
-      } else {
-        for (const room of displayedCandidates) {
-          const source = String((room as any).source || 'direct');
-          const sourceLabel =
-            source === 'meeting'
-              ? t({ it: 'meeting', en: 'meeting' })
-              : source === 'empty'
-                ? t({ it: 'vuoto', en: 'empty' })
-                : source === 'other'
-                  ? t({ it: 'altro reparto', en: 'other department' })
-                  : t({ it: 'diretta', en: 'direct' });
-          const distance = distanceFromAnchor.get(`${room.planId}:${room.roomId}`) || {
-            meters: (room as any).distanceMeters ?? null,
-            px: (room as any).distancePx ?? null
-          };
-          writeLine(
-            `• ${room.roomName} (${room.planName}) | ${t({ it: 'allocazione', en: 'allocation' })}: ${sourceLabel} | ${t({
-              it: 'liberi',
-              en: 'free'
-            })}: ${room.freeSeats} | ${t({ it: 'distanza', en: 'distance' })}: ${formatDistanceLabel(distance.meters, distance.px)}`
-          );
-        }
-      }
 
       const fileDate = new Date().toISOString().slice(0, 10);
       pdf.save(`plixmap_placement_summary_${fileDate}.pdf`);
@@ -1141,9 +1165,10 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
                           label={t({ it: 'Includere uffici vuoti?', en: 'Include empty offices?' })}
                           value={searchAlternatives && includeEmptyOffices}
                           onChange={(next) => {
-                            if (!searchAlternatives) return;
+                            if (!searchAlternatives || !hasEmptyOfficesAvailable) return;
                             setIncludeEmptyOffices(next);
                           }}
+                          disabled={!searchAlternatives || !hasEmptyOfficesAvailable}
                           yesLabel={t({ it: 'Sì', en: 'Yes' })}
                           noLabel={t({ it: 'No', en: 'No' })}
                         />
@@ -1205,6 +1230,15 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
                     </div>
                   ) : null}
 
+                  {includeMeetingRooms && blockedMeetingCandidates.length ? (
+                    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      {t({
+                        it: `Sono escluse ${blockedMeetingCandidates.length} meeting room già occupate da persone assegnate: non vengono trattate come uffici per evitare collocazioni improprie.`,
+                        en: `${blockedMeetingCandidates.length} meeting rooms already occupied by assigned people are excluded: they are not treated as offices to avoid improper allocations.`
+                      })}
+                    </div>
+                  ) : null}
+
                   {requestedCount > 0 &&
                   searchAlternatives &&
                   (includeEmptyOffices || includeOtherDepartments || includeMeetingRooms) &&
@@ -1218,13 +1252,62 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
                   ) : null}
 
                   <div className="mt-4">
+                    {allocationSummary ? (
+                      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-semibold text-ink">{t({ it: 'Riepilogo consigliato', en: 'Suggested allocation summary' })}</div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setAllocationReportOpen(true)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              <FileText size={12} />
+                              {t({ it: 'Apri riepilogo', en: 'Open summary' })}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void exportAllocationReportPdf()}
+                              disabled={allocationPdfBusy}
+                              className="inline-flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/5 px-2 py-1 text-xs font-semibold text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Download size={12} />
+                              {allocationPdfBusy ? t({ it: 'Export...', en: 'Export...' }) : t({ it: 'Esporta PDF', en: 'Export PDF' })}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          {allocationSummary.remaining > 0
+                            ? t({
+                                it: `Plixmap riesce a collocare ${allocationSummary.placed} persone su ${allocationSummary.requested}. Mancano ${allocationSummary.remaining} posti.`,
+                                en: `Plixmap can place ${allocationSummary.placed} out of ${allocationSummary.requested} people. ${allocationSummary.remaining} seats are still missing.`
+                              })
+                            : t({
+                                it: `Plixmap colloca tutte le ${allocationSummary.requested} persone.`,
+                                en: `Plixmap places all ${allocationSummary.requested} people.`
+                              })}
+                        </div>
+                        {allocationSummary.allocations.length ? (
+                          <div className="mt-2 space-y-1 text-xs text-slate-600">
+                            {allocationSummary.allocations.map((entry) => (
+                              <div key={`${entry.planId}:${entry.roomId}`} className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-2 py-1">
+                                <span className="truncate">{entry.room}</span>
+                                <span className="font-semibold text-emerald-800">{entry.seats}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {!requestedCount ? (
                       <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
                         {t({ it: 'Inserisci il numero di persone per ottenere le opzioni di collocazione.', en: 'Enter people count to get placement options.' })}
                       </div>
-                    ) : displayedCandidates.length ? (
+                    ) : displayedCandidatesOrdered.length ? (
                       <div className="max-h-[25rem] space-y-2 overflow-auto">
-                        {displayedCandidates.map((room) => {
+                        {displayedCandidatesOrdered.map((room) => {
+                          const candidateKey = `${room.planId}:${room.roomId}`;
+                          const isInSuggestedSummary = summaryRoomOrder.has(candidateKey);
                           const saturationLabel = `${room.userCount}/${room.capacity}`;
                           const availableLabel = t({
                             it: `${room.freeSeats} posti liberi`,
@@ -1235,7 +1318,12 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
                             px: (room as any).distancePx ?? null
                           };
                           return (
-                            <div key={`${room.planId}:${room.roomId}`} className="w-full rounded-xl border border-slate-200 px-3 py-3 text-left hover:bg-slate-50">
+                            <div
+                              key={candidateKey}
+                              className={`w-full rounded-xl border px-3 py-3 text-left hover:bg-slate-50 ${
+                                isInSuggestedSummary ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200'
+                              }`}
+                            >
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="min-w-0">
                                   <div className="truncate text-sm font-semibold text-ink">{room.roomName}</div>
@@ -1347,7 +1435,7 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
                     )}
                   </div>
 
-                  {allocationSummary ? (
+                  {false && allocationSummary ? (
                     <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                       <div className="flex items-center justify-between gap-2">
                         <div className="font-semibold text-ink">{t({ it: 'Riepilogo consigliato', en: 'Suggested allocation summary' })}</div>
@@ -1372,19 +1460,19 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
                         </div>
                       </div>
                       <div className="mt-1 text-xs text-slate-600">
-                        {allocationSummary.remaining > 0
+                        {allocationSummary!.remaining > 0
                           ? t({
-                              it: `Plixmap riesce a collocare ${allocationSummary.placed} persone su ${allocationSummary.requested}. Mancano ${allocationSummary.remaining} posti.`,
-                              en: `Plixmap can place ${allocationSummary.placed} out of ${allocationSummary.requested} people. ${allocationSummary.remaining} seats are still missing.`
+                              it: `Plixmap riesce a collocare ${allocationSummary!.placed} persone su ${allocationSummary!.requested}. Mancano ${allocationSummary!.remaining} posti.`,
+                              en: `Plixmap can place ${allocationSummary!.placed} out of ${allocationSummary!.requested} people. ${allocationSummary!.remaining} seats are still missing.`
                             })
                           : t({
-                              it: `Plixmap colloca tutte le ${allocationSummary.requested} persone.`,
-                              en: `Plixmap places all ${allocationSummary.requested} people.`
+                              it: `Plixmap colloca tutte le ${allocationSummary!.requested} persone.`,
+                              en: `Plixmap places all ${allocationSummary!.requested} people.`
                             })}
                       </div>
-                      {allocationSummary.allocations.length ? (
+                      {allocationSummary!.allocations.length ? (
                         <div className="mt-2 space-y-1 text-xs text-slate-600">
-                          {allocationSummary.allocations.map((entry) => (
+                          {allocationSummary!.allocations.map((entry) => (
                             <div key={entry.room} className="flex items-center justify-between gap-2">
                               <span className="truncate">{entry.room}</span>
                               <span className="font-semibold text-ink">{entry.seats}</span>

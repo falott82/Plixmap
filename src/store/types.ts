@@ -288,6 +288,7 @@ export interface Room {
   nameEn?: string;
   departmentTags?: string[];
   color?: string;
+  fillOpacity?: number;
   capacity?: number;
   labelScale?: number;
   labelPosition?: 'top' | 'bottom' | 'left' | 'right';
@@ -296,7 +297,15 @@ export interface Room {
   notes?: string;
   logical?: boolean;
   meetingRoom?: boolean;
+  meetingProjector?: boolean;
+  meetingTv?: boolean;
+  meetingVideoConf?: boolean;
+  meetingCoffeeService?: boolean;
+  meetingWhiteboard?: boolean;
+  meetingKioskEnabled?: boolean;
   noWindows?: boolean;
+  wifiAvailable?: boolean;
+  fridgeAvailable?: boolean;
   storageRoom?: boolean;
   bathroom?: boolean;
   technicalRoom?: boolean;
@@ -521,6 +530,20 @@ export interface Site {
   clientId: string;
   name: string;
   coords?: string;
+  supportContacts?: {
+    cleaning?: { email?: string; phone?: string };
+    it?: { email?: string; phone?: string };
+    coffee?: { email?: string; phone?: string };
+  };
+  siteSchedule?: {
+    weekly?: Partial<
+      Record<
+        'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun',
+        { closed?: boolean; open?: string; close?: string }
+      >
+    >;
+    holidays?: Array<{ date: string; label?: string; closed?: boolean }>;
+  };
   floorPlans: FloorPlan[];
 }
 
@@ -531,6 +554,15 @@ export interface ClientNote {
   notesLexical?: string;
   updatedAt?: number;
   updatedBy?: { id: string; username: string };
+}
+
+export interface BusinessPartner {
+  id: string;
+  name: string;
+  logoUrl?: string;
+  email?: string;
+  phone?: string;
+  notes?: string;
 }
 
 export interface Client {
@@ -553,6 +585,7 @@ export interface Client {
   // New multi-note model
   notes?: ClientNote[];
   attachments?: { id: string; name: string; dataUrl: string }[];
+  businessPartners?: BusinessPartner[];
   wifiAntennaModels?: WifiAntennaModel[];
   emergencyContacts?: EmergencyContactEntry[];
   sites: Site[];

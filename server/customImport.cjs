@@ -209,6 +209,53 @@ const normalizeEmployeesResponse = (payload) => {
     .filter(Boolean);
 };
 
+const isManualExternalId = (externalId) => String(externalId || '').trim().toLowerCase().startsWith('manual:');
+
+const mapExternalUserRow = (r) => ({
+  clientId: r.clientId,
+  externalId: String(r.externalId),
+  firstName: r.firstName || '',
+  lastName: r.lastName || '',
+  role: r.role || '',
+  dept1: r.dept1 || '',
+  dept2: r.dept2 || '',
+  dept3: r.dept3 || '',
+  email: r.email || '',
+  mobile: r.mobile || '',
+  ext1: r.ext1 || '',
+  ext2: r.ext2 || '',
+  ext3: r.ext3 || '',
+  isExternal: Number(r.isExternal) === 1,
+  hidden: Number(r.hidden) === 1,
+  present: Number(r.present) === 1,
+  lastSeenAt: r.lastSeenAt || null,
+  createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
+  manual: isManualExternalId(r.externalId),
+  sourceKind: isManualExternalId(r.externalId) ? 'manual' : 'imported'
+});
+
+const normalizeManualExternalUserInput = (payload) => {
+  const toStr = (v) => (v === null || v === undefined ? '' : String(v).trim());
+  return {
+    externalId: toStr(payload?.externalId),
+    firstName: toStr(payload?.firstName),
+    lastName: toStr(payload?.lastName),
+    role: toStr(payload?.role),
+    dept1: toStr(payload?.dept1),
+    dept2: toStr(payload?.dept2),
+    dept3: toStr(payload?.dept3),
+    email: toStr(payload?.email),
+    mobile: toStr(payload?.mobile),
+    ext1: toStr(payload?.ext1),
+    ext2: toStr(payload?.ext2),
+    ext3: toStr(payload?.ext3),
+    isExternal: !!payload?.isExternal
+  };
+};
+
+const makeManualExternalId = () => `manual:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 const fetchEmployeesFromApi = async (config) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
@@ -411,6 +458,7 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   if (shouldMarkMissing) {
     for (const prev of existing) {
       const id = String(prev.externalId);
+      if (isManualExternalId(id)) continue;
       if (!incomingIds.has(id) && Number(prev.present || 1) === 1) {
         markMissingStmt.run(now, clientId, id);
         missing.push({ externalId: id, firstName: prev.firstName || '', lastName: prev.lastName || '' });
@@ -458,32 +506,102 @@ const listExternalUsers = (db, params) => {
   const rows = db
     .prepare(sql)
     .all(...values)
-    .map((r) => ({
-      clientId: r.clientId,
-      externalId: String(r.externalId),
-      firstName: r.firstName || '',
-      lastName: r.lastName || '',
-      role: r.role || '',
-      dept1: r.dept1 || '',
-      dept2: r.dept2 || '',
-      dept3: r.dept3 || '',
-      email: r.email || '',
-      mobile: r.mobile || '',
-      ext1: r.ext1 || '',
-      ext2: r.ext2 || '',
-      ext3: r.ext3 || '',
-      isExternal: Number(r.isExternal) === 1,
-      hidden: Number(r.hidden) === 1,
-      present: Number(r.present) === 1,
-      lastSeenAt: r.lastSeenAt || null,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt
-    }));
+    .map(mapExternalUserRow);
   return rows;
+};
+
+const getExternalUser = (db, clientId, externalId) => {
+  const row = db
+    .prepare(
+      `SELECT clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt
+       FROM external_users WHERE clientId = ? AND externalId = ?`
+    )
+    .get(clientId, externalId);
+  return row ? mapExternalUserRow(row) : null;
 };
 
 const setExternalUserHidden = (db, clientId, externalId, hidden) => {
   db.prepare('UPDATE external_users SET hidden=?, updatedAt=? WHERE clientId=? AND externalId=?').run(hidden ? 1 : 0, Date.now(), clientId, externalId);
+};
+
+const upsertManualExternalUser = (db, clientId, payload, options = {}) => {
+  const now = Date.now();
+  const data = normalizeManualExternalUserInput(payload || {});
+  let externalId = String(options.externalId || data.externalId || '').trim();
+  if (!externalId) externalId = makeManualExternalId();
+  if (!isManualExternalId(externalId)) {
+    externalId = `manual:${externalId}`;
+  }
+  const exists = db.prepare('SELECT externalId FROM external_users WHERE clientId=? AND externalId=?').get(clientId, externalId);
+  if (options.externalId && !exists) {
+    const err = new Error('External user not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  if (!data.firstName && !data.lastName && !data.email) {
+    const err = new Error('Missing user identity');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (exists) {
+    db.prepare(
+      `UPDATE external_users
+       SET firstName=?, lastName=?, role=?, dept1=?, dept2=?, dept3=?, email=?, mobile=?, ext1=?, ext2=?, ext3=?, isExternal=?, present=1, updatedAt=?
+       WHERE clientId=? AND externalId=?`
+    ).run(
+      data.firstName,
+      data.lastName,
+      data.role,
+      data.dept1,
+      data.dept2,
+      data.dept3,
+      data.email,
+      data.mobile,
+      data.ext1,
+      data.ext2,
+      data.ext3,
+      data.isExternal ? 1 : 0,
+      now,
+      clientId,
+      externalId
+    );
+  } else {
+    db.prepare(
+      `INSERT INTO external_users (clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)`
+    ).run(
+      clientId,
+      externalId,
+      data.firstName,
+      data.lastName,
+      data.role,
+      data.dept1,
+      data.dept2,
+      data.dept3,
+      data.email,
+      data.mobile,
+      data.ext1,
+      data.ext2,
+      data.ext3,
+      data.isExternal ? 1 : 0,
+      now,
+      now,
+      now
+    );
+  }
+  return getExternalUser(db, clientId, externalId);
+};
+
+const deleteManualExternalUser = (db, clientId, externalId) => {
+  if (!isManualExternalId(externalId)) {
+    const err = new Error('Only manual users can be deleted');
+    err.code = 'FORBIDDEN_KIND';
+    throw err;
+  }
+  const row = getExternalUser(db, clientId, externalId);
+  if (!row) return { ok: false, removed: 0 };
+  const result = db.prepare('DELETE FROM external_users WHERE clientId=? AND externalId=?').run(clientId, externalId);
+  return { ok: true, removed: Number(result.changes || 0), row };
 };
 
 const listImportSummary = (db) => {
@@ -538,6 +656,10 @@ module.exports = {
   upsertImportConfig,
   upsertExternalUsers,
   listExternalUsers,
+  getExternalUser,
   setExternalUserHidden,
-  listImportSummary
+  listImportSummary,
+  isManualExternalId,
+  upsertManualExternalUser,
+  deleteManualExternalUser
 };

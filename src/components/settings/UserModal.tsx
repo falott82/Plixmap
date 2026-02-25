@@ -24,6 +24,9 @@ interface Props {
     email: string;
     language: 'it' | 'en';
     isAdmin: boolean;
+    canCreateMeetings?: boolean;
+    canManageBusinessPartners?: boolean;
+    isMeetingOperator?: boolean;
     disabled?: boolean;
     permissions: Permission[];
   }) => void;
@@ -39,6 +42,9 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isMeetingOperator, setIsMeetingOperator] = useState(false);
+  const [canCreateMeetings, setCanCreateMeetings] = useState(true);
+  const [canManageBusinessPartners, setCanManageBusinessPartners] = useState(false);
   const [disabled, setDisabled] = useState(false);
   const [language, setLanguage] = useState<'it' | 'en'>('it');
   const [permMap, setPermMap] = useState<Record<string, '' | 'ro' | 'rw'>>({});
@@ -58,6 +64,9 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       setPhone('');
       setEmail('');
       setIsAdmin(false);
+      setIsMeetingOperator(false);
+      setCanCreateMeetings(true);
+      setCanManageBusinessPartners(false);
       setDisabled(false);
       setLanguage('it');
       setPermMap(seedClientExists ? { [`client:${SEED_CLIENT_ID}`]: 'rw' } : {});
@@ -72,6 +81,9 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       setPhone(initial?.phone || '');
       setEmail(initial?.email || '');
       setIsAdmin(!!initial?.isAdmin);
+      setIsMeetingOperator((initial as any)?.isMeetingOperator === true);
+      setCanCreateMeetings((initial as any)?.canCreateMeetings === false ? false : true);
+      setCanManageBusinessPartners((initial as any)?.canManageBusinessPartners === true ? true : false);
       setDisabled(!!(initial as any)?.disabled);
       setLanguage(((initial as any)?.language === 'en' ? 'en' : 'it') as 'it' | 'en');
       setPermMap(permissionsListToMap(initial?.permissions));
@@ -94,6 +106,9 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
     if (!templateId) {
       const seedClientExists = clients.some((c) => c.id === SEED_CLIENT_ID);
       setIsAdmin(false);
+      setIsMeetingOperator(false);
+      setCanCreateMeetings(true);
+      setCanManageBusinessPartners(false);
       setPermMap(seedClientExists ? { [`client:${SEED_CLIENT_ID}`]: 'rw' } : {});
       setChatMap({});
       return;
@@ -102,11 +117,17 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
     if (!source) return;
     if (source.isAdmin && canCreateAdmin) {
       setIsAdmin(true);
+      setIsMeetingOperator(false);
+      setCanCreateMeetings(source?.canCreateMeetings === false ? false : true);
+      setCanManageBusinessPartners((source as any)?.canManageBusinessPartners === true ? true : false);
       setPermMap({});
       setChatMap({});
       return;
     }
     setIsAdmin(false);
+    setIsMeetingOperator((source as any)?.isMeetingOperator === true);
+    setCanCreateMeetings(source?.canCreateMeetings === false ? false : true);
+    setCanManageBusinessPartners((source as any)?.canManageBusinessPartners === true ? true : false);
     setPermMap(permissionsListToMap(source.permissions));
     setChatMap(permissionsListToChatMap(source.permissions));
   };
@@ -115,9 +136,23 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
     if (mode !== 'create') return;
     if (!isAdmin) return;
     setImportFromUserId('');
+    setIsMeetingOperator(false);
     setPermMap({});
     setChatMap({});
   }, [isAdmin, mode]);
+
+  useEffect(() => {
+    if (!isMeetingOperator) return;
+    if (isAdmin) setIsAdmin(false);
+    setCanCreateMeetings(true);
+    setPermMap((prev) => {
+      const next: Record<string, '' | 'ro' | 'rw'> = {};
+      for (const [k, v] of Object.entries(prev || {})) {
+        next[k] = v === 'rw' ? 'ro' : v;
+      }
+      return next;
+    });
+  }, [isAdmin, isMeetingOperator]);
 
   const normalizePhone = (value: string) => {
     const raw = String(value || '');
@@ -175,9 +210,14 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       phone: phone.trim(),
       email: email.trim(),
       isAdmin,
+      canCreateMeetings,
+      canManageBusinessPartners,
+      isMeetingOperator,
       disabled: lockedDisabled,
       language,
-      permissions: permissionsMapsToList(permMap, chatMap)
+      permissions: (isMeetingOperator
+        ? permissionsMapsToList(permMap, chatMap).map((p) => ({ ...p, access: 'ro' as const }))
+        : permissionsMapsToList(permMap, chatMap))
     });
   };
 
@@ -347,6 +387,49 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                       />
                       {t({ it: 'Admin (accesso completo)', en: 'Admin (full access)' })}
                     </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
+                      <input
+                        type="checkbox"
+                        checked={isMeetingOperator}
+                        onChange={(e) => setIsMeetingOperator(e.target.checked)}
+                        disabled={isAdmin}
+                        className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      {t({ it: 'Meeting operator (solo videoconferenze)', en: 'Meeting operator (meetings only)' })}
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
+                      <input
+                        type="checkbox"
+                        checked={canCreateMeetings}
+                        onChange={(e) => setCanCreateMeetings(e.target.checked)}
+                        disabled={isMeetingOperator}
+                        className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      {t({ it: 'Può creare meeting in autonomia', en: 'Can create meetings autonomously' })}
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
+                      <input
+                        type="checkbox"
+                        checked={canManageBusinessPartners}
+                        onChange={(e) => setCanManageBusinessPartners(e.target.checked)}
+                        disabled={isAdmin}
+                        className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      {t({ it: 'Può gestire rubrica Business Partner', en: 'Can manage Business Partner directory' })}
+                    </label>
+                    {isAdmin ? (
+                      <div className="text-xs text-slate-500">
+                        {t({ it: 'Gli admin e superadmin possono sempre accedere alla rubrica Business Partner.', en: 'Admins and superadmins can always access the Business Partner directory.' })}
+                      </div>
+                    ) : null}
+                    {isMeetingOperator ? (
+                      <div className="text-xs text-slate-500">
+                        {t({
+                          it: 'Il meeting operator lavora in sola lettura sulla mappa (solo meeting room visibili) e può gestire meeting sui clienti autorizzati.',
+                          en: 'Meeting operators use a read-only map view (meeting rooms only) and can manage meetings on allowed clients.'
+                        })}
+                      </div>
+                    ) : null}
                     {!canCreateAdmin ? (
                       <div className="text-xs text-slate-500">
                         {t({ it: 'Solo i superadmin possono creare o promuovere utenti admin.', en: 'Only superadmins can create or promote admin users.' })}

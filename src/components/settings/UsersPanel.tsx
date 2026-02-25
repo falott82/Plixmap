@@ -109,7 +109,7 @@ const UsersPanel = () => {
       ...rows.map((u) =>
         [
           u.username,
-          u.isSuperAdmin ? 'superadmin' : u.isAdmin ? 'admin' : 'user',
+          u.isSuperAdmin ? 'superadmin' : u.isAdmin ? 'admin' : (u as any).isMeetingOperator ? 'meeting_operator' : 'user',
           u.disabled ? 'disabled' : 'active',
           u.firstName,
           u.lastName,
@@ -223,7 +223,13 @@ const UsersPanel = () => {
 	                  <div className="min-w-0">
 	                    <div className={`font-semibold ${isStrictSuperAdmin ? 'text-rose-600' : 'text-ink'}`}>{u.username}</div>
 	                    <div className="text-xs text-slate-500">
-	                      {isStrictSuperAdmin ? 'Superadmin' : u.isAdmin ? 'Admin' : t({ it: 'Utente', en: 'User' })}
+	                      {isStrictSuperAdmin
+                          ? 'Superadmin'
+                          : u.isAdmin
+                            ? 'Admin'
+                            : (u as any).isMeetingOperator
+                              ? t({ it: 'Meeting operator', en: 'Meeting operator' })
+                              : t({ it: 'Utente', en: 'User' })}
 	                      {u.disabled ? ` • ${t({ it: 'Disattivato', en: 'Disabled' })}` : ''}
 	                    </div>
 		                  </div>
@@ -442,6 +448,9 @@ const UsersPanel = () => {
                 email: payload.email,
                 language: payload.language || 'it',
                 isAdmin: isSuperAdmin ? payload.isAdmin : false,
+                canCreateMeetings: payload.canCreateMeetings !== false,
+                canManageBusinessPartners: payload.canManageBusinessPartners === true,
+                isMeetingOperator: (payload as any).isMeetingOperator === true,
                 disabled: !!payload.disabled,
                 permissions: payload.permissions
               });
@@ -456,6 +465,9 @@ const UsersPanel = () => {
                 email: payload.email,
                 language: payload.language || 'it',
                 isAdmin: isSuperAdmin ? payload.isAdmin : false,
+                canCreateMeetings: payload.canCreateMeetings !== false,
+                canManageBusinessPartners: payload.canManageBusinessPartners === true,
+                isMeetingOperator: (payload as any).isMeetingOperator === true,
                 permissions: payload.permissions
               });
               push(t({ it: 'Utente creato', en: 'User created' }), 'success');

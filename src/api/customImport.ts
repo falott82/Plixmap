@@ -28,6 +28,8 @@ export interface ExternalUserRow {
   lastSeenAt: number | null;
   createdAt: number;
   updatedAt: number;
+  manual?: boolean;
+  sourceKind?: 'manual' | 'imported';
 }
 
 export interface ExternalUsersResponse {
@@ -167,6 +169,49 @@ export const setExternalUserHidden = async (payload: { clientId: string; externa
   if (!res.ok) throw new Error(`Failed to update external user (${res.status})`);
 };
 
+export const createManualExternalUser = async (payload: {
+  clientId: string;
+  user: Partial<ExternalUserRow>;
+}): Promise<{ ok: boolean; row: ExternalUserRow }> => {
+  const res = await apiFetch(`/api/external-users/manual`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to create manual user (${res.status})`);
+  return body;
+};
+
+export const updateManualExternalUser = async (payload: {
+  clientId: string;
+  externalId: string;
+  user: Partial<ExternalUserRow>;
+}): Promise<{ ok: boolean; row: ExternalUserRow }> => {
+  const res = await apiFetch(`/api/external-users/manual`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to update manual user (${res.status})`);
+  return body;
+};
+
+export const deleteManualExternalUser = async (payload: { clientId: string; externalId: string }): Promise<{ ok: boolean; removed: number }> => {
+  const res = await apiFetch(`/api/external-users/manual`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to delete manual user (${res.status})`);
+  return body;
+};
+
 export const diffImport = async (clientId: string): Promise<{
   ok: boolean;
   remoteCount: number;
@@ -190,6 +235,88 @@ export const diffImport = async (clientId: string): Promise<{
   if (!res.ok) {
     return { ok: false, remoteCount: 0, localCount: 0, newCount: 0, updatedCount: 0, missingCount: 0, newSample: [], missingSample: [], error: body?.error || `HTTP ${res.status}`, contentType: body?.contentType, rawSnippet: body?.rawSnippet } as any;
   }
+  return body;
+};
+
+export interface ImportPreviewRow {
+  externalId: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  dept1: string;
+  dept2: string;
+  dept3: string;
+  email: string;
+  mobile: string;
+  ext1: string;
+  ext2: string;
+  ext3: string;
+  isExternal: boolean;
+  importStatus: 'new' | 'update' | 'existing';
+}
+
+export interface ImportPreviewExistingRow {
+  externalId: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  dept1: string;
+  dept2: string;
+  dept3: string;
+  email: string;
+  mobile: string;
+  ext1: string;
+  ext2: string;
+  ext3: string;
+  isExternal: boolean;
+  hidden: boolean;
+  present: boolean;
+  updatedAt: number | null;
+}
+
+export const previewImport = async (clientId: string): Promise<{
+  ok: boolean;
+  clientId: string;
+  remoteCount: number;
+  existingCount: number;
+  remoteRows: ImportPreviewRow[];
+  existingRows: ImportPreviewExistingRow[];
+  error?: string;
+  contentType?: string;
+  rawSnippet?: string;
+}> => {
+  const res = await apiFetch(`/api/import/preview`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, clientId, remoteCount: 0, existingCount: 0, remoteRows: [], existingRows: [], error: body?.error || `HTTP ${res.status}`, contentType: body?.contentType, rawSnippet: body?.rawSnippet } as any;
+  return body;
+};
+
+export const importOneWebApiUser = async (payload: { clientId: string; externalId: string; user?: Partial<ImportPreviewRow> }): Promise<{ ok: boolean; externalId: string; summary: any; created: any[]; updated: any[] }> => {
+  const res = await apiFetch(`/api/import/import-one`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to import user (${res.status})`);
+  return body;
+};
+
+export const deleteOneImportedUser = async (payload: { clientId: string; externalId: string }): Promise<{ ok: boolean; externalId: string; removedUsers: number; removedObjects: number }> => {
+  const res = await apiFetch(`/api/import/delete-one`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to delete user (${res.status})`);
   return body;
 };
 

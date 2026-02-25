@@ -21,6 +21,7 @@ import {
   unblockChatUser
 } from '../../api/chat';
 import { updateMyProfile } from '../../api/auth';
+import { reviewMeeting } from '../../api/meetings';
 import { fetchUserProfile } from '../../api/userProfile';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useChatStore } from '../../store/useChatStore';
@@ -58,6 +59,12 @@ const allowedExts = new Set([
   'webm',
   'mov'
 ]);
+
+const parseMeetingRequestToken = (text: string): string | null => {
+  const raw = String(text || '');
+  const m = raw.match(/MEETING_REQUEST:([a-z0-9-]+)/i);
+  return m?.[1] ? String(m[1]) : null;
+};
 
 const extForMime = (mime: string) => {
   const m = String(mime || '').toLowerCase();
@@ -1029,6 +1036,39 @@ const ClientChatDock = () => {
       useChatStore.getState().upsertMessage(clientChatClientId, res.message);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to react');
+    }
+  };
+
+  const reviewMeetingFromChat = async (meetingId: string, action: 'approve' | 'reject') => {
+    const id = String(meetingId || '').trim();
+    if (!id) return;
+    try {
+      let reason: string | undefined;
+      if (action === 'reject') {
+        const answer = window.prompt(
+          t({
+            it: 'Motivazione rifiuto (obbligatoria):',
+            en: 'Rejection reason (required):'
+          })
+        );
+        reason = String(answer || '').trim();
+        if (!reason) return;
+      }
+      await reviewMeeting(id, { action, reason });
+      toast.success(
+        action === 'approve'
+          ? t({ it: 'Meeting approvato.', en: 'Meeting approved.' })
+          : t({ it: 'Meeting rifiutato.', en: 'Meeting rejected.' })
+      );
+    } catch (error: any) {
+      const msg = String(error?.message || '').trim();
+      toast.error(
+        msg ||
+          t({
+            it: 'Impossibile completare la revisione meeting.',
+            en: 'Unable to complete meeting review.'
+          })
+      );
     }
   };
 
@@ -2314,6 +2354,8 @@ const ClientChatDock = () => {
 	                          const name = String((a as any)?.name || '').toLowerCase();
 	                          return name.startsWith('voice-') && isAudioAttachment(a);
 	                        });
+	                        const meetingRequestId = parseMeetingRequestToken(String(m.text || ''));
+	                        const canReviewMeetingFromChat = !!meetingRequestId && (!!user?.isAdmin || !!user?.isSuperAdmin);
 	                        const starredBy = Array.isArray((m as any).starredBy) ? ((m as any).starredBy as string[]) : [];
 	                        const starred = !!user?.id && starredBy.some((id) => String(id) === String(user.id));
 	                        const replyTarget = m.replyToId ? messagesById.get(String(m.replyToId)) : null;
@@ -2442,6 +2484,25 @@ const ClientChatDock = () => {
                                 ) : (
                                   m.text
                                 )}
+                                {!m.deleted && canReviewMeetingFromChat ? (
+                                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950/40 px-2 py-2 text-xs">
+                                    <button
+                                      type="button"
+                                      className="rounded-lg bg-emerald-600 px-2 py-1 font-semibold text-white hover:bg-emerald-700"
+                                      onClick={() => reviewMeetingFromChat(String(meetingRequestId || ''), 'approve')}
+                                    >
+                                      {t({ it: 'Approva', en: 'Approve' })}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="rounded-lg bg-rose-600 px-2 py-1 font-semibold text-white hover:bg-rose-700"
+                                      onClick={() => reviewMeetingFromChat(String(meetingRequestId || ''), 'reject')}
+                                    >
+                                      {t({ it: 'Rifiuta', en: 'Reject' })}
+                                    </button>
+                                    <span className="text-slate-300">#{meetingRequestId}</span>
+                                  </div>
+                                ) : null}
                                 {m.editedAt && !m.deleted ? (
                                   <span className="ml-2 text-[10px] font-semibold opacity-60">{t({ it: '(modificato)', en: '(edited)' })}</span>
                                 ) : null}

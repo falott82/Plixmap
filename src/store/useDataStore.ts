@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import {
+  BusinessPartner,
   Client,
   Corridor,
   DoorVerificationEntry,
@@ -91,14 +92,39 @@ interface DataState {
           | 'pecEmail'
           | 'description'
           | 'attachments'
+          | 'businessPartners'
           | 'wifiAntennaModels'
           | 'emergencyContacts'
       >
     >
   ) => void;
   deleteClient: (id: string) => void;
-  addSite: (clientId: string, payload: { name: string; coords?: string }) => string;
-  updateSite: (id: string, payload: { name?: string; coords?: string }) => void;
+  addSite: (
+    clientId: string,
+    payload: {
+      name: string;
+      coords?: string;
+      supportContacts?: {
+        cleaning?: { email?: string; phone?: string };
+        it?: { email?: string; phone?: string };
+        coffee?: { email?: string; phone?: string };
+      };
+      siteSchedule?: Site['siteSchedule'];
+    }
+  ) => string;
+  updateSite: (
+    id: string,
+    payload: {
+      name?: string;
+      coords?: string;
+      supportContacts?: {
+        cleaning?: { email?: string; phone?: string };
+        it?: { email?: string; phone?: string };
+        coffee?: { email?: string; phone?: string };
+      };
+      siteSchedule?: Site['siteSchedule'];
+    }
+  ) => void;
   deleteSite: (id: string) => void;
   addFloorPlan: (siteId: string, name: string, imageUrl: string, width?: number, height?: number) => string;
   updateFloorPlan: (
@@ -601,6 +627,28 @@ const normalizeEmergencyContacts = (contacts: any): EmergencyContactEntry[] => {
     .filter((entry) => !!entry.name && !!entry.phone);
 };
 
+const normalizeBusinessPartners = (items: any): BusinessPartner[] => {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((entry) => {
+      const name = String(entry?.name || '').trim();
+      const logoUrl = String(entry?.logoUrl || '').trim();
+      const email = String(entry?.email || '').trim();
+      const phone = String(entry?.phone || '').trim();
+      const notes = String(entry?.notes || '').trim();
+      return {
+        id: String(entry?.id || nanoid()),
+        name,
+        logoUrl: logoUrl || undefined,
+        email: email || undefined,
+        phone: phone || undefined,
+        notes: notes || undefined
+      } as BusinessPartner;
+    })
+    .filter((row) => !!row.name)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+};
+
 const snapshotRevision = (
   plan: FloorPlan,
   rev: { major: number; minor: number },
@@ -716,6 +764,61 @@ const defaultLayers = (): LayerDefinition[] => [
 ];
 
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
+
+const normalizeSupportContactValue = (value: any) => {
+  const email = String(value?.email || '').trim();
+  const phone = String(value?.phone || '').trim();
+  if (!email && !phone) return undefined;
+  return { ...(email ? { email } : {}), ...(phone ? { phone } : {}) };
+};
+
+const normalizeSiteSupportContacts = (value: any) => {
+  if (!value || typeof value !== 'object') return undefined;
+  const cleaning = normalizeSupportContactValue(value.cleaning);
+  const it = normalizeSupportContactValue(value.it);
+  const coffee = normalizeSupportContactValue(value.coffee);
+  if (!cleaning && !it && !coffee) return undefined;
+  return {
+    ...(cleaning ? { cleaning } : {}),
+    ...(it ? { it } : {}),
+    ...(coffee ? { coffee } : {})
+  };
+};
+
+const normalizeSiteSchedule = (value: any): Site['siteSchedule'] | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const dayKeys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+  const weeklySource = value.weekly && typeof value.weekly === 'object' ? value.weekly : {};
+  const weekly: Record<string, { closed?: boolean; open?: string; close?: string }> = {};
+  for (const key of dayKeys) {
+    const row = (weeklySource as any)?.[key];
+    if (!row || typeof row !== 'object') continue;
+    const open = String(row.open || '').trim();
+    const close = String(row.close || '').trim();
+    const closed = !!row.closed;
+    if (!closed && !open && !close) continue;
+    weekly[key] = {
+      ...(closed ? { closed: true } : {}),
+      ...(!closed && open ? { open } : {}),
+      ...(!closed && close ? { close } : {})
+    };
+  }
+  const holidays = Array.isArray(value.holidays)
+    ? value.holidays
+        .map((h: any) => {
+          const date = String(h?.date || '').trim();
+          const label = String(h?.label || '').trim();
+          if (!date) return null;
+          return { date, ...(label ? { label } : {}), ...(h?.closed === false ? { closed: false } : {}) };
+        })
+        .filter(Boolean)
+    : [];
+  if (!Object.keys(weekly).length && !holidays.length) return undefined;
+  return {
+    ...(Object.keys(weekly).length ? { weekly: weekly as any } : {}),
+    ...(holidays.length ? { holidays: holidays as any } : {})
+  };
+};
 
 const normalizeWifiAntennaModels = (models?: WifiAntennaModel[]): WifiAntennaModel[] => {
   const source = Array.isArray(models) && models.length ? models : DEFAULT_WIFI_ANTENNA_MODELS;
@@ -889,14 +992,25 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
       labelScale: Number.isFinite(Number((room as any)?.labelScale))
         ? Math.max(0.3, Math.min(3, Number((room as any).labelScale)))
         : undefined,
+      fillOpacity: Number.isFinite(Number((room as any)?.fillOpacity))
+        ? Math.max(0.05, Math.min(1, Number((room as any).fillOpacity)))
+        : undefined,
       labelPosition:
         (room as any)?.labelPosition === 'bottom' || (room as any)?.labelPosition === 'left' || (room as any)?.labelPosition === 'right'
           ? (room as any).labelPosition
           : 'top',
       noWindows: !!(room as any)?.noWindows,
+      wifiAvailable: !!(room as any)?.wifiAvailable,
+      fridgeAvailable: !!(room as any)?.fridgeAvailable,
       storageRoom: !!(room as any)?.storageRoom,
       bathroom: !!(room as any)?.bathroom,
-      technicalRoom: !!(room as any)?.technicalRoom
+      technicalRoom: !!(room as any)?.technicalRoom,
+      meetingProjector: !!(room as any)?.meetingProjector,
+      meetingTv: !!(room as any)?.meetingTv,
+      meetingVideoConf: !!(room as any)?.meetingVideoConf,
+      meetingCoffeeService: !!(room as any)?.meetingCoffeeService,
+      meetingWhiteboard: !!(room as any)?.meetingWhiteboard,
+      meetingKioskEnabled: !!(room as any)?.meetingKioskEnabled
     }));
   }
   if (!Array.isArray(next.corridors)) next.corridors = [];
@@ -1108,10 +1222,13 @@ export const useDataStore = create<DataState>()(
           clients: (clients || []).map((c) => ({
             ...c,
             layers: normalizeClientLayers(c),
+            businessPartners: normalizeBusinessPartners((c as any).businessPartners),
             wifiAntennaModels: normalizeWifiAntennaModels((c as any).wifiAntennaModels),
             emergencyContacts: normalizeEmergencyContacts((c as any).emergencyContacts),
             sites: (c.sites || []).map((s) => ({
               ...s,
+              supportContacts: normalizeSiteSupportContacts((s as any).supportContacts),
+              siteSchedule: normalizeSiteSchedule((s as any).siteSchedule),
               floorPlans: (s.floorPlans || []).map((p) => normalizePlan(p))
             }))
           })),
@@ -1222,6 +1339,9 @@ export const useDataStore = create<DataState>()(
                   ...(payload?.wifiAntennaModels !== undefined
                     ? { wifiAntennaModels: normalizeWifiAntennaModels(payload.wifiAntennaModels as any) }
                     : {}),
+                  ...(payload?.businessPartners !== undefined
+                    ? { businessPartners: normalizeBusinessPartners((payload as any).businessPartners) }
+                    : {}),
                   ...(payload?.emergencyContacts !== undefined
                     ? { emergencyContacts: normalizeEmergencyContacts(payload.emergencyContacts) }
                     : {})
@@ -1238,10 +1358,12 @@ export const useDataStore = create<DataState>()(
         const id = nanoid();
         const name = payload?.name || '';
         const coords = payload?.coords;
+        const supportContacts = normalizeSiteSupportContacts(payload?.supportContacts);
+        const siteSchedule = normalizeSiteSchedule(payload?.siteSchedule);
         set((state) => ({
           clients: state.clients.map((client) =>
             client.id === clientId
-              ? { ...client, sites: [...client.sites, { id, clientId, name, coords, floorPlans: [] }] }
+              ? { ...client, sites: [...client.sites, { id, clientId, name, coords, supportContacts, siteSchedule, floorPlans: [] }] }
               : client
           ),
           version: state.version + 1
@@ -1257,7 +1379,11 @@ export const useDataStore = create<DataState>()(
                 ? {
                     ...site,
                     ...(payload?.name !== undefined ? { name: payload.name || '' } : {}),
-                    ...(payload?.coords !== undefined ? { coords: payload.coords || undefined } : {})
+                    ...(payload?.coords !== undefined ? { coords: payload.coords || undefined } : {}),
+                    ...(payload?.supportContacts !== undefined
+                      ? { supportContacts: normalizeSiteSupportContacts(payload.supportContacts) }
+                      : {}),
+                    ...(payload?.siteSchedule !== undefined ? { siteSchedule: normalizeSiteSchedule(payload.siteSchedule) } : {})
                   }
                 : site
             )

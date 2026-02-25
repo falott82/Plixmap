@@ -14,9 +14,12 @@ const formatTs = (ts: number) => {
 type Props = {
   clearInfo?: LogsClearMeta;
   onCleared?: () => void;
+  scopeType?: string;
+  scopeId?: string;
+  compact?: boolean;
 };
 
-const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
+const AuditTrailPanel = ({ clearInfo, onCleared, scopeType, scopeId, compact = false }: Props) => {
   const t = useT();
   const push = useToastStore((s) => s.push);
   const [query, setQuery] = useState('');
@@ -42,7 +45,14 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetchAuditTrail({ q: query.trim() || undefined, level, limit, offset });
+      const res = await fetchAuditTrail({
+        q: query.trim() || undefined,
+        level,
+        limit,
+        offset,
+        scopeType: scopeType || undefined,
+        scopeId: scopeId || undefined
+      });
       setRows(res.rows);
       setTotal(res.total || 0);
     } catch {
@@ -60,7 +70,7 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
   useEffect(() => {
     load().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit, offset, level]);
+  }, [limit, offset, level, scopeType, scopeId]);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -153,45 +163,49 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
           >
             <Download size={16} />
           </button>
-          <button
-            onClick={() => setConfirmClearOpen(true)}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-            title={t({
-              it: 'Svuota audit trail: elimina definitivamente tutte le righe di log (non annulla azioni o modifiche).',
-              en: 'Clear audit trail: permanently deletes all log entries (does not undo actions or changes).'
-            })}
-          >
-            <Trash2 size={16} />
-          </button>
-          <button
-            onClick={async () => {
-              setAuditVerboseLoading(true);
-              try {
-                const next = !auditVerbose;
-                await setAuditSettings({ auditVerbose: next });
-                setAuditVerbose(next);
-                push(
-                  next
-                    ? t({ it: 'Audit esteso abilitato', en: 'Extended audit enabled' })
-                    : t({ it: 'Audit esteso disabilitato', en: 'Extended audit disabled' }),
-                  'success'
-                );
-              } catch {
-                push(t({ it: 'Impossibile aggiornare impostazione audit', en: 'Failed to update audit setting' }), 'danger');
-              } finally {
-                setAuditVerboseLoading(false);
-              }
-            }}
-            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-ink hover:bg-slate-50"
-            title={t({
-              it: 'Audit esteso: registra eventi principali + dettagli tecnici/contesto utili per diagnosi (più righe e spazio). Audit ridotto: solo eventi principali. Non cambia il comportamento dell’app, cambia solo cosa viene salvato nel log.',
-              en: 'Extended audit: records key events plus extra technical/context details for troubleshooting (more rows and storage). Reduced audit: only key events. It does not change app behavior, only what is written in the log.'
-            })}
-            disabled={auditVerboseLoading}
-          >
-            {auditVerbose ? <ToggleRight size={16} className="text-primary" /> : <ToggleLeft size={16} className="text-slate-500" />}
-            {t({ it: 'Estesa', en: 'Extended' })}
-          </button>
+          {!compact ? (
+            <>
+              <button
+                onClick={() => setConfirmClearOpen(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                title={t({
+                  it: 'Svuota audit trail: elimina definitivamente tutte le righe di log (non annulla azioni o modifiche).',
+                  en: 'Clear audit trail: permanently deletes all log entries (does not undo actions or changes).'
+                })}
+              >
+                <Trash2 size={16} />
+              </button>
+              <button
+                onClick={async () => {
+                  setAuditVerboseLoading(true);
+                  try {
+                    const next = !auditVerbose;
+                    await setAuditSettings({ auditVerbose: next });
+                    setAuditVerbose(next);
+                    push(
+                      next
+                        ? t({ it: 'Audit esteso abilitato', en: 'Extended audit enabled' })
+                        : t({ it: 'Audit esteso disabilitato', en: 'Extended audit disabled' }),
+                      'success'
+                    );
+                  } catch {
+                    push(t({ it: 'Impossibile aggiornare impostazione audit', en: 'Failed to update audit setting' }), 'danger');
+                  } finally {
+                    setAuditVerboseLoading(false);
+                  }
+                }}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-ink hover:bg-slate-50"
+                title={t({
+                  it: 'Audit esteso: registra eventi principali + dettagli tecnici/contesto utili per diagnosi (più righe e spazio). Audit ridotto: solo eventi principali. Non cambia il comportamento dell’app, cambia solo cosa viene salvato nel log.',
+                  en: 'Extended audit: records key events plus extra technical/context details for troubleshooting (more rows and storage). Reduced audit: only key events. It does not change app behavior, only what is written in the log.'
+                })}
+                disabled={auditVerboseLoading}
+              >
+                {auditVerbose ? <ToggleRight size={16} className="text-primary" /> : <ToggleLeft size={16} className="text-slate-500" />}
+                {t({ it: 'Estesa', en: 'Extended' })}
+              </button>
+            </>
+          ) : null}
           <button
             onClick={load}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
@@ -202,6 +216,7 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
         </div>
       </div>
 
+      {!compact ? (
       <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-card">
         <div className="flex items-start gap-2">
           <div className="mt-0.5 text-slate-500">
@@ -226,6 +241,13 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
           </div>
         </div>
       </div>
+      ) : (
+        scopeType && scopeId ? (
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600 shadow-card">
+            {t({ it: 'Filtro attivo', en: 'Active filter' })}: <span className="font-semibold text-ink">{scopeType}</span> = <span className="font-mono">{scopeId}</span>
+          </div>
+        ) : null
+      )}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative flex-1">
@@ -331,7 +353,7 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
         </button>
       </div>
 
-      <ConfirmDialog
+      {!compact ? <ConfirmDialog
         open={confirmClearOpen}
         title={t({ it: 'Svuotare l’audit trail?', en: 'Clear audit trail?' })}
         description={t({
@@ -352,7 +374,7 @@ const AuditTrailPanel = ({ clearInfo, onCleared }: Props) => {
           }
         }}
         confirmLabel={t({ it: 'Svuota', en: 'Clear' })}
-      />
+      /> : null}
     </div>
   );
 };

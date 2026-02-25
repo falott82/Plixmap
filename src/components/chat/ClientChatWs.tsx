@@ -165,6 +165,49 @@ const ClientChatWs = () => {
           const ids = msg.users.map((u: any) => String(u?.userId || '')).filter(Boolean);
           useUIStore.getState().setOnlineUserIds(ids);
         }
+        if (msg?.type === 'meeting_request_new' && msg?.booking?.id) {
+          const subject = String(msg.booking?.subject || '').trim() || t({ it: 'Meeting', en: 'Meeting' });
+          const room = String(msg.booking?.roomName || '').trim();
+          toast.info(
+            t({
+              it: `Nuova richiesta meeting: ${subject}${room ? ` (${room})` : ''}`,
+              en: `New meeting request: ${subject}${room ? ` (${room})` : ''}`
+            }),
+            { duration: 6000, id: `meeting-request:${String(msg.booking.id)}` }
+          );
+          return;
+        }
+        if (msg?.type === 'meeting_pending_summary') {
+          const count = Number(msg?.pendingCount || 0);
+          if (count > 0) {
+            toast.info(
+              t({
+                it: `Richieste meeting in attesa: ${count}`,
+                en: `Pending meeting requests: ${count}`
+              }),
+              { duration: 4500, id: 'meeting-pending-summary' }
+            );
+          }
+          return;
+        }
+        if (msg?.type === 'meeting_request_reviewed' && msg?.bookingId) {
+          const action = String(msg.action || '').toLowerCase();
+          if (action === 'approved') {
+            toast.success(t({ it: 'La tua richiesta meeting e stata approvata.', en: 'Your meeting request was approved.' }), {
+              duration: 5000,
+              id: `meeting-reviewed:${String(msg.bookingId)}`
+            });
+          } else if (action === 'rejected') {
+            const reason = String(msg.reason || '').trim();
+            toast.error(
+              reason
+                ? t({ it: `Richiesta meeting rifiutata: ${reason}`, en: `Meeting request rejected: ${reason}` })
+                : t({ it: 'Richiesta meeting rifiutata.', en: 'Meeting request rejected.' }),
+              { duration: 7000, id: `meeting-reviewed:${String(msg.bookingId)}` }
+            );
+          }
+          return;
+        }
       };
 
       ws.onclose = () => {

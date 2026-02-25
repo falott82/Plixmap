@@ -57,12 +57,16 @@ export const fetchAuditTrail = async (params?: {
   level?: 'all' | AuditLevel;
   limit?: number;
   offset?: number;
+  scopeType?: string;
+  scopeId?: string;
 }): Promise<{ rows: AuditRow[]; limit: number; offset: number; total: number }> => {
   const qs = new URLSearchParams();
   if (params?.q) qs.set('q', params.q);
   if (params?.level) qs.set('level', params.level);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.offset) qs.set('offset', String(params.offset));
+  if (params?.scopeType) qs.set('scopeType', params.scopeType);
+  if (params?.scopeId) qs.set('scopeId', params.scopeId);
   const res = await apiFetch(`/api/audit?${qs.toString()}`, { credentials: 'include' });
   if (!res.ok) throw new Error(`Failed to fetch audit trail (${res.status})`);
   return res.json();

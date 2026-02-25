@@ -1,9 +1,11 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ChevronLeft, ChevronRight, ChevronsRight, HelpCircle, Image as ImageIcon, Search, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsRight, Copy, ExternalLink, HelpCircle, Image as ImageIcon, Ruler, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
+import QRCode from 'qrcode';
 import { useT } from '../../i18n/useT';
+import { fetchMeetingRoomSchedule } from '../../api/meetings';
 import RoomShapePreview from './RoomShapePreview';
 import Icon from '../ui/Icon';
 import CapacityGauge from '../ui/CapacityGauge';
@@ -17,6 +19,7 @@ interface Props {
   initialDepartmentTags?: string[];
   departmentOptions?: string[];
   initialColor?: string;
+  initialFillOpacity?: number;
   initialCapacity?: number;
   initialLabelScale?: number;
   initialShowName?: boolean;
@@ -24,10 +27,19 @@ interface Props {
   initialNotes?: string;
   initialLogical?: boolean;
   initialMeetingRoom?: boolean;
+  initialMeetingProjector?: boolean;
+  initialMeetingTv?: boolean;
+  initialMeetingVideoConf?: boolean;
+  initialMeetingCoffeeService?: boolean;
+  initialMeetingWhiteboard?: boolean;
+  initialMeetingKioskEnabled?: boolean;
   initialNoWindows?: boolean;
+  initialWifiAvailable?: boolean;
+  initialFridgeAvailable?: boolean;
   initialStorageRoom?: boolean;
   initialBathroom?: boolean;
   initialTechnicalRoom?: boolean;
+  kioskRoomId?: string;
   surfaceLocked?: boolean;
   measurements?: {
     scaleMissing?: boolean;
@@ -53,6 +65,7 @@ interface Props {
     nameEn?: string;
     departmentTags?: string[];
     color?: string;
+    fillOpacity?: number;
     capacity?: number;
     labelScale?: number;
     showName: boolean;
@@ -60,7 +73,15 @@ interface Props {
     notes?: string;
     logical?: boolean;
     meetingRoom?: boolean;
+    meetingProjector?: boolean;
+    meetingTv?: boolean;
+    meetingVideoConf?: boolean;
+    meetingCoffeeService?: boolean;
+    meetingWhiteboard?: boolean;
+    meetingKioskEnabled?: boolean;
     noWindows?: boolean;
+    wifiAvailable?: boolean;
+    fridgeAvailable?: boolean;
     storageRoom?: boolean;
     bathroom?: boolean;
     technicalRoom?: boolean;
@@ -73,14 +94,20 @@ const IosSwitch = ({
   label,
   description,
   checked,
-  onChange
+  onChange,
+  disabled = false
 }: {
   label: string;
   description?: string;
   checked: boolean;
   onChange: (next: boolean) => void;
+  disabled?: boolean;
 }) => (
-  <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+  <div
+    className={`flex items-start justify-between gap-3 rounded-xl border px-3 py-2.5 ${
+      disabled ? 'border-slate-200 bg-slate-50 opacity-70' : 'border-slate-200 bg-white'
+    }`}
+  >
     <div>
       <div className="text-sm font-semibold text-ink">{label}</div>
       {description ? <div className="mt-0.5 text-xs text-slate-500">{description}</div> : null}
@@ -89,10 +116,11 @@ const IosSwitch = ({
       type="button"
       role="switch"
       aria-checked={checked}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative mt-0.5 h-6 w-11 rounded-full transition ${
-        checked ? 'bg-primary' : 'bg-slate-300'
-      }`}
+        disabled ? 'cursor-not-allowed' : ''
+      } ${checked ? 'bg-primary' : 'bg-slate-300'}`}
       title={label}
     >
       <span
@@ -104,6 +132,30 @@ const IosSwitch = ({
   </div>
 );
 
+const ColorSwatchPicker = ({
+  color,
+  onChange
+}: {
+  color: string;
+  onChange: (next: string) => void;
+}) => (
+  <div className="mt-2 flex flex-wrap gap-2">
+    {COLORS.map((c) => {
+      const active = (color || COLORS[0]).toLowerCase() === c.toLowerCase();
+      return (
+        <button
+          key={c}
+          type="button"
+          onClick={() => onChange(c)}
+          className={`h-8 w-8 rounded-xl border ${active ? 'border-ink ring-2 ring-primary/30' : 'border-slate-200'}`}
+          style={{ background: c }}
+          title={c}
+        />
+      );
+    })}
+  </div>
+);
+
 const RoomModal = ({
   open,
   initialDepartmentsOpen = false,
@@ -112,6 +164,7 @@ const RoomModal = ({
   initialDepartmentTags,
   departmentOptions,
   initialColor = COLORS[0],
+  initialFillOpacity,
   initialCapacity,
   initialLabelScale,
   initialShowName = true,
@@ -119,10 +172,19 @@ const RoomModal = ({
   initialNotes,
   initialLogical = false,
   initialMeetingRoom = false,
+  initialMeetingProjector = false,
+  initialMeetingTv = false,
+  initialMeetingVideoConf = false,
+  initialMeetingCoffeeService = false,
+  initialMeetingWhiteboard = false,
+  initialMeetingKioskEnabled = false,
   initialNoWindows = false,
+  initialWifiAvailable = false,
+  initialFridgeAvailable = false,
   initialStorageRoom = false,
   initialBathroom = false,
   initialTechnicalRoom = false,
+  kioskRoomId,
   surfaceLocked = false,
   measurements,
   shapePreview,
@@ -142,6 +204,7 @@ const RoomModal = ({
   const [nameEn, setNameEn] = useState(initialNameEn);
   const [departmentTags, setDepartmentTags] = useState<string[]>([]);
   const [color, setColor] = useState(initialColor);
+  const [fillOpacity, setFillOpacity] = useState(0.08);
   const [capacity, setCapacity] = useState('');
   const [showName, setShowName] = useState(initialShowName);
   const [surfaceSqm, setSurfaceSqm] = useState('');
@@ -149,7 +212,15 @@ const RoomModal = ({
   const [labelScale, setLabelScale] = useState(1);
   const [logical, setLogical] = useState(initialLogical);
   const [meetingRoom, setMeetingRoom] = useState(initialMeetingRoom);
+  const [meetingProjector, setMeetingProjector] = useState(initialMeetingProjector);
+  const [meetingTv, setMeetingTv] = useState(initialMeetingTv);
+  const [meetingVideoConf, setMeetingVideoConf] = useState(initialMeetingVideoConf);
+  const [meetingCoffeeService, setMeetingCoffeeService] = useState(initialMeetingCoffeeService);
+  const [meetingWhiteboard, setMeetingWhiteboard] = useState(initialMeetingWhiteboard);
+  const [meetingKioskEnabled, setMeetingKioskEnabled] = useState(initialMeetingKioskEnabled);
   const [noWindows, setNoWindows] = useState(initialNoWindows);
+  const [wifiAvailable, setWifiAvailable] = useState(initialWifiAvailable);
+  const [fridgeAvailable, setFridgeAvailable] = useState(initialFridgeAvailable);
   const [storageRoom, setStorageRoom] = useState(initialStorageRoom);
   const [bathroom, setBathroom] = useState(initialBathroom);
   const [technicalRoom, setTechnicalRoom] = useState(initialTechnicalRoom);
@@ -157,6 +228,9 @@ const RoomModal = ({
   const [capacityError, setCapacityError] = useState('');
   const [departmentsModalOpen, setDepartmentsModalOpen] = useState(false);
   const [propertiesModalOpen, setPropertiesModalOpen] = useState(false);
+  const [measuresModalOpen, setMeasuresModalOpen] = useState(false);
+  const [kioskQrDataUrl, setKioskQrDataUrl] = useState('');
+  const [kioskPublicLink, setKioskPublicLink] = useState('');
   const [departmentQuery, setDepartmentQuery] = useState('');
   const [availableSelection, setAvailableSelection] = useState<string[]>([]);
   const [selectedSelection, setSelectedSelection] = useState<string[]>([]);
@@ -222,6 +296,9 @@ const RoomModal = ({
         : []
     );
     setColor(initialColor || COLORS[0]);
+    setFillOpacity(
+      Number.isFinite(Number(initialFillOpacity)) ? Math.max(0.05, Math.min(1, Number(initialFillOpacity))) : 0.08
+    );
     setCapacity(Number.isFinite(initialCapacity) && Number(initialCapacity) >= 0 ? String(Math.floor(Number(initialCapacity))) : '');
     setLabelScale(Number.isFinite(initialLabelScale) && (initialLabelScale || 0) > 0 ? Number(initialLabelScale) : 1);
     setShowName(initialShowName !== false);
@@ -229,7 +306,15 @@ const RoomModal = ({
     setNotes(initialNotes || '');
     setLogical(!!initialLogical);
     setMeetingRoom(!!initialMeetingRoom);
+    setMeetingProjector(!!initialMeetingProjector);
+    setMeetingTv(!!initialMeetingTv);
+    setMeetingVideoConf(!!initialMeetingVideoConf);
+    setMeetingCoffeeService(!!initialMeetingCoffeeService);
+    setMeetingWhiteboard(!!initialMeetingWhiteboard);
+    setMeetingKioskEnabled(!!initialMeetingKioskEnabled);
     setNoWindows(!!initialNoWindows);
+    setWifiAvailable(!!initialWifiAvailable);
+    setFridgeAvailable(!!initialFridgeAvailable);
     setStorageRoom(!!initialStorageRoom);
     setBathroom(!!initialBathroom);
     setTechnicalRoom(!!initialTechnicalRoom);
@@ -238,6 +323,8 @@ const RoomModal = ({
     setCapacityError('');
     setDepartmentsModalOpen(!!initialDepartmentsOpen);
     setPropertiesModalOpen(false);
+    setMeasuresModalOpen(false);
+    setKioskQrDataUrl('');
     setDepartmentQuery('');
     setAvailableSelection([]);
     setSelectedSelection([]);
@@ -254,10 +341,19 @@ const RoomModal = ({
   }, [
     initialDepartmentsOpen,
     initialColor,
+    initialFillOpacity,
     initialDepartmentTags,
     initialLogical,
     initialMeetingRoom,
+    initialMeetingProjector,
+    initialMeetingTv,
+    initialMeetingVideoConf,
+    initialMeetingCoffeeService,
+    initialMeetingWhiteboard,
+    initialMeetingKioskEnabled,
     initialNoWindows,
+    initialWifiAvailable,
+    initialFridgeAvailable,
     initialStorageRoom,
     initialBathroom,
     initialTechnicalRoom,
@@ -280,6 +376,34 @@ const RoomModal = ({
     if (!open || !departmentsModalOpen) return;
     toast.dismiss();
   }, [departmentsModalOpen, open]);
+
+  useEffect(() => {
+    if (!open || !propertiesModalOpen || !meetingRoom || !meetingKioskEnabled || !kioskRoomId) {
+      setKioskQrDataUrl('');
+      setKioskPublicLink('');
+      return;
+    }
+    let cancelled = false;
+    const path = `/meetingroom/${encodeURIComponent(String(kioskRoomId))}`;
+    const fallback = typeof window === 'undefined' ? path : `${window.location.origin}${path}`;
+    fetchMeetingRoomSchedule(String(kioskRoomId))
+      .then((res: any) => String(res?.kioskPublicUrl || '').trim() || fallback)
+      .catch(() => fallback)
+      .then((absolute) => {
+        if (cancelled) return;
+        setKioskPublicLink(absolute);
+        return QRCode.toDataURL(absolute, { margin: 1, width: 180 })
+          .then((url: string) => !cancelled && setKioskQrDataUrl(url))
+          .catch(() => !cancelled && setKioskQrDataUrl(''));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [kioskRoomId, meetingKioskEnabled, meetingRoom, open, propertiesModalOpen]);
+
+  useEffect(() => {
+    if (meetingRoom && departmentsModalOpen) setDepartmentsModalOpen(false);
+  }, [departmentsModalOpen, meetingRoom]);
 
   const canonicalDepartmentTags = (input: string[]) =>
     Array.from(
@@ -495,15 +619,17 @@ const RoomModal = ({
     const finalSurface = Number.isFinite(rawSurface) && rawSurface > 0 ? rawSurface : undefined;
     const finalNotes = notes.trim() ? notes.trim() : undefined;
     const finalNameEn = nameEn.trim() ? nameEn.trim() : undefined;
-    const finalDepartmentTags = departmentTags
+    const finalDepartmentTags = (meetingRoom ? [] : departmentTags)
       .map((entry) => String(entry || '').trim())
       .filter(Boolean)
       .filter((entry, index, list) => list.findIndex((candidate) => candidate.toLocaleLowerCase() === entry.toLocaleLowerCase()) === index);
+    const finalFillOpacity = Number.isFinite(Number(fillOpacity)) ? Math.max(0.05, Math.min(1, Number(fillOpacity))) : 0.08;
     const saved = onSubmit({
       name: name.trim(),
       nameEn: finalNameEn,
       departmentTags: finalDepartmentTags.length ? finalDepartmentTags : undefined,
       color: color || COLORS[0],
+      fillOpacity: finalFillOpacity,
       capacity: finalCapacity,
       labelScale: finalLabelScale,
       showName,
@@ -511,7 +637,15 @@ const RoomModal = ({
       notes: finalNotes,
       logical,
       meetingRoom,
+      meetingProjector: meetingRoom ? meetingProjector : false,
+      meetingTv: meetingRoom ? meetingTv : false,
+      meetingVideoConf: meetingRoom ? meetingVideoConf : false,
+      meetingCoffeeService: meetingRoom ? meetingCoffeeService : false,
+      meetingWhiteboard: meetingRoom ? meetingWhiteboard : false,
+      meetingKioskEnabled: meetingRoom ? meetingKioskEnabled : false,
       noWindows,
+      wifiAvailable: meetingRoom && !logical ? wifiAvailable : false,
+      fridgeAvailable: meetingRoom && !logical ? fridgeAvailable : false,
       storageRoom,
       bathroom,
       technicalRoom
@@ -550,7 +684,7 @@ const RoomModal = ({
 
   return (
     <>
-      <Transition show={open && !departmentsModalOpen && !propertiesModalOpen} as={Fragment}>
+      <Transition show={open && !departmentsModalOpen && !propertiesModalOpen && !measuresModalOpen} as={Fragment}>
       <Dialog
         as="div"
         className="relative z-50"
@@ -627,70 +761,6 @@ const RoomModal = ({
 
                   {activeTab === 'info' ? (
                     <div className="mt-4 space-y-3">
-                      {shapePreview || measurements ? (
-                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
-                          <div className="flex flex-col gap-3 md:flex-row">
-                            {shapePreview ? (
-                              <div className="md:w-64">
-                                <div className="text-xs font-semibold text-slate-600">
-                                  {t({ it: 'Forma stanza', en: 'Room shape' })}
-                                </div>
-                                <div className="mt-2 rounded-lg bg-slate-50 p-2">
-                                  <RoomShapePreview
-                                    points={shapePreview.points}
-                                    segments={shapePreview.segments}
-                                    width={240}
-                                    height={160}
-                                    className="h-40 w-full"
-                                  />
-                                </div>
-                              </div>
-                            ) : null}
-                            {measurements ? (
-                              <div className="flex-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                                <div className="font-semibold text-slate-700">
-                                  {t({ it: 'Misure stanza', en: 'Room measurements' })}
-                                </div>
-                                {measurements.scaleMissing ? (
-                                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
-                                    {t({ it: 'Imposta una scala per misurare.', en: 'Set a scale to measure.' })}
-                                  </div>
-                                ) : (
-                                  <>
-                                    {measurements.perimeterLabel ? (
-                                      <div className="mt-1 flex items-center justify-between gap-2">
-                                        <span>{t({ it: 'Perimetro', en: 'Perimeter' })}</span>
-                                        <span className="font-mono">{measurements.perimeterLabel}</span>
-                                      </div>
-                                    ) : null}
-                                    {measurements.areaLabel ? (
-                                      <div className="mt-1 flex items-center justify-between gap-2">
-                                        <span>{t({ it: 'Area', en: 'Area' })}</span>
-                                        <span className="font-mono">{measurements.areaLabel}</span>
-                                      </div>
-                                    ) : null}
-                                    {measurements.segments?.length ? (
-                                      <div className="mt-2">
-                                        <div className="text-[11px] font-semibold text-slate-500">
-                                          {t({ it: 'Lati', en: 'Sides' })}
-                                        </div>
-                                        <div className="mt-1 max-h-32 space-y-1 overflow-y-auto text-[11px] text-slate-600">
-                                          {measurements.segments.map((seg) => (
-                                            <div key={seg.label} className="flex items-center justify-between gap-2">
-                                              <span className="font-mono">{seg.label}</span>
-                                              <span className="font-mono">{seg.lengthLabel}</span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ) : null}
-                                  </>
-                                )}
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : null}
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                         <div className="flex items-center justify-between gap-2">
                           <div>
@@ -704,19 +774,45 @@ const RoomModal = ({
                               })}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setPropertiesModalOpen(true)}
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                          >
-                            {t({ it: 'Apri proprietà', en: 'Open properties' })}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setMeasuresModalOpen(true)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              title={t({ it: 'Misure stanza', en: 'Room measurements' })}
+                            >
+                              <Ruler size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPropertiesModalOpen(true)}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              {t({ it: 'Apri proprietà', en: 'Open properties' })}
+                            </button>
+                          </div>
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2 text-xs">
                           {showName ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Nome in mappa', en: 'Name on map' })}</span> : null}
                           {logical ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Room logica', en: 'Logical room' })}</span> : null}
                           {meetingRoom ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Meeting room', en: 'Meeting room' })}</span> : null}
+                          {meetingRoom && meetingProjector ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Proiettore', en: 'Projector' })}</span> : null}
+                          {meetingRoom && meetingTv ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">TV</span> : null}
+                          {meetingRoom && meetingVideoConf ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Videoconferenza', en: 'Video conference' })}</span>
+                          ) : null}
+                          {meetingRoom && meetingCoffeeService ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Coffee service', en: 'Coffee service' })}</span>
+                          ) : null}
+                          {meetingRoom && meetingWhiteboard ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Lavagna', en: 'Whiteboard' })}</span>
+                          ) : null}
+                          {meetingRoom && meetingKioskEnabled ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Kiosk mode', en: 'Kiosk mode' })}</span>
+                          ) : null}
                           {noWindows ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Senza finestre', en: 'No windows' })}</span> : null}
+                          {meetingRoom && wifiAvailable ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Guest Wifi', en: 'Guest Wifi' })}</span> : null}
+                          {meetingRoom && fridgeAvailable ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Frigo', en: 'Fridge' })}</span> : null}
                           {storageRoom ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Ripostiglio', en: 'Storage room' })}</span> : null}
                           {bathroom ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Bagno', en: 'Bathroom' })}</span> : null}
                           {technicalRoom ? <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-700">{t({ it: 'Locale tecnico', en: 'Technical room' })}</span> : null}
@@ -811,26 +907,27 @@ const RoomModal = ({
                           })}
                         </div>
                       </label>
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                         <div className="text-sm font-medium text-slate-700">{t({ it: 'Stato capienza', en: 'Capacity status' })}</div>
-                        <div className="mt-2 flex flex-col items-center gap-3 md:flex-row md:items-center md:justify-between">
-                          <CapacityGauge value={users.length} total={roomCapacityValue} size={170} />
-                          <div className="w-full rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 md:w-52">
+                        <div className="mt-2 flex flex-col items-center gap-2.5 md:flex-row md:items-center md:justify-between">
+                          <CapacityGauge value={users.length} total={roomCapacityValue} size={120} />
+                          <div className="w-full rounded-lg bg-slate-50 px-2.5 py-2 text-[11px] text-slate-600 md:w-48">
                             <div className="flex items-center justify-between gap-2">
                               <span>{t({ it: 'Utenti presenti', en: 'Users present' })}</span>
-                              <span className="font-semibold text-ink">{users.length}</span>
+                              <span className="font-semibold text-ink tabular-nums">{users.length}</span>
                             </div>
                             <div className="mt-1 flex items-center justify-between gap-2">
                               <span>{t({ it: 'Capienza impostata', en: 'Configured capacity' })}</span>
-                              <span className="font-semibold text-ink">{roomCapacityValue}</span>
+                              <span className="font-semibold text-ink tabular-nums">{roomCapacityValue}</span>
                             </div>
                             <div className="mt-1 flex items-center justify-between gap-2">
                               <span>{t({ it: 'Disponibilità', en: 'Availability' })}</span>
-                              <span className="font-semibold text-ink">{Math.max(0, roomCapacityValue - users.length)}</span>
+                              <span className="font-semibold text-ink tabular-nums">{Math.max(0, roomCapacityValue - users.length)}</span>
                             </div>
                           </div>
                         </div>
                       </div>
+                      {!meetingRoom ? (
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
                         <div className="flex items-center justify-between gap-2">
                           <div>
@@ -869,6 +966,11 @@ const RoomModal = ({
                           </div>
                         )}
                       </div>
+                      ) : (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+                          {t({ it: 'Le meeting room non supportano reparti associati.', en: 'Meeting rooms do not support assigned departments.' })}
+                        </div>
+                      )}
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                         <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                           {t({ it: 'Scala etichette', en: 'Label scale' })}
@@ -884,33 +986,25 @@ const RoomModal = ({
                           className="mt-1 w-full"
                         />
                       </div>
-                      <label className="block text-sm font-medium text-slate-700">
-                        {t({ it: 'Superficie (mq)', en: 'Surface (sqm)' })}
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-sm font-medium text-slate-700">{t({ it: 'Colore stanza', en: 'Room color' })}</div>
+                        <ColorSwatchPicker color={color} onChange={setColor} />
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <span>{t({ it: 'Opacità sfondo', en: 'Background opacity' })}</span>
+                          <span className="ml-auto tabular-nums">{Math.round(fillOpacity * 100)}%</span>
+                        </div>
                         <input
-                          value={surfaceSqm}
-                          onChange={(e) => {
-                            if (surfaceLocked) return;
-                            setSurfaceSqm(e.target.value);
-                          }}
-                          inputMode="decimal"
-                          type="number"
-                          min={0.1}
-                          step={0.1}
-                          disabled={surfaceLocked}
-                          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${
-                            surfaceLocked ? 'border-slate-200 bg-slate-100 text-slate-500' : 'border-slate-200'
-                          }`}
-                          placeholder={t({ it: 'Es. 24.5', en: 'e.g. 24.5' })}
+                          type="range"
+                          min={0.05}
+                          max={1}
+                          step={0.05}
+                          value={fillOpacity}
+                          onChange={(e) => setFillOpacity(Math.max(0.05, Math.min(1, Number(e.target.value) || 0.08)))}
+                          className="mt-2 w-full"
                         />
-                        {surfaceLocked ? (
-                          <div className="mt-1 text-xs text-slate-500">
-                            {t({
-                              it: 'Calcolata automaticamente dalla scala della planimetria.',
-                              en: 'Calculated automatically from the floor plan scale.'
-                            })}
-                          </div>
-                        ) : null}
-                      </label>
+                      </div>
                     </div>
                   ) : null}
 
@@ -1044,6 +1138,152 @@ const RoomModal = ({
       </Dialog>
       </Transition>
 
+      <Transition show={measuresModalOpen && open} as={Fragment}>
+        <Dialog as="div" className="relative z-[60]" onClose={() => setMeasuresModalOpen(false)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">{t({ it: 'Misure stanza', en: 'Room measurements' })}</Dialog.Title>
+                    <button
+                      onClick={() => setMeasuresModalOpen(false)}
+                      className="icon-button"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,280px)_1fr]">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="text-xs font-semibold text-slate-600">
+                          {t({ it: 'Forma stanza', en: 'Room shape' })}
+                        </div>
+                        <div className="mt-2 rounded-lg bg-slate-50 p-2">
+                          {shapePreview ? (
+                            <RoomShapePreview
+                              points={shapePreview.points}
+                              segments={shapePreview.segments}
+                              width={240}
+                              height={160}
+                              className="h-40 w-full"
+                            />
+                          ) : (
+                            <div className="flex h-40 items-center justify-center text-xs text-slate-500">
+                              {t({ it: 'Anteprima non disponibile', en: 'Preview unavailable' })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="text-xs font-semibold text-slate-600">
+                          {t({ it: 'Misure calcolate', en: 'Computed measurements' })}
+                        </div>
+                        {!measurements ? (
+                          <div className="mt-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                            {t({ it: 'Misure non disponibili per questa stanza.', en: 'Measurements are not available for this room.' })}
+                          </div>
+                        ) : measurements.scaleMissing ? (
+                          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                            {t({ it: 'Imposta una scala planimetria per ottenere le misure in metri.', en: 'Set a floor plan scale to get measurements in meters.' })}
+                          </div>
+                        ) : (
+                          <>
+                            {measurements.perimeterLabel ? (
+                              <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-700">
+                                <span>{t({ it: 'Perimetro', en: 'Perimeter' })}</span>
+                                <span className="font-mono">{measurements.perimeterLabel}</span>
+                              </div>
+                            ) : null}
+                            {measurements.areaLabel ? (
+                              <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-700">
+                                <span>{t({ it: 'Area', en: 'Area' })}</span>
+                                <span className="font-mono">{measurements.areaLabel}</span>
+                              </div>
+                            ) : null}
+                            {measurements.segments?.length ? (
+                              <div className="mt-3">
+                                <div className="text-[11px] font-semibold text-slate-500">{t({ it: 'Lati', en: 'Sides' })}</div>
+                                <div className="mt-1 max-h-44 space-y-1 overflow-y-auto text-[11px] text-slate-600">
+                                  {measurements.segments.map((seg) => (
+                                    <div key={seg.label} className="flex items-center justify-between gap-2">
+                                      <span className="font-mono">{seg.label}</span>
+                                      <span className="font-mono">{seg.lengthLabel || '—'}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <label className="block text-sm font-medium text-slate-700">
+                        {t({ it: 'Superficie (mq)', en: 'Surface (sqm)' })}
+                        <input
+                          value={surfaceSqm}
+                          onChange={(e) => {
+                            if (surfaceLocked) return;
+                            setSurfaceSqm(e.target.value);
+                          }}
+                          inputMode="decimal"
+                          type="number"
+                          min={0.1}
+                          step={0.1}
+                          disabled={surfaceLocked}
+                          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${
+                            surfaceLocked ? 'border-slate-200 bg-slate-100 text-slate-500' : 'border-slate-200'
+                          }`}
+                          placeholder={t({ it: 'Es. 24.5', en: 'e.g. 24.5' })}
+                        />
+                        {surfaceLocked ? (
+                          <div className="mt-1 text-xs text-slate-500">
+                            {t({
+                              it: 'Calcolata automaticamente dalla scala della planimetria.',
+                              en: 'Calculated automatically from the floor plan scale.'
+                            })}
+                          </div>
+                        ) : null}
+                      </label>
+                    </div>
+                  </div>
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMeasuresModalOpen(false)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
       <Transition show={propertiesModalOpen && open} as={Fragment}>
         <Dialog as="div" className="relative z-[60]" onClose={() => setPropertiesModalOpen(false)}>
           <Transition.Child
@@ -1097,11 +1337,29 @@ const RoomModal = ({
                     <IosSwitch
                       label={t({ it: 'Room logica', en: 'Logical room' })}
                       description={t({
-                        it: "Usa 'logica' per gruppi non legati a una singola stanza fisica.",
-                        en: "Use 'logical' for groups not tied to a single physical room."
+                        it: "Opzione esclusiva: disattiva meeting room e tipologie stanza speciali.",
+                        en: 'Exclusive option: disables meeting room and special room types.'
                       })}
                       checked={logical}
-                      onChange={setLogical}
+                      disabled={meetingRoom || storageRoom || bathroom || technicalRoom}
+                      onChange={(next) => {
+                        setLogical(next);
+                        if (next) {
+                          setMeetingRoom(false);
+                          setMeetingProjector(false);
+                          setMeetingTv(false);
+                          setMeetingVideoConf(false);
+                          setMeetingCoffeeService(false);
+                          setMeetingWhiteboard(false);
+                          setMeetingKioskEnabled(false);
+                          setNoWindows(false);
+                          setWifiAvailable(false);
+                          setFridgeAvailable(false);
+                          setStorageRoom(false);
+                          setBathroom(false);
+                          setTechnicalRoom(false);
+                        }
+                      }}
                     />
                     <IosSwitch
                       label={t({ it: 'Meeting room', en: 'Meeting room' })}
@@ -1110,12 +1368,164 @@ const RoomModal = ({
                         en: 'Excluded from placement search unless explicitly enabled.'
                       })}
                       checked={meetingRoom}
-                      onChange={setMeetingRoom}
+                      disabled={logical || storageRoom || bathroom || technicalRoom}
+                      onChange={(next) => {
+                        setMeetingRoom(next);
+                        if (next) {
+                          setLogical(false);
+                          setStorageRoom(false);
+                          setBathroom(false);
+                          setTechnicalRoom(false);
+                        } else {
+                          setMeetingProjector(false);
+                          setMeetingTv(false);
+                          setMeetingVideoConf(false);
+                          setMeetingCoffeeService(false);
+                          setMeetingWhiteboard(false);
+                          setMeetingKioskEnabled(false);
+                          setWifiAvailable(false);
+                          setFridgeAvailable(false);
+                        }
+                      }}
                     />
+                    {meetingRoom ? (
+                      <div className="ml-4 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-2">
+                        <div className="px-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                          {t({ it: 'Dotazioni meeting room', en: 'Meeting room equipment' })}
+                        </div>
+                        <IosSwitch
+                          label={t({ it: 'Proiettore', en: 'Projector' })}
+                          checked={meetingProjector}
+                          onChange={setMeetingProjector}
+                        />
+                        <IosSwitch
+                          label="TV"
+                          checked={meetingTv}
+                          onChange={setMeetingTv}
+                        />
+                        <IosSwitch
+                          label={t({ it: 'Sistema di videoconferenza autonomo', en: 'Autonomous video conference system' })}
+                          checked={meetingVideoConf}
+                          onChange={setMeetingVideoConf}
+                        />
+                        <IosSwitch
+                          label={t({ it: 'Coffee service', en: 'Coffee service' })}
+                          checked={meetingCoffeeService}
+                          onChange={setMeetingCoffeeService}
+                        />
+                        <IosSwitch
+                          label={t({ it: 'Lavagna', en: 'Whiteboard' })}
+                          checked={meetingWhiteboard}
+                          onChange={setMeetingWhiteboard}
+                        />
+                        <IosSwitch
+                          label={t({ it: 'Guest Wifi', en: 'Guest Wifi' })}
+                          checked={wifiAvailable}
+                          onChange={setWifiAvailable}
+                        />
+                        <IosSwitch
+                          label={t({ it: 'Frigo', en: 'Fridge' })}
+                          checked={fridgeAvailable}
+                          onChange={setFridgeAvailable}
+                        />
+                        <IosSwitch
+                          label={t({ it: 'Kiosk mode', en: 'Kiosk mode' })}
+                          description={t({
+                            it: 'Abilita link e QR code per aprire il pannello kiosk su tablet.',
+                            en: 'Enables link and QR code to open the kiosk panel on a tablet.'
+                          })}
+                          checked={meetingKioskEnabled}
+                          onChange={setMeetingKioskEnabled}
+                        />
+                        {meetingKioskEnabled ? (
+                          kioskRoomId ? (
+                            <div className="rounded-xl border border-emerald-200 bg-white p-3">
+                              <div className="text-xs font-semibold text-emerald-700">
+                                {t({ it: 'Accesso kiosk mode', en: 'Kiosk mode access' })}
+                              </div>
+                              <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-start">
+                                {kioskQrDataUrl ? (
+                                  <img
+                                    src={kioskQrDataUrl}
+                                    alt={t({ it: 'QR code kiosk', en: 'Kiosk QR code' })}
+                                    className="h-28 w-28 rounded-lg border border-slate-200 bg-white p-1"
+                                  />
+                                ) : (
+                                  <div className="flex h-28 w-28 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-[11px] text-slate-500">
+                                    QR
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-[11px]">
+                                    <div className="truncate font-mono text-slate-700">
+                                      {kioskPublicLink ||
+                                        (typeof window === 'undefined'
+                                          ? `/meetingroom/${encodeURIComponent(String(kioskRoomId))}`
+                                          : `${window.location.origin}/meetingroom/${encodeURIComponent(String(kioskRoomId))}`)}
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const link =
+                                          kioskPublicLink ||
+                                          (typeof window === 'undefined'
+                                            ? `/meetingroom/${encodeURIComponent(String(kioskRoomId))}`
+                                            : `${window.location.origin}/meetingroom/${encodeURIComponent(String(kioskRoomId))}`);
+                                        if (typeof window !== 'undefined') {
+                                          window.open(link, '_blank', 'noopener,noreferrer');
+                                        }
+                                      }}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                                    >
+                                      <ExternalLink size={13} />
+                                      {t({ it: 'Apri link', en: 'Open link' })}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const link =
+                                          kioskPublicLink ||
+                                          (typeof window === 'undefined'
+                                            ? `/meetingroom/${encodeURIComponent(String(kioskRoomId))}`
+                                            : `${window.location.origin}/meetingroom/${encodeURIComponent(String(kioskRoomId))}`);
+                                        if (!navigator?.clipboard?.writeText) {
+                                          toast.error(t({ it: 'Clipboard non disponibile', en: 'Clipboard not available' }));
+                                          return;
+                                        }
+                                        navigator.clipboard.writeText(link)
+                                          .then(() => toast.success(t({ it: 'Link kiosk copiato', en: 'Kiosk link copied' })))
+                                          .catch(() => toast.error(t({ it: 'Copia non riuscita', en: 'Copy failed' })));
+                                      }}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                    >
+                                      <Copy size={13} />
+                                      {t({ it: 'Copia link', en: 'Copy link' })}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                              {t({
+                                it: 'Salva la stanza per generare link e QR code kiosk.',
+                                en: 'Save the room to generate kiosk link and QR code.'
+                              })}
+                            </div>
+                          )
+                        ) : null}
+                      </div>
+                    ) : null}
                     <IosSwitch
                       label={t({ it: 'Stanza senza finestre', en: 'Room without windows' })}
                       checked={noWindows}
-                      onChange={setNoWindows}
+                      disabled={logical}
+                      onChange={(next) => {
+                        if (logical && next) return;
+                        setNoWindows(next);
+                      }}
                     />
                     <IosSwitch
                       label={t({ it: 'Ripostiglio', en: 'Storage room' })}
@@ -1124,7 +1534,24 @@ const RoomModal = ({
                         en: 'Users and real users cannot be placed here.'
                       })}
                       checked={storageRoom}
-                      onChange={setStorageRoom}
+                      disabled={meetingRoom || logical || bathroom || technicalRoom}
+                      onChange={(next) => {
+                        setStorageRoom(next);
+                        if (next) {
+                          setLogical(false);
+                          setMeetingRoom(false);
+                          setMeetingProjector(false);
+                          setMeetingTv(false);
+                          setMeetingVideoConf(false);
+                          setMeetingCoffeeService(false);
+                          setMeetingWhiteboard(false);
+                          setMeetingKioskEnabled(false);
+                          setWifiAvailable(false);
+                          setFridgeAvailable(false);
+                          setBathroom(false);
+                          setTechnicalRoom(false);
+                        }
+                      }}
                     />
                     <IosSwitch
                       label={t({ it: 'Bagno', en: 'Bathroom' })}
@@ -1133,7 +1560,24 @@ const RoomModal = ({
                         en: 'Users and real users cannot be placed here.'
                       })}
                       checked={bathroom}
-                      onChange={setBathroom}
+                      disabled={meetingRoom || logical || storageRoom || technicalRoom}
+                      onChange={(next) => {
+                        setBathroom(next);
+                        if (next) {
+                          setLogical(false);
+                          setMeetingRoom(false);
+                          setMeetingProjector(false);
+                          setMeetingTv(false);
+                          setMeetingVideoConf(false);
+                          setMeetingCoffeeService(false);
+                          setMeetingWhiteboard(false);
+                          setMeetingKioskEnabled(false);
+                          setWifiAvailable(false);
+                          setFridgeAvailable(false);
+                          setStorageRoom(false);
+                          setTechnicalRoom(false);
+                        }
+                      }}
                     />
                     <IosSwitch
                       label={t({ it: 'Locale tecnico', en: 'Technical room' })}
@@ -1142,26 +1586,25 @@ const RoomModal = ({
                         en: 'Users and real users cannot be placed here.'
                       })}
                       checked={technicalRoom}
-                      onChange={setTechnicalRoom}
+                      disabled={meetingRoom || logical || storageRoom || bathroom}
+                      onChange={(next) => {
+                        setTechnicalRoom(next);
+                        if (next) {
+                          setLogical(false);
+                          setMeetingRoom(false);
+                          setMeetingProjector(false);
+                          setMeetingTv(false);
+                          setMeetingVideoConf(false);
+                          setMeetingCoffeeService(false);
+                          setMeetingWhiteboard(false);
+                          setMeetingKioskEnabled(false);
+                          setWifiAvailable(false);
+                          setFridgeAvailable(false);
+                          setStorageRoom(false);
+                          setBathroom(false);
+                        }
+                      }}
                     />
-                  </div>
-                  <div className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3">
-                    <div className="text-sm font-medium text-slate-700">{t({ it: 'Colore stanza', en: 'Room color' })}</div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {COLORS.map((c) => {
-                        const active = (color || COLORS[0]).toLowerCase() === c.toLowerCase();
-                        return (
-                          <button
-                            key={c}
-                            type="button"
-                            onClick={() => setColor(c)}
-                            className={`h-9 w-9 rounded-xl border ${active ? 'border-ink ring-2 ring-primary/30' : 'border-slate-200'}`}
-                            style={{ background: c }}
-                            title={c}
-                          />
-                        );
-                      })}
-                    </div>
                   </div>
                   <div className="mt-6 flex justify-end gap-2">
                     <button

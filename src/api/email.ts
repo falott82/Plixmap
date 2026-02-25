@@ -29,6 +29,20 @@ export const fetchEmailSettings = async (): Promise<EmailSettings | null> => {
   return body?.config || null;
 };
 
+export const fetchClientEmailSettings = async (clientId: string): Promise<EmailSettings | null> => {
+  const res = await apiFetch(`/api/clients/${encodeURIComponent(String(clientId || '').trim())}/email-settings`, { credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to fetch client email settings (${res.status})`);
+  const body = await res.json();
+  return body?.config || null;
+};
+
+export const fetchClientEmailSettingsSummary = async (): Promise<Record<string, boolean>> => {
+  const res = await apiFetch('/api/clients/email-settings-summary', { credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to fetch client email settings summary (${res.status})`);
+  const body = await res.json();
+  return (body?.byClientId || {}) as Record<string, boolean>;
+};
+
 export const updateEmailSettings = async (payload: {
   host?: string;
   port?: number | string;
@@ -46,6 +60,30 @@ export const updateEmailSettings = async (payload: {
     body: JSON.stringify(payload)
   });
   if (!res.ok) throw new Error(`Failed to update email settings (${res.status})`);
+  const body = await res.json();
+  return body?.config || null;
+};
+
+export const updateClientEmailSettings = async (
+  clientId: string,
+  payload: {
+    host?: string;
+    port?: number | string;
+    secure?: boolean;
+    securityMode?: 'ssl' | 'starttls';
+    username?: string;
+    password?: string;
+    fromName?: string;
+    fromEmail?: string;
+  }
+): Promise<EmailSettings | null> => {
+  const res = await apiFetch(`/api/clients/${encodeURIComponent(String(clientId || '').trim())}/email-settings`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error(`Failed to update client email settings (${res.status})`);
   const body = await res.json();
   return body?.config || null;
 };
@@ -69,6 +107,30 @@ export const sendTestEmail = async (
       // ignore
     }
     throw new Error(detail || `Failed to send test email (${res.status})`);
+  }
+  return res.json();
+};
+
+export const sendClientTestEmail = async (
+  clientId: string,
+  recipient: string,
+  subject?: string
+): Promise<{ ok: boolean; messageId?: string | null }> => {
+  const res = await apiFetch(`/api/clients/${encodeURIComponent(String(clientId || '').trim())}/email-settings/test`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipient, subject })
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = await res.json();
+      detail = body?.detail || body?.error || '';
+    } catch {
+      // ignore
+    }
+    throw new Error(detail || `Failed to send client test email (${res.status})`);
   }
   return res.json();
 };

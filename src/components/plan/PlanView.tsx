@@ -4,6 +4,7 @@ import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
 import {
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Eye,
   Layers,
@@ -17,6 +18,7 @@ import {
   Star,
   BookmarkPlus,
   Plus,
+  Minus,
   DoorOpen,
   FileDown,
   Crop,
@@ -28,6 +30,8 @@ import {
 	  EyeOff,
   CornerDownRight,
   Link2,
+  CalendarClock,
+  QrCode,
   BarChart3,
   User,
   LocateFixed,
@@ -42,8 +46,12 @@ import {
   Type as TypeIcon,
   Image as ImageIcon,
   Camera,
-  StickyNote
+  StickyNote,
+  Building2
+  ,
+  Search
 		} from 'lucide-react';
+import QRCode from 'qrcode';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
 import SearchBar from './SearchBar';
@@ -75,6 +83,7 @@ import { updateMyProfile } from '../../api/auth';
 import { saveState } from '../../api/state';
 import UserMenu from '../layout/UserMenu';
 import EmergencyContactsModal from '../layout/EmergencyContactsModal';
+import ClientBusinessPartnersModal from '../layout/ClientBusinessPartnersModal';
 import PrinterMenuButton from './PrinterMenuButton';
 import UserAvatar from '../ui/UserAvatar';
 import UnlockRequestComposeModal, { UnlockRequestLock } from './UnlockRequestComposeModal';
@@ -88,6 +97,7 @@ import { DESK_TYPE_IDS, isDeskType } from './deskTypes';
 import RoomModal from './RoomModal';
 import RoomShapePreview from './RoomShapePreview';
 import CapacityDashboardModal from './CapacityDashboardModal';
+import MeetingManagerModal from '../meetings/MeetingManagerModal';
 import RackModal from './RackModal';
 import RackPortsModal from './RackPortsModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
@@ -107,6 +117,16 @@ import { useLang, useT } from '../../i18n/useT';
 import { shallow } from 'zustand/shallow';
 import { postAuditEvent } from '../../api/audit';
 import { hasExternalUsers, listExternalUsers } from '../../api/customImport';
+import {
+  cancelMeeting,
+  fetchMeetingRoomSchedule,
+  fetchMeetingOverview,
+  updateMeeting,
+  type MeetingBooking,
+  type MeetingParticipant,
+  type MeetingCheckInMapByMeetingId,
+  type MeetingCheckInTimestampsByMeetingId
+} from '../../api/meetings';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
 import { nanoid } from 'nanoid';
@@ -852,6 +872,72 @@ const PlanView = ({ planId }: Props) => {
   const [roomAllocationPreset, setRoomAllocationPreset] = useState<{ clientId?: string; siteId?: string } | null>(null);
   const [capacityDashboardOpen, setCapacityDashboardOpen] = useState(false);
   const [capacityDashboardPreset, setCapacityDashboardPreset] = useState<{ clientId?: string; siteId?: string } | null>(null);
+  const [meetingManagerOpen, setMeetingManagerOpen] = useState(false);
+  const [meetingManagerPreset, setMeetingManagerPreset] = useState<{
+    clientId?: string;
+    siteId?: string;
+    floorPlanId?: string;
+    roomId?: string;
+    day?: string;
+  } | null>(null);
+  const [meetingStatusByRoomId, setMeetingStatusByRoomId] = useState<Record<string, { hasMeetingToday: boolean; inProgress: boolean; hasFutureToday: boolean }>>({});
+  const [roomMeetingsTimelineModal, setRoomMeetingsTimelineModal] = useState<null | {
+    roomId: string;
+    roomName: string;
+    day: string;
+    loading: boolean;
+    error: string | null;
+    capacity: number;
+    bookings: MeetingBooking[];
+    checkInStatusByMeetingId: MeetingCheckInMapByMeetingId;
+    checkInTimestampsByMeetingId: MeetingCheckInTimestampsByMeetingId;
+  }>(null);
+  const [roomMeetingsTimelineBookingDetail, setRoomMeetingsTimelineBookingDetail] = useState<null | {
+    booking: MeetingBooking;
+    mode: 'view' | 'edit';
+    subject: string;
+    day: string;
+    startTime: string;
+    endTime: string;
+    notes: string;
+    videoConferenceLink: string;
+    setupBufferBeforeMin: number;
+    setupBufferAfterMin: number;
+    participantFilter: string;
+    manualParticipantName: string;
+    manualParticipantCompany: string;
+    manualParticipantEmail: string;
+    manualParticipantOptional: boolean;
+    manualParticipantRemote: boolean;
+    participantsDraft: Array<
+      MeetingParticipant & {
+        key: string;
+        fullName: string;
+        kind: 'real_user' | 'manual';
+      }
+    >;
+    applyToSeries: boolean;
+    saving: boolean;
+    deleting: boolean;
+    error: string | null;
+  }>(null);
+  const [roomMeetingEditExternalCandidates, setRoomMeetingEditExternalCandidates] = useState<
+    Array<{ externalId: string; fullName: string; email: string | null; department?: string | null; phone?: string | null }>
+  >([]);
+  const [roomMeetingEditManualCompanyIsOther, setRoomMeetingEditManualCompanyIsOther] = useState(false);
+  const [roomMeetingEditBusinessPartnersModalOpen, setRoomMeetingEditBusinessPartnersModalOpen] = useState(false);
+  const [roomMeetingCheckInListOpen, setRoomMeetingCheckInListOpen] = useState(false);
+  const roomMeetingsTimelineDetailCloseGuardUntilRef = useRef(0);
+  const roomMeetingsTimelineScrollRef = useRef<HTMLDivElement | null>(null);
+  const [roomKioskInfoModal, setRoomKioskInfoModal] = useState<null | {
+    roomId: string;
+    roomName: string;
+    clientName: string;
+    siteName: string;
+    planName: string;
+  }>(null);
+  const [roomKioskInfoQrDataUrl, setRoomKioskInfoQrDataUrl] = useState('');
+  const [roomKioskInfoLink, setRoomKioskInfoLink] = useState('');
   const [roomDepartmentOptions, setRoomDepartmentOptions] = useState<string[]>([]);
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement | null>(null);
@@ -963,13 +1049,41 @@ const PlanView = ({ planId }: Props) => {
         initialNotes?: string;
         initialLogical?: boolean;
         initialMeetingRoom?: boolean;
+        initialMeetingProjector?: boolean;
+        initialMeetingTv?: boolean;
+        initialMeetingVideoConf?: boolean;
+        initialMeetingCoffeeService?: boolean;
+        initialMeetingWhiteboard?: boolean;
         initialNoWindows?: boolean;
+        initialWifiAvailable?: boolean;
+        initialFridgeAvailable?: boolean;
         initialStorageRoom?: boolean;
         initialBathroom?: boolean;
         initialTechnicalRoom?: boolean;
       }
     | null
   >(null);
+  const [roomMeasuresModal, setRoomMeasuresModal] = useState<{ roomId: string } | null>(null);
+  const [roomLayoutExportModal, setRoomLayoutExportModal] = useState<{
+    clientId: string;
+    sourcePlanId: string;
+    sourceRoomId: string;
+    sortKey:
+      | 'site'
+      | 'plan'
+      | 'room'
+      | 'capacity'
+      | 'scale'
+      | 'opacity'
+      | 'meetingRoom'
+      | 'logical'
+      | 'storageRoom'
+      | 'bathroom'
+      | 'technicalRoom'
+      | 'noWindows';
+    sortDir: 'asc' | 'desc';
+    selectedKeys: string[];
+  } | null>(null);
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
   const [confirmDeleteRoomIds, setConfirmDeleteRoomIds] = useState<string[] | null>(null);
   const [confirmDeleteCorridorId, setConfirmDeleteCorridorId] = useState<string | null>(null);
@@ -1197,10 +1311,632 @@ const PlanView = ({ planId }: Props) => {
   const client = useDataStore(
     useCallback((s) => s.findClientByPlan(planId), [planId])
   );
+  const updateClient = useDataStore((s: any) => s.updateClient);
   const site = useDataStore(
     useCallback((s) => s.findSiteByPlan(planId), [planId])
   );
   const siteFloorPlans = useMemo(() => ((site?.floorPlans || []) as FloorPlan[]).filter(Boolean), [site?.floorPlans]);
+  const clientBusinessPartnerNames = useMemo(
+    () =>
+      Array.isArray((client as any)?.businessPartners)
+        ? ((client as any).businessPartners as Array<{ name?: string }>)
+            .map((bp) => String(bp?.name || '').trim())
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+        : [],
+    [client]
+  );
+  const siteMeetingParticipantCandidates = useMemo(() => {
+    const byExternalId = new Map<
+      string,
+      { externalId: string; fullName: string; email: string | null; department?: string | null; phone?: string | null }
+    >();
+    for (const fp of siteFloorPlans) {
+      for (const obj of (((fp as any)?.objects || []) as MapObject[])) {
+        if (String((obj as any)?.type || '') !== 'real_user') continue;
+        const externalId = String((obj as any)?.externalUserId || '').trim();
+        if (!externalId) continue;
+        if (byExternalId.has(externalId)) continue;
+        const first = String((obj as any)?.firstName || '').trim();
+        const last = String((obj as any)?.lastName || '').trim();
+        const fullName = `${first} ${last}`.trim() || String(obj.name || '').trim() || externalId;
+        const email = String((obj as any)?.externalEmail || '').trim() || null;
+        byExternalId.set(externalId, { externalId, fullName, email });
+      }
+    }
+    return [...byExternalId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
+  }, [siteFloorPlans]);
+  const roomMeetingEditParticipantCandidates = useMemo(() => {
+    const byExternalId = new Map<string, { externalId: string; fullName: string; email: string | null }>();
+    for (const row of siteMeetingParticipantCandidates) byExternalId.set(String(row.externalId), row);
+    for (const row of roomMeetingEditExternalCandidates) {
+      const id = String(row.externalId || '').trim();
+      if (!id) continue;
+        byExternalId.set(id, {
+          externalId: id,
+          fullName: String(row.fullName || '').trim() || id,
+          email: row.email ? String(row.email) : null,
+          department: row.department ? String(row.department) : null,
+          phone: row.phone ? String(row.phone) : null
+        });
+      }
+    return [...byExternalId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
+  }, [roomMeetingEditExternalCandidates, siteMeetingParticipantCandidates]);
+  useEffect(() => {
+    let cancelled = false;
+    const cid = String(client?.id || '').trim();
+    const sid = String(site?.id || '').trim();
+    if (!cid || !sid) {
+      setMeetingStatusByRoomId({});
+      return;
+    }
+    const load = () => {
+      fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day: new Date().toISOString().slice(0, 10) })
+        .then((payload) => {
+          if (cancelled) return;
+          const nowTs = Date.now();
+          const next: Record<string, { hasMeetingToday: boolean; inProgress: boolean; hasFutureToday: boolean }> = {};
+          for (const row of payload.rooms || []) {
+            const hasFutureToday = Array.isArray(row.bookings)
+              ? row.bookings.some((b) => Number(b.startAt) > nowTs)
+              : false;
+            next[String(row.roomId)] = {
+              hasMeetingToday: !!row.hasMeetingToday,
+              inProgress: !!row.inProgress,
+              hasFutureToday
+            };
+          }
+          setMeetingStatusByRoomId(next);
+        })
+        .catch(() => {
+          if (!cancelled) setMeetingStatusByRoomId({});
+        });
+    };
+    load();
+    const timer = window.setInterval(load, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [client?.id, planId, site?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const cid = String(client?.id || '').trim();
+    if (!cid || !roomMeetingsTimelineBookingDetail || roomMeetingsTimelineBookingDetail.mode !== 'edit') return;
+    listExternalUsers({ clientId: cid, includeHidden: false, includeMissing: true, limit: 5000 })
+      .then((resp) => {
+        if (cancelled) return;
+        const rows = Array.isArray(resp?.rows) ? resp.rows : [];
+        setRoomMeetingEditExternalCandidates(
+          rows.map((u) => ({
+            externalId: String(u.externalId || '').trim(),
+            fullName: `${String(u.firstName || '').trim()} ${String(u.lastName || '').trim()}`.trim() || String(u.externalId || '').trim(),
+            email: String(u.email || '').trim() || null,
+            department:
+              String(u.dept1 || '').trim() || String(u.dept2 || '').trim() || String(u.dept3 || '').trim() || null,
+            phone:
+              String(u.ext1 || '').trim() ||
+              String(u.ext2 || '').trim() ||
+              String(u.ext3 || '').trim() ||
+              String(u.mobile || '').trim() ||
+              null
+          }))
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setRoomMeetingEditExternalCandidates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client?.id, roomMeetingsTimelineBookingDetail?.mode]);
+
+  const reloadRoomMeetingsTimeline = useCallback(
+    async (roomId: string, day: string) => {
+      const cid = String(client?.id || '').trim();
+      const sid = String(site?.id || '').trim();
+      if (!cid || !sid || !roomId) return;
+      setRoomMeetingsTimelineModal((prev) =>
+        prev && prev.roomId === roomId ? { ...prev, day, loading: true, error: null } : prev
+      );
+      try {
+        const payload = await fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day });
+        const row = (payload.rooms || []).find((r) => String(r.roomId) === String(roomId));
+        if (!row) {
+          setRoomMeetingsTimelineModal((prev) =>
+            prev && prev.roomId === roomId
+              ? {
+                  ...prev,
+                  day,
+                  loading: false,
+                  error: t({ it: 'Stanza non trovata nella timeline.', en: 'Room not found in timeline.' }),
+                  bookings: [],
+                  checkInStatusByMeetingId: {},
+                  checkInTimestampsByMeetingId: {}
+                }
+              : prev
+          );
+          return;
+        }
+        setRoomMeetingsTimelineModal((prev) =>
+          prev && prev.roomId === roomId
+            ? {
+                ...prev,
+                roomName: row.roomName || prev.roomName,
+                capacity: Number(row.capacity) || 0,
+                day,
+                loading: false,
+                error: null,
+                bookings: [...(row.bookings || [])].sort((a, b) => Number(a.startAt) - Number(b.startAt)),
+                checkInStatusByMeetingId: payload.checkInStatusByMeetingId || {},
+                checkInTimestampsByMeetingId: payload.checkInTimestampsByMeetingId || {}
+              }
+            : prev
+        );
+      } catch {
+        setRoomMeetingsTimelineModal((prev) =>
+          prev && prev.roomId === roomId
+            ? { ...prev, day, loading: false, error: t({ it: 'Errore caricamento timeline meeting.', en: 'Failed to load meeting timeline.' }) }
+            : prev
+        );
+      }
+    },
+    [client?.id, planId, site?.id, t]
+  );
+
+  const openRoomMeetingsTimeline = useCallback(
+    (roomId: string) => {
+      const room = (((plan as any)?.rooms || []) as any[]).find((r) => String(r?.id || '') === String(roomId));
+      const day = new Date().toISOString().slice(0, 10);
+      setRoomMeetingsTimelineModal({
+        roomId,
+        roomName: String(room?.name || t({ it: 'Meeting room', en: 'Meeting room' })),
+        day,
+        loading: true,
+        error: null,
+        capacity: Number(room?.capacity) || 0,
+        bookings: [],
+        checkInStatusByMeetingId: {}
+        ,
+        checkInTimestampsByMeetingId: {}
+      });
+      void reloadRoomMeetingsTimeline(roomId, day);
+    },
+    [plan, reloadRoomMeetingsTimeline, t]
+  );
+
+  useEffect(() => {
+    const modal = roomMeetingsTimelineModal;
+    if (!modal?.roomId) return;
+    const timer = window.setInterval(() => {
+      void reloadRoomMeetingsTimeline(modal.roomId, modal.day);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [reloadRoomMeetingsTimeline, roomMeetingsTimelineModal?.day, roomMeetingsTimelineModal?.roomId]);
+
+  const meetingIsoDayFromTs = useCallback((ts: number) => {
+    const d = new Date(Number(ts || 0));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  const meetingClockFromTs = useCallback((ts: number) => {
+    const d = new Date(Number(ts || 0));
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }, []);
+
+  const meetingCheckInEntryKey = useCallback((entry: { tag?: string | null; label?: string | null; email?: string | null }) => {
+    const tag = String(entry.tag || 'INT');
+    const label = String(entry.label || '-').trim().toLowerCase();
+    const email = String(entry.email || '').trim().toLowerCase();
+    return `${tag}::${label}::${email}`;
+  }, []);
+
+  const getMeetingCheckInStats = useCallback(
+    (booking: MeetingBooking, checkMap?: Record<string, true> | null) => {
+      const participants = Array.isArray(booking?.participants) ? booking.participants : [];
+      const internalOnSite = participants
+        .filter((p: any) => (p?.kind || 'real_user') !== 'manual' && !p?.remote)
+        .map((p: any) => ({
+          tag: p?.optional ? 'OPT' : 'INT',
+          label: String(p?.fullName || p?.externalId || '-'),
+          email: p?.email ? String(p.email) : null
+        }));
+      const manualOnSiteFromParticipants = participants
+        .filter((p: any) => p?.kind === 'manual' && !p?.remote)
+        .map((p: any) => ({
+          tag: 'EXT',
+          label: String(p?.fullName || p?.externalId || '-'),
+          email: p?.email ? String(p.email) : null
+        }));
+      const manualSeen = new Set(
+        manualOnSiteFromParticipants.map((g) => `${String(g.label || '').trim().toLowerCase()}::${String(g.email || '').trim().toLowerCase()}`)
+      );
+      const externalOnSiteLegacy = (Array.isArray((booking as any)?.externalGuestsDetails) ? (booking as any).externalGuestsDetails : [])
+        .filter((g: any) => !g?.remote)
+        .filter(
+          (g: any) =>
+            !manualSeen.has(`${String(g?.name || '').trim().toLowerCase()}::${String(g?.email || '').trim().toLowerCase()}`)
+        )
+        .map((g: any) => ({
+          tag: 'EXT',
+          label: String(g?.name || '-'),
+          email: g?.email ? String(g.email) : null
+        }));
+      const entries = [...internalOnSite, ...manualOnSiteFromParticipants, ...externalOnSiteLegacy];
+      const map = checkMap || {};
+      const checked = entries.filter((e) => !!map[meetingCheckInEntryKey(e)]).length;
+      const total = entries.length;
+      const remoteInternal = participants.filter((p: any) => (p?.kind || 'real_user') !== 'manual' && !!p?.remote).length;
+      const manualRemoteKeys = new Set(
+        participants
+          .filter((p: any) => p?.kind === 'manual' && !!p?.remote)
+          .map(
+            (p: any) =>
+              `${String(p?.fullName || p?.externalId || '-').trim().toLowerCase()}::${String(p?.email || '').trim().toLowerCase()}`
+          )
+      );
+      const remoteExternalLegacy = (Array.isArray((booking as any)?.externalGuestsDetails) ? (booking as any).externalGuestsDetails : [])
+        .filter((g: any) => !!g?.remote)
+        .filter(
+          (g: any) =>
+            !manualRemoteKeys.has(`${String(g?.name || '').trim().toLowerCase()}::${String(g?.email || '').trim().toLowerCase()}`)
+        ).length;
+      return {
+        checked,
+        total,
+        percent: total > 0 ? Math.round((checked / total) * 100) : 0,
+        remoteParticipants: remoteInternal + remoteExternalLegacy,
+        internalOnSite: internalOnSite.length,
+        externalOnSite: manualOnSiteFromParticipants.length + externalOnSiteLegacy.length
+      };
+    },
+    [meetingCheckInEntryKey]
+  );
+
+  const getRoomMeetingCheckInEntries = useCallback(
+    (booking: MeetingBooking, checkMap?: Record<string, true> | null, tsMap?: Record<string, number> | null) => {
+      const checked = checkMap || {};
+      const timestamps = tsMap || {};
+      const clientLogo = String((client as any)?.logoUrl || '').trim() || null;
+      const businessPartners = Array.isArray((client as any)?.businessPartners) ? ((client as any).businessPartners as any[]) : [];
+      const businessPartnerByName = new Map(
+        businessPartners.map((bp) => [String(bp?.name || '').trim().toLowerCase(), bp]).filter(([k]) => !!k)
+      );
+      const participants = Array.isArray(booking?.participants) ? booking.participants : [];
+
+      const internal = participants
+        .filter((p: any) => (p?.kind || 'real_user') !== 'manual' && !p?.remote)
+        .map((p: any) => {
+          const label = String(p?.fullName || p?.externalId || '-').trim() || '-';
+          const email = p?.email ? String(p.email).trim() : '';
+          const entryKey = meetingCheckInEntryKey({ tag: p?.optional ? 'OPT' : 'INT', label, email });
+          return {
+            key: entryKey,
+            checked: !!checked[entryKey],
+            checkedAt: Number(timestamps[entryKey] || 0) || null,
+            label,
+            company: client?.shortName || client?.name || null,
+            email: email || null,
+            logoUrl: clientLogo,
+            kind: 'internal' as const
+          };
+        });
+
+      const manualSeen = new Set<string>();
+      const externalsFromParticipants = participants
+        .filter((p: any) => p?.kind === 'manual' && !p?.remote)
+        .map((p: any) => {
+          const label = String(p?.fullName || p?.externalId || '-').trim() || '-';
+          const email = p?.email ? String(p.email).trim() : '';
+          const company = String(p?.company || '').trim();
+          const identity = `${label.toLowerCase()}::${email.toLowerCase()}`;
+          manualSeen.add(identity);
+          const entryKey = meetingCheckInEntryKey({ tag: 'EXT', label, email });
+          const bp = businessPartnerByName.get(company.toLowerCase());
+          return {
+            key: entryKey,
+            checked: !!checked[entryKey],
+            checkedAt: Number(timestamps[entryKey] || 0) || null,
+            label,
+            company: company || null,
+            email: email || null,
+            logoUrl: String(bp?.logoUrl || '').trim() || null,
+            kind: 'external' as const
+          };
+        });
+
+      const externalsLegacy = (Array.isArray((booking as any)?.externalGuestsDetails) ? (booking as any).externalGuestsDetails : [])
+        .filter((g: any) => !g?.remote)
+        .map((g: any) => {
+          const label = String(g?.name || '-').trim() || '-';
+          const email = g?.email ? String(g.email).trim() : '';
+          const company = String((g as any)?.company || '').trim();
+          const identity = `${label.toLowerCase()}::${email.toLowerCase()}`;
+          if (manualSeen.has(identity)) return null;
+          const entryKey = meetingCheckInEntryKey({ tag: 'EXT', label, email });
+          const bp = businessPartnerByName.get(company.toLowerCase());
+          return {
+            key: entryKey,
+            checked: !!checked[entryKey],
+            checkedAt: Number(timestamps[entryKey] || 0) || null,
+            label,
+            company: company || null,
+            email: email || null,
+            logoUrl: String(bp?.logoUrl || '').trim() || null,
+            kind: 'external' as const
+          };
+        })
+        .filter(Boolean) as Array<any>;
+
+      return [...internal, ...externalsFromParticipants, ...externalsLegacy]
+        .filter((row) => row.checked)
+        .sort((a, b) => Number(b.checkedAt || 0) - Number(a.checkedAt || 0));
+    },
+    [client, meetingCheckInEntryKey]
+  );
+
+  useEffect(() => {
+    const modal = roomMeetingsTimelineModal;
+    const scroller = roomMeetingsTimelineScrollRef.current;
+    if (!modal || !scroller || modal.loading) return;
+    const bookings = modal.bookings || [];
+    let minMinutes = 7 * 60;
+    let maxMinutes = 20 * 60;
+    for (const booking of bookings) {
+      const s = new Date(Number(booking.startAt || 0));
+      const e = new Date(Number(booking.endAt || 0));
+      if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) continue;
+      minMinutes = Math.min(minMinutes, s.getHours() * 60 + s.getMinutes());
+      maxMinutes = Math.max(maxMinutes, e.getHours() * 60 + e.getMinutes());
+    }
+    minMinutes = Math.max(0, Math.floor((minMinutes - 30) / 60) * 60);
+    maxMinutes = Math.min(24 * 60, Math.ceil((maxMinutes + 30) / 60) * 60);
+    if (maxMinutes - minMinutes < 6 * 60) maxMinutes = Math.min(24 * 60, minMinutes + 6 * 60);
+    const nowDate = new Date();
+    const todayIsoLocal = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
+    if (String(modal.day || '') !== todayIsoLocal) return;
+    const total = Math.max(1, maxMinutes - minMinutes);
+    const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
+    const timelineWidthPx = Math.max(980, Math.max(6, Math.ceil((maxMinutes - minMinutes) / 60)) * 120);
+    const labelColPx = 240;
+    const nowX = labelColPx + ((nowMinutes - minMinutes) / total) * timelineWidthPx;
+    const target = Math.max(0, nowX - scroller.clientWidth / 2);
+    const raf = window.requestAnimationFrame(() => {
+      scroller.scrollLeft = target;
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [roomMeetingsTimelineModal?.day, roomMeetingsTimelineModal?.loading, roomMeetingsTimelineModal?.bookings]);
+
+  const openRoomMeetingBookingDetail = useCallback(
+    (booking: MeetingBooking, mode: 'view' | 'edit' = 'view') => {
+      const normalizedParticipants: Array<
+        MeetingParticipant & { key: string; fullName: string; kind: 'real_user' | 'manual' }
+      > = (Array.isArray(booking.participants) ? booking.participants : []).map((row, idx) => {
+        const kind: 'real_user' | 'manual' = row?.kind === 'manual' ? 'manual' : 'real_user';
+        const externalId = String(row?.externalId || '').trim() || null;
+        const fullName = String(row?.fullName || row?.externalId || '').trim() || (kind === 'manual' ? t({ it: 'Ospite', en: 'Guest' }) : 'User');
+        const key = kind === 'real_user' && externalId ? `real:${externalId}` : `manual:${idx}:${nanoid(4)}`;
+        return {
+          key,
+          kind,
+          externalId,
+          fullName,
+          email: row?.email ? String(row.email) : null,
+          optional: !!row?.optional,
+          remote: !!row?.remote,
+          company: row?.company ? String(row.company) : null
+        };
+      });
+      setRoomMeetingsTimelineBookingDetail({
+        booking,
+        mode,
+        subject: String(booking.subject || ''),
+        day: meetingIsoDayFromTs(Number(booking.startAt || 0)),
+        startTime: meetingClockFromTs(Number(booking.startAt || 0)),
+        endTime: meetingClockFromTs(Number(booking.endAt || 0)),
+        notes: String(booking.notes || ''),
+        videoConferenceLink: String(booking.videoConferenceLink || ''),
+        setupBufferBeforeMin: Math.max(0, Math.min(60, Number(booking.setupBufferBeforeMin) || 0)),
+        setupBufferAfterMin: Math.max(0, Math.min(60, Number(booking.setupBufferAfterMin) || 0)),
+        participantFilter: '',
+        manualParticipantName: '',
+        manualParticipantCompany: '',
+        manualParticipantEmail: '',
+        manualParticipantOptional: false,
+        manualParticipantRemote: false,
+        participantsDraft: normalizedParticipants,
+        applyToSeries: false,
+        saving: false,
+        deleting: false,
+        error: null
+      });
+      setRoomMeetingCheckInListOpen(false);
+      setRoomMeetingEditManualCompanyIsOther(false);
+      setRoomMeetingEditBusinessPartnersModalOpen(false);
+    },
+    [meetingClockFromTs, meetingIsoDayFromTs, t]
+  );
+
+  const closeRoomMeetingBookingDetail = useCallback(() => {
+    roomMeetingsTimelineDetailCloseGuardUntilRef.current = Date.now() + 350;
+    setRoomMeetingCheckInListOpen(false);
+    setRoomMeetingsTimelineBookingDetail(null);
+  }, []);
+
+  const addTimelineMeetingRealParticipant = useCallback((externalId: string) => {
+    const candidate = roomMeetingEditParticipantCandidates.find((row) => String(row.externalId) === String(externalId));
+    if (!candidate) return;
+    setRoomMeetingsTimelineBookingDetail((prev) => {
+      if (!prev) return prev;
+      if (prev.participantsDraft.some((p) => p.kind === 'real_user' && String(p.externalId || '') === String(candidate.externalId))) return prev;
+      return {
+        ...prev,
+        participantsDraft: [
+          ...prev.participantsDraft,
+          {
+            key: `real:${candidate.externalId}`,
+            kind: 'real_user',
+            externalId: candidate.externalId,
+            fullName: candidate.fullName,
+            email: candidate.email,
+            optional: false,
+            remote: false,
+            company: null
+          }
+        ]
+      };
+    });
+  }, [roomMeetingEditParticipantCandidates]);
+
+  const removeTimelineMeetingParticipant = useCallback((key: string) => {
+    setRoomMeetingsTimelineBookingDetail((prev) =>
+      prev ? { ...prev, participantsDraft: prev.participantsDraft.filter((p) => String(p.key) !== String(key)) } : prev
+    );
+  }, []);
+
+  const toggleTimelineMeetingParticipantFlag = useCallback((key: string, field: 'optional' | 'remote') => {
+    setRoomMeetingsTimelineBookingDetail((prev) =>
+      prev
+        ? {
+            ...prev,
+            participantsDraft: prev.participantsDraft.map((p) =>
+              String(p.key) === String(key) ? { ...p, [field]: !p[field] } : p
+            )
+          }
+        : prev
+    );
+  }, []);
+
+  const addTimelineMeetingManualParticipant = useCallback(() => {
+    setRoomMeetingsTimelineBookingDetail((prev) => {
+      if (!prev) return prev;
+      const fullName = String(prev.manualParticipantName || '').trim();
+      if (!fullName) return { ...prev, error: t({ it: 'Inserisci il nome ospite.', en: 'Enter guest name.' }) };
+      const email = String(prev.manualParticipantEmail || '').trim();
+      const company = String(prev.manualParticipantCompany || '').trim();
+      return {
+        ...prev,
+        error: null,
+        participantsDraft: [
+          ...prev.participantsDraft,
+          {
+            key: `manual:${nanoid(6)}`,
+            kind: 'manual',
+            externalId: null,
+            fullName,
+            email: email || null,
+            optional: !!prev.manualParticipantOptional,
+            remote: !!prev.manualParticipantRemote,
+            company: company || null
+          }
+        ],
+        manualParticipantName: '',
+        manualParticipantCompany: '',
+        manualParticipantEmail: '',
+        manualParticipantOptional: false,
+        manualParticipantRemote: false
+      };
+    });
+    setRoomMeetingEditManualCompanyIsOther(false);
+  }, [t]);
+
+  const shiftIsoDay = useCallback((iso: string, deltaDays: number) => {
+    const d = new Date(`${String(iso || '').trim()}T00:00:00`);
+    if (!Number.isFinite(d.getTime())) return new Date().toISOString().slice(0, 10);
+    d.setDate(d.getDate() + deltaDays);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  const saveRoomMeetingBookingEdit = useCallback(async () => {
+    const detail = roomMeetingsTimelineBookingDetail;
+    const modal = roomMeetingsTimelineModal;
+    if (!detail || !modal) return;
+    if (!detail.subject.trim()) {
+      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, error: t({ it: 'Oggetto meeting obbligatorio.', en: 'Meeting subject is required.' }) } : prev));
+      return;
+    }
+    if (!detail.day || !detail.startTime || !detail.endTime) {
+      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, error: t({ it: 'Compila data e orari.', en: 'Fill date and times.' }) } : prev));
+      return;
+    }
+    setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
+    try {
+      const result = await updateMeeting(detail.booking.id, {
+        subject: detail.subject.trim(),
+        day: detail.day,
+        startTime: detail.startTime,
+        endTime: detail.endTime,
+        notes: detail.notes,
+        videoConferenceLink: detail.videoConferenceLink,
+        setupBufferBeforeMin: Math.max(0, Math.min(60, Number(detail.setupBufferBeforeMin) || 0)),
+        setupBufferAfterMin: Math.max(0, Math.min(60, Number(detail.setupBufferAfterMin) || 0)),
+        participants: detail.participantsDraft.map((p) => ({
+          kind: p.kind === 'manual' ? 'manual' : 'real_user',
+          externalId: p.kind === 'real_user' ? String(p.externalId || '') : null,
+          fullName: String(p.fullName || ''),
+          email: p.email ? String(p.email) : null,
+          optional: !!p.optional,
+          remote: !!p.remote,
+          company: p.company ? String(p.company) : null
+        })),
+        applyToSeries: !!detail.applyToSeries
+      });
+      push(
+        detail.booking.sendEmail
+          ? t({ it: 'Meeting aggiornato. Notifica email inviata ai partecipanti.', en: 'Meeting updated. Email notification sent to participants.' })
+          : t({ it: 'Meeting aggiornato.', en: 'Meeting updated.' }),
+        'success'
+      );
+      setRoomMeetingsTimelineBookingDetail((prev) =>
+        prev ? { ...prev, booking: result.booking, mode: 'view', saving: false, error: null, applyToSeries: false } : prev
+      );
+      await reloadRoomMeetingsTimeline(modal.roomId, modal.day);
+    } catch (err: any) {
+      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, saving: false, error: err?.message || 'Update failed' } : prev));
+    }
+  }, [push, reloadRoomMeetingsTimeline, roomMeetingsTimelineBookingDetail, roomMeetingsTimelineModal, t]);
+
+  const deleteRoomMeetingBooking = useCallback(async () => {
+    const detail = roomMeetingsTimelineBookingDetail;
+    const modal = roomMeetingsTimelineModal;
+    if (!detail || !modal) return;
+    setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, deleting: true, error: null } : prev));
+    try {
+      await cancelMeeting(detail.booking.id);
+      push(
+        detail.booking.sendEmail
+          ? t({ it: 'Meeting eliminato. Notifica email inviata ai partecipanti.', en: 'Meeting deleted. Email notification sent to participants.' })
+          : t({ it: 'Meeting eliminato.', en: 'Meeting deleted.' }),
+        'success'
+      );
+      closeRoomMeetingBookingDetail();
+      await reloadRoomMeetingsTimeline(modal.roomId, modal.day);
+    } catch (err: any) {
+      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, deleting: false, error: err?.message || 'Delete failed' } : prev));
+    }
+  }, [closeRoomMeetingBookingDetail, push, reloadRoomMeetingsTimeline, roomMeetingsTimelineBookingDetail, roomMeetingsTimelineModal, t]);
+
+  const deleteRoomMeetingBookingDirect = useCallback(
+    async (booking: MeetingBooking) => {
+      const modal = roomMeetingsTimelineModal;
+      if (!booking || !modal) return;
+      try {
+        await cancelMeeting(booking.id);
+        push(
+          booking.sendEmail
+            ? t({ it: 'Meeting eliminato. Notifica email inviata ai partecipanti.', en: 'Meeting deleted. Email notification sent to participants.' })
+            : t({ it: 'Meeting eliminato.', en: 'Meeting deleted.' }),
+          'success'
+        );
+        await reloadRoomMeetingsTimeline(modal.roomId, modal.day);
+      } catch (err: any) {
+        push(err?.message || t({ it: 'Eliminazione meeting fallita.', en: 'Failed to delete meeting.' }), 'danger');
+      }
+    },
+    [push, reloadRoomMeetingsTimeline, roomMeetingsTimelineModal, t]
+  );
+
   useEffect(() => {
     let cancelled = false;
     const clientId = String(client?.id || '').trim();
@@ -3121,10 +3857,34 @@ const PlanView = ({ planId }: Props) => {
     const normalizeRoomForCompare = (room: any) => {
       const base = room || {};
       const normalized: Record<string, any> = {};
+      const falseIfMissingKeys = new Set([
+        'logical',
+        'meetingRoom',
+        'meetingProjector',
+        'meetingTv',
+        'meetingVideoConf',
+        'meetingCoffeeService',
+        'meetingWhiteboard',
+        'meetingKioskEnabled',
+        'wifiAvailable',
+        'fridgeAvailable',
+        'noWindows',
+        'storageRoom',
+        'bathroom',
+        'technicalRoom'
+      ]);
       const keys = Object.keys(base).sort((a, b) => a.localeCompare(b));
       for (const key of keys) {
         const value = (base as any)[key];
         if (value === undefined) continue;
+        if (key === 'showName' && value === true) continue;
+        if (falseIfMissingKeys.has(key) && value === false) continue;
+        if (key === 'capacity' && Number(value) === 0) continue;
+        if (typeof value === 'string' && String(value) === '') continue;
+        if (key === 'labelPosition' && (value === 'top' || value === '' || value == null)) continue;
+        if (key === 'labelScale' && (value === null || value === undefined || Number(value) === 1)) continue;
+        if (key === 'fillOpacity' && (value === null || value === undefined || Math.abs(Number(value) - 0.08) < 0.0001)) continue;
+        if ((key === 'color' || key === 'fillColor' || key === 'strokeColor') && String(value || '').trim() === '') continue;
         if (key === 'departmentTags') {
           normalized[key] = Array.isArray(value)
             ? value
@@ -3504,6 +4264,8 @@ const PlanView = ({ planId }: Props) => {
     // touchedRef is a ref; touchedTick is used to re-evaluate when touched changes.
     [hasLocalEdits, touchedTick]
   );
+  // UI "Unsaved" badge should reflect user edits only, not legacy normalization differences in old revisions.
+  const hasUnsavedUi = hasNavigationEdits;
 
   useEffect(() => {
     // If the only change is an automatic width/height fill (e.g. measured from image), do not treat it as
@@ -4303,7 +5065,6 @@ const PlanView = ({ planId }: Props) => {
     const items =
       count === 2
         ? [
-            { cmd: 'L', it: 'collega i 2 oggetti', en: 'link the 2 objects' },
             { cmd: '+ / −', it: 'scala', en: 'scale' },
             { cmd: 'Ctrl/Cmd + C / V', it: 'copia/incolla', en: 'copy/paste' },
             { cmd: 'Frecce', it: 'muovi (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
@@ -4356,8 +5117,7 @@ const PlanView = ({ planId }: Props) => {
         [
           { cmd: 'Frecce', it: 'sposta (Shift per passi maggiori)', en: 'move (Shift for larger steps)' },
           { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
-          { cmd: '+ / −', it: 'scala', en: 'scale' },
-          { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+          { cmd: '+ / −', it: 'scala', en: 'scale' }
         ]
       ),
       { duration: Infinity, id: selectionHintToastIds.current.desk }
@@ -4403,8 +5163,7 @@ const PlanView = ({ planId }: Props) => {
             en: 'extend/shrink (Shift locks horizontal/vertical)'
           },
           { cmd: '+ / −', it: 'scala', en: 'scale' },
-          { cmd: 'E', it: 'modifica', en: 'edit' },
-          { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+          { cmd: 'E', it: 'modifica', en: 'edit' }
         ]
       ),
       { duration: Infinity, id: selectionHintToastIds.current.quote }
@@ -4458,8 +5217,7 @@ const PlanView = ({ planId }: Props) => {
               { cmd: 'C', it: 'colore avanti', en: 'next color' },
               { cmd: 'Shift + C', it: 'colore indietro', en: 'previous color' },
               { cmd: 'B', it: 'mostra/nasconde background', en: 'toggle background' },
-              { cmd: 'E', it: 'modifica', en: 'edit' },
-              { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+              { cmd: 'E', it: 'modifica', en: 'edit' }
             ]
           )
         : imageIds.length && !textIds.length && !photoIds.length && !postitIds.length
@@ -4471,8 +5229,7 @@ const PlanView = ({ planId }: Props) => {
                 { cmd: 'Maniglie', it: 'ridimensiona/ruota', en: 'resize/rotate' },
                 { cmd: 'Ctrl/Cmd + ←/→', it: 'ruota di 90°', en: 'rotate 90°' },
                 { cmd: '+ / −', it: 'scala', en: 'scale' },
-                { cmd: 'E', it: 'modifica', en: 'edit' },
-                { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+                { cmd: 'E', it: 'modifica', en: 'edit' }
               ]
             )
             : photoIds.length && !textIds.length && !imageIds.length && !postitIds.length
@@ -4493,8 +5250,7 @@ const PlanView = ({ planId }: Props) => {
                   { cmd: 'Trascina', it: 'sposta', en: 'move' },
                   { cmd: 'Click icona', it: 'compatta/espandi', en: 'compact/expand' },
                   { cmd: '+ / −', it: 'scala', en: 'scale' },
-                  { cmd: 'E', it: 'modifica', en: 'edit' },
-                  { cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' }
+                  { cmd: 'E', it: 'modifica', en: 'edit' }
                 ]
               )
             : (() => {
@@ -4511,9 +5267,6 @@ const PlanView = ({ planId }: Props) => {
                   if (rotateIdx >= 0) base.splice(rotateIdx, 1);
                   const handleIdx = base.findIndex((item) => item.cmd === 'Maniglie');
                   if (handleIdx >= 0) base.splice(handleIdx, 1);
-                }
-                if (!photoIds.length) {
-                  base.push({ cmd: 'L', it: 'collega 2 oggetti selezionati', en: 'link 2 selected objects' });
                 }
                 return renderKeybindToast({ it: 'Annotazioni selezionate', en: 'Annotations selected' }, base);
               })();
@@ -5173,6 +5926,20 @@ const PlanView = ({ planId }: Props) => {
     [dismissSelectionHintToasts]
   );
 
+  const openMeetingManager = useCallback(
+    (preset?: { roomId?: string; floorPlanId?: string; siteId?: string; clientId?: string; day?: string }) => {
+      setMeetingManagerPreset({
+        clientId: preset?.clientId || client?.id,
+        siteId: preset?.siteId || site?.id,
+        floorPlanId: preset?.floorPlanId || planId,
+        roomId: preset?.roomId,
+        day: preset?.day
+      });
+      setMeetingManagerOpen(true);
+    },
+    [client?.id, planId, site?.id]
+  );
+
   const handleRoomContextMenu = useCallback(
     ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
       dismissSelectionHintToasts();
@@ -5458,6 +6225,31 @@ const PlanView = ({ planId }: Props) => {
         push(t({ it: 'Nessuna planimetria disponibile per la sede selezionata.', en: 'No floor plans available for the selected site.' }), 'info');
         return;
       }
+      if (sourceKind === 'room' && contextMenu?.kind === 'room') {
+        const roomId = String(contextMenu.id || '');
+        const activePlanForDoors = (renderPlan || plan) as any;
+        const roomDoorsNow = Array.isArray(activePlanForDoors?.roomDoors) ? (activePlanForDoors.roomDoors as any[]) : [];
+        const corridorsNow = Array.isArray(activePlanForDoors?.corridors) ? (activePlanForDoors.corridors as any[]) : [];
+        const hasLinkedRoomDoor = roomDoorsNow.some(
+          (door) => String((door as any)?.roomAId || '') === roomId || String((door as any)?.roomBId || '') === roomId
+        );
+        const hasCorridorDoorLink = corridorsNow.some((corridor) =>
+          (corridor.doors || []).some((door: any) =>
+            Array.isArray(door?.linkedRoomIds) && (door.linkedRoomIds as any[]).some((id) => String(id || '') === roomId)
+          )
+        );
+        if (!hasLinkedRoomDoor && !hasCorridorDoorLink) {
+          push(
+            t({
+              it: 'Per pianificare una via di fuga da questa stanza è necessario configurare almeno una porta collegata alla stanza.',
+              en: 'To compute an escape route from this room you must configure at least one door linked to the room.'
+            }),
+            'danger'
+          );
+          setContextMenu(null);
+          return;
+        }
+      }
       setEscapeRouteModal({
         startPoint: { x: Number(point.x), y: Number(point.y) },
         startPlanId: planId,
@@ -5465,7 +6257,7 @@ const PlanView = ({ planId }: Props) => {
       });
       setContextMenu(null);
     },
-    [planId, push, siteFloorPlans.length, t]
+    [contextMenu, plan, planId, push, renderPlan, siteFloorPlans.length, t]
   );
   const toggleSecurityCardVisibility = useCallback(() => {
     const baseVisible = hideAllLayers
@@ -5773,9 +6565,9 @@ const PlanView = ({ planId }: Props) => {
   );
 
 
-  const roomContextMetrics = useMemo(() => {
-    if (!contextMenu || contextMenu.kind !== 'room' || !renderPlan) return null;
-    const room = (renderPlan.rooms || []).find((r) => r.id === contextMenu.id);
+  const roomMeasuresData = useMemo(() => {
+    if (!roomMeasuresModal || !renderPlan) return null;
+    const room = (renderPlan.rooms || []).find((r) => r.id === roomMeasuresModal.roomId);
     if (!room) return null;
     const points = getRoomPolygon(room);
     if (points.length < 2) return null;
@@ -5795,18 +6587,214 @@ const PlanView = ({ planId }: Props) => {
     const areaLabel = scaleMissing
       ? null
       : `${formatNumber(areaPx * metersPerPixel * metersPerPixel)} ${areaUnit}`;
-    return { segments, perimeterLabel, areaLabel, scaleMissing };
+    return { roomName: room.name, points, segments, perimeterLabel, areaLabel, scaleMissing };
   }, [
     computePolygonArea,
     computePolylineLength,
-    contextMenu,
     formatCornerLabel,
     formatNumber,
     getRoomPolygon,
     lang,
     metersPerPixel,
-    renderPlan
+    renderPlan,
+    roomMeasuresModal
   ]);
+
+  useEffect(() => {
+    if (!roomKioskInfoModal?.roomId) {
+      setRoomKioskInfoQrDataUrl('');
+      setRoomKioskInfoLink('');
+      return;
+    }
+    let cancelled = false;
+    const path = `/meetingroom/${encodeURIComponent(String(roomKioskInfoModal.roomId))}`;
+    const fallback = typeof window === 'undefined' ? path : `${window.location.origin}${path}`;
+    fetchMeetingRoomSchedule(String(roomKioskInfoModal.roomId))
+      .then((res: any) => String(res?.kioskPublicUrl || '').trim() || fallback)
+      .catch(() => fallback)
+      .then((link) => {
+        if (cancelled) return;
+        setRoomKioskInfoLink(link);
+        return QRCode.toDataURL(link, { margin: 1, width: 300 })
+          .then((url: string) => !cancelled && setRoomKioskInfoQrDataUrl(url))
+          .catch(() => !cancelled && setRoomKioskInfoQrDataUrl(''));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomKioskInfoModal]);
+
+  const roomLayoutExportRows = useMemo(() => {
+    if (!roomLayoutExportModal) return [] as Array<{
+      key: string;
+      clientId: string;
+      siteId: string;
+      siteName: string;
+      planId: string;
+      planName: string;
+      roomId: string;
+      roomName: string;
+      capacity: number;
+      typeCodes: string;
+      typeFlagsLabel: string;
+      meetingRoom: boolean;
+      logical: boolean;
+      storageRoom: boolean;
+      bathroom: boolean;
+      technicalRoom: boolean;
+      noWindows: boolean;
+      color: string;
+      fillOpacity: number;
+      labelScale: number;
+      isSource: boolean;
+    }>;
+    const out: Array<{
+      key: string;
+      clientId: string;
+      siteId: string;
+      siteName: string;
+      planId: string;
+      planName: string;
+      roomId: string;
+      roomName: string;
+      capacity: number;
+      typeCodes: string;
+      typeFlagsLabel: string;
+      meetingRoom: boolean;
+      logical: boolean;
+      storageRoom: boolean;
+      bathroom: boolean;
+      technicalRoom: boolean;
+      noWindows: boolean;
+      color: string;
+      fillOpacity: number;
+      labelScale: number;
+      isSource: boolean;
+    }> = [];
+    const clientEntry = (allClients || []).find((c) => String(c.id) === String(roomLayoutExportModal.clientId));
+    if (!clientEntry) return out;
+    for (const siteEntry of clientEntry.sites || []) {
+      for (const floorPlanEntry of siteEntry.floorPlans || []) {
+        for (const roomEntry of (floorPlanEntry as any).rooms || []) {
+          if (!roomEntry?.id) continue;
+          if (!(roomEntry as any)?.meetingRoom) continue;
+          const flags = {
+            meetingRoom: !!(roomEntry as any)?.meetingRoom,
+            logical: !!(roomEntry as any)?.logical,
+            storageRoom: !!(roomEntry as any)?.storageRoom,
+            bathroom: !!(roomEntry as any)?.bathroom,
+            technicalRoom: !!(roomEntry as any)?.technicalRoom,
+            noWindows: !!(roomEntry as any)?.noWindows
+          };
+          const codeDefs: Array<[string, boolean]> = [
+            ['MR', flags.meetingRoom],
+            ['RL', flags.logical],
+            ['RP', flags.storageRoom],
+            ['BA', flags.bathroom],
+            ['LT', flags.technicalRoom],
+            ['SF', flags.noWindows]
+          ];
+          const key = `${String(floorPlanEntry.id)}::${String(roomEntry.id)}`;
+          out.push({
+            key,
+            clientId: String(clientEntry.id),
+            siteId: String(siteEntry.id),
+            siteName: String(siteEntry.name || ''),
+            planId: String(floorPlanEntry.id),
+            planName: String(floorPlanEntry.name || ''),
+            roomId: String(roomEntry.id),
+            roomName: String((roomEntry as any).name || ''),
+            capacity: Number.isFinite(Number((roomEntry as any).capacity)) ? Math.max(0, Math.floor(Number((roomEntry as any).capacity))) : 0,
+            typeCodes: codeDefs.filter(([, active]) => active).map(([code]) => code).join(' · ') || '—',
+            typeFlagsLabel: codeDefs.map(([code, active]) => `${code}:${active ? '1' : '0'}`).join(' '),
+            ...flags,
+            color: String((roomEntry as any).color || '#64748b'),
+            fillOpacity: Number.isFinite(Number((roomEntry as any).fillOpacity))
+              ? Math.max(0.05, Math.min(1, Number((roomEntry as any).fillOpacity)))
+              : 0.08,
+            labelScale: Number.isFinite(Number((roomEntry as any).labelScale))
+              ? Math.max(0.2, Math.min(2, Number((roomEntry as any).labelScale)))
+              : 1,
+            isSource:
+              String(floorPlanEntry.id) === String(roomLayoutExportModal.sourcePlanId) &&
+              String(roomEntry.id) === String(roomLayoutExportModal.sourceRoomId)
+          });
+        }
+      }
+    }
+    const dir = roomLayoutExportModal.sortDir === 'desc' ? -1 : 1;
+    const sorted = out.slice().sort((a, b) => {
+      const key = roomLayoutExportModal.sortKey;
+      const cmp =
+        key === 'site'
+          ? a.siteName.localeCompare(b.siteName, undefined, { sensitivity: 'base' })
+          : key === 'plan'
+            ? a.planName.localeCompare(b.planName, undefined, { sensitivity: 'base' })
+            : key === 'room'
+              ? a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' })
+              : key === 'capacity'
+                ? a.capacity - b.capacity
+                : key === 'meetingRoom'
+                  ? Number(a.meetingRoom) - Number(b.meetingRoom)
+                  : key === 'logical'
+                    ? Number(a.logical) - Number(b.logical)
+                    : key === 'storageRoom'
+                      ? Number(a.storageRoom) - Number(b.storageRoom)
+                      : key === 'bathroom'
+                        ? Number(a.bathroom) - Number(b.bathroom)
+                        : key === 'technicalRoom'
+                          ? Number(a.technicalRoom) - Number(b.technicalRoom)
+                          : key === 'noWindows'
+                            ? Number(a.noWindows) - Number(b.noWindows)
+                : key === 'scale'
+                  ? a.labelScale - b.labelScale
+                  : a.fillOpacity - b.fillOpacity;
+      if (cmp !== 0) return cmp * dir;
+      return (
+        a.siteName.localeCompare(b.siteName, undefined, { sensitivity: 'base' }) ||
+        a.planName.localeCompare(b.planName, undefined, { sensitivity: 'base' }) ||
+        a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' })
+      );
+    });
+    return sorted;
+  }, [allClients, roomLayoutExportModal]);
+
+  const roomLayoutExportSource = useMemo(
+    () => roomLayoutExportRows.find((row) => row.isSource) || null,
+    [roomLayoutExportRows]
+  );
+
+  const applyRoomLayoutExportToSelection = useCallback(() => {
+    if (!roomLayoutExportModal || !roomLayoutExportSource) return;
+    const selected = new Set((roomLayoutExportModal.selectedKeys || []).map((v) => String(v)));
+    const targets = roomLayoutExportRows.filter((row) => selected.has(row.key) && !row.isSource);
+    if (!targets.length) {
+      push(t({ it: 'Seleziona almeno una meeting room di destinazione.', en: 'Select at least one target meeting room.' }), 'info');
+      return;
+    }
+    const patch = {
+      color: roomLayoutExportSource.color,
+      fillOpacity: roomLayoutExportSource.fillOpacity,
+      labelScale: roomLayoutExportSource.labelScale
+    };
+    const touchedPlanIds = new Set<string>();
+    for (const target of targets) {
+      updateRoom(target.planId, target.roomId, patch as any);
+      touchedPlanIds.add(target.planId);
+    }
+    for (const pid of touchedPlanIds) {
+      if (String(pid) === String(planId || '')) markTouched();
+      setPlanDirty(pid, true);
+    }
+    push(
+      t({
+        it: `Layout esportato su ${targets.length} meeting room (colore, scala, opacità).`,
+        en: `Layout applied to ${targets.length} meeting rooms (color, scale, opacity).`
+      }),
+      'success'
+    );
+    setRoomLayoutExportModal(null);
+  }, [markTouched, planId, push, roomLayoutExportModal, roomLayoutExportRows, roomLayoutExportSource, setPlanDirty, t, updateRoom]);
 
   const roomModalMetrics = useMemo(() => {
     if (!roomModal) return null;
@@ -7569,47 +8557,7 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && key === 'l') {
-        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
-        if (currentSelectedIds.length !== 2) return;
-        e.preventDefault();
-        const [a, b] = currentSelectedIds;
-        const objA = (currentPlan as FloorPlan).objects?.find((o) => o.id === a);
-        const objB = (currentPlan as FloorPlan).objects?.find((o) => o.id === b);
-        if (!objA || !objB) return;
-        if (objA.type === 'photo' || objB.type === 'photo') {
-          push(t({ it: 'Le foto non possono essere collegate', en: 'Photos cannot be linked' }), 'info');
-          return;
-        }
-        if (isDeskType(objA.type) || isDeskType(objB.type)) {
-          push(t({ it: 'Questi oggetti non possono essere collegati', en: 'These objects cannot be linked' }), 'info');
-          return;
-        }
-        const links = (((currentPlan as any).links || []) as any[]).filter(Boolean);
-        const existing = links.find(
-          (l) =>
-            (String((l as any).fromId || '') === a && String((l as any).toId || '') === b) ||
-            (String((l as any).fromId || '') === b && String((l as any).toId || '') === a)
-        );
-        if (existing) {
-          setSelectedLinkId(String(existing.id));
-          push(t({ it: 'Collegamento già presente', en: 'Link already exists' }), 'info');
-          return;
-        }
-        markTouched();
-        const id = addLink((currentPlan as FloorPlan).id, a, b, { kind: 'arrow', arrow: 'none' });
-        postAuditEvent({
-          event: 'link_create',
-          scopeType: 'plan',
-          scopeId: (currentPlan as FloorPlan).id,
-          details: { id, fromId: a, toId: b, kind: 'arrow' }
-        });
-        setSelectedLinkId(id);
-        push(t({ it: 'Collegamento creato', en: 'Link created' }), 'success');
-        return;
-      }
-
-	      const isScaleUp = (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !e.ctrlKey && !e.metaKey;
+		      const isScaleUp = (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !e.ctrlKey && !e.metaKey;
 	      const isScaleDown = (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') && !e.ctrlKey && !e.metaKey;
 	      if (isScaleUp || isScaleDown) {
 	        if (!currentPlan) return;
@@ -8653,7 +9601,14 @@ const PlanView = ({ planId }: Props) => {
       initialNotes: room.notes,
       initialLogical: room.logical,
       initialMeetingRoom: !!(room as any).meetingRoom,
+      initialMeetingProjector: !!(room as any).meetingProjector,
+      initialMeetingTv: !!(room as any).meetingTv,
+      initialMeetingVideoConf: !!(room as any).meetingVideoConf,
+      initialMeetingCoffeeService: !!(room as any).meetingCoffeeService,
+      initialMeetingWhiteboard: !!(room as any).meetingWhiteboard,
       initialNoWindows: !!(room as any).noWindows,
+      initialWifiAvailable: !!(room as any).wifiAvailable,
+      initialFridgeAvailable: !!(room as any).fridgeAvailable,
       initialStorageRoom: !!(room as any).storageRoom,
       initialBathroom: !!(room as any).bathroom,
       initialTechnicalRoom: !!(room as any).technicalRoom
@@ -10492,6 +11447,10 @@ const PlanView = ({ planId }: Props) => {
     }
     return map;
   }, [client]);
+  const canOpenBusinessPartnersDirectory = useMemo(
+    () => !!isSuperAdmin || !!user?.isAdmin || (user as any)?.canManageBusinessPartners === true,
+    [isSuperAdmin, user]
+  );
 
   if (!renderPlan) {
     return (
@@ -11387,10 +12346,25 @@ const PlanView = ({ planId }: Props) => {
               }}
             />
           </div>
-	          <button
-	            onClick={() => {
-	              dismissSelectionHintToasts();
-	              setInternalMapOpen(true);
+              <div className="group relative">
+                <button
+                  onClick={() => openMeetingManager()}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-300 bg-emerald-600 text-white shadow-card transition hover:bg-emerald-700"
+                  title={t({ it: 'Gestione meeting room', en: 'Meeting room management' })}
+                >
+                  <CalendarClock size={15} />
+                </button>
+                <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-80 -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium leading-5 text-white opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100">
+                  {t({
+                    it: 'Apri la gestione meeting room: seleziona data/ora, filtra per dotazioni, verifica disponibilità e crea o invia richieste di prenotazione.',
+                    en: 'Open meeting room management: pick date/time, filter by equipment, check availability, and create or submit booking requests.'
+                  })}
+                </div>
+              </div>
+		          <button
+		            onClick={() => {
+		              dismissSelectionHintToasts();
+		              setInternalMapOpen(true);
 	            }}
 	            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-card hover:bg-slate-50"
 	            title={t({
@@ -11430,30 +12404,30 @@ const PlanView = ({ planId }: Props) => {
           </div>
           <div
             className={`rounded-full px-3 py-1 text-xs font-semibold ${
-              hasUnsavedChanges ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'
+              hasUnsavedUi ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'
             }`}
             title={
-              hasUnsavedChanges
+              hasUnsavedUi
                 ? t({ it: 'Modifiche non salvate', en: 'Unsaved changes' })
                 : t({ it: 'Tutto salvato', en: 'All changes saved' })
             }
           >
-            {hasUnsavedChanges ? t({ it: 'Non salvato', en: 'Unsaved' }) : t({ it: 'Salvato', en: 'Saved' })}
+            {hasUnsavedUi ? t({ it: 'Non salvato', en: 'Unsaved' }) : t({ it: 'Salvato', en: 'Saved' })}
           </div>
           {!isReadOnly ? (
             <button
               onClick={() => {
                 if (!plan) return;
-                if (!hasUnsavedChanges) {
+                if (!hasUnsavedUi) {
                   push(t({ it: 'Nessuna modifica da salvare', en: 'No changes to save' }), 'info');
                   return;
                 }
                 setSaveRevisionOpen(true);
               }}
               title={t({ it: 'Salva revisione', en: 'Save revision' })}
-              disabled={!hasUnsavedChanges}
+              disabled={!hasUnsavedUi}
               className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-card ${
-                hasUnsavedChanges
+                hasUnsavedUi
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
                   : 'border-slate-200 bg-white text-slate-400 opacity-60'
               }`}
@@ -11839,6 +12813,7 @@ const PlanView = ({ planId }: Props) => {
 				                highlightUntil={highlight?.until}
 	                    highlightRoomId={highlightRoom?.roomId}
 	                    highlightRoomUntil={highlightRoom?.until}
+                    meetingRoomStatusById={meetingStatusByRoomId}
 				                pendingType={pendingType}
 				                readOnly={isReadOnly || presentationMode}
                         panToolActive={panToolActive}
@@ -11975,6 +12950,9 @@ const PlanView = ({ planId }: Props) => {
 		        onContextMenu={handleObjectContextMenu}
                     onLinkContextMenu={handleLinkContextMenu}
                     onRoomContextMenu={handleRoomContextMenu}
+                    onMeetingBadgeDblClick={({ id }) => {
+                      openRoomMeetingsTimeline(id);
+                    }}
                     onCorridorContextMenu={handleCorridorContextMenu}
                     onCorridorConnectionContextMenu={handleCorridorConnectionContextMenu}
                     onCorridorDoorContextMenu={handleCorridorDoorContextMenu}
@@ -13249,7 +14227,7 @@ const PlanView = ({ planId }: Props) => {
                             </button>
                           </>
                         ) : null}
-                        {!contextIsWall ? (
+                        {!contextIsWall && !contextIsText ? (
                           <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
                               <MoveDiagonal size={14} />{' '}
@@ -13644,44 +14622,17 @@ const PlanView = ({ planId }: Props) => {
               </>
             ) : contextMenu.kind === 'room' ? (
 	            <>
-	              {roomContextMetrics ? (
-                <div className="mt-2 rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
-                  <div className="font-semibold text-slate-600">{t({ it: 'Info stanza', en: 'Room info' })}</div>
-                  {roomContextMetrics.scaleMissing ? (
-                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
-                      {t({ it: 'Imposta una scala per misurare.', en: 'Set a scale to measure.' })}
-                    </div>
-                  ) : (
-                    <>
-                      {roomContextMetrics.perimeterLabel ? (
-                        <div className="mt-1 flex items-center justify-between gap-2">
-                          <span>{t({ it: 'Perimetro', en: 'Perimeter' })}</span>
-                          <span className="font-mono">{roomContextMetrics.perimeterLabel}</span>
-                        </div>
-                      ) : null}
-                      {roomContextMetrics.areaLabel ? (
-                        <div className="mt-1 flex items-center justify-between gap-2">
-                          <span>{t({ it: 'Area', en: 'Area' })}</span>
-                          <span className="font-mono">{roomContextMetrics.areaLabel}</span>
-                        </div>
-                      ) : null}
-                      {roomContextMetrics.segments?.length ? (
-                        <div className="mt-2">
-                          <div className="text-[11px] font-semibold text-slate-500">{t({ it: 'Lati', en: 'Sides' })}</div>
-                          <div className="mt-1 space-y-1 text-[11px] text-slate-600">
-                            {roomContextMetrics.segments.map((seg: { label: string; lengthLabel?: string | null }) => (
-                              <div key={seg.label} className="flex items-center justify-between gap-2">
-                                <span className="font-mono">{seg.label}</span>
-                                <span className="font-mono">{seg.lengthLabel}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </>
-                  )}
-	                </div>
-	              ) : null}
+                <button
+                  onClick={() => {
+                    if (contextMenu.kind !== 'room') return;
+                    setRoomMeasuresModal({ roomId: contextMenu.id });
+                    setContextMenu(null);
+                  }}
+                  className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                  title={t({ it: 'Misure stanza', en: 'Room measurements' })}
+                >
+                  <Ruler size={14} className="text-slate-500" /> {t({ it: 'Misure', en: 'Measurements' })}
+                </button>
 	              <button
 	                onClick={() => {
 	                  if (contextMenu.kind !== 'room') return;
@@ -13715,7 +14666,8 @@ const PlanView = ({ planId }: Props) => {
                       );
                     })()
                   : null}
-              {!isReadOnly ? (
+              {!isReadOnly &&
+              !((renderPlan?.rooms || []).find((room) => room.id === contextMenu.id) as any)?.meetingRoom ? (
                 <button
                   onClick={() => {
                     openEditRoom(contextMenu.id, { openDepartments: true });
@@ -13727,6 +14679,61 @@ const PlanView = ({ planId }: Props) => {
                   <Users size={14} /> {t({ it: 'Gestione reparti', en: 'Department management' })}
                 </button>
               ) : null}
+              <button
+                onClick={() => {
+                  const room = (renderPlan?.rooms || []).find((r) => r.id === contextMenu.id) as any;
+                  if (room?.meetingRoom) {
+                    openRoomMeetingsTimeline(contextMenu.id);
+                  } else {
+                    openMeetingManager({ roomId: contextMenu.id, floorPlanId: planId, siteId: site?.id, clientId: client?.id });
+                  }
+                  setContextMenu(null);
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Pianifica meeting room', en: 'Schedule meeting room' })}
+              >
+                <CalendarClock size={14} /> {t({ it: 'Pianifica meeting', en: 'Schedule meeting' })}
+              </button>
+              {(() => {
+                const room = (renderPlan?.rooms || []).find((r) => r.id === contextMenu.id) as any;
+                if (!room?.meetingRoom || !room?.meetingKioskEnabled) return null;
+                return (
+                  <button
+                    onClick={() => {
+                      setRoomKioskInfoModal({
+                        roomId: String(room.id),
+                        roomName: String(room.name || t({ it: 'Meeting room', en: 'Meeting room' })),
+                        clientName: String(client?.shortName || client?.name || '-'),
+                        siteName: String(site?.name || '-'),
+                        planName: String(plan?.name || '-')
+                      });
+                      setContextMenu(null);
+                    }}
+                    className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                    title={t({ it: 'Informazioni kiosk (link e QR code)', en: 'Kiosk info (link and QR code)' })}
+                  >
+                    <QrCode size={14} /> {t({ it: 'Kiosk Info', en: 'Kiosk Info' })}
+                  </button>
+                );
+              })()}
+              <button
+                onClick={() => {
+                  if (!client?.id || contextMenu.kind !== 'room') return;
+                  setRoomLayoutExportModal({
+                    clientId: client.id,
+                    sourcePlanId: planId,
+                    sourceRoomId: contextMenu.id,
+                    sortKey: 'site',
+                    sortDir: 'asc',
+                    selectedKeys: []
+                  });
+                  setContextMenu(null);
+                }}
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+                title={t({ it: 'Copia colore/scala/opacità su altre meeting room del cliente', en: 'Copy color/scale/opacity to other client meeting rooms' })}
+              >
+                <Copy size={14} /> {t({ it: 'Esporta Layout', en: 'Export Layout' })}
+              </button>
               {!isReadOnly ? (
 		                <button
 	                  onClick={() => {
@@ -14618,6 +15625,16 @@ const PlanView = ({ planId }: Props) => {
               </Transition.Child>
             </div>
           </div>
+          <ClientBusinessPartnersModal
+            open={roomMeetingEditBusinessPartnersModalOpen && !!client}
+            client={client || undefined}
+            onClose={() => setRoomMeetingEditBusinessPartnersModalOpen(false)}
+            onSave={(businessPartners) => {
+              if (!client?.id) return;
+              updateClient(client.id, { businessPartners } as any);
+              setRoomMeetingEditBusinessPartnersModalOpen(false);
+            }}
+          />
         </Dialog>
       </Transition>
 
@@ -15350,6 +16367,11 @@ const PlanView = ({ planId }: Props) => {
             ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.color
             : undefined
         }
+        initialFillOpacity={
+          roomModal?.mode === 'edit'
+            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.fillOpacity
+            : undefined
+        }
         initialCapacity={
           roomModal?.mode === 'edit'
             ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.capacity
@@ -15388,9 +16410,49 @@ const PlanView = ({ planId }: Props) => {
             ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingRoom
             : undefined
         }
+        initialMeetingProjector={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingProjector
+            : undefined
+        }
+        initialMeetingTv={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingTv
+            : undefined
+        }
+        initialMeetingVideoConf={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingVideoConf
+            : undefined
+        }
+        initialMeetingCoffeeService={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingCoffeeService
+            : undefined
+        }
+        initialMeetingWhiteboard={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingWhiteboard
+            : undefined
+        }
+        initialMeetingKioskEnabled={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingKioskEnabled
+            : undefined
+        }
         initialNoWindows={
           roomModal?.mode === 'edit'
             ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.noWindows
+            : undefined
+        }
+        initialWifiAvailable={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.wifiAvailable
+            : undefined
+        }
+        initialFridgeAvailable={
+          roomModal?.mode === 'edit'
+            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.fridgeAvailable
             : undefined
         }
         initialStorageRoom={
@@ -15426,11 +16488,13 @@ const PlanView = ({ planId }: Props) => {
           skipRoomWallTypesRef.current = false;
           setRoomModal(null);
         }}
+        kioskRoomId={roomModal?.mode === 'edit' ? roomModal.roomId : undefined}
         onSubmit={({
           name,
           nameEn,
           departmentTags,
           color,
+          fillOpacity,
           capacity,
           labelScale,
           showName,
@@ -15438,13 +16502,43 @@ const PlanView = ({ planId }: Props) => {
           notes,
           logical,
           meetingRoom,
+          meetingProjector,
+          meetingTv,
+          meetingVideoConf,
+          meetingCoffeeService,
+          meetingWhiteboard,
+          meetingKioskEnabled,
           noWindows,
+          wifiAvailable,
+          fridgeAvailable,
           storageRoom,
           bathroom,
           technicalRoom
         }) => {
           if (!roomModal || isReadOnly) return false;
+          const normalizedMeetingName = String(name || '').trim().toLocaleLowerCase();
+          const hasDuplicateMeetingRoomNameInSite = (excludeRoomId?: string) => {
+            if (!meetingRoom || !normalizedMeetingName) return false;
+            return (siteFloorPlans || []).some((fp) =>
+              (fp.rooms || []).some((r) => {
+                if (!r?.id) return false;
+                if (excludeRoomId && String(r.id) === String(excludeRoomId)) return false;
+                if (!(r as any)?.meetingRoom) return false;
+                return String(r.name || '').trim().toLocaleLowerCase() === normalizedMeetingName;
+              })
+            );
+          };
           if (roomModal.mode === 'edit') {
+            if (hasDuplicateMeetingRoomNameInSite(roomModal.roomId)) {
+              push(
+                t({
+                  it: `Esiste già una meeting room con nome "${name}" in questa sede. Usa un nome univoco.`,
+                  en: `A meeting room named "${name}" already exists in this site. Use a unique name.`
+                }),
+                'danger'
+              );
+              return false;
+            }
             const existing = (basePlan.rooms || []).find((r) => r.id === roomModal.roomId);
             const nextRoom = {
               ...(existing || {}),
@@ -15452,6 +16546,7 @@ const PlanView = ({ planId }: Props) => {
               nameEn,
               departmentTags,
               color,
+              fillOpacity,
               capacity,
               labelScale,
               showName,
@@ -15459,7 +16554,15 @@ const PlanView = ({ planId }: Props) => {
               notes,
               logical,
               meetingRoom,
+              meetingProjector,
+              meetingTv,
+              meetingVideoConf,
+              meetingCoffeeService,
+              meetingWhiteboard,
+              meetingKioskEnabled,
               noWindows,
+              wifiAvailable,
+              fridgeAvailable,
               storageRoom,
               bathroom,
               technicalRoom
@@ -15474,6 +16577,7 @@ const PlanView = ({ planId }: Props) => {
               nameEn,
               departmentTags,
               color,
+              fillOpacity,
               capacity,
               labelScale,
               showName,
@@ -15481,7 +16585,15 @@ const PlanView = ({ planId }: Props) => {
               notes,
               logical,
               meetingRoom,
+              meetingProjector,
+              meetingTv,
+              meetingVideoConf,
+              meetingCoffeeService,
+              meetingWhiteboard,
+              meetingKioskEnabled,
               noWindows,
+              wifiAvailable,
+              fridgeAvailable,
               storageRoom,
               bathroom,
               technicalRoom
@@ -15500,6 +16612,7 @@ const PlanView = ({ planId }: Props) => {
                 nameEn: nameEn ?? null,
                 departmentTags: departmentTags || null,
                 color: color || null,
+                fillOpacity: fillOpacity ?? null,
                 capacity: capacity ?? null,
                 labelScale: labelScale ?? null,
                 showName,
@@ -15507,7 +16620,15 @@ const PlanView = ({ planId }: Props) => {
                 notes: notes ?? null,
                 logical: logical ?? null,
                 meetingRoom: meetingRoom ?? null,
+                meetingProjector: meetingProjector ?? null,
+                meetingTv: meetingTv ?? null,
+                meetingVideoConf: meetingVideoConf ?? null,
+                meetingCoffeeService: meetingCoffeeService ?? null,
+                meetingWhiteboard: meetingWhiteboard ?? null,
+                meetingKioskEnabled: meetingKioskEnabled ?? null,
                 noWindows: noWindows ?? null,
+                wifiAvailable: wifiAvailable ?? null,
+                fridgeAvailable: fridgeAvailable ?? null,
                 storageRoom: storageRoom ?? null,
                 bathroom: bathroom ?? null,
                 technicalRoom: technicalRoom ?? null
@@ -15519,6 +16640,16 @@ const PlanView = ({ planId }: Props) => {
             setRoomModal(null);
             return true;
           }
+          if (hasDuplicateMeetingRoomNameInSite()) {
+            push(
+              t({
+                it: `Esiste già una meeting room con nome "${name}" in questa sede. Usa un nome univoco.`,
+                en: `A meeting room named "${name}" already exists in this site. Use a unique name.`
+              }),
+              'danger'
+            );
+            return false;
+          }
           const testRoom =
             roomModal.kind === 'rect'
               ? {
@@ -15527,6 +16658,7 @@ const PlanView = ({ planId }: Props) => {
                   nameEn,
                   departmentTags,
                   color,
+                  fillOpacity,
                   capacity,
                   labelScale,
                   showName,
@@ -15534,7 +16666,15 @@ const PlanView = ({ planId }: Props) => {
                   notes,
                   logical,
                   meetingRoom,
+                  meetingProjector,
+                  meetingTv,
+                  meetingVideoConf,
+                  meetingCoffeeService,
+                  meetingWhiteboard,
+                  meetingKioskEnabled,
                   noWindows,
+                  wifiAvailable,
+                  fridgeAvailable,
                   storageRoom,
                   bathroom,
                   technicalRoom,
@@ -15547,6 +16687,7 @@ const PlanView = ({ planId }: Props) => {
                   nameEn,
                   departmentTags,
                   color,
+                  fillOpacity,
                   capacity,
                   labelScale,
                   showName,
@@ -15554,7 +16695,15 @@ const PlanView = ({ planId }: Props) => {
                   notes,
                   logical,
                   meetingRoom,
+                  meetingProjector,
+                  meetingTv,
+                  meetingVideoConf,
+                  meetingCoffeeService,
+                  meetingWhiteboard,
+                  meetingKioskEnabled,
                   noWindows,
+                  wifiAvailable,
+                  fridgeAvailable,
                   storageRoom,
                   bathroom,
                   technicalRoom,
@@ -15573,6 +16722,7 @@ const PlanView = ({ planId }: Props) => {
                   nameEn,
                   departmentTags,
                   color,
+                  fillOpacity,
                   capacity,
                   labelScale,
                   showName,
@@ -15580,7 +16730,15 @@ const PlanView = ({ planId }: Props) => {
                   notes,
                   logical,
                   meetingRoom,
+                  meetingProjector,
+                  meetingTv,
+                  meetingVideoConf,
+                  meetingCoffeeService,
+                  meetingWhiteboard,
+                  meetingKioskEnabled,
                   noWindows,
+                  wifiAvailable,
+                  fridgeAvailable,
                   storageRoom,
                   bathroom,
                   technicalRoom,
@@ -15592,6 +16750,7 @@ const PlanView = ({ planId }: Props) => {
                   nameEn,
                   departmentTags,
                   color,
+                  fillOpacity,
                   capacity,
                   labelScale,
                   showName,
@@ -15599,7 +16758,15 @@ const PlanView = ({ planId }: Props) => {
                   notes,
                   logical,
                   meetingRoom,
+                  meetingProjector,
+                  meetingTv,
+                  meetingVideoConf,
+                  meetingCoffeeService,
+                  meetingWhiteboard,
+                  meetingKioskEnabled,
                   noWindows,
+                  wifiAvailable,
+                  fridgeAvailable,
                   storageRoom,
                   bathroom,
                   technicalRoom,
@@ -15616,15 +16783,24 @@ const PlanView = ({ planId }: Props) => {
               nameEn: nameEn ?? null,
               departmentTags: departmentTags || null,
               kind: roomModal.kind,
-              color: color || null,
-              capacity: capacity ?? null,
+                  color: color || null,
+                  fillOpacity: fillOpacity ?? null,
+                  capacity: capacity ?? null,
               labelScale: labelScale ?? null,
               showName,
               surfaceSqm: surfaceSqm ?? null,
               notes: notes ?? null,
               logical: logical ?? null,
               meetingRoom: meetingRoom ?? null,
+              meetingProjector: meetingProjector ?? null,
+              meetingTv: meetingTv ?? null,
+              meetingVideoConf: meetingVideoConf ?? null,
+              meetingCoffeeService: meetingCoffeeService ?? null,
+              meetingWhiteboard: meetingWhiteboard ?? null,
+              meetingKioskEnabled: meetingKioskEnabled ?? null,
               noWindows: noWindows ?? null,
+              wifiAvailable: wifiAvailable ?? null,
+              fridgeAvailable: fridgeAvailable ?? null,
               storageRoom: storageRoom ?? null,
               bathroom: bathroom ?? null,
               technicalRoom: technicalRoom ?? null
@@ -16734,6 +17910,1765 @@ const PlanView = ({ planId }: Props) => {
         onConfirm={confirmPaste}
       />
 
+      <Transition show={!!roomKioskInfoModal} as={Fragment}>
+        <Dialog as="div" className="relative z-[76]" onClose={() => setRoomKioskInfoModal(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-6xl rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div>
+                      <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Kiosk Info', en: 'Kiosk Info' })}</Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {[roomKioskInfoModal?.clientName, roomKioskInfoModal?.siteName, roomKioskInfoModal?.planName].filter(Boolean).join(' • ')}
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-slate-700">{roomKioskInfoModal?.roomName || '-'}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRoomKioskInfoModal(null)}
+                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-[320px,1fr]">
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      {roomKioskInfoQrDataUrl ? (
+                        <img
+                          src={roomKioskInfoQrDataUrl}
+                          alt={t({ it: 'QR code kiosk mode', en: 'Kiosk mode QR code' })}
+                          className="mx-auto h-[300px] w-[300px] rounded-lg border border-slate-200 bg-white p-2"
+                        />
+                      ) : (
+                        <div className="flex h-[300px] w-[300px] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
+                          QR
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t({ it: 'Link kiosk', en: 'Kiosk link' })}</div>
+                        <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-700 break-all">
+                          {roomKioskInfoLink || '—'}
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!roomKioskInfoLink) return;
+                              if (typeof window !== 'undefined') {
+                                window.open(roomKioskInfoLink, '_blank', 'noopener,noreferrer');
+                              }
+                            }}
+                            className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                          >
+                            <ExternalLink size={14} />
+                            {t({ it: 'Apri link', en: 'Open link' })}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!roomKioskInfoLink) return;
+                              if (!navigator?.clipboard?.writeText) {
+                                push(t({ it: 'Clipboard non disponibile', en: 'Clipboard not available' }), 'danger');
+                                return;
+                              }
+                              navigator.clipboard.writeText(roomKioskInfoLink)
+                                .then(() => push(t({ it: 'Link kiosk copiato', en: 'Kiosk link copied' }), 'success'))
+                                .catch(() => push(t({ it: 'Copia non riuscita', en: 'Copy failed' }), 'danger'));
+                            }}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            <Copy size={14} />
+                            {t({ it: 'Copia link', en: 'Copy link' })}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        {t({
+                          it: 'Scansiona il QR code dal tablet della sala per aprire direttamente la pagina Kiosk mode.',
+                          en: 'Scan the QR code from the room tablet to open the Kiosk mode page directly.'
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setRoomKioskInfoModal(null)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!roomMeetingsTimelineModal && !meetingManagerOpen} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-[75]"
+          onClose={() => {
+            if (meetingManagerOpen) return;
+            if (roomMeetingsTimelineBookingDetail) return;
+            if (Date.now() < roomMeetingsTimelineDetailCloseGuardUntilRef.current) return;
+            setRoomMeetingsTimelineModal(null);
+          }}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-[1320px] rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div>
+                      <Dialog.Title className="text-lg font-semibold text-ink">
+                        {t({ it: 'Mostra meetings', en: 'Show meetings' })}
+                      </Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {(client?.shortName || client?.name || '-') + ' • ' + (site?.name || '-') + ' • ' + (roomMeetingsTimelineModal?.roomName || '-')}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRoomMeetingsTimelineModal(null)}
+                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[420px,auto]">
+                    <div className="grid grid-cols-[auto,220px,auto] items-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextDay = shiftIsoDay(roomMeetingsTimelineModal?.day || new Date().toISOString().slice(0, 10), -1);
+                          setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: nextDay } : prev));
+                          if (roomMeetingsTimelineModal?.roomId) void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, nextDay);
+                        }}
+                        className="h-[42px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Giorno precedente', en: 'Previous day' })}
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                    <label className="text-xs font-semibold text-slate-600">
+                      {t({ it: 'Data', en: 'Date' })}
+                      <input
+                        type="date"
+                        value={roomMeetingsTimelineModal?.day || new Date().toISOString().slice(0, 10)}
+                        onChange={(e) => {
+                          const nextDay = e.target.value || new Date().toISOString().slice(0, 10);
+                          setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: nextDay } : prev));
+                          if (roomMeetingsTimelineModal?.roomId) void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, nextDay);
+                        }}
+                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      />
+                    </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextDay = shiftIsoDay(roomMeetingsTimelineModal?.day || new Date().toISOString().slice(0, 10), 1);
+                          setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: nextDay } : prev));
+                          if (roomMeetingsTimelineModal?.roomId) void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, nextDay);
+                        }}
+                        className="h-[42px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Giorno successivo', en: 'Next day' })}
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap items-end justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!roomMeetingsTimelineModal?.roomId) return;
+                          openMeetingManager({
+                            roomId: roomMeetingsTimelineModal.roomId,
+                            floorPlanId: planId,
+                            siteId: site?.id,
+                            clientId: client?.id,
+                            day: roomMeetingsTimelineModal.day
+                          });
+                        }}
+                        className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                        title={t({ it: 'Nuovo meeting', en: 'New meeting' })}
+                      >
+                        <Plus size={14} className="mr-1 inline-block" />
+                        {t({ it: 'Nuovo meeting', en: 'New meeting' })}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (roomMeetingsTimelineModal?.roomId) {
+                            void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, roomMeetingsTimelineModal.day);
+                          }
+                        }}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        {t({ it: 'Aggiorna', en: 'Refresh' })}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    {roomMeetingsTimelineModal?.error ? (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                        {roomMeetingsTimelineModal.error}
+                      </div>
+                    ) : null}
+                    <div ref={roomMeetingsTimelineScrollRef} className="overflow-x-auto overflow-y-hidden rounded-xl border border-slate-200 bg-white">
+                      {(() => {
+                        const modal = roomMeetingsTimelineModal;
+                        const bookings = modal?.bookings || [];
+                        let minMinutes = 7 * 60;
+                        let maxMinutes = 20 * 60;
+                        for (const booking of bookings) {
+                          const s = new Date(Number(booking.startAt || 0));
+                          const e = new Date(Number(booking.endAt || 0));
+                          if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) continue;
+                          minMinutes = Math.min(minMinutes, s.getHours() * 60 + s.getMinutes());
+                          maxMinutes = Math.max(maxMinutes, e.getHours() * 60 + e.getMinutes());
+                        }
+                        minMinutes = Math.max(0, Math.floor((minMinutes - 30) / 60) * 60);
+                        maxMinutes = Math.min(24 * 60, Math.ceil((maxMinutes + 30) / 60) * 60);
+                        if (maxMinutes - minMinutes < 6 * 60) maxMinutes = Math.min(24 * 60, minMinutes + 6 * 60);
+                        const total = Math.max(1, maxMinutes - minMinutes);
+                        const hourCount = Math.max(1, Math.ceil((maxMinutes - minMinutes) / 60));
+                        const hours = Array.from({ length: hourCount + 1 }, (_, i) => minMinutes + i * 60);
+                        const timelineWidthPx = Math.max(980, hourCount * 120);
+                        const selectedDay = String(modal?.day || '');
+                        const nowDate = new Date();
+                        const todayIso = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
+                        const showNow = selectedDay === todayIso;
+                        const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
+                        return (
+                          <div className="min-w-[1220px]" style={{ width: `${240 + timelineWidthPx}px` }}>
+                            <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `240px ${timelineWidthPx}px` }}>
+                              <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                {t({ it: 'Meeting room', en: 'Meeting room' })}
+                              </div>
+                              <div className="relative h-12 overflow-hidden" style={{ width: `${timelineWidthPx}px` }}>
+                                {hours.map((minute) => {
+                                  const left = ((minute - minMinutes) / total) * 100;
+                                  return (
+                                    <div key={`rm-hour-${minute}`} className="absolute inset-y-0" style={{ left: `${left}%` }}>
+                                      <div className="h-full border-l border-slate-200" />
+                                    </div>
+                                  );
+                                })}
+                                {hours.slice(0, -1).map((minute) => {
+                                  const left = (((minute + 30) - minMinutes) / total) * 100;
+                                  return (
+                                    <div key={`rm-hour-label-${minute}`} className="absolute top-2 -translate-x-1/2 text-center text-[11px] font-semibold text-slate-500" style={{ left: `${left}%`, width: '70px' }}>
+                                      {`${String(Math.floor(minute / 60)).padStart(2, '0')}:00`}
+                                    </div>
+                                  );
+                                })}
+                                {showNow ? (
+                                  <div className="absolute inset-y-0 z-10" style={{ left: `${((nowMinutes - minMinutes) / total) * 100}%` }}>
+                                    <div className="absolute -top-1 left-0 -translate-x-1/2 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+                                      {t({ it: 'ORA', en: 'NOW' })}
+                                    </div>
+                                    <div className="h-full border-l-2 border-slate-900/70" />
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="grid" style={{ gridTemplateColumns: `240px ${timelineWidthPx}px` }}>
+                              <div className="border-r border-slate-100 px-3 py-3">
+                                <div className="truncate text-base font-semibold text-ink">{modal?.roomName || '-'}</div>
+                                <div className="truncate text-xs text-slate-500">{site?.name || '-'}</div>
+                                <div className="text-[11px] text-slate-500">
+                                  {t({ it: 'Capienza', en: 'Capacity' })}: {modal?.capacity || 0}
+                                </div>
+                              </div>
+                              <div className="relative h-[94px] bg-white" style={{ width: `${timelineWidthPx}px` }}>
+                                {hours.map((minute) => {
+                                  const left = ((minute - minMinutes) / total) * 100;
+                                  return <div key={`rm-grid-${minute}`} className="absolute inset-y-0 border-l border-slate-100" style={{ left: `${left}%` }} />;
+                                })}
+                                {showNow ? (
+                                  <div className="absolute inset-y-0 z-10 border-l-2 border-slate-900/70" style={{ left: `${((nowMinutes - minMinutes) / total) * 100}%` }} />
+                                ) : null}
+                                {(bookings || []).map((booking) => {
+                                  const s = new Date(Number(booking.startAt || 0));
+                                  const e = new Date(Number(booking.endAt || 0));
+                                  const es = new Date(Number((booking as any).effectiveStartAt || booking.startAt || 0));
+                                  const ee = new Date(Number((booking as any).effectiveEndAt || booking.endAt || 0));
+                                  const startMin = s.getHours() * 60 + s.getMinutes();
+                                  const endMin = e.getHours() * 60 + e.getMinutes();
+                                  const effStartMin = es.getHours() * 60 + es.getMinutes();
+                                  const effEndMin = ee.getHours() * 60 + ee.getMinutes();
+                                  const clampedStart = Math.max(minMinutes, Math.min(maxMinutes, startMin));
+                                  const clampedEnd = Math.max(clampedStart + 1, Math.max(minMinutes, Math.min(maxMinutes, endMin)));
+                                  const clampedEffStart = Math.max(minMinutes, Math.min(maxMinutes, effStartMin));
+                                  const clampedEffEnd = Math.max(clampedEffStart + 1, Math.max(minMinutes, Math.min(maxMinutes, effEndMin)));
+                                  const left = ((clampedStart - minMinutes) / total) * 100;
+                                  const width = Math.max(1, ((clampedEnd - clampedStart) / total) * 100);
+                                  const effLeft = ((clampedEffStart - minMinutes) / total) * 100;
+                                  const effWidth = Math.max(1, ((clampedEffEnd - clampedEffStart) / total) * 100);
+                                  const nowTs = Date.now();
+                                  const isPast = Number(booking.endAt) <= nowTs;
+                                  const inProgress = Number(booking.startAt) <= nowTs && nowTs < Number(booking.endAt);
+                                  const isFuture = Number(booking.startAt) > nowTs;
+                                  const tone =
+                                    inProgress
+                                      ? 'border-emerald-400 bg-emerald-200 text-emerald-950'
+                                      : isPast
+                                        ? 'border-slate-300 bg-slate-200 text-slate-900'
+                                        : isFuture
+                                          ? 'border-violet-300 bg-violet-200 text-violet-950'
+                                          : 'border-slate-300 bg-slate-200 text-slate-900';
+                                  const blockedTone =
+                                    inProgress
+                                      ? 'border-emerald-400/70 bg-emerald-200/35'
+                                      : isPast
+                                        ? 'border-slate-300/70 bg-slate-200/35'
+                                        : isFuture
+                                          ? 'border-violet-300/70 bg-violet-200/35'
+                                          : 'border-slate-300/70 bg-slate-200/35';
+                                  return (
+                                    <Fragment key={booking.id}>
+                                      <div
+                                        className={`absolute top-1 h-[76px] rounded-lg border border-dashed ${blockedTone}`}
+                                        style={{ left: `${effLeft}%`, width: `${effWidth}%` }}
+                                        title={`${t({ it: 'Blocco con setup', en: 'Blocked range incl. setup' })}: ${es.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${ee.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                                      />
+                                      <div
+                                        className={`absolute h-[52px] overflow-hidden rounded-lg border px-2 py-1 shadow-sm cursor-pointer ${tone}`}
+                                        style={{ left: `${left}%`, width: `${width}%`, top: '12px' }}
+                                        title={`${booking.subject} • ${s.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${e.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                                        onClick={() => openRoomMeetingBookingDetail(booking)}
+                                        role="button"
+                                        tabIndex={0}
+                                        onKeyDown={(evt) => {
+                                          if (evt.key === 'Enter' || evt.key === ' ') {
+                                            evt.preventDefault();
+                                            openRoomMeetingBookingDetail(booking);
+                                          }
+                                        }}
+                                      >
+                                        <div className="flex items-start justify-between gap-1">
+                                          <div className="min-w-0 truncate text-xs font-semibold">{booking.subject || t({ it: 'Meeting', en: 'Meeting' })}</div>
+                                          <div className="flex shrink-0 items-center gap-1">
+                                            <button
+                                              type="button"
+                                              onClick={(evt) => {
+                                                evt.preventDefault();
+                                                evt.stopPropagation();
+                                                openRoomMeetingBookingDetail(booking, 'edit');
+                                              }}
+                                              className="inline-flex h-4 w-4 items-center justify-center rounded bg-white/70 text-slate-700 hover:bg-white"
+                                              title={t({ it: 'Modifica meeting', en: 'Edit meeting' })}
+                                            >
+                                              <Pencil size={10} />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={(evt) => {
+                                                evt.preventDefault();
+                                                evt.stopPropagation();
+                                                const ok = window.confirm(
+                                                  t({
+                                                    it: 'Eliminare questo meeting? Se era attivo invio mail, i partecipanti verranno notificati.',
+                                                    en: 'Delete this meeting? If email notifications were enabled, participants will be notified.'
+                                                  })
+                                                );
+                                                if (!ok) return;
+                                                void deleteRoomMeetingBookingDirect(booking);
+                                              }}
+                                              className="inline-flex h-4 w-4 items-center justify-center rounded bg-white/70 text-rose-700 hover:bg-white"
+                                              title={t({ it: 'Elimina meeting', en: 'Delete meeting' })}
+                                            >
+                                              <Trash size={10} />
+                                            </button>
+                                          </div>
+                                        </div>
+                                        <div className="truncate text-[11px] opacity-90">
+                                          {s.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {e.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </div>
+                                        <div className="truncate text-[10px] opacity-80">{booking.requestedByUsername || '-'}</div>
+                                      </div>
+                                    </Fragment>
+                                  );
+                                })}
+                                {!bookings.length && !modal?.loading ? (
+                                  <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">
+                                    {t({ it: 'Nessun meeting per la data selezionata.', en: 'No meetings for the selected date.' })}
+                                  </div>
+                                ) : null}
+                                {modal?.loading ? (
+                                  <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-500">
+                                    {t({ it: 'Caricamento...', en: 'Loading...' })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setRoomMeetingsTimelineModal(null)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!roomMeetingsTimelineBookingDetail && !meetingManagerOpen} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-[78]"
+          onClose={() => {
+            if (roomMeetingEditBusinessPartnersModalOpen) return;
+            closeRoomMeetingBookingDetail();
+          }}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-6xl rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div>
+                      <Dialog.Title className="text-lg font-semibold text-ink">
+                        {roomMeetingsTimelineBookingDetail?.mode === 'edit'
+                          ? t({ it: 'Modifica meeting', en: 'Edit meeting' })
+                          : t({ it: 'Dettaglio meeting', en: 'Meeting details' })}
+                      </Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {roomMeetingsTimelineBookingDetail?.booking?.sendEmail
+                          ? t({ it: 'Invio mail attivo: modifica/eliminazione notificheranno i partecipanti.', en: 'Email delivery enabled: update/delete will notify participants.' })
+                          : t({ it: 'Invio mail non attivo su questo meeting.', en: 'Email delivery is not enabled for this meeting.' })}
+                      </div>
+                    </div>
+                    <button type="button" onClick={closeRoomMeetingBookingDetail} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink">
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {roomMeetingsTimelineBookingDetail ? (
+                    <div className="mt-3 space-y-3">
+                      {roomMeetingsTimelineBookingDetail.mode === 'view' ? (
+                        <>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <div className="text-base font-semibold text-ink">{roomMeetingsTimelineBookingDetail.booking.subject || t({ it: 'Meeting', en: 'Meeting' })}</div>
+                            <div className="mt-1 text-sm text-slate-600">
+                              {new Date(roomMeetingsTimelineBookingDetail.booking.startAt).toLocaleString()} - {new Date(roomMeetingsTimelineBookingDetail.booking.endAt).toLocaleTimeString()}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {t({ it: 'Stato', en: 'Status' })}: {roomMeetingsTimelineBookingDetail.booking.status} • {t({ it: 'Richiedente', en: 'Requester' })}:{' '}
+                              {roomMeetingsTimelineBookingDetail.booking.requestedByUsername || '-'}
+                            </div>
+                            {(() => {
+                              const booking = roomMeetingsTimelineBookingDetail.booking;
+                              const checkMap =
+                                roomMeetingsTimelineModal?.checkInStatusByMeetingId?.[String(booking.id || '')] || {};
+                              const checkTsMap =
+                                roomMeetingsTimelineModal?.checkInTimestampsByMeetingId?.[String(booking.id || '')] || {};
+                              const stats = getMeetingCheckInStats(booking, checkMap);
+                              const checkedEntries = getRoomMeetingCheckInEntries(booking, checkMap, checkTsMap);
+                              return (
+                                <div className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm">
+                                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                                    <div className="font-semibold text-slate-700">
+                                      {t({ it: 'Stato check-in', en: 'Check-in status' })}
+                                    </div>
+                                    <div className="text-slate-600">
+                                      {stats.checked}/{stats.total} • {stats.percent}%
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+                                    <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${stats.percent}%` }} />
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                                    <span>
+                                      {t({ it: 'Interni in sede', en: 'Internal on-site' })}: {stats.internalOnSite}
+                                    </span>
+                                    <span>
+                                      {t({ it: 'Esterni in sede', en: 'External on-site' })}: {stats.externalOnSite}
+                                    </span>
+                                    <span>
+                                      {t({ it: 'Partecipanti remoti', en: 'Remote participants' })}: {stats.remoteParticipants}
+                                    </span>
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                                    <div className="text-[11px] text-slate-500">
+                                      {t({
+                                        it: 'Visualizza chi ha effettuato il check-in con data/ora registrata dal server.',
+                                        en: 'Show who checked in with date/time recorded by the server.'
+                                      })}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => setRoomMeetingCheckInListOpen((prev) => !prev)}
+                                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                    >
+                                      {roomMeetingCheckInListOpen
+                                        ? t({ it: 'Nascondi check-in', en: 'Hide check-in' })
+                                        : t({ it: 'Mostra check-in', en: 'Show check-in' })}
+                                    </button>
+                                  </div>
+                                  {roomMeetingCheckInListOpen ? (
+                                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                                      {checkedEntries.length ? (
+                                        <div className="grid max-h-64 gap-2 overflow-auto pr-1">
+                                          {checkedEntries.map((entry) => (
+                                            <div
+                                              key={`chk-${entry.key}`}
+                                              className="grid grid-cols-[auto,minmax(0,1fr),auto] items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2"
+                                            >
+                                              <UserAvatar src={entry.logoUrl || undefined} username={entry.label} size={28} />
+                                              <div className="min-w-0">
+                                                <div className={`truncate text-sm font-semibold ${entry.kind === 'external' ? 'text-violet-800 uppercase tracking-[0.02em]' : 'text-slate-800'}`}>
+                                                  {entry.label}
+                                                </div>
+                                                <div className="truncate text-[11px] text-slate-500">
+                                                  {entry.company || (entry.kind === 'internal' ? (client?.shortName || client?.name || '-') : '—')}
+                                                  {entry.email ? ` • ${entry.email}` : ''}
+                                                </div>
+                                              </div>
+                                              <div className="text-right">
+                                                <div className="text-[11px] font-semibold text-emerald-700">
+                                                  {t({ it: 'Check-in', en: 'Check-in' })}
+                                                </div>
+                                                <div className="text-[11px] text-slate-500">
+                                                  {entry.checkedAt ? new Date(entry.checkedAt).toLocaleString() : '—'}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-500">
+                                          {t({ it: 'Nessun check-in registrato al momento.', en: 'No check-ins registered yet.' })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })()}
+                            {roomMeetingsTimelineBookingDetail.booking.notes ? (
+                              <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 whitespace-pre-wrap">
+                                {roomMeetingsTimelineBookingDetail.booking.notes}
+                              </div>
+                            ) : null}
+                            {roomMeetingsTimelineBookingDetail.booking.videoConferenceLink ? (
+                              <a
+                                href={roomMeetingsTimelineBookingDetail.booking.videoConferenceLink}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="mt-2 inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-primary hover:bg-slate-50"
+                              >
+                                <Link2 size={14} />
+                                <span className="truncate">{roomMeetingsTimelineBookingDetail.booking.videoConferenceLink}</span>
+                              </a>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={closeRoomMeetingBookingDetail}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              {t({ it: 'Chiudi', en: 'Close' })}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {(() => {
+                            const detail = roomMeetingsTimelineBookingDetail;
+                            const filter = String(detail.participantFilter || '').trim().toLowerCase();
+                            const selectedRealIds = new Set(
+                              detail.participantsDraft.filter((p) => p.kind === 'real_user').map((p) => String(p.externalId || ''))
+                            );
+                            const filteredCandidates = roomMeetingEditParticipantCandidates.filter((row) => {
+                              if (!filter) return true;
+                              return (
+                                row.fullName.toLowerCase().includes(filter) ||
+                                String(row.email || '').toLowerCase().includes(filter) ||
+                                row.externalId.toLowerCase().includes(filter) ||
+                                String((row as any).department || '').toLowerCase().includes(filter) ||
+                                String((row as any).phone || '').toLowerCase().includes(filter)
+                              );
+                            });
+                            const onsiteInternal = detail.participantsDraft.filter((p) => p.kind === 'real_user' && !p.remote).length;
+                            const remoteInternal = detail.participantsDraft.filter((p) => p.kind === 'real_user' && !!p.remote).length;
+                            const onsiteManual = detail.participantsDraft.filter((p) => p.kind === 'manual' && !p.remote).length;
+                            const remoteManual = detail.participantsDraft.filter((p) => p.kind === 'manual' && !!p.remote).length;
+                            const requestedSeatsPreview = onsiteInternal + onsiteManual;
+                            const toDetailLocalTs = (isoDay: string, hhmm: string) => {
+                              const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDay || '').trim());
+                              const tm = /^(\d{1,2}):(\d{1,2})$/.exec(String(hhmm || '').trim());
+                              if (!dm || !tm) return null;
+                              const y = Number(dm[1]);
+                              const mo = Number(dm[2]) - 1;
+                              const da = Number(dm[3]);
+                              const hh = Number(tm[1]);
+                              const mm = Number(tm[2]);
+                              if (![y, mo, da, hh, mm].every(Number.isFinite)) return null;
+                              if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+                              const dt = new Date(y, mo, da, hh, mm, 0, 0);
+                              return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+                            };
+                            const detailStartTs = toDetailLocalTs(detail.day, detail.startTime);
+                            const detailEndTs = toDetailLocalTs(detail.day, detail.endTime);
+                            const siblingBookings = (roomMeetingsTimelineModal?.bookings || [])
+                              .filter((b) => String(b.id) !== String(detail.booking.id))
+                              .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0));
+                            const prevNeighbor =
+                              detailStartTs === null
+                                ? null
+                                : [...siblingBookings]
+                                    .filter((b) => Number((b as any).effectiveEndAt ?? b.endAt ?? 0) <= detailStartTs)
+                                    .sort((a, b) => Number((b as any).effectiveEndAt ?? b.endAt ?? 0) - Number((a as any).effectiveEndAt ?? a.endAt ?? 0))[0] || null;
+                            const nextNeighbor =
+                              detailEndTs === null
+                                ? null
+                                : siblingBookings
+                                    .filter((b) => Number((b as any).effectiveStartAt ?? b.startAt ?? 0) >= detailEndTs)
+                                    .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0))[0] || null;
+                            const prevBoundaryTs = prevNeighbor ? Number((prevNeighbor as any).effectiveEndAt ?? prevNeighbor.endAt ?? 0) : null;
+                            const nextBoundaryTs = nextNeighbor ? Number((nextNeighbor as any).effectiveStartAt ?? nextNeighbor.startAt ?? 0) : null;
+                            const freeBeforeSetupEdit =
+                              detailStartTs === null || prevBoundaryTs === null
+                                ? 60
+                                : Math.max(0, Math.min(60, Math.floor((detailStartTs - prevBoundaryTs) / 60000)));
+                            const freeAfterSetupEdit =
+                              detailEndTs === null || nextBoundaryTs === null
+                                ? 60
+                                : Math.max(0, Math.min(60, Math.floor((nextBoundaryTs - detailEndTs) / 60000)));
+                            const detailDurationMin =
+                              detailStartTs === null || detailEndTs === null ? 0 : Math.max(0, Math.floor((detailEndTs - detailStartTs) / 60000));
+                            const borrowableFromDetailMeeting = Math.max(0, detailDurationMin - 1);
+                            const maxBeforeSetupEdit = Math.max(0, Math.min(60, freeBeforeSetupEdit + borrowableFromDetailMeeting));
+                            const maxAfterSetupEdit = Math.max(0, Math.min(60, freeAfterSetupEdit + borrowableFromDetailMeeting));
+                            return (
+                              <>
+                          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                            <label className="text-sm font-semibold text-slate-700">
+                              {t({ it: 'Oggetto meeting', en: 'Meeting subject' })}
+                              <input
+                                value={roomMeetingsTimelineBookingDetail.subject}
+                                onChange={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, subject: e.target.value } : prev))
+                                }
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                              />
+                            </label>
+                            <label className="text-sm font-semibold text-slate-700">
+                              {t({ it: 'Data', en: 'Date' })}
+                              <input
+                                type="date"
+                                value={roomMeetingsTimelineBookingDetail.day}
+                                onChange={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, day: e.target.value } : prev))
+                                }
+                                disabled={!!roomMeetingsTimelineBookingDetail.applyToSeries && !!roomMeetingsTimelineBookingDetail.booking.multiDayGroupId}
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                              />
+                            </label>
+                            <label className="text-sm font-semibold text-slate-700">
+                              {t({ it: 'Inizio', en: 'Start' })}
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="HH:MM"
+                                value={roomMeetingsTimelineBookingDetail.startTime}
+                                onChange={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => {
+                                    if (!prev) return prev;
+                                    const nextStart = e.target.value;
+                                    let nextEnd = prev.endTime;
+                                    if (nextStart && nextEnd && nextStart >= nextEnd) {
+                                      const [hh, mm] = nextStart.split(':').map((v) => Number(v));
+                                      if (Number.isFinite(hh) && Number.isFinite(mm)) {
+                                        const end = new Date(2000, 0, 1, hh, mm, 0, 0);
+                                        end.setHours(end.getHours() + 1);
+                                        nextEnd = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+                                      }
+                                    }
+                                    return { ...prev, startTime: nextStart, endTime: nextEnd };
+                                  })
+                                }
+                                onBlur={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => {
+                                    if (!prev) return prev;
+                                    const raw = String(e.target.value || '').trim();
+                                    const m = /^(\d{1,2}):(\d{1,2})$/.exec(raw);
+                                    if (!m) return prev;
+                                    const hh = Number(m[1]);
+                                    const mm = Number(m[2]);
+                                    if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return prev;
+                                    const normalized = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+                                    let nextEnd = prev.endTime;
+                                    if (normalized && nextEnd && normalized >= nextEnd) {
+                                      const end = new Date(2000, 0, 1, hh, mm, 0, 0);
+                                      end.setHours(end.getHours() + 1);
+                                      nextEnd = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+                                    }
+                                    return { ...prev, startTime: normalized, endTime: nextEnd };
+                                  })
+                                }
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                              />
+                            </label>
+                            <label className="text-sm font-semibold text-slate-700">
+                              {t({ it: 'Fine', en: 'End' })}
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="HH:MM"
+                                value={roomMeetingsTimelineBookingDetail.endTime}
+                                onChange={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => {
+                                    if (!prev) return prev;
+                                    const nextEnd = e.target.value;
+                                    if (prev.startTime && nextEnd && prev.startTime >= nextEnd) {
+                                      const [hh, mm] = prev.startTime.split(':').map((v) => Number(v));
+                                      if (Number.isFinite(hh) && Number.isFinite(mm)) {
+                                        const end = new Date(2000, 0, 1, hh, mm, 0, 0);
+                                        end.setHours(end.getHours() + 1);
+                                        return {
+                                          ...prev,
+                                          endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`
+                                        };
+                                      }
+                                    }
+                                    return { ...prev, endTime: nextEnd };
+                                  })
+                                }
+                                onBlur={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => {
+                                    if (!prev) return prev;
+                                    const raw = String(e.target.value || '').trim();
+                                    const m = /^(\d{1,2}):(\d{1,2})$/.exec(raw);
+                                    if (!m) return prev;
+                                    const hh = Number(m[1]);
+                                    const mm = Number(m[2]);
+                                    if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return prev;
+                                    const normalized = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+                                    if (prev.startTime && normalized && prev.startTime >= normalized) {
+                                      const [sh, sm] = prev.startTime.split(':').map((v) => Number(v));
+                                      if (Number.isFinite(sh) && Number.isFinite(sm)) {
+                                        const end = new Date(2000, 0, 1, sh, sm, 0, 0);
+                                        end.setHours(end.getHours() + 1);
+                                        return { ...prev, endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}` };
+                                      }
+                                    }
+                                    return { ...prev, endTime: normalized };
+                                  })
+                                }
+                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                              />
+                            </label>
+                          </div>
+                          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                            <label className="text-sm font-semibold text-slate-700">
+                              {t({ it: 'Setup pre-riunione (min)', en: 'Pre-meeting setup (min)' })}: {roomMeetingsTimelineBookingDetail.setupBufferBeforeMin}
+                              <input
+                                type="range"
+                                min={0}
+                                max={maxBeforeSetupEdit}
+                                step={5}
+                                value={roomMeetingsTimelineBookingDetail.setupBufferBeforeMin}
+                                onChange={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => {
+                                    if (!prev) return prev;
+                                    const desired = Math.max(0, Math.min(maxBeforeSetupEdit, Number(e.target.value) || 0));
+                                    const overflow = Math.max(0, desired - freeBeforeSetupEdit);
+                                    if (overflow > 0 && detailDurationMin > 1) {
+                                      const borrow = Math.min(overflow, Math.max(0, detailDurationMin - 1));
+                                      const baseStart = String(prev.startTime || '');
+                                      const [hh, mm] = baseStart.split(':').map((v) => Number(v));
+                                      if (Number.isFinite(hh) && Number.isFinite(mm)) {
+                                        const dt = new Date(2000, 0, 1, hh, mm, 0, 0);
+                                        dt.setMinutes(dt.getMinutes() + borrow);
+                                        const startTime = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+                                        return { ...prev, startTime, setupBufferBeforeMin: desired };
+                                      }
+                                    }
+                                    return { ...prev, setupBufferBeforeMin: desired };
+                                  })
+                                }
+                                className="mt-2 w-full"
+                              />
+                              <div className="mt-1 text-[11px] text-slate-500">
+                                {prevNeighbor
+                                  ? t({
+                                      it: `Max ${maxBeforeSetupEdit} min (considerando meeting precedente ${new Date(prevNeighbor.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-${new Date(prevNeighbor.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+                                      en: `Max ${maxBeforeSetupEdit} min (considering previous meeting ${new Date(prevNeighbor.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-${new Date(prevNeighbor.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+                                    })
+                                  : t({ it: 'Nessun meeting precedente: max 60 min.', en: 'No previous meeting: max 60 min.' })}
+                              </div>
+                            </label>
+                            <label className="text-sm font-semibold text-slate-700">
+                              {t({ it: 'Setup post-riunione (min)', en: 'Post-meeting setup (min)' })}: {roomMeetingsTimelineBookingDetail.setupBufferAfterMin}
+                              <input
+                                type="range"
+                                min={0}
+                                max={maxAfterSetupEdit}
+                                step={5}
+                                value={roomMeetingsTimelineBookingDetail.setupBufferAfterMin}
+                                onChange={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => {
+                                    if (!prev) return prev;
+                                    const desired = Math.max(0, Math.min(maxAfterSetupEdit, Number(e.target.value) || 0));
+                                    const overflow = Math.max(0, desired - freeAfterSetupEdit);
+                                    if (overflow > 0 && detailDurationMin > 1) {
+                                      const borrow = Math.min(overflow, Math.max(0, detailDurationMin - 1));
+                                      const baseEnd = String(prev.endTime || '');
+                                      const [hh, mm] = baseEnd.split(':').map((v) => Number(v));
+                                      if (Number.isFinite(hh) && Number.isFinite(mm)) {
+                                        const dt = new Date(2000, 0, 1, hh, mm, 0, 0);
+                                        dt.setMinutes(dt.getMinutes() - borrow);
+                                        const endTime = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+                                        return { ...prev, endTime, setupBufferAfterMin: desired };
+                                      }
+                                    }
+                                    return { ...prev, setupBufferAfterMin: desired };
+                                  })
+                                }
+                                className="mt-2 w-full"
+                              />
+                              <div className="mt-1 text-[11px] text-slate-500">
+                                {nextNeighbor
+                                  ? t({
+                                      it: `Max ${maxAfterSetupEdit} min (prima del meeting successivo ${new Date(nextNeighbor.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-${new Date(nextNeighbor.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+                                      en: `Max ${maxAfterSetupEdit} min (before next meeting ${new Date(nextNeighbor.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-${new Date(nextNeighbor.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+                                    })
+                                  : t({ it: 'Nessun meeting successivo: max 60 min.', en: 'No next meeting: max 60 min.' })}
+                              </div>
+                            </label>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                              <div className="text-sm font-semibold text-ink">{t({ it: 'Partecipanti', en: 'Participants' })}</div>
+                              <div className="text-xs text-slate-500">
+                                {t({
+                                  it: `Posti richiesti (in sede): ${requestedSeatsPreview} · Interni remoti: ${remoteInternal} · Ospiti remoti: ${remoteManual}`,
+                                  en: `Requested seats (on-site): ${requestedSeatsPreview} · Remote internal: ${remoteInternal} · Remote guests: ${remoteManual}`
+                                })}
+                              </div>
+                            </div>
+                            <div className="space-y-3">
+                              <div>
+                                <div className="relative">
+                                  <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-slate-400" />
+                                  <input
+                                    value={detail.participantFilter}
+                                    onChange={(e) =>
+                                      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, participantFilter: e.target.value } : prev))
+                                    }
+                                    placeholder={t({ it: 'Filtra utenti reali...', en: 'Filter real users...' })}
+                                    className="w-full rounded-lg border border-slate-200 py-2 pl-8 pr-3 text-sm"
+                                  />
+                                </div>
+                                <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2">
+                                  <div className="mb-1 grid grid-cols-[auto,minmax(0,1.2fr),minmax(0,1.1fr),minmax(0,0.8fr),84px] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    <span />
+                                    <span>{t({ it: 'Nome', en: 'Name' })}</span>
+                                    <span>{t({ it: 'Email', en: 'Email' })}</span>
+                                    <span>{t({ it: 'Reparto', en: 'Department' })}</span>
+                                    <span>{t({ it: 'Telefono', en: 'Phone' })}</span>
+                                  </div>
+                                  <div className="max-h-56 space-y-1 overflow-auto">
+                                  {filteredCandidates.map((candidate) => {
+                                    const selected = selectedRealIds.has(String(candidate.externalId));
+                                    return (
+                                      <div
+                                        key={`cand-${candidate.externalId}`}
+                                        className="grid grid-cols-[auto,minmax(0,1.2fr),minmax(0,1.1fr),minmax(0,0.8fr),84px] items-center gap-2 px-1 text-sm"
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => addTimelineMeetingRealParticipant(candidate.externalId)}
+                                          disabled={selected}
+                                          className={`inline-flex h-6 w-6 items-center justify-center rounded-full border ${
+                                            selected
+                                              ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                                              : 'border-emerald-300 bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                          }`}
+                                          title={selected ? t({ it: 'Già selezionato', en: 'Already selected' }) : t({ it: 'Aggiungi', en: 'Add' })}
+                                        >
+                                          <Plus size={12} />
+                                        </button>
+                                        <span className="truncate text-slate-700">{candidate.fullName}</span>
+                                        <span className="truncate text-xs text-slate-500">{candidate.email || 'no email'}</span>
+                                        <button
+                                          type="button"
+                                          onContextMenu={(e) => {
+                                            e.preventDefault();
+                                            const dept = String((candidate as any).department || '').trim();
+                                            if (!dept) return;
+                                            const rows = filteredCandidates.filter(
+                                              (row) =>
+                                                String((row as any).department || '').trim().toLowerCase() === dept.toLowerCase()
+                                            );
+                                            if (!rows.length) return;
+                                            setRoomMeetingsTimelineBookingDetail((prev) => {
+                                              if (!prev) return prev;
+                                              const existing = new Set(
+                                                prev.participantsDraft
+                                                  .filter((p) => p.kind === 'real_user' && p.externalId)
+                                                  .map((p) => String(p.externalId))
+                                              );
+                                              const toAdd = rows
+                                                .filter((row) => !existing.has(String(row.externalId)))
+                                                .map((row) => ({
+                                                  key: `real:${row.externalId}`,
+                                                  kind: 'real_user' as const,
+                                                  externalId: row.externalId,
+                                                  fullName: row.fullName,
+                                                  email: row.email,
+                                                  optional: false,
+                                                  remote: false,
+                                                  company: null
+                                                }));
+                                              if (!toAdd.length) return prev;
+                                              return { ...prev, participantsDraft: [...prev.participantsDraft, ...toAdd] };
+                                            });
+                                            push(
+                                              t({ it: `Reparto aggiunto: ${dept}`, en: `Department added: ${dept}` }),
+                                              'success'
+                                            );
+                                          }}
+                                          className="truncate rounded-md px-1.5 py-1 text-left text-xs text-slate-600 hover:bg-slate-100"
+                                          title={t({
+                                            it: 'Tasto destro per aggiungere tutto il reparto visibile nel filtro',
+                                            en: 'Right click to add the whole department visible in the filter'
+                                          })}
+                                        >
+                                          {(candidate as any).department || '—'}
+                                        </button>
+                                        <span className="truncate text-xs text-slate-500">{(candidate as any).phone || '—'}</span>
+                                      </div>
+                                    );
+                                  })}
+                                  {!filteredCandidates.length ? (
+                                    <div className="text-xs text-slate-500">{t({ it: 'Nessun utente trovato.', en: 'No users found.' })}</div>
+                                  ) : null}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="max-h-52 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-2">
+                                {detail.participantsDraft.map((p) => (
+                                  <div key={p.key} className="grid grid-cols-[minmax(0,1fr),auto] items-center gap-2 rounded-lg border border-slate-100 px-2 py-1.5">
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        <span className={`truncate text-sm font-medium uppercase tracking-[0.02em] ${p.kind === 'manual' ? 'text-violet-800' : 'text-slate-700'}`}>
+                                          {p.fullName}
+                                        </span>
+                                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${p.kind === 'manual' ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}`}>
+                                          {p.kind === 'manual' ? t({ it: 'OSP', en: 'GST' }) : t({ it: 'INT', en: 'INT' })}
+                                        </span>
+                                        {p.optional ? <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">OPT</span> : null}
+                                        {p.remote ? <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">REM</span> : null}
+                                        {p.company ? <span className="truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{p.company}</span> : null}
+                                      </div>
+                                      <div className="truncate text-xs text-slate-500">{p.email || (p.kind === 'manual' ? t({ it: 'Ospite senza email', en: 'Guest without email' }) : 'no email')}</div>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleTimelineMeetingParticipantFlag(p.key, 'optional')}
+                                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${p.optional ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}
+                                      >
+                                        {t({ it: 'Facolt.', en: 'Optional' })}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleTimelineMeetingParticipantFlag(p.key, 'remote')}
+                                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${p.remote ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}
+                                      >
+                                        {t({ it: 'Remoto', en: 'Remote' })}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => removeTimelineMeetingParticipant(p.key)}
+                                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                        title={t({ it: 'Rimuovi', en: 'Remove' })}
+                                      >
+                                        <Minus size={12} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                                {!detail.participantsDraft.length ? (
+                                  <div className="text-xs text-slate-500">{t({ it: 'Nessun partecipante configurato.', en: 'No participants configured.' })}</div>
+                                ) : null}
+                              </div>
+
+                              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                  {t({ it: 'Altri ospiti', en: 'Other guests' })}
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,1fr]">
+                                  <input
+                                    value={detail.manualParticipantName}
+                                    onChange={(e) =>
+                                      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantName: e.target.value } : prev))
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        addTimelineMeetingManualParticipant();
+                                      }
+                                    }}
+                                    placeholder={t({ it: 'Altri ospiti', en: 'Other guests' })}
+                                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                  />
+                                  <div className="flex items-center gap-2">
+                                    <select
+                                      value={
+                                        roomMeetingEditManualCompanyIsOther
+                                          ? '__OTHER__'
+                                          : clientBusinessPartnerNames.includes(String(detail.manualParticipantCompany || '').trim())
+                                            ? String(detail.manualParticipantCompany || '').trim()
+                                            : ''
+                                      }
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === '__OTHER__') {
+                                          setRoomMeetingEditManualCompanyIsOther(true);
+                                          setRoomMeetingsTimelineBookingDetail((prev) =>
+                                            prev ? { ...prev, manualParticipantCompany: '' } : prev
+                                          );
+                                          return;
+                                        }
+                                        setRoomMeetingEditManualCompanyIsOther(false);
+                                        setRoomMeetingsTimelineBookingDetail((prev) =>
+                                          prev ? { ...prev, manualParticipantCompany: value } : prev
+                                        );
+                                      }}
+                                      className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    >
+                                      <option value="">{t({ it: 'Azienda (opzionale)', en: 'Company (optional)' })}</option>
+                                      {clientBusinessPartnerNames.map((name) => (
+                                        <option key={`planview-bp-opt-${name}`} value={name}>
+                                          {name}
+                                        </option>
+                                      ))}
+                                      <option value="__OTHER__">{t({ it: 'Altro', en: 'Other' })}</option>
+                                    </select>
+                                    {canOpenBusinessPartnersDirectory ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setRoomMeetingEditBusinessPartnersModalOpen(true);
+                                        }}
+                                        className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-2 text-slate-700 hover:bg-slate-50"
+                                        title={t({ it: 'Apri rubrica Business Partner', en: 'Open Business Partner directory' })}
+                                      >
+                                        <Building2 size={14} />
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                {roomMeetingEditManualCompanyIsOther ? (
+                                  <div className="mt-2">
+                                    <input
+                                      value={detail.manualParticipantCompany}
+                                      onChange={(e) =>
+                                        setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantCompany: e.target.value } : prev))
+                                      }
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          addTimelineMeetingManualParticipant();
+                                        }
+                                      }}
+                                      placeholder={t({ it: 'Nome azienda (Altro)', en: 'Company name (Other)' })}
+                                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                    />
+                                  </div>
+                                ) : null}
+                                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr,auto,auto,auto]">
+                                  <input
+                                    value={detail.manualParticipantEmail}
+                                    onChange={(e) =>
+                                      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantEmail: e.target.value } : prev))
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        addTimelineMeetingManualParticipant();
+                                      }
+                                    }}
+                                    placeholder={t({ it: 'Email (opzionale)', en: 'Email (optional)' })}
+                                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                  />
+                                  <label className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">
+                                    <input
+                                      type="checkbox"
+                                      checked={detail.manualParticipantOptional}
+                                      onChange={(e) =>
+                                        setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantOptional: e.target.checked } : prev))
+                                      }
+                                    />
+                                    {t({ it: 'Facolt.', en: 'Optional' })}
+                                  </label>
+                                  <label className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">
+                                    <input
+                                      type="checkbox"
+                                      checked={detail.manualParticipantRemote}
+                                      onChange={(e) =>
+                                        setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantRemote: e.target.checked } : prev))
+                                      }
+                                    />
+                                    {t({ it: 'Remoto', en: 'Remote' })}
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      addTimelineMeetingManualParticipant();
+                                    }}
+                                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                  >
+                                    {t({ it: 'Aggiungi', en: 'Add' })}
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                {t({
+                                  it: `${onsiteInternal} interni in sede · ${remoteInternal} interni remoti · ${onsiteManual} ospiti in sede · ${remoteManual} ospiti remoti`,
+                                  en: `${onsiteInternal} on-site internal · ${remoteInternal} remote internal · ${onsiteManual} on-site guests · ${remoteManual} remote guests`
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                          <label className="block text-sm font-semibold text-slate-700">
+                            {t({ it: 'Video conference LINK', en: 'Video conference LINK' })}
+                            <input
+                              value={roomMeetingsTimelineBookingDetail.videoConferenceLink}
+                              onChange={(e) =>
+                                setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, videoConferenceLink: e.target.value } : prev))
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            />
+                          </label>
+                          <label className="block text-sm font-semibold text-slate-700">
+                            {t({ it: 'Note', en: 'Notes' })}
+                            <textarea
+                              rows={3}
+                              value={roomMeetingsTimelineBookingDetail.notes}
+                              onChange={(e) =>
+                                setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, notes: e.target.value } : prev))
+                              }
+                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            />
+                          </label>
+                              </>
+                            );
+                          })()}
+                          {roomMeetingsTimelineBookingDetail.booking.multiDayGroupId ? (
+                            <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={roomMeetingsTimelineBookingDetail.applyToSeries}
+                                onChange={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, applyToSeries: e.target.checked } : prev))
+                                }
+                              />
+                              {t({ it: 'Applica modifiche a tutta la serie multi-giorno', en: 'Apply changes to the whole multi-day series' })}
+                            </label>
+                          ) : null}
+                          {roomMeetingsTimelineBookingDetail.applyToSeries && roomMeetingsTimelineBookingDetail.booking.multiDayGroupId ? (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                              {t({
+                                it: 'Modalità serie: la data della singola occorrenza resta invariata per ogni giorno della serie; vengono applicati oggetto/orari/note/link/setup.',
+                                en: 'Series mode: each occurrence keeps its own date; subject/time/notes/link/setup are applied across the series.'
+                              })}
+                            </div>
+                          ) : null}
+                          {roomMeetingsTimelineBookingDetail.error ? (
+                            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                              {roomMeetingsTimelineBookingDetail.error}
+                            </div>
+                          ) : null}
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, mode: 'view', saving: false, error: null } : prev))
+                              }
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              {t({ it: 'Annulla', en: 'Cancel' })}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={saveRoomMeetingBookingEdit}
+                              disabled={roomMeetingsTimelineBookingDetail.saving}
+                              className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                            >
+                              {roomMeetingsTimelineBookingDetail.saving ? t({ it: 'Salvataggio...', en: 'Saving...' }) : t({ it: 'Salva modifiche', en: 'Save changes' })}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!roomLayoutExportModal} as={Fragment}>
+        <Dialog as="div" className="relative z-[70]" onClose={() => setRoomLayoutExportModal(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-[1800px] rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div>
+                      <Dialog.Title className="text-lg font-semibold text-ink">
+                        {t({ it: 'Esporta Layout meeting room', en: 'Export meeting room layout' })}
+                      </Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {t({
+                          it: 'Copia colore, scala etichetta e opacità della stanza sorgente su altre meeting room del cliente.',
+                          en: 'Copy color, label scale and opacity from the source room to other client meeting rooms.'
+                        })}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRoomLayoutExportModal(null)}
+                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {roomLayoutExportSource ? (
+                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                      <div className="flex flex-wrap items-center gap-3 text-sm">
+                        <span className="font-semibold text-emerald-900">
+                          {t({ it: 'Sorgente', en: 'Source' })}: {roomLayoutExportSource.siteName} · {roomLayoutExportSource.planName} · {roomLayoutExportSource.roomName}
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
+                          <span className="inline-block h-4 w-4 rounded border border-slate-300" style={{ backgroundColor: roomLayoutExportSource.color }} />
+                          {t({ it: 'Colore', en: 'Color' })}
+                        </span>
+                        <span className="rounded-full border border-emerald-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
+                          {t({ it: 'Scala', en: 'Scale' })}: {roomLayoutExportSource.labelScale.toFixed(2)}
+                        </span>
+                        <span className="rounded-full border border-emerald-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
+                          {t({ it: 'Opacità', en: 'Opacity' })}: {Math.round(roomLayoutExportSource.fillOpacity * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+                      {t({ it: 'Stanza sorgente non trovata.', en: 'Source room not found.' })}
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRoomLayoutExportModal((prev) =>
+                          !prev
+                            ? prev
+                            : {
+                                ...prev,
+                                selectedKeys: roomLayoutExportRows.filter((row) => !row.isSource).map((row) => row.key)
+                              }
+                        )
+                      }
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Seleziona tutte', en: 'Select all' })}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRoomLayoutExportModal((prev) => (prev ? { ...prev, selectedKeys: [] } : prev))}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Deseleziona tutte', en: 'Clear selection' })}
+                    </button>
+                    <span className="ml-auto text-xs text-slate-500">
+                      {t({
+                        it: `${(roomLayoutExportModal?.selectedKeys || []).length} selezionate · ${roomLayoutExportRows.length} meeting room`,
+                        en: `${(roomLayoutExportModal?.selectedKeys || []).length} selected · ${roomLayoutExportRows.length} meeting rooms`
+                      })}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+                    <div className="max-h-[52vh] overflow-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                          <tr>
+                            <th className="w-10 px-3 py-2 text-left">
+                              <input
+                                type="checkbox"
+                                checked={
+                                  roomLayoutExportRows.filter((row) => !row.isSource).length > 0 &&
+                                  roomLayoutExportRows.filter((row) => !row.isSource).every((row) =>
+                                    (roomLayoutExportModal?.selectedKeys || []).includes(row.key)
+                                  )
+                                }
+                                onChange={(e) =>
+                                  setRoomLayoutExportModal((prev) =>
+                                    !prev
+                                      ? prev
+                                      : {
+                                          ...prev,
+                                          selectedKeys: e.target.checked
+                                            ? roomLayoutExportRows.filter((row) => !row.isSource).map((row) => row.key)
+                                            : []
+                                        }
+                                  )
+                                }
+                              />
+                            </th>
+                            {([
+                              ['site', t({ it: 'Sede', en: 'Site' })],
+                              ['plan', t({ it: 'Planimetria', en: 'Floor plan' })],
+                              ['room', t({ it: 'Stanza', en: 'Room' })],
+                              ['capacity', t({ it: 'Capienza', en: 'Capacity' })],
+                              ['scale', t({ it: 'Scala', en: 'Scale' })],
+                              ['opacity', t({ it: 'Opacità', en: 'Opacity' })]
+                            ] as Array<[typeof roomLayoutExportModal extends null ? never : NonNullable<typeof roomLayoutExportModal>['sortKey'], string]>).map(
+                              ([key, label]) => (
+                                <th key={String(key)} className="px-3 py-2 text-left">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setRoomLayoutExportModal((prev) =>
+                                        !prev
+                                          ? prev
+                                          : {
+                                              ...prev,
+                                              sortKey: key,
+                                              sortDir: prev.sortKey === key && prev.sortDir === 'asc' ? 'desc' : 'asc'
+                                            }
+                                      )
+                                    }
+                                    className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
+                                    title={
+                                      key === 'site'
+                                        ? t({ it: 'Ordina per sede', en: 'Sort by site' })
+                                        : key === 'plan'
+                                          ? t({ it: 'Ordina per planimetria', en: 'Sort by floor plan' })
+                                          : key === 'room'
+                                            ? t({ it: 'Ordina per nome stanza', en: 'Sort by room name' })
+                                            : key === 'capacity'
+                                              ? t({ it: 'Ordina per capienza stanza', en: 'Sort by room capacity' })
+                                              : key === 'scale'
+                                                ? t({ it: 'Ordina per scala etichetta', en: 'Sort by label scale' })
+                                                : t({ it: 'Ordina per opacità sfondo', en: 'Sort by background opacity' })
+                                    }
+                                  >
+                                    {label}
+                                    {roomLayoutExportModal?.sortKey === key ? (
+                                      <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span>
+                                    ) : null}
+                                  </button>
+                                </th>
+                              )
+                            )}
+                            <th className="px-3 py-2 text-left" title={t({ it: 'Sigle tipi stanza attivi (MR, RP, BA, LT, RL, SF)', en: 'Active room type initials (MR, RP, BA, LT, RL, SF)' })}>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
+                                title={t({ it: 'Meeting Room (MR): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Meeting Room (MR): 1 on, 0 off. Click to sort.' })}
+                                onClick={() =>
+                                  setRoomLayoutExportModal((prev) =>
+                                    !prev ? prev : { ...prev, sortKey: 'meetingRoom', sortDir: prev.sortKey === 'meetingRoom' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
+                                  )
+                                }
+                              >
+                                MR
+                                {roomLayoutExportModal?.sortKey === 'meetingRoom' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
+                              </button>
+                            </th>
+                            <th className="px-3 py-2 text-left" title={t({ it: 'Room Logica (RL): 1 attivo, 0 disattivo', en: 'Logical room (RL): 1 on, 0 off' })}>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
+                                title={t({ it: 'Room Logica (RL): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Logical room (RL): 1 on, 0 off. Click to sort.' })}
+                                onClick={() =>
+                                  setRoomLayoutExportModal((prev) =>
+                                    !prev ? prev : { ...prev, sortKey: 'logical', sortDir: prev.sortKey === 'logical' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
+                                  )
+                                }
+                              >
+                                RL
+                                {roomLayoutExportModal?.sortKey === 'logical' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
+                              </button>
+                            </th>
+                            <th className="px-3 py-2 text-left" title={t({ it: 'Ripostiglio (RP): 1 attivo, 0 disattivo', en: 'Storage room (RP): 1 on, 0 off' })}>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
+                                title={t({ it: 'Ripostiglio (RP): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Storage room (RP): 1 on, 0 off. Click to sort.' })}
+                                onClick={() =>
+                                  setRoomLayoutExportModal((prev) =>
+                                    !prev ? prev : { ...prev, sortKey: 'storageRoom', sortDir: prev.sortKey === 'storageRoom' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
+                                  )
+                                }
+                              >
+                                RP
+                                {roomLayoutExportModal?.sortKey === 'storageRoom' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
+                              </button>
+                            </th>
+                            <th className="px-3 py-2 text-left" title={t({ it: 'Bagno (BA): 1 attivo, 0 disattivo', en: 'Bathroom (BA): 1 on, 0 off' })}>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
+                                title={t({ it: 'Bagno (BA): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Bathroom (BA): 1 on, 0 off. Click to sort.' })}
+                                onClick={() =>
+                                  setRoomLayoutExportModal((prev) =>
+                                    !prev ? prev : { ...prev, sortKey: 'bathroom', sortDir: prev.sortKey === 'bathroom' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
+                                  )
+                                }
+                              >
+                                BA
+                                {roomLayoutExportModal?.sortKey === 'bathroom' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
+                              </button>
+                            </th>
+                            <th className="px-3 py-2 text-left" title={t({ it: 'Locale tecnico (LT): 1 attivo, 0 disattivo', en: 'Technical room (LT): 1 on, 0 off' })}>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
+                                title={t({ it: 'Locale tecnico (LT): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Technical room (LT): 1 on, 0 off. Click to sort.' })}
+                                onClick={() =>
+                                  setRoomLayoutExportModal((prev) =>
+                                    !prev ? prev : { ...prev, sortKey: 'technicalRoom', sortDir: prev.sortKey === 'technicalRoom' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
+                                  )
+                                }
+                              >
+                                LT
+                                {roomLayoutExportModal?.sortKey === 'technicalRoom' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
+                              </button>
+                            </th>
+                            <th className="px-3 py-2 text-left" title={t({ it: 'Senza finestre (SF): 1 attivo, 0 disattivo', en: 'No windows (SF): 1 on, 0 off' })}>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
+                                title={t({ it: 'Senza finestre (SF): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'No windows (SF): 1 on, 0 off. Click to sort.' })}
+                                onClick={() =>
+                                  setRoomLayoutExportModal((prev) =>
+                                    !prev ? prev : { ...prev, sortKey: 'noWindows', sortDir: prev.sortKey === 'noWindows' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
+                                  )
+                                }
+                              >
+                                SF
+                                {roomLayoutExportModal?.sortKey === 'noWindows' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
+                              </button>
+                            </th>
+                            <th className="px-3 py-2 text-left" title={t({ it: 'Colore di sfondo della stanza', en: 'Room background color' })}>
+                              {t({ it: 'Colore', en: 'Color' })}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {roomLayoutExportRows.map((row) => {
+                            const checked = (roomLayoutExportModal?.selectedKeys || []).includes(row.key);
+                            return (
+                              <tr
+                                key={row.key}
+                                className={`border-t border-slate-100 ${row.isSource ? 'bg-emerald-50/60' : checked ? 'bg-sky-50/50' : 'bg-white'}`}
+                              >
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="checkbox"
+                                    disabled={row.isSource}
+                                    checked={row.isSource ? false : checked}
+                                    onChange={(e) =>
+                                      setRoomLayoutExportModal((prev) => {
+                                        if (!prev) return prev;
+                                        const selected = new Set(prev.selectedKeys || []);
+                                        if (e.target.checked) selected.add(row.key);
+                                        else selected.delete(row.key);
+                                        return { ...prev, selectedKeys: Array.from(selected) };
+                                      })
+                                    }
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-slate-700">{row.siteName}</td>
+                                <td className="px-3 py-2 text-slate-700">{row.planName}</td>
+                                <td className="px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-ink">{row.roomName}</span>
+                                    {row.isSource ? (
+                                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                                        {t({ it: 'Sorgente', en: 'Source' })}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 text-slate-700">{row.capacity}</td>
+                                <td className="px-3 py-2 font-mono text-slate-700">{row.labelScale.toFixed(2)}</td>
+                                <td className="px-3 py-2 font-mono text-slate-700">{Math.round(row.fillOpacity * 100)}%</td>
+                                <td className="px-3 py-2 text-center text-xs text-slate-700">
+                                  <input type="checkbox" checked={!!row.meetingRoom} readOnly disabled className="h-4 w-4 accent-primary" />
+                                </td>
+                                <td className="px-3 py-2 text-center text-xs text-slate-700">
+                                  <input type="checkbox" checked={!!row.logical} readOnly disabled className="h-4 w-4 accent-primary" />
+                                </td>
+                                <td className="px-3 py-2 text-center text-xs text-slate-700">
+                                  <input type="checkbox" checked={!!row.storageRoom} readOnly disabled className="h-4 w-4 accent-primary" />
+                                </td>
+                                <td className="px-3 py-2 text-center text-xs text-slate-700">
+                                  <input type="checkbox" checked={!!row.bathroom} readOnly disabled className="h-4 w-4 accent-primary" />
+                                </td>
+                                <td className="px-3 py-2 text-center text-xs text-slate-700">
+                                  <input type="checkbox" checked={!!row.technicalRoom} readOnly disabled className="h-4 w-4 accent-primary" />
+                                </td>
+                                <td className="px-3 py-2 text-center text-xs text-slate-700">
+                                  <input type="checkbox" checked={!!row.noWindows} readOnly disabled className="h-4 w-4 accent-primary" />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="inline-block h-5 w-5 rounded border border-slate-300" style={{ backgroundColor: row.color }} />
+                                    <span className="font-mono text-xs text-slate-600">{row.color}</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRoomLayoutExportModal(null)}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={applyRoomLayoutExportToSelection}
+                      disabled={!roomLayoutExportSource || !(roomLayoutExportModal?.selectedKeys || []).length}
+                      className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {t({ it: 'Applica layout selezionato', en: 'Apply layout to selection' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!roomMeasuresModal} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setRoomMeasuresModal(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Misure stanza', en: 'Room measurements' })}</Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {t({ it: 'Stanza', en: 'Room' })}:{' '}
+                        <span className="font-semibold text-slate-700">{roomMeasuresData?.roomName || '-'}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setRoomMeasuresModal(null)}
+                      className="text-slate-500 hover:text-ink"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  {!roomMeasuresData ? (
+                    <div className="mt-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                      {t({ it: 'Nessuna informazione disponibile.', en: 'No data available.' })}
+                    </div>
+                  ) : (
+                    <div className="mt-4 grid gap-3 md:grid-cols-[340px,1fr]">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
+                        <RoomShapePreview
+                          points={roomMeasuresData.points}
+                          segments={roomMeasuresData.segments}
+                          width={320}
+                          height={220}
+                          className="h-[220px] w-full"
+                        />
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+                        {roomMeasuresData.scaleMissing ? (
+                          <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 font-semibold text-amber-700">
+                            {t({ it: 'Imposta una scala per misurare.', en: 'Set a scale to measure.' })}
+                          </div>
+                        ) : null}
+                        {roomMeasuresData.perimeterLabel ? (
+                          <div className="mt-2 flex items-center justify-between gap-2">
+                            <span>{t({ it: 'Perimetro', en: 'Perimeter' })}</span>
+                            <span className="font-mono">{roomMeasuresData.perimeterLabel}</span>
+                          </div>
+                        ) : null}
+                        {roomMeasuresData.areaLabel ? (
+                          <div className="mt-1 flex items-center justify-between gap-2">
+                            <span>{t({ it: 'Area', en: 'Area' })}</span>
+                            <span className="font-mono">{roomMeasuresData.areaLabel}</span>
+                          </div>
+                        ) : null}
+                        <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          {t({ it: 'Lati', en: 'Sides' })}
+                        </div>
+                        <div className="mt-1 max-h-48 space-y-1 overflow-auto text-[11px]">
+                          {(roomMeasuresData.segments || []).map((seg) => (
+                            <div key={seg.label} className="flex items-center justify-between gap-2">
+                              <span className="font-mono">{seg.label}</span>
+                              <span className="font-mono">{seg.lengthLabel || '-'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-5 flex justify-end">
+                    <button
+                      onClick={() => setRoomMeasuresModal(null)}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
       <RoomAllocationModal
         open={roomAllocationOpen}
         clients={allClients}
@@ -16767,6 +19702,68 @@ const PlanView = ({ planId }: Props) => {
         onClose={() => {
           setCapacityDashboardOpen(false);
           setCapacityDashboardPreset(null);
+        }}
+      />
+
+      <MeetingManagerModal
+        open={meetingManagerOpen}
+        clients={allClients}
+        initialClientId={meetingManagerPreset?.clientId || client?.id}
+        initialSiteId={meetingManagerPreset?.siteId || site?.id}
+        initialFloorPlanId={meetingManagerPreset?.floorPlanId || planId}
+        initialRoomId={meetingManagerPreset?.roomId}
+        initialDay={meetingManagerPreset?.day}
+        onClose={() => {
+          setMeetingManagerOpen(false);
+          setMeetingManagerPreset(null);
+        }}
+        onCreated={() => {
+          const cid = String(client?.id || '').trim();
+          const sid = String(site?.id || '').trim();
+          if (cid && sid) {
+            void fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day: new Date().toISOString().slice(0, 10) })
+              .then((payload) => {
+                const nowTs = Date.now();
+                const next: Record<string, { hasMeetingToday: boolean; inProgress: boolean; hasFutureToday: boolean }> = {};
+                for (const row of payload.rooms || []) {
+                  const hasFutureToday = Array.isArray(row.bookings) ? row.bookings.some((b) => Number(b.startAt) > nowTs) : false;
+                  next[String(row.roomId)] = {
+                    hasMeetingToday: !!row.hasMeetingToday,
+                    inProgress: !!row.inProgress,
+                    hasFutureToday
+                  };
+                }
+                setMeetingStatusByRoomId(next);
+              })
+              .catch(() => {});
+          }
+          if (roomMeetingsTimelineModal?.roomId) {
+            void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, roomMeetingsTimelineModal.day);
+          }
+        }}
+        onGoToRoom={(roomId) => {
+          let targetPlanId: string | null = null;
+          for (const c of allClients || []) {
+            for (const s of c.sites || []) {
+              const hit = (s.floorPlans || []).find((p) => (p.rooms || []).some((r) => r.id === roomId));
+              if (hit?.id) {
+                targetPlanId = hit.id;
+                break;
+              }
+            }
+            if (targetPlanId) break;
+          }
+          if (!targetPlanId) return;
+          setMeetingManagerOpen(false);
+          setMeetingManagerPreset(null);
+          if (targetPlanId !== planId) {
+            setSelectedPlan(targetPlanId);
+            navigate(`/plan/${targetPlanId}?focusRoom=${encodeURIComponent(roomId)}`);
+            return;
+          }
+          setSelectedRoomId(roomId);
+          setSelectedRoomIds([roomId]);
+          setHighlightRoom({ roomId, until: Date.now() + 3200 });
         }}
       />
 

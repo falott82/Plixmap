@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, Mail, Heart, ShieldAlert } from 'lucide-react';
+import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, Mail, Heart, ShieldAlert, History } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useDataStore } from '../../store/useDataStore';
@@ -15,6 +15,7 @@ import UsersPanel from './UsersPanel';
 import AccountPanel from './AccountPanel';
 import UserMenu from '../layout/UserMenu';
 import LogsTabsPanel from './LogsTabsPanel';
+import AuditTrailPanel from './AuditTrailPanel';
 import ClientModal from './ClientModal';
 import NerdAreaPanel from './NerdAreaPanel';
 import { useT } from '../../i18n/useT';
@@ -27,6 +28,8 @@ import DonationsPanel from './DonationsPanel';
 import LayersPanel from './LayersPanel';
 import SafetyPanel from './SafetyPanel';
 import { SEED_CLIENT_ID } from '../../store/data';
+import ClientEmailSettingsModal from '../layout/ClientEmailSettingsModal';
+import { fetchClientEmailSettingsSummary } from '../../api/email';
 
 const SettingsView = () => {
   const {
@@ -51,7 +54,20 @@ const SettingsView = () => {
   const [selectedClient, setSelectedClient] = useState<string | undefined>(clients[0]?.id);
   const [selectedSite, setSelectedSite] = useState<string | undefined>(clients[0]?.sites[0]?.id);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; type: 'client' | 'site' | 'plan' } | null>(null);
-  const [siteModal, setSiteModal] = useState<{ siteId?: string; initialName?: string; initialCoords?: string } | null>(null);
+  const [siteModal, setSiteModal] = useState<{
+    siteId?: string;
+    initialName?: string;
+    initialCoords?: string;
+    initialSupportContacts?: {
+      cleaning?: { email?: string; phone?: string };
+      it?: { email?: string; phone?: string };
+      coffee?: { email?: string; phone?: string };
+    };
+    initialSiteSchedule?: {
+      weekly?: Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', { closed?: boolean; open?: string; close?: string }>>;
+      holidays?: Array<{ date: string; label?: string; closed?: boolean }>;
+    };
+  } | null>(null);
   const [editingPlan, setEditingPlan] = useState<string | null>(null);
   const [addPlanOpen, setAddPlanOpen] = useState(false);
   const [replaceModal, setReplaceModal] = useState<
@@ -96,7 +112,33 @@ const SettingsView = () => {
     navigate({ pathname: location.pathname, search: search.toString() }, { replace: true });
   };
   const [clientModal, setClientModal] = useState<{ client?: any } | null>(null);
-  const modalActive = !!(clientModal || siteModal || addPlanOpen || replaceModal || confirmDelete || planPreview);
+  const [clientEmailModal, setClientEmailModal] = useState<{ clientId: string; clientName: string } | null>(null);
+  const [clientImportModal, setClientImportModal] = useState<{ clientId: string; clientName: string } | null>(null);
+  const [clientLayersModal, setClientLayersModal] = useState<{ clientId: string; clientName: string } | null>(null);
+  const [clientLogsModal, setClientLogsModal] = useState<{ clientId: string; clientName: string } | null>(null);
+
+  const blurTrigger = (target?: EventTarget | null) => {
+    try {
+      if (target && typeof (target as any).blur === 'function') (target as any).blur();
+      const active = document.activeElement as HTMLElement | null;
+      if (active && typeof active.blur === 'function') active.blur();
+    } catch {
+      // no-op: focus cleanup is best-effort to avoid aria-hidden warnings when opening dialogs
+    }
+  };
+  const [clientEmailConfiguredMap, setClientEmailConfiguredMap] = useState<Record<string, boolean>>({});
+  const modalActive = !!(
+    clientModal ||
+    clientEmailModal ||
+    clientImportModal ||
+    clientLayersModal ||
+    clientLogsModal ||
+    siteModal ||
+    addPlanOpen ||
+    replaceModal ||
+    confirmDelete ||
+    planPreview
+  );
 
   useEffect(() => {
     const next = resolveTab(location.search);
@@ -193,6 +235,24 @@ const SettingsView = () => {
     window.setTimeout(() => planInputRefs.current[editingPlan]?.focus(), 0);
   }, [editingPlan]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!isSuperAdmin) {
+      setClientEmailConfiguredMap({});
+      return;
+    }
+    fetchClientEmailSettingsSummary()
+      .then((map) => {
+        if (!cancelled) setClientEmailConfiguredMap(map || {});
+      })
+      .catch(() => {
+        if (!cancelled) setClientEmailConfiguredMap({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSuperAdmin, clients.length]);
+
   return (
     <div className="h-screen overflow-y-auto p-6">
       <div className="mb-4 flex items-center justify-between">
@@ -241,15 +301,6 @@ const SettingsView = () => {
               <LayoutGrid size={16} /> {t({ it: 'Oggetti', en: 'Objects' })}
             </button>
             <button
-              onClick={() => setTabAndUrl('layers')}
-              className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
-                tab === 'layers' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
-              }`}
-              title={t({ it: 'Apri tab Layers', en: 'Open Layers tab' })}
-            >
-              <Layers size={16} /> {t({ it: 'Layers', en: 'Layers' })}
-            </button>
-            <button
               onClick={() => setTabAndUrl('users')}
               className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
                 tab === 'users' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
@@ -277,15 +328,6 @@ const SettingsView = () => {
                   title={t({ it: 'Apri tab Backup', en: 'Open Backup tab' })}
                 >
                   <Upload size={16} /> {t({ it: 'Backup', en: 'Backup' })}
-                </button>
-                <button
-                  onClick={() => setTabAndUrl('import')}
-                  className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
-                    tab === 'import' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 bg-white text-ink hover:bg-slate-50'
-                  }`}
-                  title={t({ it: 'Apri tab Custom Import', en: 'Open Custom Import tab' })}
-                >
-                  <DownloadCloud size={16} /> {t({ it: 'Custom Import', en: 'Custom Import' })}
                 </button>
                 <button
                   onClick={() => setTabAndUrl('nerd')}
@@ -424,7 +466,10 @@ const SettingsView = () => {
                   <FolderPlus size={16} /> {t({ it: 'Clienti', en: 'Clients' })}
                 </h2>
                 <button
-                  onClick={() => setClientModal({})}
+                  onClick={(e) => {
+                    blurTrigger(e.currentTarget);
+                    setClientModal({});
+                  }}
                   className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-white hover:bg-primary/90"
                   title={t({ it: 'Aggiungi cliente', en: 'Add client' })}
                 >
@@ -467,9 +512,69 @@ const SettingsView = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      {isSuperAdmin ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            blurTrigger(e.currentTarget);
+                            setClientEmailModal({ clientId: client.id, clientName: client.shortName || client.name });
+                          }}
+                          title={t({ it: 'SMTP cliente dedicato', en: 'Dedicated client SMTP' })}
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg border ${
+                            clientEmailConfiguredMap[client.id]
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                              : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Mail size={14} />
+                        </button>
+                      ) : null}
+                      {isSuperAdmin ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            blurTrigger(e.currentTarget);
+                            setSelectedClient(client.id);
+                            setClientImportModal({ clientId: client.id, clientName: client.shortName || client.name });
+                          }}
+                          title={t({ it: 'Custom Import per cliente', en: 'Client custom import' })}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                        >
+                          <DownloadCloud size={14} />
+                        </button>
+                      ) : null}
+                      {isAdmin ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            blurTrigger(e.currentTarget);
+                            setSelectedClient(client.id);
+                            setClientLayersModal({ clientId: client.id, clientName: client.shortName || client.name });
+                          }}
+                          title={t({ it: 'Layers del cliente', en: 'Client layers' })}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                        >
+                          <Layers size={14} />
+                        </button>
+                      ) : null}
+                      {isSuperAdmin ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            blurTrigger(e.currentTarget);
+                            setClientLogsModal({ clientId: client.id, clientName: client.shortName || client.name });
+                          }}
+                          title={t({ it: 'Logs del cliente', en: 'Client logs' })}
+                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          <History size={12} />
+                          LOGS
+                        </button>
+                      ) : null}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          blurTrigger(e.currentTarget);
                           setClientModal({ client });
                         }}
                         title={t({ it: 'Modifica', en: 'Edit' })}
@@ -478,7 +583,11 @@ const SettingsView = () => {
                         <Pencil size={14} />
                       </button>
                       <button
-                        onClick={() => setConfirmDelete({ id: client.id, type: 'client' })}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          blurTrigger(e.currentTarget);
+                          setConfirmDelete({ id: client.id, type: 'client' });
+                        }}
                         className="text-xs text-rose-500 hover:text-rose-700"
                         title={t({ it: 'Elimina', en: 'Delete' })}
                       >
@@ -536,7 +645,13 @@ const SettingsView = () => {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSiteModal({ siteId: site.id, initialName: site.name, initialCoords: (site as any).coords || '' });
+                          setSiteModal({
+                            siteId: site.id,
+                            initialName: site.name,
+                            initialCoords: (site as any).coords || '',
+                            initialSupportContacts: (site as any).supportContacts,
+                            initialSiteSchedule: (site as any).siteSchedule
+                          });
                         }}
                         title={t({ it: 'Modifica', en: 'Edit' })}
                         className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
@@ -828,21 +943,131 @@ const SettingsView = () => {
         }}
       />
 
+      <ClientEmailSettingsModal
+        open={!!clientEmailModal}
+        clientId={clientEmailModal?.clientId || null}
+        clientName={clientEmailModal?.clientName || null}
+        onClose={() => {
+          setClientEmailModal(null);
+          if (isSuperAdmin) {
+            fetchClientEmailSettingsSummary()
+              .then((map) => setClientEmailConfiguredMap(map || {}))
+              .catch(() => {});
+          }
+        }}
+      />
+
+      <Transition show={!!clientImportModal} as={Fragment}>
+        <div className="relative z-[90]">
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" onMouseDown={() => setClientImportModal(null)} />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <div
+                  className="w-full max-w-7xl rounded-2xl border border-slate-200 bg-white p-4 shadow-card"
+                  role="dialog"
+                  aria-modal="true"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div>
+                      <div className="text-lg font-semibold text-ink">
+                        {t({ it: 'Custom Import cliente', en: 'Client custom import' })} • {clientImportModal?.clientName}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {t({ it: 'Gestione import utenti esterni/manuali per il cliente selezionato.', en: 'Manage external/manual user import for the selected client.' })}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setClientImportModal(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink">
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <CustomImportPanel initialClientId={clientImportModal?.clientId || undefined} lockClientSelection />
+                </div>
+              </Transition.Child>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      <Transition show={!!clientLayersModal} as={Fragment}>
+        <Dialog as="div" className="relative z-[90]" onClose={() => setClientLayersModal(null)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <Dialog.Panel className="w-full max-w-7xl rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+                  <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div>
+                      <Dialog.Title className="text-lg font-semibold text-ink">
+                        {t({ it: 'Layers cliente', en: 'Client layers' })} • {clientLayersModal?.clientName}
+                      </Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {t({ it: 'Gestione layers visibili e assegnazioni tipi per il cliente selezionato.', en: 'Manage visible layers and type assignments for the selected client.' })}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setClientLayersModal(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink">
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <LayersPanel initialClientId={clientLayersModal?.clientId || undefined} lockClientSelection />
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!clientLogsModal} as={Fragment}>
+        <Dialog as="div" className="relative z-[90]" onClose={() => setClientLogsModal(null)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <Dialog.Panel className="w-full max-w-7xl rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+                  <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div>
+                      <Dialog.Title className="text-lg font-semibold text-ink">LOGS • {clientLogsModal?.clientName}</Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {t({ it: 'Audit trail filtrato sul cliente selezionato (scope client).', en: 'Audit trail filtered for the selected client (client scope).' })}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setClientLogsModal(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink">
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <AuditTrailPanel compact scopeType="client" scopeId={clientLogsModal?.clientId || ''} />
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
       <SiteModal
         open={!!siteModal}
         initialName={siteModal?.initialName || ''}
         initialCoords={siteModal?.initialCoords || ''}
+        initialSupportContacts={siteModal?.initialSupportContacts}
+        initialSiteSchedule={(siteModal as any)?.initialSiteSchedule}
         title={siteModal?.siteId ? t({ it: 'Modifica sede', en: 'Edit site' }) : t({ it: 'Nuova sede', en: 'New site' })}
         onClose={() => setSiteModal(null)}
-        onSubmit={({ name, coords }) => {
+        onSubmit={({ name, coords, supportContacts, siteSchedule }) => {
           if (!currentClient) return;
           if (siteModal?.siteId) {
-            updateSite(siteModal.siteId, { name, coords });
+            updateSite(siteModal.siteId, { name, coords, supportContacts, siteSchedule } as any);
             push(t({ it: 'Sede aggiornata', en: 'Site updated' }), 'success');
             setSiteModal(null);
             return;
           }
-          const id = addSite(currentClient.id, { name, coords });
+          const id = addSite(currentClient.id, { name, coords, supportContacts, siteSchedule } as any);
           setSelectedSite(id);
           push(t({ it: 'Sede creata', en: 'Site created' }), 'success');
           setSiteModal(null);

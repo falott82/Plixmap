@@ -20,7 +20,9 @@ const slugify = (value: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
-const LayersPanel = () => {
+const LayersPanel = (
+  { initialClientId, lockClientSelection = false }: { initialClientId?: string | null; lockClientSelection?: boolean } = {}
+) => {
   const { clients, objectTypes, updateClientLayers } = useDataStore();
   const selectedPlanId = useUIStore((s) => s.selectedPlanId);
   const setPlanDirty = useUIStore((s) => s.setPlanDirty);
@@ -62,12 +64,26 @@ const LayersPanel = () => {
 
   useEffect(() => {
     if (selectedPlanClientId && clients.some((c) => c.id === selectedPlanClientId)) {
+      if (initialClientId) {
+        const forced = String(initialClientId).trim();
+        if (forced && clients.some((c) => c.id === forced)) {
+          setClientId(forced);
+          return;
+        }
+      }
       setClientId(selectedPlanClientId);
       return;
     }
+    if (initialClientId) {
+      const forced = String(initialClientId).trim();
+      if (forced && clients.some((c) => c.id === forced)) {
+        setClientId(forced);
+        return;
+      }
+    }
     if (clientId && clients.some((c) => c.id === clientId)) return;
     setClientId(clientOptions[0]?.id);
-  }, [clientId, clientOptions, clients, selectedPlanClientId]);
+  }, [clientId, clientOptions, clients, initialClientId, selectedPlanClientId]);
 
   const currentClient = useMemo(
     () => clients.find((c) => c.id === clientId) || clients[0],
@@ -436,11 +452,16 @@ const LayersPanel = () => {
 	          </div>
 	          <select
 	            value={clientId}
+	            disabled={lockClientSelection}
 	            onChange={(e) => {
 	              setClientId(e.target.value);
 	              setTypeEditor(null);
 	            }}
-	            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink"
+	            className={`rounded-xl border px-3 py-2 text-sm font-semibold ${
+                lockClientSelection
+                  ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500'
+                  : 'border-slate-200 bg-white text-ink'
+              }`}
 	            title={t({ it: 'Seleziona cliente', en: 'Select client' })}
 	          >
 	            {clientOptions.map((opt) => (
