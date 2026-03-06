@@ -1,7 +1,7 @@
 {
   "name": "plixmap",
   "description": "Collaborative workspace planning with floor plans, desks, racks, and network links.",
-  "version": "3.3.0",
+  "version": "3.5.2",
   "license": "MIT",
   "homepage": "https://www.plixmap.com",
   "repository": {
@@ -69,6 +69,7 @@
     "zustand": "^4.4.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^20.10.7",
     "@types/react": "^18.2.41",
     "@types/react-dom": "^18.2.17",
@@ -86,6 +87,7 @@
     "vite-plugin-pwa": "^1.2.0"
   },
   "overrides": {
+    "dompurify": "^3.3.2",
     "qs": "^6.14.1",
     "lodash": "^4.17.23"
   }

@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.3.0
+Current version: 3.5.2
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -13,12 +13,13 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - Full release notes: [`CHANGELOG.md`](CHANGELOG.md)
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 
-## What's new in 3.3.0
-- Meeting management system extended with room availability timeline, meeting-room scheduler, kiosk mode, check-in tracking, and room-level support/help flows.
-- Kiosk mode now supports synchronized check-in, meeting progress, day planning, business partner logos, and tablet-friendly fullscreen behavior.
-- Customer-scoped SMTP settings for meeting/help notifications (generic portal SMTP remains available for non-customer communications).
-- Customer-scoped real-user import tooling reworked (WebAPI/CSV/Manual) with preview, diff actions (add/update/remove), and duplicate checks.
-- Placement/capacity workflows refined with guided alternatives, richer room metadata, and improved context-menu entry points.
+## What's new in 3.5.2
+- Site hours now have a dedicated editor with weekly multi-range schedule, separate holidays/closures modal, named holidays, and selectable holiday calendars (`Italy`, `US`, `UK`, `Germany`, `France`, `Spain`, `China`, `Saudi Arabia`, `UAE`, or manual only).
+- Meeting scheduling now suggests the room site closing time as the default end boundary while still allowing manual override beyond site hours when needed.
+- Mobile chat startup and thread opening are much faster thanks to the dedicated mobile overview flow, cache reuse, and fixes for the unread/read request loop.
+- Superadmin visibility is now consistent across users and meetings, including the `My meetings` flow and server-side admin-like permission checks.
+- Room-to-corridor connection handling is more reliable: inferred door links now cover rooms that lacked an explicit saved link, and the related PlanView crash from helper initialization order was fixed.
+- Import configuration/device modals were stabilized: nested dialogs now keep correct focus/z-index, imported-device lists show a clean empty state when no client devices exist, and the backend/server codebase is further modularized (`users`, `chat`, `meetings`, `realtime`, `static`).
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.

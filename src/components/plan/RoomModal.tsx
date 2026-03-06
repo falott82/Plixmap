@@ -599,7 +599,9 @@ const RoomModal = ({
   ]);
 
   const submit = () => {
-    if (!name.trim()) {
+    const normalizedName = name.trim();
+    const normalizedNameEn = nameEn.trim();
+    if (!normalizedName && !normalizedNameEn) {
       setNameError(t({ it: 'Il nome della stanza è obbligatorio.', en: 'Room name is required.' }));
       window.setTimeout(() => nameRef.current?.focus(), 0);
       return;
@@ -618,14 +620,15 @@ const RoomModal = ({
     const rawSurface = Number(surfaceSqm);
     const finalSurface = Number.isFinite(rawSurface) && rawSurface > 0 ? rawSurface : undefined;
     const finalNotes = notes.trim() ? notes.trim() : undefined;
-    const finalNameEn = nameEn.trim() ? nameEn.trim() : undefined;
+    const finalName = normalizedName || normalizedNameEn;
+    const finalNameEn = normalizedNameEn || normalizedName || undefined;
     const finalDepartmentTags = (meetingRoom ? [] : departmentTags)
       .map((entry) => String(entry || '').trim())
       .filter(Boolean)
       .filter((entry, index, list) => list.findIndex((candidate) => candidate.toLocaleLowerCase() === entry.toLocaleLowerCase()) === index);
     const finalFillOpacity = Number.isFinite(Number(fillOpacity)) ? Math.max(0.05, Math.min(1, Number(fillOpacity))) : 0.08;
     const saved = onSubmit({
-      name: name.trim(),
+      name: finalName,
       nameEn: finalNameEn,
       departmentTags: finalDepartmentTags.length ? finalDepartmentTags : undefined,
       color: color || COLORS[0],

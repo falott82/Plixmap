@@ -1,6 +1,6 @@
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
-import { Fragment, ReactNode } from 'react';
+import { Fragment, ReactNode, RefObject, useRef } from 'react';
 
 type Props = {
   open: boolean;
@@ -8,9 +8,12 @@ type Props = {
   title: ReactNode;
   description?: ReactNode;
   sizeClassName?: string;
+  rootClassName?: string;
+  backdropClassName?: string;
   children: ReactNode;
   footer?: ReactNode;
   closeDisabled?: boolean;
+  initialFocusRef?: RefObject<HTMLElement | null>;
 };
 
 const ModalShell = ({
@@ -19,15 +22,24 @@ const ModalShell = ({
   title,
   description,
   sizeClassName = 'max-w-md',
+  rootClassName = 'z-50',
+  backdropClassName = 'bg-black/30 backdrop-blur-sm',
   children,
   footer,
-  closeDisabled = false
+  closeDisabled = false,
+  initialFocusRef
 }: Props) => {
+  // Focus sentinel prevents HeadlessUI FocusTrap warnings when a modal
+  // opens before the intended input/button is mounted.
+  const fallbackFocusRef = useRef<HTMLButtonElement | null>(null);
+  const dialogInitialFocusRef = (initialFocusRef || fallbackFocusRef) as RefObject<HTMLElement>;
+
   return (
     <Transition show={open} as={Fragment}>
       <Dialog
         as="div"
-        className="relative z-50"
+        className={`relative ${rootClassName}`}
+        initialFocus={dialogInitialFocusRef}
         onClose={() => {
           if (closeDisabled) return;
           onClose();
@@ -42,7 +54,7 @@ const ModalShell = ({
           leaveFrom="opacity-100"
           leaveTo="opacity-0"
         >
-          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          <div className={`fixed inset-0 ${backdropClassName}`} />
         </Transition.Child>
         <div className="fixed inset-0 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center px-4 py-8">
@@ -56,6 +68,13 @@ const ModalShell = ({
               leaveTo="opacity-0 scale-95"
             >
               <Dialog.Panel className={`w-full ${sizeClassName} modal-panel`}>
+                <button
+                  ref={fallbackFocusRef}
+                  type="button"
+                  className="absolute -left-[9999px] h-px w-px overflow-hidden opacity-0"
+                >
+                  focus-sentinel
+                </button>
                 <div className="modal-header items-center">
                   <div className="min-w-0">
                     <Dialog.Title className="modal-title">{title}</Dialog.Title>
@@ -88,4 +107,3 @@ const ModalShell = ({
 };
 
 export default ModalShell;
-

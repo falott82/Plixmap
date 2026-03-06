@@ -14,6 +14,7 @@ import {
   $getSelection,
   $getRoot,
   $isRangeSelection,
+  $setSelection,
   $isTextNode,
   $insertNodes,
   FORMAT_ELEMENT_COMMAND,
@@ -55,6 +56,9 @@ export interface LexicalNotesEditorHandle {
   getHtml: () => string;
   getStateJson: () => string;
   focus: () => void;
+  setHtml: (html: string) => void;
+  getSelectedText: () => string;
+  replaceSelectedText: (text: string) => boolean;
 }
 
 interface Props {
@@ -835,6 +839,8 @@ const EditorInner = forwardRef<LexicalNotesEditorHandle, Props>(
     const [tableManageOpen, setTableManageOpen] = useState(false);
     const [tableOpsEnabled, setTableOpsEnabled] = useState(false);
     const [linkOpen, setLinkOpen] = useState(false);
+    const lastSelectionCloneRef = useRef<any>(null);
+    const lastSelectionTextRef = useRef('');
 
   useEffect(() => registerImageInsertCommand(editor), [editor]);
   useEffect(() => {
@@ -847,6 +853,13 @@ const EditorInner = forwardRef<LexicalNotesEditorHandle, Props>(
         }
         const cell = $getTableCellNodeFromLexicalNode(selection.anchor.getNode());
         setTableOpsEnabled(!!cell);
+        if (!selection.isCollapsed()) {
+          const selectedText = String(selection.getTextContent() || '').trim();
+          if (selectedText) {
+            lastSelectionTextRef.current = selectedText;
+            lastSelectionCloneRef.current = typeof (selection as any).clone === 'function' ? (selection as any).clone() : null;
+          }
+        }
       });
     });
   }, [editor]);
@@ -862,7 +875,50 @@ const EditorInner = forwardRef<LexicalNotesEditorHandle, Props>(
         return html;
       },
       getStateJson: () => stateJson,
-      focus: () => editor.focus()
+      focus: () => editor.focus(),
+      setHtml: (html: string) => {
+        editor.update(() => {
+          const root = $getRoot();
+          root.clear();
+          const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+          const nodes = $generateNodesFromDOM(editor, doc);
+          if (nodes.length) $insertNodes(nodes);
+          if (!root.getFirstChild()) root.append($createParagraphNode());
+        });
+      },
+      getSelectedText: () => {
+        let selectedText = '';
+        editor.getEditorState().read(() => {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection) && !selection.isCollapsed()) {
+            selectedText = String(selection.getTextContent() || '').trim();
+            return;
+          }
+          selectedText = String(lastSelectionTextRef.current || '').trim();
+        });
+        return selectedText;
+      },
+      replaceSelectedText: (text: string) => {
+        const replacement = String(text ?? '');
+        let replaced = false;
+        editor.update(() => {
+          let selection = $getSelection();
+          if (!$isRangeSelection(selection) || selection.isCollapsed()) {
+            const cachedSelection = lastSelectionCloneRef.current;
+            if (cachedSelection && typeof cachedSelection.clone === 'function') {
+              $setSelection(cachedSelection.clone());
+              selection = $getSelection();
+            }
+          }
+          if (!$isRangeSelection(selection) || selection.isCollapsed()) return;
+          selection.insertText(replacement);
+          lastSelectionTextRef.current = replacement.trim();
+          lastSelectionCloneRef.current = null;
+          replaced = true;
+        });
+        if (replaced) editor.focus();
+        return replaced;
+      }
     }),
     [editor, stateJson]
   );
@@ -931,7 +987,7 @@ const EditorInner = forwardRef<LexicalNotesEditorHandle, Props>(
   }, [editor, readOnly]);
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <Toolbar
         readOnly={readOnly}
         onPickImage={pickImage}
@@ -1017,7 +1073,7 @@ const EditorInner = forwardRef<LexicalNotesEditorHandle, Props>(
       />
 
       <div
-        className="mt-3 min-h-[260px] w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-800 shadow-inner outline-none ring-primary/30 focus-within:ring-2"
+        className="mt-3 flex min-h-0 flex-1 flex-col w-full rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-inner outline-none ring-amber-300/50 focus-within:ring-2"
         onMouseDown={() => onRequestFocus?.()}
         onClickCapture={(e) => {
           // Cmd/Ctrl+Click opens links in a new tab (without messing with selection/editing).
@@ -1057,8 +1113,8 @@ const EditorInner = forwardRef<LexicalNotesEditorHandle, Props>(
         }}
       >
         <RichTextPlugin
-          contentEditable={<ContentEditable className="min-h-[220px] outline-none" />}
-          placeholder={<div className="text-sm text-slate-400">{t({ it: 'Scrivi qui…', en: 'Write here…' })}</div>}
+          contentEditable={<ContentEditable className="h-full min-h-[220px] flex-1 outline-none" />}
+          placeholder={<div className="text-sm text-amber-700/70">{t({ it: 'Scrivi qui…', en: 'Write here…' })}</div>}
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />
@@ -1142,7 +1198,7 @@ const LexicalNotesEditor = forwardRef<LexicalNotesEditorHandle, Props>(
   );
 
   return (
-    <div className={className}>
+    <div className={['min-h-0', className || ''].filter(Boolean).join(' ')}>
       <LexicalComposer initialConfig={initialConfig as any}>
         <EditorInner
           ref={ref}

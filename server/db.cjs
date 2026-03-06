@@ -177,6 +177,7 @@ const migrations = [
           attachmentsJson TEXT NOT NULL DEFAULT '[]',
           starredByJson TEXT NOT NULL DEFAULT '[]',
           reactionsJson TEXT NOT NULL DEFAULT '{}',
+          deletedForJson TEXT NOT NULL DEFAULT '[]',
           text TEXT NOT NULL,
           deleted INTEGER NOT NULL DEFAULT 0,
           deletedAt INTEGER,
@@ -257,6 +258,7 @@ const migrations = [
           attachmentsJson TEXT NOT NULL DEFAULT '[]',
           starredByJson TEXT NOT NULL DEFAULT '[]',
           reactionsJson TEXT NOT NULL DEFAULT '{}',
+          deletedForJson TEXT NOT NULL DEFAULT '[]',
           text TEXT NOT NULL,
           deleted INTEGER NOT NULL DEFAULT 0,
           deletedAt INTEGER,
@@ -303,6 +305,7 @@ const migrations = [
           technicalEmail TEXT NOT NULL DEFAULT '',
           notes TEXT NOT NULL DEFAULT '',
           videoConferenceLink TEXT NOT NULL DEFAULT '',
+          kioskLanguage TEXT NOT NULL DEFAULT '',
           setupBufferBeforeMin INTEGER NOT NULL DEFAULT 0,
           setupBufferAfterMin INTEGER NOT NULL DEFAULT 0,
           startAt INTEGER NOT NULL,
@@ -324,6 +327,7 @@ const migrations = [
         );
         CREATE INDEX IF NOT EXISTS idx_meeting_bookings_site_time ON meeting_bookings(siteId, effectiveStartAt, effectiveEndAt);
         CREATE INDEX IF NOT EXISTS idx_meeting_bookings_room_time ON meeting_bookings(roomId, effectiveStartAt, effectiveEndAt);
+        CREATE INDEX IF NOT EXISTS idx_meeting_bookings_client_start_end ON meeting_bookings(clientId, startAt, endAt);
         CREATE INDEX IF NOT EXISTS idx_meeting_bookings_status ON meeting_bookings(status, requestedAt);
         CREATE INDEX IF NOT EXISTS idx_meeting_bookings_requester ON meeting_bookings(requestedById, requestedAt);
       `);
@@ -393,6 +397,169 @@ const migrations = [
       if (!userCols.includes('isMeetingOperator')) {
         db.exec('ALTER TABLE users ADD COLUMN isMeetingOperator INTEGER NOT NULL DEFAULT 0');
       }
+    }
+  },
+  {
+    version: 18,
+    up: (db) => {
+      const meetingCols = db.prepare("PRAGMA table_info('meeting_bookings')").all().map((c) => String(c.name || ''));
+      if (!meetingCols.includes('kioskLanguage')) {
+        db.exec("ALTER TABLE meeting_bookings ADD COLUMN kioskLanguage TEXT NOT NULL DEFAULT ''");
+      }
+    }
+  },
+  {
+    version: 19,
+    up: (db) => {
+      const userCols = db.prepare("PRAGMA table_info('users')").all().map((c) => String(c.name || ''));
+      if (!userCols.includes('linkedExternalClientId')) {
+        db.exec("ALTER TABLE users ADD COLUMN linkedExternalClientId TEXT NOT NULL DEFAULT ''");
+      }
+      if (!userCols.includes('linkedExternalId')) {
+        db.exec("ALTER TABLE users ADD COLUMN linkedExternalId TEXT NOT NULL DEFAULT ''");
+      }
+    }
+  },
+  {
+    version: 20,
+    up: (db) => {
+      const clientChatCols = db.prepare("PRAGMA table_info('client_chat_messages')").all().map((c) => String(c.name || ''));
+      if (clientChatCols.length && !clientChatCols.includes('deletedForJson')) {
+        db.exec("ALTER TABLE client_chat_messages ADD COLUMN deletedForJson TEXT NOT NULL DEFAULT '[]'");
+      }
+      const dmChatCols = db.prepare("PRAGMA table_info('dm_chat_messages')").all().map((c) => String(c.name || ''));
+      if (dmChatCols.length && !dmChatCols.includes('deletedForJson')) {
+        db.exec("ALTER TABLE dm_chat_messages ADD COLUMN deletedForJson TEXT NOT NULL DEFAULT '[]'");
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS meeting_notes (
+          id TEXT PRIMARY KEY,
+          meetingId TEXT NOT NULL,
+          authorUserId TEXT NOT NULL,
+          authorUsername TEXT NOT NULL,
+          authorExternalId TEXT NOT NULL DEFAULT '',
+          authorEmail TEXT NOT NULL DEFAULT '',
+          authorDisplayName TEXT NOT NULL DEFAULT '',
+          title TEXT NOT NULL DEFAULT '',
+          contentText TEXT NOT NULL DEFAULT '',
+          contentHtml TEXT NOT NULL DEFAULT '',
+          contentLexical TEXT NOT NULL DEFAULT '',
+          shared INTEGER NOT NULL DEFAULT 0,
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_meeting_notes_meeting ON meeting_notes(meetingId, updatedAt DESC);
+      `);
+      const meetingNotesCols = db.prepare("PRAGMA table_info('meeting_notes')").all().map((c) => String(c.name || ''));
+      if (meetingNotesCols.length && !meetingNotesCols.includes('authorEmail')) {
+        db.exec("ALTER TABLE meeting_notes ADD COLUMN authorEmail TEXT NOT NULL DEFAULT ''");
+      }
+      if (meetingNotesCols.length && !meetingNotesCols.includes('authorDisplayName')) {
+        db.exec("ALTER TABLE meeting_notes ADD COLUMN authorDisplayName TEXT NOT NULL DEFAULT ''");
+      }
+    }
+  },
+  {
+    version: 21,
+    up: (db) => {
+      const meetingNotesCols = db.prepare("PRAGMA table_info('meeting_notes')").all().map((c) => String(c.name || ''));
+      if (meetingNotesCols.length && !meetingNotesCols.includes('authorEmail')) {
+        db.exec("ALTER TABLE meeting_notes ADD COLUMN authorEmail TEXT NOT NULL DEFAULT ''");
+      }
+      if (meetingNotesCols.length && !meetingNotesCols.includes('authorDisplayName')) {
+        db.exec("ALTER TABLE meeting_notes ADD COLUMN authorDisplayName TEXT NOT NULL DEFAULT ''");
+      }
+    }
+  },
+  {
+    version: 22,
+    up: (db) => {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_meeting_bookings_client_start_end ON meeting_bookings(clientId, startAt, endAt);');
+    }
+  },
+  {
+    version: 23,
+    up: (db) => {
+      const meetingCols = db.prepare("PRAGMA table_info('meeting_bookings')").all().map((c) => String(c.name || ''));
+      if (!meetingCols.includes('meetingAdminIdsJson')) {
+        db.exec("ALTER TABLE meeting_bookings ADD COLUMN meetingAdminIdsJson TEXT NOT NULL DEFAULT '[]'");
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS client_device_import (
+          clientId TEXT PRIMARY KEY,
+          url TEXT NOT NULL,
+          username TEXT NOT NULL,
+          passwordEnc TEXT,
+          method TEXT NOT NULL DEFAULT 'POST',
+          bodyJson TEXT,
+          updatedAt INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS external_devices (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          clientId TEXT NOT NULL,
+          devId TEXT NOT NULL,
+          deviceType TEXT NOT NULL DEFAULT '',
+          deviceName TEXT NOT NULL DEFAULT '',
+          manufacturer TEXT NOT NULL DEFAULT '',
+          model TEXT NOT NULL DEFAULT '',
+          serialNumber TEXT NOT NULL DEFAULT '',
+          hidden INTEGER NOT NULL DEFAULT 0,
+          present INTEGER NOT NULL DEFAULT 1,
+          lastSeenAt INTEGER,
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL,
+          UNIQUE(clientId, devId)
+        );
+        CREATE INDEX IF NOT EXISTS idx_external_devices_client ON external_devices(clientId, devId);
+        CREATE INDEX IF NOT EXISTS idx_external_devices_client_present ON external_devices(clientId, present, hidden);
+      `);
+    }
+  },
+  {
+    version: 24,
+    up: (db) => {
+      const meetingCols = db.prepare("PRAGMA table_info('meeting_bookings')").all().map((c) => String(c.name || ''));
+      if (!meetingCols.includes('meetingNumber')) {
+        db.exec("ALTER TABLE meeting_bookings ADD COLUMN meetingNumber INTEGER NOT NULL DEFAULT 0");
+      }
+      const rows = db.prepare('SELECT id FROM meeting_bookings ORDER BY createdAt ASC, id ASC').all();
+      if (rows.length) {
+        const update = db.prepare('UPDATE meeting_bookings SET meetingNumber = ? WHERE id = ?');
+        const tx = db.transaction((items) => {
+          let next = 0;
+          for (const item of items) {
+            next += 1;
+            update.run(next, String(item.id || ''));
+          }
+        });
+        tx(rows);
+      }
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_meeting_bookings_meeting_number ON meeting_bookings(meetingNumber);');
+    }
+  },
+  {
+    version: 25,
+    up: (db) => {
+      const meetingCols = db.prepare("PRAGMA table_info('meeting_bookings')").all().map((c) => String(c.name || ''));
+      if (!meetingCols.includes('followUpOfMeetingId')) {
+        db.exec("ALTER TABLE meeting_bookings ADD COLUMN followUpOfMeetingId TEXT");
+      }
+      if (!meetingCols.includes('followUpSequence')) {
+        db.exec("ALTER TABLE meeting_bookings ADD COLUMN followUpSequence INTEGER NOT NULL DEFAULT 0");
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS idx_meeting_bookings_followup ON meeting_bookings(followUpOfMeetingId, followUpSequence);');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS meeting_manager_fields (
+          meetingId TEXT PRIMARY KEY,
+          topicsText TEXT NOT NULL DEFAULT '',
+          summaryText TEXT NOT NULL DEFAULT '',
+          actionsJson TEXT NOT NULL DEFAULT '[]',
+          nextMeetingDate TEXT NOT NULL DEFAULT '',
+          updatedAt INTEGER NOT NULL,
+          updatedById TEXT NOT NULL DEFAULT '',
+          updatedByUsername TEXT NOT NULL DEFAULT ''
+        );
+      `);
     }
   }
 ];
@@ -500,6 +667,8 @@ const openDb = () => {
       lastName TEXT NOT NULL DEFAULT '',
       phone TEXT NOT NULL DEFAULT '',
       email TEXT NOT NULL DEFAULT '',
+      linkedExternalClientId TEXT NOT NULL DEFAULT '',
+      linkedExternalId TEXT NOT NULL DEFAULT '',
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL
     );
@@ -523,6 +692,7 @@ const openDb = () => {
 	      attachmentsJson TEXT NOT NULL DEFAULT '[]',
 	      starredByJson TEXT NOT NULL DEFAULT '[]',
 	      reactionsJson TEXT NOT NULL DEFAULT '{}',
+	      deletedForJson TEXT NOT NULL DEFAULT '[]',
 	      text TEXT NOT NULL,
 	      deleted INTEGER NOT NULL DEFAULT 0,
 	      deletedAt INTEGER,
@@ -591,6 +761,15 @@ const openDb = () => {
       bodyJson TEXT,
       updatedAt INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS client_device_import (
+      clientId TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      username TEXT NOT NULL,
+      passwordEnc TEXT,
+      method TEXT NOT NULL DEFAULT 'POST',
+      bodyJson TEXT,
+      updatedAt INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS external_users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       clientId TEXT NOT NULL,
@@ -614,6 +793,24 @@ const openDb = () => {
       updatedAt INTEGER NOT NULL,
       UNIQUE(clientId, externalId)
     );
+    CREATE TABLE IF NOT EXISTS external_devices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      clientId TEXT NOT NULL,
+      devId TEXT NOT NULL,
+      deviceType TEXT NOT NULL DEFAULT '',
+      deviceName TEXT NOT NULL DEFAULT '',
+      manufacturer TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      serialNumber TEXT NOT NULL DEFAULT '',
+      hidden INTEGER NOT NULL DEFAULT 0,
+      present INTEGER NOT NULL DEFAULT 1,
+      lastSeenAt INTEGER,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      UNIQUE(clientId, devId)
+    );
+    CREATE INDEX IF NOT EXISTS idx_external_devices_client ON external_devices(clientId, devId);
+    CREATE INDEX IF NOT EXISTS idx_external_devices_client_present ON external_devices(clientId, present, hidden);
 
     CREATE TABLE IF NOT EXISTS user_custom_fields (
       id TEXT PRIMARY KEY,
@@ -672,6 +869,7 @@ const openDb = () => {
       technicalEmail TEXT NOT NULL DEFAULT '',
       notes TEXT NOT NULL DEFAULT '',
       videoConferenceLink TEXT NOT NULL DEFAULT '',
+      kioskLanguage TEXT NOT NULL DEFAULT '',
       setupBufferBeforeMin INTEGER NOT NULL DEFAULT 0,
       setupBufferAfterMin INTEGER NOT NULL DEFAULT 0,
       startAt INTEGER NOT NULL,
@@ -680,10 +878,13 @@ const openDb = () => {
       effectiveEndAt INTEGER NOT NULL,
       multiDayGroupId TEXT,
       occurrenceDate TEXT NOT NULL DEFAULT '',
+      followUpOfMeetingId TEXT,
+      followUpSequence INTEGER NOT NULL DEFAULT 0,
       requestedById TEXT NOT NULL,
       requestedByUsername TEXT NOT NULL,
       requestedByEmail TEXT NOT NULL DEFAULT '',
       requestedAt INTEGER NOT NULL,
+      meetingAdminIdsJson TEXT NOT NULL DEFAULT '[]',
       reviewedAt INTEGER,
       reviewedById TEXT,
       reviewedByUsername TEXT,
@@ -693,6 +894,7 @@ const openDb = () => {
     );
     CREATE INDEX IF NOT EXISTS idx_meeting_bookings_site_time ON meeting_bookings(siteId, effectiveStartAt, effectiveEndAt);
     CREATE INDEX IF NOT EXISTS idx_meeting_bookings_room_time ON meeting_bookings(roomId, effectiveStartAt, effectiveEndAt);
+    CREATE INDEX IF NOT EXISTS idx_meeting_bookings_client_start_end ON meeting_bookings(clientId, startAt, endAt);
     CREATE INDEX IF NOT EXISTS idx_meeting_bookings_status ON meeting_bookings(status, requestedAt);
     CREATE INDEX IF NOT EXISTS idx_meeting_bookings_requester ON meeting_bookings(requestedById, requestedAt);
     CREATE TABLE IF NOT EXISTS meeting_audit_log (
@@ -713,9 +915,44 @@ const openDb = () => {
       PRIMARY KEY (meetingId, entryKey)
     );
     CREATE INDEX IF NOT EXISTS idx_meeting_checkins_meeting ON meeting_checkins(meetingId, updatedAt DESC);
+    CREATE TABLE IF NOT EXISTS meeting_notes (
+      id TEXT PRIMARY KEY,
+      meetingId TEXT NOT NULL,
+      authorUserId TEXT NOT NULL,
+      authorUsername TEXT NOT NULL,
+      authorExternalId TEXT NOT NULL DEFAULT '',
+      authorEmail TEXT NOT NULL DEFAULT '',
+      authorDisplayName TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '',
+      contentText TEXT NOT NULL DEFAULT '',
+      contentHtml TEXT NOT NULL DEFAULT '',
+      contentLexical TEXT NOT NULL DEFAULT '',
+      shared INTEGER NOT NULL DEFAULT 0,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_meeting_notes_meeting ON meeting_notes(meetingId, updatedAt DESC);
+    CREATE TABLE IF NOT EXISTS meeting_manager_fields (
+      meetingId TEXT PRIMARY KEY,
+      topicsText TEXT NOT NULL DEFAULT '',
+      summaryText TEXT NOT NULL DEFAULT '',
+      actionsJson TEXT NOT NULL DEFAULT '[]',
+      nextMeetingDate TEXT NOT NULL DEFAULT '',
+      updatedAt INTEGER NOT NULL,
+      updatedById TEXT NOT NULL DEFAULT '',
+      updatedByUsername TEXT NOT NULL DEFAULT ''
+    );
   `);
 
   runMigrations(db);
+  try {
+    const meetingCols = db.prepare("PRAGMA table_info('meeting_bookings')").all().map((c) => String(c.name || ''));
+    if (meetingCols.includes('followUpOfMeetingId') && meetingCols.includes('followUpSequence')) {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_meeting_bookings_followup ON meeting_bookings(followUpOfMeetingId, followUpSequence);');
+    }
+  } catch {
+    // ignore index bootstrap errors; migration flow handles schema convergence
+  }
 
   // enforce single superadmin account
   try {

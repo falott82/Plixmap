@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Cog, History, Info, LogOut, MessageSquare, RefreshCw } from 'lucide-react';
+import { Check, Cog, Copy, ExternalLink, History, Info, LogOut, MessageSquare, QrCode, RefreshCw, Smartphone } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import QRCodeLib from 'qrcode';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
 import { useT } from '../../i18n/useT';
 import { useUIStore } from '../../store/useUIStore';
+import { fetchMobileAppUrl } from '../../api/mobile';
 import UserAvatar from '../ui/UserAvatar';
 
 const UserMenu = () => {
   const { user, logout } = useAuthStore();
   const [open, setOpen] = useState(false);
+  const [mobileModalOpen, setMobileModalOpen] = useState(false);
+  const [mobileAppUrl, setMobileAppUrl] = useState('');
+  const [mobileQrUrl, setMobileQrUrl] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -36,6 +41,36 @@ const UserMenu = () => {
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
   }, []);
+
+  useEffect(() => {
+    if (!mobileModalOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchMobileAppUrl();
+        const url = String(res?.url || '').trim() || `${window.location.origin}/mobile`;
+        if (cancelled) return;
+        setMobileAppUrl(url);
+        try {
+          const qr = await QRCodeLib.toDataURL(url, { width: 220, margin: 1 });
+          if (!cancelled) setMobileQrUrl(qr);
+        } catch {
+          if (!cancelled) setMobileQrUrl('');
+        }
+      } catch {
+        const fallback = `${window.location.origin}/mobile`;
+        if (cancelled) return;
+        setMobileAppUrl(fallback);
+        try {
+          const qr = await QRCodeLib.toDataURL(fallback, { width: 220, margin: 1 });
+          if (!cancelled) setMobileQrUrl(qr);
+        } catch {}
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mobileModalOpen]);
 
   const label = useMemo(() => {
     if (!user) return '';
@@ -167,6 +202,20 @@ const UserMenu = () => {
             </button>
           ) : null}
           <button
+            onClick={() => {
+              setOpen(false);
+              setMobileModalOpen(true);
+            }}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold text-ink hover:bg-slate-50"
+            title={t({
+              it: 'Mobile App: mostra URL e QR per aprire la web app mobile (agenda meeting, chat e check-in).',
+              en: 'Mobile App: shows URL and QR code for the mobile web app (meeting agenda, chat and check-in).'
+            })}
+          >
+            <Smartphone size={16} className="text-slate-500" />
+            {t({ it: 'Mobile App', en: 'Mobile App' })}
+          </button>
+          <button
             onClick={async () => {
               setOpen(false);
               if (hasDirtyPlans) {
@@ -181,6 +230,67 @@ const UserMenu = () => {
             <LogOut size={16} />
             {t({ it: 'Logout', en: 'Logout' })}
           </button>
+        </div>
+      ) : null}
+      {mobileModalOpen ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onMouseDown={() => setMobileModalOpen(false)}>
+          <div
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-card"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-lg font-semibold text-ink">{t({ it: 'Mobile App', en: 'Mobile App' })}</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {t({
+                    it: 'Scansiona il QR dal telefono per aprire la web app mobile (agenda giornaliera, chat e check-in meeting).',
+                    en: 'Scan the QR code from your phone to open the mobile web app (daily agenda, chat and meeting check-in).'
+                  })}
+                </div>
+              </div>
+              <button type="button" onClick={() => setMobileModalOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100">
+                <span className="text-lg leading-none">×</span>
+              </button>
+            </div>
+            <div className="mt-4 flex items-center justify-center">
+              {mobileQrUrl ? (
+                <img src={mobileQrUrl} alt="Mobile app QR code" className="h-56 w-56 rounded-2xl border border-slate-200 bg-white p-2" />
+              ) : (
+                <div className="flex h-56 w-56 items-center justify-center rounded-2xl border border-dashed border-slate-300 text-slate-400">
+                  <QrCode size={28} />
+                </div>
+              )}
+            </div>
+            <div className="mt-4">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t({ it: 'URL mobile', en: 'Mobile URL' })}
+              </label>
+              <input readOnly value={mobileAppUrl} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700" />
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(mobileAppUrl);
+                  } catch {}
+                }}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+              >
+                <Copy size={15} />
+                {t({ it: 'Copia link', en: 'Copy link' })}
+              </button>
+              <button
+                type="button"
+                onClick={() => window.open(mobileAppUrl, '_blank', 'noopener,noreferrer')}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90"
+              >
+                <ExternalLink size={15} />
+                {t({ it: 'Apri link', en: 'Open link' })}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

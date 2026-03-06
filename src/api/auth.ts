@@ -25,6 +25,8 @@ export interface AuthUser {
   lastName: string;
   phone: string;
   email: string;
+  linkedExternalClientId?: string;
+  linkedExternalId?: string;
   chatLayout?: Record<string, any>;
 }
 
@@ -127,6 +129,20 @@ export interface AdminUserRow {
   lastName: string;
   phone: string;
   email: string;
+  linkedExternalClientId?: string;
+  linkedExternalId?: string;
+  linkedImportedUser?: {
+    clientId: string;
+    clientName: string;
+    externalId: string;
+    firstName: string;
+    lastName: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    role: string;
+    department: string;
+  } | null;
   createdAt: number;
   updatedAt: number;
   permissions: Permission[];
@@ -150,6 +166,8 @@ export const adminCreateUser = async (payload: {
   canCreateMeetings?: boolean;
   canManageBusinessPartners?: boolean;
   isMeetingOperator?: boolean;
+  linkedExternalClientId?: string;
+  linkedExternalId?: string;
   permissions: Permission[];
 }): Promise<{ ok: boolean; id: string }> => {
   const normalizedUsername = String(payload.username || '').trim().toLowerCase();
@@ -159,8 +177,9 @@ export const adminCreateUser = async (payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...payload, username: normalizedUsername })
   });
-  if (!res.ok) throw new Error(`Failed to create user (${res.status})`);
-  return res.json();
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to create user (${res.status})`);
+  return body;
 };
 
 export const adminUpdateUser = async (
@@ -175,6 +194,8 @@ export const adminUpdateUser = async (
     canCreateMeetings?: boolean;
     canManageBusinessPartners?: boolean;
     isMeetingOperator?: boolean;
+    linkedExternalClientId?: string;
+    linkedExternalId?: string;
     disabled: boolean;
     permissions: Permission[];
   }
@@ -185,7 +206,41 @@ export const adminUpdateUser = async (
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  if (!res.ok) throw new Error(`Failed to update user (${res.status})`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to update user (${res.status})`);
+};
+
+export interface ImportedUserLinkCandidate {
+  clientId: string;
+  clientName: string;
+  externalId: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  role: string;
+  department: string;
+  hidden: boolean;
+  present: boolean;
+}
+
+export const searchImportedUsersForPortalLink = async (params: {
+  q?: string;
+  email?: string;
+  limit?: number;
+}): Promise<{ ok: true; rows: ImportedUserLinkCandidate[] }> => {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set('q', params.q);
+  if (params.email) qs.set('email', params.email);
+  if (params.limit) qs.set('limit', String(params.limit));
+  const res = await apiFetch(`/api/users/imported-user-search?${qs.toString()}`, {
+    credentials: 'include',
+    cache: 'no-store'
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to search imported users (${res.status})`);
+  return body;
 };
 
 export const changePassword = async (id: string, payload: { oldPassword?: string; newPassword: string }) => {

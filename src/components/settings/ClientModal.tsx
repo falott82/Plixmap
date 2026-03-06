@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { Eye, FileDown, Trash2, Upload, X } from 'lucide-react';
+import { Eye, FileDown, Loader2, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { Client } from '../../store/types';
 import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import { useToastStore } from '../../store/useToast';
 import { useT } from '../../i18n/useT';
+import { testOpenAiApiKey } from '../../api/ai';
 
 interface Props {
   open: boolean;
@@ -14,6 +15,8 @@ interface Props {
   onSubmit: (payload: {
     name: string;
     shortName?: string;
+    openAiApiKey?: string;
+    openAiDailyTokensPerUser?: number;
     address?: string;
     phone?: string;
     email?: string;
@@ -50,6 +53,11 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
   const push = useToastStore((s) => s.push);
   const [name, setName] = useState(''); // ragione sociale estesa
   const [shortName, setShortName] = useState(''); // nome breve (workspace)
+  const [openAiApiKey, setOpenAiApiKey] = useState('');
+  const [openAiDailyTokensPerUser, setOpenAiDailyTokensPerUser] = useState('');
+  const [showOpenAiApiKey, setShowOpenAiApiKey] = useState(false);
+  const [testingOpenAi, setTestingOpenAi] = useState(false);
+  const [openAiTestResult, setOpenAiTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -64,6 +72,15 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
     if (!open) return;
     setName(initial?.name || '');
     setShortName(initial?.shortName || '');
+    setOpenAiApiKey(initial?.openAiApiKey || '');
+    setOpenAiDailyTokensPerUser(
+      Number.isFinite(Number(initial?.openAiDailyTokensPerUser))
+        ? String(Math.max(0, Math.round(Number(initial?.openAiDailyTokensPerUser))))
+        : ''
+    );
+    setShowOpenAiApiKey(false);
+    setTestingOpenAi(false);
+    setOpenAiTestResult(null);
     setAddress(initial?.address || '');
     setPhone(initial?.phone || '');
     setEmail(initial?.email || '');
@@ -87,9 +104,21 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
 
   const submit = () => {
     if (!canSubmit) return;
+    const openAiDailyTokensRaw = openAiDailyTokensPerUser.trim();
+    let normalizedOpenAiDailyTokensPerUser: number | undefined = undefined;
+    if (openAiDailyTokensRaw) {
+      const parsed = Number(openAiDailyTokensRaw);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        push(t({ it: 'Token giornalieri non validi. Inserisci un numero >= 0.', en: 'Invalid daily tokens. Enter a number >= 0.' }), 'danger');
+        return;
+      }
+      normalizedOpenAiDailyTokensPerUser = Math.round(parsed);
+    }
     onSubmit({
       name: name.trim(),
       shortName: shortName.trim() || undefined,
+      openAiApiKey: openAiApiKey.trim() || undefined,
+      openAiDailyTokensPerUser: normalizedOpenAiDailyTokensPerUser,
       address: address.trim() || undefined,
       phone: phone.trim() || undefined,
       email: email.trim() || undefined,
@@ -100,6 +129,31 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
       attachments: attachments.length ? attachments : undefined
     });
     onClose();
+  };
+
+  const runOpenAiApiKeyTest = async () => {
+    const apiKey = openAiApiKey.trim();
+    if (!apiKey) {
+      push(t({ it: 'Inserisci prima la OpenAI API key.', en: 'Enter the OpenAI API key first.' }), 'info');
+      return;
+    }
+    setTestingOpenAi(true);
+    setOpenAiTestResult(null);
+    try {
+      const result = await testOpenAiApiKey(apiKey);
+      const model = String(result?.firstModel || '').trim();
+      const message = model
+        ? t({ it: `Connessione riuscita. Primo modello: ${model}`, en: `Connection successful. First model: ${model}` })
+        : t({ it: 'Connessione riuscita.', en: 'Connection successful.' });
+      setOpenAiTestResult({ ok: true, message });
+      push(message, 'success');
+    } catch (error: any) {
+      const message = String(error?.message || t({ it: 'Test OpenAI fallito.', en: 'OpenAI test failed.' }));
+      setOpenAiTestResult({ ok: false, message });
+      push(message, 'danger');
+    } finally {
+      setTestingOpenAi(false);
+    }
   };
 
   return (
@@ -238,6 +292,92 @@ const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
                         rows={3}
                         placeholder={t({ it: 'Note, contatti, ecc.', en: 'Notes, contacts, etc.' })}
                       />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      OpenAI API key
+                      <div
+                        className="text-xs font-normal text-slate-500"
+                        title={t({
+                          it: 'Chiave API per abilitare integrazioni AI sul cliente. Lascia vuoto per disattivare.',
+                          en: 'API key used to enable AI integrations for this client. Leave empty to disable.'
+                        })}
+                      >
+                        {t({ it: 'Integrazione AI per questo cliente', en: 'AI integration for this client' })}
+                      </div>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          type={showOpenAiApiKey ? 'text' : 'password'}
+                          value={openAiApiKey}
+                          onChange={(e) => {
+                            setOpenAiApiKey(e.target.value);
+                            setOpenAiTestResult(null);
+                          }}
+                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          placeholder="sk-..."
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowOpenAiApiKey((prev) => !prev)}
+                          className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-slate-600 hover:bg-slate-50"
+                          title={showOpenAiApiKey ? t({ it: 'Nascondi', en: 'Hide' }) : t({ it: 'Mostra', en: 'Show' })}
+                        >
+                          <Eye size={16} />
+                        </button>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={runOpenAiApiKeyTest}
+                          disabled={testingOpenAi || !openAiApiKey.trim()}
+                          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          title={t({
+                            it: 'Verifica che la OpenAI API key sia valida e raggiungibile.',
+                            en: 'Verify that the OpenAI API key is valid and reachable.'
+                          })}
+                        >
+                          {testingOpenAi ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
+                          {t({ it: 'Test API key', en: 'Test API key' })}
+                        </button>
+                        {openAiTestResult ? (
+                          <div
+                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                              openAiTestResult.ok
+                                ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                                : 'border border-rose-200 bg-rose-50 text-rose-700'
+                            }`}
+                          >
+                            {openAiTestResult.message}
+                          </div>
+                        ) : null}
+                      </div>
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Token giornalieri per utente', en: 'Daily tokens per user' })}
+                      <div
+                        className="text-xs font-normal text-slate-500"
+                        title={t({
+                          it: 'Limite massimo di token AI per singolo utente ogni giorno su questo cliente. Lascia vuoto per nessun limite.',
+                          en: 'Maximum AI token budget per user per day for this client. Leave empty for no limit.'
+                        })}
+                      >
+                        {t({ it: 'Controllo consumo AI per utente', en: 'Per-user AI usage control' })}
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        inputMode="numeric"
+                        value={openAiDailyTokensPerUser}
+                        onChange={(e) => setOpenAiDailyTokensPerUser(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                        placeholder={t({ it: 'Es. 50000', en: 'e.g. 50000' })}
+                      />
+                      <div className="mt-1 text-xs text-slate-500">
+                        {t({
+                          it: 'Imposta 0 per bloccare l’uso AI, vuoto per nessun limite.',
+                          en: 'Set 0 to block AI usage, empty for no limit.'
+                        })}
+                      </div>
                     </label>
                     <div className="text-xs text-slate-500">
                       {t({ it: '* I campi con asterisco sono obbligatori.', en: '* Fields marked with an asterisk are required.' })}

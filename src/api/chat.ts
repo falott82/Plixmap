@@ -14,6 +14,7 @@ export interface ChatMessage {
   attachments?: { name: string; url: string; mime?: string; sizeBytes?: number }[];
   starredBy?: string[];
   reactions?: Record<string, string[]>;
+  deletedFor?: string[];
   text: string;
   deleted: boolean;
   deletedAt: number | null;
@@ -109,12 +110,19 @@ export const editChatMessage = async (id: string, text: string): Promise<{ ok: b
   return res.json();
 };
 
-export const deleteChatMessage = async (id: string): Promise<void> => {
-  const res = await apiFetch(`/api/chat/messages/${encodeURIComponent(id)}`, {
+export const deleteChatMessage = async (id: string, mode: 'me' | 'all' = 'all'): Promise<void> => {
+  const qs = mode === 'me' ? '?mode=me' : '?mode=all';
+  const res = await apiFetch(`/api/chat/messages/${encodeURIComponent(id)}${qs}`, {
     method: 'DELETE',
     credentials: 'include'
   });
-  if (!res.ok) throw new Error(`Failed to delete message (${res.status})`);
+  if (!res.ok) {
+    const detail = await res
+      .json()
+      .then((j) => (j && typeof j === 'object' ? (j as any).error : ''))
+      .catch(() => '');
+    throw new Error(`Failed to delete message (${res.status})${detail ? `: ${detail}` : ''}`);
+  }
 };
 
 export const starChatMessage = async (id: string, star?: boolean): Promise<{ ok: boolean; message: ChatMessage }> => {
@@ -181,6 +189,32 @@ export type DmContactRow = {
 export const fetchDmContacts = async (): Promise<{ users: DmContactRow[] }> => {
   const res = await apiFetch('/api/chat/dm/contacts', { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch DM contacts (${res.status})`);
+  return res.json();
+};
+
+export type MobileChatOverviewRow = {
+  id: string;
+  name: string;
+  logoUrl?: string;
+  avatarUrl?: string;
+  unreadCount: number;
+  lastMessageAt?: number | null;
+  lastMessage: ChatMessage | null;
+};
+
+export type MobileDmOverviewRow = {
+  id: string;
+  threadId: string;
+  name: string;
+  avatarUrl?: string;
+  unreadCount: number;
+  lastMessageAt?: number | null;
+  lastMessage: ChatMessage | null;
+};
+
+export const fetchMobileChatOverview = async (): Promise<{ clients: MobileChatOverviewRow[]; dms: MobileDmOverviewRow[]; serverAt: number }> => {
+  const res = await apiFetch('/api/chat/mobile/overview', { credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to fetch mobile chat overview (${res.status})`);
   return res.json();
 };
 

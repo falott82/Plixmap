@@ -1,9 +1,10 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { ArrowUpCircle, Eye, EyeOff, FileDown, Info, Pencil, Plus, RefreshCw, Save, Search, Settings2, TestTube, Trash2, UploadCloud, Users, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
+import { useAuthStore } from '../../store/useAuthStore';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import {
   clearImport,
@@ -68,6 +69,8 @@ const CustomImportPanel = (
   const clients = useDataStore((s) => s.clients);
   const setServerState = useDataStore((s) => s.setServerState);
   const { push } = useToastStore();
+  const authUser = useAuthStore((s) => s.user);
+  const isSuperAdmin = !!authUser?.isSuperAdmin && String(authUser?.username || '').toLowerCase() === 'superadmin';
 
   const [summaryRows, setSummaryRows] = useState<ImportSummaryRow[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -95,7 +98,10 @@ const CustomImportPanel = (
   const [usersQuery, setUsersQuery] = useState('');
   const [includeMissing, setIncludeMissing] = useState(false);
   const [onlyMissing, setOnlyMissing] = useState(false);
-  const [usersSortHiddenFirst, setUsersSortHiddenFirst] = useState<boolean>(false);
+  const [usersSortState, setUsersSortState] = useState<{ key: 'name' | 'id' | 'alloc' | 'hidden'; dir: 'asc' | 'desc' }>({
+    key: 'name',
+    dir: 'asc'
+  });
 
   const [webApiPreviewOpen, setWebApiPreviewOpen] = useState(false);
   const [webApiPreviewLoading, setWebApiPreviewLoading] = useState(false);
@@ -133,6 +139,12 @@ const CustomImportPanel = (
     ext3: '',
     isExternal: false
   });
+  const configDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const webApiPreviewDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const usersDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const manualUserDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const csvConfirmDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const infoDialogFocusRef = useRef<HTMLButtonElement | null>(null);
 
   const summaryById = useMemo(() => new Map(summaryRows.map((r) => [r.clientId, r])), [summaryRows]);
   const visibleSummaryRows = useMemo(() => {
@@ -193,6 +205,8 @@ const CustomImportPanel = (
     }
     return set;
   }, [duplicateGroups]);
+  const configChildDialogOpen = csvConfirmOpen || clearConfirmOpen;
+  const usersChildDialogOpen = manualUserModalOpen || !!manualDeleteCandidate || duplicatesModalOpen;
   const infoCounts = useMemo(() => {
     if (!infoClient) return { sites: 0, plans: 0 };
     const sites = infoClient.sites?.length || 0;
@@ -220,6 +234,11 @@ const CustomImportPanel = (
   }, [activeClient]);
 
   const loadSummary = useCallback(async () => {
+    if (!isSuperAdmin) {
+      setSummaryRows([]);
+      setSummaryLoading(false);
+      return;
+    }
     setSummaryLoading(true);
     try {
       const res = await fetchImportSummary();
@@ -229,7 +248,7 @@ const CustomImportPanel = (
     } finally {
       setSummaryLoading(false);
     }
-  }, []);
+  }, [isSuperAdmin]);
 
   const loadConfig = useCallback(async (clientId: string) => {
     setCfg(null);
@@ -303,15 +322,23 @@ const CustomImportPanel = (
   const sortedUsers = useMemo(() => {
     const list = [...filteredUsers];
     list.sort((a, b) => {
-      if (usersSortHiddenFirst) {
-        if (!!a.hidden !== !!b.hidden) return a.hidden ? -1 : 1;
-      } else {
-        if (!!a.hidden !== !!b.hidden) return a.hidden ? 1 : -1;
-      }
+      const dir = usersSortState.dir === 'asc' ? 1 : -1;
+      const allocA = assignedCounts.get(`${a.clientId}:${a.externalId}`) || 0;
+      const allocB = assignedCounts.get(`${b.clientId}:${b.externalId}`) || 0;
+      const primary =
+        usersSortState.key === 'id'
+          ? String(a.externalId || '').localeCompare(String(b.externalId || ''), undefined, { sensitivity: 'base' })
+          : usersSortState.key === 'alloc'
+            ? allocA - allocB
+            : usersSortState.key === 'hidden'
+              ? Number(!!a.hidden) - Number(!!b.hidden)
+              : comparePeopleByName(a, b);
+      if (primary !== 0) return primary * dir;
+      if (!!a.hidden !== !!b.hidden) return Number(!!a.hidden) - Number(!!b.hidden);
       return comparePeopleByName(a, b);
     });
     return list;
-  }, [filteredUsers, usersSortHiddenFirst]);
+  }, [assignedCounts, filteredUsers, usersSortState]);
 
   const webApiPreviewExistingFiltered = useMemo(() => {
     const q = normalizeSearchText(webApiPreviewLeftQuery);
@@ -429,7 +456,7 @@ const CustomImportPanel = (
     setUsersQuery('');
     setIncludeMissing(false);
     setOnlyMissing(false);
-    setUsersSortHiddenFirst(false);
+    setUsersSortState({ key: 'name', dir: 'asc' });
     setCsvFile(null);
     await loadUsers(clientId);
   };
@@ -544,6 +571,15 @@ const CustomImportPanel = (
       setSyncResult(res);
       if (res.ok) {
         push(t({ it: 'Import completato', en: 'Import completed' }), 'success');
+        if ((res as any)?.summary?.duplicateEmails > 0) {
+          push(
+            t({
+              it: `Import completato con ${(res as any).summary.duplicateEmails} email duplicate saltate. Apri la schermata importazione per gestire le variazioni.`,
+              en: `Import completed with ${(res as any).summary.duplicateEmails} duplicate-email records skipped. Open import preview to review changes.`
+            }),
+            'info'
+          );
+        }
         await loadSummary();
         const rows = await loadUsers(clientId);
         await refreshWebApiPreview(clientId);
@@ -665,15 +701,20 @@ const CustomImportPanel = (
   };
 
   const downloadCsvTemplate = () => {
+    const safeClientName = String(activeClient?.shortName || activeClient?.name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-+|-+$/g, '');
     const template = [
-      'externalId,firstName,lastName,role,dept1,dept2,dept3,email,mobile,ext1,ext2,ext3,isExternal',
-      'u-001,Mario,Rossi,HR,People,,,mario.rossi@example.com,+39 333 1234567,101,,,"0"'
+      'firstName,lastName,role,dept1,dept2,dept3,email,mobile,ext1,ext2,ext3,isExternal',
+      'Mario,Rossi,HR,People,,,mario.rossi@example.com,+39 333 1234567,101,,,"0"'
     ].join('\n');
     const blob = new Blob([template], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'plixmap-users-template.csv';
+    a.download = safeClientName ? `${safeClientName}-users-import-template.csv` : 'users-import-template.csv';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -691,6 +732,15 @@ const CustomImportPanel = (
         }),
         'success'
       );
+      if ((res as any)?.summary?.duplicateEmails > 0) {
+        push(
+          t({
+            it: `CSV importato con ${(res as any).summary.duplicateEmails} email duplicate saltate.`,
+            en: `CSV imported with ${(res as any).summary.duplicateEmails} duplicate-email records skipped.`
+          }),
+          'info'
+        );
+      }
       setCsvFile(null);
       await loadSummary();
       const rows = await loadUsers(activeClientId);
@@ -820,26 +870,23 @@ const CustomImportPanel = (
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-ink">{t({ it: 'Import WebAPI / CSV / Manuale', en: 'WebAPI / CSV / Manual import' })}</div>
-            <div className="modal-description">
-              {t({
-                it: 'Ogni cliente ha una rubrica utenti separata. Da qui puoi importare e sincronizzare una lista utenti tramite WebAPI (endpoint esterno), da file CSV oppure tramite inserimento manuale.',
-                en: 'Each client has a separate user directory. From here you can import and sync a user list via WebAPI (external endpoint), CSV file or manual entry.'
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-
       {lockClientSelection && activeClientId ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-ink">
-                {t({ it: 'Sorgente importazione', en: 'Import source' })} · {activeClient?.shortName || activeClient?.name || '—'}
+              <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <span>{t({ it: 'Sorgente importazione', en: 'Import source' })} · {activeClient?.shortName || activeClient?.name || '—'}</span>
+                <button
+                  type="button"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-ink"
+                  title={t({
+                    it: 'Gestisci la rubrica utenti del cliente con tre sorgenti: WebAPI, CSV e inserimento manuale. Tutti gli utenti finiscono in un unico contenitore. I duplicati vengono segnalati per email o, se assente, per nome+cognome. Da questa schermata puoi configurare, testare e importare dalla WebAPI, importare da CSV e aggiungere utenti manuali.',
+                    en: 'Manage the client user directory with three sources: WebAPI, CSV and manual entry. All users go into one container. Duplicates are flagged by email or, if missing, by first and last name. From here you can configure, test and import from WebAPI, import from CSV and add manual users.'
+                  })}
+                  aria-label={t({ it: 'Informazioni import utenti', en: 'User import information' })}
+                >
+                  <Info size={14} />
+                </button>
               </div>
               <div className="modal-description">
                 {t({
@@ -1035,7 +1082,15 @@ const CustomImportPanel = (
       </div>
 
       <Transition show={configOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-[120]" onClose={() => setConfigOpen(false)}>
+        <Dialog
+          as="div"
+          className="relative z-[120]"
+          onClose={() => {
+            if (configChildDialogOpen) return;
+            setConfigOpen(false);
+          }}
+          initialFocus={configDialogFocusRef}
+        >
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-150"
@@ -1059,6 +1114,9 @@ const CustomImportPanel = (
                 leaveTo="opacity-0 scale-95"
               >
                 <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <button ref={configDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
                   <div className="modal-header">
                     <div>
                       <Dialog.Title className="modal-title">
@@ -1433,7 +1491,12 @@ const CustomImportPanel = (
       </Transition>
 
       <Transition show={webApiPreviewOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-[120]" onClose={() => setWebApiPreviewOpen(false)}>
+        <Dialog
+          as="div"
+          className="relative z-[130]"
+          onClose={() => setWebApiPreviewOpen(false)}
+          initialFocus={webApiPreviewDialogFocusRef}
+        >
           <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
             <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
           </Transition.Child>
@@ -1441,6 +1504,9 @@ const CustomImportPanel = (
             <div className="flex min-h-full items-center justify-center px-4 py-8">
               <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
                 <Dialog.Panel className="w-full max-w-6xl modal-panel">
+                  <button ref={webApiPreviewDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
                   <div className="modal-header">
                     <div>
                       <Dialog.Title className="modal-title">{t({ it: 'Importazione WebAPI', en: 'WebAPI import' })}</Dialog.Title>
@@ -1589,7 +1655,15 @@ const CustomImportPanel = (
       </Transition>
 
       <Transition show={usersOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-[120]" onClose={() => setUsersOpen(false)}>
+        <Dialog
+          as="div"
+          className="relative z-[125]"
+          onClose={() => {
+            if (usersChildDialogOpen) return;
+            setUsersOpen(false);
+          }}
+          initialFocus={usersDialogFocusRef}
+        >
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-150"
@@ -1612,7 +1686,10 @@ const CustomImportPanel = (
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-4xl modal-panel">
+                <Dialog.Panel className="w-full max-w-7xl modal-panel">
+                  <button ref={usersDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
                   <div className="modal-header">
                     <div>
                       <Dialog.Title className="modal-title">{t({ it: 'Utenti importati', en: 'Imported users' })}</Dialog.Title>
@@ -1634,11 +1711,23 @@ const CustomImportPanel = (
                         autoFocus
                       />
                     </div>
-                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                    <label
+                      className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                      title={t({
+                        it: 'Mostra anche gli utenti che risultano mancanti nell’ultima importazione (non più presenti nella sorgente).',
+                        en: 'Also show users marked as missing in the latest import (no longer present in the source).'
+                      })}
+                    >
                       <input type="checkbox" checked={includeMissing} onChange={(e) => setIncludeMissing(e.target.checked)} />
                       {t({ it: 'Includi mancanti', en: 'Include missing' })}
                     </label>
-                    <label className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+                    <label
+                      className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800"
+                      title={t({
+                        it: 'Mostra solo gli utenti mancanti per decidere se includerli o escluderli dal contenitore utenti.',
+                        en: 'Show only missing users so you can include or exclude them from the user container.'
+                      })}
+                    >
                       <input
                         type="checkbox"
                         checked={onlyMissing}
@@ -1661,120 +1750,208 @@ const CustomImportPanel = (
                     </button>
                   </div>
 
-                  <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-                    <div className="grid grid-cols-14 gap-2 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
-                      <div className="col-span-4">{t({ it: 'Nome', en: 'Name' })}</div>
-                      <div className="col-span-2">{t({ it: 'ID', en: 'ID' })}</div>
-                      <div className="col-span-4">{t({ it: 'Ruolo / Reparto', en: 'Role / Dept' })}</div>
-                      <div className="col-span-1 text-center">{t({ it: 'Alloc.', en: 'Alloc.' })}</div>
-                      <button
-                        type="button"
-                        onClick={() => setUsersSortHiddenFirst((v) => !v)}
-                        className="col-span-1 text-center uppercase hover:text-ink"
-                        title={t({ it: 'Ordina per visibilità (occhio barrato = nascosto)', en: 'Sort by visibility (slashed eye = hidden)' })}
-                      >
-                        {t({ it: 'Vis.', en: 'Vis.' })}
-                      </button>
-                      <div className="col-span-2 text-right">{t({ it: 'Azioni', en: 'Actions' })}</div>
-                    </div>
-                    <div className="max-h-[380px] overflow-auto">
+                  <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                    <div className="max-h-[55vh] overflow-auto">
                       {usersLoading ? <div className="px-4 py-6 text-sm text-slate-600">{t({ it: 'Caricamento…', en: 'Loading…' })}</div> : null}
                       {!usersLoading && !sortedUsers.length ? (
                         <div className="px-4 py-6 text-sm text-slate-600">{t({ it: 'Nessun utente trovato.', en: 'No users found.' })}</div>
                       ) : null}
-                      {sortedUsers.map((r) => {
-                        const count = assignedCounts.get(`${r.clientId}:${r.externalId}`) || 0;
-                        const displayName = `${String(r.firstName || '').trim()} ${String(r.lastName || '').trim()}`.trim() || r.email || r.externalId;
-                        const contact = [r.email, r.mobile].filter(Boolean).join(' · ');
-                        return (
-                          <div key={r.externalId} className="grid grid-cols-14 gap-2 border-t border-slate-200 px-4 py-3 text-sm">
-                            <div className="col-span-4 min-w-0">
-                              <div className="truncate font-semibold text-ink">
-                                {displayName}
-                                {(r.manual || String(r.externalId || '').toLowerCase().startsWith('manual:')) ? (
-                                  <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
-                                    {t({ it: 'Manuale', en: 'Manual' })}
-                                  </span>
-                                ) : null}
-                                {!r.present ? (
-                                  <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                                    {t({ it: 'Mancante', en: 'Missing' })}
-                                  </span>
-                                ) : null}
-                                {r.hidden ? (
-                                  <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">
-                                    {t({ it: 'Nascosto', en: 'Hidden' })}
-                                  </span>
-                                ) : null}
-                                {duplicateUserKeys.has(`${r.clientId}:${r.externalId}`) ? (
-                                  <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                                    {t({ it: 'Duplicato', en: 'Duplicate' })}
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="truncate text-xs text-slate-500">{contact}</div>
-                            </div>
-                            <div className="col-span-2 font-mono text-[12px] text-slate-700">{r.externalId}</div>
-                            <div className="col-span-4 min-w-0">
-                              <div className="truncate text-xs text-slate-700">{r.role || '—'}</div>
-                              <div className="truncate text-[11px] text-slate-500">{[r.dept1, r.dept2, r.dept3].filter(Boolean).join(' / ')}</div>
-                            </div>
-                            <div className="col-span-1 text-center text-sm font-semibold text-slate-700">{count}</div>
-                            <div className="col-span-1 flex items-center justify-center text-slate-500" title={r.hidden ? t({ it: 'Nascosto', en: 'Hidden' }) : t({ it: 'Visibile', en: 'Visible' })}>
-                              {r.hidden ? <EyeOff size={15} /> : <Eye size={15} />}
-                            </div>
-                            <div className="col-span-2 flex items-center justify-end">
-                              <div className="flex items-center gap-1">
-                                {(r.manual || String(r.externalId || '').toLowerCase().startsWith('manual:')) ? (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => openManualUserEdit(r)}
-                                      className="btn-inline"
-                                      title={t({ it: 'Modifica utente manuale', en: 'Edit manual user' })}
-                                    >
-                                      <Pencil size={12} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setManualDeleteCandidate(r)}
-                                      disabled={manualUserDeletingId === r.externalId}
-                                      className="btn-inline text-rose-700 hover:bg-rose-50"
-                                      title={t({ it: 'Rimuovi utente manuale', en: 'Delete manual user' })}
-                                    >
-                                      <Trash2 size={12} />
-                                    </button>
-                                  </>
-                                ) : null}
+                      {!usersLoading && sortedUsers.length ? (
+                        <table className="min-w-full text-sm">
+                          <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                              <th className="px-4 py-3 text-left" title={t({ it: 'Nome completo utente (badge: manuale, mancante, nascosto, duplicato).', en: 'User full name (badges: manual, missing, hidden, duplicate).' })}>
                                 <button
-                                  onClick={async () => {
-                                    if (!activeClientId) return;
-                                    try {
-                                      await setExternalUserHidden({ clientId: activeClientId, externalId: r.externalId, hidden: !r.hidden });
-                                      await loadUsers(activeClientId);
-                                      push(t({ it: 'Aggiornato', en: 'Updated' }), 'success');
-                                    } catch {
-                                      push(t({ it: 'Errore', en: 'Error' }), 'danger');
-                                    }
-                                  }}
-                                  className="btn-inline"
-                                  title={
-                                    !r.present
-                                      ? r.hidden
-                                        ? t({ it: 'Includi nel contenitore utenti', en: 'Include in user container' })
-                                        : t({ it: 'Escludi dal contenitore utenti', en: 'Exclude from user container' })
-                                      : r.hidden
-                                        ? t({ it: 'Mostra utente', en: 'Unhide user' })
-                                        : t({ it: 'Nascondi utente', en: 'Hide user' })
+                                  type="button"
+                                  onClick={() =>
+                                    setUsersSortState((prev) => ({
+                                      key: 'name',
+                                      dir: prev.key === 'name' && prev.dir === 'asc' ? 'desc' : 'asc'
+                                    }))
                                   }
+                                  className="inline-flex items-center gap-1 font-semibold uppercase hover:text-ink"
                                 >
-                                  {r.hidden ? <Eye size={13} /> : <EyeOff size={13} />}
+                                  {t({ it: 'Nome', en: 'Name' })}
+                                  {usersSortState.key === 'name' ? <span>{usersSortState.dir === 'asc' ? '▲' : '▼'}</span> : null}
                                 </button>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                              </th>
+                              <th className="px-3 py-3 text-left" title={t({ it: 'Email e/o cellulare associati all’utente importato.', en: 'Email and/or mobile associated with the imported user.' })}>
+                                {t({ it: 'Email / Cellulare', en: 'Email / Mobile' })}
+                              </th>
+                              <th className="px-3 py-3 text-left" title={t({ it: 'ID esterno della sorgente importazione (WebAPI/CSV/Manuale).', en: 'External ID from the import source (WebAPI/CSV/Manual).' })}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setUsersSortState((prev) => ({
+                                      key: 'id',
+                                      dir: prev.key === 'id' && prev.dir === 'asc' ? 'desc' : 'asc'
+                                    }))
+                                  }
+                                  className="inline-flex items-center gap-1 font-semibold uppercase hover:text-ink"
+                                >
+                                  {t({ it: 'ID', en: 'ID' })}
+                                  {usersSortState.key === 'id' ? <span>{usersSortState.dir === 'asc' ? '▲' : '▼'}</span> : null}
+                                </button>
+                              </th>
+                              <th className="px-3 py-3 text-left" title={t({ it: 'Ruolo e reparti importati per l’utente.', en: 'Imported role and departments for the user.' })}>
+                                {t({ it: 'Ruolo / Reparto', en: 'Role / Dept' })}
+                              </th>
+                              <th className="px-3 py-3 text-center" title={t({ it: 'Numero di assegnazioni in planimetria (utenti reali collegati a postazioni/stanze). Clicca per ordinare.', en: 'Number of floor-plan allocations (real users linked to seats/rooms). Click to sort.' })}>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setUsersSortState((prev) => ({
+                                      key: 'alloc',
+                                      dir: prev.key === 'alloc' && prev.dir === 'asc' ? 'desc' : 'asc'
+                                    }))
+                                  }
+                                  className="inline-flex items-center gap-1 font-semibold uppercase hover:text-ink"
+                                >
+                                  {t({ it: 'Alloc.', en: 'Alloc.' })}
+                                  {usersSortState.key === 'alloc' ? <span>{usersSortState.dir === 'asc' ? '▲' : '▼'}</span> : null}
+                                </button>
+                              </th>
+                              <th className="px-3 py-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setUsersSortState((prev) => ({
+                                      key: 'hidden',
+                                      dir: prev.key === 'hidden' && prev.dir === 'asc' ? 'desc' : 'asc'
+                                    }))
+                                  }
+                                  className="inline-flex items-center gap-1 font-semibold uppercase hover:text-ink"
+                                  title={t({ it: 'Ordina per visibilità (occhio barrato = nascosto)', en: 'Sort by visibility (slashed eye = hidden)' })}
+                                >
+                                  {t({ it: 'Vis.', en: 'Vis.' })}
+                                  {usersSortState.key === 'hidden' ? <span>{usersSortState.dir === 'asc' ? '▲' : '▼'}</span> : null}
+                                </button>
+                              </th>
+                              <th className="px-4 py-3 text-right" title={t({ it: 'Azioni disponibili: modifica/elimina manuale e nascondi/mostra o includi/escludi.', en: 'Available actions: edit/delete manual and hide/show or include/exclude.' })}>
+                                {t({ it: 'Azioni', en: 'Actions' })}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sortedUsers.map((r) => {
+                              const count = assignedCounts.get(`${r.clientId}:${r.externalId}`) || 0;
+                              const displayName = `${String(r.firstName || '').trim()} ${String(r.lastName || '').trim()}`.trim() || r.email || r.externalId;
+                              const contact = [r.email, r.mobile].filter(Boolean).join(' · ') || '—';
+                              const deptLabel = [r.dept1, r.dept2, r.dept3].filter(Boolean).join(' / ');
+                              return (
+                                <tr key={r.externalId} className="border-t border-slate-200 align-top">
+                                  <td className="px-4 py-3">
+                                    <div className="min-w-[260px]">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-semibold text-ink">{displayName}</span>
+                                        {(r.manual || String(r.externalId || '').toLowerCase().startsWith('manual:')) ? (
+                                          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                                            {t({ it: 'Manuale', en: 'Manual' })}
+                                          </span>
+                                        ) : null}
+                                        {!r.present ? (
+                                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                                            {t({ it: 'Mancante', en: 'Missing' })}
+                                          </span>
+                                        ) : null}
+                                        {r.hidden ? (
+                                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                                            {t({ it: 'Nascosto', en: 'Hidden' })}
+                                          </span>
+                                        ) : null}
+                                        {duplicateUserKeys.has(`${r.clientId}:${r.externalId}`) ? (
+                                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                                            {t({ it: 'Duplicato', en: 'Duplicate' })}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-3 text-xs text-slate-600">{contact}</td>
+                                  <td className="px-3 py-3 font-mono text-xs text-slate-700">{r.externalId}</td>
+                                  <td className="px-3 py-3">
+                                    <div className="text-xs text-slate-700">{r.role || '—'}</div>
+                                    <div className="text-[11px] text-slate-500">{deptLabel || '—'}</div>
+                                  </td>
+                                  <td className="px-3 py-3 text-center">
+                                    <span
+                                      className={`inline-flex min-w-[56px] items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                        count > 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                      }`}
+                                      title={t({
+                                        it:
+                                          count > 0
+                                            ? `${count} assegnazioni in planimetria`
+                                            : 'Nessuna assegnazione in planimetria',
+                                        en:
+                                          count > 0
+                                            ? `${count} floor-plan allocations`
+                                            : 'No floor-plan allocations'
+                                      })}
+                                    >
+                                      {count > 0
+                                        ? t({ it: `${count} assegn.`, en: `${count} alloc.` })
+                                        : t({ it: 'Nessuna', en: 'None' })}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-3 text-center text-slate-500" title={r.hidden ? t({ it: 'Nascosto', en: 'Hidden' }) : t({ it: 'Visibile', en: 'Visible' })}>
+                                    {r.hidden ? <EyeOff size={15} className="mx-auto" /> : <Eye size={15} className="mx-auto" />}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex items-center justify-end gap-1">
+                                      {(r.manual || String(r.externalId || '').toLowerCase().startsWith('manual:')) ? (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => openManualUserEdit(r)}
+                                            className="btn-inline"
+                                            title={t({ it: 'Modifica utente manuale', en: 'Edit manual user' })}
+                                          >
+                                            <Pencil size={12} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setManualDeleteCandidate(r)}
+                                            disabled={manualUserDeletingId === r.externalId}
+                                            className="btn-inline text-rose-700 hover:bg-rose-50"
+                                            title={t({ it: 'Rimuovi utente manuale', en: 'Delete manual user' })}
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </>
+                                      ) : null}
+                                      <button
+                                        onClick={async () => {
+                                          if (!activeClientId) return;
+                                          try {
+                                            await setExternalUserHidden({ clientId: activeClientId, externalId: r.externalId, hidden: !r.hidden });
+                                            await loadUsers(activeClientId);
+                                            push(t({ it: 'Aggiornato', en: 'Updated' }), 'success');
+                                          } catch {
+                                            push(t({ it: 'Errore', en: 'Error' }), 'danger');
+                                          }
+                                        }}
+                                        className="btn-inline"
+                                        title={
+                                          !r.present
+                                            ? r.hidden
+                                              ? t({ it: 'Includi nel contenitore utenti', en: 'Include in user container' })
+                                              : t({ it: 'Escludi dal contenitore utenti', en: 'Exclude from user container' })
+                                            : r.hidden
+                                              ? t({ it: 'Mostra utente', en: 'Unhide user' })
+                                              : t({ it: 'Nascondi utente', en: 'Hide user' })
+                                        }
+                                      >
+                                        {r.hidden ? <Eye size={13} /> : <EyeOff size={13} />}
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      ) : null}
                     </div>
                   </div>
 
@@ -1798,7 +1975,8 @@ const CustomImportPanel = (
       <Transition show={manualUserModalOpen} as={Fragment}>
         <Dialog
           as="div"
-          className="relative z-[125]"
+          className="relative z-[140]"
+          initialFocus={manualUserDialogFocusRef}
           onClose={() => {
             if (manualUserSaving) return;
             setManualUserModalOpen(false);
@@ -1827,6 +2005,9 @@ const CustomImportPanel = (
                 leaveTo="opacity-0 scale-95"
               >
                 <Dialog.Panel className="w-full max-w-4xl modal-panel">
+                  <button ref={manualUserDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
                   <div className="modal-header">
                     <div>
                       <Dialog.Title className="modal-title">
@@ -1910,7 +2091,7 @@ const CustomImportPanel = (
       </Transition>
 
       <Transition show={csvConfirmOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-[130]" onClose={() => setCsvConfirmOpen(false)}>
+        <Dialog as="div" className="relative z-[130]" onClose={() => setCsvConfirmOpen(false)} initialFocus={csvConfirmDialogFocusRef}>
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-150"
@@ -1934,6 +2115,9 @@ const CustomImportPanel = (
                 leaveTo="opacity-0 scale-95"
               >
                 <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <button ref={csvConfirmDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
                   <div className="modal-header items-center">
                     <Dialog.Title className="modal-title">{t({ it: 'Import CSV', en: 'CSV import' })}</Dialog.Title>
                     <button onClick={() => setCsvConfirmOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
@@ -1980,7 +2164,7 @@ const CustomImportPanel = (
       </Transition>
 
       <Transition show={infoOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-[120]" onClose={() => setInfoOpen(false)}>
+        <Dialog as="div" className="relative z-[135]" onClose={() => setInfoOpen(false)} initialFocus={infoDialogFocusRef}>
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-150"
@@ -2004,6 +2188,9 @@ const CustomImportPanel = (
                 leaveTo="opacity-0 scale-95"
               >
                 <Dialog.Panel className="w-full max-w-lg modal-panel">
+                  <button ref={infoDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
                   <div className="modal-header items-center">
                     <Dialog.Title className="modal-title">{t({ it: 'Info cliente', en: 'Client info' })}</Dialog.Title>
                     <button onClick={() => setInfoOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>

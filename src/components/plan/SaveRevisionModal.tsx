@@ -8,13 +8,26 @@ interface Props {
   hasExisting: boolean;
   latestRevMajor: number;
   latestRevMinor: number;
+  initialBump?: 'major' | 'minor';
+  requireNoteForMajor?: boolean;
   reason?: { it: string; en: string } | null;
   onDiscard?: () => void;
   onClose: () => void;
   onConfirm: (payload: { bump: 'major' | 'minor'; note?: string }) => void;
 }
 
-const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, reason, onDiscard, onClose, onConfirm }: Props) => {
+const SaveRevisionModal = ({
+  open,
+  hasExisting,
+  latestRevMajor,
+  latestRevMinor,
+  initialBump = 'minor',
+  requireNoteForMajor = false,
+  reason,
+  onDiscard,
+  onClose,
+  onConfirm
+}: Props) => {
   const t = useT();
   const [bump, setBump] = useState<'major' | 'minor'>('minor');
   const [note, setNote] = useState('');
@@ -29,10 +42,10 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
 
   useEffect(() => {
     if (!open) return;
-    setBump('minor');
+    setBump(initialBump);
     setNote('');
     setHelpOpen(false);
-  }, [open]);
+  }, [initialBump, open]);
 
   useEffect(() => {
     if (!helpOpen) return;
@@ -89,6 +102,14 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                   {t({ it: 'Verrà generata la revisione', en: 'This will create revision' })}{' '}
                   <span className="font-semibold text-ink">Rev: {next.major}.{next.minor}</span>.
                 </Dialog.Description>
+                {requireNoteForMajor && bump === 'major' ? (
+                  <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+                    {t({
+                      it: 'Per un salvataggio major inserisci una nota descrittiva della modifica.',
+                      en: 'For a major save, add a descriptive note of the change.'
+                    })}
+                  </div>
+                ) : null}
 
                 <div className="mt-4 space-y-2">
                   <div className="flex items-center gap-2">
@@ -171,6 +192,7 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                       className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
                       placeholder={t({ it: 'Es. Aggiunti 2 utenti e spostata stampante', en: 'e.g. Added 2 users and moved the printer' })}
                       rows={3}
+                      autoFocus={requireNoteForMajor && bump === 'major'}
                     />
                   </label>
                 </div>
@@ -194,11 +216,13 @@ const SaveRevisionModal = ({ open, hasExisting, latestRevMajor, latestRevMinor, 
                   </button>
                   <button
                     onClick={() => {
+                      if (requireNoteForMajor && bump === 'major' && !note.trim()) return;
                       onConfirm({ bump, note: note.trim() || undefined });
                       onClose();
                     }}
                     className="inline-flex items-center gap-2 btn-primary"
                     title={t({ it: 'Salva', en: 'Save' })}
+                    disabled={requireNoteForMajor && bump === 'major' && !note.trim()}
                   >
                     <Check size={16} />
                     {t({ it: 'Salva', en: 'Save' })}

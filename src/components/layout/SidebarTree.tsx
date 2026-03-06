@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Dialog, Transition } from '@headlessui/react';
-import { BarChart3, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Clock3, Copy, Crop, Eye, EyeOff, FileText, FolderOpen, History, Hourglass, Image as ImageIcon, Info, Mail, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, PhoneCall, Search, ShieldAlert, Star, Trash, Users, X } from 'lucide-react';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { BarChart3, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Clock3, Copy, Crop, Eye, EyeOff, FileText, FolderOpen, History, Hourglass, Image as ImageIcon, Info, Loader2, Mail, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, PhoneCall, Plus, Search, ShieldAlert, Star, Trash, Users, X } from 'lucide-react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useT } from '../../i18n/useT';
@@ -17,11 +17,15 @@ import ClientIpMapModal from './ClientIpMapModal';
 import ClientDirectoryModal from './ClientDirectoryModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import CloneFloorPlanModal from './CloneFloorPlanModal';
+import SiteHoursModal from './SiteHoursModal';
 import { fetchImportSummary, ImportSummaryRow } from '../../api/customImport';
 import EmergencyContactsModal from './EmergencyContactsModal';
 import ClientBusinessPartnersModal from './ClientBusinessPartnersModal';
 import ClientEmailSettingsModal from './ClientEmailSettingsModal';
+import { useToastStore } from '../../store/useToast';
 import {
+  createMeeting,
+  fetchMeetings,
   fetchMeetingOverview,
   type MeetingBooking,
   type MeetingCheckInMapByMeetingId,
@@ -35,6 +39,8 @@ import {
   getDefaultVisiblePlanLayerIds as getDefaultVisiblePlanLayerIdsUtil,
   normalizePlanLayerSelection as normalizePlanLayerSelectionUtil
 } from '../../utils/layerVisibility';
+
+const MeetingNotesModal = lazy(() => import('../meetings/MeetingNotesModal'));
 
 type TreeClient = {
   id: string;
@@ -50,6 +56,7 @@ type TreeClient = {
       it?: { email?: string; phone?: string };
       coffee?: { email?: string; phone?: string };
     };
+    siteSchedule?: any;
     floorPlans: { id: string; name: string; order?: number; printArea?: any }[];
   }[];
 };
@@ -60,10 +67,38 @@ type ClientMeetingsTimelineRow = {
   roomId: string;
   roomName: string;
   capacity: number;
+  floorPlanName?: string;
   bookings: NonNullable<MeetingRoomOverviewRow['bookings']>;
+};
+type ClientMeetingsSearchResult = {
+  booking: MeetingBooking;
+  siteId: string;
+  roomName: string;
+  siteName: string;
+  floorPlanName: string;
+  participantsCount: number;
+  participantsLabel: string;
+};
+type ClientDuplicateRoomOption = {
+  roomId: string;
+  roomName: string;
+  floorPlanId: string;
+  floorPlanName: string;
+};
+type ClientDuplicateDayCandidate = {
+  roomId: string;
+  roomName: string;
+  floorPlanId: string;
+  floorPlanName: string;
+  startHm: string;
+  endHm: string;
 };
 const UNLOCK_REQUEST_EVENT = 'plixmap_unlock_request';
 const FORCE_UNLOCK_EVENT = 'plixmap_force_unlock';
+const OPEN_CLIENT_MEETINGS_EVENT = 'plixmap_open_client_meetings';
+const OPEN_MEETING_CENTER_EVENT = 'plixmap_open_meeting_center';
+const OPEN_MY_MEETINGS_EVENT = 'plixmap_open_my_meetings';
+const OPEN_MEETING_MANAGER_EVENT = 'plixmap_open_meeting_manager';
 
 const parseCoords = (value: string | undefined): { lat: number; lng: number } | null => {
   const s = String(value || '').trim();
@@ -154,6 +189,66 @@ const todayIso = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const shiftIsoDay = (isoDay: string, deltaDays: number) => {
+  const base = String(isoDay || '').trim() || todayIso();
+  const [y, m, d] = base.split('-').map(Number);
+  const dt = new Date(Number.isFinite(y) ? y : new Date().getFullYear(), Number.isFinite(m) ? m - 1 : 0, Number.isFinite(d) ? d : 1);
+  dt.setDate(dt.getDate() + deltaDays);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+};
+
+const monthAnchorFromIso = (iso: string) => {
+  const d = new Date(`${String(iso || '').trim() || todayIso()}T00:00:00`);
+  if (!Number.isFinite(d.getTime())) {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+};
+
+const shiftMonthAnchor = (anchorIso: string, deltaMonths: number) => {
+  const d = new Date(`${String(anchorIso || '').trim() || monthAnchorFromIso(todayIso())}T00:00:00`);
+  if (!Number.isFinite(d.getTime())) return monthAnchorFromIso(todayIso());
+  d.setMonth(d.getMonth() + deltaMonths);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+};
+
+const timeHmFromTs = (value: number) => {
+  const d = new Date(Number(value || 0));
+  if (!Number.isFinite(d.getTime())) return '00:00';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+const hmToMinutes = (hm: string): number => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || '').trim());
+  if (!m) return 0;
+  const h = Math.max(0, Math.min(23, Number(m[1]) || 0));
+  const mm = Math.max(0, Math.min(59, Number(m[2]) || 0));
+  return h * 60 + mm;
+};
+
+const minutesToHm = (totalMinutes: number): string => {
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.floor(Number(totalMinutes) || 0)));
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
+const localTsFromIsoHm = (isoDay: string, hm: string): number | null => {
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDay || '').trim());
+  const tm = /^(\d{1,2}):(\d{2})$/.exec(String(hm || '').trim());
+  if (!dm || !tm) return null;
+  const y = Number(dm[1]);
+  const mo = Number(dm[2]) - 1;
+  const da = Number(dm[3]);
+  const hh = Number(tm[1]);
+  const mm = Number(tm[2]);
+  if (![y, mo, da, hh, mm].every(Number.isFinite)) return null;
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  const dt = new Date(y, mo, da, hh, mm, 0, 0);
+  return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+};
+
 const sameTree = (a: TreeClient[], b: TreeClient[]) => {
   if (a === b) return true;
   if (!Array.isArray(a) || !Array.isArray(b)) return false;
@@ -175,6 +270,9 @@ const sameTree = (a: TreeClient[], b: TreeClient[]) => {
       const asContacts = JSON.stringify((as as any).supportContacts || null);
       const bsContacts = JSON.stringify((bs as any).supportContacts || null);
       if (asContacts !== bsContacts) return false;
+      const asSchedule = JSON.stringify((as as any).siteSchedule || null);
+      const bsSchedule = JSON.stringify((bs as any).siteSchedule || null);
+      if (asSchedule !== bsSchedule) return false;
       if (as.floorPlans.length !== bs.floorPlans.length) return false;
       for (let k = 0; k < as.floorPlans.length; k++) {
         const ap = as.floorPlans[k];
@@ -204,6 +302,7 @@ const SidebarTree = () => {
           name: site.name,
           coords: (site as any).coords,
           supportContacts: (site as any).supportContacts,
+          siteSchedule: (site as any).siteSchedule,
           floorPlans: site.floorPlans.map((p) => ({ id: p.id, name: p.name, order: (p as any).order, printArea: (p as any).printArea }))
         }))
       })),
@@ -220,6 +319,7 @@ const SidebarTree = () => {
   const updateFloorPlan = useDataStore((s) => s.updateFloorPlan);
   const updateSite = useDataStore((s) => s.updateSite);
   const cloneFloorPlan = useDataStore((s) => (s as any).cloneFloorPlan);
+  const pushToast = useToastStore((s) => s.push);
   const { dataVersion, savedDataVersion } = useDataStore(
     (s) => ({ dataVersion: s.version, savedDataVersion: s.savedVersion }),
     shallow
@@ -289,9 +389,17 @@ const SidebarTree = () => {
       it?: { email?: string; phone?: string };
       coffee?: { email?: string; phone?: string };
     };
+    siteSchedule?: any;
     x: number;
     y: number;
   } | null>(null);
+  const [siteHoursModal, setSiteHoursModal] = useState<null | {
+    clientId: string;
+    clientName: string;
+    siteId: string;
+    siteName: string;
+    siteSchedule?: any;
+  }>(null);
   const [siteSupportContactsModal, setSiteSupportContactsModal] = useState<null | {
     clientId: string;
     siteId: string;
@@ -316,16 +424,50 @@ const SidebarTree = () => {
     day: string;
     siteId: string | 'all';
     siteLocked?: boolean;
+    returnTo?: 'hub' | 'myMeetings' | null;
   } | null>(null);
   const [clientMeetingsLoading, setClientMeetingsLoading] = useState(false);
   const [clientMeetingsError, setClientMeetingsError] = useState<string | null>(null);
   const [clientMeetingsRows, setClientMeetingsRows] = useState<ClientMeetingsTimelineRow[]>([]);
+  const [clientMeetingsSearchTerm, setClientMeetingsSearchTerm] = useState('');
+  const [clientMeetingsSearchLoading, setClientMeetingsSearchLoading] = useState(false);
+  const [clientMeetingsSearchError, setClientMeetingsSearchError] = useState<string | null>(null);
+  const [clientMeetingsSearchResults, setClientMeetingsSearchResults] = useState<ClientMeetingsSearchResult[]>([]);
+  const [clientMeetingsSearchActiveIndex, setClientMeetingsSearchActiveIndex] = useState(-1);
+  const [clientMeetingsHighlightBookingId, setClientMeetingsHighlightBookingId] = useState<string | null>(null);
   const [clientMeetingsBookingDetail, setClientMeetingsBookingDetail] = useState<{
     booking: MeetingBooking;
     roomName: string;
     siteName: string;
   } | null>(null);
+  const [clientMeetingsTimelineContextMenu, setClientMeetingsTimelineContextMenu] = useState<null | {
+    booking: MeetingBooking;
+    x: number;
+    y: number;
+  }>(null);
+  const [clientMeetingsDuplicateModal, setClientMeetingsDuplicateModal] = useState<null | {
+    booking: MeetingBooking;
+    step: 'setup' | 'calendar';
+    roomMode: 'selected' | 'any';
+    selectedRoomId: string;
+    timeMode: 'same' | 'any_08_18' | 'custom';
+    customFromHm: string;
+    customToHm: string;
+    roomOptions: ClientDuplicateRoomOption[];
+    baseDay: string;
+    preferredDay: string;
+    monthAnchor: string; // YYYY-MM-01
+    selectedDays: string[];
+    availabilityByDay: Record<string, { state: 'available' | 'occupied' | 'blocked' | 'loading' | 'error'; reason?: string }>;
+    candidateByDay: Record<string, ClientDuplicateDayCandidate>;
+    loadingMonth: boolean;
+    saving: boolean;
+    error: string | null;
+  }>(null);
+  const [clientMeetingsDuplicateRoomPickerOpen, setClientMeetingsDuplicateRoomPickerOpen] = useState(false);
+  const clientMeetingsDuplicateRoomPickerRef = useRef<HTMLDivElement | null>(null);
   const [clientMeetingsShowCheckInDetails, setClientMeetingsShowCheckInDetails] = useState(false);
+  const [clientMeetingsNotesBooking, setClientMeetingsNotesBooking] = useState<MeetingBooking | null>(null);
   const [clientMeetingsRoomPreview, setClientMeetingsRoomPreview] = useState<{
     roomId: string;
     floorPlanId: string;
@@ -371,6 +513,13 @@ const SidebarTree = () => {
   const lockMenuRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ siteId: string; planId: string } | null>(null);
   const clientDragRef = useRef<string | null>(null);
+  const siteSupportContactsFocusRef = useRef<HTMLButtonElement | null>(null);
+  const clientMeetingsFocusRef = useRef<HTMLButtonElement | null>(null);
+  const clientMeetingsSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const clientMeetingsRoomPreviewFocusRef = useRef<HTMLButtonElement | null>(null);
+  const clientMeetingsBookingDetailFocusRef = useRef<HTMLButtonElement | null>(null);
+  const clientMeetingsDuplicateFocusRef = useRef<HTMLButtonElement | null>(null);
+  const clientMeetingsTimelineContextMenuRef = useRef<HTMLDivElement | null>(null);
   const clientMeetingsDetailCloseGuardUntilRef = useRef(0);
 
   const canChatClientIds = useMemo(() => {
@@ -620,6 +769,10 @@ const SidebarTree = () => {
   }, [lockMenu]);
 
   useEffect(() => {
+    if (!isSuperAdmin) {
+      setImportSummaryByClient({});
+      return;
+    }
     let active = true;
     fetchImportSummary()
       .then((res) => {
@@ -637,7 +790,7 @@ const SidebarTree = () => {
     return () => {
       active = false;
     };
-  }, []);
+  }, [isSuperAdmin]);
 
   const orderedClients = useMemo(() => {
     if (!clientOrder.length) return clients;
@@ -771,16 +924,67 @@ const SidebarTree = () => {
     navigate(to);
   };
 
-  const openClientMeetingsTimeline = (clientId: string, siteId: string | 'all' = 'all', siteLocked = false) => {
-    setPlanMenu(null);
-    setClientMenu(null);
-    setSiteMenu(null);
-    setClientMeetingsModal({ clientId, day: todayIso(), siteId, siteLocked });
-    setClientMeetingsRows([]);
-    setClientMeetingsCheckInStatusByMeetingId({});
-    setClientMeetingsCheckInTimestampsByMeetingId({});
-    setClientMeetingsError(null);
-  };
+  const openClientMeetingsTimeline = useCallback(
+    (
+      clientId: string,
+      siteId: string | 'all' = 'all',
+      siteLocked = false,
+      day: string = todayIso(),
+      returnTo: 'hub' | 'myMeetings' | null = null
+    ) => {
+      setPlanMenu(null);
+      setClientMenu(null);
+      setSiteMenu(null);
+      setClientMeetingsModal({ clientId, day, siteId, siteLocked, returnTo });
+      setClientMeetingsRows([]);
+      setClientMeetingsCheckInStatusByMeetingId({});
+      setClientMeetingsCheckInTimestampsByMeetingId({});
+      setClientMeetingsError(null);
+      setClientMeetingsSearchTerm('');
+      setClientMeetingsSearchLoading(false);
+      setClientMeetingsSearchError(null);
+      setClientMeetingsSearchResults([]);
+      setClientMeetingsSearchActiveIndex(-1);
+      setClientMeetingsHighlightBookingId(null);
+    },
+    []
+  );
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail || {};
+      const clientId = String(detail?.clientId || '').trim();
+      if (!clientId) return;
+      const siteIdRaw = String(detail?.siteId || '').trim();
+      const siteId: string | 'all' = siteIdRaw || 'all';
+      const dayRaw = String(detail?.day || '').trim();
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(dayRaw) ? dayRaw : todayIso();
+      const returnToRaw = String(detail?.returnTo || '').trim();
+      const returnTo = returnToRaw === 'hub' || returnToRaw === 'myMeetings' ? (returnToRaw as 'hub' | 'myMeetings') : null;
+      openClientMeetingsTimeline(clientId, siteId, !!detail?.siteLocked, day, returnTo);
+    };
+    window.addEventListener(OPEN_CLIENT_MEETINGS_EVENT, handler as EventListener);
+    return () => window.removeEventListener(OPEN_CLIENT_MEETINGS_EVENT, handler as EventListener);
+  }, [openClientMeetingsTimeline]);
+
+  const closeClientMeetingsModal = useCallback(() => {
+    const returnTo = clientMeetingsModal?.returnTo || null;
+    setClientMeetingsTimelineContextMenu(null);
+    setClientMeetingsModal(null);
+    setClientMeetingsSearchTerm('');
+    setClientMeetingsSearchLoading(false);
+    setClientMeetingsSearchError(null);
+    setClientMeetingsSearchResults([]);
+    setClientMeetingsSearchActiveIndex(-1);
+    setClientMeetingsHighlightBookingId(null);
+    if (returnTo === 'hub') {
+      window.dispatchEvent(new CustomEvent(OPEN_MEETING_CENTER_EVENT));
+      return;
+    }
+    if (returnTo === 'myMeetings') {
+      window.dispatchEvent(new CustomEvent(OPEN_MY_MEETINGS_EVENT));
+    }
+  }, [clientMeetingsModal?.returnTo]);
 
   const selectedClientForMeetings = useMemo(
     () => (clientMeetingsModal ? clients.find((c) => c.id === clientMeetingsModal.clientId) || null : null),
@@ -1040,6 +1244,7 @@ const SidebarTree = () => {
               roomId: String(room.roomId || ''),
               roomName: String(room.roomName || ''),
               capacity: Number(room.capacity || 0),
+              floorPlanName: String((room as any).floorPlanName || ''),
               bookings: Array.isArray(room.bookings) ? room.bookings : []
             }))
         )
@@ -1085,6 +1290,29 @@ const SidebarTree = () => {
     return () => window.clearInterval(id);
   }, [clientMeetingsModal]);
 
+  useEffect(() => {
+    if (!clientMeetingsTimelineContextMenu) return;
+    const close = () => setClientMeetingsTimelineContextMenu(null);
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && clientMeetingsTimelineContextMenuRef.current?.contains(target)) return;
+      close();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+    window.addEventListener('mousedown', onPointerDown, true);
+    window.addEventListener('contextmenu', onPointerDown, true);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown, true);
+      window.removeEventListener('contextmenu', onPointerDown, true);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [clientMeetingsTimelineContextMenu]);
+
   const clientMeetingsTimelineMeta = useMemo(() => {
     const rows = clientMeetingsRows || [];
     let minMinutes = 8 * 60;
@@ -1112,6 +1340,541 @@ const SidebarTree = () => {
     const showNowLine = selectedDay === nowDay && nowMinutes >= minMinutes && nowMinutes <= maxMinutes;
     return { minMinutes, maxMinutes, hours, nowMinutes, showNowLine };
   }, [clientMeetingsRows, clientMeetingsModal?.day, clientMeetingsNowTs]);
+
+  const jumpToClientTimelineMeeting = useCallback(
+    (result: ClientMeetingsSearchResult) => {
+      const booking = result?.booking;
+      if (!booking) return;
+      const targetDay = String((booking as any).occurrenceDate || new Date(Number(booking.startAt || 0)).toISOString().slice(0, 10) || '').trim();
+      if (!targetDay) return;
+      setClientMeetingsSearchTerm('');
+      setClientMeetingsSearchResults([]);
+      setClientMeetingsSearchActiveIndex(-1);
+      setClientMeetingsSearchError(null);
+      setClientMeetingsHighlightBookingId(String(booking.id || ''));
+      setClientMeetingsModal((prev) =>
+        prev
+          ? {
+              ...prev,
+              day: targetDay,
+              siteId: prev.siteLocked ? prev.siteId : (String(result.siteId || '').trim() || prev.siteId)
+            }
+          : prev
+      );
+      window.setTimeout(() => {
+        setClientMeetingsHighlightBookingId((prev) => (prev === String(booking.id || '') ? null : prev));
+      }, 4200);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!clientMeetingsModal) return;
+    const term = String(clientMeetingsSearchTerm || '').trim();
+    if (!term) {
+      setClientMeetingsSearchLoading(false);
+      setClientMeetingsSearchError(null);
+      setClientMeetingsSearchResults([]);
+      setClientMeetingsSearchActiveIndex(-1);
+      return;
+    }
+    if (term.length < 2) {
+      setClientMeetingsSearchLoading(false);
+      setClientMeetingsSearchError(null);
+      setClientMeetingsSearchResults([]);
+      setClientMeetingsSearchActiveIndex(-1);
+      return;
+    }
+    const selectedClientId = String(clientMeetingsModal.clientId || '').trim();
+    if (!selectedClientId) return;
+    const selectedClient = clients.find((entry) => String(entry.id) === selectedClientId);
+    if (!selectedClient) {
+      setClientMeetingsSearchError(t({ it: 'Cliente non trovato.', en: 'Client not found.' }));
+      setClientMeetingsSearchResults([]);
+      setClientMeetingsSearchActiveIndex(-1);
+      return;
+    }
+    const candidateSites = (selectedClient.sites || []).filter((siteEntry) =>
+      clientMeetingsModal.siteId === 'all' ? true : String(siteEntry.id) === String(clientMeetingsModal.siteId)
+    );
+    if (!candidateSites.length) {
+      setClientMeetingsSearchError(t({ it: 'Nessuna sede disponibile.', en: 'No site available.' }));
+      setClientMeetingsSearchResults([]);
+      setClientMeetingsSearchActiveIndex(-1);
+      return;
+    }
+    let cancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      setClientMeetingsSearchLoading(true);
+      setClientMeetingsSearchError(null);
+      try {
+        const responses = await Promise.all(
+          candidateSites.map(async (siteEntry) => {
+            const payload = await fetchMeetings({ siteId: String(siteEntry.id) });
+            return { siteEntry, meetings: Array.isArray(payload?.meetings) ? payload.meetings : [] };
+          })
+        );
+        if (cancelled) return;
+        const normalizedTerm = term.toLowerCase().replace(/^#/, '');
+        const matchRows: ClientMeetingsSearchResult[] = [];
+        for (const { siteEntry, meetings } of responses) {
+          for (const booking of meetings) {
+            if (String(booking.clientId || '') !== selectedClientId) continue;
+            const meetingNumber = Number((booking as any)?.meetingNumber || 0);
+            const subject = String(booking.subject || '').trim();
+            const roomName = String(booking.roomName || '').trim();
+            const floorPlanName = String(
+              (siteEntry.floorPlans || []).find((plan) => String(plan.id) === String(booking.floorPlanId || ''))?.name || ''
+            ).trim();
+            const searchBlob = [subject, roomName, floorPlanName, String(meetingNumber > 0 ? meetingNumber : ''), meetingNumber > 0 ? `#${meetingNumber}` : '']
+              .join(' ')
+              .toLowerCase();
+            if (!searchBlob.includes(normalizedTerm)) continue;
+            const participants = Array.isArray(booking.participants) ? booking.participants : [];
+            const participantsCount = participants.length;
+            const participantsLabel = participants
+              .slice(0, 3)
+              .map((participant: any) => String(participant?.fullName || participant?.externalId || '').trim())
+              .filter(Boolean)
+              .join(', ');
+            matchRows.push({
+              booking,
+              siteId: String(siteEntry.id || ''),
+              roomName: roomName || '-',
+              siteName: String(siteEntry.name || ''),
+              floorPlanName,
+              participantsCount,
+              participantsLabel: participantsLabel || '-'
+            });
+          }
+        }
+        matchRows.sort((a, b) => Number(b.booking.startAt || 0) - Number(a.booking.startAt || 0));
+        setClientMeetingsSearchResults(matchRows.slice(0, 80));
+        setClientMeetingsSearchActiveIndex(matchRows.length ? 0 : -1);
+      } catch {
+        if (cancelled) return;
+        setClientMeetingsSearchError(t({ it: 'Errore durante la ricerca meeting.', en: 'Error searching meetings.' }));
+        setClientMeetingsSearchResults([]);
+        setClientMeetingsSearchActiveIndex(-1);
+      } finally {
+        if (!cancelled) setClientMeetingsSearchLoading(false);
+      }
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [clientMeetingsModal, clientMeetingsSearchTerm, clients, t]);
+
+  const openClientMeetingDuplicateModal = (booking: MeetingBooking, options?: { preferredDay?: string }) => {
+    const baseDay = String((booking as any).occurrenceDate || new Date(Number(booking.startAt || 0)).toISOString().slice(0, 10) || '').trim();
+    if (!baseDay) return;
+    const preferredDayRaw = String(options?.preferredDay || '').trim();
+    const preferredDay = /^\d{4}-\d{2}-\d{2}$/.test(preferredDayRaw) ? preferredDayRaw : '';
+    const siteEntry = (selectedClientForMeetingsFull?.sites || []).find((entry: any) => String(entry?.id || '') === String(booking.siteId || ''));
+    const optionsById = new Map<string, ClientDuplicateRoomOption>();
+    for (const floorPlan of siteEntry?.floorPlans || []) {
+      const floorPlanId = String((floorPlan as any)?.id || '').trim();
+      const floorPlanName = String((floorPlan as any)?.name || '').trim();
+      for (const room of (floorPlan as any)?.rooms || []) {
+        const roomId = String((room as any)?.id || '').trim();
+        if (!roomId || !(room as any)?.meetingRoom) continue;
+        if (optionsById.has(roomId)) continue;
+        optionsById.set(roomId, {
+          roomId,
+          roomName: String((room as any)?.name || (booking as any)?.roomName || roomId).trim(),
+          floorPlanId,
+          floorPlanName
+        });
+      }
+    }
+    const sourceRoomId = String((booking as any)?.roomId || '').trim();
+    const sourceRoomName = String((booking as any)?.roomName || '').trim() || t({ it: 'Sala meeting', en: 'Meeting room' });
+    if (sourceRoomId && !optionsById.has(sourceRoomId)) {
+      optionsById.set(sourceRoomId, {
+        roomId: sourceRoomId,
+        roomName: sourceRoomName,
+        floorPlanId: String((booking as any)?.floorPlanId || '').trim(),
+        floorPlanName: ''
+      });
+    }
+    const roomOptions = Array.from(optionsById.values()).sort((a, b) => a.roomName.localeCompare(b.roomName));
+    const selectedRoomId = roomOptions.some((entry) => entry.roomId === sourceRoomId)
+      ? sourceRoomId
+      : String(roomOptions[0]?.roomId || sourceRoomId || '').trim();
+    setClientMeetingsDuplicateModal({
+      booking,
+      step: 'setup',
+      roomMode: 'selected',
+      selectedRoomId,
+      timeMode: 'same',
+      customFromHm: '08:00',
+      customToHm: '18:00',
+      roomOptions,
+      baseDay,
+      preferredDay,
+      monthAnchor: monthAnchorFromIso(preferredDay || baseDay),
+      selectedDays: [],
+      availabilityByDay: {},
+      candidateByDay: {},
+      loadingMonth: false,
+      saving: false,
+      error: null
+    });
+  };
+
+  const resolveClientDuplicateSlot = useCallback((
+    booking: MeetingBooking,
+    dayIso: string,
+    timeMode: 'same' | 'any_08_18' | 'custom' = 'same'
+  ): { startHm: string; endHm: string; startMin: number; endMin: number } | null => {
+    const startTs = Number(booking.startAt || 0);
+    const endTs = Number(booking.endAt || 0);
+    const sourceStartHm = timeHmFromTs(startTs);
+    const sourceStartMin = hmToMinutes(sourceStartHm);
+    const durationMinRaw = Math.round((endTs - startTs) / 60_000);
+    const durationMin = Math.max(1, Number.isFinite(durationMinRaw) ? durationMinRaw : 60);
+    let startMin = timeMode === 'same' ? sourceStartMin : 0;
+    if (dayIso === todayIso()) {
+      const now = new Date();
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      startMin = Math.max(startMin, nowMin);
+    }
+    const endMin = startMin + durationMin;
+    if (endMin > 23 * 60 + 59) return null;
+    return { startHm: minutesToHm(startMin), endHm: minutesToHm(endMin), startMin, endMin };
+  }, []);
+
+  useEffect(() => {
+    if (!clientMeetingsDuplicateRoomPickerOpen) return;
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!clientMeetingsDuplicateRoomPickerRef.current) return;
+      if (clientMeetingsDuplicateRoomPickerRef.current.contains(event.target as Node)) return;
+      setClientMeetingsDuplicateRoomPickerOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [clientMeetingsDuplicateRoomPickerOpen]);
+
+  useEffect(() => {
+    if (!clientMeetingsDuplicateModal || clientMeetingsDuplicateModal.step !== 'setup') {
+      setClientMeetingsDuplicateRoomPickerOpen(false);
+    }
+  }, [clientMeetingsDuplicateModal?.step, clientMeetingsDuplicateModal?.booking?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const dup = clientMeetingsDuplicateModal;
+    const bookingId = String(dup?.booking?.id || '').trim();
+    if (!dup || !bookingId) return;
+    if (dup.step !== 'calendar') return;
+    const booking = dup.booking;
+    const clientId = String(booking.clientId || '').trim();
+    const siteId = String(booking.siteId || '').trim();
+    const baseDay = String(dup.baseDay || '').trim();
+    const monthAnchor = String(dup.monthAnchor || '').trim();
+    if (!baseDay || !monthAnchor || !clientId || !siteId) return;
+    const monthDate = new Date(`${monthAnchor}T00:00:00`);
+    if (!Number.isFinite(monthDate.getTime())) return;
+    const today = todayIso();
+    const y = monthDate.getFullYear();
+    const m = monthDate.getMonth();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const monthDays = Array.from({ length: daysInMonth }, (_, idx) => {
+      const d = new Date(y, m, idx + 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    });
+    const unknownDays = monthDays.filter((iso) => !dup.availabilityByDay?.[iso]);
+    if (!unknownDays.length) return;
+    const sourceSlot = resolveClientDuplicateSlot(booking, baseDay, 'same');
+    if (!sourceSlot) return;
+    const durationMin = Math.max(1, sourceSlot.endMin - sourceSlot.startMin);
+    const sourceStartMin = sourceSlot.startMin;
+    const candidateRooms =
+      dup.roomMode === 'any'
+        ? dup.roomOptions
+        : dup.roomOptions.filter((entry) => String(entry.roomId) === String(dup.selectedRoomId || ''));
+    if (!candidateRooms.length) {
+      setClientMeetingsDuplicateModal((prev) =>
+        prev && String(prev.booking.id) === bookingId ? { ...prev, error: t({ it: 'Seleziona una saletta valida.', en: 'Select a valid room.' }) } : prev
+      );
+      return;
+    }
+
+    const prefilled: Record<string, any> = {};
+    const queue: string[] = [];
+    for (const day of unknownDays) {
+      if (day <= baseDay) {
+        prefilled[day] = {
+          state: 'blocked',
+          reason: day < today ? t({ it: 'Giorno passato', en: 'Past day' }) : t({ it: 'Giorno di origine', en: 'Source day' })
+        };
+        continue;
+      }
+      if (day < today) {
+        prefilled[day] = { state: 'blocked', reason: t({ it: 'Giorno passato', en: 'Past day' }) };
+        continue;
+      }
+      queue.push(day);
+    }
+    if (!Object.keys(prefilled).length && !queue.length) return;
+
+    setClientMeetingsDuplicateModal((prev) => {
+      if (!prev || String(prev.booking.id) !== bookingId || String(prev.monthAnchor) !== monthAnchor) return prev;
+      return {
+        ...prev,
+        loadingMonth: queue.length > 0,
+        availabilityByDay: {
+          ...prev.availabilityByDay,
+          ...prefilled,
+          ...Object.fromEntries(queue.map((day) => [day, { state: 'loading' as const }]))
+        },
+        candidateByDay: Object.fromEntries(
+          Object.entries(prev.candidateByDay || {}).filter(([day]) => monthDays.includes(day))
+        )
+      };
+    });
+
+    (async () => {
+      if (!queue.length) {
+        setClientMeetingsDuplicateModal((prev) => {
+          if (!prev || String(prev.booking.id) !== bookingId || String(prev.monthAnchor) !== monthAnchor) return prev;
+          return { ...prev, loadingMonth: false };
+        });
+        return;
+      }
+      const outcomes: Record<string, any> = {};
+      const candidates: Record<string, ClientDuplicateDayCandidate> = {};
+      try {
+        const monthStartTs = new Date(y, m, 1, 0, 0, 0, 0).getTime();
+        const monthEndTs = new Date(y, m + 1, 0, 23, 59, 59, 999).getTime();
+        const payload = await Promise.race([
+          fetchMeetings({
+            siteId,
+            fromAt: monthStartTs - 24 * 60 * 60 * 1000,
+            toAt: monthEndTs + 24 * 60 * 60 * 1000
+          }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 4500))
+        ]);
+        const allMeetings = Array.isArray(payload?.meetings) ? payload.meetings : [];
+        const scopedMeetings = allMeetings.filter((entry: any) => {
+          if (String(entry?.clientId || '') !== clientId) return false;
+          if (String(entry?.siteId || '') !== siteId) return false;
+          return true;
+        });
+        const toIntervals = (day: string, roomId: string): Array<{ start: number; end: number }> => {
+          const dayStartTs = localTsFromIsoHm(day, '00:00');
+          if (dayStartTs === null) return [];
+          const dayEndTs = dayStartTs + 24 * 60 * 60 * 1000;
+          const raw = scopedMeetings
+            .filter((entry: any) => String(entry?.roomId || '') === roomId && String(entry?.id || '') !== String(booking.id || ''))
+            .map((entry: any) => {
+              const startRaw = toEpochMs(entry?.startAt);
+              const endRaw = toEpochMs(entry?.endAt);
+              const preMin = Math.max(0, Number(entry?.setupBufferBeforeMin) || 0);
+              const postMin = Math.max(0, Number(entry?.setupBufferAfterMin) || 0);
+              const startAdj = startRaw - preMin * 60_000;
+              const endAdj = endRaw + postMin * 60_000;
+              return { startAdj, endAdj };
+            })
+            .filter((entry) => Number.isFinite(entry.startAdj) && Number.isFinite(entry.endAdj) && entry.startAdj < dayEndTs && entry.endAdj > dayStartTs)
+            .map((entry) => ({
+              start: Math.max(0, Math.floor((Math.max(entry.startAdj, dayStartTs) - dayStartTs) / 60_000)),
+              end: Math.min(24 * 60, Math.ceil((Math.min(entry.endAdj, dayEndTs) - dayStartTs) / 60_000))
+            }))
+            .filter((entry) => entry.end > entry.start)
+            .sort((a, b) => a.start - b.start);
+          const merged: Array<{ start: number; end: number }> = [];
+          for (const interval of raw) {
+            const last = merged[merged.length - 1];
+            if (!last || interval.start > last.end) {
+              merged.push({ ...interval });
+            } else {
+              last.end = Math.max(last.end, interval.end);
+            }
+          }
+          return merged;
+        };
+        const findSlot = (
+          day: string,
+          intervals: Array<{ start: number; end: number }>
+        ): { startMin: number; endMin: number } | null => {
+          const nowMin = (() => {
+            if (day !== today) return 0;
+            const now = new Date();
+            return now.getHours() * 60 + now.getMinutes();
+          })();
+          if (dup.timeMode === 'same') {
+            const startMin = Math.max(sourceStartMin, nowMin);
+            const endMin = startMin + durationMin;
+            if (endMin > 23 * 60 + 59) return null;
+            const overlap = intervals.some((entry) => entry.start < endMin && entry.end > startMin);
+            return overlap ? null : { startMin, endMin };
+          }
+          const windowStartRaw =
+            dup.timeMode === 'custom' ? hmToMinutes(String(dup.customFromHm || '')) : 8 * 60;
+          const windowEndRaw =
+            dup.timeMode === 'custom' ? hmToMinutes(String(dup.customToHm || '')) : 18 * 60;
+          if (!Number.isFinite(windowStartRaw) || !Number.isFinite(windowEndRaw)) return null;
+          const windowStart = Math.max(0, Math.min(23 * 60 + 59, Math.max(windowStartRaw, nowMin)));
+          const windowEnd = Math.max(0, Math.min(23 * 60 + 59, windowEndRaw));
+          if (windowEnd <= windowStart) return null;
+          let cursor = windowStart;
+          for (const interval of intervals) {
+            if (interval.end <= windowStart) continue;
+            if (interval.start >= windowEnd) break;
+            const blockedStart = Math.max(windowStart, interval.start);
+            if (cursor + durationMin <= blockedStart) return { startMin: cursor, endMin: cursor + durationMin };
+            cursor = Math.max(cursor, Math.min(windowEnd, interval.end));
+            if (cursor >= windowEnd) break;
+          }
+          if (cursor + durationMin <= windowEnd) return { startMin: cursor, endMin: cursor + durationMin };
+          return null;
+        };
+        for (const day of queue) {
+          let chosen: ClientDuplicateDayCandidate | null = null;
+          for (const room of candidateRooms) {
+            const intervals = toIntervals(day, room.roomId);
+            const slot = findSlot(day, intervals);
+            if (!slot) continue;
+            chosen = {
+              roomId: room.roomId,
+              roomName: room.roomName,
+              floorPlanId: room.floorPlanId,
+              floorPlanName: room.floorPlanName,
+              startHm: minutesToHm(slot.startMin),
+              endHm: minutesToHm(slot.endMin)
+            };
+            break;
+          }
+          if (chosen) {
+            outcomes[day] = {
+              state: 'available',
+              reason: `${chosen.roomName} • ${chosen.startHm} - ${chosen.endHm}`
+            };
+            candidates[day] = chosen;
+          } else {
+            outcomes[day] = {
+              state: 'occupied',
+              reason:
+                dup.roomMode === 'any'
+                  ? t({ it: 'Nessuna saletta disponibile in questa sede.', en: 'No meeting room available in this site.' })
+                  : t({ it: 'Saletta occupata nello slot richiesto.', en: 'Selected room is busy in requested slot.' })
+            };
+          }
+        }
+      } catch {
+        for (const day of queue) {
+          outcomes[day] = { state: 'error', reason: t({ it: 'Errore verifica disponibilità', en: 'Availability check failed' }) };
+        }
+      }
+      if (cancelled) return;
+      setClientMeetingsDuplicateModal((prev) => {
+        if (!prev || String(prev.booking.id) !== bookingId || String(prev.monthAnchor) !== monthAnchor) return prev;
+        const mergedCandidates = { ...(prev.candidateByDay || {}), ...candidates };
+        const validSelectedDays = prev.selectedDays.filter((day) => mergedCandidates[day] && outcomes[day]?.state === 'available');
+        const preferredDay = String(prev.preferredDay || '').trim();
+        if (
+          preferredDay &&
+          monthDays.includes(preferredDay) &&
+          !validSelectedDays.includes(preferredDay) &&
+          mergedCandidates[preferredDay] &&
+          String((outcomes[preferredDay] || prev.availabilityByDay?.[preferredDay] || {}).state || '') === 'available'
+        ) {
+          validSelectedDays.push(preferredDay);
+        }
+        return {
+          ...prev,
+          loadingMonth: false,
+          selectedDays: validSelectedDays,
+          availabilityByDay: {
+            ...prev.availabilityByDay,
+            ...outcomes
+          },
+          candidateByDay: mergedCandidates
+        };
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    clientMeetingsDuplicateModal?.step,
+    clientMeetingsDuplicateModal?.booking?.id,
+    clientMeetingsDuplicateModal?.baseDay,
+    clientMeetingsDuplicateModal?.preferredDay,
+    clientMeetingsDuplicateModal?.monthAnchor,
+    clientMeetingsDuplicateModal?.roomMode,
+    clientMeetingsDuplicateModal?.selectedRoomId,
+    clientMeetingsDuplicateModal?.timeMode,
+    clientMeetingsDuplicateModal?.customFromHm,
+    clientMeetingsDuplicateModal?.customToHm,
+    resolveClientDuplicateSlot
+  ]);
+
+  const saveClientMeetingDuplicates = async () => {
+    const dup = clientMeetingsDuplicateModal;
+    if (!dup) return;
+    const booking = dup.booking;
+    const selectedDays = [...dup.selectedDays].sort();
+    if (!selectedDays.length) {
+      setClientMeetingsDuplicateModal((prev) =>
+        prev ? { ...prev, error: t({ it: 'Seleziona almeno un giorno.', en: 'Select at least one day.' }) } : prev
+      );
+      return;
+    }
+    setClientMeetingsDuplicateModal((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
+    const failures: string[] = [];
+    for (const day of selectedDays) {
+      try {
+        const candidate = dup.candidateByDay?.[day];
+        if (!candidate) {
+          failures.push(`${day}: ${t({ it: 'Nessuna disponibilità valida', en: 'No valid availability' })}`);
+          continue;
+        }
+        await createMeeting({
+          clientId: String(booking.clientId),
+          siteId: String(booking.siteId),
+          ...(String(candidate.floorPlanId || booking.floorPlanId || '').trim()
+            ? { floorPlanId: String(candidate.floorPlanId || booking.floorPlanId) }
+            : {}),
+          roomId: String(candidate.roomId || booking.roomId),
+          subject: String(booking.subject || '').trim() || t({ it: 'Meeting', en: 'Meeting' }),
+          requestedSeats: Math.max(0, Number(booking.requestedSeats) || 0),
+          startDate: day,
+          startTime: candidate.startHm,
+          endTime: candidate.endHm,
+          setupBufferBeforeMin: Math.max(0, Number(booking.setupBufferBeforeMin) || 0),
+          setupBufferAfterMin: Math.max(0, Number(booking.setupBufferAfterMin) || 0),
+          participants: Array.isArray(booking.participants) ? booking.participants : [],
+          externalGuests: !!(booking as any).externalGuests,
+          externalGuestsList: Array.isArray((booking as any).externalGuestsList) ? (booking as any).externalGuestsList : [],
+          externalGuestsDetails: Array.isArray((booking as any).externalGuestsDetails) ? (booking as any).externalGuestsDetails : [],
+          sendEmail: !!booking.sendEmail,
+          technicalSetup: !!booking.technicalSetup,
+          technicalEmail: String(booking.technicalEmail || ''),
+          notes: String(booking.notes || ''),
+          videoConferenceLink: String(booking.videoConferenceLink || ''),
+          kioskLanguage: ((booking as any).kioskLanguage || null) as any
+        });
+      } catch (err: any) {
+        failures.push(`${day}: ${String(err?.message || t({ it: 'Errore creazione', en: 'Creation failed' }))}`);
+      }
+    }
+    if (failures.length) {
+      setClientMeetingsDuplicateModal((prev) =>
+        prev ? { ...prev, saving: false, error: failures.slice(0, 3).join(' • ') } : prev
+      );
+    } else {
+      setClientMeetingsDuplicateModal(null);
+    }
+    await reloadClientMeetingsTimeline();
+  };
 
   if (sidebarCollapsed) {
     return (
@@ -1336,6 +2099,7 @@ const SidebarTree = () => {
                             siteName: site.name,
                             coords: site.coords,
                             supportContacts: (site as any).supportContacts,
+                            siteSchedule: (site as any).siteSchedule,
                             x: e.clientX,
                             y: e.clientY
                           });
@@ -1932,6 +2696,26 @@ const SidebarTree = () => {
                 <PhoneCall size={14} className="text-slate-600" />
                 {t({ it: 'Contatti utili', en: 'Useful contacts' })}
               </button>
+              {(user?.isAdmin || isSuperAdmin) ? (
+                <button
+                  onClick={() => {
+                    const clientEntry = clients.find((entry) => entry.id === siteMenu.clientId);
+                    setSiteHoursModal({
+                      clientId: siteMenu.clientId,
+                      clientName: clientEntry?.shortName || clientEntry?.name || '-',
+                      siteId: siteMenu.siteId,
+                      siteName: siteMenu.siteName,
+                      siteSchedule: siteMenu.siteSchedule
+                    });
+                    setSiteMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+                  title={t({ it: 'Configura orari e festivi della sede', en: 'Configure site hours and holidays' })}
+                >
+                  <Clock3 size={14} className="text-cyan-700" />
+                  {t({ it: 'Orari sede', en: 'Site hours' })}
+                </button>
+              ) : null}
               {parseCoords(siteMenu.coords) ? (
                 <a
                   href={`https://www.google.com/maps?q=${parseCoords(siteMenu.coords)!.lat},${parseCoords(siteMenu.coords)!.lng}`}
@@ -2049,7 +2833,12 @@ const SidebarTree = () => {
           ) : null}
 
           <Transition show={!!siteSupportContactsModal} as={Fragment}>
-            <Dialog as="div" className="relative z-[90]" onClose={() => setSiteSupportContactsModal(null)}>
+            <Dialog
+              as="div"
+              className="relative z-[90]"
+              onClose={() => setSiteSupportContactsModal(null)}
+              initialFocus={siteSupportContactsFocusRef}
+            >
               <Transition.Child
                 as={Fragment}
                 enter="ease-out duration-150"
@@ -2083,6 +2872,7 @@ const SidebarTree = () => {
                           </div>
                         </div>
                         <button
+                          ref={siteSupportContactsFocusRef}
                           type="button"
                           onClick={() => setSiteSupportContactsModal(null)}
                           className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
@@ -2184,14 +2974,15 @@ const SidebarTree = () => {
             </Dialog>
           </Transition>
 
-      <Transition show={!!clientMeetingsModal} as={Fragment}>
+      <Transition show={!!clientMeetingsModal && !clientMeetingsDuplicateModal} as={Fragment}>
         <Dialog
           as="div"
           className="relative z-[90]"
+          initialFocus={clientMeetingsFocusRef}
           onClose={() => {
             if (clientMeetingsBookingDetail) return;
             if (Date.now() < clientMeetingsDetailCloseGuardUntilRef.current) return;
-            setClientMeetingsModal(null);
+            closeClientMeetingsModal();
           }}
         >
           <Transition.Child
@@ -2227,8 +3018,9 @@ const SidebarTree = () => {
                       </div>
                     </div>
                     <button
+                      ref={clientMeetingsFocusRef}
                       type="button"
-                      onClick={() => setClientMeetingsModal(null)}
+                      onClick={closeClientMeetingsModal}
                       className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
                       title={t({ it: 'Chiudi', en: 'Close' })}
                     >
@@ -2236,19 +3028,45 @@ const SidebarTree = () => {
                     </button>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[220px,260px,auto]">
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[340px,260px,minmax(0,1fr),auto]">
                     <label className="text-xs font-semibold text-slate-600">
                       <span className="inline-flex items-center gap-1">
                         <CalendarDays size={13} /> {t({ it: 'Data', en: 'Date' })}
                       </span>
-                      <input
-                        type="date"
-                        value={clientMeetingsModal?.day || todayIso()}
-                        onChange={(e) =>
-                          setClientMeetingsModal((prev) => (prev ? { ...prev, day: e.target.value || todayIso() } : prev))
-                        }
-                        className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                      />
+                      <div className="mt-1 grid grid-cols-[24px,1fr,24px] items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setClientMeetingsModal((prev) =>
+                              prev ? { ...prev, day: shiftIsoDay(prev.day || todayIso(), -1) } : prev
+                            )
+                          }
+                          className="inline-flex h-[24px] items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          title={t({ it: 'Giorno precedente', en: 'Previous day' })}
+                        >
+                            <ChevronLeft size={11} />
+                        </button>
+                        <input
+                          type="date"
+                          value={clientMeetingsModal?.day || todayIso()}
+                          onChange={(e) =>
+                            setClientMeetingsModal((prev) => (prev ? { ...prev, day: e.target.value || todayIso() } : prev))
+                          }
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setClientMeetingsModal((prev) =>
+                              prev ? { ...prev, day: shiftIsoDay(prev.day || todayIso(), 1) } : prev
+                            )
+                          }
+                          className="inline-flex h-[24px] items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          title={t({ it: 'Giorno successivo', en: 'Next day' })}
+                        >
+                            <ChevronRight size={11} />
+                        </button>
+                      </div>
                     </label>
                     <label className="text-xs font-semibold text-slate-600">
                       {t({ it: 'Sede', en: 'Site' })}
@@ -2274,7 +3092,130 @@ const SidebarTree = () => {
                         ))}
                       </select>
                     </label>
-                    <div className="flex items-end justify-end">
+                    <div className="relative">
+                      <label className="text-xs font-semibold text-slate-600">
+                        {t({ it: 'Ricerca meeting (ID o titolo)', en: 'Search meeting (ID or title)' })}
+                      </label>
+                      <div className="relative mt-1">
+                        <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          ref={clientMeetingsSearchInputRef}
+                          value={clientMeetingsSearchTerm}
+                          onChange={(e) => {
+                            setClientMeetingsSearchTerm(e.target.value);
+                            setClientMeetingsSearchActiveIndex(-1);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              setClientMeetingsSearchActiveIndex((prev) =>
+                                Math.min((clientMeetingsSearchResults.length || 1) - 1, Math.max(0, prev + 1))
+                              );
+                              return;
+                            }
+                            if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setClientMeetingsSearchActiveIndex((prev) => Math.max(0, prev <= 0 ? 0 : prev - 1));
+                              return;
+                            }
+                            if (e.key === 'Enter') {
+                              const candidate = clientMeetingsSearchResults[clientMeetingsSearchActiveIndex];
+                              if (candidate) {
+                                e.preventDefault();
+                                jumpToClientTimelineMeeting(candidate);
+                              }
+                              return;
+                            }
+                            if (e.key === 'Escape') {
+                              setClientMeetingsSearchTerm('');
+                              setClientMeetingsSearchResults([]);
+                              setClientMeetingsSearchActiveIndex(-1);
+                              setClientMeetingsSearchError(null);
+                            }
+                          }}
+                          placeholder={t({ it: 'Es. #104 o Budget review', en: 'e.g. #104 or Budget review' })}
+                          className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm"
+                        />
+                        {clientMeetingsSearchLoading ? (
+                          <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
+                        ) : null}
+                      </div>
+                      {String(clientMeetingsSearchTerm || '').trim() ? (
+                        <div className="absolute left-0 right-0 z-30 mt-1 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                          {clientMeetingsSearchError ? (
+                            <div className="px-3 py-2 text-xs font-semibold text-rose-600">{clientMeetingsSearchError}</div>
+                          ) : null}
+                          {!clientMeetingsSearchLoading && !clientMeetingsSearchError && !clientMeetingsSearchResults.length ? (
+                            <div className="px-3 py-2 text-xs text-slate-500">{t({ it: 'Nessun risultato.', en: 'No results.' })}</div>
+                          ) : null}
+                          {clientMeetingsSearchResults.map((row, index) => {
+                            const isActive = index === clientMeetingsSearchActiveIndex;
+                            const meetingNumber = Number((row.booking as any)?.meetingNumber || 0);
+                            const startAt = Number(row.booking.startAt || 0);
+                            const endAt = Number(row.booking.endAt || 0);
+                            return (
+                              <button
+                                key={`client-meetings-search-${row.booking.id}`}
+                                type="button"
+                                onMouseEnter={() => setClientMeetingsSearchActiveIndex(index)}
+                                onClick={() => jumpToClientTimelineMeeting(row)}
+                                className={`block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 ${
+                                  isActive ? 'bg-sky-50' : 'hover:bg-slate-50'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-700">
+                                  <span className="truncate">
+                                    {meetingNumber > 0 ? `#${meetingNumber} • ` : ''}
+                                    {row.booking.subject || t({ it: 'Meeting', en: 'Meeting' })}
+                                  </span>
+                                  <span className="shrink-0 text-slate-500">
+                                    {new Date(startAt).toLocaleDateString()} •{' '}
+                                    {new Date(startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-
+                                    {new Date(endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                                <div className="mt-0.5 text-[11px] text-slate-500">
+                                  {row.siteName}
+                                  {row.floorPlanName ? ` • ${row.floorPlanName}` : ''} • {row.roomName} • {t({ it: 'Partecipanti', en: 'Participants' })}:{' '}
+                                  {row.participantsCount}
+                                  {row.participantsLabel && row.participantsLabel !== '-' ? ` • ${row.participantsLabel}` : ''}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-end justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const selectedSiteId =
+                            clientMeetingsModal?.siteId && clientMeetingsModal.siteId !== 'all'
+                              ? String(clientMeetingsModal.siteId)
+                              : String(selectedClientForMeetings?.sites?.[0]?.id || '');
+                          const selectedSite =
+                            (selectedClientForMeetings?.sites || []).find((entry) => String(entry.id) === selectedSiteId) ||
+                            selectedClientForMeetings?.sites?.[0];
+                          const selectedPlanId = String(selectedSite?.floorPlans?.[0]?.id || '');
+                          setClientMeetingsModal(null);
+                          window.dispatchEvent(
+                            new CustomEvent(OPEN_MEETING_MANAGER_EVENT, {
+                              detail: {
+                                clientId: clientMeetingsModal?.clientId,
+                                siteId: selectedSiteId,
+                                floorPlanId: selectedPlanId,
+                                day: clientMeetingsModal?.day || todayIso()
+                              }
+                            })
+                          );
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                        title={t({ it: 'Nuovo meeting', en: 'New meeting' })}
+                      >
+                        <Plus size={14} />
+                        {t({ it: 'Nuovo meeting', en: 'New meeting' })}
+                      </button>
                       <button
                         type="button"
                         onClick={() => reloadClientMeetingsTimeline()}
@@ -2299,7 +3240,7 @@ const SidebarTree = () => {
                     {!clientMeetingsError && clientMeetingsRows.length ? (
                       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                         <div className="grid grid-cols-[240px,1fr] border-b border-slate-200 bg-slate-50">
-                          <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          <div className="sticky left-0 z-20 border-r border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                             {t({ it: 'Meeting room', en: 'Meeting room' })}
                           </div>
                           <div className="relative overflow-hidden px-0 py-2">
@@ -2328,17 +3269,17 @@ const SidebarTree = () => {
                                 );
                               })}
                               {clientMeetingsTimelineMeta.showNowLine ? (
-                                <div
-                                  className="absolute inset-y-0 z-10"
-                                  style={{
+                                  <div
+                                    className="absolute inset-y-0 z-10"
+                                    style={{
                                     left: `${((clientMeetingsTimelineMeta.nowMinutes - clientMeetingsTimelineMeta.minMinutes) /
                                       Math.max(1, clientMeetingsTimelineMeta.maxMinutes - clientMeetingsTimelineMeta.minMinutes)) * 100}%`
                                   }}
                                 >
-                                  <div className="absolute -top-1 left-0 -translate-x-1/2 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+                                  <div className="absolute top-7 left-0 -translate-x-1/2 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
                                     {t({ it: 'ORA', en: 'NOW' })}
                                   </div>
-                                  <div className="h-full border-l-2 border-slate-900/70" />
+                                  <div className="h-full border-l-2 border-blue-500/70" />
                                 </div>
                               ) : null}
                             </div>
@@ -2355,11 +3296,11 @@ const SidebarTree = () => {
                               return startTs > 0 && startTs <= nowTs && nowTs < endTs && booking.status === 'approved';
                             });
                             const roomTone = roomHasInProgress
-                              ? 'bg-amber-50 border-r border-amber-200'
-                              : 'bg-emerald-50/60 border-r border-emerald-200';
+                              ? 'bg-gradient-to-br from-amber-100 to-amber-50 border-r border-amber-300'
+                              : 'bg-gradient-to-br from-emerald-100 to-emerald-50 border-r border-emerald-300';
                             return (
                               <div key={`${row.siteId}:${row.roomId}`} className="grid grid-cols-[240px,1fr] border-b border-slate-100 last:border-b-0">
-                                <div className={`px-3 py-2 ${roomTone}`}>
+                                <div className={`sticky left-0 z-10 px-3 py-2 ${roomTone}`}>
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="truncate text-sm font-semibold text-ink">{row.roomName || '-'}</div>
                                     <button
@@ -2380,6 +3321,7 @@ const SidebarTree = () => {
                                     </button>
                                   </div>
                                   <div className="truncate text-xs text-slate-500">{row.siteName}</div>
+                                  <div className="truncate text-xs text-slate-500">{String((row as any).floorPlanName || '')}</div>
                                   <div className="text-[11px] text-slate-500">
                                     {t({ it: 'Capienza', en: 'Capacity' })}: {row.capacity}
                                   </div>
@@ -2391,7 +3333,7 @@ const SidebarTree = () => {
                                   })}
                                   {clientMeetingsTimelineMeta.showNowLine ? (
                                     <div
-                                      className="absolute inset-y-0 z-10 border-l-2 border-slate-900/70"
+                                      className="absolute inset-y-0 z-10 border-l-2 border-blue-500/70"
                                       style={{
                                         left: `${((clientMeetingsTimelineMeta.nowMinutes - clientMeetingsTimelineMeta.minMinutes) / total) * 100}%`
                                       }}
@@ -2425,8 +3367,21 @@ const SidebarTree = () => {
                                     return (
                                       <div
                                         key={booking.id}
-                                        className={`absolute top-2 h-[50px] overflow-hidden rounded-lg border px-2 py-1 shadow-sm ${tone}`}
+                                        className={`absolute top-2 h-[50px] overflow-hidden rounded-lg border px-2 py-1 shadow-sm ${tone} ${
+                                          String(clientMeetingsHighlightBookingId || '') === String(booking.id || '')
+                                            ? 'ring-2 ring-primary ring-offset-1'
+                                            : ''
+                                        }`}
                                         style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                                        onContextMenu={(event) => {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          setClientMeetingsTimelineContextMenu({
+                                            booking,
+                                            x: event.clientX,
+                                            y: event.clientY
+                                          });
+                                        }}
                                         onDoubleClick={() => {
                                           setClientMeetingsShowCheckInDetails(false);
                                           setClientMeetingsBookingDetail({ booking, roomName: row.roomName, siteName: row.siteName });
@@ -2467,12 +3422,36 @@ const SidebarTree = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setClientMeetingsModal(null)}
+                      onClick={closeClientMeetingsModal}
                       className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}
                     </button>
                   </div>
+                  {clientMeetingsTimelineContextMenu ? (
+                    <div
+                      ref={clientMeetingsTimelineContextMenuRef}
+                      className="fixed z-[97] min-w-[210px] rounded-xl border border-slate-200 bg-white p-2 shadow-2xl"
+                      style={{
+                        left: Math.max(12, Math.min(clientMeetingsTimelineContextMenu.x, window.innerWidth - 240)),
+                        top: Math.max(12, Math.min(clientMeetingsTimelineContextMenu.y, window.innerHeight - 120))
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          openClientMeetingDuplicateModal(clientMeetingsTimelineContextMenu.booking);
+                          setClientMeetingsTimelineContextMenu(null);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <Copy size={14} />
+                        <span>{t({ it: 'Follow-up…', en: 'Follow-up…' })}</span>
+                      </button>
+                    </div>
+                  ) : null}
                 </Dialog.Panel>
               </Transition.Child>
             </div>
@@ -2484,6 +3463,7 @@ const SidebarTree = () => {
         <Dialog
           as="div"
           className="relative z-[96]"
+          initialFocus={clientMeetingsRoomPreviewFocusRef}
           onClose={() => setClientMeetingsRoomPreview(null)}
         >
           <Transition.Child
@@ -2521,6 +3501,7 @@ const SidebarTree = () => {
                       </div>
                     </div>
                     <button
+                      ref={clientMeetingsRoomPreviewFocusRef}
                       type="button"
                       onClick={() => setClientMeetingsRoomPreview(null)}
                       className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
@@ -2589,10 +3570,11 @@ const SidebarTree = () => {
         </Dialog>
       </Transition>
 
-      <Transition show={!!clientMeetingsBookingDetail} as={Fragment}>
+      <Transition show={!!clientMeetingsBookingDetail && !clientMeetingsDuplicateModal} as={Fragment}>
         <Dialog
           as="div"
           className="relative z-[95]"
+          initialFocus={clientMeetingsBookingDetailFocusRef}
           onClose={() => {
             clientMeetingsDetailCloseGuardUntilRef.current = Date.now() + 350;
             setClientMeetingsBookingDetail(null);
@@ -2828,6 +3810,30 @@ const SidebarTree = () => {
                     {clientMeetingsBookingDetail ? (
                       <button
                         type="button"
+                        onClick={() => setClientMeetingsNotesBooking(clientMeetingsBookingDetail.booking)}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          <FileText size={14} />
+                          {t({ it: 'Appunti', en: 'Notes' })}
+                        </span>
+                      </button>
+                    ) : null}
+                    {clientMeetingsBookingDetail ? (
+                      <button
+                        type="button"
+                        onClick={() => openClientMeetingDuplicateModal(clientMeetingsBookingDetail.booking)}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          <Copy size={14} />
+                          {t({ it: 'Duplica', en: 'Duplicate' })}
+                        </span>
+                      </button>
+                    ) : null}
+                    {clientMeetingsBookingDetail ? (
+                      <button
+                        type="button"
                         onClick={() => setClientMeetingsShowCheckInDetails((prev) => !prev)}
                         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                       >
@@ -2837,6 +3843,7 @@ const SidebarTree = () => {
                       </button>
                     ) : null}
                     <button
+                      ref={clientMeetingsBookingDetailFocusRef}
                       type="button"
                       onClick={() => {
                         clientMeetingsDetailCloseGuardUntilRef.current = Date.now() + 350;
@@ -2855,7 +3862,579 @@ const SidebarTree = () => {
         </Dialog>
       </Transition>
 
-      <ClientInfoModal open={!!clientInfoId} client={fullClient || undefined} onClose={() => setClientInfoId(null)} />
+      <Transition show={!!clientMeetingsDuplicateModal} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-[145]"
+          initialFocus={clientMeetingsDuplicateFocusRef}
+          onClose={() => {
+            if (clientMeetingsDuplicateModal?.saving) return;
+            setClientMeetingsDuplicateModal(null);
+          }}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-[760px] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
+                  {(() => {
+                    const dup = clientMeetingsDuplicateModal;
+                    if (!dup) return null;
+                    const monthDate = new Date(`${dup.monthAnchor}T00:00:00`);
+                    const validMonth = Number.isFinite(monthDate.getTime());
+                    const y = validMonth ? monthDate.getFullYear() : new Date().getFullYear();
+                    const m = validMonth ? monthDate.getMonth() : new Date().getMonth();
+                    const daysInMonth = new Date(y, m + 1, 0).getDate();
+                    const firstWeekday = ((new Date(y, m, 1).getDay() + 6) % 7);
+                    const monthLabel = new Date(y, m, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+                    const baseDay = dup.baseDay;
+                    const booking = dup.booking;
+                    const startHm = timeHmFromTs(Number(booking.startAt || 0));
+                    const endHm = timeHmFromTs(Number(booking.endAt || 0));
+                    const sourceRoomId = String((booking as any)?.roomId || '').trim();
+                    const sourceRoomName = String((booking as any)?.roomName || '').trim();
+                    const selectedRoomOption = dup.roomOptions.find((entry) => String(entry.roomId) === String(dup.selectedRoomId));
+                    const customFromMin = hmToMinutes(String(dup.customFromHm || ''));
+                    const customToMin = hmToMinutes(String(dup.customToHm || ''));
+                    const customWindowValid = Number.isFinite(customFromMin) && Number.isFinite(customToMin) && customFromMin < customToMin;
+                    const canGoPrev = dup.monthAnchor > monthAnchorFromIso(baseDay);
+                    const today = todayIso();
+                    const cells: Array<{ iso: string | null; dayNum: number | null }> = [];
+                    for (let i = 0; i < firstWeekday; i += 1) cells.push({ iso: null, dayNum: null });
+                    for (let d = 1; d <= daysInMonth; d += 1) {
+                      const dt = new Date(y, m, d);
+                      const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                      cells.push({ iso, dayNum: d });
+                    }
+                    while (cells.length % 7) cells.push({ iso: null, dayNum: null });
+                    const weekdayLabels = [
+                      t({ it: 'Lun', en: 'Mon' }),
+                      t({ it: 'Mar', en: 'Tue' }),
+                      t({ it: 'Mer', en: 'Wed' }),
+                      t({ it: 'Gio', en: 'Thu' }),
+                      t({ it: 'Ven', en: 'Fri' }),
+                      t({ it: 'Sab', en: 'Sat' }),
+                      t({ it: 'Dom', en: 'Sun' })
+                    ];
+                    return (
+                      <>
+                        <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                          <div>
+                            <Dialog.Title className="text-lg font-semibold text-ink">
+                              {t({ it: 'Duplica riunione', en: 'Duplicate meeting' })}
+                            </Dialog.Title>
+                            <div className="text-xs text-slate-500">
+                              {booking.subject || t({ it: 'Meeting', en: 'Meeting' })} • {startHm} - {endHm}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {t({
+                                it: 'Seleziona i giorni successivi. Le date in rosso sono occupate nello stesso orario.',
+                                en: 'Select future days. Red dates are occupied at the same time.'
+                              })}
+                            </div>
+                          </div>
+                          <button
+                            ref={clientMeetingsDuplicateFocusRef}
+                            type="button"
+                            onClick={() => {
+                              if (dup.saving) return;
+                              setClientMeetingsDuplicateModal(null);
+                            }}
+                            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+
+                        {dup.step === 'setup' ? (
+                          <>
+                            <div className="mt-3 space-y-3">
+                              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                  {t({ it: 'Scelta saletta', en: 'Room selection' })}
+                                </div>
+                                <div ref={clientMeetingsDuplicateRoomPickerRef} className="relative mt-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setClientMeetingsDuplicateRoomPickerOpen((prev) => !prev)}
+                                    className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm hover:border-primary/40"
+                                  >
+                                    <span className="truncate pr-2">
+                                      {dup.roomMode === 'any'
+                                        ? t({
+                                            it: 'Qualsiasi meeting room disponibile in questa sede',
+                                            en: 'Any available meeting room in this site'
+                                          })
+                                        : `${selectedRoomOption?.roomName || '-'}${
+                                            selectedRoomOption?.floorPlanName ? ` • ${selectedRoomOption.floorPlanName}` : ''
+                                          }`}
+                                    </span>
+                                    <ChevronDown
+                                      size={16}
+                                      className={`shrink-0 text-slate-500 transition-transform ${clientMeetingsDuplicateRoomPickerOpen ? 'rotate-180' : ''}`}
+                                    />
+                                  </button>
+                                  {clientMeetingsDuplicateRoomPickerOpen ? (
+                                    <div className="absolute z-[220] mt-1 max-h-72 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setClientMeetingsDuplicateModal((prev) => (prev ? { ...prev, roomMode: 'any', error: null } : prev));
+                                          setClientMeetingsDuplicateRoomPickerOpen(false);
+                                        }}
+                                        className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
+                                          dup.roomMode === 'any' ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-100'
+                                        }`}
+                                      >
+                                        <span>{t({ it: 'Qualsiasi meeting room disponibile in questa sede', en: 'Any available meeting room in this site' })}</span>
+                                        {dup.roomMode === 'any' ? <span className="text-xs font-semibold">✓</span> : null}
+                                      </button>
+                                      {dup.roomOptions.map((option) => {
+                                        const isSelected = dup.roomMode === 'selected' && String(option.roomId) === String(dup.selectedRoomId);
+                                        const isSource = String(option.roomId) === sourceRoomId;
+                                        return (
+                                          <button
+                                            key={option.roomId}
+                                            type="button"
+                                            onClick={() => {
+                                              setClientMeetingsDuplicateModal((prev) =>
+                                                prev ? { ...prev, roomMode: 'selected', selectedRoomId: option.roomId, error: null } : prev
+                                              );
+                                              setClientMeetingsDuplicateRoomPickerOpen(false);
+                                            }}
+                                            className={`mt-1 flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
+                                              isSelected ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-100'
+                                            }`}
+                                          >
+                                            <span className="flex min-w-0 items-center gap-2">
+                                              <span className="truncate">
+                                                {option.roomName}
+                                                {option.floorPlanName ? ` • ${option.floorPlanName}` : ''}
+                                              </span>
+                                              {isSource ? (
+                                                <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-700">
+                                                  {t({ it: 'Origine', en: 'Source' })}
+                                                </span>
+                                              ) : null}
+                                            </span>
+                                            {isSelected ? <span className="text-xs font-semibold">✓</span> : null}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="mt-2 text-xs text-slate-500">
+                                  {t({ it: 'Saletta di origine', en: 'Source room' })}:{' '}
+                                  <span className="font-semibold text-slate-700">{sourceRoomName || '-'}</span>
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {t({ it: 'Selezione attuale', en: 'Current selection' })}:{' '}
+                                  {dup.roomMode === 'any'
+                                    ? t({
+                                        it: 'Qualsiasi meeting room disponibile in questa sede',
+                                        en: 'Any available meeting room in this site'
+                                      })
+                                    : `${selectedRoomOption?.roomName || '-'}${
+                                        selectedRoomOption?.floorPlanName ? ` • ${selectedRoomOption.floorPlanName}` : ''
+                                      }`}
+                                </div>
+                              </div>
+                              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                  {t({ it: 'Scelta orario', en: 'Time selection' })}
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setClientMeetingsDuplicateModal((prev) =>
+                                        prev ? { ...prev, timeMode: 'same', error: null } : prev
+                                      )
+                                    }
+                                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                                      dup.timeMode === 'same'
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {t({ it: 'Stesso di quello originale', en: 'Same as original' })}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setClientMeetingsDuplicateModal((prev) =>
+                                        prev ? { ...prev, timeMode: 'any_08_18', error: null } : prev
+                                      )
+                                    }
+                                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                                      dup.timeMode === 'any_08_18'
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {t({
+                                      it: 'Qualsiasi disponibile tra 08:00 e 18:00',
+                                      en: 'Any available between 08:00 and 18:00'
+                                    })}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setClientMeetingsDuplicateModal((prev) =>
+                                        prev ? { ...prev, timeMode: 'custom', error: null } : prev
+                                      )
+                                    }
+                                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                                      dup.timeMode === 'custom'
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {t({ it: 'Seleziona da - a', en: 'Select from - to' })}
+                                  </button>
+                                </div>
+                                {dup.timeMode === 'custom' ? (
+                                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                    <label className="text-xs text-slate-500">
+                                      {t({ it: 'Da', en: 'From' })}
+                                      <input
+                                        type="time"
+                                        value={dup.customFromHm}
+                                        onChange={(event) =>
+                                          setClientMeetingsDuplicateModal((prev) =>
+                                            prev ? { ...prev, customFromHm: event.target.value, error: null } : prev
+                                          )
+                                        }
+                                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                      />
+                                    </label>
+                                    <label className="text-xs text-slate-500">
+                                      {t({ it: 'A', en: 'To' })}
+                                      <input
+                                        type="time"
+                                        value={dup.customToHm}
+                                        onChange={(event) =>
+                                          setClientMeetingsDuplicateModal((prev) =>
+                                            prev ? { ...prev, customToHm: event.target.value, error: null } : prev
+                                          )
+                                        }
+                                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                      />
+                                    </label>
+                                  </div>
+                                ) : null}
+                                <div className="mt-2 text-xs text-slate-500">
+                                  {dup.timeMode === 'same'
+                                    ? `${t({ it: 'Slot origine', en: 'Source slot' })}: ${startHm} - ${endHm}`
+                                    : dup.timeMode === 'any_08_18'
+                                      ? t({
+                                          it: 'Il sistema trova il primo slot utile tra 08:00 e 18:00.',
+                                          en: 'System picks the first available slot between 08:00 and 18:00.'
+                                        })
+                                      : `${t({ it: 'Finestra scelta', en: 'Selected window' })}: ${dup.customFromHm} - ${dup.customToHm}`}
+                                </div>
+                                {dup.timeMode === 'custom' && !customWindowValid ? (
+                                  <div className="mt-1 text-xs font-semibold text-rose-600">
+                                    {t({
+                                      it: "L'orario 'da' deve essere precedente all'orario 'a'.",
+                                      en: "The 'from' time must be earlier than the 'to' time."
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                disabled={dup.saving}
+                                onClick={() => setClientMeetingsDuplicateModal(null)}
+                                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                {t({ it: 'Annulla', en: 'Cancel' })}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={(dup.roomMode === 'selected' && !dup.selectedRoomId) || (dup.timeMode === 'custom' && !customWindowValid)}
+                                onClick={() =>
+                                  setClientMeetingsDuplicateModal((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          step: 'calendar',
+                                          selectedDays: [],
+                                          availabilityByDay: {},
+                                          candidateByDay: {},
+                                          loadingMonth: false,
+                                          error: null
+                                        }
+                                      : prev
+                                  )
+                                }
+                                className="rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-105 disabled:opacity-50"
+                              >
+                                {t({ it: 'Vai al calendario', en: 'Go to calendar' })}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="mt-3 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setClientMeetingsDuplicateModal((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            step: 'setup',
+                                            selectedDays: [],
+                                            availabilityByDay: {},
+                                            candidateByDay: {},
+                                            loadingMonth: false,
+                                            error: null
+                                          }
+                                        : prev
+                                    )
+                                  }
+                                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                >
+                                  <ChevronLeft size={15} />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!canGoPrev}
+                                  onClick={() =>
+                                    setClientMeetingsDuplicateModal((prev) =>
+                                      prev ? { ...prev, monthAnchor: shiftMonthAnchor(prev.monthAnchor, -1), error: null } : prev
+                                    )
+                                  }
+                                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                                >
+                                  <ChevronLeft size={15} />
+                                </button>
+                                <div className="min-w-[220px] text-center text-sm font-semibold text-slate-700 capitalize">{monthLabel}</div>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setClientMeetingsDuplicateModal((prev) =>
+                                      prev ? { ...prev, monthAnchor: shiftMonthAnchor(prev.monthAnchor, 1), error: null } : prev
+                                    )
+                                  }
+                                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                >
+                                  <ChevronRight size={15} />
+                                </button>
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                {dup.loadingMonth ? (
+                                  <span className="inline-flex items-center gap-1">
+                                    <Loader2 size={12} className="animate-spin" />
+                                    {t({ it: 'Verifica disponibilità…', en: 'Checking availability…' })}
+                                  </span>
+                                ) : dup.selectedDays.length ? (
+                                  t({
+                                    it: `${dup.selectedDays.length} giorn${dup.selectedDays.length === 1 ? 'o selezionato' : 'i selezionati'}`,
+                                    en: `${dup.selectedDays.length} day(s) selected`
+                                  })
+                                ) : (
+                                  t({ it: 'Nessun giorno selezionato', en: 'No days selected' })
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                              <div className="grid grid-cols-7 gap-1">
+                                {weekdayLabels.map((label) => (
+                                  <div key={`dup-weekday-${label}`} className="px-1 py-1 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    {label}
+                                  </div>
+                                ))}
+                                {cells.map((cell, idx) => {
+                                  if (!cell.iso) return <div key={`dup-empty-${idx}`} className="h-20 rounded-lg border border-transparent" />;
+                                  const status =
+                                    dup.availabilityByDay[cell.iso] ||
+                                    (cell.iso <= baseDay || cell.iso < today
+                                      ? ({
+                                          state: 'blocked',
+                                          reason:
+                                            cell.iso < today
+                                              ? t({ it: 'Giorno passato', en: 'Past day' })
+                                              : t({ it: 'Giorno di origine', en: 'Source day' })
+                                        } as const)
+                                      : ({ state: 'loading' } as const));
+                                  const candidate = dup.candidateByDay[cell.iso];
+                                  const tooltipText = (() => {
+                                    const dayLabel = new Date(`${cell.iso}T00:00:00`).toLocaleDateString();
+                                    if (status.state === 'occupied') {
+                                      return `${dayLabel}\n${t({ it: 'Occupata', en: 'Busy' })}\n${
+                                        status.reason || t({ it: 'Slot già occupato', en: 'Slot already occupied' })
+                                      }`;
+                                    }
+                                    if (status.state === 'blocked') {
+                                      return `${dayLabel}\n${status.reason || t({ it: 'Non selezionabile', en: 'Not selectable' })}`;
+                                    }
+                                    if (status.state === 'error') {
+                                      return `${dayLabel}\n${status.reason || t({ it: 'Errore verifica', en: 'Check error' })}`;
+                                    }
+                                    if (status.state === 'loading') {
+                                      return `${dayLabel}\n${t({ it: 'Verifica disponibilità in corso', en: 'Checking availability' })}`;
+                                    }
+                                    if (candidate) {
+                                      return `${dayLabel}\n${candidate.roomName}\n${candidate.startHm} - ${candidate.endHm}`;
+                                    }
+                                    return `${dayLabel}\n${t({ it: 'Disponibile', en: 'Available' })}\n${startHm} - ${endHm}`;
+                                  })();
+                                  const selected = dup.selectedDays.includes(cell.iso);
+                                  const blocked = status.state !== 'available';
+                                  const classes =
+                                    status.state === 'occupied'
+                                      ? 'border-rose-300 bg-rose-50 text-rose-800'
+                                      : status.state === 'available' && selected
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : status.state === 'available'
+                                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                          : status.state === 'blocked'
+                                            ? 'border-slate-200 bg-slate-100 text-slate-400'
+                                            : status.state === 'loading'
+                                              ? 'border-slate-200 bg-white text-slate-500'
+                                              : 'border-amber-300 bg-amber-50 text-amber-800';
+                                  return (
+                                    <button
+                                      key={cell.iso}
+                                      type="button"
+                                      disabled={blocked}
+                                      title={tooltipText}
+                                      aria-label={tooltipText}
+                                      onClick={() =>
+                                        setClientMeetingsDuplicateModal((prev) => {
+                                          if (!prev) return prev;
+                                          const has = prev.selectedDays.includes(cell.iso!);
+                                          return {
+                                            ...prev,
+                                            error: null,
+                                            selectedDays: has
+                                              ? prev.selectedDays.filter((entry) => entry !== cell.iso)
+                                              : [...prev.selectedDays, cell.iso!]
+                                          };
+                                        })
+                                      }
+                                      className={`group relative h-20 rounded-lg border p-2 text-left transition ${classes} disabled:cursor-not-allowed`}
+                                    >
+                                      <span className="pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden max-w-[240px] whitespace-pre-line rounded-lg border border-slate-200 bg-slate-900 px-2 py-1 text-[10px] font-medium leading-snug text-white shadow-lg group-hover:block group-focus-visible:block">
+                                        {tooltipText}
+                                      </span>
+                                      <div className="flex items-start justify-between gap-1">
+                                        <span className="text-sm font-semibold">{cell.dayNum}</span>
+                                        {status.state === 'occupied' ? (
+                                          <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                                            {t({ it: 'Occupata', en: 'Busy' })}
+                                          </span>
+                                        ) : status.state === 'available' ? (
+                                          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${selected ? 'bg-primary/15 text-primary' : 'bg-emerald-100 text-emerald-700'}`}>
+                                            {selected ? t({ it: 'Selez.', en: 'Selected' }) : t({ it: 'Libera', en: 'Free' })}
+                                          </span>
+                                        ) : status.state === 'loading' ? (
+                                          <Loader2 size={12} className="animate-spin text-slate-400" />
+                                        ) : null}
+                                      </div>
+                                      <div className="mt-1 line-clamp-2 text-[11px] leading-tight opacity-90">
+                                        {status.state === 'occupied'
+                                          ? status.reason || t({ it: 'Già occupata', en: 'Already occupied' })
+                                          : status.state === 'blocked'
+                                            ? status.reason || t({ it: 'Giorno non selezionabile', en: 'Day not selectable' })
+                                            : status.state === 'error'
+                                              ? status.reason || t({ it: 'Errore verifica', en: 'Check error' })
+                                              : candidate
+                                                ? `${candidate.roomName} • ${candidate.startHm} - ${candidate.endHm}`
+                                                : `${startHm} - ${endHm}`}
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {dup.error ? (
+                              <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                                {dup.error}
+                              </div>
+                            ) : null}
+
+                            <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                disabled={dup.saving}
+                                onClick={() => setClientMeetingsDuplicateModal(null)}
+                                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                {t({ it: 'Annulla', en: 'Cancel' })}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={dup.saving || !dup.selectedDays.length}
+                                onClick={() => void saveClientMeetingDuplicates()}
+                                className="rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-105 disabled:opacity-50"
+                              >
+                                {dup.saving ? (
+                                  <>
+                                    <Loader2 size={14} className="mr-1 inline-block animate-spin" />
+                                    {t({ it: 'Duplicazione...', en: 'Duplicating...' })}
+                                  </>
+                                ) : (
+                                  t({ it: 'Duplica sui giorni selezionati', en: 'Duplicate on selected days' })
+                                )}
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <ClientInfoModal
+        open={!!clientInfoId}
+        client={fullClient || undefined}
+        canManageSiteHours={!!user?.isAdmin || !!isSuperAdmin}
+        onOpenSiteHours={(siteId) => {
+          const targetClient = fullClient;
+          const targetSite = targetClient?.sites?.find((site) => String(site.id) === String(siteId));
+          if (!targetClient || !targetSite) return;
+          setSiteHoursModal({
+            clientId: targetClient.id,
+            clientName: targetClient.shortName || targetClient.name,
+            siteId: targetSite.id,
+            siteName: targetSite.name,
+            siteSchedule: (targetSite as any).siteSchedule
+          });
+        }}
+        onClose={() => setClientInfoId(null)}
+      />
       <ClientBusinessPartnersModal
         open={!!clientBusinessPartnersId}
         client={businessPartnersClient || undefined}
@@ -2885,6 +4464,19 @@ const SidebarTree = () => {
       />
       <ClientIpMapModal open={!!clientIpMapId} client={ipMapClient || undefined} onClose={() => setClientIpMapId(null)} />
       <ClientDirectoryModal open={!!clientDirectoryId} client={directoryClient || undefined} onClose={() => setClientDirectoryId(null)} />
+      {clientMeetingsNotesBooking ? (
+        <Suspense fallback={null}>
+          <MeetingNotesModal
+            open={!!clientMeetingsNotesBooking}
+            meeting={clientMeetingsNotesBooking}
+            suspendClose={!!clientMeetingsDuplicateModal}
+            onClose={() => setClientMeetingsNotesBooking(null)}
+            onOpenFollowUpScheduler={(booking, options) => {
+              openClientMeetingDuplicateModal(booking, options);
+            }}
+          />
+        </Suspense>
+      ) : null}
       <EmergencyContactsModal
         open={!!clientEmergencyId}
         clientId={clientEmergencyId}
@@ -2895,6 +4487,37 @@ const SidebarTree = () => {
         }
         safetyCardToggleDisabled={!emergencyModalPlanId}
         onClose={() => setClientEmergencyId(null)}
+      />
+      <SiteHoursModal
+        open={!!siteHoursModal}
+        clientName={siteHoursModal?.clientName || ''}
+        siteName={siteHoursModal?.siteName || ''}
+        currentSiteId={siteHoursModal?.siteId || ''}
+        siblingSites={
+          siteHoursModal
+            ? (clients.find((client) => client.id === siteHoursModal.clientId)?.sites || []).map((site) => ({ id: site.id, name: site.name }))
+            : []
+        }
+        initialSchedule={siteHoursModal?.siteSchedule}
+        canApplyToOtherSites={!!user?.isAdmin || !!isSuperAdmin}
+        onClose={() => setSiteHoursModal(null)}
+        onSave={({ siteSchedule, applyToSiteIds }) => {
+          if (!siteHoursModal) return;
+          updateSite(siteHoursModal.siteId, { siteSchedule } as any);
+          if ((user?.isAdmin || isSuperAdmin) && Array.isArray(applyToSiteIds)) {
+            for (const siteId of applyToSiteIds) {
+              if (!siteId || siteId === siteHoursModal.siteId) continue;
+              updateSite(siteId, { siteSchedule } as any);
+            }
+          }
+          pushToast(
+            (user?.isAdmin || isSuperAdmin) && applyToSiteIds.length
+              ? t({ it: 'Orari sede salvati e copiati sulle sedi selezionate', en: 'Site hours saved and copied to selected sites' })
+              : t({ it: 'Orari sede salvati', en: 'Site hours saved' }),
+            'success'
+          );
+          setSiteHoursModal(null);
+        }}
       />
 
       <CloneFloorPlanModal

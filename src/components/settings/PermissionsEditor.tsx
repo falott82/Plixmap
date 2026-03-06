@@ -11,11 +11,12 @@ interface Props {
   chatValue: Record<string, boolean>;
   onChangeAccess: (next: Record<string, Access>) => void;
   onChangeChat: (next: Record<string, boolean>) => void;
+  scrollHeightClass?: string;
 }
 
 const keyOf = (scopeType: Permission['scopeType'], scopeId: string) => `${scopeType}:${scopeId}`;
 
-const PermissionsEditor = ({ clients, accessValue, chatValue, onChangeAccess, onChangeChat }: Props) => {
+const PermissionsEditor = ({ clients, accessValue, chatValue, onChangeAccess, onChangeChat, scrollHeightClass = 'max-h-72' }: Props) => {
   const t = useT();
   const { entries, keysByClientId } = useMemo(() => {
     const out: { key: string; scopeType: Permission['scopeType']; scopeId: string; label: string; depth: number }[] = [];
@@ -43,7 +44,7 @@ const PermissionsEditor = ({ clients, accessValue, chatValue, onChangeAccess, on
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3">
       <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Permessi', en: 'Permissions' })}</div>
-      <div className="mt-2 max-h-72 overflow-auto rounded-xl border border-slate-100">
+      <div className={`mt-2 overflow-auto rounded-xl border border-slate-100 ${scrollHeightClass}`}>
         {entries.length ? (
           entries.map((e) => (
             <div

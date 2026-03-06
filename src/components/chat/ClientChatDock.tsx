@@ -29,10 +29,12 @@ import { useUIStore } from '../../store/useUIStore';
 import { useT } from '../../i18n/useT';
 import UserAvatar from '../ui/UserAvatar';
 import { useDataStore } from '../../store/useDataStore';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
 const MAX_NONVOICE_ATTACH_BYTES = 5 * 1024 * 1024;
 const MAX_VOICE_SECONDS = 10 * 60;
 const MAX_VOICE_BYTES = 40 * 1024 * 1024; // keep in sync with server default limit
+const CHAT_HISTORY_FETCH_LIMIT = 180;
 const CHAT_REACTIONS = ['👍', '👎', '❤️', '😂', '😮', '😢', '🙏'] as const;
 const allowedExts = new Set([
   'pdf',
@@ -230,6 +232,13 @@ const downloadBlob = (blob: Blob, filename: string) => {
     return age <= 30 * 60 * 1000;
   };
 
+const canDeleteForAll = (msg: ChatMessage, myUserId: string) => {
+  if (msg.deleted) return false;
+  if (String(msg.userId) !== String(myUserId)) return false;
+  const age = Date.now() - (Number(msg.createdAt) || 0);
+  return age <= 30 * 60 * 1000;
+};
+
 const ClientChatDock = () => {
   const t = useT();
   const { user, permissions } = useAuthStore();
@@ -279,6 +288,9 @@ const ClientChatDock = () => {
   const [clearChatOpen, setClearChatOpen] = useState(false);
   const [clearChatTyped, setClearChatTyped] = useState('');
   const [clearChatBusy, setClearChatBusy] = useState(false);
+  const [confirmDmBlock, setConfirmDmBlock] = useState<null | { userId: string; username: string }>(null);
+  const [confirmReviewReject, setConfirmReviewReject] = useState<null | { meetingId: string; reason: string }>(null);
+  const [confirmDeleteMessageMode, setConfirmDeleteMessageMode] = useState<null | { messageId: string; allowAll: boolean }>(null);
   const [unstarConfirmId, setUnstarConfirmId] = useState<string | null>(null);
   const [leftSearchQ, setLeftSearchQ] = useState('');
   const [leftCompact, setLeftCompact] = useState(false);
@@ -363,22 +375,26 @@ const ClientChatDock = () => {
   const waveformLastPushAtRef = useRef<number>(0);
   const [waveform, setWaveform] = useState<number[]>([]);
 
+  const activeClientObj = useMemo(() => {
+    if (!clientChatClientId) return null;
+    if (isDmThreadId(clientChatClientId)) return null;
+    return (clientsFull || []).find((c: any) => String(c?.id) === String(clientChatClientId)) || null;
+  }, [clientChatClientId, clientsFull]);
+
   const clientName = useMemo(() => {
     if (!clientChatClientId) return '';
-    return clientNameFromStore || clientChatClientId;
-  }, [clientChatClientId, clientNameFromStore]);
+    const fromClientTree = String((activeClientObj as any)?.shortName || (activeClientObj as any)?.name || '').trim();
+    if (fromClientTree) return fromClientTree;
+    const fromStore = String(clientNameFromStore || '').trim();
+    if (fromStore) return fromStore;
+    return clientChatClientId;
+  }, [activeClientObj, clientChatClientId, clientNameFromStore]);
 
   const clientLogoUrl = useMemo(() => {
     if (!clientChatClientId) return '';
     const c = (clientTree || []).find((x) => String(x.id) === String(clientChatClientId));
     return String((c as any)?.logoUrl || '');
   }, [clientChatClientId, clientTree]);
-
-  const activeClientObj = useMemo(() => {
-    if (!clientChatClientId) return null;
-    if (isDmThreadId(clientChatClientId)) return null;
-    return (clientsFull || []).find((c: any) => String(c?.id) === String(clientChatClientId)) || null;
-  }, [clientChatClientId, clientsFull]);
 
   const clientInitial = useMemo(() => {
     const n = String(clientName || '').trim();
@@ -713,10 +729,11 @@ const ClientChatDock = () => {
   useEffect(() => {
     if (!clientChatOpen || !clientChatClientId || !user?.id) return;
     setErr(null);
-    setLoading(true);
+    const cachedMessages = useChatStore.getState().messagesByClientId?.[clientChatClientId] || [];
+    setLoading(!Array.isArray(cachedMessages) || !cachedMessages.length);
     setExportOpen(false);
     setMembersOpen(false);
-    fetchChatMessages(clientChatClientId, { limit: 300 })
+    fetchChatMessages(clientChatClientId, { limit: CHAT_HISTORY_FETCH_LIMIT })
       .then((payload) => {
         setActiveDmMeta((payload as any)?.dm || null);
         const lastReadAt = Number((payload as any)?.lastReadAt || 0) || 0;
@@ -1043,23 +1060,37 @@ const ClientChatDock = () => {
     const id = String(meetingId || '').trim();
     if (!id) return;
     try {
-      let reason: string | undefined;
       if (action === 'reject') {
-        const answer = window.prompt(
-          t({
-            it: 'Motivazione rifiuto (obbligatoria):',
-            en: 'Rejection reason (required):'
-          })
-        );
-        reason = String(answer || '').trim();
-        if (!reason) return;
+        setConfirmReviewReject({ meetingId: id, reason: '' });
+        return;
       }
-      await reviewMeeting(id, { action, reason });
+      await reviewMeeting(id, { action });
       toast.success(
         action === 'approve'
           ? t({ it: 'Meeting approvato.', en: 'Meeting approved.' })
           : t({ it: 'Meeting rifiutato.', en: 'Meeting rejected.' })
       );
+    } catch (error: any) {
+      const msg = String(error?.message || '').trim();
+      toast.error(
+        msg ||
+          t({
+            it: 'Impossibile completare la revisione meeting.',
+            en: 'Unable to complete meeting review.'
+          })
+      );
+    }
+  };
+
+  const submitMeetingReject = async () => {
+    const payload = confirmReviewReject;
+    if (!payload?.meetingId) return;
+    const reason = String(payload.reason || '').trim();
+    if (!reason) return;
+    try {
+      await reviewMeeting(payload.meetingId, { action: 'reject', reason });
+      toast.success(t({ it: 'Meeting rifiutato.', en: 'Meeting rejected.' }));
+      setConfirmReviewReject(null);
     } catch (error: any) {
       const msg = String(error?.message || '').trim();
       toast.error(
@@ -1086,6 +1117,19 @@ const ClientChatDock = () => {
     }
   };
 
+  const confirmBlockDmUser = async () => {
+    if (!confirmDmBlock?.userId) return;
+    try {
+      await blockChatUser(confirmDmBlock.userId);
+      setActiveDmMeta((prev: any) => (prev && typeof prev === 'object' ? { ...prev, blockedByMe: true } : prev));
+      await refreshDmContacts();
+    } catch {
+      // ignore
+    } finally {
+      setConfirmDmBlock(null);
+    }
+  };
+
   const commitEdit = async () => {
     if (!editingId || !clientChatClientId) return;
     const trimmed = editingText.replace(/\r\n/g, '\n').trim();
@@ -1102,11 +1146,22 @@ const ClientChatDock = () => {
 
   const remove = async (msg: ChatMessage) => {
     if (!clientChatClientId) return;
-    if (!window.confirm(t({ it: 'Eliminare questo messaggio?', en: 'Delete this message?' }))) return;
+    const allowDeleteForAll = !!user?.id && canDeleteForAll(msg, String(user.id));
+    setConfirmDeleteMessageMode({ messageId: String(msg.id), allowAll: allowDeleteForAll });
+  };
+
+  const confirmRemoveMessage = async (mode: 'me' | 'all') => {
+    if (!clientChatClientId || !confirmDeleteMessageMode?.messageId) return;
     try {
-      await deleteChatMessage(msg.id);
+      await deleteChatMessage(confirmDeleteMessageMode.messageId, mode);
+      if (mode === 'me') {
+        const payload = await fetchChatMessages(clientChatClientId, { limit: CHAT_HISTORY_FETCH_LIMIT });
+        useChatStore.getState().setMessages(clientChatClientId, payload.clientName || '', payload.messages || []);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to delete');
+    } finally {
+      setConfirmDeleteMessageMode(null);
     }
   };
 
@@ -2141,16 +2196,7 @@ const ClientChatDock = () => {
                                     await refreshDmContacts();
                                     return;
                                   }
-                                  const ok = window.confirm(
-                                    t({
-                                      it: `Bloccare ${activeDmContact.username}? I suoi messaggi resteranno con una sola spunta grigia finche il blocco e attivo.`,
-                                      en: `Block ${activeDmContact.username}? Their messages will stay with one gray check while blocked.`
-                                    })
-                                  );
-                                  if (!ok) return;
-                                  await blockChatUser(activeDmContact.id);
-                                  setActiveDmMeta((prev: any) => (prev && typeof prev === 'object' ? { ...prev, blockedByMe: true } : prev));
-                                  await refreshDmContacts();
+                                  setConfirmDmBlock({ userId: String(activeDmContact.id), username: String(activeDmContact.username || '') });
                                 } catch {
                                   // ignore
                                 }
@@ -3854,6 +3900,118 @@ const ClientChatDock = () => {
           </div>
 	        </Dialog>
 	      </Transition>
+      <ConfirmDialog
+        open={!!confirmDmBlock}
+        title={t({ it: 'Bloccare utente?', en: 'Block user?' })}
+        description={
+          confirmDmBlock
+            ? t({
+                it: `Bloccare ${confirmDmBlock.username}? I suoi messaggi resteranno con una sola spunta grigia finché il blocco è attivo.`,
+                en: `Block ${confirmDmBlock.username}? Their messages will stay with one gray check while blocked.`
+              })
+            : ''
+        }
+        onCancel={() => setConfirmDmBlock(null)}
+        onConfirm={() => {
+          void confirmBlockDmUser();
+        }}
+        confirmLabel={t({ it: 'Blocca', en: 'Block' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+        zIndexClass="z-[220]"
+      />
+      <Transition show={!!confirmReviewReject} as={Fragment}>
+        <Dialog as="div" className="relative z-[225]" onClose={() => setConfirmReviewReject(null)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 flex items-center justify-center p-4">
+            <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+              <Dialog.Panel className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-card">
+                <Dialog.Title className="text-base font-semibold text-slate-100">
+                  {t({ it: 'Motivazione rifiuto meeting', en: 'Meeting rejection reason' })}
+                </Dialog.Title>
+                <div className="mt-2 text-sm text-slate-300">
+                  {t({ it: 'Inserisci una motivazione (obbligatoria).', en: 'Insert a reason (required).' })}
+                </div>
+                <textarea
+                  value={String(confirmReviewReject?.reason || '')}
+                  onChange={(e) => setConfirmReviewReject((prev) => (prev ? { ...prev, reason: e.target.value } : prev))}
+                  rows={4}
+                  className="mt-3 w-full resize-none rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none ring-primary/40 focus:ring-2"
+                  placeholder={t({ it: 'Motivazione rifiuto', en: 'Rejection reason' })}
+                />
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  <button type="button" onClick={() => setConfirmReviewReject(null)} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800">
+                    {t({ it: 'Annulla', en: 'Cancel' })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void submitMeetingReject();
+                    }}
+                    disabled={!String(confirmReviewReject?.reason || '').trim()}
+                    className="rounded-xl bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {t({ it: 'Rifiuta meeting', en: 'Reject meeting' })}
+                  </button>
+                </div>
+              </Dialog.Panel>
+            </Transition.Child>
+          </div>
+        </Dialog>
+      </Transition>
+      <Transition show={!!confirmDeleteMessageMode} as={Fragment}>
+        <Dialog as="div" className="relative z-[225]" onClose={() => setConfirmDeleteMessageMode(null)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 flex items-center justify-center p-4">
+            <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+              <Dialog.Panel className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-card">
+                <Dialog.Title className="text-base font-semibold text-slate-100">
+                  {t({ it: 'Elimina messaggio', en: 'Delete message' })}
+                </Dialog.Title>
+                <div className="mt-2 text-sm text-slate-300">
+                  {confirmDeleteMessageMode?.allowAll
+                    ? t({
+                        it: 'Scegli se eliminare il messaggio solo per te o per tutti i partecipanti.',
+                        en: 'Choose whether to delete the message only for you or for all participants.'
+                      })
+                    : t({
+                        it: 'Elimina per tutti non disponibile dopo 30 minuti. Puoi eliminarlo solo per te.',
+                        en: 'Delete for everyone is not available after 30 minutes. You can only delete it for yourself.'
+                      })}
+                </div>
+                <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                  <button type="button" onClick={() => setConfirmDeleteMessageMode(null)} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800">
+                    {t({ it: 'Annulla', en: 'Cancel' })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void confirmRemoveMessage('me');
+                    }}
+                    className="rounded-xl border border-cyan-400/40 bg-cyan-500/20 px-3 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-500/30"
+                  >
+                    {t({ it: 'Elimina per me', en: 'Delete for me' })}
+                  </button>
+                  {confirmDeleteMessageMode?.allowAll ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void confirmRemoveMessage('all');
+                      }}
+                      className="rounded-xl border border-rose-400/40 bg-rose-500/20 px-3 py-2 text-sm font-semibold text-rose-100 hover:bg-rose-500/30"
+                    >
+                      {t({ it: 'Elimina per tutti', en: 'Delete for everyone' })}
+                    </button>
+                  ) : null}
+                </div>
+              </Dialog.Panel>
+            </Transition.Child>
+          </div>
+        </Dialog>
+      </Transition>
 	    </>
 	  );
 };

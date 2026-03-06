@@ -91,3 +91,9 @@
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Mobile chat audio: hide native loading spinner that can remain stuck on some WebKit builds. */
+.mobile-audio-control::-webkit-media-controls-loading-panel,
+.mobile-audio-control::-webkit-media-controls-loading-background {
+  display: none !important;
+}

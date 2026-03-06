@@ -1,7 +1,7 @@
 import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { X } from 'lucide-react';
-import { AdminUserRow, Permission } from '../../api/auth';
+import { Search, Unlink, X } from 'lucide-react';
+import { AdminUserRow, ImportedUserLinkCandidate, Permission, searchImportedUsersForPortalLink } from '../../api/auth';
 import { Client } from '../../store/types';
 import PermissionsEditor, { permissionsListToChatMap, permissionsListToMap, permissionsMapsToList } from './PermissionsEditor';
 import { useT } from '../../i18n/useT';
@@ -28,6 +28,8 @@ interface Props {
     canManageBusinessPartners?: boolean;
     isMeetingOperator?: boolean;
     disabled?: boolean;
+    linkedExternalClientId?: string;
+    linkedExternalId?: string;
     permissions: Permission[];
   }) => void;
 }
@@ -50,6 +52,14 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
   const [permMap, setPermMap] = useState<Record<string, '' | 'ro' | 'rw'>>({});
   const [chatMap, setChatMap] = useState<Record<string, boolean>>({});
   const [importFromUserId, setImportFromUserId] = useState('');
+  const [linkedExternalClientId, setLinkedExternalClientId] = useState('');
+  const [linkedExternalId, setLinkedExternalId] = useState('');
+  const [linkedExternalLabel, setLinkedExternalLabel] = useState('');
+  const [linkSearchQuery, setLinkSearchQuery] = useState('');
+  const [linkSearchRows, setLinkSearchRows] = useState<ImportedUserLinkCandidate[]>([]);
+  const [linkSearchLoading, setLinkSearchLoading] = useState(false);
+  const [linkSearchOpen, setLinkSearchOpen] = useState(false);
+  const [linkSearchAutoSelected, setLinkSearchAutoSelected] = useState(false);
   const userRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -72,6 +82,14 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       setPermMap(seedClientExists ? { [`client:${SEED_CLIENT_ID}`]: 'rw' } : {});
       setChatMap({});
       setImportFromUserId('');
+      setLinkedExternalClientId('');
+      setLinkedExternalId('');
+      setLinkedExternalLabel('');
+      setLinkSearchQuery('');
+      setLinkSearchRows([]);
+      setLinkSearchLoading(false);
+      setLinkSearchOpen(false);
+      setLinkSearchAutoSelected(false);
     } else {
       setUsername((initial?.username || '').toLowerCase());
       setPassword('');
@@ -89,6 +107,18 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       setPermMap(permissionsListToMap(initial?.permissions));
       setChatMap(permissionsListToChatMap(initial?.permissions));
       setImportFromUserId('');
+      setLinkedExternalClientId(String((initial as any)?.linkedExternalClientId || ''));
+      setLinkedExternalId(String((initial as any)?.linkedExternalId || ''));
+      setLinkedExternalLabel(
+        (initial as any)?.linkedImportedUser?.fullName
+          ? `${String((initial as any).linkedImportedUser.fullName)} • ${String((initial as any).linkedImportedUser.clientName || '')}`
+          : ''
+      );
+      setLinkSearchQuery('');
+      setLinkSearchRows([]);
+      setLinkSearchLoading(false);
+      setLinkSearchOpen(false);
+      setLinkSearchAutoSelected(false);
     }
     window.setTimeout(() => userRef.current?.focus(), 0);
   }, [clients, initial, mode, open]);
@@ -154,6 +184,49 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
     });
   }, [isAdmin, isMeetingOperator]);
 
+  useEffect(() => {
+    if (!open) return;
+    const q = String(linkSearchQuery || '').trim();
+    const emailQuery = String(email || '').trim();
+    if (!q && !emailQuery) {
+      setLinkSearchRows([]);
+      setLinkSearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setLinkSearchLoading(true);
+      try {
+        const res = await searchImportedUsersForPortalLink({
+          q: q || undefined,
+          email: emailQuery || undefined,
+          limit: 12
+        });
+        if (cancelled) return;
+        const rows = Array.isArray(res.rows) ? res.rows : [];
+        setLinkSearchRows(rows);
+        if (!linkedExternalId && !linkSearchAutoSelected && emailQuery) {
+          const emailKey = emailQuery.trim().toLowerCase();
+          const exact = rows.find((r) => String(r.email || '').trim().toLowerCase() === emailKey);
+          if (exact) {
+            setLinkedExternalClientId(exact.clientId);
+            setLinkedExternalId(exact.externalId);
+            setLinkedExternalLabel(`${exact.fullName || exact.email || exact.externalId} • ${exact.clientName}`);
+            setLinkSearchAutoSelected(true);
+          }
+        }
+      } catch {
+        if (!cancelled) setLinkSearchRows([]);
+      } finally {
+        if (!cancelled) setLinkSearchLoading(false);
+      }
+    }, q ? 180 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [email, linkSearchAutoSelected, linkSearchQuery, linkedExternalId, open]);
+
   const normalizePhone = (value: string) => {
     const raw = String(value || '');
     let out = '';
@@ -214,6 +287,8 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
       canManageBusinessPartners,
       isMeetingOperator,
       disabled: lockedDisabled,
+      linkedExternalClientId: linkedExternalClientId.trim(),
+      linkedExternalId: linkedExternalId.trim(),
       language,
       permissions: (isMeetingOperator
         ? permissionsMapsToList(permMap, chatMap).map((p) => ({ ...p, access: 'ro' as const }))
@@ -251,7 +326,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <Dialog.Panel className="w-full max-w-3xl modal-panel">
+              <Dialog.Panel className="w-full max-w-6xl modal-panel">
                 <div className="modal-header items-center">
                   <Dialog.Title className="modal-title">
                     {mode === 'create' ? t({ it: 'Nuovo utente', en: 'New user' }) : t({ it: 'Modifica utente', en: 'Edit user' })}
@@ -261,7 +336,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                   </button>
                 </div>
 
-                <form className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2" onSubmit={handleSubmit}>
+                <form className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,430px)_minmax(0,1fr)]" onSubmit={handleSubmit}>
                   <div className="space-y-3">
                     {mode === 'create' ? (
                       <>
@@ -377,6 +452,103 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                       />
                     </label>
 
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="text-xs font-semibold uppercase text-slate-500">
+                        {t({ it: 'Utente reale collegato', en: 'Linked imported user' })}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {t({
+                          it: 'Collega l’utente del portale a un utente reale importato. La ricerca usa automaticamente la mail come suggerimento.',
+                          en: 'Link the portal user to an imported real user. Search automatically uses the email as a suggestion.'
+                        })}
+                      </div>
+                      <div className="relative mt-2">
+                        <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-slate-400" />
+                        <input
+                          value={linkSearchQuery}
+                          onChange={(e) => {
+                            setLinkSearchQuery(e.target.value);
+                            setLinkSearchOpen(true);
+                            setLinkSearchAutoSelected(false);
+                          }}
+                          onFocus={() => setLinkSearchOpen(true)}
+                          className="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                          placeholder={t({
+                            it: 'Cerca per nome, email, reparto o cliente…',
+                            en: 'Search by name, email, department or client…'
+                          })}
+                        />
+                      </div>
+                      {linkedExternalId ? (
+                        <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-emerald-900">
+                              {linkedExternalLabel || `${linkedExternalClientId}/${linkedExternalId}`}
+                            </div>
+                            <div className="truncate text-xs text-emerald-700">
+                              {linkedExternalClientId}/{linkedExternalId}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLinkedExternalClientId('');
+                              setLinkedExternalId('');
+                              setLinkedExternalLabel('');
+                              setLinkSearchAutoSelected(false);
+                            }}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-100"
+                            title={t({ it: 'Scollega utente importato', en: 'Unlink imported user' })}
+                          >
+                            <Unlink size={14} />
+                          </button>
+                        </div>
+                      ) : null}
+                      {linkSearchOpen ? (
+                        <div className="mt-2 max-h-52 overflow-auto rounded-xl border border-slate-200">
+                          {linkSearchLoading ? (
+                            <div className="px-3 py-2 text-sm text-slate-500">
+                              {t({ it: 'Ricerca in corso…', en: 'Searching…' })}
+                            </div>
+                          ) : linkSearchRows.length ? (
+                            linkSearchRows.map((row) => {
+                              const isSelected =
+                                linkedExternalClientId === row.clientId && linkedExternalId === row.externalId;
+                              return (
+                                <button
+                                  key={`${row.clientId}:${row.externalId}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setLinkedExternalClientId(row.clientId);
+                                    setLinkedExternalId(row.externalId);
+                                    setLinkedExternalLabel(`${row.fullName || row.email || row.externalId} • ${row.clientName}`);
+                                    setLinkSearchOpen(false);
+                                  }}
+                                  className={`block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50 ${
+                                    isSelected ? 'bg-emerald-50' : 'bg-white'
+                                  }`}
+                                >
+                                  <div className="truncate font-semibold text-slate-800">
+                                    {row.fullName || row.email || row.externalId}
+                                  </div>
+                                  <div className="truncate text-xs text-slate-500">
+                                    {row.clientName} • {row.department || row.role || '—'}
+                                  </div>
+                                  <div className="truncate text-xs text-slate-500">
+                                    {row.email || '—'} {row.phone ? `• ${row.phone}` : ''}
+                                  </div>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="px-3 py-2 text-sm text-slate-500">
+                              {t({ it: 'Nessun utente importato trovato.', en: 'No imported users found.' })}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
                     <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
                       <input
                         type="checkbox"
@@ -462,7 +634,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                     </label>
                   </div>
 
-                  <div>
+                  <div className="flex min-h-[620px] flex-col">
                     {mode === 'create' && !isAdmin ? (
                       <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                         <div className="text-xs font-semibold uppercase text-slate-500">
@@ -505,6 +677,7 @@ const UserModal = ({ open, mode, clients, canCreateAdmin, templates, initial, on
                         chatValue={chatMap}
                         onChangeAccess={setPermMap}
                         onChangeChat={setChatMap}
+                        scrollHeightClass="max-h-[38rem]"
                       />
                     )}
                   </div>

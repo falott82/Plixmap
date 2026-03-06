@@ -227,6 +227,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     coverageSqm: ''
   });
   const [confirmDeleteWifiId, setConfirmDeleteWifiId] = useState<string | null>(null);
+  const [confirmRemoveType, setConfirmRemoveType] = useState<null | { typeId: string; fieldsCount: number }>(null);
   const [doorSort, setDoorSort] = useState<{ key: DoorRegistrySortKey; dir: 'asc' | 'desc' }>({
     key: 'clientName',
     dir: 'asc'
@@ -810,18 +811,21 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const removeType = async (typeId: string) => {
     const fieldsForType = (customFields || []).filter((f) => f.typeId === typeId);
     if (fieldsForType.length) {
-      const ok = window.confirm(
-        t({
-          it: `Questo oggetto ha ${fieldsForType.length} campo/i personalizzato/i. Rimuoverlo dalla palette?`,
-          en: `This object has ${fieldsForType.length} custom field(s). Remove it from your palette?`
-        })
-      );
-      if (!ok) return;
+      setConfirmRemoveType({ typeId, fieldsCount: fieldsForType.length });
+      return;
     }
     const next = enabled.filter((x) => x !== typeId);
     const ok = await saveEnabled(next);
     if (ok) push(t({ it: 'Oggetto rimosso', en: 'Object removed' }), 'info');
   };
+
+  const confirmRemoveTypeWithFields = useCallback(async () => {
+    if (!confirmRemoveType?.typeId) return;
+    const next = enabled.filter((x) => x !== confirmRemoveType.typeId);
+    const ok = await saveEnabled(next);
+    if (ok) push(t({ it: 'Oggetto rimosso', en: 'Object removed' }), 'info');
+    setConfirmRemoveType(null);
+  }, [confirmRemoveType?.typeId, enabled, push, saveEnabled, t]);
 
   const moveType = (fromId: string, toId: string) => {
     if (fromId === toId) return;
@@ -2798,6 +2802,19 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
         onCancel={() => setConfirmDeleteWifiId(null)}
         onConfirm={deleteWifiModel}
         confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+      />
+
+      <ConfirmDialog
+        open={!!confirmRemoveType}
+        title={t({ it: 'Rimuovere oggetto dalla palette?', en: 'Remove object from palette?' })}
+        description={t({
+          it: `Questo oggetto ha ${Number(confirmRemoveType?.fieldsCount || 0)} campo/i personalizzato/i associati. Vuoi rimuoverlo comunque dalla tua palette?`,
+          en: `This object has ${Number(confirmRemoveType?.fieldsCount || 0)} associated custom field(s). Do you still want to remove it from your palette?`
+        })}
+        onCancel={() => setConfirmRemoveType(null)}
+        onConfirm={confirmRemoveTypeWithFields}
+        confirmLabel={t({ it: 'Rimuovi', en: 'Remove' })}
         cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
       />
 

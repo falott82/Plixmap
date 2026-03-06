@@ -6,6 +6,7 @@ import { useToastStore } from '../../store/useToast';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { createCustomField, deleteCustomField, updateCustomField, type CustomFieldValueType } from '../../api/customFields';
 import { useLang, useT } from '../../i18n/useT';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
 interface Props {
   open: boolean;
@@ -25,7 +26,11 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
   const [label, setLabel] = useState('');
   const [valueType, setValueType] = useState<CustomFieldValueType>('string');
   const [busy, setBusy] = useState(false);
+  const [renameField, setRenameField] = useState<null | { id: string; label: string }>(null);
+  const [renameLabelDraft, setRenameLabelDraft] = useState('');
+  const [deleteFieldState, setDeleteFieldState] = useState<null | { id: string; label: string }>(null);
   const labelRef = useRef<HTMLInputElement | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
 
   const types = useMemo(() => {
     const list = (defs || []).slice();
@@ -41,6 +46,13 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
     setValueType('string');
     window.setTimeout(() => labelRef.current?.focus(), 0);
   }, [defs, initialTypeId, open]);
+
+  useEffect(() => {
+    if (!renameField) return;
+    setRenameLabelDraft(String(renameField.label || ''));
+    const timer = window.setTimeout(() => renameInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [renameField]);
 
   const fieldsForType = useMemo(() => fields.filter((f) => f.typeId === typeId), [fields, typeId]);
 
@@ -63,6 +75,7 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
   };
 
   return (
+    <>
     <Transition show={open} as={Fragment}>
       <Dialog as="div" className="relative z-[60]" onClose={onClose}>
         <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
@@ -164,15 +177,7 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
                             </div>
                             <button
                               onClick={async () => {
-                                const next = window.prompt(t({ it: 'Nuova etichetta', en: 'New label' }), f.label);
-                                if (!next || !next.trim()) return;
-                                try {
-                                  await updateCustomField(f.id, { label: next.trim() });
-                                  await refresh();
-                                  push(t({ it: 'Campo aggiornato', en: 'Field updated' }), 'success');
-                                } catch {
-                                  push(t({ it: 'Aggiornamento non riuscito', en: 'Update failed' }), 'danger');
-                                }
+                                setRenameField({ id: String(f.id), label: String(f.label || '') });
                               }}
                               className="btn-inline"
                               title={t({ it: 'Rinomina il campo', en: 'Rename the field' })}
@@ -181,14 +186,7 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
                             </button>
                             <button
                               onClick={async () => {
-                                if (!window.confirm(t({ it: `Eliminare il campo "${f.label}"?`, en: `Delete field "${f.label}"?` }))) return;
-                                try {
-                                  await deleteCustomField(f.id);
-                                  await refresh();
-                                  push(t({ it: 'Campo eliminato', en: 'Field deleted' }), 'info');
-                                } catch {
-                                  push(t({ it: 'Eliminazione non riuscita', en: 'Delete failed' }), 'danger');
-                                }
+                                setDeleteFieldState({ id: String(f.id), label: String(f.label || '') });
                               }}
                               className="flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
                               title={t({ it: 'Elimina', en: 'Delete' })}
@@ -211,6 +209,93 @@ const CustomFieldsModal = ({ open, initialTypeId, lockType = false, onClose }: P
         </div>
       </Dialog>
     </Transition>
+    <Transition show={!!renameField} as={Fragment}>
+      <Dialog as="div" className="relative z-[210]" onClose={() => setRenameField(null)} initialFocus={renameInputRef}>
+        <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+          <div className="fixed inset-0 bg-black/35 backdrop-blur-sm" />
+        </Transition.Child>
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+            <Dialog.Panel className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+              <Dialog.Title className="text-base font-semibold text-ink">{t({ it: 'Rinomina campo', en: 'Rename field' })}</Dialog.Title>
+              <div className="mt-2 text-sm text-slate-600">
+                {t({ it: 'Inserisci la nuova etichetta del campo.', en: 'Enter the new field label.' })}
+              </div>
+              <input
+                ref={renameInputRef}
+                value={renameLabelDraft}
+                onChange={(e) => setRenameLabelDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  if (!renameField?.id || !renameLabelDraft.trim()) return;
+                  void (async () => {
+                    try {
+                      await updateCustomField(renameField.id, { label: renameLabelDraft.trim() });
+                      await refresh();
+                      push(t({ it: 'Campo aggiornato', en: 'Field updated' }), 'success');
+                      setRenameField(null);
+                    } catch {
+                      push(t({ it: 'Aggiornamento non riuscito', en: 'Update failed' }), 'danger');
+                    }
+                  })();
+                }}
+                className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                placeholder={t({ it: 'Nuova etichetta', en: 'New label' })}
+              />
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button type="button" onClick={() => setRenameField(null)} className="btn-secondary">
+                  {t({ it: 'Annulla', en: 'Cancel' })}
+                </button>
+                <button
+                  type="button"
+                  disabled={!renameLabelDraft.trim() || !renameField?.id}
+                  onClick={async () => {
+                    if (!renameField?.id || !renameLabelDraft.trim()) return;
+                    try {
+                      await updateCustomField(renameField.id, { label: renameLabelDraft.trim() });
+                      await refresh();
+                      push(t({ it: 'Campo aggiornato', en: 'Field updated' }), 'success');
+                      setRenameField(null);
+                    } catch {
+                      push(t({ it: 'Aggiornamento non riuscito', en: 'Update failed' }), 'danger');
+                    }
+                  }}
+                  className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {t({ it: 'Salva', en: 'Save' })}
+                </button>
+              </div>
+            </Dialog.Panel>
+          </Transition.Child>
+        </div>
+      </Dialog>
+    </Transition>
+    <ConfirmDialog
+      open={!!deleteFieldState}
+      title={t({ it: 'Eliminare campo personalizzato?', en: 'Delete custom field?' })}
+      description={t({
+        it: `Il campo "${String(deleteFieldState?.label || '')}" verrà eliminato.`,
+        en: `The field "${String(deleteFieldState?.label || '')}" will be deleted.`
+      })}
+      onCancel={() => setDeleteFieldState(null)}
+      onConfirm={async () => {
+        if (!deleteFieldState?.id) return;
+        try {
+          await deleteCustomField(deleteFieldState.id);
+          await refresh();
+          push(t({ it: 'Campo eliminato', en: 'Field deleted' }), 'info');
+        } catch {
+          push(t({ it: 'Eliminazione non riuscita', en: 'Delete failed' }), 'danger');
+        } finally {
+          setDeleteFieldState(null);
+        }
+      }}
+      confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+      cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+      zIndexClass="z-[210]"
+    />
+    </>
   );
 };
 

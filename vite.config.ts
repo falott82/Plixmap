@@ -34,6 +34,23 @@ export default defineConfig({
       }
     })
   ],
+  build: {
+    chunkSizeWarningLimit: 750,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.replace(/\\/g, '/');
+          if (!normalizedId.includes('node_modules')) return;
+          if (normalizedId.includes('react-router') || normalizedId.includes('zustand')) return 'routing-store';
+          if (normalizedId.includes('jspdf') || normalizedId.includes('dompurify')) return 'pdf-vendor';
+          if (normalizedId.includes('lexical') || normalizedId.includes('@lexical')) return 'editor-vendor';
+          if (normalizedId.includes('konva') || normalizedId.includes('react-konva')) return 'canvas-vendor';
+          if (normalizedId.includes('lucide-react')) return 'icons';
+          return;
+        }
+      }
+    }
+  },
   server: {
     port: 5173,
     proxy: {

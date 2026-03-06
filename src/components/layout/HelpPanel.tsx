@@ -711,7 +711,11 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         <KeyHint>Ctrl+S</KeyHint> / <KeyHint>Cmd+S</KeyHint>{' '}
-                        {t({ it: 'salva un aggiornamento rapido (minor automatico).', en: 'saves a quick update (automatic minor).' })}
+                        {t({ it: 'salva un aggiornamento rapido (minor automatico) solo se ci sono modifiche.', en: 'saves a quick update (automatic minor) only when changes exist.' })}
+                      </li>
+                      <li>
+                        <KeyHint>Ctrl+Shift+S</KeyHint> / <KeyHint>Cmd+Shift+S</KeyHint>{' '}
+                        {t({ it: 'apre il salvataggio revisione in modalità major con nota richiesta.', en: 'opens revision save in major mode with required note.' })}
                       </li>
                       <li>
                         <KeyHint>Ctrl+Z</KeyHint> / <KeyHint>Cmd+Z</KeyHint>{' '}

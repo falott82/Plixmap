@@ -16,6 +16,7 @@ interface Props {
   confirmPhraseLabel?: string;
   confirmPhrasePlaceholder?: string;
   confirmPhraseHint?: string;
+  zIndexClass?: string;
 }
 
 const ConfirmDialog = ({
@@ -30,7 +31,8 @@ const ConfirmDialog = ({
   confirmPhrase,
   confirmPhraseLabel,
   confirmPhrasePlaceholder,
-  confirmPhraseHint
+  confirmPhraseHint,
+  zIndexClass = 'z-[200]'
 }: Props) => {
   const t = useT();
   const cancelRef = useRef<HTMLButtonElement | null>(null);
@@ -58,7 +60,7 @@ const ConfirmDialog = ({
 
   return (
     <Transition appear show={open} as={Fragment}>
-      <Dialog as="div" className="relative z-50" onClose={onCancel} initialFocus={initialFocus}>
+      <Dialog as="div" className={`relative ${zIndexClass}`} onClose={onCancel} initialFocus={initialFocus}>
       <Transition.Child
         as={Fragment}
         enter="ease-out duration-150"

@@ -5,6 +5,7 @@ export interface MeetingParticipant {
   externalId?: string | null;
   fullName?: string;
   email?: string | null;
+  department?: string | null;
   optional?: boolean;
   remote?: boolean;
   company?: string | null;
@@ -25,6 +26,7 @@ export interface SiteSupportContacts {
 
 export interface MeetingBooking {
   id: string;
+  meetingNumber?: number;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   approvalRequired: boolean;
   clientId: string;
@@ -45,6 +47,7 @@ export interface MeetingBooking {
   technicalEmail: string;
   notes: string;
   videoConferenceLink: string;
+  kioskLanguage?: 'it' | 'en' | 'ru' | 'ar' | 'zh' | null;
   setupBufferBeforeMin: number;
   setupBufferAfterMin: number;
   startAt: number;
@@ -53,9 +56,12 @@ export interface MeetingBooking {
   effectiveEndAt: number;
   multiDayGroupId: string | null;
   occurrenceDate: string;
+  followUpOfMeetingId?: string | null;
+  followUpSequence?: number;
   requestedById: string;
   requestedByUsername: string;
   requestedByEmail: string;
+  meetingAdminIds: string[];
   requestedAt: number;
   reviewedAt: number | null;
   reviewedById: string | null;
@@ -63,6 +69,63 @@ export interface MeetingBooking {
   rejectReason: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface MeetingManagerAction {
+  action: string;
+  assignedTo: string;
+  openingDate?: string;
+  completionDate: string;
+  progressPct?: number;
+  status?: 'open' | 'done' | 'not_needed' | 'reschedule';
+}
+
+export interface MeetingManagerFields {
+  meetingId: string;
+  topicsText: string;
+  summaryText: string;
+  actions: MeetingManagerAction[];
+  nextMeetingDate: string;
+  updatedAt: number;
+  updatedById: string;
+  updatedByUsername: string;
+}
+
+export interface MeetingFollowUpChainEntry {
+  meeting: MeetingBooking;
+  managerFields: MeetingManagerFields;
+  canManageMeeting: boolean;
+  isCurrent: boolean;
+}
+
+export interface MeetingNote {
+  id: string;
+  meetingId: string;
+  authorUserId: string;
+  authorUsername: string;
+  authorDisplayName: string;
+  authorExternalId?: string;
+  authorEmail?: string;
+  title: string;
+  contentText: string;
+  contentHtml?: string;
+  contentLexical?: string;
+  shared: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MeetingNoteParticipant {
+  key: string;
+  kind: 'internal' | 'external';
+  label: string;
+  email?: string | null;
+  department?: string | null;
+  company?: string | null;
+  remote?: boolean;
+  optional?: boolean;
+  sharedCount: number;
+  hasShared: boolean;
 }
 
 export type MeetingCheckInMapByMeetingId = Record<string, Record<string, true>>;
@@ -155,6 +218,25 @@ export const fetchMeetings = async (params?: {
   return res.json();
 };
 
+export const fetchMyMeetings = async (params?: {
+  fromAt?: number;
+  toAt?: number;
+  limit?: number;
+}): Promise<{
+  meetings: MeetingBooking[];
+  now: number;
+  counts: { total: number; inProgress: number; upcoming: number; past: number };
+}> => {
+  const qs = new URLSearchParams();
+  if (params?.fromAt !== undefined) qs.set('fromAt', String(params.fromAt));
+  if (params?.toAt !== undefined) qs.set('toAt', String(params.toAt));
+  if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+  const url = qs.toString() ? `/api/meetings/mine?${qs.toString()}` : '/api/meetings/mine';
+  const res = await apiFetch(url, { credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to fetch my meetings (${res.status})`);
+  return res.json();
+};
+
 export const fetchPendingMeetings = async (): Promise<{ pending: MeetingBooking[]; pendingCount: number }> => {
   const res = await apiFetch('/api/meetings/pending', { credentials: 'include', cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch pending meetings (${res.status})`);
@@ -189,6 +271,7 @@ export const createMeeting = async (payload: {
   setupBufferBeforeMin?: number;
   setupBufferAfterMin?: number;
   participants?: MeetingParticipant[];
+  meetingAdminIds?: string[];
   externalGuests?: boolean;
   externalGuestsList?: string[];
   externalGuestsDetails?: MeetingExternalGuest[];
@@ -197,7 +280,9 @@ export const createMeeting = async (payload: {
   technicalEmail?: string;
   notes?: string;
   videoConferenceLink?: string;
+  kioskLanguage?: 'it' | 'en' | 'ru' | 'ar' | 'zh' | 'auto' | null;
   roomSnapshotPngDataUrl?: string;
+  followUpOfMeetingId?: string;
 }) => {
   const res = await apiFetch('/api/meetings', {
     method: 'POST',
@@ -240,9 +325,11 @@ export const updateMeeting = async (
     endTime?: string;
     notes?: string;
     videoConferenceLink?: string;
+    kioskLanguage?: 'it' | 'en' | 'ru' | 'ar' | 'zh' | 'auto' | null;
     setupBufferBeforeMin?: number;
     setupBufferAfterMin?: number;
     participants?: MeetingParticipant[];
+    meetingAdminIds?: string[];
     externalGuestsDetails?: MeetingExternalGuest[];
     applyToSeries?: boolean;
   }
@@ -288,6 +375,7 @@ export const fetchMeetingRoomSchedule = async (roomId: string) => {
     checkInStatusByMeetingId?: MeetingCheckInMapByMeetingId;
     checkInTimestampsByMeetingId?: MeetingCheckInTimestampsByMeetingId;
     kioskPublicUrl?: string;
+    mobilePublicUrl?: string;
   }>;
 };
 
@@ -321,4 +409,109 @@ export const sendMeetingRoomHelpRequest = async (
     throw new Error(body?.error || `Failed to send help request (${res.status})`);
   }
   return body as { ok: true; service: string };
+};
+
+export const fetchMeetingNotes = async (meetingId: string) => {
+  const res = await apiFetch(`/api/meetings/${encodeURIComponent(meetingId)}/notes`, {
+    credentials: 'include',
+    cache: 'no-store'
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as any)?.error || `Failed to fetch meeting notes (${res.status})`);
+  return body as {
+    ok: true;
+    meetingId: string;
+    meeting: MeetingBooking;
+    notes: MeetingNote[];
+    participants: MeetingNoteParticipant[];
+    canManageMeeting?: boolean;
+    managerFields?: MeetingManagerFields;
+    followUpChain?: MeetingFollowUpChainEntry[];
+    checkInStatusByMeetingId?: MeetingCheckInMapByMeetingId;
+    checkInTimestampsByMeetingId?: MeetingCheckInTimestampsByMeetingId;
+  };
+};
+
+export const fetchMeetingManagerFields = async (meetingId: string) => {
+  const res = await apiFetch(`/api/meetings/${encodeURIComponent(meetingId)}/manager-fields`, {
+    credentials: 'include',
+    cache: 'no-store'
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as any)?.error || `Failed to fetch manager fields (${res.status})`);
+  return body as {
+    ok: true;
+    meetingId: string;
+    managerFields: MeetingManagerFields;
+    canManageMeeting: boolean;
+  };
+};
+
+export const updateMeetingManagerFields = async (
+  meetingId: string,
+  payload: {
+    topicsText?: string;
+    summaryText?: string;
+    actions?: MeetingManagerAction[];
+    nextMeetingDate?: string;
+  }
+) => {
+  const res = await apiFetch(`/api/meetings/${encodeURIComponent(meetingId)}/manager-fields`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {})
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as any)?.error || `Failed to update manager fields (${res.status})`);
+  return body as {
+    ok: true;
+    meetingId: string;
+    managerFields: MeetingManagerFields;
+    canManageMeeting: boolean;
+  };
+};
+
+export const upsertMeetingNote = async (
+  meetingId: string,
+  payload: {
+    id?: string;
+    title?: string;
+    contentText?: string;
+    contentHtml?: string;
+    contentLexical?: string;
+    shared?: boolean;
+  }
+) => {
+  const res = await apiFetch(`/api/meetings/${encodeURIComponent(meetingId)}/notes`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {})
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as any)?.error || `Failed to save meeting note (${res.status})`);
+  return body as { ok: true; note: MeetingNote };
+};
+
+export const deleteMeetingNote = async (meetingId: string, noteId: string) => {
+  const res = await apiFetch(`/api/meetings/${encodeURIComponent(meetingId)}/notes/${encodeURIComponent(noteId)}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as any)?.error || `Failed to delete meeting note (${res.status})`);
+  return body as { ok: true };
+};
+
+export const exportMeetingNotesCsv = async (meetingId: string) => {
+  const res = await apiFetch(`/api/meetings/${encodeURIComponent(meetingId)}/notes-export`, {
+    credentials: 'include',
+    cache: 'no-store'
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as any)?.error || `Failed to export meeting notes (${res.status})`);
+  }
+  return res.blob();
 };

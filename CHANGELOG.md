@@ -2,6 +2,39 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.5.2 - 2026-03-07
+- Site hours management expanded: dedicated schedule modal from site context menu, weekly multi-range editing, separate holidays/closures modal, named holidays, support for applying hours to other sites of the same client, and selectable holiday calendars (`Italy`, `United States`, `United Kingdom`, `Germany`, `France`, `Spain`, `China`, `Saudi Arabia`, `United Arab Emirates`, or manual only).
+- Meeting scheduling now uses site hours as the default suggested maximum end time for a meeting room, while still allowing admins/users to extend beyond site hours explicitly when needed.
+- Mobile app chat startup and thread opening were accelerated with a dedicated mobile overview endpoint/caching flow; fixed repeated `/messages`, `/read`, and `/mobile/overview` request loops on mobile.
+- Superadmin permissions aligned across backend/frontend: superadmins can again see the full users list and all meetings consistently, including `GET /api/meetings`, `GET /api/meetings/mine`, and related admin-only screens.
+- Internal routing/escape path reliability improved: room-to-corridor doors now also work through geometric inference when the explicit saved link is missing (fixing cases like `Sales Office`), and the related PlanView runtime crash caused by helper initialization order was removed.
+- Import/device modal UX hardened: nested configuration/import dialogs now keep correct focus and z-order, parent dialogs no longer close unexpectedly, and `Imported devices` now shows an explicit empty-state message when a client has no imported devices.
+- Server refactor continued: extracted shared access helpers plus `users`, `chat`, `meetings`, `realtime`, admin logs, object-type requests, and static app serving from the monolithic server file to reduce maintenance risk.
+
+## 3.5.1 - 2026-03-06
+- Meeting manager modal reworked with clearer tab flow (`Topics and Summary`, `Actions`, `Timeline`, `Notes`) and improved nested-modal close behavior (closing a child returns to its parent modal instead of closing everything).
+- Actions moved to a table-first workflow with a dedicated `Manage` modal per row: progress slider (0..100 step 5), deadline controls, `Not needed`/delete actions, and status-driven row coloring.
+- Added save-time guards for data quality: notes now require a title, and task rows containing payload cannot be saved without a task title.
+- Timeline/follow-up UX refined: `Create Follow-UP` entry promoted, future scheduled meetings now expose a gear menu (`Edit`/`Delete`), and chain insights are available from `My meetings`.
+- PDF export flow enhanced with a report review modal, richer participant/task sections (including completion percentages and not-needed/completed rows), plus completion charts/statistics in the final report.
+- Localization/UX polish pass on meeting modals: fixed mixed IT/EN labels, aligned tooltip coverage on key actions, and improved task deadline datepicker interaction.
+
+## 3.4.1 - 2026-02-27
+- Meeting center UX rework in PlanView: the green meeting button now opens a dedicated modal with two entry points: `Scheduling` and `My meetings`.
+- Scheduling flow now opens the same client/site `Show meetings` timeline used in sidebar context menus, preserving the existing `+ New meeting` action from that screen.
+- Added `My meetings` view for the logged-in user with past/current/future meetings, counters, and quick actions to open details or jump to scheduling.
+- Meeting notes access tightened server-side: only meeting participants can read/write/export/AI-transform notes (admins/superadmins still allowed).
+- Mobile app startup optimization: `/mobile` no longer waits for full `/api/state` hydration, removing the main 5-6s bottleneck seen during login bootstrap.
+
+## 3.4.0 - 2026-02-26
+- Mobile app: improved initial loading and sync behavior by reducing overlapping requests, tightening polling cadence, and avoiding stale UI updates during agenda/chat refreshes.
+- Mobile app: reworked chat UX with WhatsApp-like chat list ordering/preview, thread-first navigation (`list -> thread`), sticky header, fixed composer, unread dot updates, and better scrolling on small screens/notch devices.
+- Mobile app: added richer meeting detail view with participant list and check-in actions, plus improved QR/check-in flows and synchronized state feedback across devices.
+- Mobile app: voice notes support (record/playback), safer audio loading (`preload=none`), microphone permission handling, and layout fixes to keep the page shell fixed while scrolling only content.
+- Meetings timeline: duplicate-meeting calendar stabilized (fixed modal focus/click-through and loading loops), improved room timeline styling (`NOW` marker, sticky room column), and room availability visual refinements.
+- Import users (client-scoped): UI reworked for clearer WebAPI diff/import workflows, better imported-users table readability, and additional duplicate checks/normalization improvements.
+- Refactor/cleanup: removed unused code, improved timestamp parsing robustness, and reduced duplicated import preview/diff mapping/search logic while preserving behavior.
+
 ## 3.3.0 - 2026-02-25
 - Meetings: introduced a full meeting-room management workflow with room timelines (`Mostra meetings`), room-level scheduling, quick actions, and multi-day edit support.
 - Meetings/Kiosk: added kiosk mode for meeting rooms (tablet/web), synchronized check-in (server-side), meeting progress, support/help requests, and room service/equipment visibility.

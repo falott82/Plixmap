@@ -535,16 +535,38 @@ export interface Site {
     it?: { email?: string; phone?: string };
     coffee?: { email?: string; phone?: string };
   };
-  siteSchedule?: {
-    weekly?: Partial<
-      Record<
-        'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun',
-        { closed?: boolean; open?: string; close?: string }
-      >
-    >;
-    holidays?: Array<{ date: string; label?: string; closed?: boolean }>;
-  };
+  siteSchedule?: SiteSchedule;
   floorPlans: FloorPlan[];
+}
+
+export type SiteScheduleDayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+export type SiteHolidayCalendar = 'custom' | 'it' | 'us' | 'uk' | 'de' | 'fr' | 'es' | 'cn' | 'sa' | 'ae';
+
+export interface SiteScheduleSlot {
+  start: string;
+  end: string;
+}
+
+export interface SiteScheduleDay {
+  closed?: boolean;
+  // Legacy single-interval fields kept for backward compatibility.
+  open?: string;
+  close?: string;
+  // Preferred multi-interval model.
+  slots?: SiteScheduleSlot[];
+}
+
+export interface SiteHoliday {
+  date: string;
+  label?: string;
+  closed?: boolean;
+  source?: 'custom' | 'national';
+}
+
+export interface SiteSchedule {
+  holidayCalendar?: SiteHolidayCalendar;
+  weekly?: Partial<Record<SiteScheduleDayKey, SiteScheduleDay>>;
+  holidays?: SiteHoliday[];
 }
 
 export interface ClientNote {
@@ -569,6 +591,8 @@ export interface Client {
   id: string;
   name: string;
   logoUrl?: string;
+  openAiApiKey?: string;
+  openAiDailyTokensPerUser?: number;
   shortName?: string;
   address?: string;
   phone?: string;

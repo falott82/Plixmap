@@ -1,6 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import SidebarTree from './components/layout/SidebarTree';
 import ToastStack from './components/ui/ToastStack';
 import ConfirmDialog from './components/ui/ConfirmDialog';
 import { useDataStore } from './store/useDataStore';
@@ -17,6 +16,7 @@ import PerfOverlay from './components/dev/PerfOverlay';
 import { perfMetrics } from './utils/perfMetrics';
 import ClientChatWs from './components/chat/ClientChatWs';
 
+const SidebarTree = lazy(() => import('./components/layout/SidebarTree'));
 const PlanView = lazy(() => import('./components/plan/PlanView'));
 const SettingsView = lazy(() => import('./components/settings/SettingsView'));
 const HelpPanel = lazy(() => import('./components/layout/HelpPanel'));
@@ -24,6 +24,7 @@ const ChangelogPanel = lazy(() => import('./components/layout/ChangelogPanel'));
 const UpdateCheckModal = lazy(() => import('./components/layout/UpdateCheckModal'));
 const ClientChatDock = lazy(() => import('./components/chat/ClientChatDock'));
 const MeetingRoomDisplayPage = lazy(() => import('./components/meetings/MeetingRoomDisplayPage'));
+const MobileAppPage = lazy(() => import('./components/mobile/MobileAppPage'));
 
 const AppRouteFallback = () => (
   <div className="flex h-screen items-center justify-center bg-mist text-ink">
@@ -32,6 +33,8 @@ const AppRouteFallback = () => (
     </div>
   </div>
 );
+
+const SidebarFallback = () => <div className="hidden w-[320px] shrink-0 xl:block" aria-hidden="true" />;
 
 const PlanRoute = () => {
   const { planId } = useParams();
@@ -118,8 +121,9 @@ const App = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const isMeetingRoomRoute = location.pathname.startsWith('/meetingroom/');
+  const isMobileAppRoute = location.pathname.startsWith('/mobile');
   const isMeetingOperator = !!(user as any)?.isMeetingOperator && !user?.isAdmin && !user?.isSuperAdmin;
-  const hideSidebar = presentationMode || location.pathname.startsWith('/settings') || isMeetingRoomRoute || isMeetingOperator;
+  const hideSidebar = presentationMode || location.pathname.startsWith('/settings') || isMeetingRoomRoute || isMobileAppRoute || isMeetingOperator;
   const perfEnabled = (() => {
     try {
       const queryEnabled = new URLSearchParams(location.search || '').get('perf') === '1';
@@ -210,8 +214,14 @@ const App = () => {
     if (!standalone) return;
     try {
       const kioskRoomId = String(window.localStorage.getItem('plixmap:kiosk:lastRoomId') || '').trim();
-      if (!kioskRoomId) return;
-      navigate(`/meetingroom/${encodeURIComponent(kioskRoomId)}`, { replace: true });
+      if (kioskRoomId) {
+        navigate(`/meetingroom/${encodeURIComponent(kioskRoomId)}`, { replace: true });
+        return;
+      }
+      const mobileHomeHint = String(window.localStorage.getItem('plixmap:mobile:homeInstalled') || '').trim();
+      if (mobileHomeHint === '1') {
+        navigate('/mobile', { replace: true });
+      }
     } catch {
       // ignore storage access errors
     }
@@ -386,6 +396,13 @@ const App = () => {
       lastMustChangeRef.current = null;
       return;
     }
+    if (isMobileAppRoute) {
+      // Mobile app does not need full workspace hydration (/api/state is expensive).
+      setHydrated(true);
+      hydratedForUserId.current = null;
+      lastMustChangeRef.current = user.mustChangePassword ?? null;
+      return;
+    }
     if (hydratedForUserId.current === user.id && lastMustChangeRef.current === user.mustChangePassword) return;
     setHydrated(false);
     fetchState()
@@ -419,7 +436,7 @@ const App = () => {
         lastMustChangeRef.current = user.mustChangePassword ?? null;
         setHydrated(true);
       });
-  }, [authHydrated, markSaved, setServerState, user]);
+  }, [authHydrated, isMobileAppRoute, markSaved, setServerState, user]);
 
   useEffect(() => {
     if (!authHydrated || !user) return;
@@ -673,7 +690,7 @@ const App = () => {
     );
   }
 
-  if (!user && location.pathname !== '/login' && !isMeetingRoomRoute) {
+  if (!user && location.pathname !== '/login' && !isMeetingRoomRoute && !isMobileAppRoute) {
     return <Navigate to="/login" replace />;
   }
 
@@ -685,11 +702,12 @@ const App = () => {
     return <Navigate to="/" replace />;
   }
 
-  if (!user && location.pathname === '/login') {
+  if (!user && (location.pathname === '/login' || isMobileAppRoute)) {
     return (
       <>
         <Routes>
           <Route path="/login" element={<LoginView />} />
+          <Route path="/mobile" element={<MobileAppPage />} />
           <Route path="/first-run" element={<Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
@@ -701,7 +719,11 @@ const App = () => {
 
   return (
     <div className="flex bg-mist text-ink">
-      {hideSidebar ? null : <SidebarTree />}
+      {hideSidebar ? null : (
+        <Suspense fallback={<SidebarFallback />}>
+          <SidebarTree />
+        </Suspense>
+      )}
       <main className="flex-1 overflow-hidden">
         <Suspense fallback={<AppRouteFallback />}>
           <Routes>
@@ -716,27 +738,28 @@ const App = () => {
             <Route path="/plan/:planId" element={<PlanRoute />} />
             <Route path="/settings" element={isMeetingOperator ? <Navigate to="/" replace /> : <SettingsView />} />
             <Route path="/meetingroom/:roomId" element={<MeetingRoomDisplayPage />} />
+            <Route path="/mobile" element={<MobileAppPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
       </main>
-      {presentationMode || isMeetingOperator ? null : (
+      {presentationMode || isMeetingOperator || isMobileAppRoute ? null : (
         <Suspense fallback={null}>
           <HelpPanel />
         </Suspense>
       )}
-      {presentationMode || isMeetingOperator ? null : (
+      {presentationMode || isMeetingOperator || isMobileAppRoute ? null : (
         <Suspense fallback={null}>
           <ChangelogPanel />
         </Suspense>
       )}
-      {presentationMode || isMeetingOperator ? null : (
+      {presentationMode || isMeetingOperator || isMobileAppRoute ? null : (
         <Suspense fallback={null}>
           <UpdateCheckModal />
         </Suspense>
       )}
-      {isMeetingOperator ? null : <ClientChatWs />}
-      {presentationMode || isMeetingOperator ? null : (
+      {isMeetingOperator || isMobileAppRoute ? null : <ClientChatWs />}
+      {presentationMode || isMeetingOperator || isMobileAppRoute ? null : (
         <Suspense fallback={null}>
           <ClientChatDock />
         </Suspense>

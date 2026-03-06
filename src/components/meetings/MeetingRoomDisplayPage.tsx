@@ -30,15 +30,15 @@ import {
   type SiteSupportContacts
 } from '../../api/meetings';
 
-const formatClock = (ts: number) =>
-  new Intl.DateTimeFormat(undefined, {
+const formatClock = (ts: number, locale?: string) =>
+  new Intl.DateTimeFormat(locale, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit'
   }).format(new Date(ts));
 
-const formatTime = (ts: number) =>
-  new Intl.DateTimeFormat(undefined, {
+const formatTime = (ts: number, locale?: string) =>
+  new Intl.DateTimeFormat(locale, {
     hour: '2-digit',
     minute: '2-digit'
   }).format(new Date(ts));
@@ -54,8 +54,8 @@ const formatRemainingToEnd = (meeting: MeetingBooking | null, now: number) => {
   return hours > 0 ? `${hours}h:${String(minutes).padStart(2, '0')}m` : `${minutes}m`;
 };
 
-const formatDateLong = (ts: number) =>
-  new Intl.DateTimeFormat(undefined, {
+const formatDateLong = (ts: number, locale?: string) =>
+  new Intl.DateTimeFormat(locale, {
     weekday: 'long',
     day: '2-digit',
     month: 'long',
@@ -153,6 +153,19 @@ type HelpOverlayState =
   | { mode: 'sent'; serviceLabel: string }
   | { mode: 'phone'; serviceLabel: string; phone: string };
 
+type KioskLang = 'it' | 'en' | 'ru' | 'ar' | 'zh';
+
+const KIOSK_LANG_CHOICES: Array<{ key: KioskLang; flag: string; label: string; locale: string }> = [
+  { key: 'it', flag: '🇮🇹', label: 'IT', locale: 'it-IT' },
+  { key: 'en', flag: '🇬🇧', label: 'EN', locale: 'en-US' },
+  { key: 'ru', flag: '🇷🇺', label: 'RU', locale: 'ru-RU' },
+  { key: 'ar', flag: '🇸🇦', label: 'AR', locale: 'ar-SA' },
+  { key: 'zh', flag: '🇨🇳', label: 'ZH', locale: 'zh-CN' }
+];
+
+const isKioskLang = (value: unknown): value is KioskLang =>
+  ['it', 'en', 'ru', 'ar', 'zh'].includes(String(value || '').toLowerCase());
+
 const MeetingRoomDisplayPage = () => {
   const { roomId } = useParams();
   const [theme, setTheme] = useState<'night' | 'day'>('night');
@@ -166,23 +179,61 @@ const MeetingRoomDisplayPage = () => {
     upcoming: MeetingBooking[];
     daySchedule: MeetingBooking[];
     kioskPublicUrl?: string;
+    mobilePublicUrl?: string;
   } | null>(null);
   const [participantMeeting, setParticipantMeeting] = useState<MeetingBooking | null>(null);
   const [participantOverlayUntil, setParticipantOverlayUntil] = useState<number | null>(null);
   const [checkInStatusByMeetingId, setCheckInStatusByMeetingId] = useState<Record<string, Record<string, true>>>({});
   const [checkInThanksMessage, setCheckInThanksMessage] = useState<string | null>(null);
   const [helpOverlay, setHelpOverlay] = useState<HelpOverlayState | null>(null);
-  const kioskLang = useMemo<'it' | 'en'>(() => {
+  const [kioskLang, setKioskLang] = useState<KioskLang>(() => {
+    try {
+      const saved = String(window.localStorage.getItem('plixmap:kiosk:lang') || '').toLowerCase();
+      if (isKioskLang(saved)) return saved;
+    } catch {
+      // ignore storage errors
+    }
     try {
       const lang = String(window.navigator?.language || 'en').toLowerCase();
-      return lang.startsWith('it') ? 'it' : 'en';
+      if (lang.startsWith('it')) return 'it';
+      if (lang.startsWith('ru')) return 'ru';
+      if (lang.startsWith('ar')) return 'ar';
+      if (lang.startsWith('zh')) return 'zh';
+      return 'en';
     } catch {
       return 'en';
     }
-  }, []);
-  const tk = useCallback((labels: { it: string; en: string }) => (kioskLang === 'it' ? labels.it : labels.en), [kioskLang]);
+  });
+  const meetingForcedKioskLang = useMemo(() => {
+    const raw = String((payload?.inProgress as any)?.kioskLanguage || '').trim().toLowerCase();
+    return isKioskLang(raw) ? raw : null;
+  }, [payload?.inProgress]);
+  const effectiveKioskLang: KioskLang = meetingForcedKioskLang || kioskLang;
+  const tk = useCallback(
+    (labels: { it: string; en: string; ru?: string; ar?: string; zh?: string }) => {
+      if (effectiveKioskLang === 'it') return labels.it;
+      if (effectiveKioskLang === 'ru' && labels.ru) return labels.ru;
+      if (effectiveKioskLang === 'ar' && labels.ar) return labels.ar;
+      if (effectiveKioskLang === 'zh' && labels.zh) return labels.zh;
+      return labels.en;
+    },
+    [effectiveKioskLang]
+  );
+  const kioskLocale = useMemo(
+    () => KIOSK_LANG_CHOICES.find((entry) => entry.key === effectiveKioskLang)?.locale || 'en-US',
+    [effectiveKioskLang]
+  );
   const autoCloseRef = useRef<number | null>(null);
   const helpOverlayTimerRef = useRef<number | null>(null);
+  const localCheckInMutationUntilRef = useRef<number>(0);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('plixmap:kiosk:lang', kioskLang);
+    } catch {
+      // ignore storage errors on kiosk devices
+    }
+  }, [kioskLang]);
 
   const reload = (options?: { silent?: boolean }) => {
     const rid = String(roomId || '').trim();
@@ -201,7 +252,8 @@ const MeetingRoomDisplayPage = () => {
           inProgress: next.inProgress,
           upcoming: next.upcoming || [],
           daySchedule: next.daySchedule || [],
-          kioskPublicUrl: next.kioskPublicUrl
+          kioskPublicUrl: next.kioskPublicUrl,
+          mobilePublicUrl: (next as any).mobilePublicUrl
         });
         setError('');
         const allMeetings = [next.inProgress, ...(next.upcoming || []), ...(next.daySchedule || [])].filter(Boolean) as MeetingBooking[];
@@ -221,6 +273,36 @@ const MeetingRoomDisplayPage = () => {
             }
             nextMap[id] = prev[id] || {};
           }
+          const currentMeeting = next.inProgress;
+          if (currentMeeting && Date.now() > Number(localCheckInMutationUntilRef.current || 0)) {
+            const meetingId = String(currentMeeting.id || '');
+            const before = prev[meetingId] || {};
+            const after = nextMap[meetingId] || {};
+            const newlyCheckedKeys = Object.keys(after).filter((k) => !!after[k] && !before[k]);
+            if (newlyCheckedKeys.length) {
+              const keyToName = new Map<string, string>();
+              const participants = Array.isArray((currentMeeting as any)?.participants) ? (currentMeeting as any).participants : [];
+              for (const p of participants) {
+                const key =
+                  String(p?.kind || 'real_user') === 'manual'
+                    ? buildCheckInKeyFromParticipant({ kind: 'manual', fullName: p?.fullName, externalId: p?.externalId, email: p?.email })
+                    : buildCheckInKeyFromParticipant({
+                        kind: 'real_user',
+                        fullName: p?.fullName,
+                        externalId: p?.externalId,
+                        email: p?.email,
+                        optional: !!p?.optional
+                      });
+                keyToName.set(key, String(p?.fullName || p?.externalId || 'Ospite'));
+              }
+              for (const g of Array.isArray((currentMeeting as any)?.externalGuestsDetails) ? (currentMeeting as any).externalGuestsDetails : []) {
+                const key = buildCheckInKeyFromExternalGuest({ name: g?.name, email: g?.email });
+                if (!keyToName.has(key)) keyToName.set(key, String(g?.name || 'Ospite'));
+              }
+              const welcomeName = keyToName.get(newlyCheckedKeys[0]) || 'Ospite';
+              setCheckInThanksMessage(tk({ it: `Benvenuto ${welcomeName}, buona riunione`, en: `Welcome ${welcomeName}, enjoy the meeting` }));
+            }
+          }
           return nextMap;
         });
       })
@@ -237,14 +319,38 @@ const MeetingRoomDisplayPage = () => {
   useEffect(() => {
     reload();
     const clockTick = window.setInterval(() => setNow(Date.now()), 1000);
-    const refreshIntervalMs = participantMeeting ? 2_000 : payload?.inProgress ? 4_000 : 15_000;
-    const refreshTick = window.setInterval(() => reload({ silent: true }), refreshIntervalMs);
+    const refreshIntervalMs =
+      typeof document !== 'undefined' && document.visibilityState === 'hidden'
+        ? 30_000
+        : participantMeeting
+          ? 1_500
+          : payload?.inProgress
+            ? 2_500
+            : 12_000;
+    const refreshTick = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void reload({ silent: true });
+    }, refreshIntervalMs);
     return () => {
       window.clearInterval(clockTick);
       window.clearInterval(refreshTick);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, !!payload?.inProgress, !!participantMeeting]);
+
+  useEffect(() => {
+    const resumeReload = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void reload({ silent: true });
+    };
+    window.addEventListener('focus', resumeReload);
+    document.addEventListener('visibilitychange', resumeReload);
+    return () => {
+      window.removeEventListener('focus', resumeReload);
+      document.removeEventListener('visibilitychange', resumeReload);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
 
   useEffect(() => {
     const rid = String(roomId || '').trim();
@@ -379,6 +485,7 @@ const MeetingRoomDisplayPage = () => {
     if (nextChecked) optimistic[key] = true;
     else delete optimistic[key];
     applyMap(optimistic);
+    localCheckInMutationUntilRef.current = Date.now() + 1500;
     try {
       if (roomId) {
         const result = await toggleMeetingRoomCheckIn(String(roomId), { meetingId, key, checked: nextChecked });
@@ -595,7 +702,7 @@ const MeetingRoomDisplayPage = () => {
   const soft = isNight ? 'text-slate-400' : 'text-slate-600';
 
   return (
-    <div className={shell}>
+    <div className={shell} dir={effectiveKioskLang === 'ar' ? 'rtl' : 'ltr'}>
       <div className="fixed inset-0 pointer-events-none opacity-70">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(59,130,246,0.18),transparent_38%),radial-gradient(circle_at_80%_15%,rgba(168,85,247,0.14),transparent_35%),radial-gradient(circle_at_60%_80%,rgba(16,185,129,0.12),transparent_40%)]" />
       </div>
@@ -619,10 +726,10 @@ const MeetingRoomDisplayPage = () => {
               </div>
               <div className={`mt-1 inline-flex items-center gap-2 text-xs ${soft}`}>
                 <CalendarDays size={13} />
-                {formatDateLong(now)}
+                {formatDateLong(now, kioskLocale)}
                 <span className="mx-1">•</span>
                 <Clock3 size={13} />
-                {formatClock(now)}
+                {formatClock(now, kioskLocale)}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -644,6 +751,56 @@ const MeetingRoomDisplayPage = () => {
                   {tk({ it: 'Serve aiuto', en: 'Need Help' })}
                 </button>
               ) : null}
+              <div
+                className={`inline-flex items-center gap-1 rounded-xl border px-2 py-1 ${isNight ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'}`}
+                title={
+                  meetingForcedKioskLang
+                    ? tk({
+                        it: 'Lingua bloccata dal meeting in corso. La selezione salva solo la preferenza predefinita del kiosk.',
+                        en: 'Language is locked by the current meeting. Selection only saves the kiosk default preference.',
+                        ru: 'Язык зафиксирован текущей встречей. Выбор сохраняет только язык по умолчанию для киоска.',
+                        ar: 'لغة الكشك مقفلة بسبب الاجتماع الجاري. الاختيار يحفظ فقط تفضيل اللغة الافتراضية.',
+                        zh: '语言已被当前会议锁定。此选择仅保存自助终端默认语言。'
+                      })
+                    : tk({
+                        it: 'Lingua kiosk predefinita. Se un meeting imposta una lingua specifica, il kiosk passa automaticamente a quella lingua durante la riunione.',
+                        en: 'Default kiosk language. If a meeting sets a specific language, the kiosk switches automatically during that meeting.',
+                        ru: 'Язык киоска по умолчанию. Если для встречи задан язык, киоск переключится автоматически во время встречи.',
+                        ar: 'لغة الكشك الافتراضية. إذا حدد الاجتماع لغة معينة فسيتم التبديل تلقائيًا أثناء الاجتماع.',
+                        zh: '默认自助终端语言。如果会议设置了指定语言，会议进行时将自动切换。'
+                      })
+                }
+              >
+                <Sparkles size={14} className={soft} />
+                {KIOSK_LANG_CHOICES.map((choice) => {
+                  const active = effectiveKioskLang === choice.key;
+                  const selectedByUser = kioskLang === choice.key;
+                  return (
+                    <button
+                      key={`kiosk-lang-${choice.key}`}
+                      type="button"
+                      onClick={() => setKioskLang(choice.key)}
+                      className={`inline-flex h-8 min-w-8 items-center justify-center rounded-lg border px-1 text-sm font-semibold transition ${
+                        active
+                          ? isNight
+                            ? 'border-cyan-400/50 bg-cyan-400/15 text-cyan-200'
+                            : 'border-cyan-300 bg-cyan-50 text-cyan-700'
+                          : selectedByUser
+                            ? isNight
+                              ? 'border-slate-600 bg-slate-800 text-slate-200'
+                              : 'border-slate-300 bg-slate-100 text-slate-700'
+                            : isNight
+                              ? 'border-transparent bg-transparent text-slate-300 hover:bg-slate-800'
+                              : 'border-transparent bg-transparent text-slate-600 hover:bg-slate-100'
+                      }`}
+                      aria-label={choice.label}
+                      title={`${choice.flag} ${choice.label}${meetingForcedKioskLang === choice.key ? ' • meeting' : ''}`}
+                    >
+                      <span>{choice.flag}</span>
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 onClick={() => setTheme((prev) => (prev === 'night' ? 'day' : 'night'))}
                 className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${isNight ? 'border-slate-700 bg-slate-900 hover:bg-slate-800' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
@@ -679,7 +836,7 @@ const MeetingRoomDisplayPage = () => {
                   ) : null}
                   <div className={`mt-1 text-sm ${soft}`}>
                     {inProgress
-                      ? `${formatTime(inProgress.startAt)} - ${formatTime(inProgress.endAt)} · ${inProgress.requestedSeats}/${inProgress.roomCapacity} ${tk({
+                      ? `${formatTime(inProgress.startAt, kioskLocale)} - ${formatTime(inProgress.endAt, kioskLocale)} · ${inProgress.requestedSeats}/${inProgress.roomCapacity} ${tk({
                           it: 'posti richiesti',
                           en: 'requested seats'
                         })}`
@@ -743,15 +900,17 @@ const MeetingRoomDisplayPage = () => {
                       />
                       <div className={`absolute inset-[11px] rounded-full ${isNight ? 'bg-slate-950' : 'bg-white'}`} />
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <div className="text-2xl font-semibold tabular-nums">{currentMeetingCheckInStats.percent}%</div>
-                        <div className={`text-[11px] ${soft}`}>{tk({ it: 'check-in', en: 'check-in' })}</div>
+                        <>
+                          <div className="text-2xl font-semibold tabular-nums">{currentMeetingCheckInStats.percent}%</div>
+                          <div className={`text-[11px] ${soft}`}>{tk({ it: 'check-in', en: 'check-in' })}</div>
+                        </>
                       </div>
                     </div>
                     <div className="flex justify-end pr-1">
                       <div className={`ml-auto w-full max-w-[248px] rounded-xl border px-2.5 py-2.5 ${card}`}>
                         <div className={`text-[11px] uppercase tracking-wide ${soft}`}>{tk({ it: 'Stato check-in', en: 'Check-in status' })}</div>
                         <div className="mt-1 text-sm font-semibold">
-                          {currentMeetingCheckInStats.checked}/{currentMeetingCheckInStats.total}
+                          {currentMeetingCheckInStats.checked}/{currentMeetingCheckInStats.total} • {currentMeetingCheckInStats.percent}%
                         </div>
                         <div className={`mt-1 text-xs ${soft}`}>
                           {inProgress
@@ -774,7 +933,7 @@ const MeetingRoomDisplayPage = () => {
                             }`}
                           >
                             <Users size={13} />
-                            {tk({ it: 'Check-in', en: 'Check-in' })}
+                            Check-in
                           </button>
                         ) : null}
                       </div>

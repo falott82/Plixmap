@@ -44,6 +44,13 @@ const RichTextEditor = ({ value, onChange, readOnly = false, className }: Props)
   const [hasImageCtx, setHasImageCtx] = useState(false);
   const [imageSize, setImageSize] = useState<string>('100');
   const [imgOverlay, setImgOverlay] = useState<ImageOverlay>({ visible: false, x: 0, y: 0, w: 0, h: 0 });
+  const [linkPromptOpen, setLinkPromptOpen] = useState(false);
+  const [linkUrlDraft, setLinkUrlDraft] = useState('');
+  const [tablePromptOpen, setTablePromptOpen] = useState(false);
+  const [tableColsDraft, setTableColsDraft] = useState('3');
+  const [tableRowsDraft, setTableRowsDraft] = useState('3');
+  const linkPromptInputRef = useRef<HTMLInputElement | null>(null);
+  const tablePromptColsRef = useRef<HTMLInputElement | null>(null);
   const rafOverlayRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -626,15 +633,28 @@ const RichTextEditor = ({ value, onChange, readOnly = false, className }: Props)
 
   const promptLink = () => {
     saveSelection();
-    const url = window.prompt(t({ it: 'Inserisci URL', en: 'Enter URL' }));
+    setLinkUrlDraft('');
+    setLinkPromptOpen(true);
+  };
+
+  const promptTable = () => {
+    setTableColsDraft('3');
+    setTableRowsDraft('3');
+    setTablePromptOpen(true);
+  };
+
+  const applyLinkPrompt = () => {
+    const url = String(linkUrlDraft || '').trim();
+    setLinkPromptOpen(false);
     if (!url) return;
     restoreSelection();
     exec('createLink', url);
   };
 
-  const promptTable = () => {
-    const cols = Math.min(8, Math.max(1, Number(window.prompt(t({ it: 'Numero colonne (1-8)', en: 'Number of columns (1-8)' }), '3')) || 3));
-    const rows = Math.min(12, Math.max(1, Number(window.prompt(t({ it: 'Numero righe (1-12)', en: 'Number of rows (1-12)' }), '3')) || 3));
+  const applyTablePrompt = () => {
+    const cols = Math.min(8, Math.max(1, Number(tableColsDraft) || 3));
+    const rows = Math.min(12, Math.max(1, Number(tableRowsDraft) || 3));
+    setTablePromptOpen(false);
     const head = `<tr>${Array.from({ length: cols }).map(() => `<th style="border:1px solid #cbd5e1;padding:6px;background:#f8fafc;">&nbsp;</th>`).join('')}</tr>`;
     const body = Array.from({ length: rows })
       .map(
@@ -648,6 +668,18 @@ const RichTextEditor = ({ value, onChange, readOnly = false, className }: Props)
       `<div style="overflow:auto"><table style="border-collapse:collapse;width:100%;margin:8px 0">${head}${body}</table></div><p></p>`
     );
   };
+
+  useEffect(() => {
+    if (!linkPromptOpen) return;
+    const timer = window.setTimeout(() => linkPromptInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [linkPromptOpen]);
+
+  useEffect(() => {
+    if (!tablePromptOpen) return;
+    const timer = window.setTimeout(() => tablePromptColsRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [tablePromptOpen]);
 
   const onPickImage = async (file: File) => {
     if (readOnly) return;
@@ -1042,6 +1074,78 @@ const RichTextEditor = ({ value, onChange, readOnly = false, className }: Props)
               />
             </>
           )}
+        </div>
+      ) : null}
+      {linkPromptOpen ? (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-slate-950/35 p-4" onMouseDown={() => setLinkPromptOpen(false)}>
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-4 shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="text-sm font-semibold text-ink">{t({ it: 'Inserisci URL', en: 'Enter URL' })}</div>
+            <input
+              ref={linkPromptInputRef}
+              value={linkUrlDraft}
+              onChange={(e) => setLinkUrlDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                applyLinkPrompt();
+              }}
+              className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+              placeholder="https://"
+            />
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button type="button" onClick={() => setLinkPromptOpen(false)} className="btn-secondary">
+                {t({ it: 'Annulla', en: 'Cancel' })}
+              </button>
+              <button type="button" onClick={applyLinkPrompt} className="btn-primary">
+                {t({ it: 'Inserisci', en: 'Insert' })}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {tablePromptOpen ? (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-slate-950/35 p-4" onMouseDown={() => setTablePromptOpen(false)}>
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-4 shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="text-sm font-semibold text-ink">{t({ it: 'Inserisci tabella', en: 'Insert table' })}</div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t({ it: 'Colonne (1-8)', en: 'Columns (1-8)' })}
+                <input
+                  ref={tablePromptColsRef}
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={tableColsDraft}
+                  onChange={(e) => setTableColsDraft(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                />
+              </label>
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t({ it: 'Righe (1-12)', en: 'Rows (1-12)' })}
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={tableRowsDraft}
+                  onChange={(e) => setTableRowsDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    applyTablePrompt();
+                  }}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button type="button" onClick={() => setTablePromptOpen(false)} className="btn-secondary">
+                {t({ it: 'Annulla', en: 'Cancel' })}
+              </button>
+              <button type="button" onClick={applyTablePrompt} className="btn-primary">
+                {t({ it: 'Inserisci', en: 'Insert' })}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

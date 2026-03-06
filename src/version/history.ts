@@ -8,6 +8,122 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.5.2',
+    date: '2026-03-07',
+    type: 'fix',
+    notes: [
+      n(
+        'Orari sede: editor dedicato con schedule settimanale multi-range, modale separata per festivi/chiusure, nome festività e calendari selezionabili (Italia, USA, UK, Germania, Francia, Spagna, Cina, Arabia Saudita, Emirati o manuale)',
+        'Site hours: dedicated editor with weekly multi-range schedule, separate holidays/closures modal, holiday names, and selectable calendars (Italy, US, UK, Germany, France, Spain, China, Saudi Arabia, UAE, or manual)'
+      ),
+      n(
+        'Meeting room: l’orario massimo suggerito ora deriva dagli orari della sede della sala meeting, con possibilità esplicita di andare oltre quando serve',
+        'Meeting rooms: the suggested maximum end time now derives from the site hours of the meeting room, with an explicit option to go beyond when needed'
+      ),
+      n(
+        'Mobile chat: apertura molto più veloce grazie a overview dedicata/caching e rimosso il loop di richieste unread/read che saturava la console e il backend',
+        'Mobile chat: much faster opening thanks to dedicated overview/caching and removal of the unread/read request loop that was flooding console and backend'
+      ),
+      n(
+        'Permessi superadmin riallineati: visibilità completa su Users e Meetings anche nei flussi `My meetings` e nelle route backend estratte',
+        'Superadmin permissions realigned: full visibility over Users and Meetings, including `My meetings` flows and extracted backend routes'
+      ),
+      n(
+        'Routing stanze/corridoi più robusto: le porte inferite geometricamente coprono anche stanze senza link esplicito salvato e corretto il crash PlanView dovuto all’inizializzazione degli helper',
+        'Room/corridor routing is now more robust: geometrically inferred doors also cover rooms without an explicit saved link, and the PlanView crash caused by helper initialization order was fixed'
+      ),
+      n(
+        'Import devices/users: modali annidate stabilizzate (focus, z-index, close behavior), stato vuoto esplicito per clienti senza device importati e ulteriore modularizzazione del server (`users`, `chat`, `meetings`, `realtime`, `static`)',
+        'Import devices/users: nested modals stabilized (focus, z-index, close behavior), explicit empty state for clients without imported devices, and further server modularization (`users`, `chat`, `meetings`, `realtime`, `static`)'
+      )
+    ]
+  },
+  {
+    version: '3.5.1',
+    date: '2026-03-06',
+    type: 'minor',
+    notes: [
+      n(
+        'Meeting manager: flusso tab consolidato (`Topics and Summary`, `Actions`, `Timeline`, `Notes`) con chiusura modali annidate più prevedibile (la chiusura di una modale figlia riporta alla modale padre)',
+        'Meeting manager: consolidated tab flow (`Topics and Summary`, `Actions`, `Timeline`, `Notes`) with more predictable nested modal closing (closing a child modal returns to its parent)'
+      ),
+      n(
+        'Azioni meeting: tabella operativa con modale `Manage` per task (progress 0-100 a step 5, gestione scadenza, `Not needed`, delete) e colorazione riga per stato',
+        'Meeting actions: operational table with per-task `Manage` modal (0-100 progress in 5-point steps, deadline handling, `Not needed`, delete) and status-driven row coloring'
+      ),
+      n(
+        'Validazioni salvataggio: appunti non salvabili senza titolo e task con payload non salvabili senza titolo attività',
+        'Save validations: notes cannot be saved without a title, and task rows with payload cannot be saved without a task title'
+      ),
+      n(
+        'Timeline follow-up: migliorato il flusso `Create Follow-UP`, menu gear per meeting futuri (`Edit`/`Delete`) e vista chain disponibile da `My meetings`',
+        'Follow-up timeline: improved `Create Follow-UP` flow, gear menu for future meetings (`Edit`/`Delete`), and chain view available from `My meetings`'
+      ),
+      n(
+        'PDF meeting manager: introdotta review pre-esportazione e report finale più ricco (partecipanti su 2 colonne, task con percentuali/completate/non necessarie, grafici e statistiche)',
+        'Meeting manager PDF: added pre-export review and a richer final report (2-column participants, tasks with percentages/completed/not-needed rows, charts and statistics)'
+      ),
+      n(
+        'Polish localizzazione/tooltip nelle modali meeting e migliorata affidabilità apertura datepicker nella gestione task',
+        'Localization/tooltip polish across meeting modals and improved datepicker opening reliability in task management'
+      )
+    ]
+  },
+  {
+    version: '3.4.1',
+    date: '2026-02-27',
+    type: 'fix',
+    notes: [
+      n(
+        'Meeting center in PlanView: il bottone verde apre una modale con due percorsi (`Scheduling` e `My meetings`) per separare timeline sale e agenda personale',
+        'Meeting center in PlanView: the green button now opens a modal with two paths (`Scheduling` and `My meetings`) to separate room timeline and personal agenda'
+      ),
+      n(
+        'Scheduling ora riusa la stessa schermata `Mostra meetings` disponibile da menu cliente/sede, inclusa l’azione `Nuovo meeting` in alto a destra',
+        'Scheduling now reuses the same `Show meetings` screen available from client/site menus, including the top-right `New meeting` action'
+      ),
+      n(
+        'Aggiunta vista `My meetings` con elenco meeting passati/in corso/futuri per l’utente loggato e accessi rapidi a dettaglio e scheduling',
+        'Added `My meetings` view listing past/in-progress/upcoming meetings for the logged-in user with quick access to detail and scheduling'
+      ),
+      n(
+        'Appunti meeting: enforcement server-side “solo partecipanti” per lettura/scrittura/export/AI transform (admin e superadmin restano autorizzati)',
+        'Meeting notes: server-side “participants only” enforcement for read/write/export/AI transform (admin and superadmin remain authorized)'
+      ),
+      n(
+        'Performance mobile login: su route `/mobile` viene saltata l’idratazione completa `/api/state`, riducendo il tempo percepito in apertura',
+        'Mobile login performance: `/mobile` route now skips full `/api/state` hydration, reducing perceived startup time'
+      )
+    ]
+  },
+  {
+    version: '3.4.0',
+    date: '2026-02-26',
+    type: 'minor',
+    notes: [
+      n(
+        'Mobile app: caricamento iniziale e sincronizzazione migliorati con polling ottimizzato, riduzione richieste concorrenti e shell pagina più stabile su smartphone/notch',
+        'Mobile app: improved initial loading and synchronization with optimized polling, fewer overlapping requests, and a more stable page shell on smartphones/notch devices'
+      ),
+      n(
+        'Chat mobile: elenco stile WhatsApp (ultimo contatto), thread dedicato con header sticky/composer fisso, badge unread, supporto DM e vocali (record + playback)',
+        'Mobile chat: WhatsApp-like list (latest contact first), dedicated thread with sticky header/fixed composer, unread badge, DM support, and voice notes (record + playback)'
+      ),
+      n(
+        'Meeting mobile/kiosk: dettaglio riunione più ricco con partecipanti e check-in, sincronizzazione check-in più reattiva e miglioramenti UX su QR/meeting timeline',
+        'Mobile/kiosk meetings: richer meeting detail with participants and check-in, more responsive check-in sync, and UX improvements across QR flow and meeting timelines'
+      ),
+      n(
+        'Timeline meeting: fissata la colonna sale, affinato indicatore NOW/ORA e stabilizzata la modale di duplicazione riunioni (focus, click-through e caricamento calendario)',
+        'Meeting timelines: sticky room column, refined NOW indicator, and stabilized duplicate-meeting modal (focus, click-through, and calendar loading)'
+      ),
+      n(
+        'Refactor qualità: pulizia codice non usato e riduzione duplicazioni nelle logiche import/preview, parsing timestamp più robusto e hardening TypeScript',
+        'Quality refactor: cleaned unused code and reduced duplication in import/preview logic, more robust timestamp parsing, and TypeScript hardening'
+      )
+    ]
+  },
+  {
     version: '3.3.0',
     date: '2026-02-25',
     type: 'minor',

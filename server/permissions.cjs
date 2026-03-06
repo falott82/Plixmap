@@ -1,13 +1,15 @@
+const { isAdminLike, isStrictSuperAdmin } = require('./access.cjs');
+
 const getUserWithPermissions = (db, userId) => {
   const user = db
     .prepare(
-      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, canCreateMeetings, canManageBusinessPartners, isMeetingOperator, defaultPlanId, clientOrderJson, paletteFavoritesJson, visibleLayerIdsByPlanJson, mustChangePassword, tokenVersion, avatarUrl, firstName, lastName, phone, email, chatLayoutJson, lastOnlineAt, createdAt, updatedAt FROM users WHERE id = ?'
+      'SELECT id, username, isAdmin, isSuperAdmin, disabled, language, canCreateMeetings, canManageBusinessPartners, isMeetingOperator, defaultPlanId, clientOrderJson, paletteFavoritesJson, visibleLayerIdsByPlanJson, mustChangePassword, tokenVersion, avatarUrl, firstName, lastName, phone, email, linkedExternalClientId, linkedExternalId, chatLayoutJson, lastOnlineAt, createdAt, updatedAt FROM users WHERE id = ?'
     )
     .get(userId);
   if (!user) return null;
   const normalizedUsername = String(user.username || '').toLowerCase();
   const isAdmin = !!user.isAdmin;
-  const isSuperAdmin = !!user.isSuperAdmin && normalizedUsername === 'superadmin';
+  const isSuperAdmin = isStrictSuperAdmin({ ...user, username: normalizedUsername });
   const clientOrder = (() => {
     try {
       const arr = JSON.parse(user.clientOrderJson || '[]');
@@ -56,7 +58,7 @@ const getUserWithPermissions = (db, userId) => {
       return {};
     }
   })();
-  const permissions = isAdmin
+  const permissions = isAdminLike({ isAdmin, isSuperAdmin, username: normalizedUsername })
     ? []
     : db
         .prepare('SELECT scopeType, scopeId, access, chat FROM permissions WHERE userId = ? ORDER BY scopeType, scopeId')

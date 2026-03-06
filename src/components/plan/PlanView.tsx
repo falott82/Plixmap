@@ -18,7 +18,6 @@ import {
   Star,
   BookmarkPlus,
   Plus,
-  Minus,
   DoorOpen,
   FileDown,
   Crop,
@@ -43,20 +42,20 @@ import {
   Undo2,
   Redo2,
   ExternalLink,
+  Globe,
   Type as TypeIcon,
   Image as ImageIcon,
   Camera,
   StickyNote,
   Building2
   ,
-  Search
+  Search,
+  Loader2
 		} from 'lucide-react';
 import QRCode from 'qrcode';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
 import SearchBar from './SearchBar';
-import ObjectModal from './ObjectModal';
-import RoomAllocationModal from './RoomAllocationModal';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import {
   Corridor,
@@ -81,34 +80,16 @@ import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
 import { saveState } from '../../api/state';
-import UserMenu from '../layout/UserMenu';
-import EmergencyContactsModal from '../layout/EmergencyContactsModal';
-import ClientBusinessPartnersModal from '../layout/ClientBusinessPartnersModal';
 import PrinterMenuButton from './PrinterMenuButton';
 import UserAvatar from '../ui/UserAvatar';
 import UnlockRequestComposeModal, { UnlockRequestLock } from './UnlockRequestComposeModal';
-import ViewModal from './ViewModal';
 import SearchResultsPopover from './SearchResultsPopover';
 import ChooseDefaultViewModal from './ChooseDefaultViewModal';
 import Icon from '../ui/Icon';
-import RevisionsModal from './RevisionsModal';
-import SaveRevisionModal from './SaveRevisionModal';
 import { DESK_TYPE_IDS, isDeskType } from './deskTypes';
-import RoomModal from './RoomModal';
 import RoomShapePreview from './RoomShapePreview';
-import CapacityDashboardModal from './CapacityDashboardModal';
-import MeetingManagerModal from '../meetings/MeetingManagerModal';
-import RackModal from './RackModal';
-import RackPortsModal from './RackPortsModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
 import BulkEditSelectionModal from './BulkEditSelectionModal';
-import RealUserPickerModal from './RealUserPickerModal';
-import PrintModal from './PrintModal';
-import AllObjectTypesModal from './AllObjectTypesModal';
-import CableModal from './CableModal';
-import LinksModal from './LinksModal';
-import LinkEditModal from './LinkEditModal';
-import RealUserDetailsModal from './RealUserDetailsModal';
 import type { CrossPlanSearchResult } from './CrossPlanSearchModal';
 import type { PhotoItem } from './PhotoViewerModal';
 import { useClipboard } from './useClipboard';
@@ -119,7 +100,10 @@ import { postAuditEvent } from '../../api/audit';
 import { hasExternalUsers, listExternalUsers } from '../../api/customImport';
 import {
   cancelMeeting,
+  createMeeting,
+  fetchMeetings,
   fetchMeetingRoomSchedule,
+  fetchMyMeetings,
   fetchMeetingOverview,
   updateMeeting,
   type MeetingBooking,
@@ -127,6 +111,7 @@ import {
   type MeetingCheckInMapByMeetingId,
   type MeetingCheckInTimestampsByMeetingId
 } from '../../api/meetings';
+import { mobileCheckInMeeting } from '../../api/mobile';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
 import { nanoid } from 'nanoid';
@@ -151,6 +136,29 @@ const CrossPlanSearchModal = lazy(() => import('./CrossPlanSearchModal'));
 const InternalMapModal = lazy(() => import('./InternalMapModal'));
 const EscapeRouteModal = lazy(() => import('./EscapeRouteModal'));
 const PhotoViewerModal = lazy(() => import('./PhotoViewerModal'));
+const MeetingHubModal = lazy(() => import('./MeetingHubModal'));
+const MyMeetingsModal = lazy(() => import('./MyMeetingsModal'));
+const UserMenu = lazy(() => import('../layout/UserMenu'));
+const EmergencyContactsModal = lazy(() => import('../layout/EmergencyContactsModal'));
+const ClientBusinessPartnersModal = lazy(() => import('../layout/ClientBusinessPartnersModal'));
+const ObjectModal = lazy(() => import('./ObjectModal'));
+const RoomAllocationModal = lazy(() => import('./RoomAllocationModal'));
+const ViewModal = lazy(() => import('./ViewModal'));
+const RevisionsModal = lazy(() => import('./RevisionsModal'));
+const SaveRevisionModal = lazy(() => import('./SaveRevisionModal'));
+const RoomModal = lazy(() => import('./RoomModal'));
+const CapacityDashboardModal = lazy(() => import('./CapacityDashboardModal'));
+const RackModal = lazy(() => import('./RackModal'));
+const RackPortsModal = lazy(() => import('./RackPortsModal'));
+const RealUserPickerModal = lazy(() => import('./RealUserPickerModal'));
+const PrintModal = lazy(() => import('./PrintModal'));
+const AllObjectTypesModal = lazy(() => import('./AllObjectTypesModal'));
+const CableModal = lazy(() => import('./CableModal'));
+const LinksModal = lazy(() => import('./LinksModal'));
+const LinkEditModal = lazy(() => import('./LinkEditModal'));
+const RealUserDetailsModal = lazy(() => import('./RealUserDetailsModal'));
+const MeetingManagerModal = lazy(() => import('../meetings/MeetingManagerModal'));
+const MeetingNotesModal = lazy(() => import('../meetings/MeetingNotesModal'));
 
 interface Props {
   planId: string;
@@ -159,6 +167,10 @@ interface Props {
 const isRackLinkId = (id?: string | null) => typeof id === 'string' && id.startsWith('racklink:');
 const UNLOCK_REQUEST_EVENT = 'plixmap_unlock_request';
 const FORCE_UNLOCK_EVENT = 'plixmap_force_unlock';
+const OPEN_CLIENT_MEETINGS_EVENT = 'plixmap_open_client_meetings';
+const OPEN_MEETING_CENTER_EVENT = 'plixmap_open_meeting_center';
+const OPEN_MY_MEETINGS_EVENT = 'plixmap_open_my_meetings';
+const OPEN_MEETING_MANAGER_EVENT = 'plixmap_open_meeting_manager';
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
 const DEFAULT_SAFETY_CARD_LAYOUT = { x: 24, y: 24, w: 420, h: 84, fontSize: 10, fontIndex: 0, colorIndex: 0, textBgIndex: 0 } as const;
 const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[] => {
@@ -245,6 +257,127 @@ const projectPointToSegment = (a: { x: number; y: number }, b: { x: number; y: n
   const y = a.y + dy * t;
   const distSq = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
   return { t, x, y, distSq };
+};
+
+const pointInPolygon = (point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>) => {
+  if (!polygon.length) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i];
+    const b = polygon[j];
+    const intersects = a.y > point.y !== b.y > point.y && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y + 0.000001) + a.x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+};
+
+const pointOnPolygonBoundary = (point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>, tolerance = 1.25) => {
+  if (!polygon.length) return false;
+  const toleranceSq = tolerance * tolerance;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    if (projectPointToSegment(a, b, point).distSq <= toleranceSq) return true;
+  }
+  return false;
+};
+
+const getCorridorPolygonForDoorLink = (corridor: any): Array<{ x: number; y: number }> => {
+  const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
+  if (kind === 'poly') {
+    const pts = Array.isArray(corridor?.points) ? corridor.points : [];
+    if (pts.length >= 3) return pts;
+  }
+  const x = Number(corridor?.x || 0);
+  const y = Number(corridor?.y || 0);
+  const w = Number(corridor?.width || 0);
+  const h = Number(corridor?.height || 0);
+  if (!w || !h) return [];
+  return [
+    { x, y },
+    { x: x + w, y },
+    { x: x + w, y: y + h },
+    { x, y: y + h }
+  ];
+};
+
+const getCorridorEdgePointForDoorLink = (corridor: any, edgeIndex: number, t: number) => {
+  const points = getCorridorPolygonForDoorLink(corridor);
+  if (points.length < 2) return null;
+  const idx = ((Math.floor(edgeIndex) % points.length) + points.length) % points.length;
+  const a = points[idx];
+  const b = points[(idx + 1) % points.length];
+  if (!a || !b) return null;
+  const ratio = Math.max(0, Math.min(1, Number(t) || 0));
+  return { x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio };
+};
+
+const inferCorridorDoorLinkedRoomIds = (corridor: Corridor, door: any, rooms: Room[]) => {
+  const availableRooms = (rooms || []).filter(Boolean);
+  if (!availableRooms.length) return [] as string[];
+  const validRoomIdSet = new Set(availableRooms.map((room) => String(room.id || '')).filter(Boolean));
+  const explicitRoomIds = Array.isArray((door as any)?.linkedRoomIds)
+    ? Array.from(new Set((door as any).linkedRoomIds.map((id: any) => String(id || '').trim()).filter((id: string) => validRoomIdSet.has(id))))
+    : [];
+  if (explicitRoomIds.length) return explicitRoomIds;
+  const corridorPoly = getCorridorPolygonForDoorLink(corridor);
+  const anchor = getCorridorEdgePointForDoorLink(corridor, Number((door as any)?.edgeIndex), Number((door as any)?.t));
+  if (!anchor || corridorPoly.length < 2) return [] as string[];
+  const roomEntries = availableRooms
+    .map((room) => ({ id: String(room.id || ''), poly: getRoomPolygon(room as any) }))
+    .filter((entry) => entry.id && entry.poly.length >= 3);
+  if (!roomEntries.length) return [] as string[];
+  const probeMatches: string[] = [];
+  const edgeIndex = Number((door as any)?.edgeIndex);
+  if (Number.isFinite(edgeIndex)) {
+    const idx = ((Math.floor(edgeIndex) % corridorPoly.length) + corridorPoly.length) % corridorPoly.length;
+    const a = corridorPoly[idx];
+    const b = corridorPoly[(idx + 1) % corridorPoly.length];
+    const dx = (b?.x || 0) - (a?.x || 0);
+    const dy = (b?.y || 0) - (a?.y || 0);
+    const len = Math.hypot(dx, dy);
+    if (len > 0.0001) {
+      const nx = -dy / len;
+      const ny = dx / len;
+      const seen = new Set<string>();
+      const probeDistances = [2, 4, 8, 12, 18, 26, 36, 48, 64];
+      const pushProbeMatches = (probe: { x: number; y: number }, tolerance: number) => {
+        for (const entry of roomEntries) {
+          if (!pointInPolygon(probe, entry.poly) && !pointOnPolygonBoundary(probe, entry.poly, tolerance)) continue;
+          if (seen.has(entry.id)) continue;
+          seen.add(entry.id);
+          probeMatches.push(entry.id);
+        }
+      };
+      for (const dist of probeDistances) {
+        const tolerance = dist <= 12 ? 2.6 : 3.4;
+        pushProbeMatches({ x: anchor.x + nx * dist, y: anchor.y + ny * dist }, tolerance);
+        pushProbeMatches({ x: anchor.x - nx * dist, y: anchor.y - ny * dist }, tolerance);
+        if (probeMatches.length >= 2 && dist >= 18) break;
+      }
+    }
+  }
+  if (probeMatches.length) return probeMatches;
+  const ranked = roomEntries
+    .map((entry) => {
+      let bestDistSq = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < entry.poly.length; i += 1) {
+        const a = entry.poly[i];
+        const b = entry.poly[(i + 1) % entry.poly.length];
+        const proj = projectPointToSegment(a, b, anchor);
+        if (proj.distSq < bestDistSq) bestDistSq = proj.distSq;
+      }
+      return { id: entry.id, dist: Math.sqrt(bestDistSq) };
+    })
+    .filter((entry) => Number.isFinite(entry.dist))
+    .sort((a, b) => a.dist - b.dist);
+  if (!ranked.length) return [] as string[];
+  const best = ranked[0].dist;
+  const maxAllowed = Math.max(42, best + 2.5);
+  return ranked
+    .filter((entry) => entry.dist <= maxAllowed)
+    .slice(0, 4)
+    .map((entry) => entry.id);
 };
 
 const getSharedRoomSides = (roomA: Room, roomB: Room): SharedRoomSide[] => {
@@ -737,6 +870,10 @@ const PlanView = ({ planId }: Props) => {
   const [printAreaMode, setPrintAreaMode] = useState(false);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [saveRevisionOpen, setSaveRevisionOpen] = useState(false);
+  const [saveRevisionModalPreset, setSaveRevisionModalPreset] = useState<{ initialBump: 'major' | 'minor'; requireNoteForMajor: boolean }>({
+    initialBump: 'minor',
+    requireNoteForMajor: false
+  });
   const [realUserPicker, setRealUserPicker] = useState<{ x: number; y: number } | null>(null);
   const [realUserImportMissing, setRealUserImportMissing] = useState(false);
   const [capacityConfirm, setCapacityConfirm] = useState<{
@@ -873,12 +1010,39 @@ const PlanView = ({ planId }: Props) => {
   const [capacityDashboardOpen, setCapacityDashboardOpen] = useState(false);
   const [capacityDashboardPreset, setCapacityDashboardPreset] = useState<{ clientId?: string; siteId?: string } | null>(null);
   const [meetingManagerOpen, setMeetingManagerOpen] = useState(false);
+  const [meetingHubModalOpen, setMeetingHubModalOpen] = useState(false);
   const [meetingManagerPreset, setMeetingManagerPreset] = useState<{
     clientId?: string;
     siteId?: string;
     floorPlanId?: string;
     roomId?: string;
     day?: string;
+  } | null>(null);
+  type MyMeetingsModalState = {
+    loading: boolean;
+    error: string | null;
+    now: number;
+    meetings: MeetingBooking[];
+    counts: { total: number; inProgress: number; upcoming: number; past: number };
+    returnToHub?: boolean;
+  };
+  const [myMeetingsModal, setMyMeetingsModal] = useState<MyMeetingsModalState | null>(null);
+  const [myMeetingsSearch, setMyMeetingsSearch] = useState('');
+  const [myMeetingsCheckInBusyId, setMyMeetingsCheckInBusyId] = useState<string | null>(null);
+  const [myMeetingsCheckInDoneById, setMyMeetingsCheckInDoneById] = useState<Record<string, true>>({});
+  const [pendingMeetingManagerPreset, setPendingMeetingManagerPreset] = useState<{
+    clientId?: string;
+    siteId?: string;
+    floorPlanId?: string;
+    roomId?: string;
+    day?: string;
+  } | null>(null);
+  const [pendingClientMeetingsPreset, setPendingClientMeetingsPreset] = useState<{
+    clientId?: string;
+    siteId?: string;
+    siteLocked?: boolean;
+    day?: string;
+    returnTo?: 'hub' | 'myMeetings';
   } | null>(null);
   const [meetingStatusByRoomId, setMeetingStatusByRoomId] = useState<Record<string, { hasMeetingToday: boolean; inProgress: boolean; hasFutureToday: boolean }>>({});
   const [roomMeetingsTimelineModal, setRoomMeetingsTimelineModal] = useState<null | {
@@ -892,6 +1056,25 @@ const PlanView = ({ planId }: Props) => {
     checkInStatusByMeetingId: MeetingCheckInMapByMeetingId;
     checkInTimestampsByMeetingId: MeetingCheckInTimestampsByMeetingId;
   }>(null);
+  const [roomMeetingsTimelineSearchTerm, setRoomMeetingsTimelineSearchTerm] = useState('');
+  const [roomMeetingsTimelineSearchLoading, setRoomMeetingsTimelineSearchLoading] = useState(false);
+  const [roomMeetingsTimelineSearchError, setRoomMeetingsTimelineSearchError] = useState<string | null>(null);
+  const [roomMeetingsTimelineSearchResults, setRoomMeetingsTimelineSearchResults] = useState<
+    Array<{
+      booking: MeetingBooking;
+      dayIso: string;
+      participantsCount: number;
+      participantsLabel: string;
+    }>
+  >([]);
+  const [roomMeetingsTimelineSearchActiveIndex, setRoomMeetingsTimelineSearchActiveIndex] = useState(-1);
+  const [roomMeetingsTimelineHighlightBookingId, setRoomMeetingsTimelineHighlightBookingId] = useState<string | null>(null);
+  type MeetingNotesModalTab = 'manager' | 'actions' | 'history' | 'notes' | 'details';
+  type MeetingNotesReturnState = {
+    initialTab?: MeetingNotesModalTab;
+    historyMeetingId?: string;
+    highlightHistoryMeetingId?: string;
+  };
   const [roomMeetingsTimelineBookingDetail, setRoomMeetingsTimelineBookingDetail] = useState<null | {
     booking: MeetingBooking;
     mode: 'view' | 'edit';
@@ -901,6 +1084,7 @@ const PlanView = ({ planId }: Props) => {
     endTime: string;
     notes: string;
     videoConferenceLink: string;
+    kioskLanguage: 'auto' | 'it' | 'en' | 'ru' | 'ar' | 'zh';
     setupBufferBeforeMin: number;
     setupBufferAfterMin: number;
     participantFilter: string;
@@ -917,6 +1101,11 @@ const PlanView = ({ planId }: Props) => {
       }
     >;
     applyToSeries: boolean;
+    returnToMyMeetings?: boolean;
+    returnToMeetingNotes?: boolean;
+    returnToMeetingNotesInitialTab?: MeetingNotesModalTab;
+    returnToMeetingNotesHistoryMeetingId?: string;
+    returnToMeetingNotesHighlightMeetingId?: string;
     saving: boolean;
     deleting: boolean;
     error: string | null;
@@ -926,8 +1115,57 @@ const PlanView = ({ planId }: Props) => {
   >([]);
   const [roomMeetingEditManualCompanyIsOther, setRoomMeetingEditManualCompanyIsOther] = useState(false);
   const [roomMeetingEditBusinessPartnersModalOpen, setRoomMeetingEditBusinessPartnersModalOpen] = useState(false);
+  const [roomMeetingEditParticipantsModalOpen, setRoomMeetingEditParticipantsModalOpen] = useState(false);
   const [roomMeetingCheckInListOpen, setRoomMeetingCheckInListOpen] = useState(false);
+  const [roomMeetingNotesModalBooking, setRoomMeetingNotesModalBooking] = useState<MeetingBooking | null>(null);
+  const [roomMeetingNotesModalState, setRoomMeetingNotesModalState] = useState<MeetingNotesReturnState | null>(null);
+  const [roomMeetingNotesReturnToMyMeetings, setRoomMeetingNotesReturnToMyMeetings] = useState(false);
+  const [roomMeetingTimelineContextMenu, setRoomMeetingTimelineContextMenu] = useState<null | {
+    x: number;
+    y: number;
+    booking: MeetingBooking;
+  }>(null);
+  const [roomMeetingExtendBusyId, setRoomMeetingExtendBusyId] = useState<string | null>(null);
+  const [roomMeetingDeleteModal, setRoomMeetingDeleteModal] = useState<null | {
+    booking: MeetingBooking;
+    deleting: boolean;
+    error: string | null;
+  }>(null);
+  const [roomMeetingDuplicateModal, setRoomMeetingDuplicateModal] = useState<null | {
+    mode: 'duplicate' | 'followup';
+    booking: MeetingBooking;
+    step: 'setup' | 'calendar';
+    roomMode: 'selected' | 'any';
+    selectedRoomId: string;
+    timeMode: 'same' | 'any_08_18' | 'custom';
+    customFromHm: string;
+    customToHm: string;
+    roomOptions: Array<{ roomId: string; roomName: string; floorPlanId: string; floorPlanName: string }>;
+    baseDay: string;
+    preferredDay: string;
+    monthAnchor: string; // YYYY-MM-01
+    selectedDays: string[];
+    availabilityByDay: Record<
+      string,
+      { state: 'available' | 'occupied' | 'blocked' | 'loading' | 'error'; reason?: string }
+    >;
+    candidateByDay: Record<string, { roomId: string; roomName: string; floorPlanId: string; floorPlanName: string; startHm: string; endHm: string }>;
+    loadingMonth: boolean;
+    saving: boolean;
+    error: string | null;
+  }>(null);
+  const [roomMeetingDuplicateRoomPickerOpen, setRoomMeetingDuplicateRoomPickerOpen] = useState(false);
+  const roomMeetingDuplicateRoomPickerRef = useRef<HTMLDivElement | null>(null);
+  const meetingHubFocusRef = useRef<HTMLButtonElement | null>(null);
+  const myMeetingsFocusRef = useRef<HTMLButtonElement | null>(null);
+  const myMeetingsRestoreRef = useRef<MyMeetingsModalState | null>(null);
+  const reloadMyMeetingsRef = useRef<null | (() => Promise<void>)>(null);
+  const roomMeetingDetailFocusRef = useRef<HTMLButtonElement | null>(null);
+  const roomMeetingsTimelineSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const roomMeetingTimelineContextMenuRef = useRef<HTMLDivElement | null>(null);
   const roomMeetingsTimelineDetailCloseGuardUntilRef = useRef(0);
+  const roomMeetingEditParticipantsCloseGuardUntilRef = useRef(0);
+  const roomMeetingEditParticipantsNameInputRef = useRef<HTMLInputElement | null>(null);
   const roomMeetingsTimelineScrollRef = useRef<HTMLDivElement | null>(null);
   const [roomKioskInfoModal, setRoomKioskInfoModal] = useState<null | {
     roomId: string;
@@ -1510,10 +1748,47 @@ const PlanView = ({ planId }: Props) => {
         ,
         checkInTimestampsByMeetingId: {}
       });
+      setRoomMeetingsTimelineSearchTerm('');
+      setRoomMeetingsTimelineSearchResults([]);
+      setRoomMeetingsTimelineSearchActiveIndex(-1);
+      setRoomMeetingsTimelineSearchError(null);
+      setRoomMeetingsTimelineSearchLoading(false);
+      setRoomMeetingsTimelineHighlightBookingId(null);
       void reloadRoomMeetingsTimeline(roomId, day);
     },
     [plan, reloadRoomMeetingsTimeline, t]
   );
+
+  const closeRoomMeetingsTimelineModal = useCallback(() => {
+    setRoomMeetingsTimelineModal(null);
+    setRoomMeetingsTimelineSearchTerm('');
+    setRoomMeetingsTimelineSearchResults([]);
+    setRoomMeetingsTimelineSearchActiveIndex(-1);
+    setRoomMeetingsTimelineSearchError(null);
+    setRoomMeetingsTimelineSearchLoading(false);
+    setRoomMeetingsTimelineHighlightBookingId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!roomMeetingDuplicateRoomPickerOpen) return;
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!roomMeetingDuplicateRoomPickerRef.current) return;
+      if (roomMeetingDuplicateRoomPickerRef.current.contains(event.target as Node)) return;
+      setRoomMeetingDuplicateRoomPickerOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [roomMeetingDuplicateRoomPickerOpen]);
+
+  useEffect(() => {
+    if (!roomMeetingDuplicateModal || roomMeetingDuplicateModal.step !== 'setup') {
+      setRoomMeetingDuplicateRoomPickerOpen(false);
+    }
+  }, [roomMeetingDuplicateModal?.step, roomMeetingDuplicateModal?.booking?.id]);
 
   useEffect(() => {
     const modal = roomMeetingsTimelineModal;
@@ -1533,6 +1808,106 @@ const PlanView = ({ planId }: Props) => {
     const d = new Date(Number(ts || 0));
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }, []);
+
+  useEffect(() => {
+    const modal = roomMeetingsTimelineModal;
+    if (!modal?.roomId) {
+      setRoomMeetingsTimelineSearchLoading(false);
+      setRoomMeetingsTimelineSearchResults([]);
+      setRoomMeetingsTimelineSearchActiveIndex(-1);
+      setRoomMeetingsTimelineSearchError(null);
+      return;
+    }
+    const term = String(roomMeetingsTimelineSearchTerm || '').trim();
+    if (!term) {
+      setRoomMeetingsTimelineSearchLoading(false);
+      setRoomMeetingsTimelineSearchResults([]);
+      setRoomMeetingsTimelineSearchActiveIndex(-1);
+      setRoomMeetingsTimelineSearchError(null);
+      return;
+    }
+    let cancelled = false;
+    setRoomMeetingsTimelineSearchLoading(true);
+    setRoomMeetingsTimelineSearchError(null);
+    const timer = window.setTimeout(async () => {
+      try {
+        const now = Date.now();
+        const response = await fetchMeetings({
+          roomId: modal.roomId,
+          fromAt: now - 365 * 24 * 60 * 60 * 1000,
+          toAt: now + 365 * 24 * 60 * 60 * 1000
+        });
+        if (cancelled) return;
+        const normalized = term.toLowerCase();
+        const normalizedDigits = normalized.replace(/\D+/g, '');
+        const matches = (response?.meetings || [])
+          .filter((booking) => {
+            const subject = String(booking.subject || '').toLowerCase();
+            const meetingNumber = Number((booking as any)?.meetingNumber || 0);
+            const meetingNumberText = meetingNumber > 0 ? String(meetingNumber) : '';
+            const matchById =
+              !!meetingNumberText && (meetingNumberText.includes(normalized) || (!!normalizedDigits && meetingNumberText.includes(normalizedDigits)));
+            return subject.includes(normalized) || matchById;
+          })
+          .sort((a, b) => Number(b.startAt || 0) - Number(a.startAt || 0))
+          .slice(0, 40)
+          .map((booking) => {
+            const participantNames = Array.from(
+              new Set(
+                [
+                  ...(Array.isArray(booking.participants)
+                    ? booking.participants.map((p: any) => String(p?.fullName || p?.externalId || '').trim()).filter(Boolean)
+                    : []),
+                  ...(Array.isArray((booking as any)?.externalGuestsDetails)
+                    ? (booking as any).externalGuestsDetails.map((g: any) => String(g?.name || '').trim()).filter(Boolean)
+                    : [])
+                ].filter(Boolean)
+              )
+            );
+            const participantsCount = participantNames.length;
+            const participantsLabel =
+              participantsCount === 0
+                ? t({ it: 'Nessun partecipante', en: 'No participants' })
+                : participantsCount <= 3
+                  ? participantNames.join(', ')
+                  : `${participantNames.slice(0, 3).join(', ')} +${participantsCount - 3}`;
+            const dayIso = String((booking as any)?.occurrenceDate || '').trim() || meetingIsoDayFromTs(Number(booking.startAt || 0));
+            return { booking, dayIso, participantsCount, participantsLabel };
+          });
+        setRoomMeetingsTimelineSearchResults(matches);
+        setRoomMeetingsTimelineSearchActiveIndex(matches.length ? 0 : -1);
+      } catch {
+        if (cancelled) return;
+        setRoomMeetingsTimelineSearchResults([]);
+        setRoomMeetingsTimelineSearchActiveIndex(-1);
+        setRoomMeetingsTimelineSearchError(t({ it: 'Errore ricerca meeting.', en: 'Meeting search failed.' }));
+      } finally {
+        if (!cancelled) {
+          setRoomMeetingsTimelineSearchLoading(false);
+        }
+      }
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [meetingIsoDayFromTs, roomMeetingsTimelineModal?.roomId, roomMeetingsTimelineSearchTerm, t]);
+
+  const jumpToTimelineMeetingFromSearch = useCallback(
+    (result: { booking: MeetingBooking; dayIso: string }) => {
+      const roomId = String(roomMeetingsTimelineModal?.roomId || '').trim();
+      if (!roomId) return;
+      const targetDay = String(result.dayIso || '').trim() || meetingIsoDayFromTs(Number(result.booking.startAt || 0));
+      setRoomMeetingsTimelineSearchTerm('');
+      setRoomMeetingsTimelineSearchResults([]);
+      setRoomMeetingsTimelineSearchActiveIndex(-1);
+      setRoomMeetingsTimelineSearchError(null);
+      setRoomMeetingsTimelineHighlightBookingId(String(result.booking.id || ''));
+      setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: targetDay } : prev));
+      void reloadRoomMeetingsTimeline(roomId, targetDay);
+    },
+    [meetingIsoDayFromTs, reloadRoomMeetingsTimeline, roomMeetingsTimelineModal?.roomId]
+  );
 
   const meetingCheckInEntryKey = useCallback((entry: { tag?: string | null; label?: string | null; email?: string | null }) => {
     const tag = String(entry.tag || 'INT');
@@ -1705,23 +2080,76 @@ const PlanView = ({ planId }: Props) => {
     minMinutes = Math.max(0, Math.floor((minMinutes - 30) / 60) * 60);
     maxMinutes = Math.min(24 * 60, Math.ceil((maxMinutes + 30) / 60) * 60);
     if (maxMinutes - minMinutes < 6 * 60) maxMinutes = Math.min(24 * 60, minMinutes + 6 * 60);
-    const nowDate = new Date();
-    const todayIsoLocal = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
-    if (String(modal.day || '') !== todayIsoLocal) return;
     const total = Math.max(1, maxMinutes - minMinutes);
-    const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
     const timelineWidthPx = Math.max(980, Math.max(6, Math.ceil((maxMinutes - minMinutes) / 60)) * 120);
     const labelColPx = 240;
-    const nowX = labelColPx + ((nowMinutes - minMinutes) / total) * timelineWidthPx;
-    const target = Math.max(0, nowX - scroller.clientWidth / 2);
+    const highlightedBooking = roomMeetingsTimelineHighlightBookingId
+      ? bookings.find((booking) => String(booking.id || '') === String(roomMeetingsTimelineHighlightBookingId))
+      : null;
+    let target: number | null = null;
+    if (highlightedBooking) {
+      const start = new Date(Number(highlightedBooking.startAt || 0));
+      const end = new Date(Number(highlightedBooking.endAt || 0));
+      const startMinutes = start.getHours() * 60 + start.getMinutes();
+      const endMinutes = end.getHours() * 60 + end.getMinutes();
+      const midMinutes = (startMinutes + endMinutes) / 2;
+      const x = labelColPx + ((midMinutes - minMinutes) / total) * timelineWidthPx;
+      target = Math.max(0, x - scroller.clientWidth / 2);
+    } else {
+      const nowDate = new Date();
+      const todayIsoLocal = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
+      if (String(modal.day || '') !== todayIsoLocal) return;
+      const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
+      const nowX = labelColPx + ((nowMinutes - minMinutes) / total) * timelineWidthPx;
+      target = Math.max(0, nowX - scroller.clientWidth / 2);
+    }
+    if (target == null) return;
     const raf = window.requestAnimationFrame(() => {
-      scroller.scrollLeft = target;
+      scroller.scrollLeft = target as number;
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [roomMeetingsTimelineModal?.day, roomMeetingsTimelineModal?.loading, roomMeetingsTimelineModal?.bookings]);
+  }, [
+    roomMeetingsTimelineHighlightBookingId,
+    roomMeetingsTimelineModal?.day,
+    roomMeetingsTimelineModal?.loading,
+    roomMeetingsTimelineModal?.bookings
+  ]);
+
+  useEffect(() => {
+    if (!roomMeetingsTimelineHighlightBookingId) return;
+    const timer = window.setTimeout(() => setRoomMeetingsTimelineHighlightBookingId(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [roomMeetingsTimelineHighlightBookingId]);
+
+  const restoreMyMeetingsFromSnapshot = useCallback(() => {
+    const restoreSnapshot = myMeetingsRestoreRef.current;
+    const fallback: MyMeetingsModalState = {
+      loading: true,
+      error: null,
+      now: Date.now(),
+      meetings: [],
+      counts: { total: 0, inProgress: 0, upcoming: 0, past: 0 }
+    };
+    setMyMeetingsModal(restoreSnapshot || fallback);
+    myMeetingsRestoreRef.current = null;
+    if (!restoreSnapshot) {
+      void reloadMyMeetingsRef.current?.();
+    }
+  }, []);
 
   const openRoomMeetingBookingDetail = useCallback(
-    (booking: MeetingBooking, mode: 'view' | 'edit' = 'view') => {
+    (
+      booking: MeetingBooking,
+      mode: 'view' | 'edit' = 'view',
+      options?: { fromMyMeetings?: boolean; fromMeetingNotes?: boolean; meetingNotesState?: MeetingNotesReturnState | null }
+    ) => {
+      if (options?.fromMyMeetings) {
+        if (myMeetingsModal) {
+          myMeetingsRestoreRef.current = myMeetingsModal;
+        }
+        setMyMeetingsModal(null);
+      }
+      const meetingNotesState = options?.meetingNotesState || null;
       const normalizedParticipants: Array<
         MeetingParticipant & { key: string; fullName: string; kind: 'real_user' | 'manual' }
       > = (Array.isArray(booking.participants) ? booking.participants : []).map((row, idx) => {
@@ -1749,6 +2177,10 @@ const PlanView = ({ planId }: Props) => {
         endTime: meetingClockFromTs(Number(booking.endAt || 0)),
         notes: String(booking.notes || ''),
         videoConferenceLink: String(booking.videoConferenceLink || ''),
+        kioskLanguage: (() => {
+          const raw = String((booking as any)?.kioskLanguage || '').trim().toLowerCase();
+          return raw === 'it' || raw === 'en' || raw === 'ru' || raw === 'ar' || raw === 'zh' ? raw : 'auto';
+        })(),
         setupBufferBeforeMin: Math.max(0, Math.min(60, Number(booking.setupBufferBeforeMin) || 0)),
         setupBufferAfterMin: Math.max(0, Math.min(60, Number(booking.setupBufferAfterMin) || 0)),
         participantFilter: '',
@@ -1759,6 +2191,11 @@ const PlanView = ({ planId }: Props) => {
         manualParticipantRemote: false,
         participantsDraft: normalizedParticipants,
         applyToSeries: false,
+        returnToMyMeetings: !!options?.fromMyMeetings,
+        returnToMeetingNotes: !!options?.fromMeetingNotes,
+        returnToMeetingNotesInitialTab: meetingNotesState?.initialTab,
+        returnToMeetingNotesHistoryMeetingId: meetingNotesState?.historyMeetingId,
+        returnToMeetingNotesHighlightMeetingId: meetingNotesState?.highlightHistoryMeetingId,
         saving: false,
         deleting: false,
         error: null
@@ -1767,14 +2204,67 @@ const PlanView = ({ planId }: Props) => {
       setRoomMeetingEditManualCompanyIsOther(false);
       setRoomMeetingEditBusinessPartnersModalOpen(false);
     },
-    [meetingClockFromTs, meetingIsoDayFromTs, t]
+    [meetingClockFromTs, meetingIsoDayFromTs, myMeetingsModal, t]
   );
 
-  const closeRoomMeetingBookingDetail = useCallback(() => {
+  const closeRoomMeetingBookingDetail = useCallback((options?: { bookingOverride?: MeetingBooking | null }) => {
+    const detail = roomMeetingsTimelineBookingDetail;
+    const shouldReturnToMyMeetings = !!detail?.returnToMyMeetings;
+    const shouldReturnToMeetingNotes = !!detail?.returnToMeetingNotes;
+    const bookingToRestoreInNotes = options?.bookingOverride || detail?.booking || null;
+    const notesState: MeetingNotesReturnState | null = shouldReturnToMeetingNotes
+      ? {
+          initialTab: detail?.returnToMeetingNotesInitialTab || 'history',
+          historyMeetingId: detail?.returnToMeetingNotesHistoryMeetingId || String(bookingToRestoreInNotes?.id || ''),
+          highlightHistoryMeetingId: detail?.returnToMeetingNotesHighlightMeetingId || String(bookingToRestoreInNotes?.id || '')
+        }
+      : null;
     roomMeetingsTimelineDetailCloseGuardUntilRef.current = Date.now() + 350;
+    roomMeetingEditParticipantsCloseGuardUntilRef.current = Date.now() + 350;
+    setRoomMeetingEditParticipantsModalOpen(false);
     setRoomMeetingCheckInListOpen(false);
     setRoomMeetingsTimelineBookingDetail(null);
+    if (shouldReturnToMeetingNotes && bookingToRestoreInNotes) {
+      setRoomMeetingNotesReturnToMyMeetings(shouldReturnToMyMeetings);
+      setRoomMeetingNotesModalState(notesState);
+      setRoomMeetingNotesModalBooking(bookingToRestoreInNotes);
+      return;
+    }
+    setRoomMeetingNotesModalState(null);
+    if (shouldReturnToMyMeetings) {
+      restoreMyMeetingsFromSnapshot();
+    }
+  }, [restoreMyMeetingsFromSnapshot, roomMeetingsTimelineBookingDetail]);
+
+  const openRoomMeetingEditParticipantsModal = useCallback(() => {
+    setRoomMeetingEditParticipantsModalOpen(true);
   }, []);
+
+  const closeRoomMeetingEditParticipantsModal = useCallback(() => {
+    roomMeetingEditParticipantsCloseGuardUntilRef.current = Date.now() + 250;
+    setRoomMeetingEditParticipantsModalOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!roomMeetingEditParticipantsModalOpen) return;
+    const timer = window.setTimeout(() => {
+      roomMeetingEditParticipantsNameInputRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [roomMeetingEditParticipantsModalOpen]);
+
+  useEffect(() => {
+    if (!roomMeetingEditParticipantsModalOpen) return;
+    const onKeyDown = (evt: KeyboardEvent) => {
+      if (evt.key !== 'Escape') return;
+      evt.preventDefault();
+      evt.stopPropagation();
+      if (roomMeetingEditBusinessPartnersModalOpen) return;
+      closeRoomMeetingEditParticipantsModal();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [closeRoomMeetingEditParticipantsModal, roomMeetingEditBusinessPartnersModalOpen, roomMeetingEditParticipantsModalOpen]);
 
   const addTimelineMeetingRealParticipant = useCallback((externalId: string) => {
     const candidate = roomMeetingEditParticipantCandidates.find((row) => String(row.externalId) === String(externalId));
@@ -1860,10 +2350,665 @@ const PlanView = ({ planId }: Props) => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }, []);
 
+  const monthAnchorFromIso = useCallback((iso: string) => {
+    const d = new Date(`${String(iso || '').trim()}T00:00:00`);
+    if (!Number.isFinite(d.getTime())) return new Date().toISOString().slice(0, 7) + '-01';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  }, []);
+
+  const shiftMonthAnchor = useCallback((anchorIso: string, deltaMonths: number) => {
+    const d = new Date(`${String(anchorIso || '').trim()}T00:00:00`);
+    if (!Number.isFinite(d.getTime())) return monthAnchorFromIso(new Date().toISOString().slice(0, 10));
+    d.setMonth(d.getMonth() + deltaMonths, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  }, [monthAnchorFromIso]);
+
+  const toLocalHmFromTs = useCallback((ts: number) => {
+    const d = new Date(Number(ts || 0));
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }, []);
+
+  const hmToMinutes = useCallback((hm: string) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || '').trim());
+    if (!m) return 0;
+    const h = Math.max(0, Math.min(23, Number(m[1]) || 0));
+    const mm = Math.max(0, Math.min(59, Number(m[2]) || 0));
+    return h * 60 + mm;
+  }, []);
+
+  const minutesToHm = useCallback((totalMinutes: number) => {
+    const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.floor(Number(totalMinutes) || 0)));
+    const h = Math.floor(clamped / 60);
+    const m = clamped % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }, []);
+
+  const localTsFromIsoHm = useCallback((isoDay: string, hm: string): number | null => {
+    const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDay || '').trim());
+    const tm = /^(\d{1,2}):(\d{2})$/.exec(String(hm || '').trim());
+    if (!dm || !tm) return null;
+    const y = Number(dm[1]);
+    const mo = Number(dm[2]) - 1;
+    const da = Number(dm[3]);
+    const hh = Number(tm[1]);
+    const mm = Number(tm[2]);
+    if (![y, mo, da, hh, mm].every(Number.isFinite)) return null;
+    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+    const dt = new Date(y, mo, da, hh, mm, 0, 0);
+    return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+  }, []);
+
+  const resolveRoomDuplicateSlot = useCallback(
+    (
+      booking: MeetingBooking,
+      dayIso: string,
+      timeMode: 'same' | 'any_08_18' | 'custom' = 'same'
+    ): { startHm: string; endHm: string; startMin: number; endMin: number } | null => {
+      const startTs = Number(booking.startAt || 0);
+      const endTs = Number(booking.endAt || 0);
+      const sourceStartHm = meetingClockFromTs(startTs);
+      const sourceStartMin = hmToMinutes(sourceStartHm);
+      const durationMinRaw = Math.round((endTs - startTs) / 60_000);
+      const durationMin = Math.max(1, Number.isFinite(durationMinRaw) ? durationMinRaw : 60);
+      let startMin = timeMode === 'same' ? sourceStartMin : 0;
+      const today = new Date().toISOString().slice(0, 10);
+      if (dayIso === today) {
+        const now = new Date();
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        startMin = Math.max(startMin, nowMin);
+      }
+      const endMin = startMin + durationMin;
+      if (endMin > 23 * 60 + 59) return null;
+      return { startHm: minutesToHm(startMin), endHm: minutesToHm(endMin), startMin, endMin };
+    },
+    [hmToMinutes, meetingClockFromTs, minutesToHm]
+  );
+
+  const getRoomMeetingExtendMaxEndTs = useCallback((booking: MeetingBooking, bookings: MeetingBooking[]) => {
+    const currentEnd = Number(booking.endAt || 0);
+    const dayEnd = (() => {
+      const d = new Date(Number(booking.startAt || 0));
+      d.setHours(23, 59, 0, 0);
+      return d.getTime();
+    })();
+    const nextBoundary = (bookings || [])
+      .filter((b) => String(b.id) !== String(booking.id) && Number((b as any).effectiveStartAt ?? b.startAt ?? 0) >= currentEnd)
+      .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0))[0];
+    const nextStart = nextBoundary ? Number((nextBoundary as any).effectiveStartAt ?? nextBoundary.startAt ?? 0) : Number.POSITIVE_INFINITY;
+    return Math.min(dayEnd, nextStart);
+  }, []);
+
+  const extendRoomMeetingBooking = useCallback(
+    async (booking: MeetingBooking, mode: '10m' | '30m' | '1h' | '1.5h' | '2h' | 'max') => {
+      const modal = roomMeetingsTimelineModal;
+      if (!booking) return;
+      const currentEndTs = Number(booking.endAt || 0);
+      const currentStartTs = Number(booking.startAt || 0);
+      if (!Number.isFinite(currentEndTs) || !Number.isFinite(currentStartTs)) return;
+      if (Date.now() >= currentEndTs) {
+        push(
+          t({
+            it: 'Meeting concluso: estensione non consentita.',
+            en: 'Meeting ended: extension is not allowed.'
+          }),
+          'info'
+        );
+        return;
+      }
+      const resolvedDay = String((booking as any).occurrenceDate || meetingIsoDayFromTs(currentStartTs) || modal?.day || '').trim();
+      const resolvedRoomId = String((booking as any).roomId || modal?.roomId || '').trim();
+      let roomBookings: MeetingBooking[] = [];
+      if (modal && String(modal.roomId || '') === resolvedRoomId && String(modal.day || '') === resolvedDay) {
+        roomBookings = modal.bookings || [];
+      } else {
+        const cid = String(client?.id || '').trim();
+        const sid = String(site?.id || '').trim();
+        if (cid && sid && resolvedRoomId && resolvedDay) {
+          try {
+            const payload = await fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day: resolvedDay });
+            const roomRow = (payload.rooms || []).find((r) => String(r.roomId || '') === resolvedRoomId);
+            roomBookings = roomRow?.bookings || [];
+          } catch {
+            roomBookings = [];
+          }
+        }
+      }
+      const maxEndTs = getRoomMeetingExtendMaxEndTs(booking, roomBookings);
+      let targetEndTs = currentEndTs;
+      if (mode === 'max') {
+        targetEndTs = maxEndTs;
+      } else {
+        const addMin = mode === '10m' ? 10 : mode === '30m' ? 30 : mode === '1h' ? 60 : mode === '1.5h' ? 90 : 120;
+        targetEndTs = Math.min(maxEndTs, currentEndTs + addMin * 60_000);
+      }
+      if (!Number.isFinite(targetEndTs) || targetEndTs <= currentEndTs) {
+        push(
+          t({
+            it: 'Nessuno spazio disponibile per estendere il meeting.',
+            en: 'No free slot available to extend the meeting.'
+          }),
+          'info'
+        );
+        return;
+      }
+      try {
+        setRoomMeetingExtendBusyId(String(booking.id));
+        const result = await updateMeeting(booking.id, {
+          day: resolvedDay,
+          startTime: toLocalHmFromTs(currentStartTs),
+          endTime: toLocalHmFromTs(targetEndTs)
+        });
+        push(
+          t({
+            it: `Meeting esteso fino alle ${toLocalHmFromTs(Number(result.booking?.endAt || targetEndTs))}.`,
+            en: `Meeting extended until ${toLocalHmFromTs(Number(result.booking?.endAt || targetEndTs))}.`
+          }),
+          'success'
+        );
+        if (roomMeetingsTimelineBookingDetail && String(roomMeetingsTimelineBookingDetail.booking.id) === String(booking.id)) {
+          setRoomMeetingsTimelineBookingDetail((prev) =>
+            prev ? { ...prev, booking: result.booking, mode: 'view', saving: false, error: null } : prev
+          );
+        }
+        setRoomMeetingTimelineContextMenu(null);
+        if (modal?.roomId) {
+          await reloadRoomMeetingsTimeline(modal.roomId, modal.day);
+        }
+      } catch (err: any) {
+        push(err?.message || t({ it: 'Estensione meeting fallita.', en: 'Failed to extend meeting.' }), 'danger');
+      } finally {
+        setRoomMeetingExtendBusyId(null);
+      }
+    },
+    [
+      client?.id,
+      getRoomMeetingExtendMaxEndTs,
+      meetingIsoDayFromTs,
+      planId,
+      push,
+      reloadRoomMeetingsTimeline,
+      roomMeetingsTimelineBookingDetail,
+      roomMeetingsTimelineModal,
+      site?.id,
+      t,
+      toLocalHmFromTs
+    ]
+  );
+
+  const adjustRoomMeetingEditEndTime = useCallback(
+    (mode: '10m' | '30m' | '1h' | '2h' | 'max') => {
+      setRoomMeetingsTimelineBookingDetail((prev) => {
+        if (!prev || prev.mode !== 'edit') return prev;
+        const toLocalTs = (isoDay: string, hhmm: string) => {
+          const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDay || '').trim());
+          const tm = /^(\d{1,2}):(\d{1,2})$/.exec(String(hhmm || '').trim());
+          if (!dm || !tm) return null;
+          const y = Number(dm[1]);
+          const mo = Number(dm[2]) - 1;
+          const da = Number(dm[3]);
+          const hh = Number(tm[1]);
+          const mm = Number(tm[2]);
+          if (![y, mo, da, hh, mm].every(Number.isFinite)) return null;
+          if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+          const dt = new Date(y, mo, da, hh, mm, 0, 0);
+          return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
+        };
+        const startTs = toLocalTs(prev.day, prev.startTime);
+        const endTs = toLocalTs(prev.day, prev.endTime);
+        if (startTs === null || endTs === null) return prev;
+        const siblingBookings = (roomMeetingsTimelineModal?.bookings || [])
+          .filter((b) => String(b.id) !== String(prev.booking.id))
+          .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0));
+        const nextNeighbor =
+          siblingBookings
+            .filter((b) => Number((b as any).effectiveStartAt ?? b.startAt ?? 0) >= endTs)
+            .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0))[0] || null;
+        const dayEnd = new Date(`${String(prev.day || '').trim()}T23:59:00`);
+        const dayEndTs = Number.isFinite(dayEnd.getTime()) ? dayEnd.getTime() : endTs;
+        const nextBoundaryTs = nextNeighbor ? Number((nextNeighbor as any).effectiveStartAt ?? nextNeighbor.startAt ?? 0) : Number.POSITIVE_INFINITY;
+        const maxEndTs = Math.min(dayEndTs, nextBoundaryTs);
+        let targetEndTs = endTs;
+        if (mode === 'max') {
+          targetEndTs = maxEndTs;
+        } else {
+          const deltaMin = mode === '10m' ? 10 : mode === '30m' ? 30 : mode === '1h' ? 60 : 120;
+          targetEndTs = Math.min(maxEndTs, endTs + deltaMin * 60_000);
+        }
+        if (!Number.isFinite(targetEndTs) || targetEndTs <= startTs) return prev;
+        if (targetEndTs <= endTs) return prev;
+        return { ...prev, endTime: toLocalHmFromTs(targetEndTs) };
+      });
+    },
+    [roomMeetingsTimelineModal?.bookings, toLocalHmFromTs]
+  );
+
+  const openRoomMeetingDuplicateModal = useCallback(
+    (booking: MeetingBooking, options?: { preferredDay?: string; mode?: 'duplicate' | 'followup' }) => {
+      const baseDay = String((booking as any).occurrenceDate || meetingIsoDayFromTs(Number(booking.startAt || 0)) || '').trim();
+      if (!baseDay) return;
+      const preferredDayRaw = String(options?.preferredDay || '').trim();
+      const preferredDay = /^\d{4}-\d{2}-\d{2}$/.test(preferredDayRaw) ? preferredDayRaw : '';
+      const mode = options?.mode === 'followup' ? 'followup' : 'duplicate';
+      const optionsById = new Map<string, { roomId: string; roomName: string; floorPlanId: string; floorPlanName: string }>();
+      for (const floorPlan of site?.floorPlans || []) {
+        const floorPlanId = String((floorPlan as any)?.id || '').trim();
+        const floorPlanName = String((floorPlan as any)?.name || '').trim();
+        for (const room of (floorPlan as any)?.rooms || []) {
+          const roomId = String((room as any)?.id || '').trim();
+          if (!roomId || !(room as any)?.meetingRoom) continue;
+          if (optionsById.has(roomId)) continue;
+          optionsById.set(roomId, {
+            roomId,
+            roomName: String((room as any)?.name || (booking as any)?.roomName || roomId).trim(),
+            floorPlanId,
+            floorPlanName
+          });
+        }
+      }
+      const sourceRoomId = String((booking as any)?.roomId || '').trim();
+      if (sourceRoomId && !optionsById.has(sourceRoomId)) {
+        optionsById.set(sourceRoomId, {
+          roomId: sourceRoomId,
+          roomName: String((booking as any)?.roomName || sourceRoomId).trim(),
+          floorPlanId: String((booking as any)?.floorPlanId || '').trim(),
+          floorPlanName: ''
+        });
+      }
+      const roomOptions = Array.from(optionsById.values()).sort((a, b) => a.roomName.localeCompare(b.roomName));
+      const selectedRoomId = roomOptions.some((entry) => entry.roomId === sourceRoomId)
+        ? sourceRoomId
+        : String(roomOptions[0]?.roomId || sourceRoomId || '').trim();
+      setRoomMeetingDuplicateModal({
+        mode,
+        booking,
+        step: 'setup',
+        roomMode: 'selected',
+        selectedRoomId,
+        timeMode: 'same',
+        customFromHm: '08:00',
+        customToHm: '18:00',
+        roomOptions,
+        baseDay,
+        preferredDay,
+        monthAnchor: monthAnchorFromIso(preferredDay || baseDay),
+        selectedDays: [],
+        availabilityByDay: {},
+        candidateByDay: {},
+        loadingMonth: false,
+        saving: false,
+        error: null
+      });
+      setRoomMeetingTimelineContextMenu(null);
+    },
+    [meetingIsoDayFromTs, monthAnchorFromIso, site?.floorPlans]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const modal = roomMeetingDuplicateModal;
+    const cid = String(client?.id || '').trim();
+    const sid = String(site?.id || '').trim();
+    const activeBookingId = String(modal?.booking?.id || '').trim();
+    if (!modal || !activeBookingId || !cid || !sid || !planId) return;
+    if (modal.step !== 'calendar') return;
+    const booking = modal.booking;
+    const baseDay = String(modal.baseDay || '').trim();
+    const monthAnchor = String(modal.monthAnchor || '').trim();
+    if (!baseDay || !monthAnchor) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const monthDate = new Date(`${monthAnchor}T00:00:00`);
+    if (!Number.isFinite(monthDate.getTime())) return;
+    const y = monthDate.getFullYear();
+    const m = monthDate.getMonth();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const monthDays = Array.from({ length: daysInMonth }, (_, idx) => {
+      const d = new Date(y, m, idx + 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    });
+    const unknownDays = monthDays.filter((iso) => !modal.availabilityByDay?.[iso]);
+    if (!unknownDays.length) return;
+    const sourceSlot = resolveRoomDuplicateSlot(booking, baseDay, 'same');
+    if (!sourceSlot) return;
+    const durationMin = Math.max(1, sourceSlot.endMin - sourceSlot.startMin);
+    const sourceStartMin = sourceSlot.startMin;
+    const candidateRooms =
+      modal.roomMode === 'any'
+        ? modal.roomOptions
+        : modal.roomOptions.filter((entry) => String(entry.roomId) === String(modal.selectedRoomId || ''));
+    if (!candidateRooms.length) {
+      setRoomMeetingDuplicateModal((prev) =>
+        prev && String(prev.booking.id) === activeBookingId
+          ? { ...prev, error: t({ it: 'Seleziona una saletta valida.', en: 'Select a valid room.' }) }
+          : prev
+      );
+      return;
+    }
+    const prefilled: Record<string, any> = {};
+    const queue: string[] = [];
+    for (const day of unknownDays) {
+      if (day <= baseDay) {
+        prefilled[day] = {
+          state: 'blocked',
+          reason: day < today ? t({ it: 'Giorno passato', en: 'Past day' }) : t({ it: 'Giorno di origine', en: 'Source day' })
+        };
+        continue;
+      }
+      if (day < today) {
+        prefilled[day] = { state: 'blocked', reason: t({ it: 'Giorno passato', en: 'Past day' }) };
+        continue;
+      }
+      queue.push(day);
+    }
+    if (!Object.keys(prefilled).length && !queue.length) return;
+    setRoomMeetingDuplicateModal((prev) => {
+      if (!prev || String(prev.booking.id) !== activeBookingId || String(prev.monthAnchor) !== monthAnchor) return prev;
+      return {
+        ...prev,
+        loadingMonth: queue.length > 0,
+        availabilityByDay: {
+          ...prev.availabilityByDay,
+          ...prefilled,
+          ...Object.fromEntries(queue.map((day) => [day, { state: 'loading' as const }]))
+        },
+        candidateByDay: Object.fromEntries(
+          Object.entries(prev.candidateByDay || {}).filter(([day]) => monthDays.includes(day))
+        )
+      };
+    });
+
+    (async () => {
+      if (!queue.length) {
+        setRoomMeetingDuplicateModal((prev) => {
+          if (!prev || String(prev.booking.id) !== activeBookingId || String(prev.monthAnchor) !== monthAnchor) return prev;
+          return { ...prev, loadingMonth: false };
+        });
+        return;
+      }
+      const outcomes: Record<string, any> = {};
+      const candidates: Record<string, { roomId: string; roomName: string; floorPlanId: string; floorPlanName: string; startHm: string; endHm: string }> = {};
+      try {
+        const monthStartTs = new Date(y, m, 1, 0, 0, 0, 0).getTime();
+        const monthEndTs = new Date(y, m + 1, 0, 23, 59, 59, 999).getTime();
+        const payload = await Promise.race([
+          fetchMeetings({
+            siteId: sid,
+            fromAt: monthStartTs - 24 * 60 * 60 * 1000,
+            toAt: monthEndTs + 24 * 60 * 60 * 1000
+          }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 4500))
+        ]);
+        const allMeetings = Array.isArray(payload?.meetings) ? payload.meetings : [];
+        const scopedMeetings = allMeetings.filter((entry: any) => {
+          if (String(entry?.clientId || '') !== cid) return false;
+          if (String(entry?.siteId || '') !== sid) return false;
+          return true;
+        });
+        const toIntervals = (day: string, roomId: string): Array<{ start: number; end: number }> => {
+          const dayStartTs = localTsFromIsoHm(day, '00:00');
+          if (dayStartTs === null) return [];
+          const dayEndTs = dayStartTs + 24 * 60 * 60 * 1000;
+          const raw = scopedMeetings
+            .filter((entry: any) => String(entry?.roomId || '') === roomId && String(entry?.id || '') !== String(booking.id || ''))
+            .map((entry: any) => {
+              const startRaw = Number(entry?.startAt || 0);
+              const endRaw = Number(entry?.endAt || 0);
+              const preMin = Math.max(0, Number(entry?.setupBufferBeforeMin) || 0);
+              const postMin = Math.max(0, Number(entry?.setupBufferAfterMin) || 0);
+              const startAdj = startRaw - preMin * 60_000;
+              const endAdj = endRaw + postMin * 60_000;
+              return { startAdj, endAdj };
+            })
+            .filter((entry) => Number.isFinite(entry.startAdj) && Number.isFinite(entry.endAdj) && entry.startAdj < dayEndTs && entry.endAdj > dayStartTs)
+            .map((entry) => ({
+              start: Math.max(0, Math.floor((Math.max(entry.startAdj, dayStartTs) - dayStartTs) / 60_000)),
+              end: Math.min(24 * 60, Math.ceil((Math.min(entry.endAdj, dayEndTs) - dayStartTs) / 60_000))
+            }))
+            .filter((entry) => entry.end > entry.start)
+            .sort((a, b) => a.start - b.start);
+          const merged: Array<{ start: number; end: number }> = [];
+          for (const interval of raw) {
+            const last = merged[merged.length - 1];
+            if (!last || interval.start > last.end) {
+              merged.push({ ...interval });
+            } else {
+              last.end = Math.max(last.end, interval.end);
+            }
+          }
+          return merged;
+        };
+        const findSlot = (
+          day: string,
+          intervals: Array<{ start: number; end: number }>
+        ): { startMin: number; endMin: number } | null => {
+          const nowMin = (() => {
+            if (day !== today) return 0;
+            const now = new Date();
+            return now.getHours() * 60 + now.getMinutes();
+          })();
+          if (modal.timeMode === 'same') {
+            const startMin = Math.max(sourceStartMin, nowMin);
+            const endMin = startMin + durationMin;
+            if (endMin > 23 * 60 + 59) return null;
+            const overlap = intervals.some((entry) => entry.start < endMin && entry.end > startMin);
+            return overlap ? null : { startMin, endMin };
+          }
+          const windowStartRaw =
+            modal.timeMode === 'custom' ? hmToMinutes(String(modal.customFromHm || '')) : 8 * 60;
+          const windowEndRaw =
+            modal.timeMode === 'custom' ? hmToMinutes(String(modal.customToHm || '')) : 18 * 60;
+          if (!Number.isFinite(windowStartRaw) || !Number.isFinite(windowEndRaw)) return null;
+          const windowStart = Math.max(0, Math.min(23 * 60 + 59, Math.max(windowStartRaw, nowMin)));
+          const windowEnd = Math.max(0, Math.min(23 * 60 + 59, windowEndRaw));
+          if (windowEnd <= windowStart) return null;
+          let cursor = windowStart;
+          for (const interval of intervals) {
+            if (interval.end <= windowStart) continue;
+            if (interval.start >= windowEnd) break;
+            const blockedStart = Math.max(windowStart, interval.start);
+            if (cursor + durationMin <= blockedStart) return { startMin: cursor, endMin: cursor + durationMin };
+            cursor = Math.max(cursor, Math.min(windowEnd, interval.end));
+            if (cursor >= windowEnd) break;
+          }
+          if (cursor + durationMin <= windowEnd) return { startMin: cursor, endMin: cursor + durationMin };
+          return null;
+        };
+        for (const day of queue) {
+          let chosen: { roomId: string; roomName: string; floorPlanId: string; floorPlanName: string; startHm: string; endHm: string } | null = null;
+          for (const room of candidateRooms) {
+            const intervals = toIntervals(day, room.roomId);
+            const slot = findSlot(day, intervals);
+            if (!slot) continue;
+            chosen = {
+              roomId: room.roomId,
+              roomName: room.roomName,
+              floorPlanId: room.floorPlanId,
+              floorPlanName: room.floorPlanName,
+              startHm: minutesToHm(slot.startMin),
+              endHm: minutesToHm(slot.endMin)
+            };
+            break;
+          }
+          if (chosen) {
+            outcomes[day] = {
+              state: 'available',
+              reason: `${chosen.roomName} • ${chosen.startHm} - ${chosen.endHm}`
+            };
+            candidates[day] = chosen;
+          } else {
+            outcomes[day] = {
+              state: 'occupied',
+              reason:
+                modal.roomMode === 'any'
+                  ? t({ it: 'Nessuna saletta disponibile in questa sede.', en: 'No meeting room available in this site.' })
+                  : t({ it: 'Saletta occupata nello slot richiesto.', en: 'Selected room is busy in requested slot.' })
+            };
+          }
+        }
+      } catch {
+        for (const day of queue) {
+          outcomes[day] = { state: 'error', reason: t({ it: 'Errore verifica disponibilità', en: 'Availability check failed' }) };
+        }
+      }
+      if (cancelled) return;
+      setRoomMeetingDuplicateModal((prev) => {
+        if (!prev || String(prev.booking.id) !== activeBookingId || String(prev.monthAnchor) !== monthAnchor) return prev;
+        const mergedCandidates = { ...(prev.candidateByDay || {}), ...candidates };
+        const validSelectedDays = prev.selectedDays.filter((day) => mergedCandidates[day] && outcomes[day]?.state === 'available');
+        const preferredDay = String(prev.preferredDay || '').trim();
+        if (
+          preferredDay &&
+          monthDays.includes(preferredDay) &&
+          !validSelectedDays.includes(preferredDay) &&
+          mergedCandidates[preferredDay] &&
+          String((outcomes[preferredDay] || prev.availabilityByDay?.[preferredDay] || {}).state || '') === 'available'
+        ) {
+          validSelectedDays.push(preferredDay);
+        }
+        return {
+          ...prev,
+          loadingMonth: false,
+          selectedDays: validSelectedDays,
+          availabilityByDay: {
+            ...prev.availabilityByDay,
+            ...outcomes
+          },
+          candidateByDay: mergedCandidates
+        };
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    client?.id,
+    site?.id,
+    planId,
+    roomMeetingDuplicateModal?.step,
+    roomMeetingDuplicateModal?.booking?.id,
+    roomMeetingDuplicateModal?.baseDay,
+    roomMeetingDuplicateModal?.preferredDay,
+    roomMeetingDuplicateModal?.monthAnchor,
+    roomMeetingDuplicateModal?.roomMode,
+    roomMeetingDuplicateModal?.selectedRoomId,
+    roomMeetingDuplicateModal?.timeMode,
+    roomMeetingDuplicateModal?.customFromHm,
+    roomMeetingDuplicateModal?.customToHm,
+    hmToMinutes,
+    resolveRoomDuplicateSlot
+  ]);
+
+  const saveRoomMeetingDuplicates = useCallback(async () => {
+    const dup = roomMeetingDuplicateModal;
+    if (!dup) return;
+    const booking = dup.booking;
+    const selectedDays = [...dup.selectedDays].sort();
+    if (!selectedDays.length) {
+      setRoomMeetingDuplicateModal((prev) => (prev ? { ...prev, error: t({ it: 'Seleziona almeno un giorno.', en: 'Select at least one day.' }) } : prev));
+      return;
+    }
+    setRoomMeetingDuplicateModal((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
+    const successes: string[] = [];
+    const createdMeetingIds: string[] = [];
+    const failures: string[] = [];
+    let followUpParentMeetingId = String(booking.id || '');
+    for (const day of selectedDays) {
+      try {
+        const candidate = dup.candidateByDay?.[day];
+        if (!candidate) {
+          failures.push(`${day}: ${t({ it: 'Nessuna disponibilità valida', en: 'No valid availability' })}`);
+          continue;
+        }
+        const duplicateFloorPlanId = String(candidate.floorPlanId || booking.floorPlanId || planId || '').trim();
+        const created = await createMeeting({
+          clientId: String(booking.clientId),
+          siteId: String(booking.siteId),
+          ...(duplicateFloorPlanId ? { floorPlanId: duplicateFloorPlanId } : {}),
+          roomId: String(candidate.roomId || booking.roomId),
+          subject: String(booking.subject || '').trim() || t({ it: 'Meeting', en: 'Meeting' }),
+          requestedSeats: Math.max(0, Number(booking.requestedSeats) || 0),
+          startDate: day,
+          startTime: candidate.startHm,
+          endTime: candidate.endHm,
+          setupBufferBeforeMin: Math.max(0, Number(booking.setupBufferBeforeMin) || 0),
+          setupBufferAfterMin: Math.max(0, Number(booking.setupBufferAfterMin) || 0),
+          participants: Array.isArray(booking.participants) ? booking.participants : [],
+          externalGuests: !!(booking as any).externalGuests,
+          externalGuestsList: Array.isArray((booking as any).externalGuestsList) ? (booking as any).externalGuestsList : [],
+          externalGuestsDetails: Array.isArray((booking as any).externalGuestsDetails) ? (booking as any).externalGuestsDetails : [],
+          sendEmail: !!booking.sendEmail,
+          technicalSetup: !!booking.technicalSetup,
+          technicalEmail: String(booking.technicalEmail || ''),
+          notes: String(booking.notes || ''),
+          videoConferenceLink: String(booking.videoConferenceLink || ''),
+          kioskLanguage: ((booking as any).kioskLanguage || null) as any,
+          ...(dup.mode === 'followup' && followUpParentMeetingId ? { followUpOfMeetingId: followUpParentMeetingId } : {})
+        });
+        if (dup.mode === 'followup') {
+          const firstCreatedBookingId = String((created as any)?.bookings?.[0]?.id || '').trim();
+          if (firstCreatedBookingId) followUpParentMeetingId = firstCreatedBookingId;
+          if (firstCreatedBookingId) createdMeetingIds.push(firstCreatedBookingId);
+        }
+        successes.push(day);
+      } catch (err: any) {
+        failures.push(`${day}: ${String(err?.message || t({ it: 'Errore creazione', en: 'Creation failed' }))}`);
+      }
+    }
+    if (successes.length) {
+      push(
+        t({
+          it:
+            dup.mode === 'followup'
+              ? `Follow-up creat${successes.length === 1 ? 'o' : 'i'} su ${successes.length} giorn${successes.length === 1 ? 'o' : 'i'}.`
+              : `Riunione duplicata su ${successes.length} giorn${successes.length === 1 ? 'o' : 'i'}.`,
+          en:
+            dup.mode === 'followup'
+              ? `Follow-up created on ${successes.length} day(s).`
+              : `Meeting duplicated on ${successes.length} day(s).`
+        }),
+        'success'
+      );
+    }
+    if (failures.length) {
+      setRoomMeetingDuplicateModal((prev) =>
+        prev ? { ...prev, saving: false, error: failures.slice(0, 3).join(' • ') } : prev
+      );
+      push(
+        t({
+          it: `Alcune date non sono state create (${failures.length}).`,
+          en: `Some dates were not created (${failures.length}).`
+        }),
+        'danger'
+      );
+    } else {
+      if (dup.mode === 'followup' && roomMeetingNotesModalBooking) {
+        const highlightId = String(createdMeetingIds[createdMeetingIds.length - 1] || '').trim();
+        setRoomMeetingNotesModalState({
+          initialTab: 'history',
+          historyMeetingId: highlightId || String(booking.id || ''),
+          highlightHistoryMeetingId: highlightId || String(booking.id || '')
+        });
+      }
+      setRoomMeetingDuplicateModal(null);
+    }
+    if (roomMeetingsTimelineModal?.roomId) {
+      void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, roomMeetingsTimelineModal.day);
+    }
+  }, [
+    planId,
+    push,
+    reloadRoomMeetingsTimeline,
+    resolveRoomDuplicateSlot,
+    roomMeetingDuplicateModal,
+    roomMeetingNotesModalBooking,
+    roomMeetingsTimelineModal,
+    t
+  ]);
+
   const saveRoomMeetingBookingEdit = useCallback(async () => {
     const detail = roomMeetingsTimelineBookingDetail;
     const modal = roomMeetingsTimelineModal;
-    if (!detail || !modal) return;
+    if (!detail) return;
     if (!detail.subject.trim()) {
       setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, error: t({ it: 'Oggetto meeting obbligatorio.', en: 'Meeting subject is required.' }) } : prev));
       return;
@@ -1874,6 +3019,65 @@ const PlanView = ({ planId }: Props) => {
     }
     setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, saving: true, error: null } : prev));
     try {
+      const nowTs = Date.now();
+      const bookingStartTs = Number(detail.booking.startAt || 0);
+      const bookingEndTs = Number(detail.booking.endAt || 0);
+      const isInProgress = bookingStartTs <= nowTs && nowTs < bookingEndTs;
+      const basePreSetup = Math.max(0, Math.min(60, Number(detail.booking.setupBufferBeforeMin) || 0));
+      const basePostSetup = Math.max(0, Math.min(60, Number(detail.booking.setupBufferAfterMin) || 0));
+      const requestedPreSetup = Math.max(0, Math.min(60, Number(detail.setupBufferBeforeMin) || 0));
+      const requestedPostSetup = Math.max(0, Math.min(60, Number(detail.setupBufferAfterMin) || 0));
+      const safePreSetup = isInProgress ? basePreSetup : requestedPreSetup;
+      const safePostSetup = isInProgress ? Math.max(basePostSetup, requestedPostSetup) : requestedPostSetup;
+      const availabilityClientId = String(detail.booking.clientId || client?.id || '').trim();
+      const availabilitySiteId = String(detail.booking.siteId || site?.id || '').trim();
+      const availabilityFloorPlanId = String(detail.booking.floorPlanId || '').trim();
+      if (availabilitySiteId) {
+        try {
+          const availabilityPayload = await fetchMeetingOverview({
+            ...(availabilityClientId ? { clientId: availabilityClientId } : {}),
+            siteId: availabilitySiteId,
+            ...(availabilityFloorPlanId ? { floorPlanId: availabilityFloorPlanId } : {}),
+            day: detail.day,
+            startTime: detail.startTime,
+            endTime: detail.endTime,
+            setupBufferBeforeMin: safePreSetup,
+            setupBufferAfterMin: safePostSetup
+          });
+          const targetRoom = (availabilityPayload.rooms || []).find(
+            (row) => String(row.roomId || '') === String(detail.booking.roomId || '')
+          );
+          const slotConflicts = (targetRoom?.slotConflicts || []).filter(
+            (booking) => String(booking.id || '') !== String(detail.booking.id || '')
+          );
+          if (slotConflicts.length) {
+            const firstConflict =
+              [...slotConflicts].sort((a, b) => Number(a.startAt || 0) - Number(b.startAt || 0))[0] || slotConflicts[0];
+            const message = t({
+              it: `Saletta occupata nello slot selezionato (${new Date(Number(firstConflict.startAt || 0)).toLocaleDateString()} ${meetingClockFromTs(
+                Number(firstConflict.startAt || 0)
+              )}-${meetingClockFromTs(Number(firstConflict.endAt || 0))}).`,
+              en: `Meeting room is occupied in the selected slot (${new Date(Number(firstConflict.startAt || 0)).toLocaleDateString()} ${meetingClockFromTs(
+                Number(firstConflict.startAt || 0)
+              )}-${meetingClockFromTs(Number(firstConflict.endAt || 0))}).`
+            });
+            setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, saving: false, error: message } : prev));
+            push(message, 'danger');
+            return;
+          }
+        } catch (availabilityError: any) {
+          const message = String(
+            availabilityError?.message ||
+              t({
+                it: 'Impossibile verificare disponibilità della saletta.',
+                en: 'Unable to verify meeting room availability.'
+              })
+          );
+          setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, saving: false, error: message } : prev));
+          push(message, 'danger');
+          return;
+        }
+      }
       const result = await updateMeeting(detail.booking.id, {
         subject: detail.subject.trim(),
         day: detail.day,
@@ -1881,8 +3085,9 @@ const PlanView = ({ planId }: Props) => {
         endTime: detail.endTime,
         notes: detail.notes,
         videoConferenceLink: detail.videoConferenceLink,
-        setupBufferBeforeMin: Math.max(0, Math.min(60, Number(detail.setupBufferBeforeMin) || 0)),
-        setupBufferAfterMin: Math.max(0, Math.min(60, Number(detail.setupBufferAfterMin) || 0)),
+        kioskLanguage: detail.kioskLanguage,
+        setupBufferBeforeMin: safePreSetup,
+        setupBufferAfterMin: safePostSetup,
         participants: detail.participantsDraft.map((p) => ({
           kind: p.kind === 'manual' ? 'manual' : 'real_user',
           externalId: p.kind === 'real_user' ? String(p.externalId || '') : null,
@@ -1900,14 +3105,21 @@ const PlanView = ({ planId }: Props) => {
           : t({ it: 'Meeting aggiornato.', en: 'Meeting updated.' }),
         'success'
       );
+      setRoomMeetingEditParticipantsModalOpen(false);
+      if (modal?.roomId) {
+        await reloadRoomMeetingsTimeline(modal.roomId, modal.day);
+      }
+      if (detail.returnToMeetingNotes) {
+        closeRoomMeetingBookingDetail({ bookingOverride: result.booking });
+        return;
+      }
       setRoomMeetingsTimelineBookingDetail((prev) =>
         prev ? { ...prev, booking: result.booking, mode: 'view', saving: false, error: null, applyToSeries: false } : prev
       );
-      await reloadRoomMeetingsTimeline(modal.roomId, modal.day);
     } catch (err: any) {
       setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, saving: false, error: err?.message || 'Update failed' } : prev));
     }
-  }, [push, reloadRoomMeetingsTimeline, roomMeetingsTimelineBookingDetail, roomMeetingsTimelineModal, t]);
+  }, [client?.id, closeRoomMeetingBookingDetail, meetingClockFromTs, push, reloadRoomMeetingsTimeline, roomMeetingsTimelineBookingDetail, roomMeetingsTimelineModal, site?.id, t]);
 
   const deleteRoomMeetingBookingDirect = useCallback(
     async (booking: MeetingBooking) => {
@@ -1924,10 +3136,61 @@ const PlanView = ({ planId }: Props) => {
         await reloadRoomMeetingsTimeline(modal.roomId, modal.day);
       } catch (err: any) {
         push(err?.message || t({ it: 'Eliminazione meeting fallita.', en: 'Failed to delete meeting.' }), 'danger');
+        throw err;
       }
     },
     [push, reloadRoomMeetingsTimeline, roomMeetingsTimelineModal, t]
   );
+
+  const promptDeleteRoomMeetingBooking = useCallback((booking: MeetingBooking) => {
+    if (!booking) return;
+    setRoomMeetingTimelineContextMenu(null);
+    setRoomMeetingDeleteModal({ booking, deleting: false, error: null });
+  }, []);
+
+  const confirmDeleteRoomMeetingBooking = useCallback(async () => {
+    const modal = roomMeetingDeleteModal;
+    if (!modal?.booking) return;
+    setRoomMeetingDeleteModal((prev) => (prev ? { ...prev, deleting: true, error: null } : prev));
+    try {
+      await deleteRoomMeetingBookingDirect(modal.booking);
+      setRoomMeetingDeleteModal(null);
+    } catch (err: any) {
+      setRoomMeetingDeleteModal((prev) =>
+        prev ? { ...prev, deleting: false, error: err?.message || t({ it: 'Eliminazione meeting fallita.', en: 'Failed to delete meeting.' }) } : prev
+      );
+    }
+  }, [deleteRoomMeetingBookingDirect, roomMeetingDeleteModal, t]);
+
+  useEffect(() => {
+    if (!roomMeetingTimelineContextMenu) return;
+    const onDown = (evt: MouseEvent) => {
+      const target = evt.target as Node | null;
+      if (target && roomMeetingTimelineContextMenuRef.current?.contains(target)) return;
+      setRoomMeetingTimelineContextMenu(null);
+    };
+    const onKey = (evt: KeyboardEvent) => {
+      if (evt.key === 'Escape') setRoomMeetingTimelineContextMenu(null);
+    };
+    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [roomMeetingTimelineContextMenu]);
+
+  useEffect(() => {
+    if (!roomMeetingsTimelineModal) {
+      setRoomMeetingTimelineContextMenu(null);
+      setRoomMeetingDeleteModal(null);
+    }
+  }, [roomMeetingsTimelineModal]);
+
+  useEffect(() => {
+    if (roomMeetingsTimelineBookingDetail?.mode === 'edit') return;
+    setRoomMeetingEditParticipantsModalOpen(false);
+  }, [roomMeetingsTimelineBookingDetail?.mode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2112,6 +3375,79 @@ const PlanView = ({ planId }: Props) => {
     return 'ro';
   }, [client?.id, permissions, planId, site?.id, user]);
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
+  const isMeetingAdminLike = !!user?.isAdmin || !!user?.isSuperAdmin;
+  const canManageMeetingScheduling = useMemo(
+    () =>
+      isMeetingAdminLike ||
+      !!(user as any)?.canCreateMeetings ||
+      !!(user as any)?.isMeetingOperator,
+    [isMeetingAdminLike, user]
+  );
+  const canUseMeetingNotes = useCallback(
+    (booking: MeetingBooking | null | undefined) => {
+      if (!booking) return false;
+      if (isMeetingAdminLike) return true;
+      const linkedExternalClientId = String((user as any)?.linkedExternalClientId || '').trim();
+      const linkedExternalId = String((user as any)?.linkedExternalId || '').trim();
+      const userEmail = String(user?.email || '').trim().toLowerCase();
+      const participants = Array.isArray(booking.participants) ? booking.participants : [];
+      return participants.some((row) => {
+        if (String(row?.kind || 'real_user') === 'manual') return false;
+        const participantExternalId = String(row?.externalId || '').trim();
+        const participantEmail = String(row?.email || '').trim().toLowerCase();
+        if (linkedExternalId && linkedExternalClientId && linkedExternalClientId === String(booking.clientId || '') && participantExternalId === linkedExternalId) {
+          return true;
+        }
+        return !!userEmail && !!participantEmail && participantEmail === userEmail;
+      });
+    },
+    [isMeetingAdminLike, user]
+  );
+
+  const meetingLocationLabels = useMemo(() => {
+    const clientNameById = new Map<string, string>();
+    const siteNameById = new Map<string, string>();
+    const floorPlanNameById = new Map<string, string>();
+    for (const clientEntry of allClients || []) {
+      const clientLabel = String(clientEntry.shortName || clientEntry.name || '').trim();
+      if (clientLabel) clientNameById.set(String(clientEntry.id), clientLabel);
+      for (const siteEntry of clientEntry.sites || []) {
+        const siteLabel = String(siteEntry.name || '').trim();
+        if (siteLabel) siteNameById.set(String(siteEntry.id), siteLabel);
+        for (const floorEntry of siteEntry.floorPlans || []) {
+          const floorLabel = String(floorEntry.name || '').trim();
+          if (floorLabel) floorPlanNameById.set(String(floorEntry.id), floorLabel);
+        }
+      }
+    }
+    return { clientNameById, siteNameById, floorPlanNameById };
+  }, [allClients]);
+
+  const myMeetingsFiltered = useMemo(() => {
+    const rows = [...(myMeetingsModal?.meetings || [])].sort((a, b) => {
+      const startDiff = Number(b.startAt || 0) - Number(a.startAt || 0);
+      if (startDiff !== 0) return startDiff;
+      return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+    });
+    const q = String(myMeetingsSearch || '').trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((booking) => {
+      const clientLabel = meetingLocationLabels.clientNameById.get(String(booking.clientId || '')) || '';
+      const siteLabel = meetingLocationLabels.siteNameById.get(String(booking.siteId || '')) || '';
+      const floorLabel = meetingLocationLabels.floorPlanNameById.get(String(booking.floorPlanId || '')) || '';
+      const startAt = Number(booking.startAt || 0);
+      const endAt = Number(booking.endAt || 0);
+      const timeLabel = `${new Date(startAt).toLocaleString()} ${new Date(endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`.toLowerCase();
+      return (
+        String(booking.subject || '').toLowerCase().includes(q) ||
+        String(booking.roomName || '').toLowerCase().includes(q) ||
+        clientLabel.toLowerCase().includes(q) ||
+        siteLabel.toLowerCase().includes(q) ||
+        floorLabel.toLowerCase().includes(q) ||
+        timeLabel.includes(q)
+      );
+    });
+  }, [meetingLocationLabels, myMeetingsModal?.meetings, myMeetingsSearch]);
 
   const LOCK_REQUEST_THROTTLE_MS = 5_000;
   const LOCK_TOAST_MS = 5_000;
@@ -2210,11 +3546,13 @@ const PlanView = ({ planId }: Props) => {
 			    graceMinutes: number;
 			    hasUnsavedChanges?: boolean | null;
 			  } | null>(null);
-		  const [forceUnlockExecuteCommand, setForceUnlockExecuteCommand] = useState<{ requestId: string; action: 'save' | 'discard' } | null>(null);
-		  const [forceUnlockTick, setForceUnlockTick] = useState(0);
-		  const forceUnlockConfigRef = useRef(forceUnlockConfig);
-		  const forceUnlockActiveRef = useRef(forceUnlockActive);
-		  const forceUnlockIncomingRef = useRef(forceUnlockIncoming);
+  const [forceUnlockExecuteCommand, setForceUnlockExecuteCommand] = useState<{ requestId: string; action: 'save' | 'discard' } | null>(null);
+  const [forceUnlockTick, setForceUnlockTick] = useState(0);
+  const forceUnlockActiveFocusRef = useRef<HTMLButtonElement | null>(null);
+  const forceUnlockIncomingFocusRef = useRef<HTMLButtonElement | null>(null);
+  const forceUnlockConfigRef = useRef(forceUnlockConfig);
+  const forceUnlockActiveRef = useRef(forceUnlockActive);
+  const forceUnlockIncomingRef = useRef(forceUnlockIncoming);
 		  useEffect(() => {
 		    forceUnlockConfigRef.current = forceUnlockConfig;
 		  }, [forceUnlockConfig]);
@@ -4802,6 +6140,7 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     pendingNavigateRef.current = pendingSaveNavigateTo;
+    setSaveRevisionModalPreset({ initialBump: 'minor', requireNoteForMajor: false });
     setSaveRevisionOpen(true);
   }, [clearPendingSaveNavigate, hasNavigationEdits, isReadOnly, navigate, pendingSaveNavigateTo]);
 
@@ -4834,7 +6173,10 @@ const PlanView = ({ planId }: Props) => {
       void performPendingPostSaveAction(pendingPostSaveAction);
       return;
     }
-    if (!saveRevisionOpen) setSaveRevisionOpen(true);
+    if (!saveRevisionOpen) {
+      setSaveRevisionModalPreset({ initialBump: 'minor', requireNoteForMajor: false });
+      setSaveRevisionOpen(true);
+    }
   }, [clearPendingPostSaveAction, hasNavigationEdits, isReadOnly, pendingPostSaveAction, performPendingPostSaveAction, saveRevisionOpen]);
 
   const saveRevisionReason = useMemo(() => {
@@ -4856,8 +6198,20 @@ const PlanView = ({ planId }: Props) => {
         en: 'You are logging out: save a revision to avoid losing changes.'
       };
     }
+    if (pendingMeetingManagerPreset) {
+      return {
+        it: 'Stai aprendo la pianificazione meeting: salva una revisione per allineare i dati delle stanze (es. nomi/capienze).',
+        en: 'You are opening meeting scheduling: save a revision to align room data (e.g. names/capacities).'
+      };
+    }
+    if (pendingClientMeetingsPreset) {
+      return {
+        it: 'Stai aprendo la timeline meeting: salva una revisione per allineare i dati delle stanze (es. nomi/capienze).',
+        en: 'You are opening meeting timeline: save a revision to align room data (e.g. names/capacities).'
+      };
+    }
     return null;
-  }, [pendingPostSaveAction]);
+  }, [pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction]);
   const contextObject = useMemo(() => {
     if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return undefined;
     return renderPlan.objects.find((o) => o.id === contextMenu.id);
@@ -5919,17 +7273,201 @@ const PlanView = ({ planId }: Props) => {
 
   const openMeetingManager = useCallback(
     (preset?: { roomId?: string; floorPlanId?: string; siteId?: string; clientId?: string; day?: string }) => {
-      setMeetingManagerPreset({
+      const normalizedPreset = {
         clientId: preset?.clientId || client?.id,
         siteId: preset?.siteId || site?.id,
         floorPlanId: preset?.floorPlanId || planId,
         roomId: preset?.roomId,
         day: preset?.day
-      });
+      };
+      if (hasNavigationEdits && !isReadOnly) {
+        setPendingMeetingManagerPreset(normalizedPreset);
+        setSaveRevisionModalPreset({ initialBump: 'minor', requireNoteForMajor: false });
+        setSaveRevisionOpen(true);
+        push(
+          t({
+            it: 'La pianificazione meeting usa i dati correnti della planimetria (es. nomi stanze). Salva o scarta prima di continuare.',
+            en: 'Meeting scheduling uses the current floor plan data (e.g. room names). Save or discard changes before continuing.'
+          }),
+          'info'
+        );
+        return;
+      }
+      setMeetingManagerPreset(normalizedPreset);
       setMeetingManagerOpen(true);
     },
-    [client?.id, planId, site?.id]
+    [client?.id, hasNavigationEdits, isReadOnly, planId, push, site?.id, t]
   );
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail || {};
+      openMeetingManager({
+        clientId: String(detail?.clientId || '').trim() || undefined,
+        siteId: String(detail?.siteId || '').trim() || undefined,
+        floorPlanId: String(detail?.floorPlanId || '').trim() || undefined,
+        roomId: String(detail?.roomId || '').trim() || undefined,
+        day: String(detail?.day || '').trim() || undefined
+      });
+    };
+    window.addEventListener(OPEN_MEETING_MANAGER_EVENT, handler as EventListener);
+    return () => window.removeEventListener(OPEN_MEETING_MANAGER_EVENT, handler as EventListener);
+  }, [openMeetingManager]);
+
+  const dispatchOpenClientMeetingsTimeline = useCallback(
+    (preset?: { clientId?: string; siteId?: string; siteLocked?: boolean; day?: string; returnTo?: 'hub' | 'myMeetings' }) => {
+      const clientId = String(preset?.clientId || client?.id || '').trim();
+      if (!clientId) return;
+      window.dispatchEvent(
+        new CustomEvent(OPEN_CLIENT_MEETINGS_EVENT, {
+          detail: {
+            clientId,
+            siteId: String(preset?.siteId || site?.id || '').trim() || 'all',
+            siteLocked: !!preset?.siteLocked,
+            day: String(preset?.day || new Date().toISOString().slice(0, 10)),
+            returnTo: preset?.returnTo || null
+          }
+        })
+      );
+    },
+    [client?.id, site?.id]
+  );
+
+  const openSchedulingFromHub = useCallback(
+    (preset?: { clientId?: string; siteId?: string; siteLocked?: boolean; day?: string; returnTo?: 'hub' | 'myMeetings' }) => {
+      if (!canManageMeetingScheduling) {
+        push(
+          t({
+            it: 'Non hai i permessi per la pianificazione meeting.',
+            en: 'You do not have permissions for meeting scheduling.'
+          }),
+          'danger'
+        );
+        return;
+      }
+      const normalizedPreset = {
+        clientId: preset?.clientId || client?.id,
+        siteId: preset?.siteId || site?.id,
+        siteLocked: !!preset?.siteLocked,
+        day: preset?.day || new Date().toISOString().slice(0, 10),
+        returnTo: preset?.returnTo
+      };
+      if (hasNavigationEdits && !isReadOnly) {
+        setPendingClientMeetingsPreset(normalizedPreset);
+        setSaveRevisionModalPreset({ initialBump: 'minor', requireNoteForMajor: false });
+        setSaveRevisionOpen(true);
+        push(
+          t({
+            it: 'La timeline meeting usa i dati correnti della planimetria (es. nomi stanze). Salva o scarta prima di continuare.',
+            en: 'Meeting timeline uses current floor plan data (e.g. room names). Save or discard changes before continuing.'
+          }),
+          'info'
+        );
+        return;
+      }
+      dispatchOpenClientMeetingsTimeline(normalizedPreset);
+    },
+    [
+      canManageMeetingScheduling,
+      client?.id,
+      dispatchOpenClientMeetingsTimeline,
+      hasNavigationEdits,
+      isReadOnly,
+      push,
+      site?.id,
+      t
+    ]
+  );
+
+  const reloadMyMeetings = useCallback(async () => {
+    setMyMeetingsModal((prev) =>
+      prev
+        ? { ...prev, loading: true, error: null }
+        : {
+            loading: true,
+            error: null,
+            now: Date.now(),
+            meetings: [],
+            counts: { total: 0, inProgress: 0, upcoming: 0, past: 0 },
+            returnToHub: false
+          }
+    );
+    try {
+      const payload = await fetchMyMeetings({ limit: 2500 });
+      setMyMeetingsModal((prev) => ({
+        loading: false,
+        error: null,
+        now: Number(payload?.now || Date.now()),
+        meetings: Array.isArray(payload?.meetings) ? payload.meetings : [],
+        counts: payload?.counts || { total: 0, inProgress: 0, upcoming: 0, past: 0 },
+        returnToHub: !!prev?.returnToHub
+      }));
+    } catch (err: any) {
+      setMyMeetingsModal((prev) => ({
+        loading: false,
+        error: String(err?.message || t({ it: 'Errore caricamento meeting utente.', en: 'Failed to load user meetings.' })),
+        now: prev?.now || Date.now(),
+        meetings: prev?.meetings || [],
+        counts: prev?.counts || { total: 0, inProgress: 0, upcoming: 0, past: 0 },
+        returnToHub: !!prev?.returnToHub
+      }));
+    }
+  }, [t]);
+  reloadMyMeetingsRef.current = reloadMyMeetings;
+
+  const openMyMeetingsModal = useCallback((opts?: { returnToHub?: boolean; restore?: MyMeetingsModalState | null }) => {
+    setMyMeetingsSearch('');
+    const restore = opts?.restore;
+    setMyMeetingsModal(
+      restore
+        ? {
+            ...restore,
+            loading: true,
+            error: null,
+            returnToHub: !!opts?.returnToHub
+          }
+        : {
+            loading: true,
+            error: null,
+            now: Date.now(),
+            meetings: [],
+            counts: { total: 0, inProgress: 0, upcoming: 0, past: 0 },
+            returnToHub: !!opts?.returnToHub
+          }
+    );
+    void reloadMyMeetings();
+  }, [reloadMyMeetings]);
+
+  const openMyMeetingsFromHub = useCallback(() => {
+    openMyMeetingsModal({ returnToHub: true });
+  }, [openMyMeetingsModal]);
+
+  useEffect(() => {
+    const onOpenMeetingCenter = () => {
+      setMyMeetingsModal(null);
+      setMeetingHubModalOpen(true);
+    };
+    window.addEventListener(OPEN_MEETING_CENTER_EVENT, onOpenMeetingCenter as EventListener);
+    return () => window.removeEventListener(OPEN_MEETING_CENTER_EVENT, onOpenMeetingCenter as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const onOpenMyMeetings = () => {
+      const restore = myMeetingsRestoreRef.current;
+      myMeetingsRestoreRef.current = null;
+      openMyMeetingsModal({ returnToHub: false, restore });
+    };
+    window.addEventListener(OPEN_MY_MEETINGS_EVENT, onOpenMyMeetings as EventListener);
+    return () => window.removeEventListener(OPEN_MY_MEETINGS_EVENT, onOpenMyMeetings as EventListener);
+  }, [openMyMeetingsModal]);
+
+  const closeMyMeetingsModal = useCallback(() => {
+    const shouldReturnToHub = !!myMeetingsModal?.returnToHub;
+    setMyMeetingsModal(null);
+    if (shouldReturnToHub) {
+      setMeetingHubModalOpen(true);
+    }
+  }, [myMeetingsModal?.returnToHub]);
 
   const handleRoomContextMenu = useCallback(
     ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
@@ -6229,7 +7767,12 @@ const PlanView = ({ planId }: Props) => {
             Array.isArray(door?.linkedRoomIds) && (door.linkedRoomIds as any[]).some((id) => String(id || '') === roomId)
           )
         );
-        if (!hasLinkedRoomDoor && !hasCorridorDoorLink) {
+        const inferredCorridorDoorLink = corridorsNow.some((corridor) =>
+          (corridor.doors || []).some((door: any) =>
+            inferCorridorDoorLinkedRoomIds(corridor, door, ((renderPlan?.rooms || plan?.rooms || []) as Room[])).includes(roomId)
+          )
+        );
+        if (!hasLinkedRoomDoor && !hasCorridorDoorLink && !inferredCorridorDoorLink) {
           push(
             t({
               it: 'Per pianificare una via di fuga da questa stanza è necessario configurare almeno una porta collegata alla stanza.',
@@ -6668,7 +8211,6 @@ const PlanView = ({ planId }: Props) => {
       for (const floorPlanEntry of siteEntry.floorPlans || []) {
         for (const roomEntry of (floorPlanEntry as any).rooms || []) {
           if (!roomEntry?.id) continue;
-          if (!(roomEntry as any)?.meetingRoom) continue;
           const flags = {
             meetingRoom: !!(roomEntry as any)?.meetingRoom,
             logical: !!(roomEntry as any)?.logical,
@@ -6760,7 +8302,7 @@ const PlanView = ({ planId }: Props) => {
     const selected = new Set((roomLayoutExportModal.selectedKeys || []).map((v) => String(v)));
     const targets = roomLayoutExportRows.filter((row) => selected.has(row.key) && !row.isSource);
     if (!targets.length) {
-      push(t({ it: 'Seleziona almeno una meeting room di destinazione.', en: 'Select at least one target meeting room.' }), 'info');
+      push(t({ it: 'Seleziona almeno una stanza di destinazione.', en: 'Select at least one target room.' }), 'info');
       return;
     }
     const patch = {
@@ -6779,8 +8321,8 @@ const PlanView = ({ planId }: Props) => {
     }
     push(
       t({
-        it: `Layout esportato su ${targets.length} meeting room (colore, scala, opacità).`,
-        en: `Layout applied to ${targets.length} meeting rooms (color, scale, opacity).`
+        it: `Layout esportato su ${targets.length} stanze (colore, scala, opacità).`,
+        en: `Layout applied to ${targets.length} rooms (color, scale, opacity).`
       }),
       'success'
     );
@@ -8352,6 +9894,12 @@ const PlanView = ({ planId }: Props) => {
           push(t({ it: 'Nessuna modifica da salvare', en: 'No changes to save' }), 'info');
           return;
         }
+        if (e.shiftKey) {
+          e.preventDefault();
+          setSaveRevisionModalPreset({ initialBump: 'major', requireNoteForMajor: true });
+          setSaveRevisionOpen(true);
+          return;
+        }
         e.preventDefault();
         const revisions: any[] = (currentPlan as FloorPlan).revisions || [];
         const sorted = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0));
@@ -8710,12 +10258,14 @@ const PlanView = ({ planId }: Props) => {
         const step = (e.shiftKey ? 10 : 1) / Math.max(0.2, z);
         const dx = isArrowLeft ? -step : isArrowRight ? step : 0;
         const dy = isArrowUp ? -step : isArrowDown ? step : 0;
+        let didMutate = false;
         for (const id of currentSelectedIds) {
           const obj = (currentPlan as FloorPlan).objects?.find((o) => o.id === id);
           if (!obj || isWallType(obj.type)) continue;
           if (obj.type === 'quote') {
             const pts = Array.isArray(obj.points) ? obj.points : [];
             if (pts.length >= 2) {
+              didMutate = true;
               updateObject(id, {
                 x: obj.x + dx,
                 y: obj.y + dy,
@@ -8733,11 +10283,13 @@ const PlanView = ({ planId }: Props) => {
             continue;
           }
           const currentRoomId = obj.roomId ?? undefined;
+          didMutate = true;
           moveObject(id, nextX, nextY);
           if (currentRoomId !== nextRoomId) {
             updateObject(id, { roomId: nextRoomId });
           }
         }
+        if (didMutate) markTouched();
         return;
       }
       const isDeleteKey = e.key === 'Delete' || e.key === 'Backspace';
@@ -9864,6 +11416,9 @@ const PlanView = ({ planId }: Props) => {
             new Set((door as any).linkedRoomIds.map((id: any) => String(id)).filter((id: string) => availableRoomIdSet.has(id)))
           ) as string[])
         : [];
+      if (!selectedRoomIds.length) {
+        selectedRoomIds = inferCorridorDoorLinkedRoomIds(corridor, door, availableRooms);
+      }
       let nearestRoomId: string | undefined;
       let magneticRoomIds: string[] = [];
       if (availableRooms.length) {
@@ -9924,6 +11479,7 @@ const PlanView = ({ planId }: Props) => {
       planId,
       projectPointToSegment,
       renderPlan?.rooms,
+      inferCorridorDoorLinkedRoomIds,
       setHideAllLayers,
       setVisibleLayerIds,
       visibleLayerIds
@@ -12339,16 +13895,18 @@ const PlanView = ({ planId }: Props) => {
           </div>
               <div className="group relative">
                 <button
-                  onClick={() => openMeetingManager()}
+                  onClick={() => {
+                    setMeetingHubModalOpen(true);
+                  }}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-300 bg-emerald-600 text-white shadow-card transition hover:bg-emerald-700"
-                  title={t({ it: 'Gestione meeting room', en: 'Meeting room management' })}
+                  title={t({ it: 'Meeting center', en: 'Meeting center' })}
                 >
                   <CalendarClock size={15} />
                 </button>
                 <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-80 -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium leading-5 text-white opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100">
                   {t({
-                    it: 'Apri la gestione meeting room: seleziona data/ora, filtra per dotazioni, verifica disponibilità e crea o invia richieste di prenotazione.',
-                    en: 'Open meeting room management: pick date/time, filter by equipment, check availability, and create or submit booking requests.'
+                    it: 'Apri il centro meeting: scegli Scheduling per la timeline sale oppure My meetings per i tuoi meeting.',
+                    en: 'Open meeting center: choose Scheduling for room timeline or My meetings for your meetings.'
                   })}
                 </div>
               </div>
@@ -12413,9 +13971,13 @@ const PlanView = ({ planId }: Props) => {
                   push(t({ it: 'Nessuna modifica da salvare', en: 'No changes to save' }), 'info');
                   return;
                 }
+                setSaveRevisionModalPreset({ initialBump: 'minor', requireNoteForMajor: false });
                 setSaveRevisionOpen(true);
               }}
-              title={t({ it: 'Salva revisione', en: 'Save revision' })}
+              title={t({
+                it: 'Salva revisione (Cmd/Ctrl+S rapido minor · Cmd/Ctrl+Shift+S major con nota)',
+                en: 'Save revision (Cmd/Ctrl+S quick minor · Cmd/Ctrl+Shift+S major with note)'
+              })}
               disabled={!hasUnsavedUi}
               className={`flex h-10 w-10 items-center justify-center rounded-xl border shadow-card ${
                 hasUnsavedUi
@@ -12631,13 +14193,15 @@ const PlanView = ({ planId }: Props) => {
 	                  'info'
 	                );
 	              }}
-	              onClearPrintArea={() => {
+		              onClearPrintArea={() => {
 	                updateFloorPlan(basePlan.id, { printArea: undefined });
 	                push(t({ it: 'Area di stampa rimossa correttamente', en: 'Print area removed successfully' }), 'info');
 	              }}
 		              onExportPdf={() => setExportModalOpen(true)}
 		            />
-		            <UserMenu />
+		            <Suspense fallback={null}>
+		              <UserMenu />
+		            </Suspense>
 		          </div>
 		        </div>
 		      </div>
@@ -14721,7 +16285,7 @@ const PlanView = ({ planId }: Props) => {
                   setContextMenu(null);
                 }}
                 className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                title={t({ it: 'Copia colore/scala/opacità su altre meeting room del cliente', en: 'Copy color/scale/opacity to other client meeting rooms' })}
+                title={t({ it: 'Copia colore/scala/opacità su altre stanze del cliente', en: 'Copy color/scale/opacity to other client rooms' })}
               >
                 <Copy size={14} /> {t({ it: 'Esporta Layout', en: 'Export Layout' })}
               </button>
@@ -15518,33 +17082,37 @@ const PlanView = ({ planId }: Props) => {
       ) : null}
 
       {rackModal && basePlan ? (
-        <RackModal
-          open={!!rackModal}
-          plan={basePlan}
-          rackObjectId={rackModal.objectId}
-          rackObjectName={renderPlan.objects.find((o) => o.id === rackModal.objectId)?.name || t({ it: 'Rack', en: 'Rack' })}
-          readOnly={isReadOnly}
-          onClose={() => setRackModal(null)}
-        />
+        <Suspense fallback={null}>
+          <RackModal
+            open={!!rackModal}
+            plan={basePlan}
+            rackObjectId={rackModal.objectId}
+            rackObjectName={renderPlan.objects.find((o) => o.id === rackModal.objectId)?.name || t({ it: 'Rack', en: 'Rack' })}
+            readOnly={isReadOnly}
+            onClose={() => setRackModal(null)}
+          />
+        </Suspense>
       ) : null}
 
       {rackPortsLink && rackPortsLinkItem && renderPlan ? (
-        <RackPortsModal
-          open={!!rackPortsLink}
-          item={rackPortsLinkItem}
-          racks={(renderPlan as any).racks || []}
-          rackItems={(renderPlan as any).rackItems || []}
-          rackLinks={(renderPlan as any).rackLinks || []}
-          readOnly={isReadOnly}
-          initialConnectionsOpen={!!rackPortsLink.openConnections}
-          initialConnectionsKind={rackPortsLink.kind}
-          closeOnBackdrop={false}
-          onClose={() => setRackPortsLink(null)}
-          onAddLink={(payload) => addRackLink(planId, payload)}
-          onDeleteLink={(linkId) => deleteRackLink(planId, linkId)}
-          onRenamePort={handleRackPortsRename}
-          onSavePortNote={handleRackPortsNote}
-        />
+        <Suspense fallback={null}>
+          <RackPortsModal
+            open={!!rackPortsLink}
+            item={rackPortsLinkItem}
+            racks={(renderPlan as any).racks || []}
+            rackItems={(renderPlan as any).rackItems || []}
+            rackLinks={(renderPlan as any).rackLinks || []}
+            readOnly={isReadOnly}
+            initialConnectionsOpen={!!rackPortsLink.openConnections}
+            initialConnectionsKind={rackPortsLink.kind}
+            closeOnBackdrop={false}
+            onClose={() => setRackPortsLink(null)}
+            onAddLink={(payload) => addRackLink(planId, payload)}
+            onDeleteLink={(linkId) => deleteRackLink(planId, linkId)}
+            onRenamePort={handleRackPortsRename}
+            onSavePortNote={handleRackPortsNote}
+          />
+        </Suspense>
       ) : null}
 
       <Transition show={!!scaleModal} as={Fragment}>
@@ -15616,16 +17184,20 @@ const PlanView = ({ planId }: Props) => {
               </Transition.Child>
             </div>
           </div>
-          <ClientBusinessPartnersModal
-            open={roomMeetingEditBusinessPartnersModalOpen && !!client}
-            client={client || undefined}
-            onClose={() => setRoomMeetingEditBusinessPartnersModalOpen(false)}
-            onSave={(businessPartners) => {
-              if (!client?.id) return;
-              updateClient(client.id, { businessPartners } as any);
-              setRoomMeetingEditBusinessPartnersModalOpen(false);
-            }}
-          />
+          {roomMeetingEditBusinessPartnersModalOpen && client ? (
+            <Suspense fallback={null}>
+              <ClientBusinessPartnersModal
+                open={roomMeetingEditBusinessPartnersModalOpen && !!client}
+                client={client || undefined}
+                onClose={() => setRoomMeetingEditBusinessPartnersModalOpen(false)}
+                onSave={(businessPartners) => {
+                  if (!client?.id) return;
+                  updateClient(client.id, { businessPartners } as any);
+                  setRoomMeetingEditBusinessPartnersModalOpen(false);
+                }}
+              />
+            </Suspense>
+          ) : null}
         </Dialog>
       </Transition>
 
@@ -15835,7 +17407,9 @@ const PlanView = ({ planId }: Props) => {
         </Dialog>
       </Transition>
 
-      <ObjectModal
+      {modalState ? (
+        <Suspense fallback={null}>
+          <ObjectModal
 		        open={!!modalState}
             objectId={modalState?.mode === 'edit' ? (modalState as any).objectId : undefined}
 		        type={modalInitials?.type}
@@ -15919,6 +17493,8 @@ const PlanView = ({ planId }: Props) => {
             } : undefined}
             onSubmit={modalState?.mode === 'edit' ? handleUpdate : handleCreate}
           />
+        </Suspense>
+      ) : null}
 
       <Suspense fallback={null}>
         <SelectedObjectsModal
@@ -15980,61 +17556,65 @@ const PlanView = ({ planId }: Props) => {
         />
       </Suspense>
 
-      <RealUserPickerModal
-        open={!!realUserPicker}
-        clientId={client?.id || ''}
-        clientName={client?.name || client?.shortName || ''}
-        assignedCounts={assignedCounts}
-        onClose={() => setRealUserPicker(null)}
-        onSelect={(u) => {
-          if (!plan || !realUserPicker || isReadOnly) return;
-          markTouched();
-          const realUserLayerIds = getLayerIdsForType('real_user');
-          const name = `${u.firstName} ${u.lastName}`.trim() || u.externalId;
-          const desc =
-            [u.role, [u.dept1, u.dept2, u.dept3].filter(Boolean).join(' / ')].filter(Boolean).join(' · ') || undefined;
-          const id = addObject(
-            plan.id,
-            'real_user',
-            name,
-            desc,
-            realUserPicker.x,
-            realUserPicker.y,
-            defaultObjectScale,
-            realUserLayerIds,
-            {
-              externalClientId: client?.id,
-              externalUserId: u.externalId,
-              firstName: u.firstName,
-              lastName: u.lastName,
-              externalRole: u.role,
-              externalDept1: u.dept1,
-              externalDept2: u.dept2,
-              externalDept3: u.dept3,
-              externalEmail: u.email,
-              externalExt1: u.ext1,
-              externalExt2: u.ext2,
-              externalExt3: u.ext3,
-              externalIsExternal: u.isExternal
-            }
-          );
-          ensureObjectLayerVisible(realUserLayerIds, name, 'real_user');
-          lastInsertedRef.current = { id, name };
-          const roomId = getRoomIdAt((plan as FloorPlan).rooms, realUserPicker.x, realUserPicker.y);
-          const resolvedRoomId = resolveRoomAssignmentForObject(roomId, 'real_user', ((plan as FloorPlan).rooms || []) as Room[]);
-          if (roomId && !resolvedRoomId) notifyNonPeopleRoomBlocked();
-          if (resolvedRoomId) updateObject(id, { roomId: resolvedRoomId });
-          push(t({ it: 'Utente reale inserito', en: 'Real user placed' }), 'success');
-          postAuditEvent({
-            event: 'real_user_place',
-            scopeType: 'plan',
-            scopeId: plan.id,
-            details: { id, externalId: u.externalId, name, roomId: resolvedRoomId || null }
-          });
-          setRealUserPicker(null);
-          setPendingType(null);
-        }}
-      />
+      {realUserPicker ? (
+        <Suspense fallback={null}>
+          <RealUserPickerModal
+            open={!!realUserPicker}
+            clientId={client?.id || ''}
+            clientName={client?.name || client?.shortName || ''}
+            assignedCounts={assignedCounts}
+            onClose={() => setRealUserPicker(null)}
+            onSelect={(u) => {
+              if (!plan || !realUserPicker || isReadOnly) return;
+              markTouched();
+              const realUserLayerIds = getLayerIdsForType('real_user');
+              const name = `${u.firstName} ${u.lastName}`.trim() || u.externalId;
+              const desc =
+                [u.role, [u.dept1, u.dept2, u.dept3].filter(Boolean).join(' / ')].filter(Boolean).join(' · ') || undefined;
+              const id = addObject(
+                plan.id,
+                'real_user',
+                name,
+                desc,
+                realUserPicker.x,
+                realUserPicker.y,
+                defaultObjectScale,
+                realUserLayerIds,
+                {
+                  externalClientId: client?.id,
+                  externalUserId: u.externalId,
+                  firstName: u.firstName,
+                  lastName: u.lastName,
+                  externalRole: u.role,
+                  externalDept1: u.dept1,
+                  externalDept2: u.dept2,
+                  externalDept3: u.dept3,
+                  externalEmail: u.email,
+                  externalExt1: u.ext1,
+                  externalExt2: u.ext2,
+                  externalExt3: u.ext3,
+                  externalIsExternal: u.isExternal
+                }
+              );
+              ensureObjectLayerVisible(realUserLayerIds, name, 'real_user');
+              lastInsertedRef.current = { id, name };
+              const roomId = getRoomIdAt((plan as FloorPlan).rooms, realUserPicker.x, realUserPicker.y);
+              const resolvedRoomId = resolveRoomAssignmentForObject(roomId, 'real_user', ((plan as FloorPlan).rooms || []) as Room[]);
+              if (roomId && !resolvedRoomId) notifyNonPeopleRoomBlocked();
+              if (resolvedRoomId) updateObject(id, { roomId: resolvedRoomId });
+              push(t({ it: 'Utente reale inserito', en: 'Real user placed' }), 'success');
+              postAuditEvent({
+                event: 'real_user_place',
+                scopeType: 'plan',
+                scopeId: plan.id,
+                details: { id, externalId: u.externalId, name, roomId: resolvedRoomId || null }
+              });
+              setRealUserPicker(null);
+              setPendingType(null);
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       <Transition show={!!typeLayerModal} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setTypeLayerModal(null)}>
@@ -16342,7 +17922,9 @@ const PlanView = ({ planId }: Props) => {
         </Dialog>
       </Transition>
 
-      <RoomModal
+      {roomModal ? (
+        <Suspense fallback={null}>
+          <RoomModal
         open={!!roomModal}
         initialDepartmentsOpen={roomModal?.mode === 'edit' ? !!roomModal.openDepartments : false}
         initialName={roomModal?.mode === 'edit' ? roomModal.initialName : ''}
@@ -16824,6 +18406,8 @@ const PlanView = ({ planId }: Props) => {
           return true;
         }}
       />
+        </Suspense>
+      ) : null}
 
       <Transition show={!!corridorModal} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setCorridorModal(null)}>
@@ -18020,7 +19604,115 @@ const PlanView = ({ planId }: Props) => {
         </Dialog>
       </Transition>
 
-      <Transition show={!!roomMeetingsTimelineModal && !meetingManagerOpen} as={Fragment}>
+      <Transition show={!!roomMeetingDeleteModal && !meetingManagerOpen && !roomMeetingDuplicateModal} as={Fragment}>
+        <Dialog as="div" className="relative z-[92]" onClose={() => setRoomMeetingDeleteModal(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div>
+                      <Dialog.Title className="text-lg font-semibold text-ink">
+                        {t({ it: 'Eliminare meeting?', en: 'Delete meeting?' })}
+                      </Dialog.Title>
+                      <div className="text-xs text-slate-500">
+                        {t({
+                          it: 'Controlla i dettagli prima di confermare. Se era attivo invio mail, i partecipanti verranno notificati.',
+                          en: 'Review details before confirming. If email delivery was enabled, participants will be notified.'
+                        })}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRoomMeetingDeleteModal(null)}
+                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  {roomMeetingDeleteModal?.booking ? (
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t({ it: 'Oggetto', en: 'Subject' })}</div>
+                        <div className="text-sm font-semibold text-ink">{roomMeetingDeleteModal.booking.subject || t({ it: 'Meeting', en: 'Meeting' })}</div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t({ it: 'Data / ora', en: 'Date / time' })}</div>
+                        <div className="text-sm font-semibold text-ink">
+                          {new Date(roomMeetingDeleteModal.booking.startAt).toLocaleDateString()} •{' '}
+                          {new Date(roomMeetingDeleteModal.booking.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-
+                          {new Date(roomMeetingDeleteModal.booking.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t({ it: 'Sala', en: 'Room' })}</div>
+                        <div className="text-sm font-semibold text-ink">{roomMeetingsTimelineModal?.roomName || '-'}</div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t({ it: 'Richiedente', en: 'Requester' })}</div>
+                        <div className="text-sm font-semibold text-ink">{roomMeetingDeleteModal.booking.requestedByUsername || '-'}</div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t({ it: 'Partecipanti', en: 'Participants' })}</div>
+                        <div className="text-sm font-semibold text-ink">{Array.isArray(roomMeetingDeleteModal.booking.participants) ? roomMeetingDeleteModal.booking.participants.length : 0}</div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t({ it: 'Invio mail', en: 'Email delivery' })}</div>
+                        <div className="text-sm font-semibold text-ink">
+                          {roomMeetingDeleteModal.booking.sendEmail ? t({ it: 'Sì', en: 'Yes' }) : t({ it: 'No', en: 'No' })}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                  {roomMeetingDeleteModal?.error ? (
+                    <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{roomMeetingDeleteModal.error}</div>
+                  ) : null}
+                  <div className="mt-4 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRoomMeetingDeleteModal(null)}
+                      disabled={!!roomMeetingDeleteModal?.deleting}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void confirmDeleteRoomMeetingBooking()}
+                      disabled={!!roomMeetingDeleteModal?.deleting}
+                      className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                    >
+                      {roomMeetingDeleteModal?.deleting ? <Loader2 size={14} className="animate-spin" /> : null}
+                      {t({ it: 'Elimina meeting', en: 'Delete meeting' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!roomMeetingsTimelineModal && !meetingManagerOpen && !roomMeetingDuplicateModal} as={Fragment}>
         <Dialog
           as="div"
           className="relative z-[75]"
@@ -18028,7 +19720,7 @@ const PlanView = ({ planId }: Props) => {
             if (meetingManagerOpen) return;
             if (roomMeetingsTimelineBookingDetail) return;
             if (Date.now() < roomMeetingsTimelineDetailCloseGuardUntilRef.current) return;
-            setRoomMeetingsTimelineModal(null);
+            closeRoomMeetingsTimelineModal();
           }}
         >
           <Transition.Child
@@ -18065,14 +19757,14 @@ const PlanView = ({ planId }: Props) => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setRoomMeetingsTimelineModal(null)}
+                      onClick={closeRoomMeetingsTimelineModal}
                       className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
                     >
                       <X size={18} />
                     </button>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[420px,auto]">
+                  <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[420px,minmax(0,1fr),auto]">
                     <div className="grid grid-cols-[auto,220px,auto] items-end gap-2">
                       <button
                         type="button"
@@ -18081,7 +19773,7 @@ const PlanView = ({ planId }: Props) => {
                           setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: nextDay } : prev));
                           if (roomMeetingsTimelineModal?.roomId) void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, nextDay);
                         }}
-                        className="h-[42px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        className="h-[36px] rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                         title={t({ it: 'Giorno precedente', en: 'Previous day' })}
                       >
                         <ChevronLeft size={16} />
@@ -18106,11 +19798,105 @@ const PlanView = ({ planId }: Props) => {
                           setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: nextDay } : prev));
                           if (roomMeetingsTimelineModal?.roomId) void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, nextDay);
                         }}
-                        className="h-[42px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        className="h-[36px] rounded-lg border border-slate-200 bg-white px-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                         title={t({ it: 'Giorno successivo', en: 'Next day' })}
                       >
                         <ChevronRight size={16} />
                       </button>
+                    </div>
+                    <div className="relative">
+                      <label className="text-xs font-semibold text-slate-600">
+                        {t({ it: 'Ricerca meeting (ID o titolo)', en: 'Search meeting (ID or title)' })}
+                      </label>
+                      <div className="relative mt-1">
+                        <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          ref={roomMeetingsTimelineSearchInputRef}
+                          value={roomMeetingsTimelineSearchTerm}
+                          onChange={(e) => {
+                            setRoomMeetingsTimelineSearchTerm(e.target.value);
+                            setRoomMeetingsTimelineSearchActiveIndex(-1);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              setRoomMeetingsTimelineSearchActiveIndex((prev) =>
+                                Math.min((roomMeetingsTimelineSearchResults.length || 1) - 1, Math.max(0, prev + 1))
+                              );
+                              return;
+                            }
+                            if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setRoomMeetingsTimelineSearchActiveIndex((prev) =>
+                                Math.max(0, prev <= 0 ? 0 : prev - 1)
+                              );
+                              return;
+                            }
+                            if (e.key === 'Enter') {
+                              const candidate = roomMeetingsTimelineSearchResults[roomMeetingsTimelineSearchActiveIndex];
+                              if (candidate) {
+                                e.preventDefault();
+                                jumpToTimelineMeetingFromSearch(candidate);
+                              }
+                            }
+                            if (e.key === 'Escape') {
+                              setRoomMeetingsTimelineSearchTerm('');
+                              setRoomMeetingsTimelineSearchResults([]);
+                              setRoomMeetingsTimelineSearchActiveIndex(-1);
+                              setRoomMeetingsTimelineSearchError(null);
+                            }
+                          }}
+                          placeholder={t({ it: 'Es. #104 o Budget review', en: 'e.g. #104 or Budget review' })}
+                          className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm"
+                        />
+                        {roomMeetingsTimelineSearchLoading ? (
+                          <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
+                        ) : null}
+                      </div>
+                      {String(roomMeetingsTimelineSearchTerm || '').trim() ? (
+                        <div className="absolute left-0 right-0 z-30 mt-1 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                          {roomMeetingsTimelineSearchError ? (
+                            <div className="px-3 py-2 text-xs font-semibold text-rose-600">{roomMeetingsTimelineSearchError}</div>
+                          ) : null}
+                          {!roomMeetingsTimelineSearchLoading && !roomMeetingsTimelineSearchError && !roomMeetingsTimelineSearchResults.length ? (
+                            <div className="px-3 py-2 text-xs text-slate-500">
+                              {t({ it: 'Nessun risultato.', en: 'No results.' })}
+                            </div>
+                          ) : null}
+                          {roomMeetingsTimelineSearchResults.map((row, index) => {
+                            const isActive = index === roomMeetingsTimelineSearchActiveIndex;
+                            const startAt = Number(row.booking.startAt || 0);
+                            const endAt = Number(row.booking.endAt || 0);
+                            const meetingNumber = Number((row.booking as any)?.meetingNumber || 0);
+                            return (
+                              <button
+                                key={`timeline-search-${row.booking.id}`}
+                                type="button"
+                                onMouseEnter={() => setRoomMeetingsTimelineSearchActiveIndex(index)}
+                                onClick={() => jumpToTimelineMeetingFromSearch(row)}
+                                className={`block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 ${
+                                  isActive ? 'bg-sky-50' : 'hover:bg-slate-50'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-700">
+                                  <span className="truncate">
+                                    {meetingNumber > 0 ? `#${meetingNumber} • ` : ''}
+                                    {row.booking.subject || t({ it: 'Meeting', en: 'Meeting' })}
+                                  </span>
+                                  <span className="shrink-0 text-slate-500">
+                                    {new Date(startAt).toLocaleDateString()} •{' '}
+                                    {new Date(startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-
+                                    {new Date(endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                                <div className="mt-0.5 text-[11px] text-slate-500">
+                                  {t({ it: 'Partecipanti', en: 'Participants' })}: {row.participantsCount} • {row.participantsLabel}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="flex flex-wrap items-end justify-end gap-2">
                       <button
@@ -18179,7 +19965,7 @@ const PlanView = ({ planId }: Props) => {
                         return (
                           <div className="min-w-[1220px]" style={{ width: `${240 + timelineWidthPx}px` }}>
                             <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `240px ${timelineWidthPx}px` }}>
-                              <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              <div className="sticky left-0 z-20 border-r border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                                 {t({ it: 'Meeting room', en: 'Meeting room' })}
                               </div>
                               <div className="relative h-12 overflow-hidden" style={{ width: `${timelineWidthPx}px` }}>
@@ -18201,20 +19987,51 @@ const PlanView = ({ planId }: Props) => {
                                 })}
                                 {showNow ? (
                                   <div className="absolute inset-y-0 z-10" style={{ left: `${((nowMinutes - minMinutes) / total) * 100}%` }}>
-                                    <div className="absolute -top-1 left-0 -translate-x-1/2 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+                                    <div className="absolute top-7 left-0 -translate-x-1/2 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
                                       {t({ it: 'ORA', en: 'NOW' })}
                                     </div>
-                                    <div className="h-full border-l-2 border-slate-900/70" />
+                                    <div className="h-full border-l-2 border-blue-500/70" />
                                   </div>
                                 ) : null}
                               </div>
                             </div>
 
                             <div className="grid" style={{ gridTemplateColumns: `240px ${timelineWidthPx}px` }}>
-                              <div className="border-r border-slate-100 px-3 py-3">
-                                <div className="truncate text-base font-semibold text-ink">{modal?.roomName || '-'}</div>
-                                <div className="truncate text-xs text-slate-500">{site?.name || '-'}</div>
-                                <div className="text-[11px] text-slate-500">
+                              <div
+                                className={`border-r px-3 py-3 ${
+                                  (modal?.bookings || []).some((booking) => {
+                                    const nowTs = Date.now();
+                                    const startTs = Number((booking as any).startAt || 0);
+                                    const endTs = Number((booking as any).endAt || 0);
+                                    return booking.status === 'approved' && startTs <= nowTs && nowTs < endTs;
+                                  })
+                                    ? 'border-amber-300 bg-gradient-to-br from-amber-100 to-amber-50'
+                                    : 'border-emerald-300 bg-gradient-to-br from-emerald-100 to-emerald-50'
+                                }`}
+                                style={{ position: 'sticky', left: 0, zIndex: 10 }}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="truncate text-base font-semibold text-ink">{modal?.roomName || '-'}</div>
+                                  {modal?.roomId ? (
+                                    <button
+                                      type="button"
+                                      onClick={(evt) => {
+                                        evt.preventDefault();
+                                        evt.stopPropagation();
+                                        closeRoomMeetingsTimelineModal();
+                                        setHighlightRoom({ roomId: modal.roomId, until: Date.now() + 3200 });
+                                      }}
+                                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                      title={t({ it: 'Mostra posizione stanza in planimetria', en: 'Show room on floor plan' })}
+                                    >
+                                      <Eye size={14} />
+                                    </button>
+                                  ) : null}
+                                </div>
+                                <div className="truncate text-xs text-slate-600">
+                                  {[site?.name, String(basePlan?.name || '').trim()].filter(Boolean).join(' - ') || '-'}
+                                </div>
+                                <div className="text-[11px] text-slate-600">
                                   {t({ it: 'Capienza', en: 'Capacity' })}: {modal?.capacity || 0}
                                 </div>
                               </div>
@@ -18224,7 +20041,7 @@ const PlanView = ({ planId }: Props) => {
                                   return <div key={`rm-grid-${minute}`} className="absolute inset-y-0 border-l border-slate-100" style={{ left: `${left}%` }} />;
                                 })}
                                 {showNow ? (
-                                  <div className="absolute inset-y-0 z-10 border-l-2 border-slate-900/70" style={{ left: `${((nowMinutes - minMinutes) / total) * 100}%` }} />
+                                  <div className="absolute inset-y-0 z-10 border-l-2 border-blue-500/70" style={{ left: `${((nowMinutes - minMinutes) / total) * 100}%` }} />
                                 ) : null}
                                 {(bookings || []).map((booking) => {
                                   const s = new Date(Number(booking.startAt || 0));
@@ -18247,6 +20064,8 @@ const PlanView = ({ planId }: Props) => {
                                   const isPast = Number(booking.endAt) <= nowTs;
                                   const inProgress = Number(booking.startAt) <= nowTs && nowTs < Number(booking.endAt);
                                   const isFuture = Number(booking.startAt) > nowTs;
+                                  const isHighlighted = String(roomMeetingsTimelineHighlightBookingId || '') === String(booking.id || '');
+                                  const meetingNumber = Number((booking as any)?.meetingNumber || 0);
                                   const tone =
                                     inProgress
                                       ? 'border-emerald-400 bg-emerald-200 text-emerald-950'
@@ -18271,10 +20090,21 @@ const PlanView = ({ planId }: Props) => {
                                         title={`${t({ it: 'Blocco con setup', en: 'Blocked range incl. setup' })}: ${es.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${ee.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
                                       />
                                       <div
-                                        className={`absolute h-[52px] overflow-hidden rounded-lg border px-2 py-1 shadow-sm cursor-pointer ${tone}`}
+                                        className={`absolute h-[52px] overflow-hidden rounded-lg border px-2 py-1 shadow-sm cursor-pointer ${tone} ${
+                                          isHighlighted ? 'ring-2 ring-primary ring-offset-1' : ''
+                                        }`}
                                         style={{ left: `${left}%`, width: `${width}%`, top: '12px' }}
                                         title={`${booking.subject} • ${s.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${e.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
                                         onClick={() => openRoomMeetingBookingDetail(booking)}
+                                        onContextMenu={(evt) => {
+                                          evt.preventDefault();
+                                          evt.stopPropagation();
+                                          setRoomMeetingTimelineContextMenu({
+                                            x: evt.clientX,
+                                            y: evt.clientY,
+                                            booking
+                                          });
+                                        }}
                                         role="button"
                                         tabIndex={0}
                                         onKeyDown={(evt) => {
@@ -18285,7 +20115,10 @@ const PlanView = ({ planId }: Props) => {
                                         }}
                                       >
                                         <div className="flex items-start justify-between gap-1">
-                                          <div className="min-w-0 truncate text-xs font-semibold">{booking.subject || t({ it: 'Meeting', en: 'Meeting' })}</div>
+                                          <div className="min-w-0 truncate text-xs font-semibold">
+                                            {meetingNumber > 0 ? `#${meetingNumber} • ` : ''}
+                                            {booking.subject || t({ it: 'Meeting', en: 'Meeting' })}
+                                          </div>
                                           <div className="flex shrink-0 items-center gap-1">
                                             <button
                                               type="button"
@@ -18304,14 +20137,7 @@ const PlanView = ({ planId }: Props) => {
                                               onClick={(evt) => {
                                                 evt.preventDefault();
                                                 evt.stopPropagation();
-                                                const ok = window.confirm(
-                                                  t({
-                                                    it: 'Eliminare questo meeting? Se era attivo invio mail, i partecipanti verranno notificati.',
-                                                    en: 'Delete this meeting? If email notifications were enabled, participants will be notified.'
-                                                  })
-                                                );
-                                                if (!ok) return;
-                                                void deleteRoomMeetingBookingDirect(booking);
+                                                promptDeleteRoomMeetingBooking(booking);
                                               }}
                                               className="inline-flex h-4 w-4 items-center justify-center rounded bg-white/70 text-rose-700 hover:bg-white"
                                               title={t({ it: 'Elimina meeting', en: 'Delete meeting' })}
@@ -18349,12 +20175,59 @@ const PlanView = ({ planId }: Props) => {
                   <div className="mt-3 flex items-center justify-end">
                     <button
                       type="button"
-                      onClick={() => setRoomMeetingsTimelineModal(null)}
+                      onClick={closeRoomMeetingsTimelineModal}
                       className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     >
                       {t({ it: 'Chiudi', en: 'Close' })}
                     </button>
                   </div>
+
+                  {roomMeetingTimelineContextMenu ? (
+                    <div
+                      ref={roomMeetingTimelineContextMenuRef}
+                      className="fixed z-[90] min-w-[210px] rounded-xl border border-slate-200 bg-white p-2 shadow-2xl"
+                      style={{ left: Math.max(12, roomMeetingTimelineContextMenu.x), top: Math.max(12, roomMeetingTimelineContextMenu.y) }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openRoomMeetingDuplicateModal(roomMeetingTimelineContextMenu.booking)}
+                        className="mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <Copy size={14} />
+                        <span>{t({ it: 'Duplica…', en: 'Duplicate…' })}</span>
+                      </button>
+                      <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {t({ it: 'Estendi', en: 'Extend' })}
+                      </div>
+                      {Number(roomMeetingTimelineContextMenu.booking.endAt || 0) <= Date.now() ? (
+                        <div className="px-2 py-2 text-xs font-semibold text-slate-400">
+                          {t({ it: 'Meeting concluso: estensione non consentita.', en: 'Meeting ended: extension is not allowed.' })}
+                        </div>
+                      ) : (
+                        [
+                          ['10m', t({ it: '10m', en: '10m' })],
+                          ['30m', t({ it: '30m', en: '30m' })],
+                          ['1h', t({ it: '1h', en: '1h' })],
+                          ['1.5h', t({ it: '1,5h', en: '1.5h' })],
+                          ['2h', t({ it: '2h', en: '2h' })],
+                          ['max', t({ it: 'Più possibile', en: 'As much as possible' })]
+                        ].map(([key, label]) => (
+                          <button
+                            key={`extend-${key}`}
+                            type="button"
+                            disabled={roomMeetingExtendBusyId === String(roomMeetingTimelineContextMenu.booking.id)}
+                            onClick={() => void extendRoomMeetingBooking(roomMeetingTimelineContextMenu.booking, key as any)}
+                            className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            <span>{label}</span>
+                            {roomMeetingExtendBusyId === String(roomMeetingTimelineContextMenu.booking.id) ? <Loader2 size={13} className="animate-spin" /> : null}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
                 </Dialog.Panel>
               </Transition.Child>
             </div>
@@ -18362,12 +20235,13 @@ const PlanView = ({ planId }: Props) => {
         </Dialog>
       </Transition>
 
-      <Transition show={!!roomMeetingsTimelineBookingDetail && !meetingManagerOpen} as={Fragment}>
+      <Transition show={!!roomMeetingsTimelineBookingDetail && !meetingManagerOpen && !roomMeetingDuplicateModal} as={Fragment}>
         <Dialog
           as="div"
-          className="relative z-[78]"
+          className="relative z-[120]"
+          initialFocus={roomMeetingDetailFocusRef}
           onClose={() => {
-            if (roomMeetingEditBusinessPartnersModalOpen) return;
+            if (roomMeetingEditBusinessPartnersModalOpen || roomMeetingEditParticipantsModalOpen) return;
             closeRoomMeetingBookingDetail();
           }}
         >
@@ -18407,7 +20281,12 @@ const PlanView = ({ planId }: Props) => {
                           : t({ it: 'Invio mail non attivo su questo meeting.', en: 'Email delivery is not enabled for this meeting.' })}
                       </div>
                     </div>
-                    <button type="button" onClick={closeRoomMeetingBookingDetail} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink">
+                    <button
+                      ref={roomMeetingDetailFocusRef}
+                      type="button"
+                      onClick={() => closeRoomMeetingBookingDetail()}
+                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
+                    >
                       <X size={18} />
                     </button>
                   </div>
@@ -18417,7 +20296,12 @@ const PlanView = ({ planId }: Props) => {
                       {roomMeetingsTimelineBookingDetail.mode === 'view' ? (
                         <>
                           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                            <div className="text-base font-semibold text-ink">{roomMeetingsTimelineBookingDetail.booking.subject || t({ it: 'Meeting', en: 'Meeting' })}</div>
+                            <div className="text-base font-semibold text-ink">
+                              {Number((roomMeetingsTimelineBookingDetail.booking as any)?.meetingNumber || 0) > 0
+                                ? `#${Number((roomMeetingsTimelineBookingDetail.booking as any)?.meetingNumber || 0)} • `
+                                : ''}
+                              {roomMeetingsTimelineBookingDetail.booking.subject || t({ it: 'Meeting', en: 'Meeting' })}
+                            </div>
                             <div className="mt-1 text-sm text-slate-600">
                               {new Date(roomMeetingsTimelineBookingDetail.booking.startAt).toLocaleString()} - {new Date(roomMeetingsTimelineBookingDetail.booking.endAt).toLocaleTimeString()}
                             </div>
@@ -18532,9 +20416,71 @@ const PlanView = ({ planId }: Props) => {
                             ) : null}
                           </div>
                           <div className="flex flex-wrap items-center justify-end gap-2">
+                            <div className="mr-auto flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!canUseMeetingNotes(roomMeetingsTimelineBookingDetail.booking)) return;
+                                  setRoomMeetingNotesReturnToMyMeetings(false);
+                                  setRoomMeetingNotesModalState(null);
+                                  setRoomMeetingNotesModalBooking(roomMeetingsTimelineBookingDetail.booking);
+                                  closeRoomMeetingBookingDetail();
+                                }}
+                                disabled={!canUseMeetingNotes(roomMeetingsTimelineBookingDetail.booking)}
+                                title={
+                                  canUseMeetingNotes(roomMeetingsTimelineBookingDetail.booking)
+                                    ? t({ it: 'Apri appunti meeting', en: 'Open meeting notes' })
+                                    : t({
+                                        it: 'Solo i partecipanti del meeting possono usare gli appunti.',
+                                        en: 'Only meeting participants can use notes.'
+                                      })
+                                }
+                                className={`rounded-lg border px-2 py-1.5 text-xs font-semibold ${
+                                  canUseMeetingNotes(roomMeetingsTimelineBookingDetail.booking)
+                                    ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                    : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                                }`}
+                              >
+                                <StickyNote size={13} className="mr-1 inline-block" />
+                                {t({ it: 'Appunti', en: 'Notes' })}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openRoomMeetingDuplicateModal(roomMeetingsTimelineBookingDetail.booking)}
+                                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                <Copy size={13} className="mr-1 inline-block" />
+                                {t({ it: 'Duplica', en: 'Duplicate' })}
+                              </button>
+                              <span className="text-xs font-semibold text-slate-600">{t({ it: 'Estendi', en: 'Extend' })}</span>
+                              {Number(roomMeetingsTimelineBookingDetail.booking.endAt || 0) <= Date.now() ? (
+                                <span className="rounded-lg border border-slate-200 bg-slate-100 px-2 py-1.5 text-xs font-semibold text-slate-400">
+                                  {t({ it: 'Meeting concluso', en: 'Meeting ended' })}
+                                </span>
+                              ) : (
+                                [
+                                  ['10m', t({ it: '10m', en: '10m' })],
+                                  ['30m', t({ it: '30m', en: '30m' })],
+                                  ['1h', t({ it: '1h', en: '1h' })],
+                                  ['1.5h', t({ it: '1,5h', en: '1.5h' })],
+                                  ['2h', t({ it: '2h', en: '2h' })],
+                                  ['max', t({ it: 'Più possibile', en: 'As much as possible' })]
+                                ].map(([key, label]) => (
+                                  <button
+                                    key={`detail-extend-${key}`}
+                                    type="button"
+                                    disabled={roomMeetingExtendBusyId === String(roomMeetingsTimelineBookingDetail.booking.id)}
+                                    onClick={() => void extendRoomMeetingBooking(roomMeetingsTimelineBookingDetail.booking, key as any)}
+                                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                  >
+                                    {label}
+                                  </button>
+                                ))
+                              )}
+                            </div>
                             <button
                               type="button"
-                              onClick={closeRoomMeetingBookingDetail}
+                              onClick={() => closeRoomMeetingBookingDetail()}
                               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                             >
                               {t({ it: 'Chiudi', en: 'Close' })}
@@ -18564,6 +20510,17 @@ const PlanView = ({ planId }: Props) => {
                             const onsiteManual = detail.participantsDraft.filter((p) => p.kind === 'manual' && !p.remote).length;
                             const remoteManual = detail.participantsDraft.filter((p) => p.kind === 'manual' && !!p.remote).length;
                             const requestedSeatsPreview = onsiteInternal + onsiteManual;
+                            const nowTs = Date.now();
+                            const bookingStartTs = Number(detail.booking.startAt || 0);
+                            const bookingEndTs = Number(detail.booking.endAt || 0);
+                            const isMeetingInProgressEdit = bookingStartTs <= nowTs && nowTs < bookingEndTs;
+                            const hasMeetingStartedEdit = bookingStartTs <= nowTs;
+                            const nowDateLocal = new Date(nowTs);
+                            const nowHmLocal = `${String(nowDateLocal.getHours()).padStart(2, '0')}:${String(nowDateLocal.getMinutes()).padStart(2, '0')}`;
+                            const lockedPreSetupMin = Math.max(0, Math.min(60, Number(detail.booking.setupBufferBeforeMin) || 0));
+                            const lockedPostSetupMin = Math.max(0, Math.min(60, Number(detail.booking.setupBufferAfterMin) || 0));
+                            const bookingCheckMap = roomMeetingsTimelineModal?.checkInStatusByMeetingId?.[String(detail.booking.id || '')] || {};
+                            const bookingCheckTsMap = roomMeetingsTimelineModal?.checkInTimestampsByMeetingId?.[String(detail.booking.id || '')] || {};
                             const toDetailLocalTs = (isoDay: string, hhmm: string) => {
                               const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDay || '').trim());
                               const tm = /^(\d{1,2}):(\d{1,2})$/.exec(String(hhmm || '').trim());
@@ -18631,9 +20588,21 @@ const PlanView = ({ planId }: Props) => {
                                 onChange={(e) =>
                                   setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, day: e.target.value } : prev))
                                 }
-                                disabled={!!roomMeetingsTimelineBookingDetail.applyToSeries && !!roomMeetingsTimelineBookingDetail.booking.multiDayGroupId}
+                                disabled={
+                                  (!!roomMeetingsTimelineBookingDetail.applyToSeries &&
+                                    !!roomMeetingsTimelineBookingDetail.booking.multiDayGroupId) ||
+                                  isMeetingInProgressEdit
+                                }
                                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                               />
+                              {isMeetingInProgressEdit ? (
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  {t({
+                                    it: 'Meeting in corso: la data non è modificabile.',
+                                    en: 'Meeting in progress: date cannot be changed.'
+                                  })}
+                                </div>
+                              ) : null}
                             </label>
                             <label className="text-sm font-semibold text-slate-700">
                               {t({ it: 'Inizio', en: 'Start' })}
@@ -18642,6 +20611,7 @@ const PlanView = ({ planId }: Props) => {
                                 inputMode="numeric"
                                 placeholder="HH:MM"
                                 value={roomMeetingsTimelineBookingDetail.startTime}
+                                disabled={isMeetingInProgressEdit}
                                 onChange={(e) =>
                                   setRoomMeetingsTimelineBookingDetail((prev) => {
                                     if (!prev) return prev;
@@ -18679,66 +20649,134 @@ const PlanView = ({ planId }: Props) => {
                                 }
                                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                               />
+                              {isMeetingInProgressEdit ? (
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  {t({
+                                    it: 'Meeting in corso: l’orario di inizio non è modificabile.',
+                                    en: 'Meeting in progress: start time cannot be changed.'
+                                  })}
+                                </div>
+                              ) : null}
                             </label>
                             <label className="text-sm font-semibold text-slate-700">
                               {t({ it: 'Fine', en: 'End' })}
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="HH:MM"
-                                value={roomMeetingsTimelineBookingDetail.endTime}
-                                onChange={(e) =>
-                                  setRoomMeetingsTimelineBookingDetail((prev) => {
-                                    if (!prev) return prev;
-                                    const nextEnd = e.target.value;
-                                    if (prev.startTime && nextEnd && prev.startTime >= nextEnd) {
-                                      const [hh, mm] = prev.startTime.split(':').map((v) => Number(v));
-                                      if (Number.isFinite(hh) && Number.isFinite(mm)) {
-                                        const end = new Date(2000, 0, 1, hh, mm, 0, 0);
-                                        end.setHours(end.getHours() + 1);
-                                        return {
-                                          ...prev,
-                                          endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`
-                                        };
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                <input
+                                  type="time"
+                                  value={roomMeetingsTimelineBookingDetail.endTime}
+                                  max={hasMeetingStartedEdit ? nowHmLocal : undefined}
+                                  onChange={(e) =>
+                                    setRoomMeetingsTimelineBookingDetail((prev) => {
+                                      if (!prev) return prev;
+                                      let nextEnd = String(e.target.value || '').trim();
+                                      if (!nextEnd) return prev;
+                                      if (hasMeetingStartedEdit && nextEnd > nowHmLocal) nextEnd = nowHmLocal;
+                                      if (prev.startTime && nextEnd && prev.startTime >= nextEnd) {
+                                        const [hh, mm] = prev.startTime.split(':').map((v) => Number(v));
+                                        if (Number.isFinite(hh) && Number.isFinite(mm)) {
+                                          const end = new Date(2000, 0, 1, hh, mm, 0, 0);
+                                          end.setHours(end.getHours() + 1);
+                                          return {
+                                            ...prev,
+                                            endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`
+                                          };
+                                        }
                                       }
+                                      return { ...prev, endTime: nextEnd };
+                                    })
+                                  }
+                                  className="min-w-[220px] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                />
+                                {isMeetingInProgressEdit ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setRoomMeetingsTimelineBookingDetail((prev) =>
+                                        prev ? { ...prev, endTime: nowHmLocal } : prev
+                                      )
                                     }
-                                    return { ...prev, endTime: nextEnd };
-                                  })
-                                }
-                                onBlur={(e) =>
-                                  setRoomMeetingsTimelineBookingDetail((prev) => {
-                                    if (!prev) return prev;
-                                    const raw = String(e.target.value || '').trim();
-                                    const m = /^(\d{1,2}):(\d{1,2})$/.exec(raw);
-                                    if (!m) return prev;
-                                    const hh = Number(m[1]);
-                                    const mm = Number(m[2]);
-                                    if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return prev;
-                                    const normalized = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-                                    if (prev.startTime && normalized && prev.startTime >= normalized) {
-                                      const [sh, sm] = prev.startTime.split(':').map((v) => Number(v));
-                                      if (Number.isFinite(sh) && Number.isFinite(sm)) {
-                                        const end = new Date(2000, 0, 1, sh, sm, 0, 0);
-                                        end.setHours(end.getHours() + 1);
-                                        return { ...prev, endTime: `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}` };
-                                      }
-                                    }
-                                    return { ...prev, endTime: normalized };
-                                  })
-                                }
-                                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                              />
+                                    className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+                                    title={t({ it: 'Termina il meeting all’orario attuale', en: 'End meeting at current time' })}
+                                  >
+                                    {t({ it: 'Termina meeting', en: 'End meeting' })}
+                                  </button>
+                                ) : null}
+                              </div>
+                              {isMeetingInProgressEdit ? (
+                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                  {[
+                                    ['10m', t({ it: '+10m', en: '+10m' })],
+                                    ['30m', t({ it: '+30m', en: '+30m' })],
+                                    ['1h', t({ it: '+1h', en: '+1h' })],
+                                    ['2h', t({ it: '+2h', en: '+2h' })],
+                                    ['max', t({ it: 'Più possibile', en: 'As much as possible' })]
+                                  ].map(([key, label]) => (
+                                    <button
+                                      key={`edit-end-shift-${key}`}
+                                      type="button"
+                                      onClick={() => adjustRoomMeetingEditEndTime(key as '10m' | '30m' | '1h' | '2h' | 'max')}
+                                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                                    >
+                                      {label}
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
                             </label>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                              <span>{t({ it: 'Lingua kiosk meeting', en: 'Meeting kiosk language' })}</span>
+                              <span
+                                className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 text-[10px] text-slate-500"
+                                title={t({
+                                  it: 'Auto usa la lingua del kiosk (impostazione manuale o lingua del dispositivo). Se imposti una lingua, il kiosk la applica automaticamente quando la riunione è in corso.',
+                                  en: 'Auto uses the kiosk default language (manual choice or device language). If you set a language, the kiosk applies it automatically while the meeting is in progress.'
+                                })}
+                              >
+                                i
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {[
+                                { key: 'auto', flag: '🌐', label: t({ it: 'Auto', en: 'Auto' }) },
+                                { key: 'it', flag: '🇮🇹', label: 'IT' },
+                                { key: 'en', flag: '🇬🇧', label: 'EN' },
+                                { key: 'ru', flag: '🇷🇺', label: 'RU' },
+                                { key: 'ar', flag: '🇸🇦', label: 'AR' },
+                                { key: 'zh', flag: '🇨🇳', label: 'ZH' }
+                              ].map((opt) => {
+                                const active = roomMeetingsTimelineBookingDetail.kioskLanguage === (opt.key as any);
+                                return (
+                                  <button
+                                    key={`room-meeting-kiosk-lang-${opt.key}`}
+                                    type="button"
+                                    onClick={() =>
+                                      setRoomMeetingsTimelineBookingDetail((prev) =>
+                                        prev ? { ...prev, kioskLanguage: opt.key as any } : prev
+                                      )
+                                    }
+                                    className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-semibold ${
+                                      active ? 'border-primary/40 bg-primary/10 text-primary' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <span>{opt.flag}</span>
+                                    <span>{opt.label}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
                           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                             <label className="text-sm font-semibold text-slate-700">
                               {t({ it: 'Setup pre-riunione (min)', en: 'Pre-meeting setup (min)' })}: {roomMeetingsTimelineBookingDetail.setupBufferBeforeMin}
                               <input
                                 type="range"
-                                min={0}
+                                min={isMeetingInProgressEdit ? lockedPreSetupMin : 0}
                                 max={maxBeforeSetupEdit}
                                 step={5}
                                 value={roomMeetingsTimelineBookingDetail.setupBufferBeforeMin}
+                                disabled={isMeetingInProgressEdit}
                                 onChange={(e) =>
                                   setRoomMeetingsTimelineBookingDetail((prev) => {
                                     if (!prev) return prev;
@@ -18760,6 +20798,14 @@ const PlanView = ({ planId }: Props) => {
                                 }
                                 className="mt-2 w-full"
                               />
+                              {isMeetingInProgressEdit ? (
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  {t({
+                                    it: 'Meeting in corso: il setup pre-riunione non è modificabile.',
+                                    en: 'Meeting in progress: pre-meeting setup cannot be changed.'
+                                  })}
+                                </div>
+                              ) : null}
                               <div className="mt-1 text-[11px] text-slate-500">
                                 {prevNeighbor
                                   ? t({
@@ -18773,14 +20819,16 @@ const PlanView = ({ planId }: Props) => {
                               {t({ it: 'Setup post-riunione (min)', en: 'Post-meeting setup (min)' })}: {roomMeetingsTimelineBookingDetail.setupBufferAfterMin}
                               <input
                                 type="range"
-                                min={0}
-                                max={maxAfterSetupEdit}
+                                min={isMeetingInProgressEdit ? lockedPostSetupMin : 0}
+                                max={Math.max(maxAfterSetupEdit, isMeetingInProgressEdit ? lockedPostSetupMin : 0)}
                                 step={5}
                                 value={roomMeetingsTimelineBookingDetail.setupBufferAfterMin}
                                 onChange={(e) =>
                                   setRoomMeetingsTimelineBookingDetail((prev) => {
                                     if (!prev) return prev;
-                                    const desired = Math.max(0, Math.min(maxAfterSetupEdit, Number(e.target.value) || 0));
+                                    const minAllowed = isMeetingInProgressEdit ? lockedPostSetupMin : 0;
+                                    const maxAllowed = Math.max(maxAfterSetupEdit, minAllowed);
+                                    const desired = Math.max(minAllowed, Math.min(maxAllowed, Number(e.target.value) || 0));
                                     const overflow = Math.max(0, desired - freeAfterSetupEdit);
                                     if (overflow > 0 && detailDurationMin > 1) {
                                       const borrow = Math.min(overflow, Math.max(0, detailDurationMin - 1));
@@ -18798,6 +20846,14 @@ const PlanView = ({ planId }: Props) => {
                                 }
                                 className="mt-2 w-full"
                               />
+                              {isMeetingInProgressEdit ? (
+                                <div className="mt-1 text-[11px] text-slate-500">
+                                  {t({
+                                    it: 'Meeting in corso: puoi solo aumentare il setup post-riunione.',
+                                    en: 'Meeting in progress: you can only increase post-meeting setup.'
+                                  })}
+                                </div>
+                              ) : null}
                               <div className="mt-1 text-[11px] text-slate-500">
                                 {nextNeighbor
                                   ? t({
@@ -18811,316 +20867,515 @@ const PlanView = ({ planId }: Props) => {
                           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                               <div className="text-sm font-semibold text-ink">{t({ it: 'Partecipanti', en: 'Participants' })}</div>
-                              <div className="text-xs text-slate-500">
-                                {t({
-                                  it: `Posti richiesti (in sede): ${requestedSeatsPreview} · Interni remoti: ${remoteInternal} · Ospiti remoti: ${remoteManual}`,
-                                  en: `Requested seats (on-site): ${requestedSeatsPreview} · Remote internal: ${remoteInternal} · Remote guests: ${remoteManual}`
-                                })}
-                              </div>
+                              <button
+                                type="button"
+                                onClick={openRoomMeetingEditParticipantsModal}
+                                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                <Users size={14} className="mr-1 inline-block" />
+                                {t({ it: 'Gestisci partecipanti', en: 'Manage participants' })}
+                              </button>
                             </div>
-                            <div className="space-y-3">
-                              <div>
-                                <div className="relative">
-                                  <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-slate-400" />
-                                  <input
-                                    value={detail.participantFilter}
-                                    onChange={(e) =>
-                                      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, participantFilter: e.target.value } : prev))
-                                    }
-                                    placeholder={t({ it: 'Filtra utenti reali...', en: 'Filter real users...' })}
-                                    className="w-full rounded-lg border border-slate-200 py-2 pl-8 pr-3 text-sm"
-                                  />
-                                </div>
-                                <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2">
-                                  <div className="mb-1 grid grid-cols-[auto,minmax(0,1.2fr),minmax(0,1.1fr),minmax(0,0.8fr),84px] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                                    <span />
-                                    <span>{t({ it: 'Nome', en: 'Name' })}</span>
-                                    <span>{t({ it: 'Email', en: 'Email' })}</span>
-                                    <span>{t({ it: 'Reparto', en: 'Department' })}</span>
-                                    <span>{t({ it: 'Telefono', en: 'Phone' })}</span>
-                                  </div>
-                                  <div className="max-h-56 space-y-1 overflow-auto">
-                                  {filteredCandidates.map((candidate) => {
-                                    const selected = selectedRealIds.has(String(candidate.externalId));
-                                    return (
-                                      <div
-                                        key={`cand-${candidate.externalId}`}
-                                        className="grid grid-cols-[auto,minmax(0,1.2fr),minmax(0,1.1fr),minmax(0,0.8fr),84px] items-center gap-2 px-1 text-sm"
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() => addTimelineMeetingRealParticipant(candidate.externalId)}
-                                          disabled={selected}
-                                          className={`inline-flex h-6 w-6 items-center justify-center rounded-full border ${
-                                            selected
-                                              ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
-                                              : 'border-emerald-300 bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                                          }`}
-                                          title={selected ? t({ it: 'Già selezionato', en: 'Already selected' }) : t({ it: 'Aggiungi', en: 'Add' })}
-                                        >
-                                          <Plus size={12} />
-                                        </button>
-                                        <span className="truncate text-slate-700">{candidate.fullName}</span>
-                                        <span className="truncate text-xs text-slate-500">{candidate.email || 'no email'}</span>
-                                        <button
-                                          type="button"
-                                          onContextMenu={(e) => {
-                                            e.preventDefault();
-                                            const dept = String((candidate as any).department || '').trim();
-                                            if (!dept) return;
-                                            const rows = filteredCandidates.filter(
-                                              (row) =>
-                                                String((row as any).department || '').trim().toLowerCase() === dept.toLowerCase()
-                                            );
-                                            if (!rows.length) return;
-                                            setRoomMeetingsTimelineBookingDetail((prev) => {
-                                              if (!prev) return prev;
-                                              const existing = new Set(
-                                                prev.participantsDraft
-                                                  .filter((p) => p.kind === 'real_user' && p.externalId)
-                                                  .map((p) => String(p.externalId))
-                                              );
-                                              const toAdd = rows
-                                                .filter((row) => !existing.has(String(row.externalId)))
-                                                .map((row) => ({
-                                                  key: `real:${row.externalId}`,
-                                                  kind: 'real_user' as const,
-                                                  externalId: row.externalId,
-                                                  fullName: row.fullName,
-                                                  email: row.email,
-                                                  optional: false,
-                                                  remote: false,
-                                                  company: null
-                                                }));
-                                              if (!toAdd.length) return prev;
-                                              return { ...prev, participantsDraft: [...prev.participantsDraft, ...toAdd] };
-                                            });
-                                            push(
-                                              t({ it: `Reparto aggiunto: ${dept}`, en: `Department added: ${dept}` }),
-                                              'success'
-                                            );
-                                          }}
-                                          className="truncate rounded-md px-1.5 py-1 text-left text-xs text-slate-600 hover:bg-slate-100"
-                                          title={t({
-                                            it: 'Tasto destro per aggiungere tutto il reparto visibile nel filtro',
-                                            en: 'Right click to add the whole department visible in the filter'
-                                          })}
-                                        >
-                                          {(candidate as any).department || '—'}
-                                        </button>
-                                        <span className="truncate text-xs text-slate-500">{(candidate as any).phone || '—'}</span>
-                                      </div>
-                                    );
-                                  })}
-                                  {!filteredCandidates.length ? (
-                                    <div className="text-xs text-slate-500">{t({ it: 'Nessun utente trovato.', en: 'No users found.' })}</div>
-                                  ) : null}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="max-h-52 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-2">
-                                {detail.participantsDraft.map((p) => (
-                                  <div key={p.key} className="grid grid-cols-[minmax(0,1fr),auto] items-center gap-2 rounded-lg border border-slate-100 px-2 py-1.5">
-                                    <div className="min-w-0">
-                                      <div className="flex flex-wrap items-center gap-1">
-                                        <span className={`truncate text-sm font-medium uppercase tracking-[0.02em] ${p.kind === 'manual' ? 'text-violet-800' : 'text-slate-700'}`}>
-                                          {p.fullName}
-                                        </span>
-                                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${p.kind === 'manual' ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}`}>
-                                          {p.kind === 'manual' ? t({ it: 'OSP', en: 'GST' }) : t({ it: 'INT', en: 'INT' })}
-                                        </span>
-                                        {p.optional ? <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">OPT</span> : null}
-                                        {p.remote ? <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">REM</span> : null}
-                                        {p.company ? <span className="truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{p.company}</span> : null}
-                                      </div>
-                                      <div className="truncate text-xs text-slate-500">{p.email || (p.kind === 'manual' ? t({ it: 'Ospite senza email', en: 'Guest without email' }) : 'no email')}</div>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleTimelineMeetingParticipantFlag(p.key, 'optional')}
-                                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${p.optional ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}
-                                      >
-                                        {t({ it: 'Facolt.', en: 'Optional' })}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleTimelineMeetingParticipantFlag(p.key, 'remote')}
-                                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${p.remote ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}
-                                      >
-                                        {t({ it: 'Remoto', en: 'Remote' })}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => removeTimelineMeetingParticipant(p.key)}
-                                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                                        title={t({ it: 'Rimuovi', en: 'Remove' })}
-                                      >
-                                        <Minus size={12} />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                                {!detail.participantsDraft.length ? (
-                                  <div className="text-xs text-slate-500">{t({ it: 'Nessun partecipante configurato.', en: 'No participants configured.' })}</div>
-                                ) : null}
-                              </div>
-
-                              <div className="rounded-lg border border-slate-200 bg-white p-2">
-                                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                  {t({ it: 'Altri ospiti', en: 'Other guests' })}
-                                </div>
-                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,1fr]">
-                                  <input
-                                    value={detail.manualParticipantName}
-                                    onChange={(e) =>
-                                      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantName: e.target.value } : prev))
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        addTimelineMeetingManualParticipant();
-                                      }
-                                    }}
-                                    placeholder={t({ it: 'Altri ospiti', en: 'Other guests' })}
-                                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                                  />
-                                  <div className="flex items-center gap-2">
-                                    <select
-                                      value={
-                                        roomMeetingEditManualCompanyIsOther
-                                          ? '__OTHER__'
-                                          : clientBusinessPartnerNames.includes(String(detail.manualParticipantCompany || '').trim())
-                                            ? String(detail.manualParticipantCompany || '').trim()
-                                            : ''
-                                      }
-                                      onChange={(e) => {
-                                        const value = e.target.value;
-                                        if (value === '__OTHER__') {
-                                          setRoomMeetingEditManualCompanyIsOther(true);
-                                          setRoomMeetingsTimelineBookingDetail((prev) =>
-                                            prev ? { ...prev, manualParticipantCompany: '' } : prev
-                                          );
-                                          return;
-                                        }
-                                        setRoomMeetingEditManualCompanyIsOther(false);
-                                        setRoomMeetingsTimelineBookingDetail((prev) =>
-                                          prev ? { ...prev, manualParticipantCompany: value } : prev
-                                        );
-                                      }}
-                                      className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            <div className="text-xs text-slate-500">
+                              {t({
+                                it: `Posti richiesti (in sede): ${requestedSeatsPreview} · Interni remoti: ${remoteInternal} · Ospiti remoti: ${remoteManual}`,
+                                en: `Requested seats (on-site): ${requestedSeatsPreview} · Remote internal: ${remoteInternal} · Remote guests: ${remoteManual}`
+                              })}
+                            </div>
+                            <div className="mt-2 flex max-h-24 flex-wrap gap-1 overflow-auto rounded-lg border border-dashed border-slate-300 bg-white px-2 py-1.5">
+                              {detail.participantsDraft.length ? (
+                                detail.participantsDraft.map((p) => {
+                                  const checkTag = p.kind === 'manual' ? 'EXT' : p.optional ? 'OPT' : 'INT';
+                                  const checkKey = meetingCheckInEntryKey({
+                                    tag: checkTag,
+                                    label: String(p.fullName || '').trim(),
+                                    email: p.email ? String(p.email) : null
+                                  });
+                                  const hasCheckIn = !!bookingCheckMap[checkKey];
+                                  const checkInAt = Number(bookingCheckTsMap[checkKey] || 0) || null;
+                                  const canRemoveParticipant = !(hasMeetingStartedEdit && hasCheckIn);
+                                  const startAtLabel = new Date(Number(detail.booking.startAt || 0)).toLocaleString();
+                                  const checkAtLabel = checkInAt ? new Date(checkInAt).toLocaleString() : t({ it: 'non effettuato', en: 'not done' });
+                                  return (
+                                    <span
+                                      key={`meeting-edit-chip-${p.key}`}
+                                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
+                                        hasMeetingStartedEdit && hasCheckIn
+                                          ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                                          : p.kind === 'manual'
+                                            ? 'border-violet-200 bg-violet-50 text-violet-800'
+                                            : 'border-slate-200 bg-slate-50 text-slate-700'
+                                      }`}
+                                      title={t({
+                                        it: `Inizio riunione: ${startAtLabel} • Check-in: ${checkAtLabel}`,
+                                        en: `Meeting start: ${startAtLabel} • Check-in: ${checkAtLabel}`
+                                      })}
                                     >
-                                      <option value="">{t({ it: 'Azienda (opzionale)', en: 'Company (optional)' })}</option>
-                                      {clientBusinessPartnerNames.map((name) => (
-                                        <option key={`planview-bp-opt-${name}`} value={name}>
-                                          {name}
-                                        </option>
-                                      ))}
-                                      <option value="__OTHER__">{t({ it: 'Altro', en: 'Other' })}</option>
-                                    </select>
-                                    {canOpenBusinessPartnersDirectory ? (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          setRoomMeetingEditBusinessPartnersModalOpen(true);
-                                        }}
-                                        className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-2 text-slate-700 hover:bg-slate-50"
-                                        title={t({ it: 'Apri rubrica Business Partner', en: 'Open Business Partner directory' })}
-                                      >
-                                        <Building2 size={14} />
-                                      </button>
-                                    ) : null}
-                                  </div>
+                                      <span className="truncate">{p.fullName}</span>
+                                      {p.kind === 'manual' ? <span className="text-[10px] font-bold">EXT</span> : null}
+                                      {hasMeetingStartedEdit && hasCheckIn ? (
+                                        <span className="text-[10px] font-bold">{t({ it: 'OK', en: 'OK' })}</span>
+                                      ) : null}
+                                      {canRemoveParticipant ? (
+                                        <button
+                                          type="button"
+                                          onClick={(evt) => {
+                                            evt.preventDefault();
+                                            evt.stopPropagation();
+                                            removeTimelineMeetingParticipant(p.key);
+                                          }}
+                                          className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                          title={t({ it: 'Rimuovi partecipante', en: 'Remove participant' })}
+                                        >
+                                          <X size={10} />
+                                        </button>
+                                      ) : null}
+                                    </span>
+                                  );
+                                })
+                              ) : (
+                                <span className="text-xs text-slate-500">{t({ it: 'Nessun partecipante configurato.', en: 'No participants configured.' })}</span>
+                              )}
+                            </div>
+                          </div>
+                          <Transition show={roomMeetingEditParticipantsModalOpen} as={Fragment}>
+                            <div
+                              className="fixed inset-0 z-[96] pointer-events-none"
+                              role="dialog"
+                              aria-modal="true"
+                              aria-label={t({ it: 'Gestisci partecipanti meeting', en: 'Manage meeting participants' })}
+                            >
+                              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+                                <div
+                                  className="pointer-events-auto fixed inset-0 bg-slate-900/40 backdrop-blur-sm"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (roomMeetingEditBusinessPartnersModalOpen) return;
+                                    if (Date.now() < roomMeetingEditParticipantsCloseGuardUntilRef.current) return;
+                                    closeRoomMeetingEditParticipantsModal();
+                                  }}
+                                />
+                              </Transition.Child>
+                              <div
+                                className="pointer-events-auto fixed inset-0 overflow-y-auto"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <div className="flex min-h-full items-center justify-center p-4">
+                                  <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                                    <div className="w-full max-w-6xl rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+                                      <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                                        <div>
+                                          <h2 className="text-lg font-semibold text-ink">{t({ it: 'Gestisci partecipanti', en: 'Manage participants' })}</h2>
+                                          <div className="text-xs text-slate-500">
+                                            {t({
+                                              it: 'Aggiungi utenti reali e altri ospiti. Premi OK per tornare alla modifica meeting.',
+                                              en: 'Add real users and other guests. Press OK to return to meeting edit.'
+                                            })}
+                                          </div>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={closeRoomMeetingEditParticipantsModal}
+                                          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
+                                        >
+                                          <X size={18} />
+                                        </button>
+                                      </div>
+                                      <div className="mt-3 space-y-3">
+                                        <div>
+                                          <div className="relative">
+                                            <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-slate-400" />
+                                            <input
+                                              ref={roomMeetingEditParticipantsNameInputRef}
+                                              value={detail.participantFilter}
+                                              onChange={(e) =>
+                                                setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, participantFilter: e.target.value } : prev))
+                                              }
+                                              placeholder={t({ it: 'Filtra utenti reali...', en: 'Filter real users...' })}
+                                              className="w-full rounded-lg border border-slate-200 py-2 pl-8 pr-3 text-sm"
+                                            />
+                                          </div>
+                                          <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2">
+                                            <div className="mb-1 grid grid-cols-[auto,minmax(0,1.2fr),minmax(0,1.1fr),minmax(0,0.8fr),84px] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                              <span />
+                                              <span>{t({ it: 'Nome', en: 'Name' })}</span>
+                                              <span>{t({ it: 'Email', en: 'Email' })}</span>
+                                              <span>{t({ it: 'Reparto', en: 'Department' })}</span>
+                                              <span>{t({ it: 'Telefono', en: 'Phone' })}</span>
+                                            </div>
+                                            <div className="max-h-56 space-y-1 overflow-auto">
+                                              {filteredCandidates.map((candidate) => {
+                                                const selected = selectedRealIds.has(String(candidate.externalId));
+                                                return (
+                                                  <div
+                                                    key={`cand-${candidate.externalId}`}
+                                                    className="grid grid-cols-[auto,minmax(0,1.2fr),minmax(0,1.1fr),minmax(0,0.8fr),84px] items-center gap-2 px-1 text-sm"
+                                                  >
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => addTimelineMeetingRealParticipant(candidate.externalId)}
+                                                      disabled={selected}
+                                                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full border ${
+                                                        selected
+                                                          ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                                                          : 'border-emerald-300 bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                                      }`}
+                                                      title={selected ? t({ it: 'Già selezionato', en: 'Already selected' }) : t({ it: 'Aggiungi', en: 'Add' })}
+                                                    >
+                                                      <Plus size={12} />
+                                                    </button>
+                                                    <span className="truncate text-slate-700">{candidate.fullName}</span>
+                                                    <span className="truncate text-xs text-slate-500">{candidate.email || 'no email'}</span>
+                                                    <button
+                                                      type="button"
+                                                      onContextMenu={(e) => {
+                                                        e.preventDefault();
+                                                        const dept = String((candidate as any).department || '').trim();
+                                                        if (!dept) return;
+                                                        const rows = filteredCandidates.filter(
+                                                          (row) =>
+                                                            String((row as any).department || '').trim().toLowerCase() === dept.toLowerCase()
+                                                        );
+                                                        if (!rows.length) return;
+                                                        setRoomMeetingsTimelineBookingDetail((prev) => {
+                                                          if (!prev) return prev;
+                                                          const existing = new Set(
+                                                            prev.participantsDraft
+                                                              .filter((p) => p.kind === 'real_user' && p.externalId)
+                                                              .map((p) => String(p.externalId))
+                                                          );
+                                                          const toAdd = rows
+                                                            .filter((row) => !existing.has(String(row.externalId)))
+                                                            .map((row) => ({
+                                                              key: `real:${row.externalId}`,
+                                                              kind: 'real_user' as const,
+                                                              externalId: row.externalId,
+                                                              fullName: row.fullName,
+                                                              email: row.email,
+                                                              optional: false,
+                                                              remote: false,
+                                                              company: null
+                                                            }));
+                                                          if (!toAdd.length) return prev;
+                                                          return { ...prev, participantsDraft: [...prev.participantsDraft, ...toAdd] };
+                                                        });
+                                                        push(
+                                                          t({ it: `Reparto aggiunto: ${dept}`, en: `Department added: ${dept}` }),
+                                                          'success'
+                                                        );
+                                                      }}
+                                                      className="truncate rounded-md px-1.5 py-1 text-left text-xs text-slate-600 hover:bg-slate-100"
+                                                      title={t({
+                                                        it: 'Tasto destro per aggiungere tutto il reparto visibile nel filtro',
+                                                        en: 'Right click to add the whole department visible in the filter'
+                                                      })}
+                                                    >
+                                                      {(candidate as any).department || '—'}
+                                                    </button>
+                                                    <span className="truncate text-xs text-slate-500">{(candidate as any).phone || '—'}</span>
+                                                  </div>
+                                                );
+                                              })}
+                                              {!filteredCandidates.length ? (
+                                                <div className="text-xs text-slate-500">{t({ it: 'Nessun utente trovato.', en: 'No users found.' })}</div>
+                                              ) : null}
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        <div className="max-h-52 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-2">
+                                          {detail.participantsDraft.map((p) => (
+                                            (() => {
+                                              const checkTag = p.kind === 'manual' ? 'EXT' : p.optional ? 'OPT' : 'INT';
+                                              const checkKey = meetingCheckInEntryKey({
+                                                tag: checkTag,
+                                                label: String(p.fullName || '').trim(),
+                                                email: p.email ? String(p.email) : null
+                                              });
+                                              const hasCheckIn = !!bookingCheckMap[checkKey];
+                                              const checkInAt = Number(bookingCheckTsMap[checkKey] || 0) || null;
+                                              const canRemoveParticipant = !(hasMeetingStartedEdit && hasCheckIn);
+                                              const startAtLabel = new Date(Number(detail.booking.startAt || 0)).toLocaleString();
+                                              const checkAtLabel = checkInAt ? new Date(checkInAt).toLocaleString() : t({ it: 'non effettuato', en: 'not done' });
+                                              return (
+                                                <div
+                                                  key={p.key}
+                                                  className={`grid grid-cols-[minmax(0,1fr),auto] items-center gap-2 rounded-lg border px-2 py-1.5 ${
+                                                    hasMeetingStartedEdit && hasCheckIn
+                                                      ? 'border-emerald-200 bg-emerald-50'
+                                                      : 'border-slate-100 bg-white'
+                                                  }`}
+                                                  title={t({
+                                                    it: `Inizio riunione: ${startAtLabel} • Check-in: ${checkAtLabel}`,
+                                                    en: `Meeting start: ${startAtLabel} • Check-in: ${checkAtLabel}`
+                                                  })}
+                                                >
+                                                  <div className="min-w-0">
+                                                    <div className="flex flex-wrap items-center gap-1">
+                                                      <span className={`truncate text-sm font-medium uppercase tracking-[0.02em] ${p.kind === 'manual' ? 'text-violet-800' : 'text-slate-700'}`}>
+                                                        {p.fullName}
+                                                      </span>
+                                                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${p.kind === 'manual' ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}`}>
+                                                        {p.kind === 'manual' ? t({ it: 'OSP', en: 'GST' }) : t({ it: 'INT', en: 'INT' })}
+                                                      </span>
+                                                      {hasMeetingStartedEdit && hasCheckIn ? (
+                                                        <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                                                          {t({ it: 'CHECK-IN', en: 'CHECK-IN' })}
+                                                        </span>
+                                                      ) : null}
+                                                      {p.optional ? <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">OPT</span> : null}
+                                                      {p.remote ? <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">REM</span> : null}
+                                                      {p.company ? <span className="truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{p.company}</span> : null}
+                                                    </div>
+                                                    <div className="truncate text-xs text-slate-500">{p.email || (p.kind === 'manual' ? t({ it: 'Ospite senza email', en: 'Guest without email' }) : 'no email')}</div>
+                                                  </div>
+                                                  <div className="flex items-center gap-1">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => toggleTimelineMeetingParticipantFlag(p.key, 'optional')}
+                                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${p.optional ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}
+                                                    >
+                                                      {t({ it: 'Facolt.', en: 'Optional' })}
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => toggleTimelineMeetingParticipantFlag(p.key, 'remote')}
+                                                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${p.remote ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}
+                                                    >
+                                                      {t({ it: 'Remoto', en: 'Remote' })}
+                                                    </button>
+                                                    {canRemoveParticipant ? (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => removeTimelineMeetingParticipant(p.key)}
+                                                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                                        title={t({ it: 'Rimuovi', en: 'Remove' })}
+                                                      >
+                                                        <X size={12} />
+                                                      </button>
+                                                    ) : (
+                                                      <span
+                                                        className="rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700"
+                                                        title={t({
+                                                          it: 'Partecipante già in check-in: non removibile durante la riunione.',
+                                                          en: 'Participant already checked-in: cannot be removed during meeting.'
+                                                        })}
+                                                      >
+                                                        {t({ it: 'LOCK', en: 'LOCK' })}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              );
+                                            })()
+                                          ))}
+                                          {!detail.participantsDraft.length ? (
+                                            <div className="text-xs text-slate-500">{t({ it: 'Nessun partecipante configurato.', en: 'No participants configured.' })}</div>
+                                          ) : null}
+                                        </div>
+
+                                        <div className="rounded-lg border border-slate-200 bg-white p-2">
+                                          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                            {t({ it: 'Altri ospiti', en: 'Other guests' })}
+                                          </div>
+                                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,1fr]">
+                                            <input
+                                              value={detail.manualParticipantName}
+                                              onChange={(e) =>
+                                                setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantName: e.target.value } : prev))
+                                              }
+                                              onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  addTimelineMeetingManualParticipant();
+                                                }
+                                              }}
+                                              placeholder={t({ it: 'Altri ospiti', en: 'Other guests' })}
+                                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                            />
+                                            <div className="flex items-center gap-2">
+                                              <select
+                                                value={
+                                                  roomMeetingEditManualCompanyIsOther
+                                                    ? '__OTHER__'
+                                                    : clientBusinessPartnerNames.includes(String(detail.manualParticipantCompany || '').trim())
+                                                      ? String(detail.manualParticipantCompany || '').trim()
+                                                      : ''
+                                                }
+                                                onChange={(e) => {
+                                                  const value = e.target.value;
+                                                  if (value === '__OTHER__') {
+                                                    setRoomMeetingEditManualCompanyIsOther(true);
+                                                    setRoomMeetingsTimelineBookingDetail((prev) =>
+                                                      prev ? { ...prev, manualParticipantCompany: '' } : prev
+                                                    );
+                                                    return;
+                                                  }
+                                                  setRoomMeetingEditManualCompanyIsOther(false);
+                                                  setRoomMeetingsTimelineBookingDetail((prev) =>
+                                                    prev ? { ...prev, manualParticipantCompany: value } : prev
+                                                  );
+                                                }}
+                                                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                              >
+                                                <option value="">{t({ it: 'Azienda (opzionale)', en: 'Company (optional)' })}</option>
+                                                {clientBusinessPartnerNames.map((name) => (
+                                                  <option key={`planview-bp-opt-${name}`} value={name}>
+                                                    {name}
+                                                  </option>
+                                                ))}
+                                                <option value="__OTHER__">{t({ it: 'Altro', en: 'Other' })}</option>
+                                              </select>
+                                              {canOpenBusinessPartnersDirectory ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    setRoomMeetingEditBusinessPartnersModalOpen(true);
+                                                  }}
+                                                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-2 text-slate-700 hover:bg-slate-50"
+                                                  title={t({ it: 'Apri rubrica Business Partner', en: 'Open Business Partner directory' })}
+                                                >
+                                                  <Building2 size={14} />
+                                                </button>
+                                              ) : null}
+                                            </div>
+                                          </div>
+                                          {roomMeetingEditManualCompanyIsOther ? (
+                                            <div className="mt-2">
+                                              <input
+                                                value={detail.manualParticipantCompany}
+                                                onChange={(e) =>
+                                                  setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantCompany: e.target.value } : prev))
+                                                }
+                                                onKeyDown={(e) => {
+                                                  if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    addTimelineMeetingManualParticipant();
+                                                  }
+                                                }}
+                                                placeholder={t({ it: 'Nome azienda (Altro)', en: 'Company name (Other)' })}
+                                                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                              />
+                                            </div>
+                                          ) : null}
+                                          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr,auto,auto,auto]">
+                                            <input
+                                              value={detail.manualParticipantEmail}
+                                              onChange={(e) =>
+                                                setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantEmail: e.target.value } : prev))
+                                              }
+                                              onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  addTimelineMeetingManualParticipant();
+                                                }
+                                              }}
+                                              placeholder={t({ it: 'Email (opzionale)', en: 'Email (optional)' })}
+                                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                                            />
+                                            <label className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">
+                                              <input
+                                                type="checkbox"
+                                                checked={detail.manualParticipantOptional}
+                                                onChange={(e) =>
+                                                  setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantOptional: e.target.checked } : prev))
+                                                }
+                                              />
+                                              {t({ it: 'Facolt.', en: 'Optional' })}
+                                            </label>
+                                            <label className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">
+                                              <input
+                                                type="checkbox"
+                                                checked={detail.manualParticipantRemote}
+                                                onChange={(e) =>
+                                                  setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantRemote: e.target.checked } : prev))
+                                                }
+                                              />
+                                              {t({ it: 'Remoto', en: 'Remote' })}
+                                            </label>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                addTimelineMeetingManualParticipant();
+                                              }}
+                                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                            >
+                                              {t({ it: 'Aggiungi', en: 'Add' })}
+                                            </button>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
+                                          <button
+                                            type="button"
+                                            onClick={closeRoomMeetingEditParticipantsModal}
+                                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                          >
+                                            {t({ it: 'OK', en: 'OK' })}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </Transition.Child>
                                 </div>
-                                {roomMeetingEditManualCompanyIsOther ? (
-                                  <div className="mt-2">
-                                    <input
-                                      value={detail.manualParticipantCompany}
-                                      onChange={(e) =>
-                                        setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantCompany: e.target.value } : prev))
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          addTimelineMeetingManualParticipant();
-                                        }
-                                      }}
-                                      placeholder={t({ it: 'Nome azienda (Altro)', en: 'Company name (Other)' })}
-                                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                                    />
-                                  </div>
-                                ) : null}
-                                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr,auto,auto,auto]">
-                                  <input
-                                    value={detail.manualParticipantEmail}
-                                    onChange={(e) =>
-                                      setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantEmail: e.target.value } : prev))
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        addTimelineMeetingManualParticipant();
-                                      }
-                                    }}
-                                    placeholder={t({ it: 'Email (opzionale)', en: 'Email (optional)' })}
-                                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                                  />
-                                  <label className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">
-                                    <input
-                                      type="checkbox"
-                                      checked={detail.manualParticipantOptional}
-                                      onChange={(e) =>
-                                        setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantOptional: e.target.checked } : prev))
-                                      }
-                                    />
-                                    {t({ it: 'Facolt.', en: 'Optional' })}
-                                  </label>
-                                  <label className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700">
-                                    <input
-                                      type="checkbox"
-                                      checked={detail.manualParticipantRemote}
-                                      onChange={(e) =>
-                                        setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, manualParticipantRemote: e.target.checked } : prev))
-                                      }
-                                    />
-                                    {t({ it: 'Remoto', en: 'Remote' })}
-                                  </label>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      addTimelineMeetingManualParticipant();
-                                    }}
-                                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                                  >
-                                    {t({ it: 'Aggiungi', en: 'Add' })}
-                                  </button>
-                                </div>
-                              </div>
-                              <div className="text-xs text-slate-500">
-                                {t({
-                                  it: `${onsiteInternal} interni in sede · ${remoteInternal} interni remoti · ${onsiteManual} ospiti in sede · ${remoteManual} ospiti remoti`,
-                                  en: `${onsiteInternal} on-site internal · ${remoteInternal} remote internal · ${onsiteManual} on-site guests · ${remoteManual} remote guests`
-                                })}
                               </div>
                             </div>
+                          </Transition>
+                          <div className="text-xs text-slate-500">
+                            {t({
+                              it: `${onsiteInternal} interni in sede · ${remoteInternal} interni remoti · ${onsiteManual} ospiti in sede · ${remoteManual} ospiti remoti`,
+                              en: `${onsiteInternal} on-site internal · ${remoteInternal} remote internal · ${onsiteManual} on-site guests · ${remoteManual} remote guests`
+                            })}
                           </div>
                           <label className="block text-sm font-semibold text-slate-700">
                             {t({ it: 'Video conference LINK', en: 'Video conference LINK' })}
-                            <input
-                              value={roomMeetingsTimelineBookingDetail.videoConferenceLink}
-                              onChange={(e) =>
-                                setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, videoConferenceLink: e.target.value } : prev))
-                              }
-                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                            />
+                            <div className="mt-1 flex items-center gap-2">
+                              <input
+                                value={roomMeetingsTimelineBookingDetail.videoConferenceLink}
+                                onChange={(e) =>
+                                  setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, videoConferenceLink: e.target.value } : prev))
+                                }
+                                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const url = String(roomMeetingsTimelineBookingDetail.videoConferenceLink || '').trim();
+                                  if (!url) return;
+                                  const finalUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+                                  window.open(finalUrl, '_blank', 'noopener,noreferrer');
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                title={t({ it: 'Apri link', en: 'Open link' })}
+                              >
+                                <Globe size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const url = String(roomMeetingsTimelineBookingDetail.videoConferenceLink || '').trim();
+                                  if (!url) return;
+                                  try {
+                                    await navigator.clipboard.writeText(url);
+                                    push(t({ it: 'Link copiato.', en: 'Link copied.' }), 'success');
+                                  } catch {
+                                    push(t({ it: 'Copia link non riuscita.', en: 'Failed to copy link.' }), 'danger');
+                                  }
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                title={t({ it: 'Copia link', en: 'Copy link' })}
+                              >
+                                <Copy size={14} />
+                              </button>
+                            </div>
                           </label>
                           <label className="block text-sm font-semibold text-slate-700">
                             {t({ it: 'Note', en: 'Notes' })}
@@ -19164,9 +21419,13 @@ const PlanView = ({ planId }: Props) => {
                           <div className="flex flex-wrap items-center justify-end gap-2">
                             <button
                               type="button"
-                              onClick={() =>
-                                setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, mode: 'view', saving: false, error: null } : prev))
-                              }
+                              onClick={() => {
+                                if (roomMeetingsTimelineBookingDetail.returnToMeetingNotes) {
+                                  closeRoomMeetingBookingDetail();
+                                  return;
+                                }
+                                setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, mode: 'view', saving: false, error: null } : prev));
+                              }}
                               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                             >
                               {t({ it: 'Annulla', en: 'Cancel' })}
@@ -19219,12 +21478,12 @@ const PlanView = ({ planId }: Props) => {
                   <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
                     <div>
                       <Dialog.Title className="text-lg font-semibold text-ink">
-                        {t({ it: 'Esporta Layout meeting room', en: 'Export meeting room layout' })}
+                        {t({ it: 'Esporta layout stanza', en: 'Export room layout' })}
                       </Dialog.Title>
                       <div className="text-xs text-slate-500">
                         {t({
-                          it: 'Copia colore, scala etichetta e opacità della stanza sorgente su altre meeting room del cliente.',
-                          en: 'Copy color, label scale and opacity from the source room to other client meeting rooms.'
+                          it: 'Copia colore, scala etichetta e opacità della stanza sorgente su altre stanze del cliente.',
+                          en: 'Copy color, label scale and opacity from the source room to other client rooms.'
                         })}
                       </div>
                     </div>
@@ -19287,8 +21546,8 @@ const PlanView = ({ planId }: Props) => {
                     </button>
                     <span className="ml-auto text-xs text-slate-500">
                       {t({
-                        it: `${(roomLayoutExportModal?.selectedKeys || []).length} selezionate · ${roomLayoutExportRows.length} meeting room`,
-                        en: `${(roomLayoutExportModal?.selectedKeys || []).length} selected · ${roomLayoutExportRows.length} meeting rooms`
+                        it: `${(roomLayoutExportModal?.selectedKeys || []).length} selezionate · ${roomLayoutExportRows.length} stanze`,
+                        en: `${(roomLayoutExportModal?.selectedKeys || []).length} selected · ${roomLayoutExportRows.length} rooms`
                       })}
                     </span>
                   </div>
@@ -19660,103 +21919,799 @@ const PlanView = ({ planId }: Props) => {
         </Dialog>
       </Transition>
 
-      <RoomAllocationModal
-        open={roomAllocationOpen}
-        clients={allClients}
-        departmentOptions={roomDepartmentOptions}
-        currentClientId={roomAllocationPreset?.clientId || client?.id}
-        currentSiteId={roomAllocationPreset?.siteId || site?.id}
-        onHighlight={({ planId: targetPlanId, roomId }) => {
-          if (targetPlanId !== planId) {
-            setRoomAllocationOpen(false);
-            setRoomAllocationPreset(null);
-            setSelectedPlan(targetPlanId);
-            navigate(`/plan/${targetPlanId}?focusRoom=${encodeURIComponent(roomId)}`);
-            return;
-          }
-          setSelectedRoomId(roomId);
-          setSelectedRoomIds([roomId]);
-          setHighlightRoom({ roomId, until: Date.now() + 3200 });
-        }}
-        onClose={() => {
-          setRoomAllocationOpen(false);
-          setRoomAllocationPreset(null);
-          setRoomsOpen(false);
-        }}
-      />
-
-      <CapacityDashboardModal
-        open={capacityDashboardOpen}
-        clients={allClients}
-        currentClientId={capacityDashboardPreset?.clientId || client?.id}
-        currentSiteId={capacityDashboardPreset?.siteId || site?.id}
-        onClose={() => {
-          setCapacityDashboardOpen(false);
-          setCapacityDashboardPreset(null);
-        }}
-      />
-
-      <MeetingManagerModal
-        open={meetingManagerOpen}
-        clients={allClients}
-        initialClientId={meetingManagerPreset?.clientId || client?.id}
-        initialSiteId={meetingManagerPreset?.siteId || site?.id}
-        initialFloorPlanId={meetingManagerPreset?.floorPlanId || planId}
-        initialRoomId={meetingManagerPreset?.roomId}
-        initialDay={meetingManagerPreset?.day}
-        onClose={() => {
-          setMeetingManagerOpen(false);
-          setMeetingManagerPreset(null);
-        }}
-        onCreated={() => {
-          const cid = String(client?.id || '').trim();
-          const sid = String(site?.id || '').trim();
-          if (cid && sid) {
-            void fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day: new Date().toISOString().slice(0, 10) })
-              .then((payload) => {
-                const nowTs = Date.now();
-                const next: Record<string, { hasMeetingToday: boolean; inProgress: boolean; hasFutureToday: boolean }> = {};
-                for (const row of payload.rooms || []) {
-                  const hasFutureToday = Array.isArray(row.bookings) ? row.bookings.some((b) => Number(b.startAt) > nowTs) : false;
-                  next[String(row.roomId)] = {
-                    hasMeetingToday: !!row.hasMeetingToday,
-                    inProgress: !!row.inProgress,
-                    hasFutureToday
-                  };
-                }
-                setMeetingStatusByRoomId(next);
-              })
-              .catch(() => {});
-          }
-          if (roomMeetingsTimelineModal?.roomId) {
-            void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, roomMeetingsTimelineModal.day);
-          }
-        }}
-        onGoToRoom={(roomId) => {
-          let targetPlanId: string | null = null;
-          for (const c of allClients || []) {
-            for (const s of c.sites || []) {
-              const hit = (s.floorPlans || []).find((p) => (p.rooms || []).some((r) => r.id === roomId));
-              if (hit?.id) {
-                targetPlanId = hit.id;
-                break;
+      <Transition show={!!roomMeetingDuplicateModal && !meetingManagerOpen} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-[145]"
+          onClose={() => {
+            if (roomMeetingDuplicateModal?.saving) return;
+            setRoomMeetingDuplicateModal(null);
+          }}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto p-4">
+            <div className="flex min-h-full items-center justify-center">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-[760px] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
+                  {(() => {
+              const dup = roomMeetingDuplicateModal;
+              if (!dup) return null;
+              const monthDate = new Date(`${dup.monthAnchor}T00:00:00`);
+              const validMonth = Number.isFinite(monthDate.getTime());
+              const y = validMonth ? monthDate.getFullYear() : new Date().getFullYear();
+              const m = validMonth ? monthDate.getMonth() : new Date().getMonth();
+              const daysInMonth = new Date(y, m + 1, 0).getDate();
+              const firstWeekday = (() => {
+                const w = new Date(y, m, 1).getDay();
+                return (w + 6) % 7; // Monday first
+              })();
+              const monthLabel = new Date(y, m, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+              const baseDay = dup.baseDay;
+              const booking = dup.booking;
+              const startHm = meetingClockFromTs(Number(booking.startAt || 0));
+              const endHm = meetingClockFromTs(Number(booking.endAt || 0));
+              const sourceRoomId = String((booking as any)?.roomId || '').trim();
+              const sourceRoomName = String((booking as any)?.roomName || '').trim();
+              const selectedRoomOption = dup.roomOptions.find((entry) => String(entry.roomId) === String(dup.selectedRoomId));
+              const customFromMin = hmToMinutes(String(dup.customFromHm || ''));
+              const customToMin = hmToMinutes(String(dup.customToHm || ''));
+              const customWindowValid = Number.isFinite(customFromMin) && Number.isFinite(customToMin) && customFromMin < customToMin;
+              const today = new Date().toISOString().slice(0, 10);
+              const canGoPrev = dup.monthAnchor > monthAnchorFromIso(baseDay);
+              const isFollowUpMode = dup.mode === 'followup';
+              const cells: Array<{ iso: string | null; dayNum: number | null }> = [];
+              for (let i = 0; i < firstWeekday; i += 1) cells.push({ iso: null, dayNum: null });
+              for (let d = 1; d <= daysInMonth; d += 1) {
+                const dt = new Date(y, m, d);
+                const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                cells.push({ iso, dayNum: d });
               }
-            }
-            if (targetPlanId) break;
-          }
-          if (!targetPlanId) return;
-          setMeetingManagerOpen(false);
-          setMeetingManagerPreset(null);
-          if (targetPlanId !== planId) {
-            setSelectedPlan(targetPlanId);
-            navigate(`/plan/${targetPlanId}?focusRoom=${encodeURIComponent(roomId)}`);
-            return;
-          }
-          setSelectedRoomId(roomId);
-          setSelectedRoomIds([roomId]);
-          setHighlightRoom({ roomId, until: Date.now() + 3200 });
-        }}
-      />
+              while (cells.length % 7) cells.push({ iso: null, dayNum: null });
+              const weekdayLabels = [
+                t({ it: 'Lun', en: 'Mon' }),
+                t({ it: 'Mar', en: 'Tue' }),
+                t({ it: 'Mer', en: 'Wed' }),
+                t({ it: 'Gio', en: 'Thu' }),
+                t({ it: 'Ven', en: 'Fri' }),
+                t({ it: 'Sab', en: 'Sat' }),
+                t({ it: 'Dom', en: 'Sun' })
+              ];
+              return (
+                <>
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div>
+                      <div className="text-lg font-semibold text-ink">
+                        {isFollowUpMode ? t({ it: 'Create Follow-UP', en: 'Create Follow-UP' }) : t({ it: 'Duplica riunione', en: 'Duplicate meeting' })}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {booking.subject || t({ it: 'Meeting', en: 'Meeting' })} • {startHm} - {endHm}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {isFollowUpMode
+                          ? t({
+                              it: 'Pianifica il follow-up della stessa chain. Le date in rosso sono occupate nello stesso orario.',
+                              en: 'Schedule the follow-up of the same chain. Red dates are occupied at the same time.'
+                            })
+                          : t({
+                              it: 'Seleziona i giorni successivi. Le date in rosso sono occupate nello stesso orario.',
+                              en: 'Select future days. Red dates are occupied at the same time.'
+                            })}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (dup.saving) return;
+                        setRoomMeetingDuplicateModal(null);
+                      }}
+                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {dup.step === 'setup' ? (
+                    <>
+                      <div className="mt-3 space-y-3">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {t({ it: 'Scelta saletta', en: 'Room selection' })}
+                          </div>
+                          <div ref={roomMeetingDuplicateRoomPickerRef} className="relative mt-2">
+                            <button
+                              type="button"
+                              onClick={() => setRoomMeetingDuplicateRoomPickerOpen((prev) => !prev)}
+                              className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm hover:border-primary/40"
+                            >
+                              <span className="truncate pr-2">
+                                {dup.roomMode === 'any'
+                                  ? t({
+                                      it: 'Qualsiasi meeting room disponibile in questa sede',
+                                      en: 'Any available meeting room in this site'
+                                    })
+                                  : `${selectedRoomOption?.roomName || '-'}${
+                                      selectedRoomOption?.floorPlanName ? ` • ${selectedRoomOption.floorPlanName}` : ''
+                                    }`}
+                              </span>
+                              <ChevronDown
+                                size={16}
+                                className={`shrink-0 text-slate-500 transition-transform ${roomMeetingDuplicateRoomPickerOpen ? 'rotate-180' : ''}`}
+                              />
+                            </button>
+                            {roomMeetingDuplicateRoomPickerOpen ? (
+                              <div className="absolute z-[220] mt-1 max-h-72 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRoomMeetingDuplicateModal((prev) => (prev ? { ...prev, roomMode: 'any', error: null } : prev));
+                                    setRoomMeetingDuplicateRoomPickerOpen(false);
+                                  }}
+                                  className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
+                                    dup.roomMode === 'any' ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  <span>{t({ it: 'Qualsiasi meeting room disponibile in questa sede', en: 'Any available meeting room in this site' })}</span>
+                                  {dup.roomMode === 'any' ? <span className="text-xs font-semibold">✓</span> : null}
+                                </button>
+                                {dup.roomOptions.map((option) => {
+                                  const isSelected = dup.roomMode === 'selected' && String(option.roomId) === String(dup.selectedRoomId);
+                                  const isSource = String(option.roomId) === sourceRoomId;
+                                  return (
+                                    <button
+                                      key={option.roomId}
+                                      type="button"
+                                      onClick={() => {
+                                        setRoomMeetingDuplicateModal((prev) =>
+                                          prev ? { ...prev, roomMode: 'selected', selectedRoomId: option.roomId, error: null } : prev
+                                        );
+                                        setRoomMeetingDuplicateRoomPickerOpen(false);
+                                      }}
+                                      className={`mt-1 flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
+                                        isSelected ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      <span className="flex min-w-0 items-center gap-2">
+                                        <span className="truncate">
+                                          {option.roomName}
+                                          {option.floorPlanName ? ` • ${option.floorPlanName}` : ''}
+                                        </span>
+                                        {isSource ? (
+                                          <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-700">
+                                            {t({ it: 'Origine', en: 'Source' })}
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                      {isSelected ? <span className="text-xs font-semibold">✓</span> : null}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="mt-2 text-xs text-slate-500">
+                            {t({ it: 'Saletta di origine', en: 'Source room' })}:{' '}
+                            <span className="font-semibold text-slate-700">{sourceRoomName || '-'}</span>
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {t({ it: 'Selezione attuale', en: 'Current selection' })}:{' '}
+                            {dup.roomMode === 'any'
+                              ? t({
+                                  it: 'Qualsiasi meeting room disponibile in questa sede',
+                                  en: 'Any available meeting room in this site'
+                                })
+                              : `${selectedRoomOption?.roomName || '-'}${
+                                  selectedRoomOption?.floorPlanName ? ` • ${selectedRoomOption.floorPlanName}` : ''
+                                }`}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {t({ it: 'Scelta orario', en: 'Time selection' })}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRoomMeetingDuplicateModal((prev) =>
+                                  prev ? { ...prev, timeMode: 'same', error: null } : prev
+                                )
+                              }
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                                dup.timeMode === 'same'
+                                  ? 'border-primary bg-primary/10 text-primary'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {t({ it: 'Stesso di quello originale', en: 'Same as original' })}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRoomMeetingDuplicateModal((prev) =>
+                                  prev ? { ...prev, timeMode: 'any_08_18', error: null } : prev
+                                )
+                              }
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                                dup.timeMode === 'any_08_18'
+                                  ? 'border-primary bg-primary/10 text-primary'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {t({
+                                it: 'Qualsiasi disponibile tra 08:00 e 18:00',
+                                en: 'Any available between 08:00 and 18:00'
+                              })}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRoomMeetingDuplicateModal((prev) =>
+                                  prev ? { ...prev, timeMode: 'custom', error: null } : prev
+                                )
+                              }
+                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                                dup.timeMode === 'custom'
+                                  ? 'border-primary bg-primary/10 text-primary'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {t({ it: 'Seleziona da - a', en: 'Select from - to' })}
+                            </button>
+                          </div>
+                          {dup.timeMode === 'custom' ? (
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              <label className="text-xs text-slate-500">
+                                {t({ it: 'Da', en: 'From' })}
+                                <input
+                                  type="time"
+                                  value={dup.customFromHm}
+                                  onChange={(event) =>
+                                    setRoomMeetingDuplicateModal((prev) =>
+                                      prev ? { ...prev, customFromHm: event.target.value, error: null } : prev
+                                    )
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                />
+                              </label>
+                              <label className="text-xs text-slate-500">
+                                {t({ it: 'A', en: 'To' })}
+                                <input
+                                  type="time"
+                                  value={dup.customToHm}
+                                  onChange={(event) =>
+                                    setRoomMeetingDuplicateModal((prev) =>
+                                      prev ? { ...prev, customToHm: event.target.value, error: null } : prev
+                                    )
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                />
+                              </label>
+                            </div>
+                          ) : null}
+                          <div className="mt-2 text-xs text-slate-500">
+                            {dup.timeMode === 'same'
+                              ? `${t({ it: 'Slot origine', en: 'Source slot' })}: ${startHm} - ${endHm}`
+                              : dup.timeMode === 'any_08_18'
+                                ? t({
+                                    it: 'Il sistema trova il primo slot utile tra 08:00 e 18:00.',
+                                    en: 'System picks the first available slot between 08:00 and 18:00.'
+                                  })
+                                : `${t({ it: 'Finestra scelta', en: 'Selected window' })}: ${dup.customFromHm} - ${dup.customToHm}`}
+                          </div>
+                          {dup.timeMode === 'custom' && !customWindowValid ? (
+                            <div className="mt-1 text-xs font-semibold text-rose-600">
+                              {t({
+                                it: "L'orario 'da' deve essere precedente all'orario 'a'.",
+                                en: "The 'from' time must be earlier than the 'to' time."
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={dup.saving}
+                          onClick={() => setRoomMeetingDuplicateModal(null)}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          {t({ it: 'Annulla', en: 'Cancel' })}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={(dup.roomMode === 'selected' && !dup.selectedRoomId) || (dup.timeMode === 'custom' && !customWindowValid)}
+                          onClick={() =>
+                            setRoomMeetingDuplicateModal((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    step: 'calendar',
+                                    selectedDays: [],
+                                    availabilityByDay: {},
+                                    candidateByDay: {},
+                                    loadingMonth: false,
+                                    error: null
+                                  }
+                                : prev
+                            )
+                          }
+                          className="rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-105 disabled:opacity-50"
+                        >
+                          {isFollowUpMode ? t({ it: 'Vai alla pianificazione', en: 'Go to scheduling' }) : t({ it: 'Vai al calendario', en: 'Go to calendar' })}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRoomMeetingDuplicateModal((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      step: 'setup',
+                                      selectedDays: [],
+                                      availabilityByDay: {},
+                                      candidateByDay: {},
+                                      loadingMonth: false,
+                                      error: null
+                                    }
+                                  : prev
+                              )
+                            }
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            <ChevronLeft size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!canGoPrev}
+                            onClick={() =>
+                              setRoomMeetingDuplicateModal((prev) =>
+                                prev ? { ...prev, monthAnchor: shiftMonthAnchor(prev.monthAnchor, -1), error: null } : prev
+                              )
+                            }
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                          >
+                            <ChevronLeft size={15} />
+                          </button>
+                          <div className="min-w-[220px] text-center text-sm font-semibold text-slate-700 capitalize">{monthLabel}</div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRoomMeetingDuplicateModal((prev) =>
+                                prev ? { ...prev, monthAnchor: shiftMonthAnchor(prev.monthAnchor, 1), error: null } : prev
+                              )
+                            }
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                          >
+                            <ChevronRight size={15} />
+                          </button>
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {dup.loadingMonth ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Loader2 size={12} className="animate-spin" />
+                              {t({ it: 'Verifica disponibilità…', en: 'Checking availability…' })}
+                            </span>
+                          ) : dup.selectedDays.length > 0
+                            ? t({
+                                it: `${dup.selectedDays.length} giorn${dup.selectedDays.length === 1 ? 'o selezionato' : 'i selezionati'}`,
+                                en: `${dup.selectedDays.length} day(s) selected`
+                              })
+                            : t({ it: 'Nessun giorno selezionato', en: 'No days selected' })}
+                        </div>
+                      </div>
+
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="grid grid-cols-7 gap-1">
+                          {weekdayLabels.map((label) => (
+                            <div key={`dup-weekday-${label}`} className="px-1 py-1 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                              {label}
+                            </div>
+                          ))}
+                          {cells.map((cell, idx) => {
+                            if (!cell.iso) {
+                              return <div key={`dup-empty-${idx}`} className="h-20 rounded-lg border border-transparent" />;
+                            }
+                            const status =
+                              dup.availabilityByDay[cell.iso] ||
+                              (cell.iso <= baseDay || cell.iso < today
+                                ? ({
+                                    state: 'blocked' as const,
+                                    reason:
+                                      cell.iso < today
+                                        ? t({ it: 'Giorno passato', en: 'Past day' })
+                                        : t({ it: 'Giorno di origine', en: 'Source day' })
+                                  } as const)
+                                : ({ state: 'loading' as const }));
+                            const candidate = dup.candidateByDay[cell.iso];
+                            const tooltipText = (() => {
+                              const dayLabel = new Date(`${cell.iso}T00:00:00`).toLocaleDateString();
+                              if (status.state === 'occupied') {
+                                return `${dayLabel}\n${t({ it: 'Occupata', en: 'Busy' })}\n${
+                                  status.reason || t({ it: 'Slot già occupato', en: 'Slot already occupied' })
+                                }`;
+                              }
+                              if (status.state === 'blocked') {
+                                return `${dayLabel}\n${status.reason || t({ it: 'Non selezionabile', en: 'Not selectable' })}`;
+                              }
+                              if (status.state === 'error') {
+                                return `${dayLabel}\n${status.reason || t({ it: 'Errore verifica', en: 'Check error' })}`;
+                              }
+                              if (status.state === 'loading') {
+                                return `${dayLabel}\n${t({ it: 'Verifica disponibilità in corso', en: 'Checking availability' })}`;
+                              }
+                              if (candidate) {
+                                return `${dayLabel}\n${candidate.roomName}\n${candidate.startHm} - ${candidate.endHm}`;
+                              }
+                              return `${dayLabel}\n${t({ it: 'Disponibile', en: 'Available' })}\n${startHm} - ${endHm}`;
+                            })();
+                            const selected = dup.selectedDays.includes(cell.iso);
+                            const blocked = status.state !== 'available';
+                            const classes =
+                              status.state === 'occupied'
+                                ? 'border-rose-300 bg-rose-50 text-rose-800'
+                                : status.state === 'available' && selected
+                                  ? 'border-primary bg-primary/10 text-primary'
+                                  : status.state === 'available'
+                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                    : status.state === 'blocked'
+                                      ? 'border-slate-200 bg-slate-100 text-slate-400'
+                                      : status.state === 'loading'
+                                        ? 'border-slate-200 bg-white text-slate-500'
+                                        : 'border-amber-300 bg-amber-50 text-amber-800';
+                            return (
+                              <button
+                                key={cell.iso}
+                                type="button"
+                                disabled={blocked}
+                                title={tooltipText}
+                                aria-label={tooltipText}
+                                onClick={() =>
+                                  setRoomMeetingDuplicateModal((prev) => {
+                                    if (!prev) return prev;
+                                    const has = prev.selectedDays.includes(cell.iso!);
+                                    return {
+                                      ...prev,
+                                      error: null,
+                                      selectedDays: has
+                                        ? prev.selectedDays.filter((entry) => entry !== cell.iso)
+                                        : [...prev.selectedDays, cell.iso!]
+                                    };
+                                  })
+                                }
+                                className={`group relative h-20 rounded-lg border p-2 text-left transition ${classes} disabled:cursor-not-allowed`}
+                              >
+                                <span className="pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden max-w-[240px] whitespace-pre-line rounded-lg border border-slate-200 bg-slate-900 px-2 py-1 text-[10px] font-medium leading-snug text-white shadow-lg group-hover:block group-focus-visible:block">
+                                  {tooltipText}
+                                </span>
+                                <div className="flex items-start justify-between gap-1">
+                                  <span className="text-sm font-semibold">{cell.dayNum}</span>
+                                  {status.state === 'occupied' ? (
+                                    <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                                      {t({ it: 'Occupata', en: 'Busy' })}
+                                    </span>
+                                  ) : status.state === 'available' ? (
+                                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${selected ? 'bg-primary/15 text-primary' : 'bg-emerald-100 text-emerald-700'}`}>
+                                      {selected ? t({ it: 'Selez.', en: 'Selected' }) : t({ it: 'Libera', en: 'Free' })}
+                                    </span>
+                                  ) : status.state === 'loading' ? (
+                                    <Loader2 size={12} className="animate-spin text-slate-400" />
+                                  ) : null}
+                                </div>
+                                <div className="mt-1 line-clamp-2 text-[11px] leading-tight opacity-90">
+                                  {status.state === 'occupied'
+                                    ? status.reason || t({ it: 'Già occupata', en: 'Already occupied' })
+                                    : status.state === 'blocked'
+                                      ? status.reason || t({ it: 'Giorno non selezionabile', en: 'Day not selectable' })
+                                      : status.state === 'error'
+                                        ? status.reason || t({ it: 'Errore verifica', en: 'Check error' })
+                                        : candidate
+                                          ? `${candidate.roomName} • ${candidate.startHm} - ${candidate.endHm}`
+                                          : `${startHm} - ${endHm}`}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {dup.error ? (
+                        <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                          {dup.error}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          disabled={dup.saving}
+                          onClick={() => setRoomMeetingDuplicateModal(null)}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          {t({ it: 'Annulla', en: 'Cancel' })}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={dup.saving || !dup.selectedDays.length}
+                          onClick={() => void saveRoomMeetingDuplicates()}
+                          className="rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-105 disabled:opacity-50"
+                        >
+                          {dup.saving ? (
+                            <>
+                              <Loader2 size={14} className="mr-1 inline-block animate-spin" />
+                              {isFollowUpMode ? t({ it: 'Creazione follow-up...', en: 'Creating follow-up...' }) : t({ it: 'Duplicazione...', en: 'Duplicating...' })}
+                            </>
+                          ) : (
+                            isFollowUpMode
+                              ? t({ it: 'Crea Follow-UP sui giorni selezionati', en: 'Create Follow-UP on selected days' })
+                              : t({ it: 'Duplica sui giorni selezionati', en: 'Duplicate on selected days' })
+                          )}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                    </>
+                  );
+                })()}
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      {meetingHubModalOpen ? (
+        <Suspense fallback={null}>
+          <MeetingHubModal
+            open={meetingHubModalOpen}
+            canManageMeetingScheduling={canManageMeetingScheduling}
+            t={t}
+            focusRef={meetingHubFocusRef}
+            onClose={() => setMeetingHubModalOpen(false)}
+            onOpenScheduling={() => {
+              setMeetingHubModalOpen(false);
+              openSchedulingFromHub({
+                clientId: client?.id,
+                siteId: site?.id,
+                siteLocked: false,
+                day: new Date().toISOString().slice(0, 10),
+                returnTo: 'hub'
+              });
+            }}
+            onOpenMyMeetings={() => {
+              setMeetingHubModalOpen(false);
+              openMyMeetingsFromHub();
+            }}
+          />
+        </Suspense>
+      ) : null}
+
+      {myMeetingsModal ? (
+        <Suspense fallback={null}>
+          <MyMeetingsModal
+            open={!!myMeetingsModal}
+            modal={myMeetingsModal}
+            meetings={myMeetingsFiltered}
+            search={myMeetingsSearch}
+            focusRef={myMeetingsFocusRef}
+            t={t}
+            canUseMeetingNotes={canUseMeetingNotes}
+            locationLabels={meetingLocationLabels}
+            checkInBusyId={myMeetingsCheckInBusyId}
+            checkInDoneById={myMeetingsCheckInDoneById}
+            onClose={closeMyMeetingsModal}
+            onSearchChange={setMyMeetingsSearch}
+            onOpenScheduling={() => {
+              const topMeeting = myMeetingsFiltered[0] || myMeetingsModal?.meetings?.[0] || null;
+              myMeetingsRestoreRef.current = myMeetingsModal;
+              setMyMeetingsModal(null);
+              dispatchOpenClientMeetingsTimeline({
+                clientId: String(topMeeting?.clientId || client?.id || '').trim() || undefined,
+                siteId: String(topMeeting?.siteId || site?.id || '').trim() || undefined,
+                siteLocked: false,
+                day: String((topMeeting as any)?.occurrenceDate || (topMeeting?.startAt ? meetingIsoDayFromTs(Number(topMeeting.startAt)) : new Date().toISOString().slice(0, 10))),
+                returnTo: 'myMeetings'
+              });
+            }}
+            onRefresh={() => void reloadMyMeetings()}
+            onOpenNotes={(booking) => {
+              myMeetingsRestoreRef.current = myMeetingsModal;
+              setRoomMeetingNotesReturnToMyMeetings(true);
+              setRoomMeetingNotesModalState(null);
+              setRoomMeetingNotesModalBooking(booking);
+              setMyMeetingsModal(null);
+            }}
+            onCheckIn={(booking) => {
+              if (myMeetingsCheckInBusyId) return;
+              setMyMeetingsCheckInBusyId(String(booking.id));
+              void mobileCheckInMeeting(String(booking.id), true)
+                .then(() => {
+                  setMyMeetingsCheckInDoneById((prev) => ({ ...prev, [String(booking.id)]: true }));
+                  push(t({ it: 'Check-in registrato.', en: 'Check-in registered.' }), 'success');
+                })
+                .catch((err: any) => {
+                  push(String(err?.message || t({ it: 'Errore check-in', en: 'Check-in error' })), 'danger');
+                })
+                .finally(() => {
+                  setMyMeetingsCheckInBusyId(null);
+                });
+            }}
+          />
+        </Suspense>
+      ) : null}
+
+      {roomAllocationOpen ? (
+        <Suspense fallback={null}>
+          <RoomAllocationModal
+            open={roomAllocationOpen}
+            clients={allClients}
+            departmentOptions={roomDepartmentOptions}
+            currentClientId={roomAllocationPreset?.clientId || client?.id}
+            currentSiteId={roomAllocationPreset?.siteId || site?.id}
+            onHighlight={({ planId: targetPlanId, roomId }) => {
+              if (targetPlanId !== planId) {
+                setRoomAllocationOpen(false);
+                setRoomAllocationPreset(null);
+                setSelectedPlan(targetPlanId);
+                navigate(`/plan/${targetPlanId}?focusRoom=${encodeURIComponent(roomId)}`);
+                return;
+              }
+              setSelectedRoomId(roomId);
+              setSelectedRoomIds([roomId]);
+              setHighlightRoom({ roomId, until: Date.now() + 3200 });
+            }}
+            onClose={() => {
+              setRoomAllocationOpen(false);
+              setRoomAllocationPreset(null);
+              setRoomsOpen(false);
+            }}
+          />
+        </Suspense>
+      ) : null}
+
+      {capacityDashboardOpen ? (
+        <Suspense fallback={null}>
+          <CapacityDashboardModal
+            open={capacityDashboardOpen}
+            clients={allClients}
+            currentClientId={capacityDashboardPreset?.clientId || client?.id}
+            currentSiteId={capacityDashboardPreset?.siteId || site?.id}
+            onClose={() => {
+              setCapacityDashboardOpen(false);
+              setCapacityDashboardPreset(null);
+            }}
+          />
+        </Suspense>
+      ) : null}
+
+      {meetingManagerOpen ? (
+        <Suspense fallback={null}>
+          <MeetingManagerModal
+            open={meetingManagerOpen}
+            clients={allClients}
+            initialClientId={meetingManagerPreset?.clientId || client?.id}
+            initialSiteId={meetingManagerPreset?.siteId || site?.id}
+            initialFloorPlanId={meetingManagerPreset?.floorPlanId || planId}
+            initialRoomId={meetingManagerPreset?.roomId}
+            initialDay={meetingManagerPreset?.day}
+            onClose={() => {
+              setMeetingManagerOpen(false);
+              setMeetingManagerPreset(null);
+            }}
+            onCreated={() => {
+              const cid = String(client?.id || '').trim();
+              const sid = String(site?.id || '').trim();
+              if (cid && sid) {
+                void fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day: new Date().toISOString().slice(0, 10) })
+                  .then((payload) => {
+                    const nowTs = Date.now();
+                    const next: Record<string, { hasMeetingToday: boolean; inProgress: boolean; hasFutureToday: boolean }> = {};
+                    for (const row of payload.rooms || []) {
+                      const hasFutureToday = Array.isArray(row.bookings) ? row.bookings.some((b) => Number(b.startAt) > nowTs) : false;
+                      next[String(row.roomId)] = {
+                        hasMeetingToday: !!row.hasMeetingToday,
+                        inProgress: !!row.inProgress,
+                        hasFutureToday
+                      };
+                    }
+                    setMeetingStatusByRoomId(next);
+                  })
+                  .catch(() => {});
+              }
+              if (roomMeetingsTimelineModal?.roomId) {
+                void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, roomMeetingsTimelineModal.day);
+              }
+            }}
+            onGoToRoom={(roomId) => {
+              let targetPlanId: string | null = null;
+              for (const c of allClients || []) {
+                for (const s of c.sites || []) {
+                  const hit = (s.floorPlans || []).find((p) => (p.rooms || []).some((r) => r.id === roomId));
+                  if (hit?.id) {
+                    targetPlanId = hit.id;
+                    break;
+                  }
+                }
+                if (targetPlanId) break;
+              }
+              if (!targetPlanId) return;
+              setMeetingManagerOpen(false);
+              setMeetingManagerPreset(null);
+              if (targetPlanId !== planId) {
+                setSelectedPlan(targetPlanId);
+                navigate(`/plan/${targetPlanId}?focusRoom=${encodeURIComponent(roomId)}`);
+                return;
+              }
+              setSelectedRoomId(roomId);
+              setSelectedRoomIds([roomId]);
+              setHighlightRoom({ roomId, until: Date.now() + 3200 });
+            }}
+          />
+        </Suspense>
+      ) : null}
+
+      {roomMeetingNotesModalBooking ? (
+        <Suspense fallback={null}>
+          <MeetingNotesModal
+            open={!!roomMeetingNotesModalBooking}
+            meeting={roomMeetingNotesModalBooking}
+            suspendClose={!!roomMeetingDuplicateModal}
+            initialTab={roomMeetingNotesModalState?.initialTab}
+            initialHistoryMeetingId={roomMeetingNotesModalState?.historyMeetingId}
+            highlightHistoryMeetingId={roomMeetingNotesModalState?.highlightHistoryMeetingId}
+            onClose={() => {
+              const shouldReturnToMyMeetings = roomMeetingNotesReturnToMyMeetings;
+              setRoomMeetingNotesModalBooking(null);
+              setRoomMeetingNotesModalState(null);
+              setRoomMeetingNotesReturnToMyMeetings(false);
+              if (shouldReturnToMyMeetings) {
+                restoreMyMeetingsFromSnapshot();
+              }
+            }}
+            onOpenDetails={(booking) => {
+              const fromMyMeetings = roomMeetingNotesReturnToMyMeetings;
+              setRoomMeetingNotesModalBooking(null);
+              setRoomMeetingNotesModalState(null);
+              setRoomMeetingNotesReturnToMyMeetings(false);
+              openRoomMeetingBookingDetail(booking, 'edit', {
+                fromMyMeetings,
+                fromMeetingNotes: true,
+                meetingNotesState: {
+                  initialTab: 'history',
+                  historyMeetingId: String(booking.id || ''),
+                  highlightHistoryMeetingId: String(booking.id || '')
+                }
+              });
+            }}
+            onOpenFollowUpScheduler={(booking, options) => {
+              openRoomMeetingDuplicateModal(booking, { ...options, mode: 'followup' });
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       {/* kept for potential future use */}
       <BulkEditDescriptionModal
@@ -20186,17 +23141,27 @@ const PlanView = ({ planId }: Props) => {
         cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
       />
 
-      <ViewModal
-        open={viewModalOpen}
-        onClose={() => setViewModalOpen(false)}
-        onSubmit={handleSaveView}
-        hasExistingDefault={hasDefaultView}
-        existingDefaultName={(basePlan.views || []).find((v) => v.isDefault)?.name || ''}
-      />
+      {viewModalOpen ? (
+        <Suspense fallback={null}>
+          <ViewModal
+            open={viewModalOpen}
+            onClose={() => setViewModalOpen(false)}
+            onSubmit={handleSaveView}
+            hasExistingDefault={hasDefaultView}
+            existingDefaultName={(basePlan.views || []).find((v) => v.isDefault)?.name || ''}
+          />
+        </Suspense>
+      ) : null}
 
-      <PrintModal open={exportModalOpen} onClose={() => setExportModalOpen(false)} mode="single" singlePlanId={basePlan.id} />
+      {exportModalOpen ? (
+        <Suspense fallback={null}>
+          <PrintModal open={exportModalOpen} onClose={() => setExportModalOpen(false)} mode="single" singlePlanId={basePlan.id} />
+        </Suspense>
+      ) : null}
 
-      <CableModal
+      {cableModal ? (
+        <Suspense fallback={null}>
+          <CableModal
         open={!!cableModal}
         initial={
           cableModal?.mode === 'edit'
@@ -20260,8 +23225,12 @@ const PlanView = ({ planId }: Props) => {
           }
         }}
       />
+        </Suspense>
+      ) : null}
 
-      <LinksModal
+      {linksModalObjectId ? (
+        <Suspense fallback={null}>
+          <LinksModal
         open={!!linksModalObjectId}
         readOnly={isReadOnly}
         objectName={linksModalObjectName}
@@ -20284,8 +23253,12 @@ const PlanView = ({ planId }: Props) => {
           if (selectedLinkId === linkId) setSelectedLinkId(null);
         }}
       />
+        </Suspense>
+      ) : null}
 
-      <LinkEditModal
+      {linkEditId ? (
+        <Suspense fallback={null}>
+          <LinkEditModal
         open={!!linkEditId}
         initial={
           linkEditId
@@ -20334,13 +23307,19 @@ const PlanView = ({ planId }: Props) => {
           closeReturnToSelectionList();
         }}
       />
+        </Suspense>
+      ) : null}
 
-      <RealUserDetailsModal
-        open={!!realUserDetailsId}
-        userName={realUserDetailsName}
-        details={realUserDetails}
-        onClose={() => setRealUserDetailsId(null)}
-      />
+      {realUserDetailsId ? (
+        <Suspense fallback={null}>
+          <RealUserDetailsModal
+            open={!!realUserDetailsId}
+            userName={realUserDetailsName}
+            details={realUserDetails}
+            onClose={() => setRealUserDetailsId(null)}
+          />
+        </Suspense>
+      ) : null}
 
       <Transition show={!!unlockPrompt} as={Fragment}>
         <Dialog
@@ -20685,8 +23664,8 @@ const PlanView = ({ planId }: Props) => {
 	        </Dialog>
 	      </Transition>
 
-		      <Transition show={!!forceUnlockActive} as={Fragment}>
-		        <Dialog as="div" className="relative z-50" onClose={() => {}}>
+	      <Transition show={!!forceUnlockActive} as={Fragment}>
+	        <Dialog as="div" className="relative z-50" onClose={() => {}} initialFocus={forceUnlockActiveFocusRef}>
 		          <Transition.Child
 		            as={Fragment}
 		            enter="ease-out duration-150"
@@ -20709,8 +23688,11 @@ const PlanView = ({ planId }: Props) => {
 	                leaveFrom="opacity-100 scale-100"
 	                leaveTo="opacity-0 scale-95"
 	              >
-		                <Dialog.Panel className="w-full max-w-2xl modal-panel">
-		                  <div className="modal-header items-center">
+	                <Dialog.Panel className="w-full max-w-2xl modal-panel">
+                    <button ref={forceUnlockActiveFocusRef} type="button" className="sr-only" tabIndex={0}>
+                      focus
+                    </button>
+                  <div className="modal-header items-center">
 		                    <div className="min-w-0">
 		                      <Dialog.Title className="modal-title">{t({ it: 'Force unlock in corso', en: 'Force unlock in progress' })}</Dialog.Title>
 		                      <div className="mt-1 text-xs text-slate-500">
@@ -20805,8 +23787,8 @@ const PlanView = ({ planId }: Props) => {
 	        </Dialog>
 	      </Transition>
 
-		      <Transition show={!!forceUnlockIncoming} as={Fragment}>
-		        <Dialog as="div" className="relative z-50" onClose={() => {}}>
+	      <Transition show={!!forceUnlockIncoming} as={Fragment}>
+	        <Dialog as="div" className="relative z-50" onClose={() => {}} initialFocus={forceUnlockIncomingFocusRef}>
 		          <Transition.Child
 		            as={Fragment}
 		            enter="ease-out duration-150"
@@ -20829,8 +23811,11 @@ const PlanView = ({ planId }: Props) => {
 	                leaveFrom="opacity-100 scale-100"
 	                leaveTo="opacity-0 scale-95"
 	              >
-		                <Dialog.Panel className="w-full max-w-xl modal-panel">
-		                  <div className="modal-header items-center">
+	                <Dialog.Panel className="w-full max-w-xl modal-panel">
+                    <button ref={forceUnlockIncomingFocusRef} type="button" className="sr-only" tabIndex={0}>
+                      focus
+                    </button>
+                  <div className="modal-header items-center">
 		                    <div className="min-w-0">
 		                      <Dialog.Title className="modal-title">{t({ it: 'Force unlock richiesto', en: 'Force unlock requested' })}</Dialog.Title>
 		                      <div className="mt-1 text-xs text-slate-500">
@@ -20934,99 +23919,115 @@ const PlanView = ({ planId }: Props) => {
         />
       </Suspense>
 
-      <AllObjectTypesModal
-        open={allTypesOpen}
-        defs={(objectTypeDefs || []).filter((def) => (def as any)?.category !== 'door')}
-        onClose={() => setAllTypesOpen(false)}
-        onPick={(typeId) => {
-          setPendingType(typeId);
-          push(t({ it: 'Seleziona un punto sulla mappa per inserire l’oggetto', en: 'Click on the map to place the object' }), 'info');
-        }}
-        defaultTab={allTypesDefaultTab}
-        paletteTypeIds={paletteOrder}
-        onAddToPalette={addTypeToPalette}
-      />
+      {allTypesOpen ? (
+        <Suspense fallback={null}>
+          <AllObjectTypesModal
+            open={allTypesOpen}
+            defs={(objectTypeDefs || []).filter((def) => (def as any)?.category !== 'door')}
+            onClose={() => setAllTypesOpen(false)}
+            onPick={(typeId) => {
+              setPendingType(typeId);
+              push(t({ it: 'Seleziona un punto sulla mappa per inserire l’oggetto', en: 'Click on the map to place the object' }), 'info');
+            }}
+            defaultTab={allTypesDefaultTab}
+            paletteTypeIds={paletteOrder}
+            onAddToPalette={addTypeToPalette}
+          />
+        </Suspense>
+      ) : null}
 
-      <AllObjectTypesModal
-        open={deskCatalogOpen}
-        defs={deskCatalogDefs}
-        onClose={() => setDeskCatalogOpen(false)}
-        onPick={(typeId) => {
-          setPendingType(typeId);
-          push(t({ it: 'Seleziona un punto sulla mappa per inserire l’oggetto', en: 'Click on the map to place the object' }), 'info');
-          setDeskCatalogOpen(false);
-        }}
-        defaultTab="desks"
-      />
+      {deskCatalogOpen ? (
+        <Suspense fallback={null}>
+          <AllObjectTypesModal
+            open={deskCatalogOpen}
+            defs={deskCatalogDefs}
+            onClose={() => setDeskCatalogOpen(false)}
+            onPick={(typeId) => {
+              setPendingType(typeId);
+              push(t({ it: 'Seleziona un punto sulla mappa per inserire l’oggetto', en: 'Click on the map to place the object' }), 'info');
+              setDeskCatalogOpen(false);
+            }}
+            defaultTab="desks"
+          />
+        </Suspense>
+      ) : null}
 
-      <RevisionsModal
-        open={revisionsOpen}
-        revisions={basePlan.revisions || []}
-        selectedRevisionId={selectedRevisionId}
-        breadcrumb={[client?.shortName || client?.name, site?.name, basePlan?.name].filter(Boolean).join(' → ')}
-        onClose={() => setRevisionsOpen(false)}
-        onSelect={(revisionId) => {
-          setSelectedRevision(planId, revisionId);
-          push(t({ it: 'Revisione caricata (sola lettura)', en: 'Revision loaded (read-only)' }), 'info');
-        }}
-        onBackToPresent={() => {
-          setSelectedRevision(planId, null);
-          push(t({ it: 'Tornato al presente', en: 'Back to present' }), 'info');
-        }}
-        onDelete={(revisionId) => {
-          const rev = (basePlan.revisions || []).find((r) => r.id === revisionId);
-          if (rev?.immutable && !isSuperAdmin) {
-            push(t({ it: 'Revisione immutabile: non puoi eliminarla.', en: 'Immutable revision: you cannot delete it.' }), 'danger');
-            return;
-          }
-          deleteRevision(basePlan.id, revisionId);
-          if (selectedRevisionId === revisionId) {
-            setSelectedRevision(planId, null);
-          }
-          push(t({ it: 'Revisione eliminata', en: 'Revision deleted' }), 'info');
-          postAuditEvent({
-            event: rev?.immutable ? 'revision_delete_immutable' : 'revision_delete',
-            scopeType: 'plan',
-            scopeId: basePlan.id,
-            details: { id: revisionId, immutable: !!rev?.immutable }
-          });
-        }}
-        onClearAll={() => {
-          const hasImmutable = (basePlan.revisions || []).some((r) => r.immutable);
-          if (hasImmutable && !isSuperAdmin) {
-            push(t({ it: 'Impossibile eliminare le revisioni immutabili.', en: 'Immutable revisions cannot be deleted.' }), 'danger');
-            return;
-          }
-          clearRevisions(basePlan.id);
-          setSelectedRevision(planId, null);
-          push(t({ it: 'Revisioni eliminate', en: 'Revisions deleted' }), 'info');
-          postAuditEvent({
-            event: 'revision_clear_all',
-            scopeType: 'plan',
-            scopeId: basePlan.id,
-            details: { immutableIncluded: hasImmutable }
-          });
-        }}
-        canRestore={planAccess === 'rw'}
-        onRestore={(revisionId) => {
-          if (planAccess !== 'rw') return;
-          restoreRevision(basePlan.id, revisionId);
-          setSelectedRevision(planId, null);
-          push(
-            t({ it: 'Revisione ripristinata (stato attuale aggiornato)', en: 'Revision restored (current state updated)' }),
-            'success'
-          );
-          postAuditEvent({ event: 'revision_restore', scopeType: 'plan', scopeId: basePlan.id, details: { id: revisionId } });
-        }}
-        isSuperAdmin={isSuperAdmin}
-        onToggleImmutable={toggleRevisionImmutable}
-      />
+      {revisionsOpen ? (
+        <Suspense fallback={null}>
+          <RevisionsModal
+            open={revisionsOpen}
+            revisions={basePlan.revisions || []}
+            selectedRevisionId={selectedRevisionId}
+            breadcrumb={[client?.shortName || client?.name, site?.name, basePlan?.name].filter(Boolean).join(' → ')}
+            onClose={() => setRevisionsOpen(false)}
+            onSelect={(revisionId) => {
+              setSelectedRevision(planId, revisionId);
+              push(t({ it: 'Revisione caricata (sola lettura)', en: 'Revision loaded (read-only)' }), 'info');
+            }}
+            onBackToPresent={() => {
+              setSelectedRevision(planId, null);
+              push(t({ it: 'Tornato al presente', en: 'Back to present' }), 'info');
+            }}
+            onDelete={(revisionId) => {
+              const rev = (basePlan.revisions || []).find((r) => r.id === revisionId);
+              if (rev?.immutable && !isSuperAdmin) {
+                push(t({ it: 'Revisione immutabile: non puoi eliminarla.', en: 'Immutable revision: you cannot delete it.' }), 'danger');
+                return;
+              }
+              deleteRevision(basePlan.id, revisionId);
+              if (selectedRevisionId === revisionId) {
+                setSelectedRevision(planId, null);
+              }
+              push(t({ it: 'Revisione eliminata', en: 'Revision deleted' }), 'info');
+              postAuditEvent({
+                event: rev?.immutable ? 'revision_delete_immutable' : 'revision_delete',
+                scopeType: 'plan',
+                scopeId: basePlan.id,
+                details: { id: revisionId, immutable: !!rev?.immutable }
+              });
+            }}
+            onClearAll={() => {
+              const hasImmutable = (basePlan.revisions || []).some((r) => r.immutable);
+              if (hasImmutable && !isSuperAdmin) {
+                push(t({ it: 'Impossibile eliminare le revisioni immutabili.', en: 'Immutable revisions cannot be deleted.' }), 'danger');
+                return;
+              }
+              clearRevisions(basePlan.id);
+              setSelectedRevision(planId, null);
+              push(t({ it: 'Revisioni eliminate', en: 'Revisions deleted' }), 'info');
+              postAuditEvent({
+                event: 'revision_clear_all',
+                scopeType: 'plan',
+                scopeId: basePlan.id,
+                details: { immutableIncluded: hasImmutable }
+              });
+            }}
+            canRestore={planAccess === 'rw'}
+            onRestore={(revisionId) => {
+              if (planAccess !== 'rw') return;
+              restoreRevision(basePlan.id, revisionId);
+              setSelectedRevision(planId, null);
+              push(
+                t({ it: 'Revisione ripristinata (stato attuale aggiornato)', en: 'Revision restored (current state updated)' }),
+                'success'
+              );
+              postAuditEvent({ event: 'revision_restore', scopeType: 'plan', scopeId: basePlan.id, details: { id: revisionId } });
+            }}
+            isSuperAdmin={isSuperAdmin}
+            onToggleImmutable={toggleRevisionImmutable}
+          />
+        </Suspense>
+      ) : null}
 
-      <SaveRevisionModal
+      {saveRevisionOpen ? (
+        <Suspense fallback={null}>
+          <SaveRevisionModal
         open={saveRevisionOpen}
         hasExisting={hasAnyRevision}
         latestRevMajor={latestRev.major}
         latestRevMinor={latestRev.minor}
+        initialBump={saveRevisionModalPreset.initialBump}
+        requireNoteForMajor={saveRevisionModalPreset.requireNoteForMajor}
         reason={saveRevisionReason}
         onDiscard={
           pendingNavigateRef.current
@@ -21040,8 +24041,8 @@ const PlanView = ({ planId }: Props) => {
                 setSaveRevisionOpen(false);
                 if (to) navigate(to);
               }
-            : pendingPostSaveAction
-              ? () => {
+              : pendingPostSaveAction
+                ? () => {
                   const action = pendingPostSaveAction;
                   clearPendingPostSaveAction();
                   revertUnsavedChanges();
@@ -21050,13 +24051,41 @@ const PlanView = ({ planId }: Props) => {
                   setSaveRevisionOpen(false);
                   if (action) void performPendingPostSaveAction(action);
                 }
-              : undefined
+              : pendingMeetingManagerPreset
+                ? () => {
+                    const preset = pendingMeetingManagerPreset;
+                    setPendingMeetingManagerPreset(null);
+                    revertUnsavedChanges();
+                    resetTouched();
+                    entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+                    setSaveRevisionOpen(false);
+                    if (preset) {
+                      setMeetingManagerPreset(preset);
+                      setMeetingManagerOpen(true);
+                    }
+                  }
+                : pendingClientMeetingsPreset
+                  ? () => {
+                      const preset = pendingClientMeetingsPreset;
+                      setPendingClientMeetingsPreset(null);
+                      revertUnsavedChanges();
+                      resetTouched();
+                      entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+                      setSaveRevisionOpen(false);
+                      if (preset) {
+                        dispatchOpenClientMeetingsTimeline(preset);
+                      }
+                    }
+                : undefined
         }
         onClose={() => {
           setSaveRevisionOpen(false);
+          setSaveRevisionModalPreset({ initialBump: 'minor', requireNoteForMajor: false });
           pendingNavigateRef.current = null;
           clearPendingSaveNavigate?.();
           clearPendingPostSaveAction();
+          setPendingMeetingManagerPreset(null);
+          setPendingClientMeetingsPreset(null);
         }}
         onConfirm={({ bump, note }) => {
           if (!plan) return;
@@ -21092,6 +24121,19 @@ const PlanView = ({ planId }: Props) => {
             void performPendingPostSaveAction(action);
             return;
           }
+          if (pendingMeetingManagerPreset) {
+            const preset = pendingMeetingManagerPreset;
+            setPendingMeetingManagerPreset(null);
+            setMeetingManagerPreset(preset);
+            setMeetingManagerOpen(true);
+            return;
+          }
+          if (pendingClientMeetingsPreset) {
+            const preset = pendingClientMeetingsPreset;
+            setPendingClientMeetingsPreset(null);
+            dispatchOpenClientMeetingsTimeline(preset || undefined);
+            return;
+          }
           if (pendingNavigateRef.current) {
             const to = pendingNavigateRef.current;
             pendingNavigateRef.current = null;
@@ -21100,6 +24142,8 @@ const PlanView = ({ planId }: Props) => {
           }
         }}
       />
+        </Suspense>
+      ) : null}
 
       <ChooseDefaultViewModal
         open={!!chooseDefaultModal}
@@ -21176,15 +24220,19 @@ const PlanView = ({ planId }: Props) => {
           onClose={() => setEscapeRouteModal(null)}
         />
       </Suspense>
-      <EmergencyContactsModal
-        open={emergencyContactsOpen}
-        clientId={client?.id || null}
-        readOnly={planAccess !== 'rw'}
-        safetyCardVisible={securityLayerVisible}
-        onToggleSafetyCard={toggleSecurityCardVisibility}
-        safetyCardToggleDisabled={!planId}
-        onClose={() => setEmergencyContactsOpen(false)}
-      />
+      {emergencyContactsOpen ? (
+        <Suspense fallback={null}>
+          <EmergencyContactsModal
+            open={emergencyContactsOpen}
+            clientId={client?.id || null}
+            readOnly={planAccess !== 'rw'}
+            safetyCardVisible={securityLayerVisible}
+            onToggleSafetyCard={toggleSecurityCardVisibility}
+            safetyCardToggleDisabled={!planId}
+            onClose={() => setEmergencyContactsOpen(false)}
+          />
+        </Suspense>
+      ) : null}
 
       <Transition appear show={webcamGesturesEnabled && presentationEnterModalOpen} as={Fragment}>
         <Dialog

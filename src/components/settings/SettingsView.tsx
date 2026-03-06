@@ -22,7 +22,7 @@ import { useT } from '../../i18n/useT';
 import SiteModal from './SiteModal';
 import ObjectTypesPanel from './ObjectTypesPanel';
 import BackupPanel from './BackupPanel';
-import CustomImportPanel from './CustomImportPanel';
+import ClientImportUnifiedPanel from './ClientImportUnifiedPanel';
 import EmailSettingsPanel from './EmailSettingsPanel';
 import DonationsPanel from './DonationsPanel';
 import LayersPanel from './LayersPanel';
@@ -435,7 +435,7 @@ const SettingsView = () => {
 
         {tab === 'backup' ? (isSuperAdmin ? <BackupPanel /> : null) : null}
 
-        {tab === 'import' ? (isSuperAdmin ? <CustomImportPanel /> : null) : null}
+        {tab === 'import' ? (isSuperAdmin ? <ClientImportUnifiedPanel /> : null) : null}
 
         {tab === 'nerd' ? (
           isSuperAdmin ? (
@@ -704,10 +704,15 @@ const SettingsView = () => {
                       value={plan.name}
                       onChange={(e) => updateFloorPlan(plan.id, { name: e.target.value })}
                       readOnly={editingPlan !== plan.id}
+                      tabIndex={editingPlan === plan.id ? 0 : -1}
                       ref={(node) => {
                         planInputRefs.current[plan.id] = node;
                       }}
-                      className="w-2/3 rounded-md border border-transparent px-1 py-0.5 text-sm font-semibold text-ink hover:border-slate-200 focus:border-primary focus:outline-none disabled:opacity-60"
+                      className={`w-2/3 rounded-md px-1 py-0.5 text-sm font-semibold text-ink disabled:opacity-60 ${
+                        editingPlan === plan.id
+                          ? 'border border-slate-200 bg-white hover:border-slate-300 focus:border-primary focus:outline-none'
+                          : 'pointer-events-none border border-transparent bg-transparent caret-transparent select-none'
+                      }`}
                     />
                     <div className="flex items-center gap-2">
                       <button
@@ -985,7 +990,7 @@ const SettingsView = () => {
                       <X size={18} />
                     </button>
                   </div>
-                  <CustomImportPanel initialClientId={clientImportModal?.clientId || undefined} lockClientSelection />
+                  <ClientImportUnifiedPanel initialClientId={clientImportModal?.clientId || undefined} lockClientSelection />
                 </div>
               </Transition.Child>
             </div>

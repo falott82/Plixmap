@@ -7,10 +7,16 @@ import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { createCustomField } from '../../api/customFields';
 import { saveState } from '../../api/state';
 import { createServerBackup, fetchServerBackups, getServerBackupDownloadUrl, type ServerBackupRow } from '../../api/backup';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
 type SpreadsheetColumn = { header: string; key: string; width?: number };
 type SpreadsheetRow = Record<string, unknown>;
 type SpreadsheetSheet = { name: string; columns: SpreadsheetColumn[]; rows: SpreadsheetRow[] };
+type PendingWorkspaceImport = {
+  clients: any[];
+  objectTypes: any[];
+  customFields: any[];
+};
 
 const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
@@ -112,6 +118,7 @@ const BackupPanel = () => {
   const [serverBackupDir, setServerBackupDir] = useState('');
   const [serverBackupRetention, setServerBackupRetention] = useState(0);
   const [serverBackups, setServerBackups] = useState<ServerBackupRow[]>([]);
+  const [pendingWorkspaceImport, setPendingWorkspaceImport] = useState<PendingWorkspaceImport | null>(null);
 
   const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
   const [expandedSites, setExpandedSites] = useState<Record<string, boolean>>({});
@@ -498,6 +505,50 @@ const BackupPanel = () => {
     }
   };
 
+  const applyWorkspaceImport = useCallback(
+    async (payload: PendingWorkspaceImport) => {
+      setBusy(true);
+      try {
+        const nextObjectTypes = Array.isArray(payload.objectTypes) ? payload.objectTypes : objectTypes;
+        const nextClients = Array.isArray(payload.clients) ? payload.clients : [];
+
+        // Persist on server (also externalizes embedded data URLs into /uploads) then update the local store.
+        try {
+          await saveState(nextClients, nextObjectTypes);
+        } catch {
+          // If server isn't reachable (offline), we still update locally.
+        }
+        setServerState({ clients: nextClients, objectTypes: nextObjectTypes });
+        setClients(nextClients);
+
+        // Best-effort import custom fields (per-user)
+        if (Array.isArray(payload.customFields)) {
+          for (const f of payload.customFields) {
+            const typeId = String(f?.typeId || '').trim();
+            const fieldKey = String(f?.fieldKey || '').trim();
+            const label = String(f?.label || '').trim();
+            const valueType = f?.valueType;
+            if (!typeId || !label || !valueType) continue;
+            try {
+              await createCustomField({ typeId, fieldKey: fieldKey || undefined, label, valueType });
+            } catch {
+              // ignore duplicates / invalid
+            }
+          }
+        }
+
+        push(t({ it: 'Import completato. Ricarico…', en: 'Import completed. Reloading…' }), 'success');
+        window.setTimeout(() => window.location.reload(), 600);
+      } catch {
+        push(t({ it: 'Errore import', en: 'Import failed' }), 'danger');
+      } finally {
+        setBusy(false);
+        setPendingWorkspaceImport(null);
+      }
+    },
+    [objectTypes, push, setClients, setServerState, t]
+  );
+
   const handleImportJson = async (file: File | null) => {
     if (!file) return;
     setBusy(true);
@@ -509,46 +560,11 @@ const BackupPanel = () => {
         push(t({ it: 'File non valido', en: 'Invalid file' }), 'danger');
         return;
       }
-      if (
-        !window.confirm(
-          t({
-            it: 'Importare e sostituire il workspace corrente? Operazione irreversibile.',
-            en: 'Import and replace the current workspace? This cannot be undone.'
-          })
-        )
-      ) {
-        return;
-      }
-      const nextObjectTypes = Array.isArray(parsed.objectTypes) ? parsed.objectTypes : objectTypes;
-      const nextClients = parsed.clients;
-
-      // Persist on server (also externalizes embedded data URLs into /uploads) then update the local store.
-      try {
-        await saveState(nextClients, nextObjectTypes);
-      } catch {
-        // If server isn't reachable (offline), we still update locally.
-      }
-      setServerState({ clients: nextClients, objectTypes: nextObjectTypes });
-      setClients(nextClients);
-
-      // Best-effort import custom fields (per-user)
-      if (Array.isArray(parsed.customFields)) {
-        for (const f of parsed.customFields) {
-          const typeId = String(f?.typeId || '').trim();
-          const fieldKey = String(f?.fieldKey || '').trim();
-          const label = String(f?.label || '').trim();
-          const valueType = f?.valueType;
-          if (!typeId || !label || !valueType) continue;
-          try {
-            await createCustomField({ typeId, fieldKey: fieldKey || undefined, label, valueType });
-          } catch {
-            // ignore duplicates / invalid
-          }
-        }
-      }
-
-      push(t({ it: 'Import completato. Ricarico…', en: 'Import completed. Reloading…' }), 'success');
-      window.setTimeout(() => window.location.reload(), 600);
+      setPendingWorkspaceImport({
+        clients: Array.isArray(parsed.clients) ? parsed.clients : [],
+        objectTypes: Array.isArray(parsed.objectTypes) ? parsed.objectTypes : objectTypes,
+        customFields: Array.isArray(parsed.customFields) ? parsed.customFields : []
+      });
     } catch {
       push(t({ it: 'Errore import', en: 'Import failed' }), 'danger');
     } finally {
@@ -854,6 +870,22 @@ const BackupPanel = () => {
           <FileSpreadsheet size={16} /> {t({ it: 'Esporta Excel', en: 'Export Excel' })}
         </button>
       </div>
+
+      <ConfirmDialog
+        open={!!pendingWorkspaceImport}
+        title={t({ it: 'Importare e sostituire il workspace corrente?', en: 'Import and replace current workspace?' })}
+        description={t({
+          it: 'Operazione irreversibile: il workspace attuale verrà sostituito con il contenuto del file JSON selezionato.',
+          en: 'This operation cannot be undone: the current workspace will be replaced by the selected JSON file.'
+        })}
+        onCancel={() => setPendingWorkspaceImport(null)}
+        onConfirm={() => {
+          if (!pendingWorkspaceImport) return;
+          void applyWorkspaceImport(pendingWorkspaceImport);
+        }}
+        confirmLabel={t({ it: 'Importa e sostituisci', en: 'Import and replace' })}
+        cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
+      />
     </div>
   );
 };

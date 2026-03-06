@@ -84,6 +84,8 @@ interface DataState {
         Client,
         'name'
           | 'logoUrl'
+          | 'openAiApiKey'
+          | 'openAiDailyTokensPerUser'
           | 'shortName'
           | 'address'
           | 'phone'
@@ -787,20 +789,34 @@ const normalizeSiteSupportContacts = (value: any) => {
 
 const normalizeSiteSchedule = (value: any): Site['siteSchedule'] | undefined => {
   if (!value || typeof value !== 'object') return undefined;
+  const holidayCalendar = ['custom', 'it', 'us', 'uk', 'de', 'fr', 'es', 'cn', 'sa', 'ae'].includes(String(value.holidayCalendar || '').trim())
+    ? (String(value.holidayCalendar || '').trim() as NonNullable<Site['siteSchedule']>['holidayCalendar'])
+    : undefined;
   const dayKeys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
   const weeklySource = value.weekly && typeof value.weekly === 'object' ? value.weekly : {};
-  const weekly: Record<string, { closed?: boolean; open?: string; close?: string }> = {};
+  const weekly: Record<string, { closed?: boolean; open?: string; close?: string; slots?: Array<{ start: string; end: string }> }> = {};
   for (const key of dayKeys) {
     const row = (weeklySource as any)?.[key];
     if (!row || typeof row !== 'object') continue;
-    const open = String(row.open || '').trim();
-    const close = String(row.close || '').trim();
+    const slots = Array.isArray(row.slots)
+      ? row.slots
+          .map((slot: any) => {
+            const start = String(slot?.start || '').trim();
+            const end = String(slot?.end || '').trim();
+            if (!start || !end) return null;
+            return { start, end };
+          })
+          .filter(Boolean)
+      : [];
+    const open = String(row.open || slots[0]?.start || '').trim();
+    const close = String(row.close || (slots.length ? slots[slots.length - 1]?.end : '') || '').trim();
     const closed = !!row.closed;
-    if (!closed && !open && !close) continue;
+    if (!closed && !open && !close && !slots.length) continue;
     weekly[key] = {
       ...(closed ? { closed: true } : {}),
       ...(!closed && open ? { open } : {}),
-      ...(!closed && close ? { close } : {})
+      ...(!closed && close ? { close } : {}),
+      ...(!closed && slots.length ? { slots: slots as any } : {})
     };
   }
   const holidays = Array.isArray(value.holidays)
@@ -808,16 +824,30 @@ const normalizeSiteSchedule = (value: any): Site['siteSchedule'] | undefined => 
         .map((h: any) => {
           const date = String(h?.date || '').trim();
           const label = String(h?.label || '').trim();
+          const source = String(h?.source || '').trim();
           if (!date) return null;
-          return { date, ...(label ? { label } : {}), ...(h?.closed === false ? { closed: false } : {}) };
+          return {
+            date,
+            ...(label ? { label } : {}),
+            ...(h?.closed === false ? { closed: false } : {}),
+            ...(source === 'national' || source === 'custom' ? { source: source as 'national' | 'custom' } : {})
+          };
         })
         .filter(Boolean)
     : [];
   if (!Object.keys(weekly).length && !holidays.length) return undefined;
   return {
+    ...(holidayCalendar ? { holidayCalendar } : {}),
     ...(Object.keys(weekly).length ? { weekly: weekly as any } : {}),
     ...(holidays.length ? { holidays: holidays as any } : {})
   };
+};
+
+const normalizeOpenAiDailyTokensPerUser = (value: any): number | undefined => {
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined;
+  return Math.round(parsed);
 };
 
 const normalizeWifiAntennaModels = (models?: WifiAntennaModel[]): WifiAntennaModel[] => {
@@ -1221,6 +1251,7 @@ export const useDataStore = create<DataState>()(
         return {
           clients: (clients || []).map((c) => ({
             ...c,
+            openAiDailyTokensPerUser: normalizeOpenAiDailyTokensPerUser((c as any).openAiDailyTokensPerUser),
             layers: normalizeClientLayers(c),
             businessPartners: normalizeBusinessPartners((c as any).businessPartners),
             wifiAntennaModels: normalizeWifiAntennaModels((c as any).wifiAntennaModels),
@@ -1341,6 +1372,9 @@ export const useDataStore = create<DataState>()(
                     : {}),
                   ...(payload?.businessPartners !== undefined
                     ? { businessPartners: normalizeBusinessPartners((payload as any).businessPartners) }
+                    : {}),
+                  ...(payload?.openAiDailyTokensPerUser !== undefined
+                    ? { openAiDailyTokensPerUser: normalizeOpenAiDailyTokensPerUser((payload as any).openAiDailyTokensPerUser) }
                     : {}),
                   ...(payload?.emergencyContacts !== undefined
                     ? { emergencyContacts: normalizeEmergencyContacts(payload.emergencyContacts) }

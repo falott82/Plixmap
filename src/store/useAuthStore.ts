@@ -31,9 +31,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         try {
           const next = window.localStorage.getItem('plixmap_session_hint');
           if (next === '1' || next === '0') return next === '1';
-          return true;
+          return false;
         } catch {
-          return true;
+          return false;
         }
       })();
       if (!sessionHint) {

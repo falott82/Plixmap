@@ -209,6 +209,45 @@ const normalizeEmployeesResponse = (payload) => {
     .filter(Boolean);
 };
 
+const normalizeDevicesResponse = (payload) => {
+  const rawList = (() => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== 'object') return [];
+    const candidates = [
+      payload.devices,
+      payload.Devices,
+      payload.DISPOSITIVI,
+      payload.Dispositivi,
+      payload.dispositivi,
+      payload.data,
+      payload.items
+    ];
+    const found = candidates.find((item) => Array.isArray(item));
+    return Array.isArray(found) ? found : [];
+  })();
+  const rows = [];
+  for (const row of rawList) {
+    const get = (...keys) => {
+      for (const key of keys) {
+        const value = row?.[key];
+        if (value !== null && value !== undefined && String(value).trim()) return String(value).trim();
+      }
+      return '';
+    };
+    const devId = get('dev_id', 'devId', 'device_id', 'id');
+    if (!devId) continue;
+    rows.push({
+      devId,
+      deviceType: get('device_type', 'deviceType', 'type'),
+      deviceName: get('device_name', 'deviceName', 'name'),
+      manufacturer: get('manufacturer', 'brand'),
+      model: get('model'),
+      serialNumber: get('serial_number', 'serialNumber', 'serial')
+    });
+  }
+  return rows;
+};
+
 const isManualExternalId = (externalId) => String(externalId || '').trim().toLowerCase().startsWith('manual:');
 
 const mapExternalUserRow = (r) => ({
@@ -235,8 +274,28 @@ const mapExternalUserRow = (r) => ({
   sourceKind: isManualExternalId(r.externalId) ? 'manual' : 'imported'
 });
 
+const isManualDeviceId = (devId) => String(devId || '').trim().toLowerCase().startsWith('manual:');
+
+const mapExternalDeviceRow = (r) => ({
+  clientId: String(r.clientId || ''),
+  devId: String(r.devId || ''),
+  deviceType: String(r.deviceType || ''),
+  deviceName: String(r.deviceName || ''),
+  manufacturer: String(r.manufacturer || ''),
+  model: String(r.model || ''),
+  serialNumber: String(r.serialNumber || ''),
+  hidden: Number(r.hidden) === 1,
+  present: Number(r.present) === 1,
+  lastSeenAt: r.lastSeenAt || null,
+  createdAt: Number(r.createdAt) || 0,
+  updatedAt: Number(r.updatedAt) || 0,
+  manual: isManualDeviceId(r.devId),
+  sourceKind: isManualDeviceId(r.devId) ? 'manual' : 'imported'
+});
+
 const normalizeManualExternalUserInput = (payload) => {
   const toStr = (v) => (v === null || v === undefined ? '' : String(v).trim());
+  const normalizePhone = (v) => toStr(v).replace(/\s+/g, '');
   return {
     externalId: toStr(payload?.externalId),
     firstName: toStr(payload?.firstName),
@@ -246,7 +305,7 @@ const normalizeManualExternalUserInput = (payload) => {
     dept2: toStr(payload?.dept2),
     dept3: toStr(payload?.dept3),
     email: toStr(payload?.email),
-    mobile: toStr(payload?.mobile),
+    mobile: normalizePhone(payload?.mobile),
     ext1: toStr(payload?.ext1),
     ext2: toStr(payload?.ext2),
     ext3: toStr(payload?.ext3),
@@ -255,6 +314,30 @@ const normalizeManualExternalUserInput = (payload) => {
 };
 
 const makeManualExternalId = () => `manual:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const normalizeEmailKey = (value) => String(value || '').trim().toLowerCase();
+
+const findExternalEmailConflict = (db, clientId, email, currentExternalId = '') => {
+  const emailKey = normalizeEmailKey(email);
+  if (!emailKey) return null;
+  const rows = db
+    .prepare('SELECT externalId, firstName, lastName, email FROM external_users WHERE clientId = ?')
+    .all(clientId);
+  const currentKey = String(currentExternalId || '').trim();
+  for (const row of rows) {
+    const rowExternalId = String(row.externalId || '').trim();
+    if (currentKey && rowExternalId === currentKey) continue;
+    if (normalizeEmailKey(row.email) === emailKey) {
+      return {
+        externalId: rowExternalId,
+        firstName: String(row.firstName || ''),
+        lastName: String(row.lastName || ''),
+        email: String(row.email || '')
+      };
+    }
+  }
+  return null;
+};
 
 const fetchEmployeesFromApi = async (config) => {
   const controller = new AbortController();
@@ -312,6 +395,71 @@ const fetchEmployeesFromApi = async (config) => {
   }
 };
 
+const fetchDevicesFromApi = async (config) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const urlCheck = await validateImportUrl(config.url, { allowPrivate: !!config.allowPrivate });
+    if (!urlCheck.ok) {
+      return { ok: false, status: 0, error: urlCheck.error || 'Invalid URL' };
+    }
+    const password = config.password ? String(config.password) : '';
+    const auth = Buffer.from(`${config.username}:${password}`, 'utf8').toString('base64');
+    const method = String(config.method || 'POST').trim().toUpperCase() === 'GET' ? 'GET' : 'POST';
+    const bodyJson = typeof config.bodyJson === 'string' ? config.bodyJson.trim() : '';
+    const useBody = method === 'POST' && !!bodyJson;
+    const res = await fetch(urlCheck.url, {
+      method,
+      headers: {
+        Authorization: `Basic ${auth}`,
+        Accept: 'application/json',
+        ...(useBody ? { 'Content-Type': 'application/json' } : {})
+      },
+      ...(useBody ? { body: bodyJson } : {}),
+      signal: controller.signal
+    });
+    const readResult = await readResponseText(res, MAX_IMPORT_RESPONSE_BYTES);
+    if (!readResult.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        error: readResult.error || 'Response too large',
+        rawSnippet: '',
+        contentType: res.headers.get('content-type') || ''
+      };
+    }
+    const text = readResult.text;
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        error: text.slice(0, 500),
+        rawSnippet: text.slice(0, 2000),
+        contentType: res.headers.get('content-type') || ''
+      };
+    }
+    let json = null;
+    try {
+      let cleaned = String(text || '').trim().replace(/^\uFEFF/, '');
+      if (/^"devices"\s*:/.test(cleaned) || /^"Dispositivi"\s*:/.test(cleaned)) cleaned = `{${cleaned}}`;
+      json = JSON.parse(cleaned);
+    } catch {
+      return {
+        ok: false,
+        status: res.status,
+        error: 'Invalid JSON response',
+        rawSnippet: String(text || '').slice(0, 2000),
+        contentType: res.headers.get('content-type') || ''
+      };
+    }
+    return { ok: true, status: res.status, devices: normalizeDevicesResponse(json), raw: json };
+  } catch (e) {
+    return { ok: false, status: 0, error: e?.name === 'AbortError' ? 'Timeout' : String(e?.message || e) };
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 const getImportConfig = (db, authSecret, clientId) => {
   const row = db
     .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson FROM client_user_import WHERE clientId = ?')
@@ -328,9 +476,41 @@ const getImportConfig = (db, authSecret, clientId) => {
   };
 };
 
+const getDeviceImportConfig = (db, authSecret, clientId) => {
+  const row = db
+    .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson FROM client_device_import WHERE clientId = ?')
+    .get(clientId);
+  if (!row) return null;
+  const password = decryptString(authSecret, row.passwordEnc);
+  return {
+    clientId: row.clientId,
+    url: row.url,
+    username: row.username,
+    password,
+    method: row.method || 'POST',
+    bodyJson: row.bodyJson || ''
+  };
+};
+
 const getImportConfigSafe = (db, clientId) => {
   const row = db
     .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson, updatedAt FROM client_user_import WHERE clientId = ?')
+    .get(clientId);
+  if (!row) return null;
+  return {
+    clientId: row.clientId,
+    url: row.url,
+    username: row.username,
+    method: row.method || 'POST',
+    bodyJson: row.bodyJson || '',
+    hasPassword: !!row.passwordEnc,
+    updatedAt: row.updatedAt
+  };
+};
+
+const getDeviceImportConfigSafe = (db, clientId) => {
+  const row = db
+    .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson, updatedAt FROM client_device_import WHERE clientId = ?')
     .get(clientId);
   if (!row) return null;
   return {
@@ -363,6 +543,25 @@ const upsertImportConfig = (db, authSecret, payload) => {
   return getImportConfigSafe(db, payload.clientId);
 };
 
+const upsertDeviceImportConfig = (db, authSecret, payload) => {
+  const now = Date.now();
+  const prev = db.prepare('SELECT passwordEnc, bodyJson, method FROM client_device_import WHERE clientId = ?').get(payload.clientId);
+  const nextPasswordEnc =
+    payload.password !== undefined
+      ? payload.password
+        ? encryptString(authSecret, payload.password)
+        : null
+      : prev?.passwordEnc || null;
+  const nextBodyJson = payload.bodyJson !== undefined ? String(payload.bodyJson || '') : prev?.bodyJson || '';
+  const nextMethod = payload.method !== undefined ? String(payload.method || 'POST') : prev?.method || 'POST';
+  db.prepare(
+    `INSERT INTO client_device_import (clientId, url, username, passwordEnc, method, bodyJson, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(clientId) DO UPDATE SET url=excluded.url, username=excluded.username, passwordEnc=excluded.passwordEnc, method=excluded.method, bodyJson=excluded.bodyJson, updatedAt=excluded.updatedAt`
+  ).run(payload.clientId, payload.url, payload.username, nextPasswordEnc, nextMethod, nextBodyJson, now);
+  return getDeviceImportConfigSafe(db, payload.clientId);
+};
+
 const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   const now = Date.now();
   const shouldMarkMissing = options.markMissing !== false;
@@ -388,10 +587,42 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   const created = [];
   const updated = [];
   const missing = [];
+  const duplicates = [];
+  const incomingEmailCounts = new Map();
+  for (const e of employees || []) {
+    const emailKey = normalizeEmailKey(e?.email);
+    if (!emailKey) continue;
+    incomingEmailCounts.set(emailKey, (incomingEmailCounts.get(emailKey) || 0) + 1);
+  }
+  const existingEmailOwner = new Map();
+  for (const row of existing) {
+    const emailKey = normalizeEmailKey(row.email);
+    if (!emailKey) continue;
+    const key = String(row.externalId || '');
+    if (!existingEmailOwner.has(emailKey)) existingEmailOwner.set(emailKey, key);
+  }
 
   for (const e of employees) {
     const id = String(e.externalId);
     const prev = existingById.get(id);
+    const emailKey = normalizeEmailKey(e?.email);
+    const duplicateInIncoming = !!emailKey && (incomingEmailCounts.get(emailKey) || 0) > 1;
+    const existingOwner = emailKey ? String(existingEmailOwner.get(emailKey) || '') : '';
+    const duplicateAgainstExisting = !!emailKey && !!existingOwner && existingOwner !== id;
+    if (duplicateInIncoming || duplicateAgainstExisting) {
+      duplicates.push({
+        externalId: id,
+        email: String(e.email || ''),
+        firstName: String(e.firstName || ''),
+        lastName: String(e.lastName || ''),
+        reason: duplicateInIncoming ? 'duplicate_email_in_import' : 'duplicate_email_existing',
+        conflictExternalId: duplicateAgainstExisting ? existingOwner : ''
+      });
+      if (prev) {
+        db.prepare('UPDATE external_users SET present=1, lastSeenAt=?, updatedAt=? WHERE clientId=? AND externalId=?').run(now, now, clientId, id);
+      }
+      continue;
+    }
     if (!prev) {
       insert.run(
         clientId,
@@ -467,10 +698,18 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   }
 
   return {
-    summary: { totalBefore: existing.length, totalNow: employees.length, created: created.length, updated: updated.length, missing: missing.length },
+    summary: {
+      totalBefore: existing.length,
+      totalNow: employees.length,
+      created: created.length,
+      updated: updated.length,
+      missing: missing.length,
+      duplicateEmails: duplicates.length
+    },
     created,
     updated,
-    missing
+    missing,
+    duplicates
   };
 };
 
@@ -543,6 +782,13 @@ const upsertManualExternalUser = (db, clientId, payload, options = {}) => {
     err.code = 'VALIDATION';
     throw err;
   }
+  const emailConflict = findExternalEmailConflict(db, clientId, data.email, externalId);
+  if (emailConflict) {
+    const err = new Error(`Duplicate email: ${data.email}`);
+    err.code = 'DUPLICATE_EMAIL';
+    err.details = emailConflict;
+    throw err;
+  }
   if (exists) {
     db.prepare(
       `UPDATE external_users
@@ -604,6 +850,233 @@ const deleteManualExternalUser = (db, clientId, externalId) => {
   return { ok: true, removed: Number(result.changes || 0), row };
 };
 
+const normalizeManualDeviceInput = (payload) => {
+  const toStr = (v) => (v === null || v === undefined ? '' : String(v).trim());
+  return {
+    devId: toStr(payload?.devId),
+    deviceType: toStr(payload?.deviceType),
+    deviceName: toStr(payload?.deviceName),
+    manufacturer: toStr(payload?.manufacturer),
+    model: toStr(payload?.model),
+    serialNumber: toStr(payload?.serialNumber)
+  };
+};
+
+const makeManualDeviceId = () => `manual:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const upsertExternalDevices = (db, clientId, devices, options = {}) => {
+  const now = Date.now();
+  const shouldMarkMissing = options.markMissing !== false;
+  const existing = db
+    .prepare(
+      'SELECT devId, deviceType, deviceName, manufacturer, model, serialNumber, hidden, present FROM external_devices WHERE clientId = ?'
+    )
+    .all(clientId);
+  const existingById = new Map(existing.map((r) => [String(r.devId), r]));
+  const incomingIds = new Set((devices || []).map((d) => String(d.devId || '').trim()).filter(Boolean));
+
+  const insert = db.prepare(
+    `INSERT INTO external_devices (clientId, devId, deviceType, deviceName, manufacturer, model, serialNumber, hidden, present, lastSeenAt, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)`
+  );
+  const update = db.prepare(
+    `UPDATE external_devices
+     SET deviceType=?, deviceName=?, manufacturer=?, model=?, serialNumber=?, present=1, lastSeenAt=?, updatedAt=?
+     WHERE clientId=? AND devId=?`
+  );
+  const markMissingStmt = db.prepare(`UPDATE external_devices SET present=0, updatedAt=? WHERE clientId=? AND devId=?`);
+
+  const created = [];
+  const updated = [];
+  const missing = [];
+
+  for (const raw of devices || []) {
+    const row = normalizeManualDeviceInput(raw || {});
+    const devId = String(row.devId || '').trim();
+    if (!devId) continue;
+    const prev = existingById.get(devId);
+    if (!prev) {
+      insert.run(clientId, devId, row.deviceType, row.deviceName, row.manufacturer, row.model, row.serialNumber, now, now, now);
+      created.push({ ...row, devId });
+      continue;
+    }
+    const changed =
+      String(prev.deviceType || '') !== row.deviceType ||
+      String(prev.deviceName || '') !== row.deviceName ||
+      String(prev.manufacturer || '') !== row.manufacturer ||
+      String(prev.model || '') !== row.model ||
+      String(prev.serialNumber || '') !== row.serialNumber ||
+      Number(prev.present || 1) !== 1;
+    if (changed) {
+      update.run(row.deviceType, row.deviceName, row.manufacturer, row.model, row.serialNumber, now, now, clientId, devId);
+      updated.push({ ...row, devId });
+    } else {
+      db.prepare('UPDATE external_devices SET present=1, lastSeenAt=?, updatedAt=? WHERE clientId=? AND devId=?').run(
+        now,
+        now,
+        clientId,
+        devId
+      );
+    }
+  }
+
+  if (shouldMarkMissing) {
+    for (const prev of existing) {
+      const devId = String(prev.devId || '');
+      if (isManualDeviceId(devId)) continue;
+      if (!incomingIds.has(devId) && Number(prev.present || 1) === 1) {
+        markMissingStmt.run(now, clientId, devId);
+        missing.push({
+          devId,
+          deviceType: String(prev.deviceType || ''),
+          deviceName: String(prev.deviceName || '')
+        });
+      }
+    }
+  }
+
+  return {
+    summary: {
+      totalBefore: existing.length,
+      totalNow: devices.length,
+      created: created.length,
+      updated: updated.length,
+      missing: missing.length
+    },
+    created,
+    updated,
+    missing
+  };
+};
+
+const listExternalDevices = (db, params) => {
+  const q = String(params.q || '').trim().toLowerCase();
+  const includeHidden = !!params.includeHidden;
+  const includeMissing = !!params.includeMissing;
+  const where = ['clientId = ?'];
+  const values = [params.clientId];
+  if (!includeHidden) where.push('hidden = 0');
+  if (!includeMissing) where.push('present = 1');
+  if (q) {
+    const escaped = q.replace(/[%_]/g, '\\$&');
+    const like = `%${escaped}%`;
+    where.push(
+      '(lower(devId) LIKE ? ESCAPE \'\\\\\' OR lower(deviceType) LIKE ? ESCAPE \'\\\\\' OR lower(deviceName) LIKE ? ESCAPE \'\\\\\' OR lower(manufacturer) LIKE ? ESCAPE \'\\\\\' OR lower(model) LIKE ? ESCAPE \'\\\\\' OR lower(serialNumber) LIKE ? ESCAPE \'\\\\\')'
+    );
+    values.push(like, like, like, like, like, like);
+  }
+  const rows = db
+    .prepare(
+      `SELECT clientId, devId, deviceType, deviceName, manufacturer, model, serialNumber, hidden, present, lastSeenAt, createdAt, updatedAt
+       FROM external_devices
+       WHERE ${where.join(' AND ')}
+       ORDER BY deviceName COLLATE NOCASE, devId COLLATE NOCASE`
+    )
+    .all(...values)
+    .map(mapExternalDeviceRow);
+  return rows;
+};
+
+const getExternalDevice = (db, clientId, devId) => {
+  const row = db
+    .prepare(
+      `SELECT clientId, devId, deviceType, deviceName, manufacturer, model, serialNumber, hidden, present, lastSeenAt, createdAt, updatedAt
+       FROM external_devices WHERE clientId = ? AND devId = ?`
+    )
+    .get(clientId, devId);
+  return row ? mapExternalDeviceRow(row) : null;
+};
+
+const setExternalDeviceHidden = (db, clientId, devId, hidden) => {
+  db.prepare('UPDATE external_devices SET hidden=?, updatedAt=? WHERE clientId=? AND devId=?').run(hidden ? 1 : 0, Date.now(), clientId, devId);
+};
+
+const upsertManualExternalDevice = (db, clientId, payload, options = {}) => {
+  const now = Date.now();
+  const data = normalizeManualDeviceInput(payload || {});
+  let devId = String(options.devId || data.devId || '').trim();
+  if (!devId) devId = makeManualDeviceId();
+  if (!isManualDeviceId(devId)) devId = `manual:${devId}`;
+  const exists = db.prepare('SELECT devId FROM external_devices WHERE clientId=? AND devId=?').get(clientId, devId);
+  if (options.devId && !exists) {
+    const err = new Error('Device not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  if (!data.deviceName && !data.serialNumber && !data.deviceType) {
+    const err = new Error('Missing device identity');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (exists) {
+    db.prepare(
+      `UPDATE external_devices
+       SET deviceType=?, deviceName=?, manufacturer=?, model=?, serialNumber=?, present=1, updatedAt=?
+       WHERE clientId=? AND devId=?`
+    ).run(data.deviceType, data.deviceName, data.manufacturer, data.model, data.serialNumber, now, clientId, devId);
+  } else {
+    db.prepare(
+      `INSERT INTO external_devices (clientId, devId, deviceType, deviceName, manufacturer, model, serialNumber, hidden, present, lastSeenAt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)`
+    ).run(clientId, devId, data.deviceType, data.deviceName, data.manufacturer, data.model, data.serialNumber, now, now, now);
+  }
+  return getExternalDevice(db, clientId, devId);
+};
+
+const deleteManualExternalDevice = (db, clientId, devId) => {
+  if (!isManualDeviceId(devId)) {
+    const err = new Error('Only manual devices can be deleted');
+    err.code = 'FORBIDDEN_KIND';
+    throw err;
+  }
+  const row = getExternalDevice(db, clientId, devId);
+  if (!row) return { ok: false, removed: 0 };
+  const result = db.prepare('DELETE FROM external_devices WHERE clientId=? AND devId=?').run(clientId, devId);
+  return { ok: true, removed: Number(result.changes || 0), row };
+};
+
+const listDeviceImportSummary = (db) => {
+  const rows = db
+    .prepare(
+      `SELECT clientId,
+              COUNT(*) as total,
+              SUM(CASE WHEN present = 1 THEN 1 ELSE 0 END) as presentCount,
+              SUM(CASE WHEN present = 0 THEN 1 ELSE 0 END) as missingCount,
+              SUM(CASE WHEN hidden = 1 THEN 1 ELSE 0 END) as hiddenCount,
+              MAX(updatedAt) as lastImportAt
+       FROM external_devices
+       GROUP BY clientId`
+    )
+    .all();
+  const cfgRows = db.prepare('SELECT clientId, updatedAt FROM client_device_import').all();
+  const byClient = new Map();
+  for (const row of rows) {
+    byClient.set(row.clientId, {
+      clientId: row.clientId,
+      total: Number(row.total || 0),
+      presentCount: Number(row.presentCount || 0),
+      missingCount: Number(row.missingCount || 0),
+      hiddenCount: Number(row.hiddenCount || 0),
+      lastImportAt: row.lastImportAt || null,
+      configUpdatedAt: null
+    });
+  }
+  for (const row of cfgRows) {
+    const entry = byClient.get(row.clientId) || {
+      clientId: row.clientId,
+      total: 0,
+      presentCount: 0,
+      missingCount: 0,
+      hiddenCount: 0,
+      lastImportAt: null,
+      configUpdatedAt: null
+    };
+    entry.configUpdatedAt = row.updatedAt || null;
+    byClient.set(row.clientId, entry);
+  }
+  return Array.from(byClient.values());
+};
+
 const listImportSummary = (db) => {
   const userRows = db
     .prepare(
@@ -650,16 +1123,30 @@ module.exports = {
   encryptString,
   decryptString,
   normalizeEmployeesResponse,
+  normalizeDevicesResponse,
   fetchEmployeesFromApi,
+  fetchDevicesFromApi,
   getImportConfig,
+  getDeviceImportConfig,
   getImportConfigSafe,
+  getDeviceImportConfigSafe,
   upsertImportConfig,
+  upsertDeviceImportConfig,
   upsertExternalUsers,
+  upsertExternalDevices,
   listExternalUsers,
+  listExternalDevices,
   getExternalUser,
+  getExternalDevice,
   setExternalUserHidden,
+  setExternalDeviceHidden,
   listImportSummary,
+  listDeviceImportSummary,
   isManualExternalId,
+  isManualDeviceId,
   upsertManualExternalUser,
+  upsertManualExternalDevice,
   deleteManualExternalUser
+  ,deleteManualExternalDevice
+  ,findExternalEmailConflict
 };

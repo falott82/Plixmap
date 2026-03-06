@@ -26,7 +26,7 @@ import {
   Wrench,
   X
 } from 'lucide-react';
-import type { Client } from '../../store/types';
+import type { Client, Site, SiteScheduleDayKey } from '../../store/types';
 import { useT } from '../../i18n/useT';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useDataStore } from '../../store/useDataStore';
@@ -43,6 +43,7 @@ import {
   type MeetingRoomOverviewRow
 } from '../../api/meetings';
 import { listExternalUsers } from '../../api/customImport';
+import { fetchUserDirectory, type UserDirectoryRow } from '../../api/usersDirectory';
 
 interface Props {
   open: boolean;
@@ -78,6 +79,7 @@ type SelectedParticipant = {
 };
 
 type NeedKey = 'projector' | 'tv' | 'videoConf' | 'coffee' | 'whiteboard' | 'guestWifi' | 'fridge';
+type KioskMeetingLanguage = 'auto' | 'it' | 'en' | 'ru' | 'ar' | 'zh';
 
 const NEED_CONFIG: Array<{
   key: NeedKey;
@@ -97,6 +99,15 @@ const NEED_CONFIG: Array<{
   { key: 'whiteboard', icon: Clipboard, labels: { it: 'Lavagna', en: 'Whiteboard' }, match: ['whiteboard'] },
   { key: 'guestWifi', icon: Wifi, labels: { it: 'Guest Wifi', en: 'Guest Wifi' }, match: ['guest wifi'] },
   { key: 'fridge', icon: Snowflake, labels: { it: 'Frigo', en: 'Fridge' }, match: ['fridge'] }
+];
+
+const KIOSK_LANG_OPTIONS: Array<{ key: KioskMeetingLanguage; flag: string; labels: { it: string; en: string } }> = [
+  { key: 'auto', flag: '🌐', labels: { it: 'Sistema', en: 'System' } },
+  { key: 'it', flag: '🇮🇹', labels: { it: 'Italiano', en: 'Italian' } },
+  { key: 'en', flag: '🇬🇧', labels: { it: 'Inglese', en: 'English' } },
+  { key: 'ru', flag: '🇷🇺', labels: { it: 'Russo', en: 'Russian' } },
+  { key: 'ar', flag: '🇸🇦', labels: { it: 'Arabo', en: 'Arabic' } },
+  { key: 'zh', flag: '🇨🇳', labels: { it: 'Cinese', en: 'Chinese' } }
 ];
 
 const todayIso = () => {
@@ -157,6 +168,31 @@ const toLocalTsFromDayAndTime = (day: string, time: string) => {
   const dt = new Date(y, mo, da, hh, mm, 0, 0);
   const ts = dt.getTime();
   return Number.isFinite(ts) ? ts : null;
+};
+
+const siteScheduleDayKeyFromIso = (isoDay: string): SiteScheduleDayKey | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDay || '').trim());
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0);
+  if (!Number.isFinite(date.getTime())) return null;
+  const dayIndex = date.getDay();
+  return (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][dayIndex] || null) as SiteScheduleDayKey | null;
+};
+
+const latestSiteScheduleEndTime = (site: Site | null | undefined, isoDay: string): string | null => {
+  if (!site?.siteSchedule) return null;
+  const holiday = (site.siteSchedule.holidays || []).find((entry) => String(entry?.date || '').trim() === String(isoDay || '').trim());
+  if (holiday && holiday.closed !== false) return null;
+  const dayKey = siteScheduleDayKeyFromIso(isoDay);
+  if (!dayKey) return null;
+  const row = site.siteSchedule.weekly?.[dayKey];
+  if (!row || row.closed) return null;
+  if (Array.isArray(row.slots) && row.slots.length) {
+    const last = row.slots[row.slots.length - 1];
+    const end = normalizeTypedTime(String(last?.end || '').trim());
+    if (end) return end;
+  }
+  return normalizeTypedTime(String(row.close || '').trim());
 };
 
 const normalizeEq = (value: string) =>
@@ -337,6 +373,7 @@ const MeetingManagerModal = ({
   const [subject, setSubject] = useState('');
   const [meetingNotes, setMeetingNotes] = useState('');
   const [videoConferenceLink, setVideoConferenceLink] = useState('');
+  const [meetingKioskLanguage, setMeetingKioskLanguage] = useState<KioskMeetingLanguage>('auto');
   const [bufferBefore, setBufferBefore] = useState(0);
   const [bufferAfter, setBufferAfter] = useState(0);
   const [sendEmail, setSendEmail] = useState(false);
@@ -353,6 +390,9 @@ const MeetingManagerModal = ({
   });
   const [participantFilter, setParticipantFilter] = useState('');
   const [selectedParticipants, setSelectedParticipants] = useState<SelectedParticipant[]>([]);
+  const [meetingAdminsDirectory, setMeetingAdminsDirectory] = useState<UserDirectoryRow[]>([]);
+  const [meetingAdminIds, setMeetingAdminIds] = useState<string[]>([]);
+  const [meetingAdminCandidateId, setMeetingAdminCandidateId] = useState('');
   const [manualName, setManualName] = useState('');
   const [manualCompany, setManualCompany] = useState('');
   const [manualCompanyIsOther, setManualCompanyIsOther] = useState(false);
@@ -376,7 +416,9 @@ const MeetingManagerModal = ({
   const [roomPreview, setRoomPreview] = useState<{ roomId: string; floorPlanId: string } | null>(null);
   const previewCloseGuardUntilRef = useRef(0);
   const participantsCloseGuardUntilRef = useRef(0);
+  const participantsFilterInputRef = useRef<HTMLInputElement | null>(null);
   const earliestSuggestionsCloseGuardUntilRef = useRef(0);
+  const approvalCloseGuardUntilRef = useRef(0);
   const todayMin = useMemo(() => todayIso(), []);
   const closeRoomPreview = () => {
     previewCloseGuardUntilRef.current = Date.now() + 350;
@@ -389,6 +431,10 @@ const MeetingManagerModal = ({
   const closeEarliestSuggestionsModal = () => {
     earliestSuggestionsCloseGuardUntilRef.current = Date.now() + 350;
     setEarliestSuggestionsModalOpen(false);
+  };
+  const closeApprovalModal = () => {
+    approvalCloseGuardUntilRef.current = Date.now() + 350;
+    setApprovalModalOpen(false);
   };
   const updateClient = useDataStore((s: any) => s.updateClient);
 
@@ -406,6 +452,20 @@ const MeetingManagerModal = ({
     [selectedClient?.sites, siteId]
   );
   const selectedRoom = useMemo(() => overviewRows.find((room) => room.roomId === selectedRoomId) || null, [overviewRows, selectedRoomId]);
+  const selectedClientLabel = String(selectedClient?.shortName || selectedClient?.name || '').trim();
+  const selectedSiteLabel = String(selectedSite?.name || '').trim();
+  const selectedFloorPlanLabel = String(selectedRoom?.floorPlanName || '').trim();
+  const dialogTitle = useMemo(() => {
+    if (step === 'browse') return 'Meeting rooms';
+    const parts = [
+      t({ it: 'Meeting room', en: 'Meeting room' }),
+      selectedClientLabel,
+      selectedSiteLabel,
+      selectedFloorPlanLabel
+    ].filter(Boolean);
+    return parts.join(' - ');
+  }, [selectedClientLabel, selectedFloorPlanLabel, selectedSiteLabel, step, t]);
+  const dialogTitleClass = dialogTitle.length > 72 ? 'text-lg' : dialogTitle.length > 54 ? 'text-xl' : 'text-2xl';
   const selectedCount = selectedParticipants.length;
   const remoteSelectedCount = selectedParticipants.filter((row) => row.remote).length;
   const onsiteSelectedCount = selectedCount - remoteSelectedCount;
@@ -416,14 +476,15 @@ const MeetingManagerModal = ({
   const remoteManualGuestCount = selectedParticipants.filter((row) => row.kind === 'manual' && row.remote).length;
   const onsiteManualGuestCount = manualGuestCount - remoteManualGuestCount;
   const onsiteExternalGuestsCount = 0;
+  const onsiteHeadcount = onsiteSelectedCount + onsiteExternalGuestsCount;
   const optionalCount = selectedParticipants.filter((row) => row.optional).length;
   const roomCapacity = Math.max(1, Number(selectedRoom?.capacity || 1));
-  const requestedSeats = Math.max(1, onsiteSelectedCount + onsiteExternalGuestsCount);
-  const participantsOverCapacity = onsiteSelectedCount + onsiteExternalGuestsCount > roomCapacity;
+  const requestedSeats = Math.max(1, onsiteHeadcount);
+  const participantsOverCapacity = onsiteHeadcount > roomCapacity;
   const selectedRoomSlotBlocked = !!selectedRoom?.slotConflicts?.length;
-  const liveAvailability = roomCapacity - (onsiteSelectedCount + onsiteExternalGuestsCount);
   const selectedSlotStartTs = useMemo(() => toLocalTsFromDayAndTime(day, startTime), [day, startTime]);
   const selectedSlotEndTs = useMemo(() => toLocalTsFromDayAndTime(day, endTime), [day, endTime]);
+  const selectedSiteMaxEndTime = useMemo(() => latestSiteScheduleEndTime(selectedSite, day), [day, selectedSite]);
   const selectedMeetingDurationMin = useMemo(() => {
     const s = timeToMinutes(startTime);
     const e = timeToMinutes(endTime);
@@ -486,6 +547,22 @@ const MeetingManagerModal = ({
       postPct: (postMin / total) * 100
     };
   }, [bufferAfter, bufferBefore, endTime, startTime]);
+
+  useEffect(() => {
+    if (!open || !selectedSiteMaxEndTime) return;
+    const normalizedStart = normalizeTypedTime(startTime);
+    const normalizedEnd = normalizeTypedTime(endTime);
+    if (!normalizedStart || !normalizedEnd) return;
+    const defaultEnd = addMinutesTime(normalizedStart, 60);
+    if (normalizedEnd !== defaultEnd) return;
+    const startMin = timeToMinutes(normalizedStart);
+    const defaultEndMin = timeToMinutes(defaultEnd);
+    const siteEndMin = timeToMinutes(selectedSiteMaxEndTime);
+    if (startMin === null || defaultEndMin === null || siteEndMin === null) return;
+    if (siteEndMin > startMin && defaultEndMin > siteEndMin) {
+      setEndTime(selectedSiteMaxEndTime);
+    }
+  }, [endTime, open, selectedSiteMaxEndTime, startTime]);
 
   const previewData = useMemo(() => {
     if (!roomPreview || !selectedSite) return null;
@@ -555,9 +632,13 @@ const MeetingManagerModal = ({
     setBusinessPartnersModalOpen(false);
     setManualCompany('');
     setManualCompanyIsOther(false);
+    setMeetingKioskLanguage('auto');
+    const currentUserId = String((user as any)?.id || '').trim();
+    setMeetingAdminIds(currentUserId ? [currentUserId] : []);
+    setMeetingAdminCandidateId('');
     const nextClient = initialClientId && clients.some((c) => c.id === initialClientId) ? initialClientId : firstClientId;
     setClientId(nextClient);
-  }, [clients, firstClientId, initialClientId, initialDay, open]);
+  }, [clients, firstClientId, initialClientId, initialDay, open, user]);
 
   useEffect(() => {
     if (!open) return;
@@ -599,6 +680,32 @@ const MeetingManagerModal = ({
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
+    fetchUserDirectory()
+      .then((payload) => {
+        if (cancelled) return;
+        const rows = Array.isArray(payload?.users) ? payload.users : [];
+        setMeetingAdminsDirectory(rows);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMeetingAdminsDirectory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    const allowed = meetingAdminsDirectory.filter((row) => !meetingAdminIds.includes(String(row.id || '')));
+    setMeetingAdminCandidateId((prev) => {
+      if (prev && allowed.some((row) => String(row.id) === String(prev))) return prev;
+      return allowed[0] ? String(allowed[0].id) : '';
+    });
+  }, [meetingAdminIds, meetingAdminsDirectory]);
+
+  useEffect(() => {
+    if (!open) return;
     if (day < todayMin) setDay(todayMin);
     if (endDate < todayMin) setEndDate(todayMin);
   }, [day, endDate, open, todayMin]);
@@ -614,6 +721,15 @@ const MeetingManagerModal = ({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [businessPartnersModalOpen, participantsModalOpen]);
+
+  useEffect(() => {
+    if (!participantsModalOpen || businessPartnersModalOpen) return;
+    const focusTimer = window.setTimeout(() => {
+      participantsFilterInputRef.current?.focus();
+      participantsFilterInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(focusTimer);
   }, [businessPartnersModalOpen, participantsModalOpen]);
 
   useEffect(() => {
@@ -705,6 +821,37 @@ const MeetingManagerModal = ({
     return out;
   }, [selectedParticipants]);
 
+  const currentUserId = String((user as any)?.id || '').trim();
+  const meetingAdminDirectoryById = useMemo(
+    () => new Map(meetingAdminsDirectory.map((row) => [String(row.id), row])),
+    [meetingAdminsDirectory]
+  );
+  const selectedMeetingAdmins = useMemo(
+    () =>
+      meetingAdminIds
+        .map((id) => {
+          const key = String(id);
+          const known = meetingAdminDirectoryById.get(key);
+          if (known) return known;
+          if (key && key === currentUserId) {
+            return {
+              id: key,
+              username: String((user as any)?.username || ''),
+              firstName: String((user as any)?.firstName || ''),
+              lastName: String((user as any)?.lastName || '')
+            } as UserDirectoryRow;
+          }
+          return null;
+        })
+        .filter((row): row is UserDirectoryRow => !!row),
+    [currentUserId, meetingAdminDirectoryById, meetingAdminIds, user]
+  );
+  const availableMeetingAdminCandidates = useMemo(
+    () =>
+      meetingAdminsDirectory.filter((row) => !meetingAdminIds.includes(String(row.id || ''))),
+    [meetingAdminIds, meetingAdminsDirectory]
+  );
+
   const selectedParticipantsByExternalId = useMemo(() => {
     const out = new Map<string, SelectedParticipant>();
     for (const row of selectedParticipants) {
@@ -759,6 +906,21 @@ const MeetingManagerModal = ({
     }
     return out;
   }, [overviewRows, selectedSlotEndTs, selectedSlotStartTs]);
+
+  const formatParticipantConflictLabel = (externalId: string) => {
+    const conflicts = participantMeetingConflictsByExternalId.get(String(externalId || '')) || [];
+    const first = conflicts[0];
+    if (!first) return '';
+    const range = `${new Date(first.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-${new Date(first.endAt).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    })}`;
+    const more = conflicts.length > 1 ? ` (+${conflicts.length - 1})` : '';
+    return t({
+      it: `Impegnato: ${first.subject} • ${first.roomName} • ${range}${more}`,
+      en: `Busy: ${first.subject} • ${first.roomName} • ${range}${more}`
+    });
+  };
 
   const requiredNeeds = useMemo(() => NEED_CONFIG.filter((def) => needs[def.key]), [needs]);
   const roomsWithAvailability = useMemo(() => {
@@ -878,6 +1040,22 @@ const MeetingManagerModal = ({
     setSelectedParticipants((prev) => prev.filter((row) => row.key !== key));
   };
 
+  const addMeetingAdmin = (userId: string) => {
+    const nextId = String(userId || '').trim();
+    if (!nextId) return;
+    setMeetingAdminIds((prev) => {
+      if (prev.includes(nextId)) return prev;
+      return [...prev, nextId];
+    });
+  };
+
+  const removeMeetingAdmin = (userId: string) => {
+    const targetId = String(userId || '').trim();
+    if (!targetId) return;
+    if (targetId === currentUserId) return;
+    setMeetingAdminIds((prev) => prev.filter((id) => String(id) !== targetId));
+  };
+
   const addManualParticipant = () => {
     const fullName = String(manualName || '').trim();
     const company = String(manualCompany || '').trim();
@@ -993,9 +1171,9 @@ const MeetingManagerModal = ({
         }
       }
 
+      const suggestions = buildRoomSuggestionsForRows(rowsForDay, baseCandidateTs);
+      if (!suggestions.length) continue;
       if (step === 'browse') {
-        const suggestions = buildRoomSuggestionsForRows(rowsForDay, baseCandidateTs);
-        if (!suggestions.length) continue;
         const firstTs = suggestions[0]?.startAt;
         if (!Number.isFinite(firstTs)) continue;
         const sameTime = suggestions.filter((s) => s.startAt === firstTs);
@@ -1003,8 +1181,20 @@ const MeetingManagerModal = ({
         setEarliestSuggestionsModalOpen(true);
         return;
       }
-
       if (!selectedRoomId) return;
+      const preferredRoom = suggestions.find((row) => String(row.roomId) === String(selectedRoomId));
+      const firstTs = Number(suggestions[0]?.startAt || 0);
+      const preferredTs = Number(preferredRoom?.startAt || 0);
+      const shouldRequireChoice =
+        !preferredRoom ||
+        !Number.isFinite(preferredTs) ||
+        !Number.isFinite(firstTs) ||
+        preferredTs > firstTs;
+      if (shouldRequireChoice) {
+        setEarliestRoomSuggestions(suggestions.slice(0, 8));
+        setEarliestSuggestionsModalOpen(true);
+        return;
+      }
       const nextCandidate = findSingleRoomEarliestForRows(rowsForDay, selectedRoomId, baseCandidateTs);
       if (!Number.isFinite(nextCandidate)) continue;
       const d = new Date(nextCandidate);
@@ -1043,21 +1233,34 @@ const MeetingManagerModal = ({
   const setMaxPossibleEndTime = () => {
     const startTs = toLocalTsFromDayAndTime(day, startTime);
     if (startTs === null) return;
+    const siteLimitTs = selectedSiteMaxEndTime ? toLocalTsFromDayAndTime(day, selectedSiteMaxEndTime) : null;
     const sorted = [...overviewRows]
       .filter((r) => r.roomId === selectedRoomId)
       .flatMap((r) => r.bookings || [])
       .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0));
     const nextBlocked = sorted.find((b) => Number((b as any).effectiveStartAt ?? b.startAt ?? 0) > startTs);
+    const siteEndCandidate = siteLimitTs !== null && siteLimitTs > startTs ? selectedSiteMaxEndTime : null;
     if (nextBlocked) {
       const next = new Date(Number((nextBlocked as any).effectiveStartAt ?? nextBlocked.startAt ?? 0));
       const nextDayIso = formatIsoLocalDay(next);
       if (nextDayIso === day) {
-        setEndTime(`${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`);
+        const nextBlockedHm = `${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`;
+        const nextBlockedMin = timeToMinutes(nextBlockedHm);
+        const siteEndMin = siteEndCandidate ? timeToMinutes(siteEndCandidate) : null;
+        if (siteEndCandidate && siteEndMin !== null && nextBlockedMin !== null) {
+          setEndTime(siteEndMin <= nextBlockedMin ? siteEndCandidate : nextBlockedHm);
+          return;
+        }
+        setEndTime(siteEndCandidate || nextBlockedHm);
         return;
       }
-      setEndTime('23:59');
+      setEndTime(siteEndCandidate || '23:59');
       return;
     }
+    setEndTime(siteEndCandidate || '23:59');
+  };
+
+  const setEndTimeBeyondSiteHours = () => {
     setEndTime('23:59');
   };
 
@@ -1107,6 +1310,7 @@ const MeetingManagerModal = ({
         subject: subject.trim(),
         notes: meetingNotes.trim(),
         videoConferenceLink: videoConferenceLink.trim(),
+        kioskLanguage: meetingKioskLanguage,
         requestedSeats,
         startDate: day,
         endDate: multiDay ? endDate : day,
@@ -1115,6 +1319,7 @@ const MeetingManagerModal = ({
         setupBufferBeforeMin: bufferBefore,
         setupBufferAfterMin: bufferAfter,
         participants,
+        meetingAdminIds: meetingAdminIds.length ? meetingAdminIds : currentUserId ? [currentUserId] : undefined,
         externalGuests: externalGuestsDetails.length > 0,
         externalGuestsList: externalGuestsDetails.length > 0
           ? externalGuestsDetails
@@ -1139,6 +1344,7 @@ const MeetingManagerModal = ({
       setSubject('');
       setMeetingNotes('');
       setVideoConferenceLink('');
+      setMeetingKioskLanguage('auto');
       setSelectedParticipants([]);
       setParticipantFilter('');
       onCreated?.();
@@ -1269,6 +1475,7 @@ const MeetingManagerModal = ({
                   <div className="relative">
                     <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-slate-400" />
                     <input
+                      ref={participantsFilterInputRef}
                       value={participantFilter}
                       onChange={(e) => setParticipantFilter(e.target.value)}
                       placeholder={t({ it: 'Filtra utenti reali...', en: 'Filter real users...' })}
@@ -1279,6 +1486,7 @@ const MeetingManagerModal = ({
                     {orderedFilteredParticipants.allRows.map((row, index) => {
                       const selected = selectedExternalIds.has(row.externalId);
                       const selectedRow = selectedParticipantsByExternalId.get(row.externalId);
+                      const conflictLabel = formatParticipantConflictLabel(String(row.externalId || ''));
                       const startsAvailableSection =
                         orderedFilteredParticipants.selectedRows.length > 0 && index === orderedFilteredParticipants.selectedRows.length;
                       return (
@@ -1306,27 +1514,18 @@ const MeetingManagerModal = ({
                             >
                               {selected ? <Minus size={13} /> : <Plus size={13} />}
                             </button>
-                            <span className="flex min-w-0 items-center gap-1.5">
-                              <span className="truncate text-slate-700">{row.fullName}</span>
-                              {participantMeetingConflictsByExternalId.has(String(row.externalId)) ? (
-                                <span className="group relative inline-flex flex-shrink-0 items-center justify-center text-amber-600">
-                                  <AlertTriangle size={13} />
-                                  <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 hidden w-72 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white shadow-lg group-hover:block">
-                                    {(() => {
-                                      const conflicts = participantMeetingConflictsByExternalId.get(String(row.externalId)) || [];
-                                      const first = conflicts[0];
-                                      if (!first) return t({ it: 'Utente già impegnato in un altro meeting nello stesso periodo.', en: 'User is already busy in another meeting in the same time slot.' });
-                                      const range = `${new Date(first.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-${new Date(first.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-                                      const more = conflicts.length > 1 ? ` (+${conflicts.length - 1})` : '';
-                                      return t({
-                                        it: `Utente impegnato: ${first.subject} • ${first.roomName} • ${range}${more}`,
-                                        en: `User busy: ${first.subject} • ${first.roomName} • ${range}${more}`
-                                      });
-                                    })()}
+                            <div className="min-w-0">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <span className="truncate text-slate-700">{row.fullName}</span>
+                                {conflictLabel ? (
+                                  <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                                    <AlertTriangle size={11} />
+                                    {t({ it: 'Occupato', en: 'Busy' })}
                                   </span>
-                                </span>
-                              ) : null}
-                            </span>
+                                ) : null}
+                              </div>
+                              {conflictLabel ? <div className="mt-0.5 truncate text-[10px] text-amber-700">{conflictLabel}</div> : null}
+                            </div>
                             <span className="truncate text-xs text-slate-500">{row.email || 'no email'}</span>
                             <button
                               type="button"
@@ -1472,22 +1671,10 @@ const MeetingManagerModal = ({
                           }`}
                         >
                           <span className="max-w-[220px] truncate uppercase tracking-[0.02em]">{row.fullName}</span>
-                          {row.kind === 'real_user' && row.externalId && participantMeetingConflictsByExternalId.has(String(row.externalId)) ? (
-                            <span className="group relative inline-flex items-center justify-center text-amber-600">
-                              <AlertTriangle size={12} />
-                              <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 hidden w-72 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white shadow-lg group-hover:block">
-                                {(() => {
-                                  const conflicts = participantMeetingConflictsByExternalId.get(String(row.externalId)) || [];
-                                  const first = conflicts[0];
-                                  if (!first) return t({ it: 'Utente già impegnato in un altro meeting nello stesso periodo.', en: 'User is already busy in another meeting in the same time slot.' });
-                                  const range = `${new Date(first.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-${new Date(first.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-                                  const more = conflicts.length > 1 ? ` (+${conflicts.length - 1})` : '';
-                                  return t({
-                                    it: `Utente impegnato: ${first.subject} • ${first.roomName} • ${range}${more}`,
-                                    en: `User busy: ${first.subject} • ${first.roomName} • ${range}${more}`
-                                  });
-                                })()}
-                              </span>
+                          {row.kind === 'real_user' && row.externalId && formatParticipantConflictLabel(String(row.externalId || '')) ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                              <AlertTriangle size={11} />
+                              {t({ it: 'Occupato', en: 'Busy' })}
                             </span>
                           ) : null}
                           {row.optional ? <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">OPT</span> : null}
@@ -1606,15 +1793,17 @@ const MeetingManagerModal = ({
       <Transition show={open} as={Fragment}>
         <Dialog
           as="div"
-          className="relative z-[80]"
+          className="relative z-[110]"
           onClose={() => {
             if (roomPreview) return;
             if (participantsModalOpen) return;
             if (businessPartnersModalOpen) return;
             if (earliestSuggestionsModalOpen) return;
+            if (approvalModalOpen) return;
             if (Date.now() < previewCloseGuardUntilRef.current) return;
             if (Date.now() < participantsCloseGuardUntilRef.current) return;
             if (Date.now() < earliestSuggestionsCloseGuardUntilRef.current) return;
+            if (Date.now() < approvalCloseGuardUntilRef.current) return;
             onClose();
           }}
         >
@@ -1643,7 +1832,7 @@ const MeetingManagerModal = ({
               <Dialog.Panel className="w-full max-w-[1260px] rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
                 <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-3">
                   <div>
-                    <Dialog.Title className="text-2xl font-semibold text-ink">Meeting rooms</Dialog.Title>
+                    <Dialog.Title className={`${dialogTitleClass} font-semibold text-ink`}>{dialogTitle}</Dialog.Title>
                     <div className="text-sm text-slate-500">
                       {step === 'browse'
                         ? t({
@@ -1688,27 +1877,31 @@ const MeetingManagerModal = ({
                   </div>
                 ) : null}
 
-                <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-                  <label className="text-sm font-semibold text-slate-700">
-                    {t({ it: 'Cliente', en: 'Client' })}{requiredAsterisk}
-                    <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-                      {clients.map((client) => (
-                        <option key={client.id} value={client.id}>
-                          {client.shortName || client.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="text-sm font-semibold text-slate-700">
-                    {t({ it: 'Sede', en: 'Site' })}{requiredAsterisk}
-                    <select value={siteId} onChange={(e) => setSiteId(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-                      {(selectedClient?.sites || []).map((site) => (
-                        <option key={site.id} value={site.id}>
-                          {site.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <div className={`mt-4 grid grid-cols-1 gap-3 ${step === 'browse' ? 'lg:grid-cols-2' : ''}`}>
+                  {step === 'browse' ? (
+                    <>
+                      <label className="text-sm font-semibold text-slate-700">
+                        {t({ it: 'Cliente', en: 'Client' })}{requiredAsterisk}
+                        <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+                          {clients.map((client) => (
+                            <option key={client.id} value={client.id}>
+                              {client.shortName || client.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-sm font-semibold text-slate-700">
+                        {t({ it: 'Sede', en: 'Site' })}{requiredAsterisk}
+                        <select value={siteId} onChange={(e) => setSiteId(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+                          {(selectedClient?.sites || []).map((site) => (
+                            <option key={site.id} value={site.id}>
+                              {site.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  ) : null}
                   <div className="grid grid-cols-3 gap-2 lg:col-span-2">
                     <label className="text-sm font-semibold text-slate-700">
                       <span className="inline-flex items-center gap-1">
@@ -1771,9 +1964,30 @@ const MeetingManagerModal = ({
                     type="button"
                     onClick={setMaxPossibleEndTime}
                     className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    title={t({ it: 'Estende la fine meeting fino alle 23:59 (modificabile).', en: 'Extends meeting end time to 23:59 (editable).' })}
+                    title={
+                      selectedSiteMaxEndTime
+                        ? t({
+                            it: `Imposta la fine meeting sull'orario sede (${selectedSiteMaxEndTime}) o prima se la sala si blocca.`,
+                            en: `Set meeting end to the site closing time (${selectedSiteMaxEndTime}) or earlier if the room becomes blocked.`
+                          })
+                        : t({
+                            it: 'Imposta la fine meeting al limite disponibile attuale.',
+                            en: 'Set meeting end to the current available limit.'
+                          })
+                    }
                   >
-                    {t({ it: 'Più possibile', en: 'Latest possible' })}
+                    {selectedSiteMaxEndTime ? t({ it: 'Fine sede', en: 'Site closing' }) : t({ it: 'Più possibile', en: 'Latest possible' })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={setEndTimeBeyondSiteHours}
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    title={t({
+                      it: 'Estende manualmente la fine meeting fino alle 23:59, anche oltre l\'orario sede.',
+                      en: 'Manually extends meeting end to 23:59, even beyond site hours.'
+                    })}
+                  >
+                    {t({ it: 'Oltre sede', en: 'Beyond site' })}
                   </button>
                   {[
                     { label: '30m', minutes: 30 },
@@ -1794,6 +2008,22 @@ const MeetingManagerModal = ({
                       {preset.label}
                     </button>
                   ))}
+                  <label className="ml-1 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700">
+                    <input type="checkbox" checked={multiDay} onChange={(e) => setMultiDay(e.target.checked)} />
+                    {t({ it: 'Meeting multi-giorno', en: 'Multi-day meeting' })}
+                  </label>
+                  {multiDay ? (
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700">
+                      <span>{t({ it: 'Fino al', en: 'Until' })}</span>
+                      <input
+                        type="date"
+                        min={day || todayMin}
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="rounded-md border border-slate-200 px-2 py-1 text-xs"
+                      />
+                    </label>
+                  ) : null}
                   <span className="group relative inline-flex items-center">
                     <HelpCircle size={14} className="text-slate-400" />
                     <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 w-80 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-lg transition group-hover:opacity-100">
@@ -1803,24 +2033,10 @@ const MeetingManagerModal = ({
                       })}
                     </span>
                   </span>
-                </div>
-
-                <div className="mt-3 flex items-center gap-3 text-xs">
-                  <label className="inline-flex items-center gap-2 font-semibold text-slate-700">
-                    <input type="checkbox" checked={multiDay} onChange={(e) => setMultiDay(e.target.checked)} />
-                    {t({ it: 'Meeting multi-giorno', en: 'Multi-day meeting' })}
-                  </label>
-                  {multiDay ? (
-                    <label className="inline-flex items-center gap-2 font-semibold text-slate-700">
-                      {t({ it: 'Fino al', en: 'Until' })}
-                      <input
-                        type="date"
-                        min={day || todayMin}
-                        value={endDate}
-                        onChange={(e) => setEndDate(e.target.value)}
-                        className="rounded-lg border border-slate-200 px-2 py-1"
-                      />
-                    </label>
+                  {selectedSiteMaxEndTime ? (
+                    <span className="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700">
+                      {t({ it: `Massimo sede: ${selectedSiteMaxEndTime}`, en: `Site max: ${selectedSiteMaxEndTime}` })}
+                    </span>
                   ) : null}
                 </div>
 
@@ -1868,34 +2084,39 @@ const MeetingManagerModal = ({
                                 : 'border-rose-300 bg-rose-50/80 opacity-90'
                             }`}
                           >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-semibold text-ink">{room.roomName}</div>
-                              <div className="truncate text-xs text-slate-600">{room.floorPlanName}</div>
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50/90 px-2.5 py-1.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="truncate text-sm font-semibold text-ink">{room.roomName}</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRoomPreview({ roomId: room.roomId, floorPlanId: room.floorPlanId })}
+                                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                    title={t({ it: 'Mostra planimetria', en: 'Show floor plan' })}
+                                  >
+                                    <Eye size={12} />
+                                  </button>
+                                </div>
+                                <div className="truncate text-[10px] leading-4 text-slate-700">{room.siteName || selectedSite?.name || ''}</div>
+                                <div className="truncate text-[10px] leading-4 text-slate-600">{room.floorPlanName}</div>
+                              </div>
+                              <div className="text-xs font-semibold text-slate-700">{room.currentPeople}/{room.capacity}</div>
                             </div>
-                            <div className="text-xs font-semibold text-slate-700">{room.currentPeople}/{room.capacity}</div>
                           </div>
-                          <div className="mt-1 text-[11px] text-slate-700">
+                          <div className="mt-1 text-[10px] leading-4 text-slate-700">
                             {Number.isFinite(Number(room.surfaceSqm)) && Number(room.surfaceSqm) > 0
                               ? `${t({ it: 'Superficie', en: 'Surface' })}: ${Number(room.surfaceSqm).toFixed(1)} mq`
                               : t({ it: 'Superficie non disponibile', en: 'Surface not available' })}
                           </div>
-                          <div className={`mt-2 text-xs font-semibold ${slotBlocked || missingNeeds.length ? 'text-rose-700' : 'text-emerald-700'}`}>
+                          <div className={`mt-1.5 text-xs font-semibold ${slotBlocked || missingNeeds.length ? 'text-rose-700' : 'text-emerald-700'}`}>
                             {slotBlocked
                               ? t({ it: 'Occupata nello slot selezionato', en: 'Busy in selected slot' })
                               : missingNeeds.length
                                 ? t({ it: 'Mancano dotazioni richieste', en: 'Missing required equipment' })
                                 : t({ it: 'Disponibile', en: 'Available' })}
                           </div>
-                          <div className="mt-2 flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setRoomPreview({ roomId: room.roomId, floorPlanId: room.floorPlanId })}
-                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                              title={t({ it: 'Mostra planimetria', en: 'Show floor plan' })}
-                            >
-                              <Eye size={13} />
-                            </button>
+                          <div className="mt-1.5 flex items-center justify-end gap-2">
                             <button
                               type="button"
                               onClick={() => openDetailsForRoom(room.roomId)}
@@ -1905,15 +2126,15 @@ const MeetingManagerModal = ({
                               {t({ it: 'Seleziona', en: 'Select' })}
                             </button>
                           </div>
-                          <div className="mt-2 flex items-center gap-1.5">
+                          <div className="mt-1.5 flex items-center gap-1.5">
                             {serviceIcons.map((service) => {
                               const ServiceIcon = service.icon;
                               return (
                                 <span
                                   key={`${room.roomId}-${service.key}`}
-                                  className="group relative inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-700"
+                                  className="group relative inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-700"
                                 >
-                                  <ServiceIcon size={13} />
+                                  <ServiceIcon size={12} />
                                   <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white shadow-lg group-hover:block">
                                     {t(service.labels)}
                                   </span>
@@ -1943,12 +2164,19 @@ const MeetingManagerModal = ({
                           >
                             <ArrowLeft size={13} /> {t({ it: 'Cambia sala', en: 'Change room' })}
                           </button>
-                          <span className="text-xs text-slate-500">{selectedRoom?.floorPlanName || ''}</span>
                         </div>
                         <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                          <div className="grid grid-cols-[1fr_auto] items-start gap-2">
+                          <div className="grid grid-cols-[1fr_auto] items-center gap-2">
                             <div className="min-w-0">
-                              <div className="font-semibold text-ink">{selectedRoom?.roomName || '-'}</div>
+                              <div className="truncate text-sm font-semibold text-ink">
+                                {selectedRoom?.roomName || '-'}{' '}
+                                <span className="font-normal text-slate-600">
+                                  - {t({ it: 'Posti disponibili', en: 'Available seats' })}: {selectedRoom?.availableSeats ?? 0} -{' '}
+                                  {Number.isFinite(Number(selectedRoom?.surfaceSqm)) && Number(selectedRoom?.surfaceSqm) > 0
+                                    ? `${t({ it: 'Superficie', en: 'Surface' })} ${Number(selectedRoom?.surfaceSqm).toFixed(1)} mq`
+                                    : t({ it: 'Superficie n.d.', en: 'Surface n/a' })}
+                                </span>
+                              </div>
                             </div>
                             {selectedRoom ? (
                               <button
@@ -1961,16 +2189,8 @@ const MeetingManagerModal = ({
                               </button>
                             ) : null}
                           </div>
-                          <div className="text-xs text-slate-600">
-                            {t({ it: 'Posti disponibili', en: 'Available seats' })}: {selectedRoom?.availableSeats ?? 0}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-600">
-                            {Number.isFinite(Number(selectedRoom?.surfaceSqm)) && Number(selectedRoom?.surfaceSqm) > 0
-                              ? `${t({ it: 'Superficie', en: 'Surface' })}: ${Number(selectedRoom?.surfaceSqm).toFixed(1)} mq`
-                              : t({ it: 'Superficie non disponibile', en: 'Surface not available' })}
-                          </div>
                         </div>
-                        <label className="mt-3 block text-sm font-semibold text-slate-700">
+                        <label className="mt-2 block text-sm font-semibold text-slate-700">
                           {t({ it: 'Oggetto meeting', en: 'Meeting subject' })}{requiredAsterisk}
                           <input value={subject} onChange={(e) => setSubject(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
                         </label>
@@ -2047,21 +2267,109 @@ const MeetingManagerModal = ({
                                   <span className="max-w-[220px] truncate uppercase tracking-[0.02em]">{row.fullName}</span>
                                   {row.optional ? <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">OPT</span> : null}
                                   {row.remote ? <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">REM</span> : null}
-                                  {row.kind === 'manual' ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => removeParticipant(row.key)}
-                                      className="text-violet-600 hover:text-rose-600"
-                                      title={t({ it: 'Rimuovi ospite', en: 'Remove guest' })}
-                                    >
-                                      <X size={12} />
-                                    </button>
-                                  ) : null}
+                                  <button
+                                    type="button"
+                                    onClick={() => removeParticipant(row.key)}
+                                    className={row.kind === 'manual' ? 'text-violet-600 hover:text-rose-600' : 'text-slate-500 hover:text-rose-600'}
+                                    title={row.kind === 'manual' ? t({ it: 'Rimuovi ospite', en: 'Remove guest' }) : t({ it: 'Rimuovi partecipante', en: 'Remove participant' })}
+                                  >
+                                    <X size={12} />
+                                  </button>
                                 </span>
                               ))
                             ) : (
                               <span className="text-xs text-slate-500">{t({ it: 'Nessun partecipante selezionato.', en: 'No participant selected.' })}</span>
                             )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                            <ShieldCheck size={15} />
+                            {t({ it: 'Admin meeting', en: 'Meeting admins' })}
+                            <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-bold text-sky-700">
+                              {selectedMeetingAdmins.length}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {t({
+                            it: 'Uno o più utenti possono amministrare il meeting (modifica, estensione, cancellazione, gestione partecipanti).',
+                            en: 'One or more users can administer the meeting (edit, extend, cancel, participant management).'
+                          })}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-2">
+                          {selectedMeetingAdmins.length ? (
+                            selectedMeetingAdmins.map((row) => {
+                              const rowId = String(row.id || '');
+                              const displayName =
+                                `${String(row.firstName || '').trim()} ${String(row.lastName || '').trim()}`.trim() || row.username;
+                              const fixed = rowId === currentUserId;
+                              return (
+                                <span
+                                  key={`meeting-admin-${rowId}`}
+                                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs ${
+                                    fixed ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-700'
+                                  }`}
+                                  title={
+                                    fixed
+                                      ? t({ it: 'Creatore meeting (sempre admin)', en: 'Meeting creator (always admin)' })
+                                      : t({ it: 'Admin meeting', en: 'Meeting admin' })
+                                  }
+                                >
+                                  <span className="max-w-[220px] truncate">{displayName}</span>
+                                  {fixed ? (
+                                    <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                      {t({ it: 'Creatore', en: 'Creator' })}
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeMeetingAdmin(rowId)}
+                                      className="text-slate-500 hover:text-rose-600"
+                                      title={t({ it: 'Rimuovi admin meeting', en: 'Remove meeting admin' })}
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  )}
+                                </span>
+                              );
+                            })
+                          ) : (
+                            <span className="text-xs text-slate-500">{t({ it: 'Nessun admin meeting selezionato.', en: 'No meeting admins selected.' })}</span>
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <select
+                            value={meetingAdminCandidateId}
+                            onChange={(e) => setMeetingAdminCandidateId(e.target.value)}
+                            className="min-w-[260px] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            disabled={!availableMeetingAdminCandidates.length}
+                          >
+                            {availableMeetingAdminCandidates.length ? (
+                              availableMeetingAdminCandidates.map((row) => {
+                                const label =
+                                  `${String(row.firstName || '').trim()} ${String(row.lastName || '').trim()}`.trim() || row.username;
+                                return (
+                                  <option key={`meeting-admin-candidate-${row.id}`} value={row.id}>
+                                    {label}
+                                  </option>
+                                );
+                              })
+                            ) : (
+                              <option value="">{t({ it: 'Nessun altro utente disponibile', en: 'No additional user available' })}</option>
+                            )}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => addMeetingAdmin(meetingAdminCandidateId)}
+                            disabled={!meetingAdminCandidateId}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Plus size={13} />
+                            {t({ it: 'Aggiungi admin', en: 'Add admin' })}
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -2131,6 +2439,39 @@ const MeetingManagerModal = ({
                               : t({ it: 'Nessun meeting successivo: max 60 min.', en: 'No next meeting: max 60 min.' })}
                           </div>
                         </label>
+                        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                            <span>{t({ it: 'Lingua kiosk meeting', en: 'Meeting kiosk language' })}</span>
+                            <span className="group relative inline-flex items-center">
+                              <HelpCircle size={13} className="text-slate-400" />
+                              <span className="pointer-events-none absolute left-0 top-full z-10 mt-2 w-80 rounded-md bg-slate-900 px-2 py-1 text-[11px] font-normal text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+                                {t({
+                                  it: 'Auto usa la lingua del kiosk (impostazione manuale o lingua del dispositivo). Se imposti una lingua qui, quando il meeting inizia il kiosk passa automaticamente a quella lingua finché la riunione è in corso.',
+                                  en: 'Auto uses the kiosk default language (manual choice or device language). If you set a language here, the kiosk automatically switches to that language while the meeting is in progress.'
+                                })}
+                              </span>
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {KIOSK_LANG_OPTIONS.map((opt) => {
+                              const active = meetingKioskLanguage === opt.key;
+                              return (
+                                <button
+                                  key={`meeting-kiosk-lang-${opt.key}`}
+                                  type="button"
+                                  onClick={() => setMeetingKioskLanguage(opt.key)}
+                                  className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-semibold ${
+                                    active ? 'border-primary/40 bg-primary/10 text-primary' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                  }`}
+                                  title={`${opt.flag} ${t(opt.labels)}`}
+                                >
+                                  <span>{opt.flag}</span>
+                                  <span>{opt.key === 'auto' ? t({ it: 'Auto', en: 'Auto' }) : opt.key.toUpperCase()}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                         <div className="mt-3 space-y-2">
                           <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                             <input type="checkbox" checked={sendEmail} onChange={(e) => setSendEmail(e.target.checked)} /> <Mail size={15} />
@@ -2154,12 +2495,8 @@ const MeetingManagerModal = ({
                       <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                         <div className="flex items-center justify-between gap-2 text-sm font-semibold text-slate-700">
                           <span>{t({ it: 'Disponibilità', en: 'Availability' })}</span>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                              liveAvailability < 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
-                            }`}
-                          >
-                            {liveAvailability}/{roomCapacity}
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${participantsOverCapacity ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {onsiteHeadcount}/{roomCapacity}
                           </span>
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
@@ -2168,7 +2505,7 @@ const MeetingManagerModal = ({
                             en: `${onsiteInternalParticipantCount} on-site internal (${optionalCount} optional) · ${remoteInternalParticipantCount} remote internal · ${onsiteManualGuestCount} on-site guests · ${remoteManualGuestCount} remote guests. Availability updates automatically.`
                           })}
                         </div>
-                        <div className="mt-2 text-xs text-slate-500">
+                        <div className={`mt-2 text-xs ${nextMeetingSameDay ? 'font-semibold text-blue-600' : 'text-slate-500'}`}>
                           {nextMeetingSameDay
                             ? t({
                                 it: `Prossima riunione oggi: ${nextMeetingSameDay.subject || 'Meeting'} • ${new Date(nextMeetingSameDay.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}-${new Date(nextMeetingSameDay.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
@@ -2241,7 +2578,7 @@ const MeetingManagerModal = ({
       </Transition>
 
       <Transition show={isAdmin && approvalModalOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-[90]" onClose={() => setApprovalModalOpen(false)}>
+        <Dialog as="div" className="relative z-[112]" onClose={closeApprovalModal}>
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-150"
@@ -2269,7 +2606,7 @@ const MeetingManagerModal = ({
                     <Dialog.Title className="text-lg font-semibold text-ink">
                       {t({ it: 'Richieste approvazione', en: 'Approval requests' })}
                     </Dialog.Title>
-                    <button onClick={() => setApprovalModalOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink">
+                    <button onClick={closeApprovalModal} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink">
                       <X size={18} />
                     </button>
                   </div>
@@ -2330,7 +2667,7 @@ const MeetingManagerModal = ({
       </Transition>
 
       <Transition show={!!roomPreview} as={Fragment}>
-        <Dialog as="div" className="relative z-[95]" onClose={closeRoomPreview}>
+        <Dialog as="div" className="relative z-[113]" onClose={closeRoomPreview}>
           <Transition.Child
             as={Fragment}
             enter="ease-out duration-150"

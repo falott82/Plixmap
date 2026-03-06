@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { MapPinned, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
+import type { Site } from '../../store/types';
 
 interface Props {
   open: boolean;
@@ -12,10 +13,7 @@ interface Props {
     it?: { email?: string; phone?: string };
     coffee?: { email?: string; phone?: string };
   };
-  initialSiteSchedule?: {
-    weekly?: Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', { closed?: boolean; open?: string; close?: string }>>;
-    holidays?: Array<{ date: string; label?: string; closed?: boolean }>;
-  };
+  initialSiteSchedule?: Site['siteSchedule'];
   title: string;
   onClose: () => void;
   onSubmit: (payload: {
@@ -26,10 +24,7 @@ interface Props {
       it?: { email?: string; phone?: string };
       coffee?: { email?: string; phone?: string };
     };
-    siteSchedule?: {
-      weekly?: Partial<Record<'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun', { closed?: boolean; open?: string; close?: string }>>;
-      holidays?: Array<{ date: string; label?: string; closed?: boolean }>;
-    };
+    siteSchedule?: Site['siteSchedule'];
   }) => void;
 }
 
@@ -69,6 +64,7 @@ const SiteModal = ({ open, initialName = '', initialCoords = '', initialSupportC
     sun: { closed: true, open: '09:00', close: '13:00' }
   });
   const [holidaysText, setHolidaysText] = useState('');
+  const initialScheduleComparableRef = useRef('');
   const nameRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -99,6 +95,15 @@ const SiteModal = ({ open, initialName = '', initialCoords = '', initialSupportC
             .join('\n')
         : ''
     );
+    initialScheduleComparableRef.current = JSON.stringify({
+      weekly: nextWeekly,
+      holidaysText: Array.isArray(initialSiteSchedule?.holidays)
+        ? initialSiteSchedule!.holidays!
+            .map((h) => `${String(h.date || '')}${h?.label ? `|${String(h.label)}` : ''}`)
+            .filter(Boolean)
+            .join('\n')
+        : ''
+    });
     window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [initialCoords, initialName, initialSupportContacts, initialSiteSchedule, open]);
 
@@ -141,11 +146,13 @@ const SiteModal = ({ open, initialName = '', initialCoords = '', initialSupportC
         return { date, ...(label ? { label } : {}) };
       })
       .filter(Boolean) as Array<{ date: string; label?: string }>;
+    const nextSiteSchedule = { weekly: weekly as any, ...(holidays.length ? { holidays } : {}) } as Site['siteSchedule'];
+    const nextComparable = JSON.stringify({ weekly: weeklyHours, holidaysText });
     onSubmit({
       name: name.trim(),
       coords: coords.trim() || undefined,
       supportContacts: Object.keys(supportContacts).length ? supportContacts : undefined,
-      siteSchedule: { weekly: weekly as any, ...(holidays.length ? { holidays } : {}) }
+      siteSchedule: nextComparable === initialScheduleComparableRef.current ? initialSiteSchedule : nextSiteSchedule
     });
     onClose();
   };

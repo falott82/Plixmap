@@ -451,6 +451,8 @@ const UsersPanel = () => {
                 canCreateMeetings: payload.canCreateMeetings !== false,
                 canManageBusinessPartners: payload.canManageBusinessPartners === true,
                 isMeetingOperator: (payload as any).isMeetingOperator === true,
+                linkedExternalClientId: (payload as any).linkedExternalClientId || '',
+                linkedExternalId: (payload as any).linkedExternalId || '',
                 disabled: !!payload.disabled,
                 permissions: payload.permissions
               });
@@ -468,6 +470,8 @@ const UsersPanel = () => {
                 canCreateMeetings: payload.canCreateMeetings !== false,
                 canManageBusinessPartners: payload.canManageBusinessPartners === true,
                 isMeetingOperator: (payload as any).isMeetingOperator === true,
+                linkedExternalClientId: (payload as any).linkedExternalClientId || '',
+                linkedExternalId: (payload as any).linkedExternalId || '',
                 permissions: payload.permissions
               });
               push(t({ it: 'Utente creato', en: 'User created' }), 'success');
@@ -475,7 +479,10 @@ const UsersPanel = () => {
             setModal(null);
             await reload();
           } catch (e: any) {
-            push(t({ it: 'Errore salvataggio utente', en: 'Failed to save user' }), 'danger');
+            push(
+              e?.message || t({ it: 'Errore salvataggio utente', en: 'Failed to save user' }),
+              'danger'
+            );
           }
         }}
       />
