@@ -4423,7 +4423,7 @@ const SidebarTree = () => {
         canManageSiteHours={!!user?.isAdmin || !!isSuperAdmin}
         onOpenSiteHours={(siteId) => {
           const targetClient = fullClient;
-          const targetSite = targetClient?.sites?.find((site) => String(site.id) === String(siteId));
+          const targetSite = targetClient?.sites?.find((site: any) => String(site.id) === String(siteId));
           if (!targetClient || !targetSite) return;
           setSiteHoursModal({
             clientId: targetClient.id,

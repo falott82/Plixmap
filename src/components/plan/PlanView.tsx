@@ -11412,12 +11412,18 @@ const PlanView = ({ planId }: Props) => {
       const availableRooms = (renderPlan?.rooms || []) as Room[];
       const availableRoomIdSet = new Set(availableRooms.map((room) => room.id));
       let selectedRoomIds: string[] = Array.isArray((door as any).linkedRoomIds)
-        ? (Array.from(
-            new Set((door as any).linkedRoomIds.map((id: any) => String(id)).filter((id: string) => availableRoomIdSet.has(id)))
-          ) as string[])
+        ? Array.from(
+            new Set<string>(
+              (door as any).linkedRoomIds
+                .map((id: any) => String(id))
+                .filter((id: string) => availableRoomIdSet.has(id))
+            )
+          )
         : [];
       if (!selectedRoomIds.length) {
-        selectedRoomIds = inferCorridorDoorLinkedRoomIds(corridor, door, availableRooms);
+        selectedRoomIds = inferCorridorDoorLinkedRoomIds(corridor, door, availableRooms)
+          .map((id: any) => String(id))
+          .filter((id: string) => availableRoomIdSet.has(id));
       }
       let nearestRoomId: string | undefined;
       let magneticRoomIds: string[] = [];
