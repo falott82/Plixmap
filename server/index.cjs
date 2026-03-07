@@ -79,6 +79,9 @@ const {
   getClientEmailConfigSafe,
   getClientEmailConfig,
   upsertClientEmailConfig,
+  normalizePortalPublicUrl,
+  getPortalPublicUrl,
+  setPortalPublicUrl,
   logEmailAttempt,
   listEmailLogs
 } = require('./email.cjs');
@@ -3505,7 +3508,12 @@ app.get('/api/settings/email', requireAuth, (req, res) => {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
-  res.json({ config: getEmailConfigSafe(db) });
+  res.json({
+    config: {
+      ...(getEmailConfigSafe(db) || {}),
+      portalPublicUrl: getPortalPublicUrl(db, process.env.PUBLIC_APP_URL || '')
+    }
+  });
 });
 
 app.get('/api/clients/:clientId/email-settings', requireAuth, (req, res) => {
@@ -3544,6 +3552,11 @@ app.put('/api/settings/email', requireAuth, (req, res) => {
     return;
   }
   const payload = req.body || {};
+  const normalizedPortalPublicUrl = normalizePortalPublicUrl(payload.portalPublicUrl);
+  if (payload.portalPublicUrl !== undefined && String(payload.portalPublicUrl || '').trim() && !normalizedPortalPublicUrl) {
+    res.status(400).json({ error: 'Invalid portal public URL' });
+    return;
+  }
   const updated = upsertEmailConfig(db, dataSecret, {
     host: payload.host,
     port: payload.port,
@@ -3554,15 +3567,29 @@ app.put('/api/settings/email', requireAuth, (req, res) => {
     fromName: payload.fromName,
     fromEmail: payload.fromEmail
   });
+  if (payload.portalPublicUrl !== undefined) {
+    setPortalPublicUrl(db, normalizedPortalPublicUrl || '');
+  }
   writeAuditLog(db, {
     level: 'important',
     event: 'email_settings_update',
     userId: req.userId,
     username: req.username,
     ...requestMeta(req),
-    details: { host: updated?.host || null, port: updated?.port || null, securityMode: updated?.securityMode || null }
+    details: {
+      host: updated?.host || null,
+      port: updated?.port || null,
+      securityMode: updated?.securityMode || null,
+      portalPublicUrlConfigured: !!String(getPortalPublicUrl(db, process.env.PUBLIC_APP_URL || '') || '').trim()
+    }
   });
-  res.json({ ok: true, config: updated });
+  res.json({
+    ok: true,
+    config: {
+      ...(updated || {}),
+      portalPublicUrl: getPortalPublicUrl(db, process.env.PUBLIC_APP_URL || '')
+    }
+  });
 });
 
 app.put('/api/clients/:clientId/email-settings', requireAuth, (req, res) => {

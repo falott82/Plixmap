@@ -4,11 +4,16 @@ const nodemailer = require('nodemailer');
 const { isAdminLike, isStrictSuperAdmin } = require('../access.cjs');
 const {
   findPortalUserEmailConflict,
+  findLinkedPortalUserConflict,
+  getImportedUserByLink,
   normalizeUserEmailKey,
+  normalizeLinkedImportedRef,
   mapAdminUsersResponse,
+  replaceUserPermissions,
   searchImportedUsers,
   listDirectoryUsers
 } = require('../services/users.cjs');
+const { getPortalPublicUrl } = require('../email.cjs');
 
 const sanitizeProvisionUsername = (value) =>
   String(value || '')
@@ -62,14 +67,6 @@ const generateTemporaryPassword = () => {
   return chars.join('');
 };
 
-const buildPortalBaseUrl = (req) => {
-  const hostHeader = String(req.headers.host || '').trim();
-  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http')
-    .split(',')[0]
-    .trim() || 'http';
-  return `${proto}://${hostHeader || 'localhost'}`;
-};
-
 const registerUserRoutes = (app, deps) => {
   const {
     db,
@@ -92,8 +89,97 @@ const registerUserRoutes = (app, deps) => {
     getClientEmailConfig,
     logEmailAttempt
   } = deps;
+  const insertProvisionedPortalUser = db.transaction((payload) => {
+    const {
+      req,
+      id,
+      normalizedUsername,
+      salt,
+      hash,
+      language,
+      canCreateMeetings,
+      defaultPaletteFavoritesJson,
+      firstName,
+      lastName,
+      phone,
+      email,
+      linkedClientId,
+      linkedExternalId,
+      now,
+      sendEmail,
+      access,
+      chat
+    } = payload;
+    const existingLinked = findLinkedPortalUserConflict(db, linkedClientId, linkedExternalId);
+    if (existingLinked) {
+      const err = new Error('Imported user is already linked to a portal user');
+      err.code = 'LINKED_EXISTS';
+      err.existingUserId = String(existingLinked.id || '');
+      err.existingUsername = String(existingLinked.username || '');
+      throw err;
+    }
+    const usernameConflict = db.prepare('SELECT id FROM users WHERE lower(username) = ? LIMIT 1').get(normalizedUsername);
+    if (usernameConflict) {
+      const err = new Error('Username already exists');
+      err.code = 'USERNAME_EXISTS';
+      throw err;
+    }
+    const emailConflict = findPortalUserEmailConflict(db, '', email);
+    if (emailConflict) {
+      const err = new Error(`Email already used by ${emailConflict.username}`);
+      err.code = 'EMAIL_EXISTS';
+      throw err;
+    }
+    db.prepare(
+      `INSERT INTO users (
+        id, username, passwordSalt, passwordHash, tokenVersion,
+        isAdmin, isSuperAdmin, disabled, language,
+        canCreateMeetings, canManageBusinessPartners, isMeetingOperator,
+        paletteFavoritesJson, mustChangePassword,
+        firstName, lastName, phone, email,
+        linkedExternalClientId, linkedExternalId,
+        createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, 1, 0, 0, 0, ?, ?, 0, 0, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      normalizedUsername,
+      salt,
+      hash,
+      String(language),
+      canCreateMeetings ? 1 : 0,
+      defaultPaletteFavoritesJson,
+      firstName,
+      lastName,
+      phone,
+      email,
+      linkedClientId,
+      linkedExternalId,
+      now,
+      now
+    );
+    db.prepare(
+      'INSERT INTO permissions (userId, scopeType, scopeId, access, chat) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, 'client', linkedClientId, access, chat ? 1 : 0);
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'user_provisioned_from_imported',
+      userId: req.userId,
+      username: req.username,
+      scopeType: 'user',
+      scopeId: id,
+      ...requestMeta(req),
+      details: {
+        linkedExternalClientId: linkedClientId,
+        linkedExternalId,
+        provisionedUsername: normalizedUsername,
+        sendEmail: !!sendEmail,
+        access,
+        chat: !!chat,
+        canCreateMeetings: !!canCreateMeetings
+      }
+    });
+  });
   const sendProvisioningMail = async ({
-    req,
     clientId,
     clientName,
     recipient,
@@ -139,7 +225,10 @@ const registerUserRoutes = (app, deps) => {
       requireTLS: securityMode === 'starttls',
       ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
     });
-    const portalUrl = buildPortalBaseUrl(req);
+    const portalUrl = getPortalPublicUrl(db, process.env.PUBLIC_APP_URL || '');
+    if (!portalUrl) {
+      return { ok: false, skipped: true, reason: 'portal_url_not_configured' };
+    }
     const lang = language === 'en' ? 'en' : 'it';
     const safeClientName = String(clientName || clientId || APP_BRAND);
     const safeFullName = String(fullName || '').trim() || username;
@@ -349,18 +438,20 @@ const registerUserRoutes = (app, deps) => {
       return;
     }
     const meetingOperator = !!isMeetingOperator && !isAdmin;
-    const linkedClientId = String(linkedExternalClientId || '').trim();
-    const linkedEid = String(linkedExternalId || '').trim();
+    const { clientId: linkedClientId, externalId: linkedEid } = normalizeLinkedImportedRef(linkedExternalClientId, linkedExternalId);
     if ((linkedClientId && !linkedEid) || (!linkedClientId && linkedEid)) {
       res.status(400).json({ error: 'Invalid linked imported user reference' });
       return;
     }
     if (linkedClientId && linkedEid) {
-      const linkedRow = db
-        .prepare('SELECT externalId FROM external_users WHERE clientId = ? AND externalId = ?')
-        .get(linkedClientId, linkedEid);
+      const linkedRow = getImportedUserByLink(db, linkedClientId, linkedEid);
       if (!linkedRow) {
         res.status(400).json({ error: 'Linked imported user not found' });
+        return;
+      }
+      const existingLinked = findLinkedPortalUserConflict(db, linkedClientId, linkedEid);
+      if (existingLinked) {
+        res.status(409).json({ error: `Imported user already linked to ${String(existingLinked.username || '')}` });
         return;
       }
     }
@@ -402,17 +493,16 @@ const registerUserRoutes = (app, deps) => {
         now,
         now
       );
-    } catch {
+    } catch (error) {
+      const message = String(error?.message || '');
+      if (String(error?.code || '') === 'SQLITE_CONSTRAINT_UNIQUE' && message.includes('idx_users_linked_external_unique')) {
+        res.status(409).json({ error: 'Imported user is already linked to a portal user' });
+        return;
+      }
       res.status(400).json({ error: 'Username already exists' });
       return;
     }
-    const insertPerm = db.prepare(
-      'INSERT OR REPLACE INTO permissions (userId, scopeType, scopeId, access, chat) VALUES (?, ?, ?, ?, ?)'
-    );
-    for (const permission of Array.isArray(permissions) ? permissions : []) {
-      if (!permission?.scopeType || !permission?.scopeId || !permission?.access) continue;
-      insertPerm.run(id, permission.scopeType, permission.scopeId, meetingOperator ? 'ro' : permission.access, permission?.chat ? 1 : 0);
-    }
+    const permissionCount = replaceUserPermissions(db, id, permissions, meetingOperator ? 'ro' : null);
     writeAuditLog(db, {
       level: 'important',
       event: 'user_created',
@@ -426,7 +516,7 @@ const registerUserRoutes = (app, deps) => {
         isAdmin: !!isAdmin,
         isMeetingOperator: meetingOperator,
         canManageBusinessPartners: !!canManageBusinessPartners,
-        permissions: Array.isArray(permissions) ? permissions.length : 0,
+        permissions: permissionCount,
         linkedExternalClientId: linkedClientId,
         linkedExternalId: linkedEid
       }
@@ -453,8 +543,7 @@ const registerUserRoutes = (app, deps) => {
       canCreateMeetings = false,
       sendEmail = false
     } = req.body || {};
-    const linkedClientId = String(clientId || '').trim();
-    const linkedExternalId = String(externalId || '').trim();
+    const { clientId: linkedClientId, externalId: linkedExternalId } = normalizeLinkedImportedRef(clientId, externalId);
     if (!linkedClientId || !linkedExternalId) {
       res.status(400).json({ error: 'Missing linked imported user reference' });
       return;
@@ -473,23 +562,9 @@ const registerUserRoutes = (app, deps) => {
       res.status(404).json({ error: 'Client not found' });
       return;
     }
-    const imported = db
-      .prepare(
-        `SELECT clientId, externalId, firstName, lastName, email, mobile, role, dept1, hidden, present
-         FROM external_users
-         WHERE clientId = ? AND externalId = ?
-         LIMIT 1`
-      )
-      .get(linkedClientId, linkedExternalId);
+    const imported = getImportedUserByLink(db, linkedClientId, linkedExternalId);
     if (!imported) {
       res.status(404).json({ error: 'Imported user not found' });
-      return;
-    }
-    const existingLinked = db
-      .prepare('SELECT id, username FROM users WHERE linkedExternalClientId = ? AND linkedExternalId = ? LIMIT 1')
-      .get(linkedClientId, linkedExternalId);
-    if (existingLinked) {
-      res.status(409).json({ error: 'Imported user is already linked to a portal user', existingUserId: String(existingLinked.id || ''), existingUsername: String(existingLinked.username || '') });
       return;
     }
     const nextEmail = String(email ?? imported.email ?? '').trim();
@@ -497,82 +572,61 @@ const registerUserRoutes = (app, deps) => {
     const nextLastName = String(lastName ?? imported.lastName ?? '').trim();
     const nextPhone = String(phone ?? imported.mobile ?? '').trim();
     const normalizedRequestedUsername = sanitizeProvisionUsername(username);
-    const usernameConflict = normalizedRequestedUsername
-      ? db.prepare('SELECT id FROM users WHERE lower(username) = ? LIMIT 1').get(normalizedRequestedUsername)
-      : null;
-    if (normalizedRequestedUsername && usernameConflict) {
-      res.status(409).json({
-        error: 'Username already exists',
-        suggestedUsername: nextAvailableProvisionUsername(db, buildProvisionUsernameBase({ ...imported, email: nextEmail }))
-      });
-      return;
-    }
-    const emailConflict = findPortalUserEmailConflict(db, '', nextEmail);
-    if (emailConflict) {
-      res.status(409).json({ error: `Email already used by ${emailConflict.username}` });
-      return;
-    }
     const normalizedUsername = normalizedRequestedUsername || nextAvailableProvisionUsername(db, buildProvisionUsernameBase({ ...imported, email: nextEmail }));
     const temporaryPassword = generateTemporaryPassword();
     const { salt, hash } = hashPassword(String(temporaryPassword));
     const now = Date.now();
     const id = crypto.randomUUID();
     const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
-    db.prepare(
-      `INSERT INTO users (
-        id, username, passwordSalt, passwordHash, tokenVersion,
-        isAdmin, isSuperAdmin, disabled, language,
-        canCreateMeetings, canManageBusinessPartners, isMeetingOperator,
-        paletteFavoritesJson, mustChangePassword,
-        firstName, lastName, phone, email,
-        linkedExternalClientId, linkedExternalId,
-        createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, 1, 0, 0, 0, ?, ?, 0, 0, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id,
-      normalizedUsername,
-      salt,
-      hash,
-      String(language),
-      canCreateMeetings ? 1 : 0,
-      defaultPaletteFavoritesJson,
-      nextFirstName,
-      nextLastName,
-      nextPhone,
-      nextEmail,
-      linkedClientId,
-      linkedExternalId,
-      now,
-      now
-    );
-    db.prepare(
-      'INSERT OR REPLACE INTO permissions (userId, scopeType, scopeId, access, chat) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, 'client', linkedClientId, access, chat ? 1 : 0);
-    writeAuditLog(db, {
-      level: 'important',
-      event: 'user_provisioned_from_imported',
-      userId: req.userId,
-      username: req.username,
-      scopeType: 'user',
-      scopeId: id,
-      ...requestMeta(req),
-      details: {
-        linkedExternalClientId: linkedClientId,
+    try {
+      insertProvisionedPortalUser.immediate({
+        req,
+        id,
+        normalizedUsername,
+        salt,
+        hash,
+        language: String(language),
+        canCreateMeetings: !!canCreateMeetings,
+        defaultPaletteFavoritesJson,
+        firstName: nextFirstName,
+        lastName: nextLastName,
+        phone: nextPhone,
+        email: nextEmail,
+        linkedClientId,
         linkedExternalId,
-        provisionedUsername: normalizedUsername,
+        now,
         sendEmail: !!sendEmail,
         access,
-        chat: !!chat,
-        canCreateMeetings: !!canCreateMeetings
+        chat: !!chat
+      });
+    } catch (error) {
+      if (error?.code === 'LINKED_EXISTS') {
+        res.status(409).json({
+          error: 'Imported user is already linked to a portal user',
+          existingUserId: String(error.existingUserId || ''),
+          existingUsername: String(error.existingUsername || '')
+        });
+        return;
       }
-    });
+      if (error?.code === 'USERNAME_EXISTS') {
+        res.status(409).json({
+          error: 'Username already exists',
+          suggestedUsername: nextAvailableProvisionUsername(db, buildProvisionUsernameBase({ ...imported, email: nextEmail }))
+        });
+        return;
+      }
+      if (error?.code === 'EMAIL_EXISTS') {
+        res.status(409).json({ error: String(error.message || 'Email already in use') });
+        return;
+      }
+      throw error;
+    }
     let mailResult = { ok: false, skipped: true, reason: 'not_requested' };
     if (sendEmail) {
       if (!nextEmail) {
         mailResult = { ok: false, skipped: true, reason: 'missing_recipient' };
       } else {
         mailResult = await sendProvisioningMail({
-          req,
           clientId: linkedClientId,
           clientName: String(client?.shortName || client?.name || linkedClientId),
           recipient: nextEmail,
@@ -643,49 +697,51 @@ const registerUserRoutes = (app, deps) => {
     const now = Date.now();
     const lockedDisabled = target.isSuperAdmin ? 0 : (disabled ? 1 : 0);
     const meetingOperator = !!isMeetingOperator && !isAdmin;
-    const linkedClientId = String(linkedExternalClientId || '').trim();
-    const linkedEid = String(linkedExternalId || '').trim();
+    const { clientId: linkedClientId, externalId: linkedEid } = normalizeLinkedImportedRef(linkedExternalClientId, linkedExternalId);
     if ((linkedClientId && !linkedEid) || (!linkedClientId && linkedEid)) {
       res.status(400).json({ error: 'Invalid linked imported user reference' });
       return;
     }
     if (linkedClientId && linkedEid) {
-      const linkedRow = db
-        .prepare('SELECT externalId FROM external_users WHERE clientId = ? AND externalId = ?')
-        .get(linkedClientId, linkedEid);
+      const linkedRow = getImportedUserByLink(db, linkedClientId, linkedEid);
       if (!linkedRow) {
         res.status(400).json({ error: 'Linked imported user not found' });
         return;
       }
-    }
-    db.prepare(
-      'UPDATE users SET isAdmin = ?, canCreateMeetings = ?, canManageBusinessPartners = ?, isMeetingOperator = ?, disabled = ?, language = COALESCE(?, language), firstName = ?, lastName = ?, phone = ?, email = ?, linkedExternalClientId = ?, linkedExternalId = ?, updatedAt = ? WHERE id = ?'
-    ).run(
-      isAdmin ? 1 : 0,
-      meetingOperator ? 1 : canCreateMeetings === undefined ? (Number(target.canCreateMeetings || 1) ? 1 : 0) : canCreateMeetings ? 1 : 0,
-      canManageBusinessPartners === undefined ? (Number(target.canManageBusinessPartners || 0) ? 1 : 0) : canManageBusinessPartners ? 1 : 0,
-      meetingOperator ? 1 : 0,
-      lockedDisabled,
-      language || null,
-      String(firstName || ''),
-      String(lastName || ''),
-      String(phone || ''),
-      String(email || ''),
-      linkedClientId,
-      linkedEid,
-      now,
-      userId
-    );
-    if (Array.isArray(permissions)) {
-      db.prepare('DELETE FROM permissions WHERE userId = ?').run(userId);
-      const insertPerm = db.prepare(
-        'INSERT OR REPLACE INTO permissions (userId, scopeType, scopeId, access, chat) VALUES (?, ?, ?, ?, ?)'
-      );
-      for (const permission of permissions) {
-        if (!permission?.scopeType || !permission?.scopeId || !permission?.access) continue;
-        insertPerm.run(userId, permission.scopeType, permission.scopeId, meetingOperator ? 'ro' : permission.access, permission?.chat ? 1 : 0);
+      const existingLinked = findLinkedPortalUserConflict(db, linkedClientId, linkedEid, userId);
+      if (existingLinked) {
+        res.status(409).json({ error: `Imported user already linked to ${String(existingLinked.username || '')}` });
+        return;
       }
     }
+    try {
+      db.prepare(
+        'UPDATE users SET isAdmin = ?, canCreateMeetings = ?, canManageBusinessPartners = ?, isMeetingOperator = ?, disabled = ?, language = COALESCE(?, language), firstName = ?, lastName = ?, phone = ?, email = ?, linkedExternalClientId = ?, linkedExternalId = ?, updatedAt = ? WHERE id = ?'
+      ).run(
+        isAdmin ? 1 : 0,
+        meetingOperator ? 1 : canCreateMeetings === undefined ? (Number(target.canCreateMeetings || 1) ? 1 : 0) : canCreateMeetings ? 1 : 0,
+        canManageBusinessPartners === undefined ? (Number(target.canManageBusinessPartners || 0) ? 1 : 0) : canManageBusinessPartners ? 1 : 0,
+        meetingOperator ? 1 : 0,
+        lockedDisabled,
+        language || null,
+        String(firstName || ''),
+        String(lastName || ''),
+        String(phone || ''),
+        String(email || ''),
+        linkedClientId,
+        linkedEid,
+        now,
+        userId
+      );
+    } catch (error) {
+      const message = String(error?.message || '');
+      if (String(error?.code || '') === 'SQLITE_CONSTRAINT_UNIQUE' && message.includes('idx_users_linked_external_unique')) {
+        res.status(409).json({ error: 'Imported user is already linked to a portal user' });
+        return;
+      }
+      throw error;
+    }
+    if (Array.isArray(permissions)) replaceUserPermissions(db, userId, permissions, meetingOperator ? 'ro' : null);
     const changes = [];
     if (typeof isAdmin === 'boolean' && Number(target.isAdmin) !== (isAdmin ? 1 : 0)) changes.push('isAdmin');
     if (typeof canCreateMeetings === 'boolean' && Number(target.canCreateMeetings || 1) !== (canCreateMeetings ? 1 : 0)) changes.push('canCreateMeetings');

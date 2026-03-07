@@ -47,6 +47,7 @@ import {
 } from '../../api/chat';
 import { fetchMeetingNotes, type MeetingNote, type MeetingNoteParticipant, upsertMeetingNote } from '../../api/meetings';
 import { useLang, useT } from '../../i18n/useT';
+import { getMeetingTemporalState, getMeetingTimePhaseBadgeLabel } from '../../utils/meetingTime';
 import ConfirmDialog from '../ui/ConfirmDialog';
 
 type MobileTab = 'agenda' | 'chat' | 'checkin';
@@ -496,15 +497,6 @@ const chatSnippet = (msg: ChatMessage | null | undefined, tr: (m: { it: string; 
   return '';
 };
 
-const getMeetingTemporalState = (meeting: MobileAgendaMeeting, nowTs: number) => {
-  const startTs = Number(meeting.startAt || 0);
-  const endTs = Number(meeting.endAt || 0);
-  const inProgress = startTs <= nowTs && nowTs < endTs;
-  const isPast = endTs <= nowTs;
-  const isFuture = !inProgress && !isPast;
-  return { inProgress, isPast, isFuture };
-};
-
 const canEditChatMessage = (msg: ChatMessage, myUserId: string) => {
   if (!msg || msg.deleted) return false;
   if (String(msg.userId || '') !== String(myUserId || '')) return false;
@@ -677,9 +669,6 @@ const MobileAppPage = () => {
   const directMessageLabel = tr({ it: 'Messaggio diretto', en: 'Direct message' });
   const noMessagesLabel = tr({ it: 'Nessun messaggio', en: 'No messages' });
   const meetingLabel = tr({ it: 'Meeting', en: 'Meeting' });
-  const liveLabel = tr({ it: 'IN CORSO', en: 'LIVE' });
-  const pastLabel = tr({ it: 'PASSATO', en: 'PAST' });
-  const upcomingLabel = tr({ it: 'IN ARRIVO', en: 'UPCOMING' });
   const checkedLabel = tr({ it: 'PRESENTE', en: 'CHECKED' });
   const remoteShortLabel = tr({ it: 'REMOTO', en: 'REMOTE' });
   const checkInOkLabel = tr({ it: 'CHECK-IN OK', en: 'CHECK-IN OK' });
@@ -1006,7 +995,7 @@ const MobileAppPage = () => {
     const p = (meeting as any).participantMatch || {};
     const key = buildCheckInKeyForParticipantMatch(meeting);
     const checked = !!((checkInMapByMeetingId[String(meeting.id)] || {})[key]);
-    const { inProgress } = getMeetingTemporalState(meeting, Date.now());
+    const { inProgress } = getMeetingTemporalState(meeting.startAt, meeting.endAt, Date.now());
     if (!p.remote && inProgress && !checked) {
       setMeetingCheckInPrompt(meeting);
       return;
@@ -2458,7 +2447,7 @@ const MobileAppPage = () => {
                 <div className={emptyAgendaClass}>{tr({ it: 'Nessun meeting per la giornata selezionata.', en: 'No meetings for the selected day.' })}</div>
               ) : null}
               {meetings.map((meeting) => {
-                const { inProgress, isPast } = getMeetingTemporalState(meeting, now);
+                const { phase, inProgress, isPast } = getMeetingTemporalState(meeting.startAt, meeting.endAt, now);
                 return (
                   <button
                     type="button"
@@ -2477,7 +2466,7 @@ const MobileAppPage = () => {
                         </div>
                       </div>
                       <div className={`rounded-full px-2 py-1 text-[11px] font-bold ${inProgress ? 'bg-emerald-500/20 text-emerald-200' : isPast ? 'bg-slate-700/70 text-slate-300' : 'bg-violet-500/20 text-violet-200'}`}>
-                        {inProgress ? liveLabel : isPast ? pastLabel : upcomingLabel}
+                        {getMeetingTimePhaseBadgeLabel(phase, tr)}
                       </div>
                     </div>
                   </button>
@@ -2925,7 +2914,7 @@ const MobileAppPage = () => {
                 const key = buildCheckInKeyForParticipantMatch(meeting);
                 const checked = !!((checkInMapByMeetingId[String(meeting.id)] || {})[key]);
                 const checkedAt = (checkInTsByMeetingId[String(meeting.id)] || {})[key];
-                const { inProgress, isPast } = getMeetingTemporalState(meeting, now);
+                const { inProgress } = getMeetingTemporalState(meeting.startAt, meeting.endAt, now);
                 const roomMatched = !selectedRoomId || String(meeting.roomId) === String(selectedRoomId);
                 const remote = !!p.remote;
                 const toneClass = inProgress
@@ -3120,7 +3109,7 @@ const MobileAppPage = () => {
               const checked = !!((checkInMapByMeetingId[String(meeting.id)] || {})[key]);
               const checkedAt = (checkInTsByMeetingId[String(meeting.id)] || {})[key];
               const remote = !!p.remote;
-              const { inProgress, isPast } = getMeetingTemporalState(meeting, now);
+              const { phase, inProgress, isPast } = getMeetingTemporalState(meeting.startAt, meeting.endAt, now);
               const allParticipants = Array.isArray(meeting.participants) ? meeting.participants : [];
               const externalDetails = Array.isArray(meeting.externalGuestsDetails) ? meeting.externalGuestsDetails : [];
               return (
@@ -3159,7 +3148,7 @@ const MobileAppPage = () => {
                     <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
                       <div className="text-slate-400">{tr({ it: 'Stato', en: 'Status' })}</div>
                       <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${inProgress ? 'bg-emerald-500/20 text-emerald-200' : isPast ? 'bg-slate-700/70 text-slate-300' : 'bg-violet-500/20 text-violet-200'}`}>
-                        {inProgress ? liveLabel : isPast ? pastLabel : upcomingLabel}
+                        {getMeetingTimePhaseBadgeLabel(phase, tr)}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">

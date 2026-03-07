@@ -22,6 +22,7 @@ const EmailSettingsPanel = () => {
     password: '',
     fromName: '',
     fromEmail: '',
+    portalPublicUrl: '',
     hasPassword: false,
     updatedAt: null as number | null
   });
@@ -56,6 +57,7 @@ const EmailSettingsPanel = () => {
           username: cfg.username || '',
           fromName: cfg.fromName || '',
           fromEmail: cfg.fromEmail || '',
+          portalPublicUrl: cfg.portalPublicUrl || '',
           hasPassword: !!cfg.hasPassword,
           updatedAt: cfg.updatedAt || null
         }));
@@ -82,7 +84,8 @@ const EmailSettingsPanel = () => {
         securityMode: form.securityMode,
         username: form.username,
         fromName: form.fromName,
-        fromEmail: form.fromEmail
+        fromEmail: form.fromEmail,
+        portalPublicUrl: form.portalPublicUrl
       };
       if (passwordDirty && form.password.trim()) payload.password = form.password;
       const updated = await updateEmailSettings(payload);
@@ -232,6 +235,21 @@ const EmailSettingsPanel = () => {
                 {form.hasPassword
                   ? t({ it: 'Password salvata. Modifica per sovrascrivere o lascia vuoto per rimuoverla.', en: 'Password saved. Edit to overwrite or leave blank to remove it.' })
                   : t({ it: 'Nessuna password salvata.', en: 'No password saved.' })}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">{t({ it: 'URL pubblico del portale', en: 'Portal public URL' })}</label>
+              <input
+                value={form.portalPublicUrl}
+                onChange={(e) => setForm((prev) => ({ ...prev, portalPublicUrl: e.target.value }))}
+                placeholder="https://plixmap.company.com"
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2"
+              />
+              <div className="mt-1 text-[11px] text-slate-500">
+                {t({
+                  it: 'Usato nelle email di provisioning per il link al portale. Se vuoto, il server prova il fallback dalla variabile ambiente PUBLIC_APP_URL.',
+                  en: 'Used in provisioning emails for the portal link. If empty, the server falls back to the PUBLIC_APP_URL environment variable.'
+                })}
               </div>
             </div>
             <div>

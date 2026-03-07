@@ -1,6 +1,7 @@
 const { encryptString, decryptString } = require('./customImport.cjs');
 
 const SETTINGS_KEY = 'emailConfig';
+const PORTAL_PUBLIC_URL_KEY = 'portalPublicUrl';
 const clientSettingsKey = (clientId) => `emailConfig:client:${String(clientId || '').trim()}`;
 
 const safeJson = (obj) => {
@@ -41,6 +42,18 @@ const normalizeConfig = (raw, fallbackPort) => {
 };
 
 const getConfigRow = (db, key = SETTINGS_KEY) => db.prepare('SELECT value, updatedAt FROM app_settings WHERE key = ?').get(String(key));
+
+const normalizePortalPublicUrl = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+};
 
 const parseConfigRow = (row) => {
   if (!row?.value) return null;
@@ -140,6 +153,22 @@ const upsertClientEmailConfig = (db, dataSecret, clientId, payload) => {
   return upsertEmailConfigByKey(db, dataSecret, payload, clientSettingsKey(cid));
 };
 
+const getPortalPublicUrl = (db, fallbackValue = '') => {
+  const stored = normalizePortalPublicUrl(getConfigRow(db, PORTAL_PUBLIC_URL_KEY)?.value || '');
+  if (stored) return stored;
+  return normalizePortalPublicUrl(fallbackValue);
+};
+
+const setPortalPublicUrl = (db, value) => {
+  const normalized = normalizePortalPublicUrl(value);
+  const now = Date.now();
+  db.prepare(
+    `INSERT INTO app_settings (key, value, updatedAt) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updatedAt=excluded.updatedAt`
+  ).run(PORTAL_PUBLIC_URL_KEY, normalized, now);
+  return normalized;
+};
+
 const logEmailAttempt = (db, payload) => {
   const {
     userId = null,
@@ -201,6 +230,9 @@ module.exports = {
   getClientEmailConfigSafe,
   getClientEmailConfig,
   upsertClientEmailConfig,
+  normalizePortalPublicUrl,
+  getPortalPublicUrl,
+  setPortalPublicUrl,
   logEmailAttempt,
   listEmailLogs
 };

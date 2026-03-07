@@ -2,6 +2,57 @@ const { isStrictSuperAdmin } = require('../access.cjs');
 
 const normalizeUserEmailKey = (value) => String(value || '').trim().toLowerCase();
 
+const normalizeLinkedImportedRef = (clientId, externalId) => ({
+  clientId: String(clientId || '').trim(),
+  externalId: String(externalId || '').trim()
+});
+
+const getImportedUserByLink = (db, clientId, externalId) => {
+  const ref = normalizeLinkedImportedRef(clientId, externalId);
+  if (!ref.clientId || !ref.externalId) return null;
+  return (
+    db
+      .prepare(
+        `SELECT clientId, externalId, firstName, lastName, email, mobile, role, dept1, hidden, present
+         FROM external_users
+         WHERE clientId = ? AND externalId = ?
+         LIMIT 1`
+      )
+      .get(ref.clientId, ref.externalId) || null
+  );
+};
+
+const findLinkedPortalUserConflict = (db, clientId, externalId, excludeUserId = '') => {
+  const ref = normalizeLinkedImportedRef(clientId, externalId);
+  if (!ref.clientId || !ref.externalId) return null;
+  const selfId = String(excludeUserId || '').trim();
+  const sql = selfId
+    ? 'SELECT id, username FROM users WHERE linkedExternalClientId = ? AND linkedExternalId = ? AND id <> ? LIMIT 1'
+    : 'SELECT id, username FROM users WHERE linkedExternalClientId = ? AND linkedExternalId = ? LIMIT 1';
+  const row = selfId
+    ? db.prepare(sql).get(ref.clientId, ref.externalId, selfId)
+    : db.prepare(sql).get(ref.clientId, ref.externalId);
+  if (!row) return null;
+  return { id: String(row.id || ''), username: String(row.username || '') };
+};
+
+const replaceUserPermissions = (db, userId, permissions, accessOverride = null) => {
+  const uid = String(userId || '').trim();
+  if (!uid) return 0;
+  db.prepare('DELETE FROM permissions WHERE userId = ?').run(uid);
+  if (!Array.isArray(permissions) || !permissions.length) return 0;
+  const insertPerm = db.prepare(
+    'INSERT OR REPLACE INTO permissions (userId, scopeType, scopeId, access, chat) VALUES (?, ?, ?, ?, ?)'
+  );
+  let inserted = 0;
+  for (const permission of permissions) {
+    if (!permission?.scopeType || !permission?.scopeId || !permission?.access) continue;
+    insertPerm.run(uid, permission.scopeType, permission.scopeId, accessOverride || permission.access, permission?.chat ? 1 : 0);
+    inserted += 1;
+  }
+  return inserted;
+};
+
 const findPortalUserEmailConflict = (db, userId, email) => {
   const emailKey = normalizeUserEmailKey(email);
   if (!emailKey) return null;
@@ -126,7 +177,11 @@ const listDirectoryUsers = (db) =>
 
 module.exports = {
   normalizeUserEmailKey,
+  normalizeLinkedImportedRef,
+  getImportedUserByLink,
+  findLinkedPortalUserConflict,
   findPortalUserEmailConflict,
+  replaceUserPermissions,
   mapAdminUsersResponse,
   searchImportedUsers,
   listDirectoryUsers

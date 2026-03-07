@@ -2,6 +2,7 @@ import { Dialog, Transition } from '@headlessui/react';
 import { CalendarClock, GitBranch, History, Loader2, Search, X } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { MeetingBooking } from '../../api/meetings';
+import { getMeetingTimePhase, getMeetingTimePhaseLabel } from '../../utils/meetingTime';
 
 type Translate = (copy: { it: string; en: string }) => string;
 
@@ -436,14 +437,8 @@ const MyMeetingsModal = ({
                         const rowStart = Number(entry.startAt || 0);
                         const rowEnd = Number(entry.endAt || 0);
                         const now = Number(modal?.now || Date.now());
-                        const phase: 'past' | 'current' | 'upcoming' =
-                          rowStart <= now && now < rowEnd ? 'current' : rowStart > now ? 'upcoming' : 'past';
-                        const phaseLabel =
-                          phase === 'current'
-                            ? t({ it: 'Corrente', en: 'Current' })
-                            : phase === 'upcoming'
-                              ? t({ it: 'Futuro', en: 'Upcoming' })
-                              : t({ it: 'Passato', en: 'Past' });
+                        const phase = getMeetingTimePhase(rowStart, rowEnd, now);
+                        const phaseLabel = getMeetingTimePhaseLabel(phase, t);
                         const phaseTone =
                           phase === 'current'
                             ? 'border-emerald-200 bg-emerald-50 text-emerald-800'

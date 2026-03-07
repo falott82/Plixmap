@@ -207,8 +207,19 @@ The reset invalidates active sessions and asks for a new strong password.
 - `PLIXMAP_BACKUP_KEEP` (optional, default `20`)
 - `PLIXMAP_CSP_ALLOW_MEDIAPIPE` (optional, default `false`; enables jsdelivr/storage + wasm/eval allowances)
 - `PLIXMAP_CSP_ALLOW_EVAL` (optional, default `false`; enables `unsafe-eval`/`wasm-unsafe-eval`)
+- `PUBLIC_APP_URL` (optional fallback; public portal base URL used in provisioning emails when the same value is not configured in Settings > Email)
 - `PLIXMAP_UPDATE_MANIFEST_URL` (optional, default `https://www.plixmap.com/updates/latest.json`)
 - `PLIXMAP_UPDATE_MANIFEST_FALLBACK_URL` (optional, default `https://raw.githubusercontent.com/falott82/plixmap.com/main/updates/latest.json`)
+
+## Portal public URL
+- Portal user provisioning emails need a public base URL that points to the customer installation of Plixmap.
+- Preferred method: set it in the UI under `Settings > Email > Portal public URL`.
+- Fallback method: set `PUBLIC_APP_URL` in the backend environment.
+- Resolution order: UI setting in `app_settings` first, `PUBLIC_APP_URL` second.
+- If neither is configured, the portal user is still created, but provisioning email delivery is skipped with reason `portal_url_not_configured`.
+- Example values:
+  - `https://plixmap.company.com`
+  - `https://workspace.company.com/plixmap`
 
 ## Storage notes
 - SQLite DB and uploads live in `./data` (or `PLIXMAP_DB_PATH`).

@@ -23,6 +23,7 @@ import {
   upsertMeetingNote
 } from '../../api/meetings';
 import { transformMeetingNoteWithAi } from '../../api/ai';
+import { getMeetingSchedulePhase, getMeetingSchedulePhaseLabel } from '../../utils/meetingTime';
 import LexicalNotesEditor, { type LexicalNotesEditorHandle } from '../ui/notes/LexicalNotesEditor';
 import { useToastStore } from '../../store/useToast';
 
@@ -630,17 +631,12 @@ const MeetingNotesModal = ({
           const now = Date.now();
           const startAt = Number(entry.meeting.effectiveStartAt || entry.meeting.startAt || 0);
           const endAt = Number(entry.meeting.effectiveEndAt || entry.meeting.endAt || 0);
-          const phase: 'past' | 'current' | 'scheduled' = endAt > 0 && now > endAt ? 'past' : startAt > 0 && now >= startAt && now <= endAt ? 'current' : 'scheduled';
+          const phase = getMeetingSchedulePhase(startAt, endAt, now);
           return {
             entry,
             index,
             phase,
-            phaseLabel:
-              phase === 'past'
-                ? t({ it: 'Passata', en: 'Past' })
-                : phase === 'current'
-                  ? t({ it: 'Corrente', en: 'Current' })
-                  : t({ it: 'Programmato', en: 'Scheduled' })
+            phaseLabel: getMeetingSchedulePhaseLabel(phase, t)
           };
         }),
     [followUpChain, t]
@@ -1705,19 +1701,15 @@ const MeetingNotesModal = ({
       .map((entry, index) => {
         const startAt = Number(entry.meeting.startAt || 0);
         const endAt = Number(entry.meeting.endAt || 0);
-        const phase: 'past' | 'current' | 'scheduled' =
-          endAt > 0 && now > endAt ? 'past' : startAt > 0 && now >= startAt && now <= endAt ? 'current' : 'scheduled';
+        const phase = getMeetingSchedulePhase(startAt, endAt, now);
         return {
           id: String(entry.meeting.id || `${index}`),
           index,
           entry,
           phase,
-          phaseLabel:
-            phase === 'current'
-              ? t({ it: 'Corrente', en: 'Current' })
-              : phase === 'scheduled'
-                ? t({ it: 'Programmato', en: 'Scheduled' })
-                : t({ it: 'Passato', en: 'Past' })
+          phaseLabel: getMeetingSchedulePhaseLabel(phase, t, {
+            past: { it: 'Passato', en: 'Past' }
+          })
         };
       });
   }, [followUpChain, t]);
@@ -1893,14 +1885,10 @@ const MeetingNotesModal = ({
           const startAt = Number(row.meeting.startAt || 0);
           const endAt = Number(row.meeting.endAt || 0);
           const now = Date.now();
-          const phase: 'past' | 'current' | 'scheduled' =
-            endAt > 0 && now > endAt ? 'past' : startAt > 0 && now >= startAt && now <= endAt ? 'current' : 'scheduled';
-          const phaseLabel =
-            phase === 'current'
-              ? t({ it: 'Corrente', en: 'Current' })
-              : phase === 'scheduled'
-                ? t({ it: 'Programmato', en: 'Scheduled' })
-                : t({ it: 'Passato', en: 'Past' });
+          const phase = getMeetingSchedulePhase(startAt, endAt, now);
+          const phaseLabel = getMeetingSchedulePhaseLabel(phase, t, {
+            past: { it: 'Passato', en: 'Past' }
+          });
           const fill =
             phase === 'past'
               ? ([241, 245, 249] as const)
@@ -2593,8 +2581,7 @@ const MeetingNotesModal = ({
                                         const now = Date.now();
                                         const startAt = Number(entry.meeting.effectiveStartAt || entry.meeting.startAt || 0);
                                         const endAt = Number(entry.meeting.effectiveEndAt || entry.meeting.endAt || 0);
-                                        const phase: 'past' | 'current' | 'scheduled' =
-                                          endAt > 0 && now > endAt ? 'past' : startAt > 0 && now >= startAt && now <= endAt ? 'current' : 'scheduled';
+                                        const phase = getMeetingSchedulePhase(startAt, endAt, now);
                                         const dayLabel = formatMeetingRelativeDayLabel(startAt);
                                         const canManageEntry = canManageMeeting || entry.canManageMeeting;
                                         return (

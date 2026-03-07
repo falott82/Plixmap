@@ -507,20 +507,30 @@ const registerMeetingRoutes = (app, deps) => {
     const fromAt = Number.isFinite(fromAtRaw) ? Math.floor(fromAtRaw) : null;
     const toAt = Number.isFinite(toAtRaw) ? Math.floor(toAtRaw) : null;
     const linked = resolveLinkedRealUserForPortalUser(req.userId);
-    const rows = db.prepare('SELECT * FROM meeting_bookings ORDER BY startAt DESC LIMIT ?').all(limit).map(mapMeetingRow).filter(Boolean);
+    const where = [];
+    const params = [];
+    if (fromAt !== null) {
+      where.push('effectiveEndAt >= ?');
+      params.push(fromAt);
+    }
+    if (toAt !== null) {
+      where.push('effectiveStartAt <= ?');
+      params.push(toAt);
+    }
+    const sql = `SELECT * FROM meeting_bookings ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY startAt ASC LIMIT ?`;
+    const rows = db.prepare(sql).all(...params, limit).map(mapMeetingRow).filter(Boolean);
     const visibleRows = isAdminLike ? rows : rows.filter((row) => visibleRoomIds.has(String(row.roomId || '')));
     const scopedRows = visibleRows.filter((row) => {
       const startAt = Number(row?.startAt || 0);
       const endAt = Number(row?.endAt || 0);
+      if (isAdminLike) return true;
       if (fromAt !== null && endAt > 0 && endAt < fromAt) return false;
       if (toAt !== null && startAt > toAt) return false;
-      if (isAdminLike) return true;
       if (String(row?.requestedById || '') === String(req.userId || '')) return true;
       if (Array.isArray(row?.meetingAdminIds) && row.meetingAdminIds.includes(String(req.userId || ''))) return true;
       if (!linked) return false;
       return !!findMeetingParticipantForLinkedUser(row, linked);
     });
-    scopedRows.sort((a, b) => Number(a.startAt || 0) - Number(b.startAt || 0));
     const now = Date.now();
     const inProgress = scopedRows.filter((row) => Number(row.startAt || 0) <= now && now < Number(row.endAt || 0));
     const upcoming = scopedRows.filter((row) => Number(row.startAt || 0) > now);

@@ -81,6 +81,8 @@ const humanizeProvisionMailReason = (reason: string, t: ReturnType<typeof useT>)
   switch (String(reason || '').trim()) {
     case 'missing_recipient':
       return t({ it: 'email destinatario mancante', en: 'missing recipient email' });
+    case 'portal_url_not_configured':
+      return t({ it: 'URL pubblico del portale non configurato', en: 'public portal URL not configured' });
     case 'smtp_client_missing_password':
       return t({ it: 'SMTP cliente incompleto (password mancante)', en: 'client SMTP incomplete (missing password)' });
     case 'smtp_client_not_configured':
@@ -552,7 +554,10 @@ const CustomImportPanel = (
     const text =
       mode === 'password'
         ? portalProvisionResult.temporaryPassword
-        : `Username: ${portalProvisionResult.username}\nPassword temporanea: ${portalProvisionResult.temporaryPassword}`;
+        : t({
+            it: `Username: ${portalProvisionResult.username}\nPassword temporanea: ${portalProvisionResult.temporaryPassword}`,
+            en: `Username: ${portalProvisionResult.username}\nTemporary password: ${portalProvisionResult.temporaryPassword}`
+          });
     try {
       await navigator.clipboard.writeText(text);
       push(t({ it: 'Copiato negli appunti', en: 'Copied to clipboard' }), 'success');

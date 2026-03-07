@@ -6,6 +6,7 @@ export interface EmailSettings {
   username: string;
   fromName: string;
   fromEmail: string;
+  portalPublicUrl?: string;
   hasPassword: boolean;
   updatedAt?: number | null;
 }
@@ -75,6 +76,7 @@ export const updateClientEmailSettings = async (
     password?: string;
     fromName?: string;
     fromEmail?: string;
+    portalPublicUrl?: string;
   }
 ): Promise<EmailSettings | null> => {
   const res = await apiFetch(`/api/clients/${encodeURIComponent(String(clientId || '').trim())}/email-settings`, {

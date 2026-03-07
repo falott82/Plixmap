@@ -561,6 +561,43 @@ const migrations = [
         );
       `);
     }
+  },
+  {
+    version: 26,
+    up: (db) => {
+      const duplicates = db
+        .prepare(
+          `SELECT linkedExternalClientId, linkedExternalId
+           FROM users
+           WHERE linkedExternalClientId <> '' AND linkedExternalId <> ''
+           GROUP BY linkedExternalClientId, linkedExternalId
+           HAVING COUNT(*) > 1`
+        )
+        .all();
+      if (duplicates.length) {
+        const selectUsers = db.prepare(
+          `SELECT id
+           FROM users
+           WHERE linkedExternalClientId = ? AND linkedExternalId = ?
+           ORDER BY createdAt ASC, id ASC`
+        );
+        const unlinkUser = db.prepare(
+          "UPDATE users SET linkedExternalClientId = '', linkedExternalId = '', updatedAt = ? WHERE id = ?"
+        );
+        const now = Date.now();
+        for (const duplicate of duplicates) {
+          const rows = selectUsers.all(String(duplicate.linkedExternalClientId || ''), String(duplicate.linkedExternalId || ''));
+          for (const row of rows.slice(1)) {
+            unlinkUser.run(now, String(row.id || ''));
+          }
+        }
+      }
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_linked_external_unique
+        ON users(linkedExternalClientId, linkedExternalId)
+        WHERE linkedExternalClientId <> '' AND linkedExternalId <> '';
+      `);
+    }
   }
 ];
 
