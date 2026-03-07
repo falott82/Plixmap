@@ -2914,7 +2914,7 @@ const MobileAppPage = () => {
                 const key = buildCheckInKeyForParticipantMatch(meeting);
                 const checked = !!((checkInMapByMeetingId[String(meeting.id)] || {})[key]);
                 const checkedAt = (checkInTsByMeetingId[String(meeting.id)] || {})[key];
-                const { inProgress } = getMeetingTemporalState(meeting.startAt, meeting.endAt, now);
+                const { inProgress, isPast } = getMeetingTemporalState(meeting.startAt, meeting.endAt, now);
                 const roomMatched = !selectedRoomId || String(meeting.roomId) === String(selectedRoomId);
                 const remote = !!p.remote;
                 const toneClass = inProgress

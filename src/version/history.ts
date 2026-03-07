@@ -8,6 +8,33 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.5.3',
+    date: '2026-03-07',
+    type: 'fix',
+    notes: [
+      n(
+        'Provisioning utenti importati reso piu affidabile: `Portal public URL` centralizzato, creazione utente atomica, vincolo univoco sul link imported-user e messaggi espliciti quando l’URL pubblico non e configurato',
+        'Imported-user provisioning is now more reliable: centralized `Portal public URL`, atomic user creation, unique constraint on imported-user linkage, and explicit messaging when the public URL is not configured'
+      ),
+      n(
+        'Meetings: corretta la visibilita di `/api/meetings/mine` applicando i filtri data prima del `LIMIT`, evitando omissioni silenziose per admin e superadmin su dataset ampi',
+        'Meetings: `/api/meetings/mine` visibility was fixed by applying date filters before `LIMIT`, avoiding silent omissions for admin and superadmin users on larger datasets'
+      ),
+      n(
+        'SSOT/DRY meetings: badge e fasi temporali condivise tra mobile, `My meetings`, follow-up timeline, Sidebar e PlanView tramite helper unificati',
+        'Meeting SSOT/DRY: shared temporal-state helpers now drive badges and phases across mobile, `My meetings`, follow-up timelines, Sidebar, and PlanView'
+      ),
+      n(
+        'Runtime URL pubblici centralizzati lato server: kiosk, mobile e public uploads usano ora un resolver comune piu prevedibile anche in scenari LAN/localhost',
+        'Public runtime URLs are now centralized server-side: kiosk, mobile, and public uploads all use a common resolver that behaves more predictably in LAN/localhost setups'
+      ),
+      n(
+        'Aggiunti test mirati per regole condivise su provisioning/email e public URL runtime per ridurre regressioni nelle release future',
+        'Added focused tests for shared provisioning/email rules and runtime public URLs to reduce regressions in future releases'
+      )
+    ]
+  },
+  {
     version: '3.5.2',
     date: '2026-03-07',
     type: 'fix',

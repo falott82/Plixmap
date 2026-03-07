@@ -2,6 +2,7 @@ import { Fragment, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useM
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
+import { getMeetingRoomActiveToneClass, getMeetingTimelineDayClasses, isApprovedMeetingInProgress } from '../../utils/meetingTime';
 import {
   ChevronDown,
   ChevronLeft,
@@ -20005,14 +20006,7 @@ const PlanView = ({ planId }: Props) => {
                             <div className="grid" style={{ gridTemplateColumns: `240px ${timelineWidthPx}px` }}>
                               <div
                                 className={`border-r px-3 py-3 ${
-                                  (modal?.bookings || []).some((booking) => {
-                                    const nowTs = Date.now();
-                                    const startTs = Number((booking as any).startAt || 0);
-                                    const endTs = Number((booking as any).endAt || 0);
-                                    return booking.status === 'approved' && startTs <= nowTs && nowTs < endTs;
-                                  })
-                                    ? 'border-amber-300 bg-gradient-to-br from-amber-100 to-amber-50'
-                                    : 'border-emerald-300 bg-gradient-to-br from-emerald-100 to-emerald-50'
+                                  getMeetingRoomActiveToneClass((modal?.bookings || []).some((booking) => isApprovedMeetingInProgress(booking, Date.now())))
                                 }`}
                                 style={{ position: 'sticky', left: 0, zIndex: 10 }}
                               >
@@ -20067,27 +20061,9 @@ const PlanView = ({ planId }: Props) => {
                                   const effLeft = ((clampedEffStart - minMinutes) / total) * 100;
                                   const effWidth = Math.max(1, ((clampedEffEnd - clampedEffStart) / total) * 100);
                                   const nowTs = Date.now();
-                                  const isPast = Number(booking.endAt) <= nowTs;
-                                  const inProgress = Number(booking.startAt) <= nowTs && nowTs < Number(booking.endAt);
-                                  const isFuture = Number(booking.startAt) > nowTs;
+                                  const { tone, blockedTone } = getMeetingTimelineDayClasses(booking.startAt, booking.endAt, nowTs);
                                   const isHighlighted = String(roomMeetingsTimelineHighlightBookingId || '') === String(booking.id || '');
                                   const meetingNumber = Number((booking as any)?.meetingNumber || 0);
-                                  const tone =
-                                    inProgress
-                                      ? 'border-emerald-400 bg-emerald-200 text-emerald-950'
-                                      : isPast
-                                        ? 'border-slate-300 bg-slate-200 text-slate-900'
-                                        : isFuture
-                                          ? 'border-violet-300 bg-violet-200 text-violet-950'
-                                          : 'border-slate-300 bg-slate-200 text-slate-900';
-                                  const blockedTone =
-                                    inProgress
-                                      ? 'border-emerald-400/70 bg-emerald-200/35'
-                                      : isPast
-                                        ? 'border-slate-300/70 bg-slate-200/35'
-                                        : isFuture
-                                          ? 'border-violet-300/70 bg-violet-200/35'
-                                          : 'border-slate-300/70 bg-slate-200/35';
                                   return (
                                     <Fragment key={booking.id}>
                                       <div

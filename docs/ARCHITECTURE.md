@@ -10,6 +10,13 @@
 - `src/components/layout/SidebarTree.tsx`: workspace navigation and plan-level actions.
 - `src/store/`: state domains (data/auth/ui/chat/custom fields).
 - `src/utils/`: shared logic (PDF export, perf metrics, files, websocket helpers, layer-visibility helpers, logging).
+- Shared meeting time SSOT now lives in `src/utils/meetingTime.ts` and is reused by mobile agenda, meeting timelines, and follow-up views.
+
+## Server shared services
+- `server/email.cjs`: SMTP settings, portal public URL SSOT, and email logging.
+- `server/publicUrls.cjs`: shared public URL builders for kiosk, mobile, and public uploads.
+- `server/services/users.cjs`: user-link normalization, imported-user conflict checks, and shared permission replacement helpers.
+- `server/services/meetings.cjs`: meeting domain logic reused by extracted meeting routes.
 
 ## Realtime flow
 - WebSocket endpoint: `/ws`.
@@ -46,7 +53,7 @@
 
 ## Build and quality gates
 - `npm run lint`: TypeScript typecheck.
-- `npm run test`: node:test suite for release/version guard logic.
+- `npm run test`: node:test suite for release/version guards plus focused shared-rule regressions (`access`, DB migrations, portal URL SSOT, public URL builders).
 - `npm run build`: production bundle.
 - `npm run release:check`: verifies version consistency across:
   - `package.json`

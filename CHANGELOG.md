@@ -2,6 +2,13 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.5.3 - 2026-03-07
+- Provisioning from imported users is now safer and more deterministic: invite links use a centralized public portal URL source (`Settings > Email > Portal public URL`, with `PUBLIC_APP_URL` as fallback), user creation is wrapped in a DB transaction, and linked imported-user uniqueness is enforced at database level.
+- Meeting visibility correctness improved for admin/superadmin flows: `/api/meetings/mine` now applies date filters before `LIMIT`, avoiding silent omissions on larger datasets.
+- SSOT/DRY refactor continued across meetings and runtime URLs: shared frontend meeting-time helpers now drive mobile agenda badges, `My meetings`, follow-up timelines, sidebar/PlanView meeting timelines, and shared server public URL builders now cover kiosk/mobile/public-upload links from one place.
+- Added focused regression coverage for the new shared rules: `scripts/ssot-dry-users-email.test.cjs` and `scripts/public-urls.test.cjs`.
+- Documentation updated to reflect the new `Portal public URL` setting and the shared architecture modules introduced in this release.
+
 ## 3.5.2 - 2026-03-07
 - Site hours management expanded: dedicated schedule modal from site context menu, weekly multi-range editing, separate holidays/closures modal, named holidays, support for applying hours to other sites of the same client, and selectable holiday calendars (`Italy`, `United States`, `United Kingdom`, `Germany`, `France`, `Spain`, `China`, `Saudi Arabia`, `United Arab Emirates`, or manual only).
 - Meeting scheduling now uses site hours as the default suggested maximum end time for a meeting room, while still allowing admins/users to extend beyond site hours explicitly when needed.

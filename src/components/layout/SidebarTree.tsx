@@ -35,6 +35,7 @@ import {
 import { ALL_ITEMS_LAYER_ID } from '../../store/data';
 import { SECURITY_LAYER_ID } from '../../store/security';
 import { PLIXMAP_WEBSITE_URL } from '../../constants/links';
+import { getMeetingBookingDayToneClass, getMeetingRoomActiveToneClass, isApprovedMeetingInProgress } from '../../utils/meetingTime';
 import {
   getDefaultVisiblePlanLayerIds as getDefaultVisiblePlanLayerIdsUtil,
   normalizePlanLayerSelection as normalizePlanLayerSelectionUtil
@@ -3290,14 +3291,8 @@ const SidebarTree = () => {
                           {clientMeetingsRows.map((row) => {
                             const total = Math.max(1, clientMeetingsTimelineMeta.maxMinutes - clientMeetingsTimelineMeta.minMinutes);
                             const nowTs = clientMeetingsNowTs;
-                            const roomHasInProgress = (row.bookings || []).some((booking) => {
-                              const startTs = toEpochMs((booking as any).startAt);
-                              const endTs = toEpochMs((booking as any).endAt);
-                              return startTs > 0 && startTs <= nowTs && nowTs < endTs && booking.status === 'approved';
-                            });
-                            const roomTone = roomHasInProgress
-                              ? 'bg-gradient-to-br from-amber-100 to-amber-50 border-r border-amber-300'
-                              : 'bg-gradient-to-br from-emerald-100 to-emerald-50 border-r border-emerald-300';
+                            const roomHasInProgress = (row.bookings || []).some((booking) => isApprovedMeetingInProgress(booking, nowTs));
+                            const roomTone = getMeetingRoomActiveToneClass(roomHasInProgress);
                             return (
                               <div key={`${row.siteId}:${row.roomId}`} className="grid grid-cols-[240px,1fr] border-b border-slate-100 last:border-b-0">
                                 <div className={`sticky left-0 z-10 px-3 py-2 ${roomTone}`}>
@@ -3350,20 +3345,7 @@ const SidebarTree = () => {
                                     const clampedEnd = Math.max(clampedStart + 1, Math.max(clientMeetingsTimelineMeta.minMinutes, Math.min(clientMeetingsTimelineMeta.maxMinutes, endMin)));
                                     const leftPct = ((clampedStart - clientMeetingsTimelineMeta.minMinutes) / total) * 100;
                                     const widthPct = Math.max(1, ((clampedEnd - clampedStart) / total) * 100);
-                                    const isInProgress = bookingStartTs > 0 && bookingStartTs <= nowTs && nowTs < bookingEndTs;
-                                    const isPast = bookingEndTs > 0 && bookingEndTs <= nowTs;
-                                    const tone =
-                                      booking.status === 'pending'
-                                        ? 'border-amber-300 bg-amber-100 text-amber-900'
-                                        : booking.status === 'rejected'
-                                          ? 'border-rose-300 bg-rose-100 text-rose-900'
-                                          : booking.status === 'cancelled'
-                                            ? 'border-slate-300 bg-slate-100 text-slate-600'
-                                            : isInProgress
-                                              ? 'border-emerald-400 bg-emerald-200 text-emerald-950'
-                                              : isPast
-                                                ? 'border-slate-200 bg-slate-100 text-slate-500'
-                                                : 'border-violet-300 bg-violet-200 text-violet-950';
+                                    const tone = getMeetingBookingDayToneClass(booking, nowTs);
                                     return (
                                       <div
                                         key={booking.id}

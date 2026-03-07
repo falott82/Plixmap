@@ -1,6 +1,5 @@
 const fs = require('fs');
 const net = require('net');
-const os = require('os');
 const path = require('path');
 const http = require('http');
 const express = require('express');
@@ -85,6 +84,11 @@ const {
   logEmailAttempt,
   listEmailLogs
 } = require('./email.cjs');
+const {
+  buildMeetingRoomPublicUrl,
+  buildMobilePublicUrl,
+  buildPublicUploadUrl
+} = require('./publicUrls.cjs');
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -133,99 +137,8 @@ const compareSemver = (a, b) => {
   return 0;
 };
 
-const getPreferredLanIPv4 = () => {
-  try {
-    const nets = os.networkInterfaces ? os.networkInterfaces() : {};
-    const candidates = [];
-    for (const entries of Object.values(nets || {})) {
-      for (const entry of entries || []) {
-        if (!entry || entry.internal) continue;
-        if (entry.family !== 'IPv4' && entry.family !== 4) continue;
-        const addr = String(entry.address || '').trim();
-        if (!addr) continue;
-        candidates.push(addr);
-      }
-    }
-    const privateFirst =
-      candidates.find((ip) => /^192\.168\./.test(ip)) ||
-      candidates.find((ip) => /^10\./.test(ip)) ||
-      candidates.find((ip) => /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) ||
-      candidates[0];
-    return privateFirst || null;
-  } catch {
-    return null;
-  }
-};
-
-const buildKioskPublicUrl = (req, roomId) => {
-  const encoded = encodeURIComponent(String(roomId || '').trim());
-  const hostHeader = String(req.headers.host || '').trim();
-  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
-  let hostname = '';
-  let port = '';
-  if (hostHeader.startsWith('[')) {
-    const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(hostHeader);
-    hostname = String(m?.[1] || '');
-    port = String(m?.[2] || '');
-  } else {
-    const [h, p] = hostHeader.split(':');
-    hostname = String(h || '');
-    port = String(p || '');
-  }
-  if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-    hostname = getPreferredLanIPv4() || hostname || 'localhost';
-  }
-  const portPart = port ? `:${port}` : '';
-  return `${proto}://${hostname}${portPart}/meetingroom/${encoded}`;
-};
-const buildMobilePublicUrl = (req, roomId) => {
-  const hostHeader = String(req.headers.host || '').trim();
-  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
-  let hostname = '';
-  let port = '';
-  if (hostHeader.startsWith('[')) {
-    const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(hostHeader);
-    hostname = String(m?.[1] || '');
-    port = String(m?.[2] || '');
-  } else {
-    const [h, p] = hostHeader.split(':');
-    hostname = String(h || '');
-    port = String(p || '');
-  }
-  if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-    hostname = getPreferredLanIPv4() || hostname || 'localhost';
-  }
-  const portPart = port ? `:${port}` : '';
-  const base = `${proto}://${hostname}${portPart}/mobile`;
-  const rid = String(roomId || '').trim();
-  if (!rid) return base;
-  return `${base}?roomId=${encodeURIComponent(rid)}`;
-};
-const buildKioskPublicUploadUrl = (req, rawUrl) => {
-  const raw = String(rawUrl || '').trim();
-  if (!raw) return null;
-  if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (!raw.startsWith('/uploads/')) return raw;
-  const hostHeader = String(req.headers.host || '').trim();
-  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
-  let hostname = '';
-  let port = '';
-  if (hostHeader.startsWith('[')) {
-    const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(hostHeader);
-    hostname = String(m?.[1] || '');
-    port = String(m?.[2] || '');
-  } else {
-    const [h, p] = hostHeader.split(':');
-    hostname = String(h || '');
-    port = String(p || '');
-  }
-  if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-    hostname = getPreferredLanIPv4() || hostname || 'localhost';
-  }
-  const portPart = port ? `:${port}` : '';
-  return `${proto}://${hostname}${portPart}/public-uploads/${raw.slice('/uploads/'.length)}`;
-};
+const buildKioskPublicUrl = (req, roomId) => buildMeetingRoomPublicUrl(req, roomId);
+const buildKioskPublicUploadUrl = (req, rawUrl) => buildPublicUploadUrl(req, rawUrl);
 const normalizeHttpUrl = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return null;

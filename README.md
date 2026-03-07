@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.5.2
+Current version: 3.5.3
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -13,13 +13,12 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - Full release notes: [`CHANGELOG.md`](CHANGELOG.md)
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 
-## What's new in 3.5.2
-- Site hours now have a dedicated editor with weekly multi-range schedule, separate holidays/closures modal, named holidays, and selectable holiday calendars (`Italy`, `US`, `UK`, `Germany`, `France`, `Spain`, `China`, `Saudi Arabia`, `UAE`, or manual only).
-- Meeting scheduling now suggests the room site closing time as the default end boundary while still allowing manual override beyond site hours when needed.
-- Mobile chat startup and thread opening are much faster thanks to the dedicated mobile overview flow, cache reuse, and fixes for the unread/read request loop.
-- Superadmin visibility is now consistent across users and meetings, including the `My meetings` flow and server-side admin-like permission checks.
-- Room-to-corridor connection handling is more reliable: inferred door links now cover rooms that lacked an explicit saved link, and the related PlanView crash from helper initialization order was fixed.
-- Import configuration/device modals were stabilized: nested dialogs now keep correct focus/z-index, imported-device lists show a clean empty state when no client devices exist, and the backend/server codebase is further modularized (`users`, `chat`, `meetings`, `realtime`, `static`).
+## What's new in 3.5.3
+- Provisioning imported users is now safer and more reliable: portal URL resolution is centralized, user creation is atomic, linked imported-user uniqueness is enforced, and email delivery clearly reports when the public portal URL is not configured.
+- Email settings now support a dedicated `Portal public URL` from the UI, documented as the primary source for invite/provisioning links with `PUBLIC_APP_URL` as deployment fallback.
+- Meeting visibility and time-state logic were further aligned: `/api/meetings/mine` filters correctly before `LIMIT`, shared frontend helpers now drive mobile badges, `My meetings`, follow-up timelines, room timelines, and meeting status tones from one source of truth.
+- Public runtime URLs for kiosk/mobile/public uploads are now built from a shared server helper, reducing drift between endpoints and making local/LAN deployment behavior more predictable.
+- Architecture cleanup continued with new shared helpers/tests (`server/publicUrls.cjs`, `src/utils/meetingTime.ts`, `scripts/public-urls.test.cjs`, `scripts/ssot-dry-users-email.test.cjs`) to keep release-critical rules verifiable.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
