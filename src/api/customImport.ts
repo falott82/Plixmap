@@ -45,6 +45,46 @@ export interface ExternalUsersResponse {
   rows: ExternalUserRow[];
 }
 
+export interface ProvisionPortalUserFromImportedPayload {
+  clientId: string;
+  externalId: string;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  email?: string;
+  language?: 'it' | 'en';
+  access?: 'ro' | 'rw';
+  chat?: boolean;
+  canCreateMeetings?: boolean;
+  sendEmail?: boolean;
+}
+
+export interface ProvisionPortalUserFromImportedResponse {
+  ok: true;
+  id: string;
+  username: string;
+  temporaryPassword: string;
+  user: {
+    id: string;
+    username: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    linkedExternalClientId: string;
+    linkedExternalId: string;
+    mustChangePassword: boolean;
+  };
+  emailDelivery: {
+    attempted: boolean;
+    sent: boolean;
+    reason?: string | null;
+    messageId?: string | null;
+    smtpScope?: 'client' | 'global' | null;
+  };
+}
+
 export interface ImportSummaryRow {
   clientId: string;
   clientName: string;
@@ -222,6 +262,26 @@ export const createManualExternalUser = async (payload: {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body?.error || `Failed to create manual user (${res.status})`);
   return body;
+};
+
+export const provisionPortalUserFromImported = async (
+  payload: ProvisionPortalUserFromImportedPayload
+): Promise<ProvisionPortalUserFromImportedResponse> => {
+  const res = await apiFetch('/api/users/provision-from-imported', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err: any = new Error(body?.error || `Failed to provision portal user (${res.status})`);
+    if (body?.suggestedUsername) err.suggestedUsername = body.suggestedUsername;
+    if (body?.existingUserId) err.existingUserId = body.existingUserId;
+    if (body?.existingUsername) err.existingUsername = body.existingUsername;
+    throw err;
+  }
+  return body as ProvisionPortalUserFromImportedResponse;
 };
 
 export const updateManualExternalUser = async (payload: {

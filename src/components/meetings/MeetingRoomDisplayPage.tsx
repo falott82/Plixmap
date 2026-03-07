@@ -136,16 +136,34 @@ const buildCheckInKeyFromExternalGuest = (params: { name?: string | null; email?
 const guestIdentityKey = (entry: { label?: string | null; email?: string | null }) =>
   `${String(entry?.label || '').trim().toLowerCase()}::${String(entry?.email || '').trim().toLowerCase()}`;
 
-const statusTone = (meeting: MeetingBooking, now: number) => {
+const statusTone = (meeting: MeetingBooking, now: number, isNight: boolean) => {
   const start = Number(meeting.startAt);
   const end = Number(meeting.endAt);
   const inProgress = start <= now && now < end;
   const isPast = end <= now;
-  if (meeting.status === 'pending') return 'border-amber-400/50 bg-amber-500/15 text-amber-100';
-  if (meeting.status === 'rejected' || meeting.status === 'cancelled') return 'border-slate-600 bg-slate-800/70 text-slate-300';
-  if (inProgress) return 'border-emerald-400/60 bg-emerald-500/20 text-emerald-100';
-  if (isPast) return 'border-slate-700 bg-slate-900/60 text-slate-400';
-  return 'border-violet-400/40 bg-violet-500/15 text-violet-100';
+  if (meeting.status === 'pending') {
+    return isNight
+      ? 'border-amber-400/50 bg-amber-500/15 text-amber-100'
+      : 'border-amber-200 bg-amber-50 text-amber-900';
+  }
+  if (meeting.status === 'rejected' || meeting.status === 'cancelled') {
+    return isNight
+      ? 'border-slate-600 bg-slate-800/70 text-slate-300'
+      : 'border-slate-200 bg-slate-100 text-slate-700';
+  }
+  if (inProgress) {
+    return isNight
+      ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-100'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-900';
+  }
+  if (isPast) {
+    return isNight
+      ? 'border-slate-700 bg-slate-900/60 text-slate-400'
+      : 'border-slate-200 bg-slate-100 text-slate-600';
+  }
+  return isNight
+    ? 'border-violet-400/40 bg-violet-500/15 text-violet-100'
+    : 'border-violet-200 bg-violet-50 text-violet-900';
 };
 
 type HelpOverlayState =
@@ -956,7 +974,7 @@ const MeetingRoomDisplayPage = () => {
                       key={meeting.id}
                       type="button"
                       onClick={() => openParticipantsOverlay(meeting)}
-                      className={`w-full rounded-xl border px-3 py-2 text-left transition hover:brightness-110 ${statusTone(meeting, now)}`}
+                      className={`w-full rounded-xl border px-3 py-2 text-left transition hover:brightness-110 ${statusTone(meeting, now, isNight)}`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-1.5">
@@ -987,7 +1005,15 @@ const MeetingRoomDisplayPage = () => {
                           })()}
                           <div className="truncate text-sm font-semibold">{meeting.subject || 'Meeting'}</div>
                         </div>
-                        {inProg ? <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 text-[10px] font-bold text-emerald-200">LIVE</span> : null}
+                        {inProg ? (
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              isNight ? 'bg-emerald-400/20 text-emerald-200' : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            LIVE
+                          </span>
+                        ) : null}
                       </div>
                       <div className="mt-1 text-xs opacity-90">
                         {formatTime(meeting.startAt)} - {formatTime(meeting.endAt)} • {meeting.requestedSeats}/{meeting.roomCapacity}
@@ -1058,7 +1084,7 @@ const MeetingRoomDisplayPage = () => {
                         key={`tl-${meeting.id}`}
                         type="button"
                         onClick={() => openParticipantsOverlay(meeting)}
-                        className={`absolute z-10 overflow-hidden rounded-xl border px-2 py-1 text-left shadow-sm transition hover:brightness-110 ${statusTone(meeting, now)}`}
+                        className={`absolute z-10 overflow-hidden rounded-xl border px-2 py-1 text-left shadow-sm transition hover:brightness-110 ${statusTone(meeting, now, isNight)}`}
                         style={{ left: `${left}%`, width: `${width}%`, top, height: 30 }}
                         title={`${meeting.subject} • ${formatTime(meeting.startAt)}-${formatTime(meeting.endAt)}`}
                       >

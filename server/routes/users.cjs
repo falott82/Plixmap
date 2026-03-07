@@ -1,12 +1,74 @@
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 const { isAdminLike, isStrictSuperAdmin } = require('../access.cjs');
 const {
   findPortalUserEmailConflict,
+  normalizeUserEmailKey,
   mapAdminUsersResponse,
   searchImportedUsers,
   listDirectoryUsers
 } = require('../services/users.cjs');
+
+const sanitizeProvisionUsername = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/@/g, '.')
+    .replace(/[^a-z0-9._-]+/g, '.')
+    .replace(/\.+/g, '.')
+    .replace(/^\.|\.$/g, '');
+
+const buildProvisionUsernameBase = (row) => {
+  const emailLocal = String(row?.email || '')
+    .trim()
+    .toLowerCase()
+    .split('@')[0];
+  const fromEmail = sanitizeProvisionUsername(emailLocal);
+  if (fromEmail) return fromEmail;
+  const first = sanitizeProvisionUsername(String(row?.firstName || '').trim());
+  const last = sanitizeProvisionUsername(String(row?.lastName || '').trim());
+  const full = [first, last].filter(Boolean).join('.');
+  if (full) return full;
+  const ext = sanitizeProvisionUsername(String(row?.externalId || '').trim());
+  if (ext) return ext;
+  return 'user';
+};
+
+const nextAvailableProvisionUsername = (db, preferred) => {
+  const base = sanitizeProvisionUsername(preferred) || 'user';
+  const exists = db.prepare('SELECT 1 FROM users WHERE lower(username) = ? LIMIT 1');
+  if (!exists.get(base)) return base;
+  for (let idx = 2; idx < 1000; idx += 1) {
+    const candidate = `${base}.${idx}`;
+    if (!exists.get(candidate)) return candidate;
+  }
+  return `${base}.${Date.now()}`;
+};
+
+const generateTemporaryPassword = () => {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const numbers = '23456789';
+  const symbols = '!@#$%*-_';
+  const all = `${upper}${lower}${numbers}${symbols}`;
+  const pick = (source) => source[crypto.randomInt(0, source.length)];
+  const chars = [pick(upper), pick(lower), pick(numbers), pick(symbols)];
+  while (chars.length < 14) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = crypto.randomInt(0, i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+};
+
+const buildPortalBaseUrl = (req) => {
+  const hostHeader = String(req.headers.host || '').trim();
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http')
+    .split(',')[0]
+    .trim() || 'http';
+  return `${proto}://${hostHeader || 'localhost'}`;
+};
 
 const registerUserRoutes = (app, deps) => {
   const {
@@ -23,8 +85,129 @@ const registerUserRoutes = (app, deps) => {
     normalizeLoginKey,
     verifyPassword,
     isStrongPassword,
-    hashPassword
+    hashPassword,
+    dataSecret,
+    APP_BRAND,
+    getEmailConfig,
+    getClientEmailConfig,
+    logEmailAttempt
   } = deps;
+  const sendProvisioningMail = async ({
+    req,
+    clientId,
+    clientName,
+    recipient,
+    username,
+    temporaryPassword,
+    fullName,
+    language
+  }) => {
+    const target = normalizeUserEmailKey(recipient);
+    if (!target) return { ok: false, skipped: true, reason: 'missing_recipient' };
+    const clientConfig = clientId ? getClientEmailConfig(db, dataSecret, clientId) : null;
+    const globalConfig = getEmailConfig(db, dataSecret);
+    const configCandidates = [
+      { config: clientConfig, scope: 'client' },
+      { config: globalConfig, scope: 'global' }
+    ];
+    const selected = configCandidates.find(
+      (entry) =>
+        entry.config &&
+        entry.config.host &&
+        (!entry.config.username || entry.config.password) &&
+        (entry.config.fromEmail || entry.config.username)
+    );
+    const config = selected?.config || null;
+    const source = (selected?.scope || (clientConfig?.host ? 'client' : 'global'));
+    if (!config || !config.host) {
+      if (clientConfig?.host && clientConfig.username && !clientConfig.password && !selected) {
+        return { ok: false, skipped: true, reason: 'smtp_client_missing_password' };
+      }
+      return { ok: false, skipped: true, reason: source === 'client' ? 'smtp_client_not_configured' : 'smtp_not_configured' };
+    }
+    if (config.username && !config.password) {
+      return { ok: false, skipped: true, reason: source === 'client' ? 'smtp_client_missing_password' : 'smtp_missing_password' };
+    }
+    const fromEmail = config.fromEmail || config.username;
+    if (!fromEmail) return { ok: false, skipped: true, reason: 'smtp_missing_from' };
+    const fromLabel = config.fromName ? `"${String(config.fromName).replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
+    const securityMode = config.securityMode || (config.secure ? 'ssl' : 'starttls');
+    const transport = nodemailer.createTransport({
+      host: config.host,
+      port: config.port,
+      secure: securityMode === 'ssl',
+      requireTLS: securityMode === 'starttls',
+      ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
+    });
+    const portalUrl = buildPortalBaseUrl(req);
+    const lang = language === 'en' ? 'en' : 'it';
+    const safeClientName = String(clientName || clientId || APP_BRAND);
+    const safeFullName = String(fullName || '').trim() || username;
+    const subject =
+      lang === 'en'
+        ? `[${APP_BRAND}] Your portal account for ${safeClientName}`
+        : `[${APP_BRAND}] Il tuo account portale per ${safeClientName}`;
+    const text =
+      lang === 'en'
+        ? [
+            `Hello ${safeFullName},`,
+            '',
+            `a portal account has been created for you on ${APP_BRAND}.`,
+            '',
+            `Portal: ${portalUrl}`,
+            `Username: ${username}`,
+            `Temporary password: ${temporaryPassword}`,
+            '',
+            'At first login you will be required to change the password before accessing the portal.',
+            '',
+            'If you did not expect this message, please contact your administrator.'
+          ].join('\n')
+        : [
+            `Ciao ${safeFullName},`,
+            '',
+            `e stato creato per te un account portale su ${APP_BRAND}.`,
+            '',
+            `Portale: ${portalUrl}`,
+            `Username: ${username}`,
+            `Password temporanea: ${temporaryPassword}`,
+            '',
+            'Al primo accesso ti verra richiesto il cambio password prima di poter usare il portale.',
+            '',
+            'Se non ti aspettavi questo messaggio, contatta il tuo amministratore.'
+          ].join('\n');
+    try {
+      const info = await transport.sendMail({ from: fromLabel, to: target, subject, text });
+      logEmailAttempt(db, {
+        userId: req.userId,
+        username: req.username,
+        recipient: target,
+        subject,
+        success: true,
+        details: {
+          kind: 'portal_user_provision',
+          clientId: clientId || null,
+          messageId: info?.messageId || null,
+          smtpScope: source
+        }
+      });
+      return { ok: true, messageId: info?.messageId || null, smtpScope: source };
+    } catch (error) {
+      logEmailAttempt(db, {
+        userId: req.userId,
+        username: req.username,
+        recipient: target,
+        subject,
+        success: false,
+        error: error?.message || 'portal_user_provision_mail_failed',
+        details: {
+          kind: 'portal_user_provision',
+          clientId: clientId || null,
+          smtpScope: source
+        }
+      });
+      return { ok: false, skipped: false, reason: error?.message || 'send_failed' };
+    }
+  };
 
   app.get('/api/users', requireAuth, (req, res) => {
     if (!isAdminLike(req)) {
@@ -33,7 +216,7 @@ const registerUserRoutes = (app, deps) => {
     }
     const users = db
       .prepare(
-        'SELECT id, username, isAdmin, isSuperAdmin, canCreateMeetings, canManageBusinessPartners, isMeetingOperator, disabled, language, avatarUrl, firstName, lastName, phone, email, linkedExternalClientId, linkedExternalId, createdAt, updatedAt FROM users ORDER BY createdAt DESC'
+        'SELECT id, username, isAdmin, isSuperAdmin, canCreateMeetings, canManageBusinessPartners, isMeetingOperator, disabled, language, mustChangePassword, avatarUrl, firstName, lastName, phone, email, linkedExternalClientId, linkedExternalId, createdAt, updatedAt FROM users ORDER BY createdAt DESC'
       )
       .all()
       .map((user) => {
@@ -46,6 +229,7 @@ const registerUserRoutes = (app, deps) => {
           canCreateMeetings: user.canCreateMeetings === undefined ? true : !!user.canCreateMeetings,
           canManageBusinessPartners: user.canManageBusinessPartners === undefined ? false : !!user.canManageBusinessPartners,
           isMeetingOperator: user.isMeetingOperator === undefined ? false : !!user.isMeetingOperator,
+          mustChangePassword: !!user.mustChangePassword,
           linkedExternalClientId: String(user.linkedExternalClientId || ''),
           linkedExternalId: String(user.linkedExternalId || ''),
           disabled: !!user.disabled
@@ -248,6 +432,181 @@ const registerUserRoutes = (app, deps) => {
       }
     });
     res.json({ ok: true, id });
+  });
+
+  app.post('/api/users/provision-from-imported', requireAuth, rateByUser('users_provision_imported', 10 * 60 * 1000, 40), async (req, res) => {
+    if (!req.isSuperAdmin) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const {
+      clientId,
+      externalId,
+      username,
+      firstName,
+      lastName,
+      phone,
+      email,
+      language = 'it',
+      access = 'ro',
+      chat = true,
+      canCreateMeetings = false,
+      sendEmail = false
+    } = req.body || {};
+    const linkedClientId = String(clientId || '').trim();
+    const linkedExternalId = String(externalId || '').trim();
+    if (!linkedClientId || !linkedExternalId) {
+      res.status(400).json({ error: 'Missing linked imported user reference' });
+      return;
+    }
+    if (language !== 'it' && language !== 'en') {
+      res.status(400).json({ error: 'Invalid language' });
+      return;
+    }
+    if (access !== 'ro' && access !== 'rw') {
+      res.status(400).json({ error: 'Invalid access mode' });
+      return;
+    }
+    const state = readState();
+    const client = Array.isArray(state?.clients) ? state.clients.find((row) => String(row?.id || '') === linkedClientId) : null;
+    if (!client) {
+      res.status(404).json({ error: 'Client not found' });
+      return;
+    }
+    const imported = db
+      .prepare(
+        `SELECT clientId, externalId, firstName, lastName, email, mobile, role, dept1, hidden, present
+         FROM external_users
+         WHERE clientId = ? AND externalId = ?
+         LIMIT 1`
+      )
+      .get(linkedClientId, linkedExternalId);
+    if (!imported) {
+      res.status(404).json({ error: 'Imported user not found' });
+      return;
+    }
+    const existingLinked = db
+      .prepare('SELECT id, username FROM users WHERE linkedExternalClientId = ? AND linkedExternalId = ? LIMIT 1')
+      .get(linkedClientId, linkedExternalId);
+    if (existingLinked) {
+      res.status(409).json({ error: 'Imported user is already linked to a portal user', existingUserId: String(existingLinked.id || ''), existingUsername: String(existingLinked.username || '') });
+      return;
+    }
+    const nextEmail = String(email ?? imported.email ?? '').trim();
+    const nextFirstName = String(firstName ?? imported.firstName ?? '').trim();
+    const nextLastName = String(lastName ?? imported.lastName ?? '').trim();
+    const nextPhone = String(phone ?? imported.mobile ?? '').trim();
+    const normalizedRequestedUsername = sanitizeProvisionUsername(username);
+    const usernameConflict = normalizedRequestedUsername
+      ? db.prepare('SELECT id FROM users WHERE lower(username) = ? LIMIT 1').get(normalizedRequestedUsername)
+      : null;
+    if (normalizedRequestedUsername && usernameConflict) {
+      res.status(409).json({
+        error: 'Username already exists',
+        suggestedUsername: nextAvailableProvisionUsername(db, buildProvisionUsernameBase({ ...imported, email: nextEmail }))
+      });
+      return;
+    }
+    const emailConflict = findPortalUserEmailConflict(db, '', nextEmail);
+    if (emailConflict) {
+      res.status(409).json({ error: `Email already used by ${emailConflict.username}` });
+      return;
+    }
+    const normalizedUsername = normalizedRequestedUsername || nextAvailableProvisionUsername(db, buildProvisionUsernameBase({ ...imported, email: nextEmail }));
+    const temporaryPassword = generateTemporaryPassword();
+    const { salt, hash } = hashPassword(String(temporaryPassword));
+    const now = Date.now();
+    const id = crypto.randomUUID();
+    const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
+    db.prepare(
+      `INSERT INTO users (
+        id, username, passwordSalt, passwordHash, tokenVersion,
+        isAdmin, isSuperAdmin, disabled, language,
+        canCreateMeetings, canManageBusinessPartners, isMeetingOperator,
+        paletteFavoritesJson, mustChangePassword,
+        firstName, lastName, phone, email,
+        linkedExternalClientId, linkedExternalId,
+        createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, 1, 0, 0, 0, ?, ?, 0, 0, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      normalizedUsername,
+      salt,
+      hash,
+      String(language),
+      canCreateMeetings ? 1 : 0,
+      defaultPaletteFavoritesJson,
+      nextFirstName,
+      nextLastName,
+      nextPhone,
+      nextEmail,
+      linkedClientId,
+      linkedExternalId,
+      now,
+      now
+    );
+    db.prepare(
+      'INSERT OR REPLACE INTO permissions (userId, scopeType, scopeId, access, chat) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, 'client', linkedClientId, access, chat ? 1 : 0);
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'user_provisioned_from_imported',
+      userId: req.userId,
+      username: req.username,
+      scopeType: 'user',
+      scopeId: id,
+      ...requestMeta(req),
+      details: {
+        linkedExternalClientId: linkedClientId,
+        linkedExternalId,
+        provisionedUsername: normalizedUsername,
+        sendEmail: !!sendEmail,
+        access,
+        chat: !!chat,
+        canCreateMeetings: !!canCreateMeetings
+      }
+    });
+    let mailResult = { ok: false, skipped: true, reason: 'not_requested' };
+    if (sendEmail) {
+      if (!nextEmail) {
+        mailResult = { ok: false, skipped: true, reason: 'missing_recipient' };
+      } else {
+        mailResult = await sendProvisioningMail({
+          req,
+          clientId: linkedClientId,
+          clientName: String(client?.shortName || client?.name || linkedClientId),
+          recipient: nextEmail,
+          username: normalizedUsername,
+          temporaryPassword,
+          fullName: `${nextFirstName} ${nextLastName}`.trim(),
+          language
+        });
+      }
+    }
+    res.json({
+      ok: true,
+      id,
+      username: normalizedUsername,
+      temporaryPassword,
+      user: {
+        id,
+        username: normalizedUsername,
+        firstName: nextFirstName,
+        lastName: nextLastName,
+        email: nextEmail,
+        phone: nextPhone,
+        linkedExternalClientId: linkedClientId,
+        linkedExternalId,
+        mustChangePassword: true
+      },
+      emailDelivery: {
+        attempted: !!sendEmail,
+        sent: !!mailResult?.ok,
+        reason: mailResult?.reason || null,
+        messageId: mailResult?.messageId || null,
+        smtpScope: mailResult?.smtpScope || null
+      }
+    });
   });
 
   app.put('/api/users/:id', requireAuth, rateByUser('users_update', 10 * 60 * 1000, 60), (req, res) => {

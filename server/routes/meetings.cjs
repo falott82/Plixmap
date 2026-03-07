@@ -62,6 +62,25 @@ const registerMeetingRoutes = (app, deps) => {
     getMeetingFollowUpChain,
     pushMeetingDm
   } = meeting;
+  const toLocalIsoDay = (ts) => {
+    const d = new Date(Number(ts || 0));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const collectMeetingDaysInRange = (startAt, endAt, rangeStart, rangeEnd) => {
+    const safeStart = Math.max(Number(startAt || 0), Number(rangeStart || 0));
+    const safeEnd = Math.min(Number(endAt || 0), Number(rangeEnd || 0));
+    if (!(safeEnd > safeStart)) return [];
+    const first = new Date(safeStart);
+    const last = new Date(Math.max(safeStart, safeEnd - 1));
+    let cursor = new Date(first.getFullYear(), first.getMonth(), first.getDate(), 0, 0, 0, 0).getTime();
+    const lastDayStart = new Date(last.getFullYear(), last.getMonth(), last.getDate(), 0, 0, 0, 0).getTime();
+    const days = [];
+    while (cursor <= lastDayStart) {
+      days.push(toLocalIsoDay(cursor));
+      cursor += 24 * 60 * 60 * 1000;
+    }
+    return days;
+  };
 
   app.get('/api/meetings/overview', requireAuth, (req, res) => {
     const state = readState();
@@ -305,6 +324,70 @@ const registerMeetingRoutes = (app, deps) => {
       checkInStatusByMeetingId,
       checkInTimestampsByMeetingId,
       perf: timingsMs
+    });
+  });
+
+  app.get('/api/mobile/agenda-month', requireAuth, (req, res) => {
+    const monthRaw = String(req.query.month || '').trim();
+    const monthMatch = /^(\d{4})-(\d{2})$/.exec(monthRaw);
+    if (!monthMatch) {
+      res.status(400).json({ error: 'Invalid month' });
+      return;
+    }
+    const year = Number(monthMatch[1]);
+    const month = Number(monthMatch[2]);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+      res.status(400).json({ error: 'Invalid month' });
+      return;
+    }
+    const linked = resolveLinkedRealUserForPortalUser(req.userId);
+    if (!linked?.clientId || (!linked?.externalId && !linked?.portalEmail && !linked?.importedEmail)) {
+      res.status(400).json({ error: 'Portal user is not linked to an imported user' });
+      return;
+    }
+    const monthStart = new Date(year, month - 1, 1, 0, 0, 0, 0).getTime();
+    const monthEnd = new Date(year, month, 1, 0, 0, 0, 0).getTime();
+    const state = readState();
+    const visibleClients = getVisibleClientsForMeetings(req, state);
+    const roomLookup = new Map(
+      listMeetingRoomsFromClients(visibleClients, {
+        includeNonMeeting: true,
+        clientId: String(linked.clientId || ''),
+        metadataOnly: true
+      }).map((room) => [String(room.roomId), room])
+    );
+    const meetings = db
+      .prepare(
+        `SELECT * FROM meeting_bookings
+         WHERE clientId = ?
+           AND status IN ('pending','approved')
+           AND endAt > ?
+           AND startAt < ?
+         ORDER BY startAt ASC`
+      )
+      .all(String(linked.clientId), monthStart, monthEnd)
+      .map(mapMeetingRow)
+      .filter(Boolean)
+      .filter((booking) => roomLookup.has(String(booking.roomId || '')))
+      .filter((booking) => !!findMeetingParticipantForLinkedUser(booking, linked));
+    const days = {};
+    for (const booking of meetings) {
+      const meetingDays = collectMeetingDaysInRange(booking.startAt, booking.endAt, monthStart, monthEnd);
+      for (const dayKey of meetingDays) {
+        days[dayKey] = Number(days[dayKey] || 0) + 1;
+      }
+    }
+    res.json({
+      ok: true,
+      month: monthRaw,
+      linkedUser: {
+        clientId: linked.clientId,
+        externalId: linked.externalId || '',
+        fullName: linked.fullName || '',
+        portalEmail: linked.portalEmail || '',
+        importedEmail: linked.importedEmail || ''
+      },
+      days
     });
   });
 

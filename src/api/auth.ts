@@ -122,6 +122,7 @@ export interface AdminUserRow {
   canManageBusinessPartners?: boolean;
   isMeetingOperator?: boolean;
   disabled: boolean;
+  mustChangePassword?: boolean;
   lockedUntil?: number | null;
   language: 'it' | 'en';
   avatarUrl?: string;

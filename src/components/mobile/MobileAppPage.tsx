@@ -3,11 +3,15 @@ import { useLocation } from 'react-router-dom';
 import {
   CalendarDays,
   ChevronLeft,
+  ChevronRight,
   CheckCircle2,
+  Cog,
   Eraser,
+  Globe,
   LogOut,
   MessageSquare,
   Mic,
+  Moon,
   Pause,
   Play,
   Square,
@@ -22,12 +26,13 @@ import {
   SmilePlus,
   Smartphone,
   Star,
+  Sun,
   Trash2,
   X
 } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
-import { MFARequiredError } from '../../api/auth';
-import { fetchMobileAgenda, mobileCheckInMeeting, type MobileAgendaMeeting } from '../../api/mobile';
+import { fetchMe, MFARequiredError, updateMyProfile } from '../../api/auth';
+import { fetchMobileAgenda, fetchMobileAgendaMonth, mobileCheckInMeeting, type MobileAgendaMeeting } from '../../api/mobile';
 import {
   clearChat,
   deleteChatMessage,
@@ -56,6 +61,7 @@ type MobileConfirmState = {
 const MOBILE_LOGIN_STORAGE_KEY = 'plixmap:mobile:loginPrefs';
 const MOBILE_AGENDA_CACHE_TTL_MS = 45_000;
 const MOBILE_AGENDA_CACHE_MAX_ENTRIES = 12;
+const MOBILE_AGENDA_MONTH_CACHE_TTL_MS = 5 * 60_000;
 const MOBILE_CHAT_RETENTION_DAYS = 14;
 const MOBILE_CHAT_RETENTION_MS = MOBILE_CHAT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const MOBILE_AGENDA_SESSION_CACHE_TTL_MS = 5 * 60_000;
@@ -64,9 +70,12 @@ const MOBILE_CHAT_OVERVIEW_SESSION_CACHE_TTL_MS = 2 * 60_000;
 const MOBILE_CHAT_OVERVIEW_SESSION_CACHE_PREFIX = 'plixmap:mobile:chat-overview:v1:';
 const MOBILE_CHAT_THREAD_SESSION_CACHE_TTL_MS = 10 * 60_000;
 const MOBILE_CHAT_THREAD_SESSION_CACHE_PREFIX = 'plixmap:mobile:chat-thread:v1:';
+const MOBILE_THEME_STORAGE_KEY = 'plixmap:mobile:theme';
 type MobileAgendaPayload = Awaited<ReturnType<typeof fetchMobileAgenda>>;
+type MobileAgendaMonthPayload = Awaited<ReturnType<typeof fetchMobileAgendaMonth>>;
 type MobileChatOverviewPayload = Awaited<ReturnType<typeof fetchMobileChatOverview>>;
 const mobileAgendaMemoryCache = new Map<string, { at: number; payload: MobileAgendaPayload }>();
+const mobileAgendaMonthMemoryCache = new Map<string, { at: number; payload: MobileAgendaMonthPayload }>();
 
 const scheduleWhenIdle = (work: () => void, timeoutMs = 1200): (() => void) => {
   if (typeof window === 'undefined') {
@@ -105,6 +114,40 @@ const toLocalDay = (ts: number) => {
 const nowDay = () => toLocalDay(Date.now());
 const formatTime = (ts: number) => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(ts));
 const formatDate = (ts: number) => new Intl.DateTimeFormat(undefined, { weekday: 'short', day: '2-digit', month: 'short' }).format(new Date(ts));
+const formatMonthLabel = (monthKey: string) => {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || '').trim());
+  if (!match) return monthKey;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
+};
+const shiftIsoDayByMonths = (value: string, delta: number) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
+  if (!match) return nowDay();
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const nextBase = new Date(year, monthIndex + delta, 1, 0, 0, 0, 0);
+  const nextYear = nextBase.getFullYear();
+  const nextMonthIndex = nextBase.getMonth();
+  const lastDay = new Date(nextYear, nextMonthIndex + 1, 0).getDate();
+  return `${nextYear}-${String(nextMonthIndex + 1).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+};
+const buildCalendarMonthCells = (monthKey: string) => {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || '').trim());
+  if (!match) return [] as Array<string | null>;
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const firstWeekday = (new Date(year, monthIndex, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const cells: Array<string | null> = [];
+  for (let i = 0; i < firstWeekday; i += 1) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(`${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+};
 const formatDateTime = (ts?: number | null) =>
   Number.isFinite(Number(ts || 0))
     ? new Intl.DateTimeFormat(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(Number(ts)))
@@ -477,15 +520,25 @@ const canDeleteChatForAll = (msg: ChatMessage, myUserId: string) => {
 
 const MobileAppPage = () => {
   const location = useLocation();
-  const { user, login, logout } = useAuthStore();
+  const { user, login, logout, setAuth } = useAuthStore();
   const [tab, setTab] = useState<MobileTab>('agenda');
   const [day, setDay] = useState(nowDay());
+  const [mobileTheme, setMobileTheme] = useState<'night' | 'day'>(() => {
+    if (typeof window === 'undefined') return 'night';
+    try {
+      return window.localStorage.getItem(MOBILE_THEME_STORAGE_KEY) === 'day' ? 'day' : 'night';
+    } catch {
+      return 'night';
+    }
+  });
   const [agendaLoading, setAgendaLoading] = useState(false);
   const [agendaError, setAgendaError] = useState('');
+  const [agendaMonthLoading, setAgendaMonthLoading] = useState(false);
   const [lastAgendaSyncAt, setLastAgendaSyncAt] = useState<number | null>(null);
   const [lastAgendaSyncMs, setLastAgendaSyncMs] = useState(0);
   const [agendaSyncDegraded, setAgendaSyncDegraded] = useState(false);
   const [agendaPayload, setAgendaPayload] = useState<Awaited<ReturnType<typeof fetchMobileAgenda>> | null>(null);
+  const [agendaMonthPayload, setAgendaMonthPayload] = useState<MobileAgendaMonthPayload | null>(null);
   const [checkInMapByMeetingId, setCheckInMapByMeetingId] = useState<Record<string, Record<string, true>>>({});
   const [checkInTsByMeetingId, setCheckInTsByMeetingId] = useState<Record<string, Record<string, number>>>({});
   const [selectedRoomId, setSelectedRoomId] = useState<string>('');
@@ -499,6 +552,8 @@ const MobileAppPage = () => {
   const [rememberUsername, setRememberUsername] = useState(true);
   const [rememberPassword, setRememberPassword] = useState(false);
   const [autoLoginEnabled, setAutoLoginEnabled] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
   const [chatClientId, setChatClientId] = useState('');
   const [chatViewMode, setChatViewMode] = useState<MobileChatViewMode>('list');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -564,8 +619,10 @@ const MobileAppPage = () => {
   const voiceMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceChunksRef = useRef<BlobPart[]>([]);
   const voiceStreamRef = useRef<MediaStream | null>(null);
+  const settingsMenuRef = useRef<HTMLDivElement | null>(null);
   const mobileAutoLoginAttemptedRef = useRef(false);
   const agendaRequestSeqRef = useRef(0);
+  const agendaMonthRequestSeqRef = useRef(0);
   const chatLoadSeqRef = useRef(0);
   const agendaLoadBusyRef = useRef(false);
   const agendaLoadLastKeyRef = useRef('');
@@ -578,9 +635,46 @@ const MobileAppPage = () => {
   const chatOverviewLastSyncAtRef = useRef(0);
   const mobileVisibilitySyncAtRef = useRef(0);
   const lastOpenedChatClientIdRef = useRef('');
+  const isDayTheme = mobileTheme === 'day';
+  const shellClass = isDayTheme
+    ? 'bg-gradient-to-b from-slate-100 via-slate-50 to-white text-slate-900'
+    : 'bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100';
+  const frameClass = isDayTheme
+    ? 'border-slate-200 bg-white/90 shadow-[0_24px_60px_rgba(15,23,42,0.10)]'
+    : 'border-white/10 bg-white/5 shadow-2xl';
+  const loginCardClass = isDayTheme
+    ? 'border-slate-200 bg-white/90 text-slate-900 shadow-[0_24px_60px_rgba(15,23,42,0.10)]'
+    : 'border-white/10 bg-white/5 text-white shadow-2xl';
+  const inputClass = isDayTheme
+    ? 'border-slate-200 bg-white text-slate-900 focus:border-cyan-500/60'
+    : 'border-white/10 bg-black/20 text-slate-100 focus:border-cyan-400/60';
+  const mutedTextClass = isDayTheme ? 'text-slate-500' : 'text-slate-400';
+  const subtlePanelClass = isDayTheme ? 'border-slate-200 bg-slate-50/90' : 'border-white/10 bg-black/20';
+  const calendarCardClass = isDayTheme ? 'border-slate-200 bg-white text-slate-900' : 'border-white/10 bg-slate-950/40';
+  const calendarNavButtonClass = isDayTheme
+    ? 'border-slate-200 bg-white text-slate-700'
+    : 'border-white/10 bg-white/5 text-slate-200';
+  const calendarDayButtonBaseClass = isDayTheme
+    ? 'border-slate-200 bg-white text-slate-700'
+    : 'border-white/5 bg-white/[0.03] text-slate-300';
+  const calendarInputClass = isDayTheme
+    ? 'border-slate-200 bg-white text-slate-900'
+    : 'border-white/10 bg-slate-950 text-slate-100';
+  const calendarActionButtonClass = isDayTheme
+    ? 'border-slate-200 bg-white text-slate-700'
+    : 'border-white/10 bg-slate-900 text-slate-100';
+  const noticeClass = isDayTheme
+    ? 'rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700'
+    : 'rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200';
+  const emptyAgendaClass = isDayTheme
+    ? 'rounded-2xl border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600'
+    : 'rounded-2xl border border-white/10 bg-black/10 px-4 py-5 text-sm text-slate-300';
 
   const isPageVisible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
+  const displayMonth = useMemo(() => String(day || nowDay()).slice(0, 7), [day]);
+  const calendarCells = useMemo(() => buildCalendarMonthCells(displayMonth), [displayMonth]);
   const getAgendaCacheKey = useCallback((targetDay: string) => `${String(user?.id || '').trim()}::${String(targetDay || '').trim()}`, [user?.id]);
+  const getAgendaMonthCacheKey = useCallback((targetMonth: string) => `${String(user?.id || '').trim()}::${String(targetMonth || '').trim()}`, [user?.id]);
   const applyAgendaPayload = useCallback(
     (next: MobileAgendaPayload, meta?: { syncAt?: number; elapsedMs?: number; degraded?: boolean }) => {
       setAgendaPayload(next);
@@ -596,6 +690,9 @@ const MobileAppPage = () => {
     },
     [chatClientId]
   );
+  const applyAgendaMonthPayload = useCallback((next: MobileAgendaMonthPayload) => {
+    setAgendaMonthPayload(next);
+  }, []);
   const warmAgendaFromMemoryCache = useCallback(
     (targetDay: string) => {
       const key = getAgendaCacheKey(targetDay);
@@ -624,6 +721,21 @@ const MobileAppPage = () => {
       return true;
     },
     [applyAgendaPayload, getAgendaCacheKey, user?.id]
+  );
+  const warmAgendaMonthFromMemoryCache = useCallback(
+    (targetMonth: string) => {
+      const key = getAgendaMonthCacheKey(targetMonth);
+      if (!key || !String(user?.id || '').trim()) return false;
+      const cached = mobileAgendaMonthMemoryCache.get(key);
+      if (!cached) return false;
+      if (Date.now() - Number(cached.at || 0) > MOBILE_AGENDA_MONTH_CACHE_TTL_MS) {
+        mobileAgendaMonthMemoryCache.delete(key);
+        return false;
+      }
+      applyAgendaMonthPayload(cached.payload);
+      return true;
+    },
+    [applyAgendaMonthPayload, getAgendaMonthCacheKey, user?.id]
   );
 
   useEffect(() => {
@@ -748,6 +860,30 @@ const MobileAppPage = () => {
   }, [notice]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(MOBILE_THEME_STORAGE_KEY, mobileTheme);
+    } catch {
+      // ignore
+    }
+  }, [mobileTheme]);
+
+  useEffect(() => {
+    if (!settingsMenuOpen) return;
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (settingsMenuRef.current && target && settingsMenuRef.current.contains(target)) return;
+      setSettingsMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+    };
+  }, [settingsMenuOpen]);
+
+  useEffect(() => {
     if (tab !== 'chat') return;
     const el = chatMessagesScrollRef.current;
     if (!el) return;
@@ -827,6 +963,27 @@ const MobileAppPage = () => {
     }
   }, [user, day, applyAgendaPayload, getAgendaCacheKey]);
 
+  const reloadAgendaMonth = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!user) return;
+    const monthKey = displayMonth;
+    const reqSeq = ++agendaMonthRequestSeqRef.current;
+    if (!opts?.silent) setAgendaMonthLoading(true);
+    try {
+      const next = await fetchMobileAgendaMonth(monthKey);
+      if (agendaMonthRequestSeqRef.current !== reqSeq) return;
+      const cacheKey = getAgendaMonthCacheKey(monthKey);
+      if (cacheKey) {
+        mobileAgendaMonthMemoryCache.set(cacheKey, { at: Date.now(), payload: next });
+      }
+      applyAgendaMonthPayload(next);
+    } catch {
+      if (agendaMonthRequestSeqRef.current !== reqSeq) return;
+      if (!opts?.silent) setAgendaMonthPayload(null);
+    } finally {
+      if (agendaMonthRequestSeqRef.current === reqSeq) setAgendaMonthLoading(false);
+    }
+  }, [user, displayMonth, getAgendaMonthCacheKey, applyAgendaMonthPayload]);
+
   const openMeetingDetail = (meeting: MobileAgendaMeeting) => {
     const p = (meeting as any).participantMatch || {};
     const key = buildCheckInKeyForParticipantMatch(meeting);
@@ -839,12 +996,69 @@ const MobileAppPage = () => {
     setMeetingDetailOpen(meeting);
   };
 
+  const handleMobileLogout = useCallback(async () => {
+    mobileAutoLoginAttemptedRef.current = true;
+    setAutoLoginEnabled(false);
+    setSettingsMenuOpen(false);
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(MOBILE_LOGIN_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw || '{}') : {};
+        window.localStorage.setItem(
+          MOBILE_LOGIN_STORAGE_KEY,
+          JSON.stringify({
+            username: String(parsed?.username || loginUsername || '').trim().toLowerCase(),
+            password: rememberPassword ? String(parsed?.password || loginPassword || '') : '',
+            rememberUsername,
+            rememberPassword,
+            autoLogin: false
+          })
+        );
+      } catch {
+        // ignore
+      }
+    }
+    await logout();
+    setTab('agenda');
+    setChatViewMode('list');
+    setChatClientId('');
+    setChatMessages([]);
+  }, [loginPassword, loginUsername, logout, rememberPassword, rememberUsername]);
+
+  const handleMobileLanguageChange = useCallback(
+    async (lang: 'it' | 'en') => {
+      if (!user || user.language === lang) {
+        setSettingsMenuOpen(false);
+        return;
+      }
+      try {
+        setSettingsBusy(true);
+        await updateMyProfile({ language: lang });
+        const next = await fetchMe();
+        setAuth(next);
+        setNotice(lang === 'en' ? 'Language updated.' : 'Lingua aggiornata.');
+        setSettingsMenuOpen(false);
+      } catch {
+        setNotice(lang === 'en' ? 'Language update failed.' : 'Aggiornamento lingua non riuscito.');
+      } finally {
+        setSettingsBusy(false);
+      }
+    },
+    [setAuth, user]
+  );
+
   useEffect(() => {
     if (!user) return;
     const warmed = warmAgendaFromMemoryCache(day);
     void reloadAgenda({ silent: warmed });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, day, warmAgendaFromMemoryCache]);
+
+  useEffect(() => {
+    if (!user) return;
+    const warmed = warmAgendaMonthFromMemoryCache(displayMonth);
+    void reloadAgendaMonth({ silent: warmed });
+  }, [user, displayMonth, warmAgendaMonthFromMemoryCache, reloadAgendaMonth]);
 
   const getChatOverviewCacheKey = useCallback(() => String(user?.id || '').trim(), [user?.id]);
 
@@ -933,6 +1147,10 @@ const MobileAppPage = () => {
     const rows = Array.isArray(agendaPayload?.meetings) ? agendaPayload!.meetings : [];
     return rows.slice().sort((a, b) => Number(a.startAt) - Number(b.startAt));
   }, [agendaPayload]);
+  const agendaMonthDaysWithMeetings = useMemo(() => {
+    if (String(agendaMonthPayload?.month || '') !== displayMonth) return {} as Record<string, number>;
+    return (agendaMonthPayload?.days || {}) as Record<string, number>;
+  }, [agendaMonthPayload, displayMonth]);
 
   const meetingsForSelectedRoom = useMemo(() => {
     const roomId = String(selectedRoomId || '').trim();
@@ -952,6 +1170,21 @@ const MobileAppPage = () => {
     if (agendaSyncDegraded || staleMs > 20_000) return { label: 'Connessione lenta', tone: 'slow' as const };
     return { label: 'Sincronizzato', tone: 'ok' as const };
   }, [agendaLoading, lastAgendaSyncAt, agendaSyncDegraded]);
+
+  useEffect(() => {
+    if (!displayMonth || !day.startsWith(displayMonth)) return;
+    setAgendaMonthPayload((prev) => {
+      if (!prev || String(prev.month || '') !== displayMonth) return prev;
+      const nextCount = meetings.length;
+      const prevCount = Number(prev.days?.[day] || 0);
+      if (prevCount === nextCount) return prev;
+      const nextDays = { ...(prev.days || {}) } as Record<string, number>;
+      if (nextCount > 0) nextDays[day] = nextCount;
+      else delete nextDays[day];
+      return { ...prev, days: nextDays };
+    });
+  }, [displayMonth, day, meetings.length]);
+
   const totalChatUnread = useMemo(
     () => Object.values(chatUnreadByClientId || {}).reduce((acc, n) => acc + Math.max(0, Number(n || 0)), 0),
     [chatUnreadByClientId]
@@ -1885,7 +2118,7 @@ const MobileAppPage = () => {
   if (!user) {
     return (
       <div
-        className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-4 text-white"
+        className={`min-h-screen p-4 ${shellClass}`}
         style={{
           paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)',
           paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
@@ -1893,24 +2126,28 @@ const MobileAppPage = () => {
           paddingRight: 'calc(env(safe-area-inset-right, 0px) + 16px)'
         }}
       >
-        <div className="mx-auto max-w-md rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl backdrop-blur">
+        <div className={`mx-auto max-w-md rounded-3xl border p-5 backdrop-blur ${loginCardClass}`}>
           <div className="flex items-center gap-3">
-            <img src="/plixmap-logo.png" alt="Plixmap" className="h-12 w-12 rounded-2xl border border-white/10 object-cover" />
+            <img
+              src="/plixmap-logo.png"
+              alt="Plixmap"
+              className={`h-12 w-12 rounded-2xl border object-cover ${isDayTheme ? 'border-slate-200' : 'border-white/10'}`}
+            />
             <div>
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Plixmap Mobile</div>
+              <div className={`text-xs uppercase tracking-[0.18em] ${mutedTextClass}`}>Plixmap Mobile</div>
               <div className="text-xl font-semibold">Accesso</div>
             </div>
           </div>
           <form className="mt-5 space-y-3" onSubmit={submitLogin}>
             <input
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm outline-none focus:border-cyan-400/60"
+              className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${inputClass}`}
               placeholder="Utente"
               autoComplete="username"
               value={loginUsername}
               onChange={(e) => setLoginUsername(e.target.value)}
             />
             <input
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm outline-none focus:border-cyan-400/60"
+              className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${inputClass}`}
               placeholder="Password"
               type="password"
               autoComplete="current-password"
@@ -1919,18 +2156,18 @@ const MobileAppPage = () => {
             />
             {otpRequired ? (
               <input
-                className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm outline-none focus:border-cyan-400/60"
+                className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${inputClass}`}
                 placeholder="Codice MFA"
                 inputMode="numeric"
                 value={loginOtp}
               onChange={(e) => setLoginOtp(e.target.value)}
             />
           ) : null}
-          <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2 text-xs text-slate-300">
+          <label className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${isDayTheme ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-white/10 bg-black/10 text-slate-300'}`}>
             <input type="checkbox" checked={rememberUsername} onChange={(e) => setRememberUsername(e.target.checked)} />
             Ricorda utente
           </label>
-          <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/10 px-3 py-2 text-xs text-slate-300">
+          <label className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${isDayTheme ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-white/10 bg-black/10 text-slate-300'}`}>
             <input
               type="checkbox"
               checked={rememberPassword}
@@ -1963,80 +2200,180 @@ const MobileAppPage = () => {
   const linkedMissing = !!agendaError && /not linked/i.test(agendaError);
 
   return (
-    <div
-      className="h-[100dvh] overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100"
-      style={{
-        paddingTop: 'env(safe-area-inset-top, 0px)',
-        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        paddingLeft: 'env(safe-area-inset-left, 0px)',
-        paddingRight: 'env(safe-area-inset-right, 0px)'
-      }}
-    >
+          <div
+        className={`h-[100dvh] overflow-hidden ${shellClass}`}
+        style={{
+          paddingTop: 'env(safe-area-inset-top, 0px)',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          paddingLeft: 'env(safe-area-inset-left, 0px)',
+          paddingRight: 'env(safe-area-inset-right, 0px)'
+        }}
+      >
       <div className="mx-auto h-full max-w-3xl p-3 sm:p-4">
-        <div className="flex h-full flex-col overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-4 shadow-2xl backdrop-blur">
+        <div className={`flex h-full flex-col overflow-hidden rounded-3xl border p-4 backdrop-blur ${frameClass}`}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Plixmap Mobile</div>
+              <div className={`text-[11px] uppercase tracking-[0.18em] ${mutedTextClass}`}>Plixmap Mobile</div>
               <div className="truncate text-xl font-semibold">
                 {user.firstName} {user.lastName}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={async () => {
-                mobileAutoLoginAttemptedRef.current = true;
-                setAutoLoginEnabled(false);
-                if (typeof window !== 'undefined') {
-                  try {
-                    const raw = window.localStorage.getItem(MOBILE_LOGIN_STORAGE_KEY);
-                    const parsed = raw ? JSON.parse(raw || '{}') : {};
-                    window.localStorage.setItem(
-                      MOBILE_LOGIN_STORAGE_KEY,
-                      JSON.stringify({
-                        username: String(parsed?.username || loginUsername || '').trim().toLowerCase(),
-                        password: rememberPassword ? String(parsed?.password || loginPassword || '') : '',
-                        rememberUsername,
-                        rememberPassword,
-                        autoLogin: false
-                      })
-                    );
-                  } catch {
-                    // ignore
-                  }
-                }
-                await logout();
-                setTab('agenda');
-                setChatViewMode('list');
-                setChatClientId('');
-                setChatMessages([]);
-              }}
-              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-semibold text-slate-200"
-              title="Logout"
-            >
-              <LogOut size={14} />
-              Logout
-            </button>
+            <div className="relative" ref={settingsMenuRef}>
+              <button
+                type="button"
+                onClick={() => setSettingsMenuOpen((prev) => !prev)}
+                className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border ${isDayTheme ? 'border-slate-200 bg-white text-slate-700' : 'border-white/10 bg-black/20 text-slate-200'}`}
+                title="Impostazioni"
+              >
+                <Cog size={16} />
+              </button>
+              {settingsMenuOpen ? (
+                <div className={`absolute right-0 top-12 z-20 w-64 rounded-2xl border p-3 shadow-2xl ${isDayTheme ? 'border-slate-200 bg-white text-slate-900' : 'border-white/10 bg-slate-950 text-slate-100'}`}>
+                  <div className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${mutedTextClass}`}>Impostazioni</div>
+                  <div className="mt-3">
+                    <div className={`mb-1 flex items-center gap-2 text-xs font-semibold ${mutedTextClass}`}>
+                      <Globe size={13} />
+                      Lingua
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(['it', 'en'] as const).map((lang) => {
+                        const active = (user.language || 'it') === lang;
+                        return (
+                          <button
+                            key={`mobile-lang-${lang}`}
+                            type="button"
+                            onClick={() => void handleMobileLanguageChange(lang)}
+                            disabled={settingsBusy}
+                            className={`rounded-xl border px-3 py-2 text-sm font-semibold ${
+                              active
+                                ? isDayTheme
+                                  ? 'border-cyan-200 bg-cyan-50 text-cyan-700'
+                                  : 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200'
+                                : isDayTheme
+                                  ? 'border-slate-200 bg-slate-50 text-slate-700'
+                                  : 'border-white/10 bg-black/20 text-slate-200'
+                            }`}
+                          >
+                            {lang === 'it' ? 'Italiano' : 'English'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <div className={`mb-1 text-xs font-semibold ${mutedTextClass}`}>Tema</div>
+                    <button
+                      type="button"
+                      onClick={() => setMobileTheme((prev) => (prev === 'night' ? 'day' : 'night'))}
+                      className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm font-semibold ${isDayTheme ? 'border-slate-200 bg-slate-50 text-slate-700' : 'border-white/10 bg-black/20 text-slate-200'}`}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        {isDayTheme ? <Moon size={15} /> : <Sun size={15} />}
+                        {isDayTheme ? 'Passa a notte' : 'Passa a giorno'}
+                      </span>
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleMobileLogout()}
+                    className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${isDayTheme ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-rose-400/30 bg-rose-500/10 text-rose-200'}`}
+                  >
+                    <LogOut size={15} />
+                    Logout
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="mt-4 flex gap-2">{[tabBtn('agenda', 'Agenda', CalendarDays), tabBtn('chat', 'Chat', MessageSquare)]}</div>
 
           {tab !== 'chat' ? (
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="text-xs font-semibold text-slate-300">Data</label>
+          <div className={`mt-4 rounded-2xl border p-3 ${subtlePanelClass}`}>
+            <div className={`rounded-2xl border p-3 ${calendarCardClass}`}>
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDay((prev) => shiftIsoDayByMonths(prev || nowDay(), -1))}
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border ${calendarNavButtonClass}`}
+                  title="Mese precedente"
+                >
+                  <ChevronLeft size={15} />
+                </button>
+                <div className="min-w-0 text-center">
+                  <div className={`truncate text-sm font-semibold capitalize ${isDayTheme ? 'text-slate-900' : 'text-slate-100'}`}>{formatMonthLabel(displayMonth)}</div>
+                  <div className={`mt-0.5 inline-flex items-center gap-1 text-[11px] ${mutedTextClass}`}>
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-cyan-300" />
+                    Giorni con meeting
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDay((prev) => shiftIsoDayByMonths(prev || nowDay(), 1))}
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border ${calendarNavButtonClass}`}
+                  title="Mese successivo"
+                >
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+
+              <div className={`mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-[0.18em] ${mutedTextClass}`}>
+                {['L', 'M', 'M', 'G', 'V', 'S', 'D'].map((label, idx) => (
+                  <div key={`mobile-calendar-weekday-${idx}`}>{label}</div>
+                ))}
+              </div>
+
+              <div className="mt-2 grid grid-cols-7 gap-1">
+                {calendarCells.map((cell, idx) => {
+                  if (!cell) return <div key={`mobile-calendar-empty-${idx}`} className="h-10 rounded-xl border border-transparent" aria-hidden="true" />;
+                  const meetingCount = Number(agendaMonthDaysWithMeetings[cell] || 0);
+                  const hasMeeting = meetingCount > 0;
+                  const selected = cell === day;
+                  const today = cell === nowDay();
+                  return (
+                    <button
+                      key={cell}
+                      type="button"
+                      onClick={() => setDay(cell)}
+                      title={hasMeeting ? `${cell} • ${meetingCount} meeting` : cell}
+                      className={`relative flex h-10 items-center justify-center rounded-xl border text-sm font-semibold transition ${
+                        selected
+                          ? isDayTheme
+                            ? 'border-cyan-300 bg-cyan-50 text-cyan-700 shadow-[0_0_0_1px_rgba(34,211,238,0.18)]'
+                            : 'border-cyan-300/70 bg-cyan-500/20 text-cyan-50 shadow-[0_0_0_1px_rgba(103,232,249,0.12)]'
+                          : hasMeeting
+                            ? isDayTheme
+                              ? 'border-cyan-200 bg-cyan-50/60 text-slate-700'
+                              : 'border-cyan-400/20 bg-cyan-500/5 text-slate-100'
+                            : calendarDayButtonBaseClass
+                      } ${today && !selected ? (isDayTheme ? 'ring-1 ring-inset ring-slate-300' : 'ring-1 ring-inset ring-white/20') : ''}`}
+                    >
+                      <span>{Number(cell.slice(8, 10))}</span>
+                      {hasMeeting ? <span className={`absolute bottom-1.5 h-1.5 w-1.5 rounded-full ${selected ? (isDayTheme ? 'bg-cyan-600' : 'bg-cyan-100') : 'bg-cyan-300'}`} /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <label className={`text-xs font-semibold ${isDayTheme ? 'text-slate-600' : 'text-slate-300'}`}>Data</label>
               <input
                 type="date"
                 value={day}
                 onChange={(e) => setDay(e.target.value || nowDay())}
-                className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm"
+                className={`rounded-lg border px-3 py-2 text-sm ${calendarInputClass}`}
               />
               <button
                 type="button"
-                onClick={() => reloadAgenda()}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-slate-900 text-sm font-semibold"
+                onClick={() => {
+                  void reloadAgenda();
+                  void reloadAgendaMonth();
+                }}
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-semibold ${calendarActionButtonClass}`}
                 title="Aggiorna"
               >
-                <RefreshCcw size={14} className={agendaLoading ? 'animate-spin' : ''} />
+                <RefreshCcw size={14} className={agendaLoading || agendaMonthLoading ? 'animate-spin' : ''} />
               </button>
               <div
                 className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold ${
@@ -2074,7 +2411,7 @@ const MobileAppPage = () => {
           ) : null}
 
           <div className={`mt-3 min-h-0 flex-1 overflow-x-hidden ${tab === 'chat' ? 'overflow-hidden' : 'overflow-y-auto pr-1'}`}>
-            {notice ? <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{notice}</div> : null}
+            {notice ? <div className={noticeClass}>{notice}</div> : null}
             {agendaLoading && !agendaPayload ? (
               <div className="mt-3 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100">
                 Caricamento iniziale in corso. Potrebbero servire alcuni secondi per sincronizzare meeting e chat.
@@ -2090,7 +2427,7 @@ const MobileAppPage = () => {
           {tab === 'agenda' ? (
             <div className="mt-4 space-y-3">
               {!meetings.length && !agendaLoading ? (
-                <div className="rounded-2xl border border-white/10 bg-black/10 px-4 py-5 text-sm text-slate-300">Nessun meeting per la giornata selezionata.</div>
+                <div className={emptyAgendaClass}>Nessun meeting per la giornata selezionata.</div>
               ) : null}
               {meetings.map((meeting) => {
                 const { inProgress, isPast } = getMeetingTemporalState(meeting, now);

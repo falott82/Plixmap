@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ArrowUpDown, ExternalLink, FileText, History, Plus, Search, Trash2, X } from 'lucide-react';
+import { ArrowUpDown, FileText, History, Plus, Search, Trash2, X } from 'lucide-react';
 import { IconName, MapObjectType, WifiAntennaModel } from '../../store/types';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
@@ -355,17 +355,6 @@ const ObjectModal = ({
     !isWall &&
     type !== 'user' &&
     type !== 'real_user';
-  const ipIsValid = useMemo(() => {
-    const raw = ipAddress.trim();
-    if (!raw) return true;
-    const parts = raw.split('.');
-    if (parts.length !== 4) return false;
-    return parts.every((part) => {
-      if (!part || !/^\d+$/.test(part)) return false;
-      const value = Number(part);
-      return Number.isInteger(value) && value >= 0 && value <= 255;
-    });
-  }, [ipAddress]);
   const isEdit = !!objectId;
   const wifiModelsById = useMemo(() => {
     const map = new Map<string, WifiAntennaModel>();
@@ -458,9 +447,8 @@ const ObjectModal = ({
     if (type !== 'quote' && type !== 'image' && type !== 'photo' && !name.trim()) return false;
     if (isImageLike && !imageUrl) return false;
     if (isRack && duplicateRackName) return false;
-    if (canHaveNetworkFields && !ipIsValid) return false;
     return wifiFormValid;
-  }, [canHaveNetworkFields, duplicateRackName, imageUrl, ipIsValid, isImageLike, isRack, name, readOnly, type, wifiFormValid]);
+  }, [duplicateRackName, imageUrl, isImageLike, isRack, name, readOnly, type, wifiFormValid]);
   const customFields = useMemo(() => (type ? getFieldsForType(type) : []), [getFieldsForType, type]);
   const quoteOrientation = useMemo(() => {
     if (!initialQuotePoints || initialQuotePoints.length < 2) return 'horizontal' as const;
@@ -1055,9 +1043,6 @@ const ObjectModal = ({
       nameRef.current?.focus();
       return;
     }
-    if (canHaveNetworkFields && !ipIsValid) {
-      return;
-    }
     if (isSecurityType && !name.trim()) return;
     const trimmedIp = ipAddress.trim();
     const trimmedUrl = urlValue.trim();
@@ -1396,51 +1381,6 @@ const ObjectModal = ({
                       {securityError ? (
                         <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">{securityError}</div>
                       ) : null}
-                    </div>
-                  ) : null}
-                  {canHaveNetworkFields ? (
-                    <div className="space-y-3">
-                      <label className="block text-sm font-medium text-slate-700">
-                        {t({ it: 'IP', en: 'IP address' })}
-                        <input
-                          value={ipAddress}
-                          onChange={(e) => setIpAddress(e.target.value)}
-                          className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-primary/30 focus:ring-2 ${
-                            ipIsValid ? 'border-slate-200' : 'border-rose-300 bg-rose-50 text-rose-700 focus:ring-rose-200'
-                          }`}
-                          placeholder={t({ it: 'Es. 192.168.1.10', en: 'e.g. 192.168.1.10' })}
-                        />
-                        {!ipIsValid ? (
-                          <div className="mt-1 text-xs font-semibold text-rose-600">
-                            {t({ it: 'Formato IP non valido.', en: 'Invalid IP format.' })}
-                          </div>
-                        ) : null}
-                      </label>
-                      <label className="block text-sm font-medium text-slate-700">
-                        {t({ it: 'URL', en: 'URL' })}
-                        <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:ring-2 focus-within:ring-primary/30">
-                          <input
-                            value={urlValue}
-                            onChange={(e) => setUrlValue(e.target.value)}
-                            className="w-full bg-transparent text-sm outline-none"
-                            placeholder={t({ it: 'Es. https://device.local', en: 'e.g. https://device.local' })}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const raw = urlValue.trim();
-                              if (!raw) return;
-                              const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-                              window.open(normalized, '_blank', 'noopener,noreferrer');
-                            }}
-                            disabled={!urlValue.trim()}
-                            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            title={t({ it: 'Apri URL', en: 'Open URL' })}
-                          >
-                            <ExternalLink size={14} />
-                          </button>
-                        </div>
-                      </label>
                     </div>
                   ) : null}
                   {isText ? (

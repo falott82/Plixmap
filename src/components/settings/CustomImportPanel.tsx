@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ArrowUpCircle, Eye, EyeOff, FileDown, Info, Pencil, Plus, RefreshCw, Save, Search, Settings2, TestTube, Trash2, UploadCloud, Users, X } from 'lucide-react';
+import { ArrowUpCircle, Copy, Eye, EyeOff, FileDown, Info, Mail, Pencil, Plus, RefreshCw, Save, Search, Settings2, TestTube, Trash2, UploadCloud, UserPlus, Users, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
+import { adminFetchUsers, type AdminUserRow } from '../../api/auth';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import {
   clearImport,
@@ -21,6 +22,7 @@ import {
   importCsv,
   listExternalUsers,
   previewImport,
+  provisionPortalUserFromImported,
   saveImportConfig,
   setExternalUserHidden,
   syncImport,
@@ -61,6 +63,40 @@ const importUserSearchIndex = (row: SearchableImportUser | SearchablePreviewUser
 const matchesImportUserQuery = (row: SearchableImportUser | SearchablePreviewUser, query: string) =>
   !query || importUserSearchIndex(row).includes(query);
 const importPreviewVariationRank = (variation?: string) => (variation === 'remove' ? 0 : variation === 'update' ? 1 : 2);
+const suggestPortalUsername = (row: Partial<ExternalUserRow>) => {
+  const emailLocal = String(row.email || '')
+    .trim()
+    .toLowerCase()
+    .split('@')[0];
+  const source = emailLocal || [String(row.firstName || '').trim(), String(row.lastName || '').trim()].filter(Boolean).join('.');
+  const sanitized = String(source || 'user')
+    .toLowerCase()
+    .replace(/@/g, '.')
+    .replace(/[^a-z0-9._-]+/g, '.')
+    .replace(/\.+/g, '.')
+    .replace(/^\.|\.$/g, '');
+  return sanitized || 'user';
+};
+const humanizeProvisionMailReason = (reason: string, t: ReturnType<typeof useT>) => {
+  switch (String(reason || '').trim()) {
+    case 'missing_recipient':
+      return t({ it: 'email destinatario mancante', en: 'missing recipient email' });
+    case 'smtp_client_missing_password':
+      return t({ it: 'SMTP cliente incompleto (password mancante)', en: 'client SMTP incomplete (missing password)' });
+    case 'smtp_client_not_configured':
+      return t({ it: 'SMTP cliente non configurato', en: 'client SMTP not configured' });
+    case 'smtp_not_configured':
+      return t({ it: 'SMTP globale non configurato', en: 'global SMTP not configured' });
+    case 'smtp_missing_from':
+      return t({ it: 'mittente SMTP mancante', en: 'missing SMTP sender' });
+    case 'send_failed':
+      return t({ it: 'invio non riuscito', en: 'delivery failed' });
+    case 'not_requested':
+      return t({ it: 'invio non richiesto', en: 'delivery not requested' });
+    default:
+      return reason || t({ it: 'errore sconosciuto', en: 'unknown error' });
+  }
+};
 
 const CustomImportPanel = (
   { initialClientId, lockClientSelection = false }: { initialClientId?: string | null; lockClientSelection?: boolean } = {}
@@ -95,6 +131,8 @@ const CustomImportPanel = (
 
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersRows, setUsersRows] = useState<ExternalUserRow[]>([]);
+  const [portalUsersLoading, setPortalUsersLoading] = useState(false);
+  const [portalUsersRows, setPortalUsersRows] = useState<AdminUserRow[]>([]);
   const [usersQuery, setUsersQuery] = useState('');
   const [includeMissing, setIncludeMissing] = useState(false);
   const [onlyMissing, setOnlyMissing] = useState(false);
@@ -124,6 +162,34 @@ const CustomImportPanel = (
   const [manualUserDeletingId, setManualUserDeletingId] = useState<string | null>(null);
   const [manualDeleteCandidate, setManualDeleteCandidate] = useState<ExternalUserRow | null>(null);
   const [duplicatesModalOpen, setDuplicatesModalOpen] = useState(false);
+  const [portalProvisionModalOpen, setPortalProvisionModalOpen] = useState(false);
+  const [portalProvisionSaving, setPortalProvisionSaving] = useState(false);
+  const [portalProvisionSourceUser, setPortalProvisionSourceUser] = useState<ExternalUserRow | null>(null);
+  const [portalProvisionForm, setPortalProvisionForm] = useState({
+    username: '',
+    firstName: '',
+    lastName: '',
+    phone: '',
+    email: '',
+    language: 'it' as 'it' | 'en',
+    access: 'ro' as 'ro' | 'rw',
+    chat: true,
+    canCreateMeetings: false,
+    sendEmail: false
+  });
+  const [portalProvisionResult, setPortalProvisionResult] = useState<null | {
+    userId: string;
+    username: string;
+    temporaryPassword: string;
+    importedDisplayName: string;
+    emailDelivery: {
+      attempted: boolean;
+      sent: boolean;
+      reason?: string | null;
+      messageId?: string | null;
+      smtpScope?: 'client' | 'global' | null;
+    };
+  }>(null);
   const [manualUserForm, setManualUserForm] = useState({
     externalId: '',
     firstName: '',
@@ -143,6 +209,8 @@ const CustomImportPanel = (
   const webApiPreviewDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const usersDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const manualUserDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const portalProvisionDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const portalProvisionResultFocusRef = useRef<HTMLButtonElement | null>(null);
   const csvConfirmDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const infoDialogFocusRef = useRef<HTMLButtonElement | null>(null);
 
@@ -206,7 +274,18 @@ const CustomImportPanel = (
     return set;
   }, [duplicateGroups]);
   const configChildDialogOpen = csvConfirmOpen || clearConfirmOpen;
-  const usersChildDialogOpen = manualUserModalOpen || !!manualDeleteCandidate || duplicatesModalOpen;
+  const portalUserByImportedKey = useMemo(() => {
+    const map = new Map<string, AdminUserRow>();
+    for (const row of portalUsersRows || []) {
+      const clientId = String(row.linkedExternalClientId || '').trim();
+      const externalId = String(row.linkedExternalId || '').trim();
+      if (!clientId || !externalId) continue;
+      map.set(`${clientId}:${externalId}`, row);
+    }
+    return map;
+  }, [portalUsersRows]);
+  const usersChildDialogOpen =
+    manualUserModalOpen || !!manualDeleteCandidate || duplicatesModalOpen || portalProvisionModalOpen || !!portalProvisionResult;
   const infoCounts = useMemo(() => {
     if (!infoClient) return { sites: 0, plans: 0 };
     const sites = infoClient.sites?.length || 0;
@@ -293,6 +372,26 @@ const CustomImportPanel = (
       setUsersLoading(false);
     }
   }, []);
+
+  const loadPortalUsers = useCallback(async () => {
+    if (!isSuperAdmin) {
+      setPortalUsersRows([]);
+      setPortalUsersLoading(false);
+      return [];
+    }
+    setPortalUsersLoading(true);
+    try {
+      const res = await adminFetchUsers();
+      const rows = Array.isArray(res.users) ? res.users : [];
+      setPortalUsersRows(rows);
+      return rows;
+    } catch {
+      setPortalUsersRows([]);
+      return [];
+    } finally {
+      setPortalUsersLoading(false);
+    }
+  }, [isSuperAdmin]);
 
   useEffect(() => {
     loadSummary();
@@ -428,6 +527,99 @@ const CustomImportPanel = (
     setManualUserModalOpen(true);
   }, []);
 
+  const openPortalProvisionModal = useCallback(
+    (row: ExternalUserRow) => {
+      setPortalProvisionSourceUser(row);
+      setPortalProvisionForm({
+        username: suggestPortalUsername(row),
+        firstName: String(row.firstName || ''),
+        lastName: String(row.lastName || ''),
+        phone: String(row.mobile || ''),
+        email: String(row.email || ''),
+        language: authUser?.language === 'en' ? 'en' : 'it',
+        access: 'ro',
+        chat: true,
+        canCreateMeetings: false,
+        sendEmail: !!String(row.email || '').trim()
+      });
+      setPortalProvisionModalOpen(true);
+    },
+    [authUser?.language]
+  );
+
+  const copyPortalProvisionSecret = useCallback(async (mode: 'credentials' | 'password') => {
+    if (!portalProvisionResult) return;
+    const text =
+      mode === 'password'
+        ? portalProvisionResult.temporaryPassword
+        : `Username: ${portalProvisionResult.username}\nPassword temporanea: ${portalProvisionResult.temporaryPassword}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      push(t({ it: 'Copiato negli appunti', en: 'Copied to clipboard' }), 'success');
+    } catch {
+      push(t({ it: 'Copia non riuscita', en: 'Copy failed' }), 'danger');
+    }
+  }, [portalProvisionResult, push, t]);
+
+  const submitPortalProvision = useCallback(async () => {
+    if (!portalProvisionSourceUser || !activeClientId) return;
+    const emailValue = String(portalProvisionForm.email || '').trim();
+    if (portalProvisionForm.sendEmail && !emailValue) {
+      push(t({ it: 'Inserisci un indirizzo email per inviare le credenziali.', en: 'Enter an email address to send credentials.' }), 'info');
+      return;
+    }
+    setPortalProvisionSaving(true);
+    try {
+      const res = await provisionPortalUserFromImported({
+        clientId: activeClientId,
+        externalId: String(portalProvisionSourceUser.externalId || ''),
+        username: portalProvisionForm.username,
+        firstName: portalProvisionForm.firstName,
+        lastName: portalProvisionForm.lastName,
+        phone: portalProvisionForm.phone,
+        email: emailValue,
+        language: portalProvisionForm.language,
+        access: portalProvisionForm.access,
+        chat: portalProvisionForm.chat,
+        canCreateMeetings: portalProvisionForm.canCreateMeetings,
+        sendEmail: portalProvisionForm.sendEmail
+      });
+      setPortalProvisionModalOpen(false);
+      setPortalProvisionResult({
+        userId: res.id,
+        username: res.username,
+        temporaryPassword: res.temporaryPassword,
+        importedDisplayName:
+          `${String(portalProvisionSourceUser.firstName || '').trim()} ${String(portalProvisionSourceUser.lastName || '').trim()}`.trim() ||
+          String(portalProvisionSourceUser.email || portalProvisionSourceUser.externalId || ''),
+        emailDelivery: res.emailDelivery
+      });
+      await loadPortalUsers();
+      push(t({ it: 'Utente portale creato', en: 'Portal user created' }), 'success');
+    } catch (err: any) {
+      if (err?.suggestedUsername) {
+        setPortalProvisionForm((prev) => ({ ...prev, username: String(err.suggestedUsername || '') }));
+      }
+      if (err?.existingUsername) {
+        push(
+          t({
+            it: `Questo utente importato e gia collegato all'utente portale ${String(err.existingUsername || '')}.`,
+            en: `This imported user is already linked to portal user ${String(err.existingUsername || '')}.`
+          }),
+          'info'
+        );
+        return;
+      }
+      push(
+        err?.message ||
+          t({ it: 'Creazione utente portale non riuscita', en: 'Failed to create portal user' }),
+        'danger'
+      );
+    } finally {
+      setPortalProvisionSaving(false);
+    }
+  }, [activeClientId, loadPortalUsers, portalProvisionForm, portalProvisionSourceUser, push, t]);
+
   const formatDate = (ts: number | null | undefined) => {
     if (!ts) return t({ it: 'Mai', en: 'Never' });
     try {
@@ -458,7 +650,7 @@ const CustomImportPanel = (
     setOnlyMissing(false);
     setUsersSortState({ key: 'name', dir: 'asc' });
     setCsvFile(null);
-    await loadUsers(clientId);
+    await Promise.all([loadUsers(clientId), loadPortalUsers()]);
   };
 
   const refreshWebApiPreview = useCallback(async (clientId: string) => {
@@ -1827,6 +2019,9 @@ const CustomImportPanel = (
                                   {usersSortState.key === 'hidden' ? <span>{usersSortState.dir === 'asc' ? '▲' : '▼'}</span> : null}
                                 </button>
                               </th>
+                              <th className="px-3 py-3 text-center" title={t({ it: 'Stato dell’utente del portale collegato all’utente importato.', en: 'Status of the portal user linked to the imported user.' })}>
+                                {t({ it: 'Portale', en: 'Portal' })}
+                              </th>
                               <th className="px-4 py-3 text-right" title={t({ it: 'Azioni disponibili: modifica/elimina manuale e nascondi/mostra o includi/escludi.', en: 'Available actions: edit/delete manual and hide/show or include/exclude.' })}>
                                 {t({ it: 'Azioni', en: 'Actions' })}
                               </th>
@@ -1838,6 +2033,7 @@ const CustomImportPanel = (
                               const displayName = `${String(r.firstName || '').trim()} ${String(r.lastName || '').trim()}`.trim() || r.email || r.externalId;
                               const contact = [r.email, r.mobile].filter(Boolean).join(' · ') || '—';
                               const deptLabel = [r.dept1, r.dept2, r.dept3].filter(Boolean).join(' / ');
+                              const linkedPortalUser = portalUserByImportedKey.get(`${r.clientId}:${r.externalId}`) || null;
                               return (
                                 <tr key={r.externalId} className="border-t border-slate-200 align-top">
                                   <td className="px-4 py-3">
@@ -1897,6 +2093,35 @@ const CustomImportPanel = (
                                   <td className="px-3 py-3 text-center text-slate-500" title={r.hidden ? t({ it: 'Nascosto', en: 'Hidden' }) : t({ it: 'Visibile', en: 'Visible' })}>
                                     {r.hidden ? <EyeOff size={15} className="mx-auto" /> : <Eye size={15} className="mx-auto" />}
                                   </td>
+                                  <td className="px-3 py-3 text-center">
+                                    {linkedPortalUser ? (
+                                      <div className="inline-flex flex-col items-center gap-1">
+                                        <span
+                                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                                            linkedPortalUser.mustChangePassword
+                                              ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                          }`}
+                                          title={
+                                            linkedPortalUser.mustChangePassword
+                                              ? t({ it: 'Creato ma non ancora attivato al primo login', en: 'Created but not activated yet on first login' })
+                                              : t({ it: 'Utente portale gia attivo', en: 'Portal user already active' })
+                                          }
+                                        >
+                                          {linkedPortalUser.mustChangePassword
+                                            ? t({ it: 'Da attivare', en: 'Pending' })
+                                            : t({ it: 'Attivo', en: 'Active' })}
+                                        </span>
+                                        <span className="max-w-[150px] truncate text-[11px] text-slate-500" title={linkedPortalUser.username}>
+                                          {linkedPortalUser.username}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                                        {portalUsersLoading ? t({ it: 'Verifica…', en: 'Checking…' }) : t({ it: 'Assente', en: 'Missing' })}
+                                      </span>
+                                    )}
+                                  </td>
                                   <td className="px-4 py-3">
                                     <div className="flex items-center justify-end gap-1">
                                       {(r.manual || String(r.externalId || '').toLowerCase().startsWith('manual:')) ? (
@@ -1920,6 +2145,19 @@ const CustomImportPanel = (
                                           </button>
                                         </>
                                       ) : null}
+                                      <button
+                                        type="button"
+                                        onClick={() => openPortalProvisionModal(r)}
+                                        disabled={!!linkedPortalUser || portalUsersLoading}
+                                        className={`btn-inline ${linkedPortalUser ? 'cursor-not-allowed opacity-50' : 'text-primary hover:bg-primary/10'}`}
+                                        title={
+                                          linkedPortalUser
+                                            ? t({ it: `Gia collegato a ${linkedPortalUser.username}`, en: `Already linked to ${linkedPortalUser.username}` })
+                                            : t({ it: 'Crea utente portale', en: 'Create portal user' })
+                                        }
+                                      >
+                                        <UserPlus size={13} />
+                                      </button>
                                       <button
                                         onClick={async () => {
                                           if (!activeClientId) return;
@@ -1964,6 +2202,287 @@ const CustomImportPanel = (
                       {t({ it: 'Chiudi', en: 'Close' })}
                     </button>
                     <div />
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={portalProvisionModalOpen} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-[140]"
+          initialFocus={portalProvisionDialogFocusRef}
+          onClose={() => {
+            if (portalProvisionSaving) return;
+            setPortalProvisionModalOpen(false);
+          }}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <button ref={portalProvisionDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
+                  <div className="modal-header">
+                    <div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Crea utente portale', en: 'Create portal user' })}</Dialog.Title>
+                      <div className="modal-description">
+                        {portalProvisionSourceUser
+                          ? `${String(portalProvisionSourceUser.firstName || '').trim()} ${String(portalProvisionSourceUser.lastName || '').trim()}`.trim() ||
+                            portalProvisionSourceUser.email ||
+                            portalProvisionSourceUser.externalId
+                          : ''}
+                      </div>
+                    </div>
+                    <button onClick={() => setPortalProvisionModalOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Username', en: 'Username' })}
+                      <input
+                        value={portalProvisionForm.username}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, username: e.target.value.toLowerCase() }))}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                        placeholder="mario.rossi"
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Lingua iniziale', en: 'Initial language' })}
+                      <select
+                        value={portalProvisionForm.language}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, language: e.target.value === 'en' ? 'en' : 'it' }))}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                      >
+                        <option value="it">Italiano</option>
+                        <option value="en">English</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Nome', en: 'First name' })}
+                      <input
+                        value={portalProvisionForm.firstName}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Cognome', en: 'Last name' })}
+                      <input
+                        value={portalProvisionForm.lastName}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Email
+                      <input
+                        value={portalProvisionForm.email}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, email: e.target.value }))}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Telefono', en: 'Phone' })}
+                      <input
+                        value={portalProvisionForm.phone}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, phone: e.target.value }))}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      {t({ it: 'Accesso sul cliente', en: 'Client access' })}
+                      <select
+                        value={portalProvisionForm.access}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, access: e.target.value === 'rw' ? 'rw' : 'ro' }))}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                      >
+                        <option value="ro">{t({ it: 'Sola lettura', en: 'Read only' })}</option>
+                        <option value="rw">{t({ it: 'Lettura / scrittura', en: 'Read / write' })}</option>
+                      </select>
+                    </label>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                      <div className="font-semibold text-slate-800">{t({ it: 'Provisioning automatico', en: 'Automatic provisioning' })}</div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        {t({
+                          it: 'La password temporanea viene generata dal server, mostrata una sola volta e l’utente sara obbligato a cambiarla al primo login.',
+                          en: 'The temporary password is generated server-side, shown only once, and the user will be forced to change it on first login.'
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-2">
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
+                      <input
+                        type="checkbox"
+                        checked={portalProvisionForm.chat}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, chat: e.target.checked }))}
+                        className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      {t({ it: 'Abilita chat sul cliente', en: 'Enable client chat' })}
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
+                      <input
+                        type="checkbox"
+                        checked={portalProvisionForm.canCreateMeetings}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, canCreateMeetings: e.target.checked }))}
+                        className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      {t({ it: 'Puo creare meeting in autonomia', en: 'Can create meetings autonomously' })}
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-ink">
+                      <input
+                        type="checkbox"
+                        checked={portalProvisionForm.sendEmail}
+                        disabled={!String(portalProvisionForm.email || '').trim()}
+                        onChange={(e) => setPortalProvisionForm((prev) => ({ ...prev, sendEmail: e.target.checked }))}
+                        className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                      />
+                      <Mail size={15} />
+                      {t({ it: 'Invia credenziali via email', en: 'Send credentials by email' })}
+                    </label>
+                    <div className="text-xs text-slate-500">
+                      {t({
+                        it: 'Se configurato, verra usato prima l’SMTP del cliente e in fallback quello globale del portale.',
+                        en: 'If configured, the client SMTP is used first, then the global portal SMTP as fallback.'
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="modal-footer">
+                    <button
+                      type="button"
+                      onClick={() => setPortalProvisionModalOpen(false)}
+                      className="btn-secondary"
+                      disabled={portalProvisionSaving}
+                    >
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void submitPortalProvision()}
+                      className="btn-primary inline-flex items-center gap-2"
+                      disabled={portalProvisionSaving}
+                    >
+                      <UserPlus size={15} />
+                      {portalProvisionSaving ? t({ it: 'Creazione…', en: 'Creating…' }) : t({ it: 'Crea utente', en: 'Create user' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!portalProvisionResult} as={Fragment}>
+        <Dialog as="div" className="relative z-[145]" initialFocus={portalProvisionResultFocusRef} onClose={() => setPortalProvisionResult(null)}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-2xl modal-panel">
+                  <button ref={portalProvisionResultFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
+                  <div className="modal-header">
+                    <div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Credenziali temporanee generate', en: 'Temporary credentials generated' })}</Dialog.Title>
+                      <div className="modal-description">{portalProvisionResult?.importedDisplayName || ''}</div>
+                    </div>
+                    <button onClick={() => setPortalProvisionResult(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                      <div className="text-xs font-semibold uppercase text-slate-500">{t({ it: 'Username', en: 'Username' })}</div>
+                      <div className="mt-1 text-base font-semibold text-ink">{portalProvisionResult?.username}</div>
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+                      <div className="text-xs font-semibold uppercase text-amber-700">{t({ it: 'Password temporanea', en: 'Temporary password' })}</div>
+                      <div className="mt-1 break-all font-mono text-base font-semibold text-amber-900">{portalProvisionResult?.temporaryPassword}</div>
+                      <div className="mt-1 text-xs text-amber-800">
+                        {t({
+                          it: 'Visibile solo ora. Al primo accesso l’utente dovra cambiarla obbligatoriamente.',
+                          en: 'Visible only now. On first login the user will be forced to change it.'
+                        })}
+                      </div>
+                    </div>
+                    <div
+                      className={`rounded-xl border px-3 py-3 text-sm ${
+                        portalProvisionResult?.emailDelivery.sent
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : portalProvisionResult?.emailDelivery.attempted
+                            ? 'border-amber-200 bg-amber-50 text-amber-800'
+                            : 'border-slate-200 bg-slate-50 text-slate-600'
+                      }`}
+                    >
+                      {portalProvisionResult?.emailDelivery.sent
+                        ? t({ it: 'Le credenziali sono state inviate via email.', en: 'Credentials were sent by email.' })
+                        : portalProvisionResult?.emailDelivery.attempted
+                          ? t({
+                              it: `Utente creato, ma l’invio email non e riuscito (${humanizeProvisionMailReason(String(portalProvisionResult.emailDelivery.reason || ''), t)}).`,
+                              en: `User created, but email delivery failed (${humanizeProvisionMailReason(String(portalProvisionResult.emailDelivery.reason || ''), t)}).`
+                            })
+                          : t({ it: 'Invio email non richiesto.', en: 'Email delivery not requested.' })}
+                    </div>
+                  </div>
+
+                  <div className="modal-footer">
+                    <button type="button" onClick={() => void copyPortalProvisionSecret('password')} className="btn-secondary inline-flex items-center gap-2">
+                      <Copy size={14} />
+                      {t({ it: 'Copia password', en: 'Copy password' })}
+                    </button>
+                    <button type="button" onClick={() => void copyPortalProvisionSecret('credentials')} className="btn-primary inline-flex items-center gap-2">
+                      <Copy size={14} />
+                      {t({ it: 'Copia credenziali', en: 'Copy credentials' })}
+                    </button>
                   </div>
                 </Dialog.Panel>
               </Transition.Child>

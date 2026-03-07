@@ -4430,7 +4430,12 @@ registerUserRoutes(app, {
   normalizeLoginKey,
   verifyPassword,
   isStrongPassword,
-  hashPassword
+  hashPassword,
+  dataSecret,
+  APP_BRAND,
+  getEmailConfig,
+  getClientEmailConfig,
+  logEmailAttempt
 });
 
 registerChatRoutes(app, {

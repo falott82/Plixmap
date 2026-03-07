@@ -31,6 +31,19 @@ export type MobileAgendaResponse = {
   checkInTimestampsByMeetingId?: MeetingCheckInTimestampsByMeetingId;
 };
 
+export type MobileAgendaMonthResponse = {
+  ok: true;
+  month: string;
+  linkedUser: {
+    clientId: string;
+    externalId: string;
+    fullName: string;
+    portalEmail: string;
+    importedEmail: string;
+  };
+  days: Record<string, number>;
+};
+
 export const fetchMobileAppUrl = async (): Promise<{ url: string }> => {
   const res = await apiFetch('/api/mobile/app-url', { credentials: 'include', cache: 'no-store' });
   const body = await res.json().catch(() => ({}));
@@ -45,6 +58,15 @@ export const fetchMobileAgenda = async (day: string): Promise<MobileAgendaRespon
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as any)?.error || `Failed to fetch mobile agenda (${res.status})`);
   return body as MobileAgendaResponse;
+};
+
+export const fetchMobileAgendaMonth = async (month: string): Promise<MobileAgendaMonthResponse> => {
+  const qs = new URLSearchParams();
+  if (month) qs.set('month', month);
+  const res = await apiFetch(`/api/mobile/agenda-month?${qs.toString()}`, { credentials: 'include', cache: 'no-store' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as any)?.error || `Failed to fetch mobile agenda month (${res.status})`);
+  return body as MobileAgendaMonthResponse;
 };
 
 export const mobileCheckInMeeting = async (meetingId: string, checked = true) => {
@@ -67,4 +89,3 @@ export const mobileCheckInMeeting = async (meetingId: string, checked = true) =>
     checkInTimestamps: Record<string, number>;
   };
 };
-
