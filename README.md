@@ -12,6 +12,7 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 ## Release notes
 - Full release notes: [`CHANGELOG.md`](CHANGELOG.md)
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
+- Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
 ## What's new in 3.5.3
 - Provisioning imported users is now safer and more reliable: portal URL resolution is centralized, user creation is atomic, linked imported-user uniqueness is enforced, and email delivery clearly reports when the public portal URL is not configured.
@@ -98,6 +99,7 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - Technical architecture: `docs/ARCHITECTURE.md`
 - Terminology reference: `docs/TERMINOLOGY.md`
 - Capacity workflow and APIs: `docs/CAPACITY_WORKFLOW.md`
+- Upgrade guide: `docs/UPGRADE.md`
 
 ## Quality and testing
 ```bash
@@ -169,6 +171,25 @@ Open `http://localhost:8787`
 docker compose up -d --build
 ```
 Open `http://localhost:8787`
+
+## Upgrade existing installation
+If Plixmap is already installed, use the dedicated guide: [`docs/UPGRADE.md`](docs/UPGRADE.md)
+
+### Docker upgrade
+```bash
+git pull
+docker compose build
+docker compose up -d
+```
+
+### npm / traditional upgrade
+```bash
+git pull
+npm install
+npm run build
+```
+
+Then restart the backend service/process you already use in production.
 
 ## First run
 A default superadmin is created on first run:
