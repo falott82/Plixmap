@@ -46,6 +46,7 @@ import {
   type ChatMessage
 } from '../../api/chat';
 import { fetchMeetingNotes, type MeetingNote, type MeetingNoteParticipant, upsertMeetingNote } from '../../api/meetings';
+import { useLang, useT } from '../../i18n/useT';
 import ConfirmDialog from '../ui/ConfirmDialog';
 
 type MobileTab = 'agenda' | 'chat' | 'checkin';
@@ -112,14 +113,14 @@ const toLocalDay = (ts: number) => {
 };
 
 const nowDay = () => toLocalDay(Date.now());
-const formatTime = (ts: number) => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(ts));
-const formatDate = (ts: number) => new Intl.DateTimeFormat(undefined, { weekday: 'short', day: '2-digit', month: 'short' }).format(new Date(ts));
-const formatMonthLabel = (monthKey: string) => {
+const formatTime = (ts: number, locale?: string) => new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(new Date(ts));
+const formatDate = (ts: number, locale?: string) => new Intl.DateTimeFormat(locale, { weekday: 'short', day: '2-digit', month: 'short' }).format(new Date(ts));
+const formatMonthLabel = (monthKey: string, locale?: string) => {
   const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || '').trim());
   if (!match) return monthKey;
   const year = Number(match[1]);
   const month = Number(match[2]);
-  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
+  return new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
 };
 const shiftIsoDayByMonths = (value: string, delta: number) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
@@ -148,9 +149,9 @@ const buildCalendarMonthCells = (monthKey: string) => {
   while (cells.length % 7 !== 0) cells.push(null);
   return cells;
 };
-const formatDateTime = (ts?: number | null) =>
+const formatDateTime = (ts?: number | null, locale?: string) =>
   Number.isFinite(Number(ts || 0))
-    ? new Intl.DateTimeFormat(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(Number(ts)))
+    ? new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(Number(ts)))
     : '—';
 const formatAudioClock = (seconds: number) => {
   const safe = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
@@ -486,12 +487,12 @@ const writeMobileChatThreadToSessionCache = (cacheKey: string, messages: ChatMes
   }
 };
 
-const chatSnippet = (msg?: ChatMessage | null) => {
+const chatSnippet = (msg: ChatMessage | null | undefined, tr: (m: { it: string; en: string }) => string) => {
   if (!msg) return '';
-  if (msg.deleted) return '— messaggio eliminato —';
+  if (msg.deleted) return tr({ it: '— messaggio eliminato —', en: '— message deleted —' });
   const text = String(msg.text || '').replace(/\s+/g, ' ').trim();
   if (text) return text;
-  if (Array.isArray(msg.attachments) && msg.attachments.length) return '[Allegato]';
+  if (Array.isArray(msg.attachments) && msg.attachments.length) return tr({ it: '[Allegato]', en: '[Attachment]' });
   return '';
 };
 
@@ -520,6 +521,8 @@ const canDeleteChatForAll = (msg: ChatMessage, myUserId: string) => {
 
 const MobileAppPage = () => {
   const location = useLocation();
+  const lang = useLang();
+  const tr = useT();
   const { user, login, logout, setAuth } = useAuthStore();
   const [tab, setTab] = useState<MobileTab>('agenda');
   const [day, setDay] = useState(nowDay());
@@ -669,6 +672,21 @@ const MobileAppPage = () => {
   const emptyAgendaClass = isDayTheme
     ? 'rounded-2xl border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600'
     : 'rounded-2xl border border-white/10 bg-black/10 px-4 py-5 text-sm text-slate-300';
+  const locale = lang === 'en' ? 'en-US' : 'it-IT';
+  const calendarWeekdayLabels = lang === 'en' ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
+  const directMessageLabel = tr({ it: 'Messaggio diretto', en: 'Direct message' });
+  const noMessagesLabel = tr({ it: 'Nessun messaggio', en: 'No messages' });
+  const meetingLabel = tr({ it: 'Meeting', en: 'Meeting' });
+  const liveLabel = tr({ it: 'IN CORSO', en: 'LIVE' });
+  const pastLabel = tr({ it: 'PASSATO', en: 'PAST' });
+  const upcomingLabel = tr({ it: 'IN ARRIVO', en: 'UPCOMING' });
+  const checkedLabel = tr({ it: 'PRESENTE', en: 'CHECKED' });
+  const remoteShortLabel = tr({ it: 'REMOTO', en: 'REMOTE' });
+  const checkInOkLabel = tr({ it: 'CHECK-IN OK', en: 'CHECK-IN OK' });
+  const checkInInactiveLabel = tr({ it: 'CHECK-IN N/D', en: 'CHECK-IN N/A' });
+  const onSiteUpperLabel = tr({ it: 'IN SEDE', en: 'ON-SITE' });
+  const optionalShortLabel = tr({ it: 'OPZ', en: 'OPT' });
+  const checkInPrefixLabel = tr({ it: 'Check-in', en: 'Check-in' });
 
   const isPageVisible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
   const displayMonth = useMemo(() => String(day || nowDay()).slice(0, 7), [day]);
@@ -1078,7 +1096,7 @@ const MobileAppPage = () => {
           .map((row) => ({
             id: String(row.id || '').trim(),
             threadId: normalizeChatClientId(row.threadId || ''),
-            name: String(row.name || '').trim() || 'Direct message',
+            name: String(row.name || '').trim() || directMessageLabel,
             avatarUrl: resolveClientLogoUrl(row.avatarUrl || ''),
             lastMessageAt: Number(row.lastMessageAt || row.lastMessage?.createdAt || 0) || null
           }))
@@ -1119,7 +1137,7 @@ const MobileAppPage = () => {
           return normalizedPrev || firstId;
         });
       }
-    }, []);
+    }, [directMessageLabel]);
 
   const warmChatOverviewFromCache = useCallback(() => {
     const cacheKey = getChatOverviewCacheKey();
@@ -1164,12 +1182,12 @@ const MobileAppPage = () => {
     [meetings, now]
   );
   const syncBadge = useMemo(() => {
-    if (agendaLoading && !lastAgendaSyncAt) return { label: 'Sincronizzazione…', tone: 'loading' as const };
-    if (!lastAgendaSyncAt) return { label: 'Connessione lenta', tone: 'slow' as const };
+    if (agendaLoading && !lastAgendaSyncAt) return { label: tr({ it: 'Sincronizzazione…', en: 'Syncing…' }), tone: 'loading' as const };
+    if (!lastAgendaSyncAt) return { label: tr({ it: 'Connessione lenta', en: 'Slow connection' }), tone: 'slow' as const };
     const staleMs = Date.now() - lastAgendaSyncAt;
-    if (agendaSyncDegraded || staleMs > 20_000) return { label: 'Connessione lenta', tone: 'slow' as const };
-    return { label: 'Sincronizzato', tone: 'ok' as const };
-  }, [agendaLoading, lastAgendaSyncAt, agendaSyncDegraded]);
+    if (agendaSyncDegraded || staleMs > 20_000) return { label: tr({ it: 'Connessione lenta', en: 'Slow connection' }), tone: 'slow' as const };
+    return { label: tr({ it: 'Sincronizzato', en: 'Synced' }), tone: 'ok' as const };
+  }, [agendaLoading, lastAgendaSyncAt, agendaSyncDegraded, tr]);
 
   useEffect(() => {
     if (!displayMonth || !day.startsWith(displayMonth)) return;
@@ -1210,7 +1228,7 @@ const MobileAppPage = () => {
       seen.add(threadId);
       rows.push({
         id: threadId,
-        name: dm.name || 'Direct message',
+        name: dm.name || directMessageLabel,
         logoUrl: '',
         avatarUrl: dm.avatarUrl || '',
         kind: 'dm',
@@ -1223,7 +1241,7 @@ const MobileAppPage = () => {
         const fallbackDm = (chatDmContacts || []).find((row) => normalizeChatClientId(row.threadId || '') === normalizedCurrentId);
         rows.push({
           id: normalizedCurrentId,
-          name: String(fallbackDm?.name || 'Direct message'),
+          name: String(fallbackDm?.name || directMessageLabel),
           logoUrl: '',
           avatarUrl: fallbackDm?.avatarUrl || '',
           kind: 'dm',
@@ -1242,7 +1260,7 @@ const MobileAppPage = () => {
       }
     }
     return rows;
-  }, [chatClientChannels, chatClientId, chatDmContacts]);
+  }, [chatClientChannels, chatClientId, chatDmContacts, directMessageLabel]);
 
   const filteredChatClientOptions = useMemo(() => {
     const q = normalizeChatText(chatSearch);
@@ -1283,16 +1301,16 @@ const MobileAppPage = () => {
     const fromOption = String(selectedChatClient?.name || '').trim();
     if (fromOption) return fromOption;
     const cid = normalizeChatClientId(chatClientId || '');
-    if (!cid) return 'Seleziona una chat';
+    if (!cid) return tr({ it: 'Seleziona una chat', en: 'Select a chat' });
     if (cid.startsWith('dm:')) {
       const otherUserId = getDmOtherUserId(cid, user?.id);
       const knownDmName = otherUserId ? dmNameByUserId.get(otherUserId) : '';
       if (knownDmName) return knownDmName;
-      return 'Direct message';
+      return tr({ it: 'Messaggio diretto', en: 'Direct message' });
     }
-    if (isOpaqueChatIdentity(cid)) return 'Direct message';
+    if (isOpaqueChatIdentity(cid)) return tr({ it: 'Messaggio diretto', en: 'Direct message' });
     return safeDecodeUriPart(cid);
-  }, [selectedChatClient?.name, chatClientId, dmNameByUserId, user?.id]);
+  }, [selectedChatClient?.name, chatClientId, dmNameByUserId, tr, user?.id]);
 
   const selectedChatClientLogoUrl =
     selectedChatClient && !chatClientLogoFailedById[String(selectedChatClient.id || '')] ? String((selectedChatClient as any).logoUrl || '') : '';
@@ -1323,13 +1341,13 @@ const MobileAppPage = () => {
   const getChatMessageAuthorName = useCallback(
     (msg: ChatMessage) => {
       const mine = String(msg.userId || '') === String(user?.id || '');
-      if (mine) return `${String(user?.firstName || '').trim()} ${String(user?.lastName || '').trim()}`.trim() || String(user?.username || 'Me');
+      if (mine) return `${String(user?.firstName || '').trim()} ${String(user?.lastName || '').trim()}`.trim() || String(user?.username || tr({ it: 'Io', en: 'Me' }));
       const dmKnown = dmNameByUserId.get(String(msg.userId || '').trim());
       if (dmKnown) return dmKnown;
       if (!isOpaqueChatIdentity(msg.username)) return String(msg.username || '').trim();
-      return 'Utente';
+      return tr({ it: 'Utente', en: 'User' });
     },
-    [dmNameByUserId, user?.firstName, user?.id, user?.lastName, user?.username]
+    [dmNameByUserId, tr, user?.firstName, user?.id, user?.lastName, user?.username]
   );
 
   useEffect(() => {
@@ -1525,7 +1543,7 @@ const MobileAppPage = () => {
       if (err instanceof MFARequiredError || err?.name === 'MFARequiredError') {
         setOtpRequired(true);
       } else {
-        setLoginError(String(err?.message || 'Login failed'));
+        setLoginError(String(err?.message || tr({ it: 'Accesso non riuscito', en: 'Login failed' })));
       }
     } finally {
       setLoginBusy(false);
@@ -1545,7 +1563,7 @@ const MobileAppPage = () => {
       setChatPendingAttachments([]);
       await loadChat(chatClientId, true);
     } catch (e: any) {
-      setChatError(String(e?.message || 'Unable to send message'));
+      setChatError(String(e?.message || tr({ it: 'Impossibile inviare il messaggio', en: 'Unable to send message' })));
     } finally {
       setChatBusy(false);
     }
@@ -1599,7 +1617,7 @@ const MobileAppPage = () => {
     if (!list.length) return;
     try {
       setChatAttachmentsBusy(true);
-      setNotice('Preparazione allegati in corso...');
+      setNotice(tr({ it: 'Preparazione allegati in corso...', en: 'Preparing attachments...' }));
       const encoded: Array<{ name: string; dataUrl: string; mime?: string }> = [];
       for (const file of list) {
         const prepared = await compressImageAttachment(file);
@@ -1608,7 +1626,7 @@ const MobileAppPage = () => {
       }
       if (encoded.length) setChatPendingAttachments((prev) => [...prev, ...encoded].slice(0, 10));
     } catch {
-      setChatError('Impossibile leggere allegato');
+      setChatError(tr({ it: 'Impossibile leggere allegato', en: 'Unable to read attachment' }));
     } finally {
       setChatAttachmentsBusy(false);
     }
@@ -1620,7 +1638,7 @@ const MobileAppPage = () => {
       await starChatMessage(msg.id, !Array.isArray(msg.starredBy) || !msg.starredBy.includes(String(user?.id || '')));
       await loadChat(chatClientId, true);
     } catch (e: any) {
-      setChatError(String(e?.message || 'Unable to update star'));
+      setChatError(String(e?.message || tr({ it: 'Impossibile aggiornare il preferito', en: 'Unable to update star' })));
     } finally {
       setChatActionBusyId(null);
     }
@@ -1633,7 +1651,7 @@ const MobileAppPage = () => {
       setChatReactionForId(null);
       await loadChat(chatClientId, true);
     } catch (e: any) {
-      setChatError(String(e?.message || 'Unable to react'));
+      setChatError(String(e?.message || tr({ it: 'Impossibile aggiungere la reazione', en: 'Unable to react' })));
     } finally {
       setChatActionBusyId(null);
     }
@@ -1658,7 +1676,7 @@ const MobileAppPage = () => {
       setChatEditingText('');
       await loadChat(chatClientId, true);
     } catch (e: any) {
-      setChatError(String(e?.message || 'Unable to edit message'));
+      setChatError(String(e?.message || tr({ it: 'Impossibile modificare il messaggio', en: 'Unable to edit message' })));
     } finally {
       setChatBusy(false);
     }
@@ -1677,7 +1695,7 @@ const MobileAppPage = () => {
       await deleteChatMessage(pending.messageId, mode);
       await loadChat(chatClientId, true);
     } catch (e: any) {
-      setChatError(String(e?.message || 'Unable to delete message'));
+      setChatError(String(e?.message || tr({ it: 'Impossibile eliminare il messaggio', en: 'Unable to delete message' })));
     } finally {
       setChatActionBusyId(null);
       setChatDeletePrompt(null);
@@ -1687,17 +1705,17 @@ const MobileAppPage = () => {
   const clearCurrentChat = async () => {
     if (!chatClientId) return;
     setMobileConfirm({
-      title: 'Svuotare la chat selezionata?',
-      description: 'I messaggi verranno rimossi solo per il tuo utente mobile.',
-      confirmLabel: 'Svuota chat',
-      cancelLabel: 'Annulla',
+      title: tr({ it: 'Svuotare la chat selezionata?', en: 'Clear the selected chat?' }),
+      description: tr({ it: 'I messaggi verranno rimossi solo per il tuo utente mobile.', en: 'Messages will be removed only for your mobile user.' }),
+      confirmLabel: tr({ it: 'Svuota chat', en: 'Clear chat' }),
+      cancelLabel: tr({ it: 'Annulla', en: 'Cancel' }),
       onConfirm: async () => {
         try {
           setChatBusy(true);
           await clearChat(chatClientId);
           await loadChat(chatClientId, true);
         } catch (e: any) {
-          setChatError(String(e?.message || 'Unable to clear chat'));
+          setChatError(String(e?.message || tr({ it: 'Impossibile svuotare la chat', en: 'Unable to clear chat' })));
         } finally {
           setChatBusy(false);
           setMobileConfirm(null);
@@ -1720,11 +1738,11 @@ const MobileAppPage = () => {
     setVoiceRecordError('');
     try {
       if (!window.isSecureContext && !/^localhost$/i.test(String(window.location.hostname || ''))) {
-        setVoiceRecordError('Il microfono richiede una connessione HTTPS (o localhost).');
+        setVoiceRecordError(tr({ it: 'Il microfono richiede una connessione HTTPS (o localhost).', en: 'Microphone access requires HTTPS (or localhost).' }));
         return;
       }
       if (!navigator.mediaDevices?.getUserMedia) {
-        setVoiceRecordError('Questo browser non supporta l’accesso al microfono.');
+        setVoiceRecordError(tr({ it: 'Questo browser non supporta l’accesso al microfono.', en: 'This browser does not support microphone access.' }));
         return;
       }
       try {
@@ -1765,7 +1783,7 @@ const MobileAppPage = () => {
             setChatPendingAttachments((prev) => [...prev, { name, dataUrl, mime: finalMime }]);
           }
         } catch {
-          setVoiceRecordError('Impossibile elaborare il messaggio vocale');
+          setVoiceRecordError(tr({ it: 'Impossibile elaborare il messaggio vocale', en: 'Unable to process the voice message' }));
         } finally {
           setVoiceRecording(false);
           try {
@@ -1780,9 +1798,9 @@ const MobileAppPage = () => {
       setVoiceRecording(true);
     } catch (err: any) {
       const name = String(err?.name || '');
-      if (name === 'NotAllowedError' || name === 'SecurityError') setVoiceRecordError('Autorizza il microfono nel browser e riprova.');
-      else if (name === 'NotFoundError') setVoiceRecordError('Nessun microfono disponibile sul dispositivo.');
-      else setVoiceRecordError('Microfono non disponibile');
+      if (name === 'NotAllowedError' || name === 'SecurityError') setVoiceRecordError(tr({ it: 'Autorizza il microfono nel browser e riprova.', en: 'Allow microphone access in the browser and try again.' }));
+      else if (name === 'NotFoundError') setVoiceRecordError(tr({ it: 'Nessun microfono disponibile sul dispositivo.', en: 'No microphone available on this device.' }));
+      else setVoiceRecordError(tr({ it: 'Microfono non disponibile', en: 'Microphone unavailable' }));
       setVoiceRecording(false);
     }
   };
@@ -1806,7 +1824,7 @@ const MobileAppPage = () => {
     setScannerOpen(false);
     setScannerError('');
     setPendingQrAutoCheckInRoomId(rid);
-    setNotice('QR kiosk acquisito • verifico il check-in');
+    setNotice(tr({ it: 'QR kiosk acquisito • verifico il check-in', en: 'Kiosk QR captured • verifying check-in' }));
   };
 
   const detectQrFromImageFile = async (file: File) => {
@@ -1816,7 +1834,7 @@ const MobileAppPage = () => {
     try {
       const BarcodeDetectorCtor = (window as any).BarcodeDetector;
       if (!BarcodeDetectorCtor) {
-        setScannerError('Scansione da immagine non supportata su questo browser. Usa Incolla link oppure la fotocamera.');
+        setScannerError(tr({ it: 'Scansione da immagine non supportata su questo browser. Usa Incolla link oppure la fotocamera.', en: 'Image QR scanning is not supported in this browser. Use Paste link or the camera instead.' }));
         return;
       }
       const bitmap = await createImageBitmap(file);
@@ -1826,7 +1844,7 @@ const MobileAppPage = () => {
         const raw = String(results?.[0]?.rawValue || '').trim();
         const rid = parseRoomIdFromQrPayload(raw);
         if (!rid) {
-          setScannerError('QR non riconosciuto nell’immagine selezionata');
+          setScannerError(tr({ it: 'QR non riconosciuto nell’immagine selezionata', en: 'QR code not recognized in the selected image' }));
           return;
         }
         applyScannedRoomId(rid);
@@ -1838,7 +1856,7 @@ const MobileAppPage = () => {
         }
       }
     } catch {
-      setScannerError('Impossibile leggere l’immagine selezionata');
+      setScannerError(tr({ it: 'Impossibile leggere l’immagine selezionata', en: 'Unable to read the selected image' }));
     } finally {
       setScannerImageBusy(false);
     }
@@ -1847,7 +1865,7 @@ const MobileAppPage = () => {
   const pasteScannerLinkFromClipboard = async () => {
     try {
       if (!navigator.clipboard?.readText) {
-        setScannerError('Clipboard non supportata. Incolla manualmente il link del kiosk.');
+        setScannerError(tr({ it: 'Clipboard non supportata. Incolla manualmente il link del kiosk.', en: 'Clipboard access is not supported. Paste the kiosk link manually.' }));
         return;
       }
       const text = await navigator.clipboard.readText();
@@ -1855,7 +1873,7 @@ const MobileAppPage = () => {
       const rid = parseRoomIdFromQrPayload(text || '');
       if (rid) applyScannedRoomId(rid);
     } catch {
-      setScannerError('Impossibile leggere dagli appunti');
+      setScannerError(tr({ it: 'Impossibile leggere dagli appunti', en: 'Unable to read from the clipboard' }));
     }
   };
 
@@ -1893,7 +1911,7 @@ const MobileAppPage = () => {
                   applyScannedRoomId(rid);
                   return;
                 }
-                setScannerError('QR non riconosciuto (nessun roomId)');
+                setScannerError(tr({ it: 'QR non riconosciuto (nessun roomId)', en: 'QR code not recognized (missing roomId)' }));
               }
             }
           } catch {
@@ -1903,7 +1921,7 @@ const MobileAppPage = () => {
         };
         tick();
       } catch {
-        setScannerError('Impossibile aprire la fotocamera');
+        setScannerError(tr({ it: 'Impossibile aprire la fotocamera', en: 'Unable to open the camera' }));
       } finally {
         setScannerDetecting(false);
       }
@@ -1940,10 +1958,14 @@ const MobileAppPage = () => {
       const res = await mobileCheckInMeeting(String(meeting.id), checked);
       setCheckInMapByMeetingId((prev) => ({ ...prev, [String(meeting.id)]: res.checkInMap || {} }));
       setCheckInTsByMeetingId((prev) => ({ ...prev, [String(meeting.id)]: res.checkInTimestamps || {} }));
-      setNotice(checked ? `Check-in OK • ${res.participantName}` : `Check-in rimosso • ${res.participantName}`);
+      setNotice(
+        checked
+          ? tr({ it: `Check-in OK • ${res.participantName}`, en: `Check-in OK • ${res.participantName}` })
+          : tr({ it: `Check-in rimosso • ${res.participantName}`, en: `Check-in removed • ${res.participantName}` })
+      );
       reloadAgenda({ silent: true });
     } catch (e: any) {
-      setNotice(String(e?.message || 'Errore check-in'));
+      setNotice(String(e?.message || tr({ it: 'Errore check-in', en: 'Check-in error' })));
     }
   };
 
@@ -1970,7 +1992,7 @@ const MobileAppPage = () => {
         setMeetingMyNoteInitial({ id: nextId, title: nextTitle, text: nextText, shared: nextShared });
         setMeetingNotesDirty(false);
       } catch (e: any) {
-        setMeetingNotesError(String(e?.message || 'Unable to load notes'));
+        setMeetingNotesError(String(e?.message || tr({ it: 'Impossibile caricare le note', en: 'Unable to load notes' })));
         setMeetingNotesList([]);
         setMeetingNotesParticipants([]);
         setMeetingMyNoteId(null);
@@ -1994,17 +2016,17 @@ const MobileAppPage = () => {
     try {
       await upsertMeetingNote(meetingId, {
         ...(meetingMyNoteId ? { id: meetingMyNoteId } : {}),
-        title: String(meetingMyNoteTitle || '').trim() || 'Mobile note',
+        title: String(meetingMyNoteTitle || '').trim() || tr({ it: 'Nota mobile', en: 'Mobile note' }),
         contentText: String(meetingMyNoteText || ''),
         contentHtml: '',
         contentLexical: '',
         shared: !!meetingMyNoteShared
       });
       await loadMeetingNotes(meetingId);
-      setNotice('Appunto salvato');
+      setNotice(tr({ it: 'Appunto salvato', en: 'Note saved' }));
     } catch (e: any) {
-      setMeetingNotesError(String(e?.message || 'Unable to save note'));
-      setNotice(String(e?.message || 'Unable to save note'));
+      setMeetingNotesError(String(e?.message || tr({ it: 'Impossibile salvare la nota', en: 'Unable to save note' })));
+      setNotice(String(e?.message || tr({ it: 'Impossibile salvare la nota', en: 'Unable to save note' })));
     } finally {
       setMeetingNotesSaving(false);
     }
@@ -2034,10 +2056,10 @@ const MobileAppPage = () => {
       return;
     }
     setMobileConfirm({
-      title: 'Chiudere senza salvare?',
-      description: 'Ci sono modifiche non salvate nelle note del meeting.',
-      confirmLabel: 'Chiudi senza salvare',
-      cancelLabel: 'Annulla',
+      title: tr({ it: 'Chiudere senza salvare?', en: 'Close without saving?' }),
+      description: tr({ it: 'Ci sono modifiche non salvate nelle note del meeting.', en: 'There are unsaved changes in the meeting notes.' }),
+      confirmLabel: tr({ it: 'Chiudi senza salvare', en: 'Close without saving' }),
+      cancelLabel: tr({ it: 'Annulla', en: 'Cancel' }),
       onConfirm: () => {
         setMeetingNotesDirty(false);
         setMeetingNotesOpen(null);
@@ -2069,7 +2091,7 @@ const MobileAppPage = () => {
     });
     if (!candidates.length) {
       setPendingQrAutoCheckInRoomId(null);
-      setNotice('Nessun meeting in corso per il tuo utente in questa sala');
+      setNotice(tr({ it: 'Nessun meeting in corso per il tuo utente in questa sala', en: 'No meeting in progress for your user in this room' }));
       return;
     }
     const meeting = candidates[0]!;
@@ -2077,7 +2099,7 @@ const MobileAppPage = () => {
     const alreadyChecked = !!((checkInMapByMeetingId[String(meeting.id)] || {})[key]);
     if (alreadyChecked) {
       setPendingQrAutoCheckInRoomId(null);
-      setNotice('Check-in già registrato per questa riunione');
+      setNotice(tr({ it: 'Check-in già registrato per questa riunione', en: 'Check-in already recorded for this meeting' }));
       return;
     }
     setQrAutoCheckInBusy(true);
@@ -2087,7 +2109,7 @@ const MobileAppPage = () => {
         setPendingQrAutoCheckInRoomId(null);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingQrAutoCheckInRoomId, qrAutoCheckInBusy, user, day, agendaPayload, checkInMapByMeetingId]);
+  }, [pendingQrAutoCheckInRoomId, qrAutoCheckInBusy, user, day, agendaPayload, checkInMapByMeetingId, tr]);
 
   const tabBtn = (key: MobileTab, label: string, Icon: any) => (
     <button
@@ -2135,20 +2157,20 @@ const MobileAppPage = () => {
             />
             <div>
               <div className={`text-xs uppercase tracking-[0.18em] ${mutedTextClass}`}>Plixmap Mobile</div>
-              <div className="text-xl font-semibold">Accesso</div>
+              <div className="text-xl font-semibold">{tr({ it: 'Accesso', en: 'Sign in' })}</div>
             </div>
           </div>
           <form className="mt-5 space-y-3" onSubmit={submitLogin}>
             <input
               className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${inputClass}`}
-              placeholder="Utente"
+              placeholder={tr({ it: 'Utente', en: 'Username' })}
               autoComplete="username"
               value={loginUsername}
               onChange={(e) => setLoginUsername(e.target.value)}
             />
             <input
               className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${inputClass}`}
-              placeholder="Password"
+              placeholder={tr({ it: 'Password', en: 'Password' })}
               type="password"
               autoComplete="current-password"
               value={loginPassword}
@@ -2157,7 +2179,7 @@ const MobileAppPage = () => {
             {otpRequired ? (
               <input
                 className={`w-full rounded-xl border px-3 py-2.5 text-sm outline-none ${inputClass}`}
-                placeholder="Codice MFA"
+                placeholder={tr({ it: 'Codice MFA', en: 'MFA code' })}
                 inputMode="numeric"
                 value={loginOtp}
               onChange={(e) => setLoginOtp(e.target.value)}
@@ -2165,7 +2187,7 @@ const MobileAppPage = () => {
           ) : null}
           <label className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${isDayTheme ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-white/10 bg-black/10 text-slate-300'}`}>
             <input type="checkbox" checked={rememberUsername} onChange={(e) => setRememberUsername(e.target.checked)} />
-            Ricorda utente
+            {tr({ it: 'Ricorda utente', en: 'Remember username' })}
           </label>
           <label className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${isDayTheme ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-white/10 bg-black/10 text-slate-300'}`}>
             <input
@@ -2177,11 +2199,11 @@ const MobileAppPage = () => {
                 if (!checked) setAutoLoginEnabled(false);
               }}
             />
-            Salva password su questo dispositivo
+            {tr({ it: 'Salva password su questo dispositivo', en: 'Save password on this device' })}
           </label>
           <label className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${rememberPassword ? 'border-white/10 bg-black/10 text-slate-300' : 'border-white/5 bg-black/5 text-slate-500'}`}>
             <input type="checkbox" checked={autoLoginEnabled} disabled={!rememberPassword} onChange={(e) => setAutoLoginEnabled(e.target.checked)} />
-            Accesso automatico (salva sessione locale)
+            {tr({ it: 'Accesso automatico (salva sessione locale)', en: 'Auto login (save local session)' })}
           </label>
           {loginError ? <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{loginError}</div> : null}
             <button
@@ -2189,7 +2211,7 @@ const MobileAppPage = () => {
               disabled={loginBusy || !loginUsername.trim() || !loginPassword.trim() || (otpRequired && !loginOtp.trim())}
               className="w-full rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50"
             >
-              {loginBusy ? 'Accesso…' : 'Entra'}
+              {loginBusy ? tr({ it: 'Accesso…', en: 'Signing in…' }) : tr({ it: 'Entra', en: 'Sign in' })}
             </button>
           </form>
         </div>
@@ -2223,17 +2245,17 @@ const MobileAppPage = () => {
                 type="button"
                 onClick={() => setSettingsMenuOpen((prev) => !prev)}
                 className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border ${isDayTheme ? 'border-slate-200 bg-white text-slate-700' : 'border-white/10 bg-black/20 text-slate-200'}`}
-                title="Impostazioni"
+                title={tr({ it: 'Impostazioni', en: 'Settings' })}
               >
                 <Cog size={16} />
               </button>
               {settingsMenuOpen ? (
                 <div className={`absolute right-0 top-12 z-20 w-64 rounded-2xl border p-3 shadow-2xl ${isDayTheme ? 'border-slate-200 bg-white text-slate-900' : 'border-white/10 bg-slate-950 text-slate-100'}`}>
-                  <div className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${mutedTextClass}`}>Impostazioni</div>
+                  <div className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${mutedTextClass}`}>{tr({ it: 'Impostazioni', en: 'Settings' })}</div>
                   <div className="mt-3">
                     <div className={`mb-1 flex items-center gap-2 text-xs font-semibold ${mutedTextClass}`}>
                       <Globe size={13} />
-                      Lingua
+                      {tr({ it: 'Lingua', en: 'Language' })}
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       {(['it', 'en'] as const).map((lang) => {
@@ -2261,7 +2283,7 @@ const MobileAppPage = () => {
                     </div>
                   </div>
                   <div className="mt-3">
-                    <div className={`mb-1 text-xs font-semibold ${mutedTextClass}`}>Tema</div>
+                    <div className={`mb-1 text-xs font-semibold ${mutedTextClass}`}>{tr({ it: 'Tema', en: 'Theme' })}</div>
                     <button
                       type="button"
                       onClick={() => setMobileTheme((prev) => (prev === 'night' ? 'day' : 'night'))}
@@ -2269,7 +2291,7 @@ const MobileAppPage = () => {
                     >
                       <span className="inline-flex items-center gap-2">
                         {isDayTheme ? <Moon size={15} /> : <Sun size={15} />}
-                        {isDayTheme ? 'Passa a notte' : 'Passa a giorno'}
+                        {isDayTheme ? tr({ it: 'Passa a notte', en: 'Switch to night' }) : tr({ it: 'Passa a giorno', en: 'Switch to day' })}
                       </span>
                     </button>
                   </div>
@@ -2279,14 +2301,14 @@ const MobileAppPage = () => {
                     className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${isDayTheme ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-rose-400/30 bg-rose-500/10 text-rose-200'}`}
                   >
                     <LogOut size={15} />
-                    Logout
+                    {tr({ it: 'Esci', en: 'Logout' })}
                   </button>
                 </div>
               ) : null}
             </div>
           </div>
 
-          <div className="mt-4 flex gap-2">{[tabBtn('agenda', 'Agenda', CalendarDays), tabBtn('chat', 'Chat', MessageSquare)]}</div>
+          <div className="mt-4 flex gap-2">{[tabBtn('agenda', tr({ it: 'Agenda', en: 'Agenda' }), CalendarDays), tabBtn('chat', tr({ it: 'Chat', en: 'Chat' }), MessageSquare)]}</div>
 
           {tab !== 'chat' ? (
           <div className={`mt-4 rounded-2xl border p-3 ${subtlePanelClass}`}>
@@ -2296,29 +2318,29 @@ const MobileAppPage = () => {
                   type="button"
                   onClick={() => setDay((prev) => shiftIsoDayByMonths(prev || nowDay(), -1))}
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border ${calendarNavButtonClass}`}
-                  title="Mese precedente"
+                  title={tr({ it: 'Mese precedente', en: 'Previous month' })}
                 >
                   <ChevronLeft size={15} />
                 </button>
                 <div className="min-w-0 text-center">
-                  <div className={`truncate text-sm font-semibold capitalize ${isDayTheme ? 'text-slate-900' : 'text-slate-100'}`}>{formatMonthLabel(displayMonth)}</div>
+                  <div className={`truncate text-sm font-semibold capitalize ${isDayTheme ? 'text-slate-900' : 'text-slate-100'}`}>{formatMonthLabel(displayMonth, locale)}</div>
                   <div className={`mt-0.5 inline-flex items-center gap-1 text-[11px] ${mutedTextClass}`}>
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-cyan-300" />
-                    Giorni con meeting
+                    {tr({ it: 'Giorni con meeting', en: 'Days with meetings' })}
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setDay((prev) => shiftIsoDayByMonths(prev || nowDay(), 1))}
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border ${calendarNavButtonClass}`}
-                  title="Mese successivo"
+                  title={tr({ it: 'Mese successivo', en: 'Next month' })}
                 >
                   <ChevronRight size={15} />
                 </button>
               </div>
 
               <div className={`mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-[0.18em] ${mutedTextClass}`}>
-                {['L', 'M', 'M', 'G', 'V', 'S', 'D'].map((label, idx) => (
+                {calendarWeekdayLabels.map((label, idx) => (
                   <div key={`mobile-calendar-weekday-${idx}`}>{label}</div>
                 ))}
               </div>
@@ -2357,7 +2379,7 @@ const MobileAppPage = () => {
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <label className={`text-xs font-semibold ${isDayTheme ? 'text-slate-600' : 'text-slate-300'}`}>Data</label>
+              <label className={`text-xs font-semibold ${isDayTheme ? 'text-slate-600' : 'text-slate-300'}`}>{tr({ it: 'Data', en: 'Date' })}</label>
               <input
                 type="date"
                 value={day}
@@ -2371,7 +2393,7 @@ const MobileAppPage = () => {
                   void reloadAgendaMonth();
                 }}
                 className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-semibold ${calendarActionButtonClass}`}
-                title="Aggiorna"
+                title={tr({ it: 'Aggiorna', en: 'Refresh' })}
               >
                 <RefreshCcw size={14} className={agendaLoading || agendaMonthLoading ? 'animate-spin' : ''} />
               </button>
@@ -2383,7 +2405,11 @@ const MobileAppPage = () => {
                       ? 'border-cyan-400/30 bg-cyan-500/10 text-cyan-200'
                       : 'border-amber-400/30 bg-amber-500/10 text-amber-100'
                 }`}
-                title={lastAgendaSyncAt ? `Ultimo sync ${formatDateTime(lastAgendaSyncAt)} • ${lastAgendaSyncMs}ms` : 'Stato sincronizzazione'}
+                title={
+                  lastAgendaSyncAt
+                    ? tr({ it: `Ultimo sync ${formatDateTime(lastAgendaSyncAt, locale)} • ${lastAgendaSyncMs}ms`, en: `Last sync ${formatDateTime(lastAgendaSyncAt, locale)} • ${lastAgendaSyncMs}ms` })
+                    : tr({ it: 'Stato sincronizzazione', en: 'Sync status' })
+                }
               >
                 <span
                   className={`inline-block h-1.5 w-1.5 rounded-full ${
@@ -2403,7 +2429,7 @@ const MobileAppPage = () => {
                   className="ml-auto inline-flex items-center gap-2 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300"
                 >
                   <QrCode size={13} />
-                  Room: {selectedRoomId.slice(0, 8)}… (rimuovi filtro)
+                  {tr({ it: 'Sala', en: 'Room' })}: {selectedRoomId.slice(0, 8)}… ({tr({ it: 'rimuovi filtro', en: 'remove filter' })})
                 </button>
               ) : null}
             </div>
@@ -2414,20 +2440,22 @@ const MobileAppPage = () => {
             {notice ? <div className={noticeClass}>{notice}</div> : null}
             {agendaLoading && !agendaPayload ? (
               <div className="mt-3 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100">
-                Caricamento iniziale in corso. Potrebbero servire alcuni secondi per sincronizzare meeting e chat.
+                {tr({ it: 'Caricamento iniziale in corso. Potrebbero servire alcuni secondi per sincronizzare meeting e chat.', en: 'Initial loading in progress. It may take a few seconds to sync meetings and chat.' })}
               </div>
             ) : null}
             {agendaError && !linkedMissing ? <div className="mt-3 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{agendaError}</div> : null}
             {linkedMissing ? (
               <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
-                L’utente del portale non è collegato a un utente reale importato. Chiedi a un admin di aprire <b>Edit user</b> e collegarti alla rubrica utenti del cliente.
+                {tr({ it: 'L’utente del portale non è collegato a un utente reale importato. Chiedi a un admin di aprire ', en: 'The portal user is not linked to a real imported user. Ask an admin to open ' })}
+                <b>Edit user</b>
+                {tr({ it: ' e collegarti alla rubrica utenti del cliente.', en: ' and link you to the client user directory.' })}
               </div>
             ) : null}
 
           {tab === 'agenda' ? (
             <div className="mt-4 space-y-3">
               {!meetings.length && !agendaLoading ? (
-                <div className={emptyAgendaClass}>Nessun meeting per la giornata selezionata.</div>
+                <div className={emptyAgendaClass}>{tr({ it: 'Nessun meeting per la giornata selezionata.', en: 'No meetings for the selected day.' })}</div>
               ) : null}
               {meetings.map((meeting) => {
                 const { inProgress, isPast } = getMeetingTemporalState(meeting, now);
@@ -2440,16 +2468,16 @@ const MobileAppPage = () => {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="truncate text-base font-semibold">{meeting.subject || 'Meeting'}</div>
+                        <div className="truncate text-base font-semibold">{meeting.subject || meetingLabel}</div>
                         <div className="mt-1 text-xs text-slate-300">
                           {meeting.clientName} • {meeting.siteName} • {meeting.floorPlanName}
                         </div>
                         <div className="mt-1 text-xs text-slate-400">
-                          {meeting.roomName} • {formatDate(meeting.startAt)} • {formatTime(meeting.startAt)} - {formatTime(meeting.endAt)}
+                          {meeting.roomName} • {formatDate(meeting.startAt, locale)} • {formatTime(meeting.startAt, locale)} - {formatTime(meeting.endAt, locale)}
                         </div>
                       </div>
                       <div className={`rounded-full px-2 py-1 text-[11px] font-bold ${inProgress ? 'bg-emerald-500/20 text-emerald-200' : isPast ? 'bg-slate-700/70 text-slate-300' : 'bg-violet-500/20 text-violet-200'}`}>
-                        {inProgress ? 'LIVE' : isPast ? 'PAST' : 'UPCOMING'}
+                        {inProgress ? liveLabel : isPast ? pastLabel : upcomingLabel}
                       </div>
                     </div>
                   </button>
@@ -2462,12 +2490,12 @@ const MobileAppPage = () => {
             <div className="mt-2 flex h-full min-h-0 flex-col">
               {chatViewMode === 'list' ? (
                 <div className="flex min-h-0 flex-1 flex-col space-y-2">
-                  <div className="mb-2 text-xs font-semibold text-slate-400">Chat</div>
+                  <div className="mb-2 text-xs font-semibold text-slate-400">{tr({ it: 'Chat', en: 'Chat' })}</div>
                   <input
                     value={chatSearch}
                     onChange={(e) => setChatSearch(e.target.value)}
                     className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm"
-                    placeholder="Cerca chat per cliente..."
+                    placeholder={tr({ it: 'Cerca chat per cliente...', en: 'Search chats by client...' })}
                   />
                   <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden overscroll-y-contain pr-1">
                     {filteredChatClientOptions.map((c: any) => {
@@ -2529,20 +2557,20 @@ const MobileAppPage = () => {
                             )}
                             <span className="min-w-0">
                               <span className="block truncate text-sm font-semibold text-slate-100">{c.name}</span>
-                              {c.kind === 'dm' ? <span className="block text-[10px] text-slate-500">Messaggio diretto</span> : null}
-                              <span className="mt-0.5 block truncate text-xs text-slate-400">{chatSnippet(lastMsg) || 'Nessun messaggio'}</span>
+                              {c.kind === 'dm' ? <span className="block text-[10px] text-slate-500">{directMessageLabel}</span> : null}
+                              <span className="mt-0.5 block truncate text-xs text-slate-400">{chatSnippet(lastMsg, tr) || noMessagesLabel}</span>
                             </span>
                           </span>
                           <span className="flex shrink-0 flex-col items-end gap-1">
-                            {lastMsg ? <span className="text-[10px] text-slate-400">{formatTime(Number(lastMsg.createdAt || 0))}</span> : null}
+                            {lastMsg ? <span className="text-[10px] text-slate-400">{formatTime(Number(lastMsg.createdAt || 0), locale)}</span> : null}
                             {unread > 0 ? <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold text-white">{unread}</span> : null}
                           </span>
                         </button>
                       );
                     })}
                   </div>
-                  {!chatClientOptions.length ? <div className="text-sm text-slate-400">Nessuna chat disponibile.</div> : null}
-                  {chatClientOptions.length > 0 && !filteredChatClientOptions.length ? <div className="text-xs text-slate-400">Nessun risultato per la ricerca.</div> : null}
+                  {!chatClientOptions.length ? <div className="text-sm text-slate-400">{tr({ it: 'Nessuna chat disponibile.', en: 'No chats available.' })}</div> : null}
+                  {chatClientOptions.length > 0 && !filteredChatClientOptions.length ? <div className="text-xs text-slate-400">{tr({ it: 'Nessun risultato per la ricerca.', en: 'No results for this search.' })}</div> : null}
                 </div>
               ) : (
                 <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/20">
@@ -2552,7 +2580,7 @@ const MobileAppPage = () => {
                         type="button"
                         onClick={() => setChatViewMode('list')}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-black/20 text-slate-200"
-                        title="Indietro"
+                        title={tr({ it: 'Indietro', en: 'Back' })}
                       >
                         <ChevronLeft size={14} />
                       </button>
@@ -2577,9 +2605,9 @@ const MobileAppPage = () => {
                         <div className="truncate text-sm font-semibold text-slate-100">{selectedChatClientName}</div>
                         <div className="flex items-center gap-1.5 truncate text-[11px] text-slate-400">
                           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                          <span>{chatBusy ? 'Sincronizzazione…' : 'Online'}</span>
+                          <span>{chatBusy ? tr({ it: 'Sincronizzazione…', en: 'Syncing…' }) : tr({ it: 'Online', en: 'Online' })}</span>
                           <span className="text-slate-500">•</span>
-                          <span>{chatMessages.length ? `${chatMessages.length} messaggi` : 'Nessun messaggio'}</span>
+                          <span>{chatMessages.length ? tr({ it: `${chatMessages.length} messaggi`, en: `${chatMessages.length} messages` }) : noMessagesLabel}</span>
                         </div>
                       </div>
                       <button
@@ -2587,10 +2615,10 @@ const MobileAppPage = () => {
                         disabled={!chatClientId || chatBusy}
                         onClick={() => void clearCurrentChat()}
                         className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[11px] font-semibold text-slate-200 disabled:opacity-50"
-                        title="Svuota chat"
+                        title={tr({ it: 'Svuota chat', en: 'Clear chat' })}
                       >
                         <Eraser size={12} />
-                        Clear
+                        {tr({ it: 'Svuota', en: 'Clear' })}
                       </button>
                     </div>
                   </div>
@@ -2609,13 +2637,13 @@ const MobileAppPage = () => {
                           <div className="truncate text-xs font-semibold">{getChatMessageAuthorName(m)}</div>
                           <div className="flex items-center gap-2">
                             {starred ? <Star size={11} className="fill-amber-300 text-amber-300" /> : null}
-                            <div className="text-[10px] text-slate-400">{formatDateTime(m.createdAt)}</div>
+                            <div className="text-[10px] text-slate-400">{formatDateTime(m.createdAt, locale)}</div>
                           </div>
                         </div>
                         {!m.deleted && replyTarget ? (
                           <div className="mt-1 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-slate-300">
                             <div className="truncate font-semibold">{getChatMessageAuthorName(replyTarget)}</div>
-                            <div className="truncate text-slate-400">{String(replyTarget.text || '').trim() || ((replyTarget.attachments || []).length ? '[Allegato]' : '[Messaggio]')}</div>
+                                  <div className="truncate text-slate-400">{String(replyTarget.text || '').trim() || ((replyTarget.attachments || []).length ? tr({ it: '[Allegato]', en: '[Attachment]' }) : tr({ it: '[Messaggio]', en: '[Message]' }))}</div>
                           </div>
                         ) : null}
                         {chatEditingId === m.id ? (
@@ -2635,7 +2663,7 @@ const MobileAppPage = () => {
                                 }}
                                 className="rounded-lg border border-white/10 px-2 py-1 text-xs font-semibold"
                               >
-                                Annulla
+                                {tr({ it: 'Annulla', en: 'Cancel' })}
                               </button>
                               <button
                                 type="button"
@@ -2643,12 +2671,12 @@ const MobileAppPage = () => {
                                 disabled={!String(chatEditingText || '').trim() || chatBusy}
                                 className="rounded-lg bg-cyan-500 px-2 py-1 text-xs font-semibold text-slate-950 disabled:opacity-50"
                               >
-                                Salva
+                                {tr({ it: 'Salva', en: 'Save' })}
                               </button>
                             </div>
                           </div>
                         ) : (
-                          <div className="mt-1 whitespace-pre-wrap text-sm">{m.deleted ? '— messaggio eliminato —' : m.text}</div>
+                          <div className="mt-1 whitespace-pre-wrap text-sm">{m.deleted ? tr({ it: '— messaggio eliminato —', en: '— message deleted —' }) : m.text}</div>
                         )}
                         {Array.isArray(m.attachments) && m.attachments.length ? (
                           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -2672,10 +2700,10 @@ const MobileAppPage = () => {
                                     target="_blank"
                                     rel="noreferrer"
                                     className="inline-flex max-w-full items-center gap-1 rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-slate-200"
-                                    title={String(att?.name || 'Attachment')}
+                                    title={String(att?.name || tr({ it: 'Allegato', en: 'Attachment' }))}
                                   >
                                     <Paperclip size={11} />
-                                    <span className="truncate">{String(att?.name || 'Attachment')}</span>
+                                    <span className="truncate">{String(att?.name || tr({ it: 'Allegato', en: 'Attachment' }))}</span>
                                   </a>
                                 ) : null}
                               </div>
@@ -2700,7 +2728,7 @@ const MobileAppPage = () => {
                           <div className="mt-2 flex flex-wrap items-center gap-1">
                             <button type="button" onClick={() => setChatReplyToId(m.id)} className="rounded-lg border border-white/10 px-2 py-1 text-[11px] font-semibold text-slate-200">
                               <Reply size={11} className="inline mr-1" />
-                              Reply
+                              {tr({ it: 'Rispondi', en: 'Reply' })}
                             </button>
                             <button
                               type="button"
@@ -2709,7 +2737,7 @@ const MobileAppPage = () => {
                               className="rounded-lg border border-white/10 px-2 py-1 text-[11px] font-semibold text-slate-200 disabled:opacity-50"
                             >
                               <Star size={11} className={`inline mr-1 ${starred ? 'fill-amber-300 text-amber-300' : ''}`} />
-                              {starred ? 'Unstar' : 'Star'}
+                              {starred ? tr({ it: 'Rimuovi stella', en: 'Unstar' }) : tr({ it: 'Stella', en: 'Star' })}
                             </button>
                             <div className="relative">
                               <button
@@ -2718,7 +2746,7 @@ const MobileAppPage = () => {
                                 className="rounded-lg border border-white/10 px-2 py-1 text-[11px] font-semibold text-slate-200"
                               >
                                 <SmilePlus size={11} className="inline mr-1" />
-                                React
+                                {tr({ it: 'Reagisci', en: 'React' })}
                               </button>
                               {chatReactionForId === m.id ? (
                                 <div className="absolute left-0 top-8 z-10 flex gap-1 rounded-xl border border-white/10 bg-slate-950 p-1 shadow-xl">
@@ -2741,7 +2769,7 @@ const MobileAppPage = () => {
                                 {!!user?.id && canEditChatMessage(m, String(user.id)) ? (
                                   <button type="button" onClick={() => startEditChatMessage(m)} className="rounded-lg border border-white/10 px-2 py-1 text-[11px] font-semibold text-slate-200">
                                     <Pencil size={11} className="inline mr-1" />
-                                    Edit
+                                    {tr({ it: 'Modifica', en: 'Edit' })}
                                   </button>
                                 ) : null}
                                 <button
@@ -2751,7 +2779,7 @@ const MobileAppPage = () => {
                                   className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold text-rose-200 disabled:opacity-50"
                                 >
                                   <Trash2 size={11} className="inline mr-1" />
-                                  Delete...
+                                  {tr({ it: 'Elimina...', en: 'Delete...' })}
                                 </button>
                               </>
                             ) : null}
@@ -2760,7 +2788,7 @@ const MobileAppPage = () => {
                       </div>
                     );
                   })}
-                  {!chatMessages.length && !chatBusy ? <div className="text-sm text-slate-400">Nessun messaggio.</div> : null}
+                  {!chatMessages.length && !chatBusy ? <div className="text-sm text-slate-400">{tr({ it: 'Nessun messaggio.', en: 'No messages.' })}</div> : null}
                   </div>
 
                   <div
@@ -2772,9 +2800,9 @@ const MobileAppPage = () => {
                       <div className="mb-2 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100">
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="truncate font-semibold">Risposta a {getChatMessageAuthorName(chatReplyTarget)}</div>
+                            <div className="truncate font-semibold">{tr({ it: 'Risposta a', en: 'Replying to' })} {getChatMessageAuthorName(chatReplyTarget)}</div>
                             <div className="truncate text-cyan-200/80">
-                              {String(chatReplyTarget.text || '').trim() || ((chatReplyTarget.attachments || []).length ? '[Allegato]' : '[Messaggio]')}
+                              {String(chatReplyTarget.text || '').trim() || ((chatReplyTarget.attachments || []).length ? tr({ it: '[Allegato]', en: '[Attachment]' }) : tr({ it: '[Messaggio]', en: '[Message]' }))}
                             </div>
                           </div>
                           <button type="button" onClick={() => setChatReplyToId(null)} className="rounded-md p-1 hover:bg-white/10">
@@ -2797,7 +2825,7 @@ const MobileAppPage = () => {
                               type="button"
                               onClick={() => setChatPendingAttachments((prev) => prev.filter((_, i) => i !== idx))}
                               className="inline-flex max-w-full items-center gap-1 rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[11px] text-slate-200"
-                              title="Rimuovi allegato"
+                              title={tr({ it: 'Rimuovi allegato', en: 'Remove attachment' })}
                             >
                               <Paperclip size={11} />
                               <span className="truncate">{att.name}</span>
@@ -2809,7 +2837,7 @@ const MobileAppPage = () => {
                     ) : null}
                     {chatAttachmentsBusy ? (
                       <div className="mb-2 rounded-lg border border-cyan-400/20 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-100">
-                        Preparazione allegati: attendi qualche secondo...
+                        {tr({ it: 'Preparazione allegati: attendi qualche secondo...', en: 'Preparing attachments: please wait a few seconds...' })}
                       </div>
                     ) : null}
                     {voiceRecordError ? <div className="mb-2 rounded-lg border border-rose-400/20 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">{voiceRecordError}</div> : null}
@@ -2819,7 +2847,7 @@ const MobileAppPage = () => {
                         onClick={() => chatFileInputRef.current?.click()}
                         disabled={!chatClientId || chatBusy}
                         className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/20 text-slate-200 disabled:opacity-50"
-                        title="Allega file"
+                        title={tr({ it: 'Allega file', en: 'Attach file' })}
                       >
                         <Paperclip size={14} />
                       </button>
@@ -2843,7 +2871,7 @@ const MobileAppPage = () => {
                         className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border disabled:opacity-50 ${
                           voiceRecording ? 'border-rose-400/30 bg-rose-500/10 text-rose-200' : 'border-white/10 bg-black/20 text-slate-200'
                         }`}
-                        title={voiceRecording ? 'Ferma registrazione' : 'Registra messaggio vocale'}
+                        title={voiceRecording ? tr({ it: 'Ferma registrazione', en: 'Stop recording' }) : tr({ it: 'Registra messaggio vocale', en: 'Record voice message' })}
                       >
                         {voiceRecording ? <Square size={14} /> : <Mic size={14} />}
                       </button>
@@ -2864,7 +2892,7 @@ const MobileAppPage = () => {
                           }
                         }}
                         className="min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-sm"
-                        placeholder={chatClientId ? 'Scrivi un messaggio...' : 'Seleziona un client'}
+                        placeholder={chatClientId ? tr({ it: 'Scrivi un messaggio...', en: 'Write a message...' }) : tr({ it: 'Seleziona un client', en: 'Select a client' })}
                         disabled={!chatClientId || chatBusy}
                       />
                       <button
@@ -2874,7 +2902,7 @@ const MobileAppPage = () => {
                         className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-3 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50"
                       >
                         <Send size={14} />
-                        Invia
+                        {tr({ it: 'Invia', en: 'Send' })}
                       </button>
                     </div>
                   </div>
@@ -2887,7 +2915,9 @@ const MobileAppPage = () => {
             <div className="mt-4 space-y-3">
               {!meetingsForSelectedRoom.length && !agendaLoading ? (
                 <div className="rounded-2xl border border-white/10 bg-black/10 px-4 py-5 text-sm text-slate-300">
-                  {selectedRoomId ? 'Nessun meeting trovato per la sala QR selezionata.' : 'Nessun meeting disponibile per il check-in nella giornata selezionata.'}
+                  {selectedRoomId
+                    ? tr({ it: 'Nessun meeting trovato per la sala QR selezionata.', en: 'No meeting found for the selected QR room.' })
+                    : tr({ it: 'Nessun meeting disponibile per il check-in nella giornata selezionata.', en: 'No meeting available for check-in on the selected day.' })}
                 </div>
               ) : null}
               {meetingsForSelectedRoom.map((meeting) => {
@@ -2919,17 +2949,23 @@ const MobileAppPage = () => {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="truncate text-base font-semibold">{meeting.subject || 'Meeting'}</div>
+                        <div className="truncate text-base font-semibold">{meeting.subject || meetingLabel}</div>
                         <div className="mt-1 text-xs text-slate-300">
                           {meeting.roomName} • {meeting.siteName} • {meeting.floorPlanName}
                         </div>
                         <div className="mt-1 text-xs text-slate-400">
-                          {formatTime(meeting.startAt)} - {formatTime(meeting.endAt)} • {remote ? 'Partecipante remoto' : 'On-site'}
+                          {formatTime(meeting.startAt, locale)} - {formatTime(meeting.endAt, locale)} • {remote ? tr({ it: 'Partecipante remoto', en: 'Remote participant' }) : tr({ it: 'In sede', en: 'On-site' })}
                         </div>
-                        {checkedAt ? <div className="mt-1 text-[11px] text-emerald-300">Check-in: {formatDateTime(checkedAt)}</div> : null}
+                        {checkedAt ? <div className="mt-1 text-[11px] text-emerald-300">{checkInPrefixLabel}: {formatDateTime(checkedAt, locale)}</div> : null}
                       </div>
                       <div className={`rounded-full px-2 py-1 text-[11px] font-bold ${checked ? 'bg-emerald-500/20 text-emerald-200' : remote ? 'bg-indigo-500/20 text-indigo-200' : inProgress ? 'bg-cyan-500/20 text-cyan-200' : 'bg-slate-700/70 text-slate-300'}`}>
-                        {checked ? 'CHECKED' : remote ? 'REMOTE' : inProgress ? 'IN CORSO' : 'NON ATTIVO'}
+                        {checked
+                          ? checkedLabel
+                          : remote
+                            ? remoteShortLabel
+                            : inProgress
+                              ? tr({ it: 'IN CORSO', en: 'IN PROGRESS' })
+                              : tr({ it: 'NON ATTIVO', en: 'INACTIVE' })}
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -2949,7 +2985,7 @@ const MobileAppPage = () => {
                           } disabled:cursor-not-allowed disabled:opacity-50`}
                         >
                           <CheckCircle2 size={15} />
-                          {checked ? 'Rimuovi check-in' : 'Check-in'}
+                          {checked ? tr({ it: 'Rimuovi check-in', en: 'Remove check-in' }) : 'Check-in'}
                         </button>
                       ) : null}
                     </div>
@@ -2974,8 +3010,8 @@ const MobileAppPage = () => {
         >
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-base font-semibold">Scansiona QR kiosk</div>
-              <button type="button" onClick={() => setScannerOpen(false)} className="rounded-lg p-2 text-slate-300 hover:bg-white/5" title="Chiudi scanner">
+              <div className="text-base font-semibold">{tr({ it: 'Scansiona QR kiosk', en: 'Scan kiosk QR' })}</div>
+              <button type="button" onClick={() => setScannerOpen(false)} className="rounded-lg p-2 text-slate-300 hover:bg-white/5" title={tr({ it: 'Chiudi scanner', en: 'Close scanner' })}>
                 <X size={16} />
               </button>
             </div>
@@ -2985,16 +3021,18 @@ const MobileAppPage = () => {
                   <video ref={videoRef} autoPlay playsInline muted className="h-64 w-full object-cover" />
                 </div>
                 <div className="mt-2 text-xs text-slate-400">
-                  Punta la fotocamera verso il QR code mostrato nel kiosk della sala.
+                  {tr({ it: 'Punta la fotocamera verso il QR code mostrato nel kiosk della sala.', en: 'Point the camera at the QR code shown on the room kiosk.' })}
                 </div>
               </>
             ) : (
               <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-                Questo browser non supporta la scansione QR integrata. Usa <b>Apri foto / QR</b> per scattare o selezionare una foto del QR, oppure incolla il link del kiosk.
+                {tr({ it: 'Questo browser non supporta la scansione QR integrata. Usa ', en: 'This browser does not support built-in QR scanning. Use ' })}
+                <b>{tr({ it: 'Apri foto / QR', en: 'Open photo / QR' })}</b>
+                {tr({ it: ' per scattare o selezionare una foto del QR, oppure incolla il link del kiosk.', en: ' to take or select a QR photo, or paste the kiosk link.' })}
               </div>
             )}
             <div className="mt-3 space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Fallback manuale</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{tr({ it: 'Fallback manuale', en: 'Manual fallback' })}</div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <button
                   type="button"
@@ -3002,11 +3040,11 @@ const MobileAppPage = () => {
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 shadow-sm active:scale-[0.99]"
                 >
                   <QrCode size={14} />
-                  Incolla link dagli appunti
+                  {tr({ it: 'Incolla link dagli appunti', en: 'Paste link from clipboard' })}
                 </button>
                 <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-100 shadow-sm active:scale-[0.99]">
                   <ScanLine size={14} />
-                  {scannerImageBusy ? 'Analizzo immagine…' : 'Apri foto / QR'}
+                  {scannerImageBusy ? tr({ it: 'Analizzo immagine…', en: 'Analyzing image…' }) : tr({ it: 'Apri foto / QR', en: 'Open photo / QR' })}
                   <input
                     ref={scannerFileInputRef}
                     type="file"
@@ -3025,7 +3063,7 @@ const MobileAppPage = () => {
                 value={scannerManualValue}
                 onChange={(e) => setScannerManualValue(e.target.value)}
                 className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm"
-                placeholder="Incolla URL kiosk o QR payload"
+                placeholder={tr({ it: 'Incolla URL kiosk o QR payload', en: 'Paste kiosk URL or QR payload' })}
               />
               <div className="flex items-center gap-2">
                 <button
@@ -3033,7 +3071,7 @@ const MobileAppPage = () => {
                   onClick={() => {
                     const rid = parseRoomIdFromQrPayload(scannerManualValue);
                     if (!rid) {
-                      setScannerError('QR/link non valido');
+                      setScannerError(tr({ it: 'QR/link non valido', en: 'Invalid QR/link' }));
                       return;
                     }
                     applyScannedRoomId(rid);
@@ -3041,12 +3079,14 @@ const MobileAppPage = () => {
                   className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
                 >
                   <Smartphone size={14} />
-                  Usa link
+                  {tr({ it: 'Usa link', en: 'Use link' })}
                 </button>
-                {scannerDetecting ? <span className="text-xs text-slate-400">Camera attiva…</span> : null}
+                {scannerDetecting ? <span className="text-xs text-slate-400">{tr({ it: 'Camera attiva…', en: 'Camera active…' })}</span> : null}
               </div>
               <div className="text-[11px] leading-relaxed text-slate-500">
-                iPhone/Safari: se la scansione live non è disponibile, usa <b>Apri foto / QR</b> (puoi scattare direttamente) oppure incolla qui il link del kiosk.
+                {tr({ it: 'iPhone/Safari: se la scansione live non è disponibile, usa ', en: 'iPhone/Safari: if live scanning is unavailable, use ' })}
+                <b>{tr({ it: 'Apri foto / QR', en: 'Open photo / QR' })}</b>
+                {tr({ it: ' (puoi scattare direttamente) oppure incolla qui il link del kiosk.', en: ' (you can take a picture directly) or paste the kiosk link here.' })}
               </div>
               {scannerError ? <div className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">{scannerError}</div> : null}
             </div>
@@ -3088,7 +3128,7 @@ const MobileAppPage = () => {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2 text-lg font-semibold leading-tight">
-                        <span>{meeting.subject || 'Meeting'}</span>
+                        <span>{meeting.subject || meetingLabel}</span>
                         <span
                           className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                             remote
@@ -3100,55 +3140,55 @@ const MobileAppPage = () => {
                                   : 'bg-slate-700/60 text-slate-200'
                           }`}
                         >
-                          {remote ? 'REMOTE' : checked ? 'CHECK-IN OK' : inProgress ? 'CHECK-IN' : 'CHECK-IN N/A'}
+                          {remote ? remoteShortLabel : checked ? checkInOkLabel : inProgress ? checkInPrefixLabel : checkInInactiveLabel}
                         </span>
                       </div>
                       <div className="mt-1 text-xs text-slate-400">
                         {meeting.clientName} • {meeting.siteName} • {meeting.floorPlanName}
                       </div>
                       <div className="mt-1 text-xs text-slate-300">
-                        {meeting.roomName} • {formatDate(meeting.startAt)} • {formatTime(meeting.startAt)} - {formatTime(meeting.endAt)}
+                        {meeting.roomName} • {formatDate(meeting.startAt, locale)} • {formatTime(meeting.startAt, locale)} - {formatTime(meeting.endAt, locale)}
                       </div>
                     </div>
-                    <button type="button" onClick={() => setMeetingDetailOpen(null)} className="rounded-lg p-2 text-slate-300 hover:bg-white/5" title="Chiudi dettaglio riunione">
+                    <button type="button" onClick={() => setMeetingDetailOpen(null)} className="rounded-lg p-2 text-slate-300 hover:bg-white/5" title={tr({ it: 'Chiudi dettaglio riunione', en: 'Close meeting details' })}>
                       <X size={16} />
                     </button>
                   </div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                     <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                      <div className="text-slate-400">Status</div>
+                      <div className="text-slate-400">{tr({ it: 'Stato', en: 'Status' })}</div>
                       <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${inProgress ? 'bg-emerald-500/20 text-emerald-200' : isPast ? 'bg-slate-700/70 text-slate-300' : 'bg-violet-500/20 text-violet-200'}`}>
-                        {inProgress ? 'LIVE' : isPast ? 'PAST' : 'UPCOMING'}
+                        {inProgress ? liveLabel : isPast ? pastLabel : upcomingLabel}
                       </div>
                     </div>
                     <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                      <div className="text-slate-400">Seats</div>
+                      <div className="text-slate-400">{tr({ it: 'Posti', en: 'Seats' })}</div>
                       <div className="mt-1 font-semibold text-slate-100">
                         {meeting.requestedSeats}/{meeting.roomCapacity}
                       </div>
                     </div>
                     <div className="col-span-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                      <div className="text-slate-400">My attendance</div>
+                      <div className="text-slate-400">{tr({ it: 'La mia presenza', en: 'My attendance' })}</div>
                       <div className="mt-1 font-semibold text-slate-100">{String(p.fullName || '—')}</div>
                       <div className="text-[11px] text-slate-400">
-                        {p.email || '—'} • {remote ? 'Remote' : 'On-site'} {p.optional ? '• Optional' : ''}
+                        {p.email || '—'} • {remote ? tr({ it: 'Remoto', en: 'Remote' }) : tr({ it: 'In sede', en: 'On-site' })} {p.optional ? `• ${tr({ it: 'Opzionale', en: 'Optional' })}` : ''}
                       </div>
                     </div>
                     <div className="col-span-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                      <div className="text-slate-400">Participants</div>
+                      <div className="text-slate-400">{tr({ it: 'Partecipanti', en: 'Participants' })}</div>
                       <div className="mt-2 max-h-40 space-y-1 overflow-auto pr-1">
                         {allParticipants.map((mp, idx) => (
                           <div key={`mp-${idx}-${String(mp.externalId || mp.fullName || '')}`} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/5 px-2 py-1">
                             <div className="min-w-0">
                               <div className="truncate text-[12px] font-semibold text-slate-100">{String(mp.fullName || '—')}</div>
                               <div className="truncate text-[10px] text-slate-400">
-                                {mp.kind === 'manual' ? (mp.company ? `${mp.company} • ` : '') + 'External guest' : 'Internal user'}
+                                {mp.kind === 'manual' ? (mp.company ? `${mp.company} • ` : '') + tr({ it: 'Ospite esterno', en: 'External guest' }) : tr({ it: 'Utente interno', en: 'Internal user' })}
                                 {mp.email ? ` • ${mp.email}` : ''}
                               </div>
                             </div>
                             <div className="shrink-0 text-[10px] text-slate-300">
-                              {mp.remote ? 'REMOTE' : 'ON-SITE'}{mp.optional ? ' • OPT' : ''}
+                              {mp.remote ? remoteShortLabel : onSiteUpperLabel}{mp.optional ? ` • ${optionalShortLabel}` : ''}
                             </div>
                           </div>
                         ))}
@@ -3158,19 +3198,19 @@ const MobileAppPage = () => {
                                 <div className="min-w-0">
                                   <div className="truncate text-[12px] font-semibold text-slate-100">{String(g.name || '—')}</div>
                                   <div className="truncate text-[10px] text-slate-400">
-                                    {(g as any).company ? `${String((g as any).company)} • ` : ''}External guest{g.email ? ` • ${g.email}` : ''}
+                                    {(g as any).company ? `${String((g as any).company)} • ` : ''}{tr({ it: 'Ospite esterno', en: 'External guest' })}{g.email ? ` • ${g.email}` : ''}
                                   </div>
                                 </div>
-                                <div className="shrink-0 text-[10px] text-slate-300">{g.remote ? 'REMOTE' : 'ON-SITE'}</div>
+                                <div className="shrink-0 text-[10px] text-slate-300">{g.remote ? remoteShortLabel : onSiteUpperLabel}</div>
                               </div>
                             ))
                           : null}
-                        {(!Array.isArray(meeting.participants) || !meeting.participants.length) ? <div className="text-[11px] text-slate-400">No participants list</div> : null}
+                        {(!Array.isArray(meeting.participants) || !meeting.participants.length) ? <div className="text-[11px] text-slate-400">{tr({ it: 'Nessuna lista partecipanti', en: 'No participants list' })}</div> : null}
                       </div>
                     </div>
                     {meeting.videoConferenceLink ? (
                       <div className="col-span-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                        <div className="text-slate-400">Video link</div>
+                        <div className="text-slate-400">{tr({ it: 'Link video', en: 'Video link' })}</div>
                         <a
                           href={meeting.videoConferenceLink}
                           target="_blank"
@@ -3183,7 +3223,7 @@ const MobileAppPage = () => {
                     ) : null}
                     {checkedAt ? (
                       <div className="col-span-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-[12px] text-emerald-200">
-                        Check-in: {formatDateTime(checkedAt)}
+                        {checkInPrefixLabel}: {formatDateTime(checkedAt, locale)}
                       </div>
                     ) : null}
                   </div>
@@ -3195,7 +3235,7 @@ const MobileAppPage = () => {
                       className="inline-flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-100"
                     >
                       <NotebookPen size={15} />
-                      Notes
+                      {tr({ it: 'Note', en: 'Notes' })}
                     </button>
                     {!remote && inProgress ? (
                       <button
@@ -3206,7 +3246,7 @@ const MobileAppPage = () => {
                         }`}
                       >
                         <CheckCircle2 size={15} />
-                        {checked ? 'Rimuovi check-in' : 'Check-in'}
+                        {checked ? tr({ it: 'Rimuovi check-in', en: 'Remove check-in' }) : checkInPrefixLabel}
                       </button>
                     ) : null}
                   </div>
@@ -3220,9 +3260,9 @@ const MobileAppPage = () => {
       {meetingCheckInPrompt ? (
         <div className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-950/75 p-4">
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl">
-            <div className="text-base font-semibold text-slate-100">Vuoi fare check-in ora?</div>
+            <div className="text-base font-semibold text-slate-100">{tr({ it: 'Vuoi fare check-in ora?', en: 'Do you want to check in now?' })}</div>
             <div className="mt-1 text-sm text-slate-300">
-              {meetingCheckInPrompt.subject || 'Meeting'} • {formatTime(meetingCheckInPrompt.startAt)} - {formatTime(meetingCheckInPrompt.endAt)}
+              {meetingCheckInPrompt.subject || meetingLabel} • {formatTime(meetingCheckInPrompt.startAt, locale)} - {formatTime(meetingCheckInPrompt.endAt, locale)}
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
               <button
@@ -3234,7 +3274,7 @@ const MobileAppPage = () => {
                 }}
                 className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-200"
               >
-                Più tardi
+                {tr({ it: 'Più tardi', en: 'Later' })}
               </button>
               <button
                 type="button"
@@ -3265,9 +3305,9 @@ const MobileAppPage = () => {
           <div className="flex h-[92vh] w-full max-w-4xl flex-col rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate text-lg font-semibold text-slate-100">Meeting notes</div>
+                <div className="truncate text-lg font-semibold text-slate-100">{tr({ it: 'Note meeting', en: 'Meeting notes' })}</div>
                 <div className="mt-1 truncate text-xs text-slate-400">
-                  {meetingNotesOpen.subject || 'Meeting'} • {meetingNotesOpen.roomName} • {formatDate(meetingNotesOpen.startAt)}
+                  {meetingNotesOpen.subject || meetingLabel} • {meetingNotesOpen.roomName} • {formatDate(meetingNotesOpen.startAt, locale)}
                 </div>
               </div>
               <button
@@ -3276,7 +3316,7 @@ const MobileAppPage = () => {
                   requestCloseMeetingNotes();
                 }}
                 className="rounded-lg p-2 text-slate-300 hover:bg-white/5"
-                title="Chiudi note"
+                title={tr({ it: 'Chiudi note', en: 'Close notes' })}
               >
                 <X size={16} />
               </button>
@@ -3284,28 +3324,28 @@ const MobileAppPage = () => {
 
             <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-slate-300">My meeting notes</div>
+                <div className="text-slate-300">{tr({ it: 'Le mie note meeting', en: 'My meeting notes' })}</div>
                 <span className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] text-slate-300">
-                  {meetingMyNoteShared ? 'Shared' : 'Personal'}
+                  {meetingMyNoteShared ? tr({ it: 'Condivisa', en: 'Shared' }) : tr({ it: 'Personale', en: 'Personal' })}
                 </span>
               </div>
               <input
                 value={meetingMyNoteTitle}
                 onChange={(e) => setMeetingMyNoteTitle(e.target.value)}
                 className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm"
-                placeholder="Note title"
+                placeholder={tr({ it: 'Titolo nota', en: 'Note title' })}
               />
               <textarea
                 value={meetingMyNoteText}
                 onChange={(e) => setMeetingMyNoteText(e.target.value)}
                 rows={16}
                 className="mt-2 min-h-0 w-full flex-1 resize-none rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm"
-                placeholder="Write your notes..."
+                placeholder={tr({ it: 'Scrivi le tue note...', en: 'Write your notes...' })}
               />
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                 <label className="inline-flex items-center gap-2 text-[12px] text-slate-300">
                   <input type="checkbox" checked={meetingMyNoteShared} onChange={(e) => setMeetingMyNoteShared(e.target.checked)} />
-                  Share with meeting participants
+                  {tr({ it: 'Condividi con i partecipanti al meeting', en: 'Share with meeting participants' })}
                 </label>
                 <button
                   type="button"
@@ -3313,15 +3353,15 @@ const MobileAppPage = () => {
                   disabled={meetingNotesSaving || !meetingNotesDirty}
                   className="rounded-lg bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-950 disabled:opacity-50"
                 >
-                  {meetingNotesSaving ? 'Saving…' : 'Save note'}
+                  {meetingNotesSaving ? tr({ it: 'Salvataggio…', en: 'Saving…' }) : tr({ it: 'Salva nota', en: 'Save note' })}
                 </button>
               </div>
               {meetingNotesError ? <div className="mt-2 rounded-lg border border-rose-400/20 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-200">{meetingNotesError}</div> : null}
-              {meetingNotesLoading ? <div className="mt-2 text-[11px] text-slate-400">Loading notes…</div> : null}
+              {meetingNotesLoading ? <div className="mt-2 text-[11px] text-slate-400">{tr({ it: 'Caricamento note…', en: 'Loading notes…' })}</div> : null}
               <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-slate-300">Shared notes</div>
-                  <div className="text-[11px] text-slate-500">{meetingNotesParticipants.filter((p) => p.hasShared).length} participants shared</div>
+                  <div className="text-slate-300">{tr({ it: 'Note condivise', en: 'Shared notes' })}</div>
+                  <div className="text-[11px] text-slate-500">{tr({ it: `${meetingNotesParticipants.filter((p) => p.hasShared).length} partecipanti hanno condiviso`, en: `${meetingNotesParticipants.filter((p) => p.hasShared).length} participants shared` })}</div>
                 </div>
                 <div className="mt-2 max-h-40 space-y-1 overflow-auto pr-1">
                   {meetingNotesList.filter((n) => n.shared && String(n.authorUserId || '') !== String(user?.id || '')).length ? (
@@ -3335,13 +3375,13 @@ const MobileAppPage = () => {
                           className="w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-left hover:bg-white/10"
                         >
                           <div className="truncate text-[12px] font-semibold text-slate-100">
-                            {String(n.authorDisplayName || n.authorUsername || '—')} - {String(n.title || 'Shared note')}
+                            {String(n.authorDisplayName || n.authorUsername || '—')} - {String(n.title || tr({ it: 'Nota condivisa', en: 'Shared note' }))}
                           </div>
-                          <div className="truncate text-[10px] text-slate-400">{formatDateTime(n.updatedAt)}</div>
+                          <div className="truncate text-[10px] text-slate-400">{formatDateTime(n.updatedAt, locale)}</div>
                         </button>
                       ))
                   ) : (
-                    <div className="rounded-lg border border-dashed border-white/10 bg-white/5 px-2 py-2 text-[11px] text-slate-400">No shared notes for this meeting.</div>
+                    <div className="rounded-lg border border-dashed border-white/10 bg-white/5 px-2 py-2 text-[11px] text-slate-400">{tr({ it: 'Nessuna nota condivisa per questo meeting.', en: 'No shared notes for this meeting.' })}</div>
                   )}
                 </div>
               </div>
@@ -3355,9 +3395,9 @@ const MobileAppPage = () => {
           <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate text-lg font-semibold text-slate-100">{meetingSharedNotePreview.title || 'Shared note'}</div>
+                <div className="truncate text-lg font-semibold text-slate-100">{meetingSharedNotePreview.title || tr({ it: 'Nota condivisa', en: 'Shared note' })}</div>
                 <div className="mt-1 truncate text-xs text-slate-400">
-                  {meetingSharedNotePreview.authorDisplayName || meetingSharedNotePreview.authorUsername || '—'} • {formatDateTime(meetingSharedNotePreview.updatedAt)}
+                  {meetingSharedNotePreview.authorDisplayName || meetingSharedNotePreview.authorUsername || '—'} • {formatDateTime(meetingSharedNotePreview.updatedAt, locale)}
                 </div>
               </div>
               <button type="button" onClick={() => setMeetingSharedNotePreview(null)} className="rounded-lg p-2 text-slate-300 hover:bg-white/5">
@@ -3373,22 +3413,22 @@ const MobileAppPage = () => {
       {chatDeletePrompt ? (
         <div className="fixed inset-0 z-[240] flex items-center justify-center bg-slate-950/70 p-4" onClick={() => setChatDeletePrompt(null)}>
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="text-base font-semibold text-slate-100">Delete message</div>
+            <div className="text-base font-semibold text-slate-100">{tr({ it: 'Elimina messaggio', en: 'Delete message' })}</div>
             <div className="mt-1 text-sm text-slate-300">
               {chatDeletePrompt.allowAll
-                ? 'Choose if you want to delete it only for you or for everyone.'
-                : 'Delete for everyone is no longer available after 30 minutes.'}
+                ? tr({ it: 'Scegli se vuoi eliminarlo solo per te o per tutti.', en: 'Choose if you want to delete it only for you or for everyone.' })
+                : tr({ it: 'Elimina per tutti non è più disponibile dopo 30 minuti.', en: 'Delete for everyone is no longer available after 30 minutes.' })}
             </div>
             <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
               <button type="button" onClick={() => setChatDeletePrompt(null)} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-200">
-                Cancel
+                {tr({ it: 'Annulla', en: 'Cancel' })}
               </button>
               <button type="button" onClick={() => void confirmChatDeleteMode('me')} className="rounded-xl border border-cyan-400/40 bg-cyan-500/20 px-3 py-2 text-sm font-semibold text-cyan-200">
-                Delete for me
+                {tr({ it: 'Elimina per me', en: 'Delete for me' })}
               </button>
               {chatDeletePrompt.allowAll ? (
                 <button type="button" onClick={() => void confirmChatDeleteMode('all')} className="rounded-xl border border-rose-400/40 bg-rose-500/20 px-3 py-2 text-sm font-semibold text-rose-200">
-                  Delete for everyone
+                  {tr({ it: 'Elimina per tutti', en: 'Delete for everyone' })}
                 </button>
               ) : null}
             </div>
@@ -3397,15 +3437,15 @@ const MobileAppPage = () => {
       ) : null}
       <ConfirmDialog
         open={!!mobileConfirm}
-        title={mobileConfirm?.title || 'Conferma'}
+        title={mobileConfirm?.title || tr({ it: 'Conferma', en: 'Confirm' })}
         description={mobileConfirm?.description}
         onCancel={() => setMobileConfirm(null)}
         onConfirm={() => {
           if (!mobileConfirm) return;
           void mobileConfirm.onConfirm();
         }}
-        confirmLabel={mobileConfirm?.confirmLabel || 'Conferma'}
-        cancelLabel={mobileConfirm?.cancelLabel || 'Annulla'}
+        confirmLabel={mobileConfirm?.confirmLabel || tr({ it: 'Conferma', en: 'Confirm' })}
+        cancelLabel={mobileConfirm?.cancelLabel || tr({ it: 'Annulla', en: 'Cancel' })}
         zIndexClass="z-[250]"
       />
     </div>
