@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.5.3
+Current version: 3.5.4
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,12 +14,12 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.5.3
-- Provisioning imported users is now safer and more reliable: portal URL resolution is centralized, user creation is atomic, linked imported-user uniqueness is enforced, and email delivery clearly reports when the public portal URL is not configured.
-- Email settings now support a dedicated `Portal public URL` from the UI, documented as the primary source for invite/provisioning links with `PUBLIC_APP_URL` as deployment fallback.
-- Meeting visibility and time-state logic were further aligned: `/api/meetings/mine` filters correctly before `LIMIT`, shared frontend helpers now drive mobile badges, `My meetings`, follow-up timelines, room timelines, and meeting status tones from one source of truth.
-- Public runtime URLs for kiosk/mobile/public uploads are now built from a shared server helper, reducing drift between endpoints and making local/LAN deployment behavior more predictable.
-- Architecture cleanup continued with new shared helpers/tests (`server/publicUrls.cjs`, `src/utils/meetingTime.ts`, `scripts/public-urls.test.cjs`, `scripts/ssot-dry-users-email.test.cjs`) to keep release-critical rules verifiable.
+## What's new in 3.5.4
+- Server runtime configuration is now centralized in `server/config.cjs`, with stricter parsing for security-sensitive flags, preserved `PORT=0` support, and aligned documentation/tests for runtime env handling.
+- `server/index.cjs` has been reduced further by extracting auth/MFA and admin settings routes, while meeting lifecycle/public/notes flows now live in dedicated route modules with stronger audit coverage for critical changes.
+- Meeting and import flows were hardened: lifecycle updates now fail fast on missing participant emails when notifications are enabled, meeting cancel/update actions write consistent global audit events, and custom import SSRF/response-limit protections were reinforced.
+- `PlanView` and meeting UI were decomposed further (`RoomMeasuresModal`, `RoomLayoutExportModal`, `RoomMeetingDuplicateModal`, kiosk helpers), while duplicate/follow-up scheduling now uses local-day logic instead of UTC slicing and rejects invalid custom time windows correctly.
+- Added focused regression coverage for server config, auth/settings/meeting lifecycle, local-date usage, time parsing, custom import, chat services, and state-save guards to keep the 3.5.4 refactor verifiable.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
@@ -221,12 +221,20 @@ The reset invalidates active sessions and asks for a new strong password.
 - `PLIXMAP_AUTH_SECRET_FILE` (optional path alternative to `PLIXMAP_AUTH_SECRET`)
 - `PLIXMAP_DATA_SECRET` (optional; recommended in production)
 - `PLIXMAP_DATA_SECRET_FILE` (optional path alternative to `PLIXMAP_DATA_SECRET`)
-- `PLIXMAP_REQUIRE_ENV_SECRETS` (optional, `1/true` to require secrets from env/file and fail fast if missing)
+- `PLIXMAP_REQUIRE_ENV_SECRETS` (optional, `1/true` to require secrets from env/file and fail fast if missing; invalid values fail fast)
 - `PLIXMAP_SECRET_MIN_LENGTH` (optional, default `32`)
 - `PLIXMAP_BACKUP_DIR` (optional, default `data/backups`)
 - `PLIXMAP_BACKUP_KEEP` (optional, default `20`)
+- `PLIXMAP_LOG_LEVEL` (optional, one of `debug|info|warn|error`, default `info`)
+- `PLIXMAP_TRUST_PROXY` (optional; `1/true` to trust proxy headers, `0/false` to disable, otherwise passed to Express as-is)
+- `PLIXMAP_COOKIE_SECURE` (optional; forces secure session and CSRF cookies on or off; invalid values fail fast)
 - `PLIXMAP_CSP_ALLOW_MEDIAPIPE` (optional, default `false`; enables jsdelivr/storage + wasm/eval allowances)
 - `PLIXMAP_CSP_ALLOW_EVAL` (optional, default `false`; enables `unsafe-eval`/`wasm-unsafe-eval`)
+- `PLIXMAP_UPLOAD_MAX_IMAGE_MB` (optional, default `12`)
+- `PLIXMAP_UPLOAD_MAX_PDF_MB` (optional, default `20`)
+- `PLIXMAP_IMPORT_MAX_BYTES` (optional, default `2097152`)
+- `PLIXMAP_IMPORT_ALLOW_PRIVATE` (optional, default `false`; allows import endpoints to fetch private or loopback hosts)
+- `PLIXMAP_CHAT_MAX_VOICE_MB` (optional, default `40`)
 - `PUBLIC_APP_URL` (optional fallback; public portal base URL used in provisioning emails when the same value is not configured in Settings > Email)
 - `PLIXMAP_UPDATE_MANIFEST_URL` (optional, default `https://www.plixmap.com/updates/latest.json`)
 - `PLIXMAP_UPDATE_MANIFEST_FALLBACK_URL` (optional, default `https://raw.githubusercontent.com/falott82/plixmap.com/main/updates/latest.json`)

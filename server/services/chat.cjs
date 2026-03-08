@@ -2,13 +2,11 @@ const crypto = require('crypto');
 const fs = require('fs');
 
 const { isStrictSuperAdmin } = require('../access.cjs');
+const { serverConfig } = require('../config.cjs');
 
 const CHAT_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const CHAT_MAX_TOTAL_ATTACHMENT_BYTES = 5 * 1024 * 1024;
-const CHAT_VOICE_MAX_ATTACHMENT_BYTES = (() => {
-  const raw = Number(process.env.PLIXMAP_CHAT_MAX_VOICE_MB || '');
-  return Number.isFinite(raw) && raw > 0 ? raw * 1024 * 1024 : 40 * 1024 * 1024;
-})();
+const CHAT_VOICE_MAX_ATTACHMENT_BYTES = serverConfig.chatMaxVoiceAttachmentBytes;
 const CHAT_VOICE_MAX_TOTAL_ATTACHMENT_BYTES = CHAT_VOICE_MAX_ATTACHMENT_BYTES;
 const CHAT_MAX_ATTACHMENTS = 10;
 const CHAT_ALLOWED_REACTIONS = new Set(['👍', '👎', '❤️', '😂', '😮', '😢', '🙏']);
@@ -128,6 +126,12 @@ const parseDeletedForUserIds = (raw) => {
 };
 
 const encodeDeletedForUserIds = (set) => JSON.stringify(Array.from(set || []));
+const CLIENT_CHAT_MESSAGE_SELECT = `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
+   FROM client_chat_messages
+   WHERE id = ?`;
+const DM_CHAT_MESSAGE_SELECT = `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
+   FROM dm_chat_messages
+   WHERE id = ?`;
 
 const createChatServices = (deps) => {
   const {
@@ -175,6 +179,46 @@ const createChatServices = (deps) => {
     } catch {
       return null;
     }
+  };
+
+  const prepareChatAttachments = (attachmentsIn) => {
+    const items = Array.isArray(attachmentsIn) ? attachmentsIn : [];
+    if (items.length > CHAT_MAX_ATTACHMENTS) return { ok: false, error: { error: 'Too many attachments' } };
+    const attachments = [];
+    let totalOtherBytes = 0;
+    let totalVoiceBytes = 0;
+    for (const attachment of items) {
+      const validated = validateChatAttachmentInput(attachment);
+      if (!validated.ok) return { ok: false, error: { error: 'Invalid attachment', ...validated } };
+      if (validated.isVoice) totalVoiceBytes += Number(validated.sizeBytes) || 0;
+      else totalOtherBytes += Number(validated.sizeBytes) || 0;
+      if (totalOtherBytes > CHAT_MAX_TOTAL_ATTACHMENT_BYTES) {
+        return {
+          ok: false,
+          error: {
+            error: 'Attachments too large',
+            reason: 'total_size',
+            maxBytes: CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
+            sizeBytes: totalOtherBytes
+          }
+        };
+      }
+      if (totalVoiceBytes > CHAT_VOICE_MAX_TOTAL_ATTACHMENT_BYTES) {
+        return {
+          ok: false,
+          error: {
+            error: 'Voice note too large',
+            reason: 'voice_total_size',
+            maxBytes: CHAT_VOICE_MAX_TOTAL_ATTACHMENT_BYTES,
+            sizeBytes: totalVoiceBytes
+          }
+        };
+      }
+      const url = externalizeChatAttachmentDataUrl(validated.name, validated.dataUrl, validated.ext);
+      if (!url) return { ok: false, error: { error: 'Failed to store attachment' } };
+      attachments.push({ name: validated.name.slice(0, 200), url, mime: validated.mime, sizeBytes: validated.sizeBytes });
+    }
+    return { ok: true, attachments };
   };
 
   const isMessageHiddenForUser = (row, userId) => {
@@ -300,6 +344,16 @@ const createChatServices = (deps) => {
     };
   };
 
+  const getNormalizedClientChatMessageById = (id) => {
+    const row = db.prepare(CLIENT_CHAT_MESSAGE_SELECT).get(String(id || '').trim());
+    return row ? normalizeChatMessageRow(row) : null;
+  };
+
+  const getNormalizedDmChatMessageById = (id) => {
+    const row = db.prepare(DM_CHAT_MESSAGE_SELECT).get(String(id || '').trim());
+    return row ? normalizeDmChatMessageRow(row) : null;
+  };
+
   const getLatestVisibleClientChatMessage = (clientId, userId) => {
     const rows = db
       .prepare(
@@ -345,6 +399,21 @@ const createChatServices = (deps) => {
       .prepare('SELECT id, pairKey, fromUserId, toUserId, deleted, createdAt, deletedForJson FROM dm_chat_messages WHERE id = ?')
       .get(messageId);
     return dmRow ? { kind: 'dm', row: dmRow } : null;
+  };
+
+  const emitDmMessageEvent = (type, params) => {
+    const eventType = String(type || '').trim();
+    const pairKey = String(params?.pairKey || '').trim();
+    const fromUserId = String(params?.fromUserId || '').trim();
+    const toUserId = String(params?.toUserId || '').trim();
+    const message = params?.message || null;
+    if (!eventType || !pairKey || !fromUserId || !toUserId || !message) return null;
+    const threadId = `dm:${pairKey}`;
+    sendToUser(fromUserId, { type: eventType, threadId, message });
+    if (message?.deliveredAt && !userHasBlocked(toUserId, fromUserId)) {
+      sendToUser(toUserId, { type: eventType, threadId, message });
+    }
+    return threadId;
   };
 
   const deliverPendingDmMessagesToUser = (userId) => {
@@ -519,6 +588,7 @@ const createChatServices = (deps) => {
     normalizeChatAttachmentList,
     validateChatAttachmentInput,
     externalizeChatAttachmentDataUrl,
+    prepareChatAttachments,
     parseDeletedForUserIds,
     encodeDeletedForUserIds,
     isMessageHiddenForUser,
@@ -527,9 +597,12 @@ const createChatServices = (deps) => {
     parseDmThreadId,
     userHasBlocked,
     normalizeDmChatMessageRow,
+    getNormalizedClientChatMessageById,
+    getNormalizedDmChatMessageById,
     getLatestVisibleClientChatMessage,
     getLatestVisibleDmChatMessage,
     findChatMessageById,
+    emitDmMessageEvent,
     deliverPendingDmMessagesToUser,
     getClientNameById,
     listDmContactUsers

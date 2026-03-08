@@ -87,7 +87,8 @@ const registerUserRoutes = (app, deps) => {
     APP_BRAND,
     getEmailConfig,
     getClientEmailConfig,
-    logEmailAttempt
+    logEmailAttempt,
+    fallbackPortalPublicUrl
   } = deps;
   const insertProvisionedPortalUser = db.transaction((payload) => {
     const {
@@ -225,7 +226,7 @@ const registerUserRoutes = (app, deps) => {
       requireTLS: securityMode === 'starttls',
       ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
     });
-    const portalUrl = getPortalPublicUrl(db, process.env.PUBLIC_APP_URL || '');
+    const portalUrl = getPortalPublicUrl(db, fallbackPortalPublicUrl || '');
     if (!portalUrl) {
       return { ok: false, skipped: true, reason: 'portal_url_not_configured' };
     }

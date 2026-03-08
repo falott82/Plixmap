@@ -1,17 +1,15 @@
 const fs = require('fs');
 const path = require('path');
-
-const DEFAULT_BACKUP_RETENTION = 20;
-const readEnv = (name) => process.env[name];
+const { serverConfig } = require('./config.cjs');
 
 const normalizeRetention = (value) => {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_BACKUP_RETENTION;
+  if (!Number.isFinite(parsed) || parsed <= 0) return serverConfig.backupRetention;
   return Math.max(1, Math.min(365, Math.round(parsed)));
 };
 
-const resolveBackupDir = () => readEnv('PLIXMAP_BACKUP_DIR') || path.join(process.cwd(), 'data', 'backups');
-const resolveBackupRetention = () => normalizeRetention(readEnv('PLIXMAP_BACKUP_KEEP') || DEFAULT_BACKUP_RETENTION);
+const resolveBackupDir = () => serverConfig.backupDir || path.join(process.cwd(), 'data', 'backups');
+const resolveBackupRetention = () => normalizeRetention(serverConfig.backupRetention);
 
 const ensureBackupDir = () => {
   const dir = resolveBackupDir();

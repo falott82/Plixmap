@@ -553,26 +553,9 @@ const registerChatRoutes = (app, deps) => {
       const replyToId = typeof req.body?.replyToId === 'string' ? String(req.body.replyToId).trim() : '';
       if (trimmed.length > 4000) return res.status(400).json({ error: 'Message too long' });
       if (!trimmed && !attachmentsIn.length) return res.status(400).json({ error: 'Empty message' });
-      if (attachmentsIn.length > chat.maxAttachments) return res.status(400).json({ error: 'Too many attachments' });
-
-      const attachments = [];
-      let totalOtherBytes = 0;
-      let totalVoiceBytes = 0;
-      for (const attachment of attachmentsIn) {
-        const validated = chat.validateChatAttachmentInput(attachment);
-        if (!validated.ok) return res.status(400).json({ error: 'Invalid attachment', ...validated });
-        if (validated.isVoice) totalVoiceBytes += Number(validated.sizeBytes) || 0;
-        else totalOtherBytes += Number(validated.sizeBytes) || 0;
-        if (totalOtherBytes > chat.maxTotalAttachmentBytes) {
-          return res.status(400).json({ error: 'Attachments too large', reason: 'total_size', maxBytes: chat.maxTotalAttachmentBytes, sizeBytes: totalOtherBytes });
-        }
-        if (totalVoiceBytes > chat.voiceMaxTotalAttachmentBytes) {
-          return res.status(400).json({ error: 'Voice note too large', reason: 'voice_total_size', maxBytes: chat.voiceMaxTotalAttachmentBytes, sizeBytes: totalVoiceBytes });
-        }
-        const url = chat.externalizeChatAttachmentDataUrl(validated.name, validated.dataUrl, validated.ext);
-        if (!url) return res.status(400).json({ error: 'Failed to store attachment' });
-        attachments.push({ name: validated.name.slice(0, 200), url, mime: validated.mime, sizeBytes: validated.sizeBytes });
-      }
+      const attachmentResult = chat.prepareChatAttachments(attachmentsIn);
+      if (!attachmentResult.ok) return res.status(400).json(attachmentResult.error);
+      const attachments = attachmentResult.attachments;
 
       const me = db.prepare('SELECT username, avatarUrl FROM users WHERE id = ?').get(req.userId);
       const now = Date.now();
@@ -594,16 +577,13 @@ const registerChatRoutes = (app, deps) => {
         `INSERT INTO dm_chat_messages (id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, text, deleted, deliveredAt, readAt, createdAt, updatedAt)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', '{}', ?, 0, ?, NULL, ?, ?)`
       ).run(id, dm.pairKey, req.userId, otherUserId, String(me?.username || req.username || ''), String(me?.avatarUrl || ''), replyToId || null, JSON.stringify(attachments), trimmed, deliveredAt, now, now);
-      const row = db
-        .prepare(
-          `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
-           FROM dm_chat_messages
-           WHERE id = ?`
-        )
-        .get(id);
-      const message = chat.normalizeDmChatMessageRow(row);
-      sendToUser(req.userId, { type: 'dm_chat_new', threadId: dm.threadId, message });
-      if (!recipientHasBlockedSender && deliveredAt) sendToUser(otherUserId, { type: 'dm_chat_new', threadId: dm.threadId, message });
+      const message = chat.getNormalizedDmChatMessageById(id);
+      chat.emitDmMessageEvent('dm_chat_new', {
+        pairKey: dm.pairKey,
+        fromUserId: req.userId,
+        toUserId: otherUserId,
+        message
+      });
       return res.json({ ok: true, message });
     }
 
@@ -614,25 +594,9 @@ const registerChatRoutes = (app, deps) => {
     const replyToId = typeof req.body?.replyToId === 'string' ? String(req.body.replyToId).trim() : '';
     if (trimmed.length > 4000) return res.status(400).json({ error: 'Message too long' });
     if (!trimmed && !attachmentsIn.length) return res.status(400).json({ error: 'Empty message' });
-    if (attachmentsIn.length > chat.maxAttachments) return res.status(400).json({ error: 'Too many attachments' });
-    const attachments = [];
-    let totalOtherBytes = 0;
-    let totalVoiceBytes = 0;
-    for (const attachment of attachmentsIn) {
-      const validated = chat.validateChatAttachmentInput(attachment);
-      if (!validated.ok) return res.status(400).json({ error: 'Invalid attachment', ...validated });
-      if (validated.isVoice) totalVoiceBytes += Number(validated.sizeBytes) || 0;
-      else totalOtherBytes += Number(validated.sizeBytes) || 0;
-      if (totalOtherBytes > chat.maxTotalAttachmentBytes) {
-        return res.status(400).json({ error: 'Attachments too large', reason: 'total_size', maxBytes: chat.maxTotalAttachmentBytes, sizeBytes: totalOtherBytes });
-      }
-      if (totalVoiceBytes > chat.voiceMaxTotalAttachmentBytes) {
-        return res.status(400).json({ error: 'Voice note too large', reason: 'voice_total_size', maxBytes: chat.voiceMaxTotalAttachmentBytes, sizeBytes: totalVoiceBytes });
-      }
-      const url = chat.externalizeChatAttachmentDataUrl(validated.name, validated.dataUrl, validated.ext);
-      if (!url) return res.status(400).json({ error: 'Failed to store attachment' });
-      attachments.push({ name: validated.name.slice(0, 200), url, mime: validated.mime, sizeBytes: validated.sizeBytes });
-    }
+    const attachmentResult = chat.prepareChatAttachments(attachmentsIn);
+    if (!attachmentResult.ok) return res.status(400).json(attachmentResult.error);
+    const attachments = attachmentResult.attachments;
     const me = db.prepare('SELECT username, avatarUrl FROM users WHERE id = ?').get(req.userId);
     const now = Date.now();
     const id = crypto.randomUUID();
@@ -649,14 +613,7 @@ const registerChatRoutes = (app, deps) => {
        VALUES (?, ?, ?)
        ON CONFLICT(userId, clientId) DO UPDATE SET lastReadAt = excluded.lastReadAt`
     ).run(req.userId, clientId, now);
-    const row = db
-      .prepare(
-        `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
-         FROM client_chat_messages
-         WHERE id = ?`
-      )
-      .get(id);
-    const message = chat.normalizeChatMessageRow(row);
+    const message = chat.getNormalizedClientChatMessageById(id);
     broadcastToChatClient(clientId, { type: 'client_chat_new', clientId, message });
     res.json({ ok: true, message });
   });
@@ -678,31 +635,18 @@ const registerChatRoutes = (app, deps) => {
     if (now - (Number(row.createdAt) || 0) > 30 * 60 * 1000) return res.status(400).json({ error: 'Edit window expired' });
     if (hit.kind === 'client') {
       db.prepare('UPDATE client_chat_messages SET text = ?, editedAt = ?, updatedAt = ? WHERE id = ?').run(trimmed, now, now, id);
-      const updated = db
-        .prepare(
-          `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
-           FROM client_chat_messages
-           WHERE id = ?`
-        )
-        .get(id);
-      const message = chat.normalizeChatMessageRow(updated);
+      const message = chat.getNormalizedClientChatMessageById(id);
       broadcastToChatClient(String(row.clientId), { type: 'client_chat_update', clientId: String(row.clientId), message });
       return res.json({ ok: true, message });
     }
     db.prepare('UPDATE dm_chat_messages SET text = ?, editedAt = ?, updatedAt = ? WHERE id = ?').run(trimmed, now, now, id);
-    const updated = db
-      .prepare(
-        `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
-         FROM dm_chat_messages
-         WHERE id = ?`
-      )
-      .get(id);
-    const message = chat.normalizeDmChatMessageRow(updated);
-    const threadId = `dm:${String(row.pairKey || '').trim()}`;
-    sendToUser(String(row.fromUserId), { type: 'dm_chat_update', threadId, message });
-    if (message?.deliveredAt && !chat.userHasBlocked(String(row.toUserId), String(row.fromUserId))) {
-      sendToUser(String(row.toUserId), { type: 'dm_chat_update', threadId, message });
-    }
+    const message = chat.getNormalizedDmChatMessageById(id);
+    chat.emitDmMessageEvent('dm_chat_update', {
+      pairKey: row.pairKey,
+      fromUserId: row.fromUserId,
+      toUserId: row.toUserId,
+      message
+    });
     res.json({ ok: true, message });
   });
 
@@ -740,31 +684,18 @@ const registerChatRoutes = (app, deps) => {
     if (createdAt && now - createdAt > 30 * 60 * 1000) return res.status(400).json({ error: 'Delete-for-everyone window expired' });
     if (hit.kind === 'client') {
       db.prepare('UPDATE client_chat_messages SET deleted = 1, deletedAt = ?, deletedById = ?, updatedAt = ? WHERE id = ?').run(now, req.userId, now, id);
-      const updated = db
-        .prepare(
-          `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
-           FROM client_chat_messages
-           WHERE id = ?`
-        )
-        .get(id);
-      const message = chat.normalizeChatMessageRow(updated);
+      const message = chat.getNormalizedClientChatMessageById(id);
       broadcastToChatClient(String(row.clientId), { type: 'client_chat_update', clientId: String(row.clientId), message });
       return res.json({ ok: true });
     }
     db.prepare('UPDATE dm_chat_messages SET deleted = 1, deletedAt = ?, deletedById = ?, updatedAt = ? WHERE id = ?').run(now, req.userId, now, id);
-    const updated = db
-      .prepare(
-        `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
-         FROM dm_chat_messages
-         WHERE id = ?`
-      )
-      .get(id);
-    const message = chat.normalizeDmChatMessageRow(updated);
-    const threadId = `dm:${String(row.pairKey || '').trim()}`;
-    sendToUser(String(row.fromUserId), { type: 'dm_chat_update', threadId, message });
-    if (message?.deliveredAt && !chat.userHasBlocked(String(row.toUserId), String(row.fromUserId))) {
-      sendToUser(String(row.toUserId), { type: 'dm_chat_update', threadId, message });
-    }
+    const message = chat.getNormalizedDmChatMessageById(id);
+    chat.emitDmMessageEvent('dm_chat_update', {
+      pairKey: row.pairKey,
+      fromUserId: row.fromUserId,
+      toUserId: row.toUserId,
+      message
+    });
     res.json({ ok: true });
   });
 
@@ -798,31 +729,18 @@ const registerChatRoutes = (app, deps) => {
     if (kind === 'client') {
       const clientId = String(row.clientId);
       db.prepare('UPDATE client_chat_messages SET starredByJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(Array.from(uniq)), now, id);
-      const updated = db
-        .prepare(
-          `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
-           FROM client_chat_messages
-           WHERE id = ?`
-        )
-        .get(id);
-      const message = chat.normalizeChatMessageRow(updated);
+      const message = chat.getNormalizedClientChatMessageById(id);
       broadcastToChatClient(clientId, { type: 'client_chat_update', clientId, message });
       return res.json({ ok: true, message });
     }
     db.prepare('UPDATE dm_chat_messages SET starredByJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(Array.from(uniq)), now, id);
-    const updated = db
-      .prepare(
-        `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
-         FROM dm_chat_messages
-         WHERE id = ?`
-      )
-      .get(id);
-    const message = chat.normalizeDmChatMessageRow(updated);
-    const threadId = `dm:${String(row.pairKey || '').trim()}`;
-    sendToUser(String(row.fromUserId), { type: 'dm_chat_update', threadId, message });
-    if (message?.deliveredAt && !chat.userHasBlocked(String(row.toUserId), String(row.fromUserId))) {
-      sendToUser(String(row.toUserId), { type: 'dm_chat_update', threadId, message });
-    }
+    const message = chat.getNormalizedDmChatMessageById(id);
+    chat.emitDmMessageEvent('dm_chat_update', {
+      pairKey: row.pairKey,
+      fromUserId: row.fromUserId,
+      toUserId: row.toUserId,
+      message
+    });
     res.json({ ok: true, message });
   });
 
@@ -874,31 +792,18 @@ const registerChatRoutes = (app, deps) => {
     if (kind === 'client') {
       const clientId = String(row.clientId);
       db.prepare('UPDATE client_chat_messages SET reactionsJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(parsed), now, id);
-      const updated = db
-        .prepare(
-          `SELECT id, clientId, userId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, createdAt, updatedAt
-           FROM client_chat_messages
-           WHERE id = ?`
-        )
-        .get(id);
-      const message = chat.normalizeChatMessageRow(updated);
+      const message = chat.getNormalizedClientChatMessageById(id);
       broadcastToChatClient(clientId, { type: 'client_chat_update', clientId, message });
       return res.json({ ok: true, message });
     }
     db.prepare('UPDATE dm_chat_messages SET reactionsJson = ?, updatedAt = ? WHERE id = ?').run(JSON.stringify(parsed), now, id);
-    const updated = db
-      .prepare(
-        `SELECT id, pairKey, fromUserId, toUserId, username, avatarUrl, replyToId, attachmentsJson, starredByJson, reactionsJson, deletedForJson, text, deleted, deletedAt, deletedById, editedAt, deliveredAt, readAt, createdAt, updatedAt
-         FROM dm_chat_messages
-         WHERE id = ?`
-      )
-      .get(id);
-    const message = chat.normalizeDmChatMessageRow(updated);
-    const threadId = `dm:${String(row.pairKey || '').trim()}`;
-    sendToUser(String(row.fromUserId), { type: 'dm_chat_update', threadId, message });
-    if (message?.deliveredAt && !chat.userHasBlocked(String(row.toUserId), String(row.fromUserId))) {
-      sendToUser(String(row.toUserId), { type: 'dm_chat_update', threadId, message });
-    }
+    const message = chat.getNormalizedDmChatMessageById(id);
+    chat.emitDmMessageEvent('dm_chat_update', {
+      pairKey: row.pairKey,
+      fromUserId: row.fromUserId,
+      toUserId: row.toUserId,
+      message
+    });
     res.json({ ok: true, message });
   });
 

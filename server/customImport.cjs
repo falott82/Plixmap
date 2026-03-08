@@ -1,252 +1,26 @@
 const crypto = require('crypto');
-const dns = require('dns').promises;
-const net = require('net');
+const { serverConfig } = require('./config.cjs');
+const {
+  normalizeEmployeesResponse,
+  normalizeDevicesResponse,
+  fetchEmployeesFromApi: fetchEmployeesFromApiInternal,
+  fetchDevicesFromApi: fetchDevicesFromApiInternal,
+  validateImportUrl: validateImportUrlInternal,
+  readResponseText
+} = require('./customImport/network.cjs');
+const {
+  encryptString,
+  decryptString,
+  getImportConfig,
+  getDeviceImportConfig,
+  getImportConfigSafe,
+  getDeviceImportConfigSafe,
+  upsertImportConfig,
+  upsertDeviceImportConfig
+} = require('./customImport/configStore.cjs');
 
-const readEnv = (name) => process.env[name];
-
-const MAX_IMPORT_RESPONSE_BYTES = (() => {
-  const raw = Number(readEnv('PLIXMAP_IMPORT_MAX_BYTES') || '');
-  return Number.isFinite(raw) && raw > 0 ? raw : 2 * 1024 * 1024;
-})();
-const ALLOW_PRIVATE_IMPORT = (() => {
-  const raw = String(readEnv('PLIXMAP_IMPORT_ALLOW_PRIVATE') || '').trim().toLowerCase();
-  return ['1', 'true', 'yes', 'on'].includes(raw);
-})();
-
-const isPrivateIpv4 = (ip) => {
-  const parts = ip.split('.').map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) return false;
-  const [a, b] = parts;
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 0) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  return false;
-};
-
-const isPrivateIpv6 = (ip) => {
-  const val = ip.toLowerCase();
-  if (val === '::1') return true;
-  if (val.startsWith('fe80:') || val.startsWith('fe80::')) return true;
-  if (val.startsWith('fc') || val.startsWith('fd')) return true;
-  return false;
-};
-
-const isPrivateIp = (ip) => {
-  const type = net.isIP(ip);
-  if (type === 4) return isPrivateIpv4(ip);
-  if (type === 6) return isPrivateIpv6(ip);
-  return false;
-};
-
-const isLoopbackHost = (hostname) => {
-  const h = String(hostname || '').trim().toLowerCase();
-  return h === 'localhost' || h.endsWith('.localhost');
-};
-
-const resolveHost = async (hostname) => {
-  const timeoutMs = 2000;
-  let timeout = null;
-  try {
-    const result = await Promise.race([
-      dns.lookup(hostname, { all: true }),
-      new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(new Error('DNS lookup timeout')), timeoutMs);
-      })
-    ]);
-    return result;
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-};
-
-const validateImportUrl = async (rawUrl, options = {}) => {
-  const allowPrivate = options.allowPrivate === true || ALLOW_PRIVATE_IMPORT;
-  let parsed;
-  try {
-    parsed = new URL(String(rawUrl || '').trim());
-  } catch {
-    return { ok: false, error: 'Invalid URL' };
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { ok: false, error: 'Invalid URL protocol' };
-  }
-  if (parsed.username || parsed.password) {
-    return { ok: false, error: 'URL must not include credentials' };
-  }
-  if (!parsed.hostname) {
-    return { ok: false, error: 'Invalid URL host' };
-  }
-  if (!allowPrivate && isLoopbackHost(parsed.hostname)) {
-    return { ok: false, error: 'Host not allowed' };
-  }
-  const ipType = net.isIP(parsed.hostname);
-  if (ipType) {
-    if (!allowPrivate && isPrivateIp(parsed.hostname)) {
-      return { ok: false, error: 'Host not allowed' };
-    }
-    return { ok: true, url: parsed.toString() };
-  }
-  let records;
-  try {
-    records = await resolveHost(parsed.hostname);
-  } catch {
-    return { ok: false, error: 'Unable to resolve host' };
-  }
-  if (!Array.isArray(records) || !records.length) {
-    return { ok: false, error: 'Unable to resolve host' };
-  }
-  if (!allowPrivate) {
-    for (const record of records) {
-      if (isPrivateIp(record.address)) {
-        return { ok: false, error: 'Host not allowed' };
-      }
-    }
-  }
-  return { ok: true, url: parsed.toString() };
-};
-
-const readResponseText = async (res, limitBytes) => {
-  const contentLength = Number(res.headers.get('content-length') || 0);
-  if (contentLength && contentLength > limitBytes) {
-    return { ok: false, error: 'Response too large' };
-  }
-  if (!res.body || typeof res.body.getReader !== 'function') {
-    const text = await res.text();
-    if (text.length > limitBytes) return { ok: false, error: 'Response too large' };
-    return { ok: true, text };
-  }
-  const reader = res.body.getReader();
-  let received = 0;
-  const chunks = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    received += value.length;
-    if (received > limitBytes) {
-      try {
-        await reader.cancel();
-      } catch {}
-      return { ok: false, error: 'Response too large' };
-    }
-    chunks.push(Buffer.from(value));
-  }
-  return { ok: true, text: Buffer.concat(chunks).toString('utf8') };
-};
-
-const encryptString = (secretB64, plaintext) => {
-  if (!plaintext) return null;
-  try {
-    const key = crypto.createHash('sha256').update(Buffer.from(secretB64, 'base64')).digest();
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    const enc = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    return Buffer.concat([iv, tag, enc]).toString('base64');
-  } catch {
-    return null;
-  }
-};
-
-const decryptString = (secretB64, blobB64) => {
-  if (!blobB64) return null;
-  try {
-    const buf = Buffer.from(String(blobB64), 'base64');
-    if (buf.length < 12 + 16 + 1) return null;
-    const iv = buf.subarray(0, 12);
-    const tag = buf.subarray(12, 28);
-    const enc = buf.subarray(28);
-    const key = crypto.createHash('sha256').update(Buffer.from(secretB64, 'base64')).digest();
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(tag);
-    const plain = Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
-    return plain;
-  } catch {
-    return null;
-  }
-};
-
-const normalizeEmployeesResponse = (payload) => {
-  if (!payload || typeof payload !== 'object') return [];
-  const arr = payload.Dipendenti || payload.dipendenti || payload.DIPENDENTI;
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .map((r) => {
-      const get = (k) => {
-        const v = r?.[k];
-        if (v === null || v === undefined) return '';
-        return String(v).trim();
-      };
-      const externalId = get('Id');
-      if (!externalId) return null;
-      const isExternal = get('Esterno') === '1';
-      const mobile =
-        get('Cellulare') ||
-        get('NumeroCellulare') ||
-        get('TelefonoCellulare') ||
-        get('Mobile') ||
-        get('Cell') ||
-        '';
-      return {
-        externalId,
-        firstName: get('Nome'),
-        lastName: get('Cognome'),
-        role: get('Ruolo'),
-        dept1: get('Reparto1'),
-        dept2: get('Reparto2'),
-        dept3: get('Reparto3'),
-        email: get('Email'),
-        mobile,
-        ext1: get('NumeroInterno1'),
-        ext2: get('NumeroInterno2'),
-        ext3: get('NumeroInterno3'),
-        isExternal
-      };
-    })
-    .filter(Boolean);
-};
-
-const normalizeDevicesResponse = (payload) => {
-  const rawList = (() => {
-    if (Array.isArray(payload)) return payload;
-    if (!payload || typeof payload !== 'object') return [];
-    const candidates = [
-      payload.devices,
-      payload.Devices,
-      payload.DISPOSITIVI,
-      payload.Dispositivi,
-      payload.dispositivi,
-      payload.data,
-      payload.items
-    ];
-    const found = candidates.find((item) => Array.isArray(item));
-    return Array.isArray(found) ? found : [];
-  })();
-  const rows = [];
-  for (const row of rawList) {
-    const get = (...keys) => {
-      for (const key of keys) {
-        const value = row?.[key];
-        if (value !== null && value !== undefined && String(value).trim()) return String(value).trim();
-      }
-      return '';
-    };
-    const devId = get('dev_id', 'devId', 'device_id', 'id');
-    if (!devId) continue;
-    rows.push({
-      devId,
-      deviceType: get('device_type', 'deviceType', 'type'),
-      deviceName: get('device_name', 'deviceName', 'name'),
-      manufacturer: get('manufacturer', 'brand'),
-      model: get('model'),
-      serialNumber: get('serial_number', 'serialNumber', 'serial')
-    });
-  }
-  return rows;
-};
+const MAX_IMPORT_RESPONSE_BYTES = serverConfig.importMaxResponseBytes;
+const ALLOW_PRIVATE_IMPORT = serverConfig.importAllowPrivate;
 
 const isManualExternalId = (externalId) => String(externalId || '').trim().toLowerCase().startsWith('manual:');
 
@@ -339,228 +113,23 @@ const findExternalEmailConflict = (db, clientId, email, currentExternalId = '') 
   return null;
 };
 
-const fetchEmployeesFromApi = async (config) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
-  try {
-    const urlCheck = await validateImportUrl(config.url, { allowPrivate: !!config.allowPrivate });
-    if (!urlCheck.ok) {
-      return { ok: false, status: 0, error: urlCheck.error || 'Invalid URL' };
-    }
-    const password = config.password ? String(config.password) : '';
-    const auth = Buffer.from(`${config.username}:${password}`, 'utf8').toString('base64');
-    const method = String(config.method || 'POST').trim().toUpperCase() === 'GET' ? 'GET' : 'POST';
-    const bodyJson = typeof config.bodyJson === 'string' ? config.bodyJson.trim() : '';
-    const useBody = method === 'POST' && !!bodyJson;
-    const res = await fetch(urlCheck.url, {
-      method,
-      headers: {
-        Authorization: `Basic ${auth}`,
-        Accept: 'application/json',
-        ...(useBody ? { 'Content-Type': 'application/json' } : {})
-      },
-      ...(useBody ? { body: bodyJson } : {}),
-      signal: controller.signal
-    });
-    const readResult = await readResponseText(res, MAX_IMPORT_RESPONSE_BYTES);
-    if (!readResult.ok) {
-      return { ok: false, status: res.status, error: readResult.error || 'Response too large', rawSnippet: '', contentType: res.headers.get('content-type') || '' };
-    }
-    const text = readResult.text;
-    if (!res.ok) {
-      return { ok: false, status: res.status, error: text.slice(0, 500), rawSnippet: text.slice(0, 2000), contentType: res.headers.get('content-type') || '' };
-    }
-    let json = null;
-    try {
-      let cleaned = String(text || '').trim();
-      // Strip UTF-8 BOM if present.
-      cleaned = cleaned.replace(/^\uFEFF/, '');
-      // Some APIs return a JSON fragment like: `"Dipendenti": [ ... ]` (missing outer braces).
-      if (/^"Dipendenti"\s*:/.test(cleaned)) cleaned = `{${cleaned}}`;
-      json = JSON.parse(cleaned);
-    } catch {
-      return {
-        ok: false,
-        status: res.status,
-        error: 'Invalid JSON response',
-        rawSnippet: String(text || '').slice(0, 2000),
-        contentType: res.headers.get('content-type') || ''
-      };
-    }
-    return { ok: true, status: res.status, employees: normalizeEmployeesResponse(json), raw: json };
-  } catch (e) {
-    return { ok: false, status: 0, error: e?.name === 'AbortError' ? 'Timeout' : String(e?.message || e) };
-  } finally {
-    clearTimeout(timeout);
-  }
-};
+const fetchEmployeesFromApi = async (config) =>
+  fetchEmployeesFromApiInternal(config, {
+    maxResponseBytes: MAX_IMPORT_RESPONSE_BYTES,
+    defaultAllowPrivate: ALLOW_PRIVATE_IMPORT
+  });
 
-const fetchDevicesFromApi = async (config) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
-  try {
-    const urlCheck = await validateImportUrl(config.url, { allowPrivate: !!config.allowPrivate });
-    if (!urlCheck.ok) {
-      return { ok: false, status: 0, error: urlCheck.error || 'Invalid URL' };
-    }
-    const password = config.password ? String(config.password) : '';
-    const auth = Buffer.from(`${config.username}:${password}`, 'utf8').toString('base64');
-    const method = String(config.method || 'POST').trim().toUpperCase() === 'GET' ? 'GET' : 'POST';
-    const bodyJson = typeof config.bodyJson === 'string' ? config.bodyJson.trim() : '';
-    const useBody = method === 'POST' && !!bodyJson;
-    const res = await fetch(urlCheck.url, {
-      method,
-      headers: {
-        Authorization: `Basic ${auth}`,
-        Accept: 'application/json',
-        ...(useBody ? { 'Content-Type': 'application/json' } : {})
-      },
-      ...(useBody ? { body: bodyJson } : {}),
-      signal: controller.signal
-    });
-    const readResult = await readResponseText(res, MAX_IMPORT_RESPONSE_BYTES);
-    if (!readResult.ok) {
-      return {
-        ok: false,
-        status: res.status,
-        error: readResult.error || 'Response too large',
-        rawSnippet: '',
-        contentType: res.headers.get('content-type') || ''
-      };
-    }
-    const text = readResult.text;
-    if (!res.ok) {
-      return {
-        ok: false,
-        status: res.status,
-        error: text.slice(0, 500),
-        rawSnippet: text.slice(0, 2000),
-        contentType: res.headers.get('content-type') || ''
-      };
-    }
-    let json = null;
-    try {
-      let cleaned = String(text || '').trim().replace(/^\uFEFF/, '');
-      if (/^"devices"\s*:/.test(cleaned) || /^"Dispositivi"\s*:/.test(cleaned)) cleaned = `{${cleaned}}`;
-      json = JSON.parse(cleaned);
-    } catch {
-      return {
-        ok: false,
-        status: res.status,
-        error: 'Invalid JSON response',
-        rawSnippet: String(text || '').slice(0, 2000),
-        contentType: res.headers.get('content-type') || ''
-      };
-    }
-    return { ok: true, status: res.status, devices: normalizeDevicesResponse(json), raw: json };
-  } catch (e) {
-    return { ok: false, status: 0, error: e?.name === 'AbortError' ? 'Timeout' : String(e?.message || e) };
-  } finally {
-    clearTimeout(timeout);
-  }
-};
+const fetchDevicesFromApi = async (config) =>
+  fetchDevicesFromApiInternal(config, {
+    maxResponseBytes: MAX_IMPORT_RESPONSE_BYTES,
+    defaultAllowPrivate: ALLOW_PRIVATE_IMPORT
+  });
 
-const getImportConfig = (db, authSecret, clientId) => {
-  const row = db
-    .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson FROM client_user_import WHERE clientId = ?')
-    .get(clientId);
-  if (!row) return null;
-  const password = decryptString(authSecret, row.passwordEnc);
-  return {
-    clientId: row.clientId,
-    url: row.url,
-    username: row.username,
-    password,
-    method: row.method || 'POST',
-    bodyJson: row.bodyJson || ''
-  };
-};
-
-const getDeviceImportConfig = (db, authSecret, clientId) => {
-  const row = db
-    .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson FROM client_device_import WHERE clientId = ?')
-    .get(clientId);
-  if (!row) return null;
-  const password = decryptString(authSecret, row.passwordEnc);
-  return {
-    clientId: row.clientId,
-    url: row.url,
-    username: row.username,
-    password,
-    method: row.method || 'POST',
-    bodyJson: row.bodyJson || ''
-  };
-};
-
-const getImportConfigSafe = (db, clientId) => {
-  const row = db
-    .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson, updatedAt FROM client_user_import WHERE clientId = ?')
-    .get(clientId);
-  if (!row) return null;
-  return {
-    clientId: row.clientId,
-    url: row.url,
-    username: row.username,
-    method: row.method || 'POST',
-    bodyJson: row.bodyJson || '',
-    hasPassword: !!row.passwordEnc,
-    updatedAt: row.updatedAt
-  };
-};
-
-const getDeviceImportConfigSafe = (db, clientId) => {
-  const row = db
-    .prepare('SELECT clientId, url, username, passwordEnc, method, bodyJson, updatedAt FROM client_device_import WHERE clientId = ?')
-    .get(clientId);
-  if (!row) return null;
-  return {
-    clientId: row.clientId,
-    url: row.url,
-    username: row.username,
-    method: row.method || 'POST',
-    bodyJson: row.bodyJson || '',
-    hasPassword: !!row.passwordEnc,
-    updatedAt: row.updatedAt
-  };
-};
-
-const upsertImportConfig = (db, authSecret, payload) => {
-  const now = Date.now();
-  const prev = db.prepare('SELECT passwordEnc, bodyJson, method FROM client_user_import WHERE clientId = ?').get(payload.clientId);
-  const nextPasswordEnc =
-    payload.password !== undefined
-      ? payload.password
-        ? encryptString(authSecret, payload.password)
-        : null
-      : prev?.passwordEnc || null;
-  const nextBodyJson = payload.bodyJson !== undefined ? String(payload.bodyJson || '') : prev?.bodyJson || '';
-  const nextMethod = payload.method !== undefined ? String(payload.method || 'POST') : prev?.method || 'POST';
-  db.prepare(
-    `INSERT INTO client_user_import (clientId, url, username, passwordEnc, method, bodyJson, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(clientId) DO UPDATE SET url=excluded.url, username=excluded.username, passwordEnc=excluded.passwordEnc, method=excluded.method, bodyJson=excluded.bodyJson, updatedAt=excluded.updatedAt`
-  ).run(payload.clientId, payload.url, payload.username, nextPasswordEnc, nextMethod, nextBodyJson, now);
-  return getImportConfigSafe(db, payload.clientId);
-};
-
-const upsertDeviceImportConfig = (db, authSecret, payload) => {
-  const now = Date.now();
-  const prev = db.prepare('SELECT passwordEnc, bodyJson, method FROM client_device_import WHERE clientId = ?').get(payload.clientId);
-  const nextPasswordEnc =
-    payload.password !== undefined
-      ? payload.password
-        ? encryptString(authSecret, payload.password)
-        : null
-      : prev?.passwordEnc || null;
-  const nextBodyJson = payload.bodyJson !== undefined ? String(payload.bodyJson || '') : prev?.bodyJson || '';
-  const nextMethod = payload.method !== undefined ? String(payload.method || 'POST') : prev?.method || 'POST';
-  db.prepare(
-    `INSERT INTO client_device_import (clientId, url, username, passwordEnc, method, bodyJson, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(clientId) DO UPDATE SET url=excluded.url, username=excluded.username, passwordEnc=excluded.passwordEnc, method=excluded.method, bodyJson=excluded.bodyJson, updatedAt=excluded.updatedAt`
-  ).run(payload.clientId, payload.url, payload.username, nextPasswordEnc, nextMethod, nextBodyJson, now);
-  return getDeviceImportConfigSafe(db, payload.clientId);
-};
+const validateImportUrl = async (rawUrl, options = {}) =>
+  validateImportUrlInternal(rawUrl, {
+    ...options,
+    defaultAllowPrivate: ALLOW_PRIVATE_IMPORT
+  });
 
 const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   const now = Date.now();
@@ -1149,4 +718,6 @@ module.exports = {
   deleteManualExternalUser
   ,deleteManualExternalDevice
   ,findExternalEmailConflict
+  ,validateImportUrl
+  ,readResponseText
 };

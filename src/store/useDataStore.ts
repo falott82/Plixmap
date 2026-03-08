@@ -1,11 +1,8 @@
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import {
-  BusinessPartner,
   Client,
   Corridor,
-  DoorVerificationEntry,
-  EmergencyContactEntry,
   FloorPlan,
   FloorPlanRevision,
   FloorPlanView,
@@ -19,8 +16,6 @@ import {
   RackLink,
   RoomConnectionDoor,
   Room,
-  SecurityCheckEntry,
-  SecurityDocumentEntry,
   Site,
   WifiAntennaModel
 } from './types';
@@ -48,6 +43,16 @@ import {
 } from './data';
 import { isSecurityTypeId, SECURITY_LAYER_ID } from './security';
 import { useAuthStore } from './useAuthStore';
+import {
+  normalizeBusinessPartners,
+  normalizeDoorVerificationHistory,
+  normalizeEmergencyContacts,
+  normalizeRoomConnectionDoor,
+  normalizeSecurityCheckHistory,
+  normalizeSecurityDocuments,
+  normalizeViews,
+  snapshotRevision
+} from './dataStoreNormalization';
 
 interface DataState {
   clients: Client[];
@@ -465,285 +470,6 @@ const nextRev = (plan: FloorPlan, bump: 'major' | 'minor') => {
   const latest = getLatestRev(plan);
   if (bump === 'major') return { major: latest.major + 1, minor: 0 };
   return { major: latest.major, minor: latest.minor + 1 };
-};
-
-const normalizeViews = (views: FloorPlanView[] | undefined): FloorPlanView[] | undefined => {
-  if (!Array.isArray(views)) return views;
-  if (!views.length) return [];
-  const withUniqueNames = (items: FloorPlanView[]) => {
-    const used = new Set<string>();
-    return items.map((view) => {
-      const baseNameRaw = String(view?.name || '').trim();
-      const baseName = baseNameRaw || 'View';
-      let candidate = baseName;
-      let suffix = 1;
-      while (used.has(candidate.toLowerCase())) {
-        candidate = `${baseName}_${suffix}`;
-        suffix += 1;
-      }
-      used.add(candidate.toLowerCase());
-      return candidate === view.name ? view : { ...view, name: candidate };
-    });
-  };
-  const next = views.map((v) => ({ ...v, pan: { ...v.pan }, name: String(v?.name || '').trim() }));
-  let defaultIndex = next.findIndex((v) => v.isDefault);
-  if (defaultIndex === -1) {
-    defaultIndex = next.findIndex((v) => String(v.name || '').trim().toLowerCase() === 'default');
-  }
-  if (defaultIndex !== -1) {
-    const normalized = next.map((v, idx) => ({
-      ...v,
-      isDefault: idx === defaultIndex
-    }));
-    const [def] = normalized.splice(defaultIndex, 1);
-    return withUniqueNames([def, ...normalized]);
-  }
-  return withUniqueNames(next.map((v) => (v.isDefault ? { ...v, isDefault: false } : v)));
-};
-
-const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[] => {
-  if (!Array.isArray(history)) return [];
-  return history
-    .map((entry) => {
-      const company = String(entry?.company || '').trim();
-      const date = typeof entry?.date === 'string' ? String(entry.date).trim() : '';
-      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
-      const createdAtRaw = Number(entry?.createdAt);
-      return {
-        id: String(entry?.id || nanoid()),
-        company,
-        date: date || undefined,
-        notes: notes || undefined,
-        createdAt: Number.isFinite(createdAtRaw) ? createdAtRaw : Date.now()
-      } as DoorVerificationEntry;
-    })
-    .filter((entry) => !!entry.company || !!entry.date)
-    .sort((a, b) => b.createdAt - a.createdAt);
-};
-
-const normalizeRoomConnectionDoor = (door: any): RoomConnectionDoor | null => {
-  const roomAId = String(door?.roomAId || '').trim();
-  const roomBId = String(door?.roomBId || '').trim();
-  if (!roomAId || !roomBId || roomAId === roomBId) return null;
-  const anchorRoomIdRaw = String(door?.anchorRoomId || '').trim();
-  const anchorRoomId = anchorRoomIdRaw === roomAId || anchorRoomIdRaw === roomBId ? anchorRoomIdRaw : roomAId;
-  const edgeIndex = Number(door?.edgeIndex);
-  const t = Number(door?.t);
-  if (!Number.isFinite(edgeIndex) || !Number.isFinite(t)) return null;
-  return {
-    ...door,
-    id: String(door?.id || nanoid()),
-    roomAId,
-    roomBId,
-    anchorRoomId,
-    edgeIndex,
-    t: Math.max(0, Math.min(1, t)),
-    mode:
-      door?.mode === 'auto_sensor' || door?.mode === 'automated' || door?.mode === 'static'
-        ? door.mode
-        : 'static',
-    automationUrl: typeof door?.automationUrl === 'string' ? String(door.automationUrl).trim() || undefined : undefined,
-    catalogTypeId: typeof door?.catalogTypeId === 'string' ? String(door.catalogTypeId).trim() || undefined : undefined,
-    description: typeof door?.description === 'string' ? String(door.description).trim() || undefined : undefined,
-    isEmergency: !!door?.isEmergency,
-    isMainEntrance: !!door?.isMainEntrance,
-    isExternal: !!door?.isExternal,
-    isFireDoor: !!door?.isFireDoor,
-    lastVerificationAt: typeof door?.lastVerificationAt === 'string' ? String(door.lastVerificationAt).trim() || undefined : undefined,
-    verifierCompany: typeof door?.verifierCompany === 'string' ? String(door.verifierCompany).trim() || undefined : undefined,
-    verificationHistory: normalizeDoorVerificationHistory(door?.verificationHistory)
-  };
-};
-
-const normalizeSecurityDocuments = (docs: any): SecurityDocumentEntry[] => {
-  if (!Array.isArray(docs)) return [];
-  return docs
-    .map((entry) => {
-      const name = String(entry?.name || '').trim();
-      const fileName = typeof entry?.fileName === 'string' ? String(entry.fileName).trim() : '';
-      const dataUrl = typeof entry?.dataUrl === 'string' ? String(entry.dataUrl) : '';
-      const uploadedAtRaw = typeof entry?.uploadedAt === 'string' ? String(entry.uploadedAt).trim() : '';
-      const validUntilRaw = typeof entry?.validUntil === 'string' ? String(entry.validUntil).trim() : '';
-      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
-      const archived = !!entry?.archived;
-      return {
-        id: String(entry?.id || nanoid()),
-        name: name || 'Documento',
-        fileName: fileName || undefined,
-        dataUrl: dataUrl || undefined,
-        uploadedAt: uploadedAtRaw || new Date().toISOString().slice(0, 10),
-        validUntil: validUntilRaw || undefined,
-        notes: notes || undefined,
-        archived
-      } as SecurityDocumentEntry;
-    })
-    .filter((entry) => !!entry.name);
-};
-
-const normalizeSecurityCheckHistory = (history: any): SecurityCheckEntry[] => {
-  if (!Array.isArray(history)) return [];
-  return history
-    .map((entry) => {
-      const date = typeof entry?.date === 'string' ? String(entry.date).trim() : '';
-      const company = typeof entry?.company === 'string' ? String(entry.company).trim() : '';
-      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
-      const createdAtRaw = Number(entry?.createdAt);
-      const archived = !!entry?.archived;
-      return {
-        id: String(entry?.id || nanoid()),
-        date: date || undefined,
-        company: company || undefined,
-        notes: notes || undefined,
-        createdAt: Number.isFinite(createdAtRaw) ? createdAtRaw : Date.now(),
-        archived
-      } as SecurityCheckEntry;
-    })
-    .filter((entry) => !!entry.date || !!entry.company || !!entry.notes)
-    .sort((a, b) => b.createdAt - a.createdAt);
-};
-
-const normalizeEmergencyContacts = (contacts: any): EmergencyContactEntry[] => {
-  if (!Array.isArray(contacts)) return [];
-  return contacts
-    .map((entry) => {
-      const scopeRaw = String(entry?.scope || '').trim();
-      const scope: EmergencyContactEntry['scope'] =
-        scopeRaw === 'global' || scopeRaw === 'client' || scopeRaw === 'site' || scopeRaw === 'plan' ? scopeRaw : 'client';
-      const name = String(entry?.name || '').trim();
-      const phone = String(entry?.phone || '').trim();
-      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
-      const showOnPlanCard = entry?.showOnPlanCard !== false;
-      const siteId = typeof entry?.siteId === 'string' ? String(entry.siteId).trim() : '';
-      const floorPlanId = typeof entry?.floorPlanId === 'string' ? String(entry.floorPlanId).trim() : '';
-      return {
-        id: String(entry?.id || nanoid()),
-        scope,
-        name,
-        phone,
-        notes: notes || undefined,
-        showOnPlanCard,
-        siteId: siteId || undefined,
-        floorPlanId: floorPlanId || undefined
-      } as EmergencyContactEntry;
-    })
-    .filter((entry) => !!entry.name && !!entry.phone);
-};
-
-const normalizeBusinessPartners = (items: any): BusinessPartner[] => {
-  if (!Array.isArray(items)) return [];
-  return items
-    .map((entry) => {
-      const name = String(entry?.name || '').trim();
-      const logoUrl = String(entry?.logoUrl || '').trim();
-      const email = String(entry?.email || '').trim();
-      const phone = String(entry?.phone || '').trim();
-      const notes = String(entry?.notes || '').trim();
-      return {
-        id: String(entry?.id || nanoid()),
-        name,
-        logoUrl: logoUrl || undefined,
-        email: email || undefined,
-        phone: phone || undefined,
-        notes: notes || undefined
-      } as BusinessPartner;
-    })
-    .filter((row) => !!row.name)
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-};
-
-const snapshotRevision = (
-  plan: FloorPlan,
-  rev: { major: number; minor: number },
-  payload?: { name?: string; description?: string; createdBy?: FloorPlanRevision['createdBy'] }
-): FloorPlanRevision => {
-  const now = Date.now();
-  const baseName = payload?.name?.trim() || 'Snapshot';
-  return {
-    id: nanoid(),
-    createdAt: now,
-    ...(payload?.createdBy ? { createdBy: payload.createdBy } : {}),
-    revMajor: rev.major,
-    revMinor: rev.minor,
-    name: baseName,
-    description: payload?.description?.trim() || undefined,
-    imageUrl: plan.imageUrl,
-    width: plan.width,
-    height: plan.height,
-    scale: plan.scale ? { ...plan.scale } : undefined,
-    views: normalizeViews(plan.views),
-    rooms: plan.rooms ? plan.rooms.map((r) => ({ ...r })) : undefined,
-    corridors: plan.corridors
-      ? plan.corridors.map((c) => ({
-          ...c,
-          points: Array.isArray(c.points) ? c.points.map((p) => ({ ...p })) : undefined,
-          doors: Array.isArray(c.doors)
-            ? c.doors.map((d) => ({
-                ...d,
-                catalogTypeId: typeof (d as any)?.catalogTypeId === 'string' ? String((d as any).catalogTypeId) : undefined,
-                description: typeof (d as any)?.description === 'string' ? String((d as any).description) : undefined,
-                isEmergency: !!(d as any)?.isEmergency,
-                isMainEntrance: !!(d as any)?.isMainEntrance,
-                isExternal: !!(d as any)?.isExternal,
-                isFireDoor: !!(d as any)?.isFireDoor,
-                lastVerificationAt: typeof (d as any)?.lastVerificationAt === 'string' ? String((d as any).lastVerificationAt) : undefined,
-                verifierCompany: typeof (d as any)?.verifierCompany === 'string' ? String((d as any).verifierCompany) : undefined,
-                verificationHistory: normalizeDoorVerificationHistory((d as any)?.verificationHistory),
-                linkedRoomIds: Array.isArray((d as any)?.linkedRoomIds)
-                  ? (d as any).linkedRoomIds.map((id: any) => String(id))
-                  : undefined
-              }))
-            : undefined,
-          connections: Array.isArray(c.connections)
-            ? c.connections.map((cp) => ({
-                ...cp,
-                planIds: [...(cp.planIds || [])],
-                transitionType: (cp as any)?.transitionType === 'elevator' ? 'elevator' : 'stairs'
-              }))
-            : undefined
-        }))
-      : undefined,
-    roomDoors: Array.isArray((plan as any).roomDoors)
-      ? (plan as any).roomDoors
-          .map((door: any) => {
-            const normalized = normalizeRoomConnectionDoor(door);
-            if (!normalized) return null;
-            return {
-              ...normalized,
-              verificationHistory: normalizeDoorVerificationHistory((normalized as any).verificationHistory)
-            };
-          })
-          .filter(Boolean) as RoomConnectionDoor[]
-      : undefined,
-    links: plan.links ? plan.links.map((l) => ({ ...l })) : undefined,
-    racks: plan.racks ? plan.racks.map((r) => ({ ...r })) : undefined,
-    rackItems: plan.rackItems ? plan.rackItems.map((i) => ({ ...i })) : undefined,
-    rackLinks: plan.rackLinks ? plan.rackLinks.map((l) => ({ ...l })) : undefined,
-    safetyCardLayout: (plan as any).safetyCardLayout
-      ? {
-          x: Number((plan as any).safetyCardLayout.x || 0),
-          y: Number((plan as any).safetyCardLayout.y || 0),
-          w: Number((plan as any).safetyCardLayout.w || 420),
-          h: Number((plan as any).safetyCardLayout.h || 84),
-          fontSize: Number.isFinite(Number((plan as any).safetyCardLayout.fontSize))
-            ? Number((plan as any).safetyCardLayout.fontSize)
-            : undefined,
-          fontIndex: Number.isFinite(Number((plan as any).safetyCardLayout.fontIndex))
-            ? Number((plan as any).safetyCardLayout.fontIndex)
-            : undefined,
-          colorIndex: Number.isFinite(Number((plan as any).safetyCardLayout.colorIndex))
-            ? Number((plan as any).safetyCardLayout.colorIndex)
-            : undefined,
-          textBgIndex: Number.isFinite(Number((plan as any).safetyCardLayout.textBgIndex))
-            ? Number((plan as any).safetyCardLayout.textBgIndex)
-            : undefined
-        }
-      : undefined,
-    objects: plan.objects.map((o) => ({
-      ...o,
-      securityDocuments: normalizeSecurityDocuments((o as any)?.securityDocuments),
-      securityCheckHistory: normalizeSecurityCheckHistory((o as any)?.securityCheckHistory)
-    }))
-  };
 };
 
 const defaultLayers = (): LayerDefinition[] => [

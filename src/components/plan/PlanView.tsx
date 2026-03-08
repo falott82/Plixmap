@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
 import { getMeetingRoomActiveToneClass, getMeetingTimelineDayClasses, isApprovedMeetingInProgress } from '../../utils/meetingTime';
+import { currentLocalIsoDay, toLocalIsoDay, toLocalMonthAnchor } from '../../utils/localDate';
 import {
   ChevronDown,
   ChevronLeft,
@@ -53,7 +54,6 @@ import {
   Search,
   Loader2
 		} from 'lucide-react';
-import QRCode from 'qrcode';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
 import SearchBar from './SearchBar';
@@ -89,6 +89,13 @@ import ChooseDefaultViewModal from './ChooseDefaultViewModal';
 import Icon from '../ui/Icon';
 import { DESK_TYPE_IDS, isDeskType } from './deskTypes';
 import RoomShapePreview from './RoomShapePreview';
+import RoomMeasuresModal from './RoomMeasuresModal';
+import RoomLayoutExportModal, {
+  type RoomLayoutExportModalState,
+  type RoomLayoutExportModalSortKey,
+  type RoomLayoutExportRow
+} from './RoomLayoutExportModal';
+import RoomMeetingDuplicateModal, { type RoomMeetingDuplicateModalState } from './RoomMeetingDuplicateModal';
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
 import BulkEditSelectionModal from './BulkEditSelectionModal';
 import type { CrossPlanSearchResult } from './CrossPlanSearchModal';
@@ -103,7 +110,6 @@ import {
   cancelMeeting,
   createMeeting,
   fetchMeetings,
-  fetchMeetingRoomSchedule,
   fetchMyMeetings,
   fetchMeetingOverview,
   updateMeeting,
@@ -130,6 +136,8 @@ import { getDefaultVisiblePlanLayerIds, normalizePlanLayerSelection } from '../.
 import { getWallTypeColor } from '../../utils/wallColors';
 import { isNonPeopleRoom } from '../../utils/roomProperties';
 import { closeSocketSafely, getWsUrl } from '../../utils/ws';
+import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
+import RoomKioskInfoModal from './RoomKioskInfoModal';
 import { usePresentationWebcamHands } from './presentation/usePresentationWebcamHands';
 
 const SelectedObjectsModal = lazy(() => import('./SelectedObjectsModal'));
@@ -225,6 +233,14 @@ type SharedRoomSide = {
   tMax: number;
   a: { x: number; y: number };
   b: { x: number; y: number };
+};
+
+type RoomKioskInfoModalState = {
+  roomId: string;
+  roomName: string;
+  clientName: string;
+  siteName: string;
+  planName: string;
 };
 
 const getRoomPolygon = (room: any): Array<{ x: number; y: number }> => {
@@ -1132,29 +1148,7 @@ const PlanView = ({ planId }: Props) => {
     deleting: boolean;
     error: string | null;
   }>(null);
-  const [roomMeetingDuplicateModal, setRoomMeetingDuplicateModal] = useState<null | {
-    mode: 'duplicate' | 'followup';
-    booking: MeetingBooking;
-    step: 'setup' | 'calendar';
-    roomMode: 'selected' | 'any';
-    selectedRoomId: string;
-    timeMode: 'same' | 'any_08_18' | 'custom';
-    customFromHm: string;
-    customToHm: string;
-    roomOptions: Array<{ roomId: string; roomName: string; floorPlanId: string; floorPlanName: string }>;
-    baseDay: string;
-    preferredDay: string;
-    monthAnchor: string; // YYYY-MM-01
-    selectedDays: string[];
-    availabilityByDay: Record<
-      string,
-      { state: 'available' | 'occupied' | 'blocked' | 'loading' | 'error'; reason?: string }
-    >;
-    candidateByDay: Record<string, { roomId: string; roomName: string; floorPlanId: string; floorPlanName: string; startHm: string; endHm: string }>;
-    loadingMonth: boolean;
-    saving: boolean;
-    error: string | null;
-  }>(null);
+  const [roomMeetingDuplicateModal, setRoomMeetingDuplicateModal] = useState<RoomMeetingDuplicateModalState | null>(null);
   const [roomMeetingDuplicateRoomPickerOpen, setRoomMeetingDuplicateRoomPickerOpen] = useState(false);
   const roomMeetingDuplicateRoomPickerRef = useRef<HTMLDivElement | null>(null);
   const meetingHubFocusRef = useRef<HTMLButtonElement | null>(null);
@@ -1168,15 +1162,12 @@ const PlanView = ({ planId }: Props) => {
   const roomMeetingEditParticipantsCloseGuardUntilRef = useRef(0);
   const roomMeetingEditParticipantsNameInputRef = useRef<HTMLInputElement | null>(null);
   const roomMeetingsTimelineScrollRef = useRef<HTMLDivElement | null>(null);
-  const [roomKioskInfoModal, setRoomKioskInfoModal] = useState<null | {
-    roomId: string;
-    roomName: string;
-    clientName: string;
-    siteName: string;
-    planName: string;
-  }>(null);
-  const [roomKioskInfoQrDataUrl, setRoomKioskInfoQrDataUrl] = useState('');
-  const [roomKioskInfoLink, setRoomKioskInfoLink] = useState('');
+  const [roomKioskInfoModal, setRoomKioskInfoModal] = useState<RoomKioskInfoModalState | null>(null);
+  const { link: roomKioskInfoLink, qrDataUrl: roomKioskInfoQrDataUrl } = useMeetingRoomKioskInfo({
+    roomId: roomKioskInfoModal?.roomId,
+    enabled: !!roomKioskInfoModal?.roomId,
+    qrWidth: 300
+  });
   const [roomDepartmentOptions, setRoomDepartmentOptions] = useState<string[]>([]);
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1303,26 +1294,7 @@ const PlanView = ({ planId }: Props) => {
     | null
   >(null);
   const [roomMeasuresModal, setRoomMeasuresModal] = useState<{ roomId: string } | null>(null);
-  const [roomLayoutExportModal, setRoomLayoutExportModal] = useState<{
-    clientId: string;
-    sourcePlanId: string;
-    sourceRoomId: string;
-    sortKey:
-      | 'site'
-      | 'plan'
-      | 'room'
-      | 'capacity'
-      | 'scale'
-      | 'opacity'
-      | 'meetingRoom'
-      | 'logical'
-      | 'storageRoom'
-      | 'bathroom'
-      | 'technicalRoom'
-      | 'noWindows';
-    sortDir: 'asc' | 'desc';
-    selectedKeys: string[];
-  } | null>(null);
+  const [roomLayoutExportModal, setRoomLayoutExportModal] = useState<RoomLayoutExportModalState | null>(null);
   const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
   const [confirmDeleteRoomIds, setConfirmDeleteRoomIds] = useState<string[] | null>(null);
   const [confirmDeleteCorridorId, setConfirmDeleteCorridorId] = useState<string | null>(null);
@@ -1619,7 +1591,7 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     const load = () => {
-      fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day: new Date().toISOString().slice(0, 10) })
+      fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day: currentLocalIsoDay() })
         .then((payload) => {
           if (cancelled) return;
           const nowTs = Date.now();
@@ -1736,7 +1708,7 @@ const PlanView = ({ planId }: Props) => {
   const openRoomMeetingsTimeline = useCallback(
     (roomId: string) => {
       const room = (((plan as any)?.rooms || []) as any[]).find((r) => String(r?.id || '') === String(roomId));
-      const day = new Date().toISOString().slice(0, 10);
+      const day = currentLocalIsoDay();
       setRoomMeetingsTimelineModal({
         roomId,
         roomName: String(room?.name || t({ it: 'Meeting room', en: 'Meeting room' })),
@@ -1801,8 +1773,7 @@ const PlanView = ({ planId }: Props) => {
   }, [reloadRoomMeetingsTimeline, roomMeetingsTimelineModal?.day, roomMeetingsTimelineModal?.roomId]);
 
   const meetingIsoDayFromTs = useCallback((ts: number) => {
-    const d = new Date(Number(ts || 0));
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return toLocalIsoDay(Number(ts || 0));
   }, []);
 
   const meetingClockFromTs = useCallback((ts: number) => {
@@ -2098,7 +2069,7 @@ const PlanView = ({ planId }: Props) => {
       target = Math.max(0, x - scroller.clientWidth / 2);
     } else {
       const nowDate = new Date();
-      const todayIsoLocal = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
+      const todayIsoLocal = currentLocalIsoDay();
       if (String(modal.day || '') !== todayIsoLocal) return;
       const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
       const nowX = labelColPx + ((nowMinutes - minMinutes) / total) * timelineWidthPx;
@@ -2346,32 +2317,32 @@ const PlanView = ({ planId }: Props) => {
 
   const shiftIsoDay = useCallback((iso: string, deltaDays: number) => {
     const d = new Date(`${String(iso || '').trim()}T00:00:00`);
-    if (!Number.isFinite(d.getTime())) return new Date().toISOString().slice(0, 10);
+    if (!Number.isFinite(d.getTime())) return currentLocalIsoDay();
     d.setDate(d.getDate() + deltaDays);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return toLocalIsoDay(d);
   }, []);
 
   const monthAnchorFromIso = useCallback((iso: string) => {
     const d = new Date(`${String(iso || '').trim()}T00:00:00`);
-    if (!Number.isFinite(d.getTime())) return new Date().toISOString().slice(0, 7) + '-01';
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+    if (!Number.isFinite(d.getTime())) return toLocalMonthAnchor();
+    return toLocalMonthAnchor(d);
   }, []);
 
   const shiftMonthAnchor = useCallback((anchorIso: string, deltaMonths: number) => {
     const d = new Date(`${String(anchorIso || '').trim()}T00:00:00`);
-    if (!Number.isFinite(d.getTime())) return monthAnchorFromIso(new Date().toISOString().slice(0, 10));
+    if (!Number.isFinite(d.getTime())) return toLocalMonthAnchor();
     d.setMonth(d.getMonth() + deltaMonths, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
-  }, [monthAnchorFromIso]);
+    return toLocalMonthAnchor(d);
+  }, []);
 
   const toLocalHmFromTs = useCallback((ts: number) => {
     const d = new Date(Number(ts || 0));
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }, []);
 
-  const hmToMinutes = useCallback((hm: string) => {
+  const hmToMinutes = useCallback((hm: string): number | null => {
     const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || '').trim());
-    if (!m) return 0;
+    if (!m) return null;
     const h = Math.max(0, Math.min(23, Number(m[1]) || 0));
     const mm = Math.max(0, Math.min(59, Number(m[2]) || 0));
     return h * 60 + mm;
@@ -2408,11 +2379,13 @@ const PlanView = ({ planId }: Props) => {
       const startTs = Number(booking.startAt || 0);
       const endTs = Number(booking.endAt || 0);
       const sourceStartHm = meetingClockFromTs(startTs);
-      const sourceStartMin = hmToMinutes(sourceStartHm);
+      const parsedSourceStartMin = hmToMinutes(sourceStartHm);
+      if (!Number.isFinite(parsedSourceStartMin)) return null;
+      const sourceStartMin = Number(parsedSourceStartMin);
       const durationMinRaw = Math.round((endTs - startTs) / 60_000);
       const durationMin = Math.max(1, Number.isFinite(durationMinRaw) ? durationMinRaw : 60);
       let startMin = timeMode === 'same' ? sourceStartMin : 0;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = currentLocalIsoDay();
       if (dayIso === today) {
         const now = new Date();
         const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -2656,7 +2629,7 @@ const PlanView = ({ planId }: Props) => {
     const baseDay = String(modal.baseDay || '').trim();
     const monthAnchor = String(modal.monthAnchor || '').trim();
     if (!baseDay || !monthAnchor) return;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = currentLocalIsoDay();
     const monthDate = new Date(`${monthAnchor}T00:00:00`);
     if (!Number.isFinite(monthDate.getTime())) return;
     const y = monthDate.getFullYear();
@@ -2798,8 +2771,10 @@ const PlanView = ({ planId }: Props) => {
           const windowEndRaw =
             modal.timeMode === 'custom' ? hmToMinutes(String(modal.customToHm || '')) : 18 * 60;
           if (!Number.isFinite(windowStartRaw) || !Number.isFinite(windowEndRaw)) return null;
-          const windowStart = Math.max(0, Math.min(23 * 60 + 59, Math.max(windowStartRaw, nowMin)));
-          const windowEnd = Math.max(0, Math.min(23 * 60 + 59, windowEndRaw));
+          const windowStartMin = Number(windowStartRaw);
+          const windowEndMin = Number(windowEndRaw);
+          const windowStart = Math.max(0, Math.min(23 * 60 + 59, Math.max(windowStartMin, nowMin)));
+          const windowEnd = Math.max(0, Math.min(23 * 60 + 59, windowEndMin));
           if (windowEnd <= windowStart) return null;
           let cursor = windowStart;
           for (const interval of intervals) {
@@ -7325,7 +7300,7 @@ const PlanView = ({ planId }: Props) => {
             clientId,
             siteId: String(preset?.siteId || site?.id || '').trim() || 'all',
             siteLocked: !!preset?.siteLocked,
-            day: String(preset?.day || new Date().toISOString().slice(0, 10)),
+            day: String(preset?.day || currentLocalIsoDay()),
             returnTo: preset?.returnTo || null
           }
         })
@@ -7350,7 +7325,7 @@ const PlanView = ({ planId }: Props) => {
         clientId: preset?.clientId || client?.id,
         siteId: preset?.siteId || site?.id,
         siteLocked: !!preset?.siteLocked,
-        day: preset?.day || new Date().toISOString().slice(0, 10),
+        day: preset?.day || currentLocalIsoDay(),
         returnTo: preset?.returnTo
       };
       if (hasNavigationEdits && !isReadOnly) {
@@ -8135,77 +8110,9 @@ const PlanView = ({ planId }: Props) => {
     roomMeasuresModal
   ]);
 
-  useEffect(() => {
-    if (!roomKioskInfoModal?.roomId) {
-      setRoomKioskInfoQrDataUrl('');
-      setRoomKioskInfoLink('');
-      return;
-    }
-    let cancelled = false;
-    const path = `/meetingroom/${encodeURIComponent(String(roomKioskInfoModal.roomId))}`;
-    const fallback = typeof window === 'undefined' ? path : `${window.location.origin}${path}`;
-    fetchMeetingRoomSchedule(String(roomKioskInfoModal.roomId))
-      .then((res: any) => String(res?.kioskPublicUrl || '').trim() || fallback)
-      .catch(() => fallback)
-      .then((link) => {
-        if (cancelled) return;
-        setRoomKioskInfoLink(link);
-        return QRCode.toDataURL(link, { margin: 1, width: 300 })
-          .then((url: string) => !cancelled && setRoomKioskInfoQrDataUrl(url))
-          .catch(() => !cancelled && setRoomKioskInfoQrDataUrl(''));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [roomKioskInfoModal]);
-
   const roomLayoutExportRows = useMemo(() => {
-    if (!roomLayoutExportModal) return [] as Array<{
-      key: string;
-      clientId: string;
-      siteId: string;
-      siteName: string;
-      planId: string;
-      planName: string;
-      roomId: string;
-      roomName: string;
-      capacity: number;
-      typeCodes: string;
-      typeFlagsLabel: string;
-      meetingRoom: boolean;
-      logical: boolean;
-      storageRoom: boolean;
-      bathroom: boolean;
-      technicalRoom: boolean;
-      noWindows: boolean;
-      color: string;
-      fillOpacity: number;
-      labelScale: number;
-      isSource: boolean;
-    }>;
-    const out: Array<{
-      key: string;
-      clientId: string;
-      siteId: string;
-      siteName: string;
-      planId: string;
-      planName: string;
-      roomId: string;
-      roomName: string;
-      capacity: number;
-      typeCodes: string;
-      typeFlagsLabel: string;
-      meetingRoom: boolean;
-      logical: boolean;
-      storageRoom: boolean;
-      bathroom: boolean;
-      technicalRoom: boolean;
-      noWindows: boolean;
-      color: string;
-      fillOpacity: number;
-      labelScale: number;
-      isSource: boolean;
-    }> = [];
+    if (!roomLayoutExportModal) return [] as RoomLayoutExportRow[];
+    const out: RoomLayoutExportRow[] = [];
     const clientEntry = (allClients || []).find((c) => String(c.id) === String(roomLayoutExportModal.clientId));
     if (!clientEntry) return out;
     for (const siteEntry of clientEntry.sites || []) {
@@ -8329,6 +8236,61 @@ const PlanView = ({ planId }: Props) => {
     );
     setRoomLayoutExportModal(null);
   }, [markTouched, planId, push, roomLayoutExportModal, roomLayoutExportRows, roomLayoutExportSource, setPlanDirty, t, updateRoom]);
+
+  const closeRoomLayoutExportModal = useCallback(() => {
+    setRoomLayoutExportModal(null);
+  }, []);
+
+  const selectAllRoomLayoutExportRows = useCallback(() => {
+    setRoomLayoutExportModal((prev) =>
+      !prev
+        ? prev
+        : {
+            ...prev,
+            selectedKeys: roomLayoutExportRows.filter((row) => !row.isSource).map((row) => row.key)
+          }
+    );
+  }, [roomLayoutExportRows]);
+
+  const clearRoomLayoutExportSelection = useCallback(() => {
+    setRoomLayoutExportModal((prev) => (prev ? { ...prev, selectedKeys: [] } : prev));
+  }, []);
+
+  const toggleAllRoomLayoutExportRows = useCallback(
+    (checked: boolean) => {
+      setRoomLayoutExportModal((prev) =>
+        !prev
+          ? prev
+          : {
+              ...prev,
+              selectedKeys: checked ? roomLayoutExportRows.filter((row) => !row.isSource).map((row) => row.key) : []
+            }
+      );
+    },
+    [roomLayoutExportRows]
+  );
+
+  const toggleRoomLayoutExportRow = useCallback((key: string, checked: boolean) => {
+    setRoomLayoutExportModal((prev) => {
+      if (!prev) return prev;
+      const selected = new Set(prev.selectedKeys || []);
+      if (checked) selected.add(key);
+      else selected.delete(key);
+      return { ...prev, selectedKeys: Array.from(selected) };
+    });
+  }, []);
+
+  const sortRoomLayoutExportRows = useCallback((key: RoomLayoutExportModalSortKey) => {
+    setRoomLayoutExportModal((prev) =>
+      !prev
+        ? prev
+        : {
+            ...prev,
+            sortKey: key,
+            sortDir: prev.sortKey === key && prev.sortDir === 'asc' ? 'desc' : 'asc'
+          }
+    );
+  }, []);
 
   const roomModalMetrics = useMemo(() => {
     if (!roomModal) return null;
@@ -19492,124 +19454,29 @@ const PlanView = ({ planId }: Props) => {
         onConfirm={confirmPaste}
       />
 
-      <Transition show={!!roomKioskInfoModal} as={Fragment}>
-        <Dialog as="div" className="relative z-[76]" onClose={() => setRoomKioskInfoModal(null)}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-150"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-100"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto p-4">
-            <div className="flex min-h-full items-center justify-center">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-150"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-100"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-6xl rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
-                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
-                    <div>
-                      <Dialog.Title className="text-lg font-semibold text-ink">{t({ it: 'Kiosk Info', en: 'Kiosk Info' })}</Dialog.Title>
-                      <div className="text-xs text-slate-500">
-                        {[roomKioskInfoModal?.clientName, roomKioskInfoModal?.siteName, roomKioskInfoModal?.planName].filter(Boolean).join(' • ')}
-                      </div>
-                      <div className="mt-1 text-sm font-semibold text-slate-700">{roomKioskInfoModal?.roomName || '-'}</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setRoomKioskInfoModal(null)}
-                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
-                      title={t({ it: 'Chiudi', en: 'Close' })}
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                  <div className="mt-4 grid gap-4 md:grid-cols-[320px,1fr]">
-                    <div className="rounded-xl border border-slate-200 bg-white p-3">
-                      {roomKioskInfoQrDataUrl ? (
-                        <img
-                          src={roomKioskInfoQrDataUrl}
-                          alt={t({ it: 'QR code kiosk mode', en: 'Kiosk mode QR code' })}
-                          className="mx-auto h-[300px] w-[300px] rounded-lg border border-slate-200 bg-white p-2"
-                        />
-                      ) : (
-                        <div className="flex h-[300px] w-[300px] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
-                          QR
-                        </div>
-                      )}
-                    </div>
-                    <div className="space-y-3">
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t({ it: 'Link kiosk', en: 'Kiosk link' })}</div>
-                        <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono text-slate-700 break-all">
-                          {roomKioskInfoLink || '—'}
-                        </div>
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!roomKioskInfoLink) return;
-                              if (typeof window !== 'undefined') {
-                                window.open(roomKioskInfoLink, '_blank', 'noopener,noreferrer');
-                              }
-                            }}
-                            className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
-                          >
-                            <ExternalLink size={14} />
-                            {t({ it: 'Apri link', en: 'Open link' })}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!roomKioskInfoLink) return;
-                              if (!navigator?.clipboard?.writeText) {
-                                push(t({ it: 'Clipboard non disponibile', en: 'Clipboard not available' }), 'danger');
-                                return;
-                              }
-                              navigator.clipboard.writeText(roomKioskInfoLink)
-                                .then(() => push(t({ it: 'Link kiosk copiato', en: 'Kiosk link copied' }), 'success'))
-                                .catch(() => push(t({ it: 'Copia non riuscita', en: 'Copy failed' }), 'danger'));
-                            }}
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                          >
-                            <Copy size={14} />
-                            {t({ it: 'Copia link', en: 'Copy link' })}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                        {t({
-                          it: 'Scansiona il QR code dal tablet della sala per aprire direttamente la pagina Kiosk mode.',
-                          en: 'Scan the QR code from the room tablet to open the Kiosk mode page directly.'
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setRoomKioskInfoModal(null)}
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                      {t({ it: 'Chiudi', en: 'Close' })}
-                    </button>
-                  </div>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
+      <RoomKioskInfoModal
+        modal={roomKioskInfoModal}
+        link={roomKioskInfoLink}
+        qrDataUrl={roomKioskInfoQrDataUrl}
+        t={t}
+        onClose={() => setRoomKioskInfoModal(null)}
+        onOpenLink={() => {
+          if (!roomKioskInfoLink) return;
+          if (typeof window !== 'undefined') {
+            window.open(roomKioskInfoLink, '_blank', 'noopener,noreferrer');
+          }
+        }}
+        onCopyLink={() => {
+          if (!roomKioskInfoLink) return;
+          if (!navigator?.clipboard?.writeText) {
+            push(t({ it: 'Clipboard non disponibile', en: 'Clipboard not available' }), 'danger');
+            return;
+          }
+          navigator.clipboard.writeText(roomKioskInfoLink)
+            .then(() => push(t({ it: 'Link kiosk copiato', en: 'Kiosk link copied' }), 'success'))
+            .catch(() => push(t({ it: 'Copia non riuscita', en: 'Copy failed' }), 'danger'));
+        }}
+      />
 
       <Transition show={!!roomMeetingDeleteModal && !meetingManagerOpen && !roomMeetingDuplicateModal} as={Fragment}>
         <Dialog as="div" className="relative z-[92]" onClose={() => setRoomMeetingDeleteModal(null)}>
@@ -19776,7 +19643,7 @@ const PlanView = ({ planId }: Props) => {
                       <button
                         type="button"
                         onClick={() => {
-                          const nextDay = shiftIsoDay(roomMeetingsTimelineModal?.day || new Date().toISOString().slice(0, 10), -1);
+                          const nextDay = shiftIsoDay(roomMeetingsTimelineModal?.day || currentLocalIsoDay(), -1);
                           setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: nextDay } : prev));
                           if (roomMeetingsTimelineModal?.roomId) void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, nextDay);
                         }}
@@ -19789,9 +19656,9 @@ const PlanView = ({ planId }: Props) => {
                       {t({ it: 'Data', en: 'Date' })}
                       <input
                         type="date"
-                        value={roomMeetingsTimelineModal?.day || new Date().toISOString().slice(0, 10)}
+                        value={roomMeetingsTimelineModal?.day || currentLocalIsoDay()}
                         onChange={(e) => {
-                          const nextDay = e.target.value || new Date().toISOString().slice(0, 10);
+                          const nextDay = e.target.value || currentLocalIsoDay();
                           setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: nextDay } : prev));
                           if (roomMeetingsTimelineModal?.roomId) void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, nextDay);
                         }}
@@ -19801,7 +19668,7 @@ const PlanView = ({ planId }: Props) => {
                       <button
                         type="button"
                         onClick={() => {
-                          const nextDay = shiftIsoDay(roomMeetingsTimelineModal?.day || new Date().toISOString().slice(0, 10), 1);
+                          const nextDay = shiftIsoDay(roomMeetingsTimelineModal?.day || currentLocalIsoDay(), 1);
                           setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: nextDay } : prev));
                           if (roomMeetingsTimelineModal?.roomId) void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, nextDay);
                         }}
@@ -21432,1038 +21299,43 @@ const PlanView = ({ planId }: Props) => {
         </Dialog>
       </Transition>
 
-      <Transition show={!!roomLayoutExportModal} as={Fragment}>
-        <Dialog as="div" className="relative z-[70]" onClose={() => setRoomLayoutExportModal(null)}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-150"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-100"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto p-4">
-            <div className="flex min-h-full items-center justify-center">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-150"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-100"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-[1800px] rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
-                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
-                    <div>
-                      <Dialog.Title className="text-lg font-semibold text-ink">
-                        {t({ it: 'Esporta layout stanza', en: 'Export room layout' })}
-                      </Dialog.Title>
-                      <div className="text-xs text-slate-500">
-                        {t({
-                          it: 'Copia colore, scala etichetta e opacità della stanza sorgente su altre stanze del cliente.',
-                          en: 'Copy color, label scale and opacity from the source room to other client rooms.'
-                        })}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setRoomLayoutExportModal(null)}
-                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
+      <RoomLayoutExportModal
+        open={!!roomLayoutExportModal}
+        modal={roomLayoutExportModal}
+        rows={roomLayoutExportRows}
+        source={roomLayoutExportSource}
+        t={t}
+        onClose={closeRoomLayoutExportModal}
+        onSelectAll={selectAllRoomLayoutExportRows}
+        onClearSelection={clearRoomLayoutExportSelection}
+        onToggleAll={toggleAllRoomLayoutExportRows}
+        onToggleRow={toggleRoomLayoutExportRow}
+        onSort={sortRoomLayoutExportRows}
+        onApply={applyRoomLayoutExportToSelection}
+      />
 
-                  {roomLayoutExportSource ? (
-                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                      <div className="flex flex-wrap items-center gap-3 text-sm">
-                        <span className="font-semibold text-emerald-900">
-                          {t({ it: 'Sorgente', en: 'Source' })}: {roomLayoutExportSource.siteName} · {roomLayoutExportSource.planName} · {roomLayoutExportSource.roomName}
-                        </span>
-                        <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
-                          <span className="inline-block h-4 w-4 rounded border border-slate-300" style={{ backgroundColor: roomLayoutExportSource.color }} />
-                          {t({ it: 'Colore', en: 'Color' })}
-                        </span>
-                        <span className="rounded-full border border-emerald-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
-                          {t({ it: 'Scala', en: 'Scale' })}: {roomLayoutExportSource.labelScale.toFixed(2)}
-                        </span>
-                        <span className="rounded-full border border-emerald-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
-                          {t({ it: 'Opacità', en: 'Opacity' })}: {Math.round(roomLayoutExportSource.fillOpacity * 100)}%
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
-                      {t({ it: 'Stanza sorgente non trovata.', en: 'Source room not found.' })}
-                    </div>
-                  )}
+      <RoomMeasuresModal
+        open={!!roomMeasuresModal}
+        data={roomMeasuresData}
+        t={t}
+        onClose={() => setRoomMeasuresModal(null)}
+      />
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setRoomLayoutExportModal((prev) =>
-                          !prev
-                            ? prev
-                            : {
-                                ...prev,
-                                selectedKeys: roomLayoutExportRows.filter((row) => !row.isSource).map((row) => row.key)
-                              }
-                        )
-                      }
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                      {t({ it: 'Seleziona tutte', en: 'Select all' })}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRoomLayoutExportModal((prev) => (prev ? { ...prev, selectedKeys: [] } : prev))}
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                      {t({ it: 'Deseleziona tutte', en: 'Clear selection' })}
-                    </button>
-                    <span className="ml-auto text-xs text-slate-500">
-                      {t({
-                        it: `${(roomLayoutExportModal?.selectedKeys || []).length} selezionate · ${roomLayoutExportRows.length} stanze`,
-                        en: `${(roomLayoutExportModal?.selectedKeys || []).length} selected · ${roomLayoutExportRows.length} rooms`
-                      })}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
-                    <div className="max-h-[52vh] overflow-auto">
-                      <table className="min-w-full text-sm">
-                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                          <tr>
-                            <th className="w-10 px-3 py-2 text-left">
-                              <input
-                                type="checkbox"
-                                checked={
-                                  roomLayoutExportRows.filter((row) => !row.isSource).length > 0 &&
-                                  roomLayoutExportRows.filter((row) => !row.isSource).every((row) =>
-                                    (roomLayoutExportModal?.selectedKeys || []).includes(row.key)
-                                  )
-                                }
-                                onChange={(e) =>
-                                  setRoomLayoutExportModal((prev) =>
-                                    !prev
-                                      ? prev
-                                      : {
-                                          ...prev,
-                                          selectedKeys: e.target.checked
-                                            ? roomLayoutExportRows.filter((row) => !row.isSource).map((row) => row.key)
-                                            : []
-                                        }
-                                  )
-                                }
-                              />
-                            </th>
-                            {([
-                              ['site', t({ it: 'Sede', en: 'Site' })],
-                              ['plan', t({ it: 'Planimetria', en: 'Floor plan' })],
-                              ['room', t({ it: 'Stanza', en: 'Room' })],
-                              ['capacity', t({ it: 'Capienza', en: 'Capacity' })],
-                              ['scale', t({ it: 'Scala', en: 'Scale' })],
-                              ['opacity', t({ it: 'Opacità', en: 'Opacity' })]
-                            ] as Array<[typeof roomLayoutExportModal extends null ? never : NonNullable<typeof roomLayoutExportModal>['sortKey'], string]>).map(
-                              ([key, label]) => (
-                                <th key={String(key)} className="px-3 py-2 text-left">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setRoomLayoutExportModal((prev) =>
-                                        !prev
-                                          ? prev
-                                          : {
-                                              ...prev,
-                                              sortKey: key,
-                                              sortDir: prev.sortKey === key && prev.sortDir === 'asc' ? 'desc' : 'asc'
-                                            }
-                                      )
-                                    }
-                                    className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
-                                    title={
-                                      key === 'site'
-                                        ? t({ it: 'Ordina per sede', en: 'Sort by site' })
-                                        : key === 'plan'
-                                          ? t({ it: 'Ordina per planimetria', en: 'Sort by floor plan' })
-                                          : key === 'room'
-                                            ? t({ it: 'Ordina per nome stanza', en: 'Sort by room name' })
-                                            : key === 'capacity'
-                                              ? t({ it: 'Ordina per capienza stanza', en: 'Sort by room capacity' })
-                                              : key === 'scale'
-                                                ? t({ it: 'Ordina per scala etichetta', en: 'Sort by label scale' })
-                                                : t({ it: 'Ordina per opacità sfondo', en: 'Sort by background opacity' })
-                                    }
-                                  >
-                                    {label}
-                                    {roomLayoutExportModal?.sortKey === key ? (
-                                      <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span>
-                                    ) : null}
-                                  </button>
-                                </th>
-                              )
-                            )}
-                            <th className="px-3 py-2 text-left" title={t({ it: 'Sigle tipi stanza attivi (MR, RP, BA, LT, RL, SF)', en: 'Active room type initials (MR, RP, BA, LT, RL, SF)' })}>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
-                                title={t({ it: 'Meeting Room (MR): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Meeting Room (MR): 1 on, 0 off. Click to sort.' })}
-                                onClick={() =>
-                                  setRoomLayoutExportModal((prev) =>
-                                    !prev ? prev : { ...prev, sortKey: 'meetingRoom', sortDir: prev.sortKey === 'meetingRoom' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
-                                  )
-                                }
-                              >
-                                MR
-                                {roomLayoutExportModal?.sortKey === 'meetingRoom' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
-                              </button>
-                            </th>
-                            <th className="px-3 py-2 text-left" title={t({ it: 'Room Logica (RL): 1 attivo, 0 disattivo', en: 'Logical room (RL): 1 on, 0 off' })}>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
-                                title={t({ it: 'Room Logica (RL): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Logical room (RL): 1 on, 0 off. Click to sort.' })}
-                                onClick={() =>
-                                  setRoomLayoutExportModal((prev) =>
-                                    !prev ? prev : { ...prev, sortKey: 'logical', sortDir: prev.sortKey === 'logical' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
-                                  )
-                                }
-                              >
-                                RL
-                                {roomLayoutExportModal?.sortKey === 'logical' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
-                              </button>
-                            </th>
-                            <th className="px-3 py-2 text-left" title={t({ it: 'Ripostiglio (RP): 1 attivo, 0 disattivo', en: 'Storage room (RP): 1 on, 0 off' })}>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
-                                title={t({ it: 'Ripostiglio (RP): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Storage room (RP): 1 on, 0 off. Click to sort.' })}
-                                onClick={() =>
-                                  setRoomLayoutExportModal((prev) =>
-                                    !prev ? prev : { ...prev, sortKey: 'storageRoom', sortDir: prev.sortKey === 'storageRoom' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
-                                  )
-                                }
-                              >
-                                RP
-                                {roomLayoutExportModal?.sortKey === 'storageRoom' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
-                              </button>
-                            </th>
-                            <th className="px-3 py-2 text-left" title={t({ it: 'Bagno (BA): 1 attivo, 0 disattivo', en: 'Bathroom (BA): 1 on, 0 off' })}>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
-                                title={t({ it: 'Bagno (BA): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Bathroom (BA): 1 on, 0 off. Click to sort.' })}
-                                onClick={() =>
-                                  setRoomLayoutExportModal((prev) =>
-                                    !prev ? prev : { ...prev, sortKey: 'bathroom', sortDir: prev.sortKey === 'bathroom' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
-                                  )
-                                }
-                              >
-                                BA
-                                {roomLayoutExportModal?.sortKey === 'bathroom' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
-                              </button>
-                            </th>
-                            <th className="px-3 py-2 text-left" title={t({ it: 'Locale tecnico (LT): 1 attivo, 0 disattivo', en: 'Technical room (LT): 1 on, 0 off' })}>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
-                                title={t({ it: 'Locale tecnico (LT): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'Technical room (LT): 1 on, 0 off. Click to sort.' })}
-                                onClick={() =>
-                                  setRoomLayoutExportModal((prev) =>
-                                    !prev ? prev : { ...prev, sortKey: 'technicalRoom', sortDir: prev.sortKey === 'technicalRoom' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
-                                  )
-                                }
-                              >
-                                LT
-                                {roomLayoutExportModal?.sortKey === 'technicalRoom' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
-                              </button>
-                            </th>
-                            <th className="px-3 py-2 text-left" title={t({ it: 'Senza finestre (SF): 1 attivo, 0 disattivo', en: 'No windows (SF): 1 on, 0 off' })}>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 font-semibold hover:text-slate-700"
-                                title={t({ it: 'Senza finestre (SF): 1 attivo, 0 disattivo. Clicca per ordinare.', en: 'No windows (SF): 1 on, 0 off. Click to sort.' })}
-                                onClick={() =>
-                                  setRoomLayoutExportModal((prev) =>
-                                    !prev ? prev : { ...prev, sortKey: 'noWindows', sortDir: prev.sortKey === 'noWindows' && prev.sortDir === 'asc' ? 'desc' : 'asc' }
-                                  )
-                                }
-                              >
-                                SF
-                                {roomLayoutExportModal?.sortKey === 'noWindows' ? <span>{roomLayoutExportModal.sortDir === 'asc' ? '▲' : '▼'}</span> : null}
-                              </button>
-                            </th>
-                            <th className="px-3 py-2 text-left" title={t({ it: 'Colore di sfondo della stanza', en: 'Room background color' })}>
-                              {t({ it: 'Colore', en: 'Color' })}
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {roomLayoutExportRows.map((row) => {
-                            const checked = (roomLayoutExportModal?.selectedKeys || []).includes(row.key);
-                            return (
-                              <tr
-                                key={row.key}
-                                className={`border-t border-slate-100 ${row.isSource ? 'bg-emerald-50/60' : checked ? 'bg-sky-50/50' : 'bg-white'}`}
-                              >
-                                <td className="px-3 py-2">
-                                  <input
-                                    type="checkbox"
-                                    disabled={row.isSource}
-                                    checked={row.isSource ? false : checked}
-                                    onChange={(e) =>
-                                      setRoomLayoutExportModal((prev) => {
-                                        if (!prev) return prev;
-                                        const selected = new Set(prev.selectedKeys || []);
-                                        if (e.target.checked) selected.add(row.key);
-                                        else selected.delete(row.key);
-                                        return { ...prev, selectedKeys: Array.from(selected) };
-                                      })
-                                    }
-                                  />
-                                </td>
-                                <td className="px-3 py-2 text-slate-700">{row.siteName}</td>
-                                <td className="px-3 py-2 text-slate-700">{row.planName}</td>
-                                <td className="px-3 py-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-ink">{row.roomName}</span>
-                                    {row.isSource ? (
-                                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                                        {t({ it: 'Sorgente', en: 'Source' })}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                </td>
-                                <td className="px-3 py-2 text-slate-700">{row.capacity}</td>
-                                <td className="px-3 py-2 font-mono text-slate-700">{row.labelScale.toFixed(2)}</td>
-                                <td className="px-3 py-2 font-mono text-slate-700">{Math.round(row.fillOpacity * 100)}%</td>
-                                <td className="px-3 py-2 text-center text-xs text-slate-700">
-                                  <input type="checkbox" checked={!!row.meetingRoom} readOnly disabled className="h-4 w-4 accent-primary" />
-                                </td>
-                                <td className="px-3 py-2 text-center text-xs text-slate-700">
-                                  <input type="checkbox" checked={!!row.logical} readOnly disabled className="h-4 w-4 accent-primary" />
-                                </td>
-                                <td className="px-3 py-2 text-center text-xs text-slate-700">
-                                  <input type="checkbox" checked={!!row.storageRoom} readOnly disabled className="h-4 w-4 accent-primary" />
-                                </td>
-                                <td className="px-3 py-2 text-center text-xs text-slate-700">
-                                  <input type="checkbox" checked={!!row.bathroom} readOnly disabled className="h-4 w-4 accent-primary" />
-                                </td>
-                                <td className="px-3 py-2 text-center text-xs text-slate-700">
-                                  <input type="checkbox" checked={!!row.technicalRoom} readOnly disabled className="h-4 w-4 accent-primary" />
-                                </td>
-                                <td className="px-3 py-2 text-center text-xs text-slate-700">
-                                  <input type="checkbox" checked={!!row.noWindows} readOnly disabled className="h-4 w-4 accent-primary" />
-                                </td>
-                                <td className="px-3 py-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="inline-block h-5 w-5 rounded border border-slate-300" style={{ backgroundColor: row.color }} />
-                                    <span className="font-mono text-xs text-slate-600">{row.color}</span>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setRoomLayoutExportModal(null)}
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                      {t({ it: 'Chiudi', en: 'Close' })}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={applyRoomLayoutExportToSelection}
-                      disabled={!roomLayoutExportSource || !(roomLayoutExportModal?.selectedKeys || []).length}
-                      className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {t({ it: 'Applica layout selezionato', en: 'Apply layout to selection' })}
-                    </button>
-                  </div>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-
-      <Transition show={!!roomMeasuresModal} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={() => setRoomMeasuresModal(null)}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-150"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-100"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-8">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-150"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-100"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-3xl modal-panel">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <Dialog.Title className="modal-title">{t({ it: 'Misure stanza', en: 'Room measurements' })}</Dialog.Title>
-                      <div className="text-xs text-slate-500">
-                        {t({ it: 'Stanza', en: 'Room' })}:{' '}
-                        <span className="font-semibold text-slate-700">{roomMeasuresData?.roomName || '-'}</span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setRoomMeasuresModal(null)}
-                      className="text-slate-500 hover:text-ink"
-                      title={t({ it: 'Chiudi', en: 'Close' })}
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                  {!roomMeasuresData ? (
-                    <div className="mt-4 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                      {t({ it: 'Nessuna informazione disponibile.', en: 'No data available.' })}
-                    </div>
-                  ) : (
-                    <div className="mt-4 grid gap-3 md:grid-cols-[340px,1fr]">
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
-                        <RoomShapePreview
-                          points={roomMeasuresData.points}
-                          segments={roomMeasuresData.segments}
-                          width={320}
-                          height={220}
-                          className="h-[220px] w-full"
-                        />
-                      </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
-                        {roomMeasuresData.scaleMissing ? (
-                          <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 font-semibold text-amber-700">
-                            {t({ it: 'Imposta una scala per misurare.', en: 'Set a scale to measure.' })}
-                          </div>
-                        ) : null}
-                        {roomMeasuresData.perimeterLabel ? (
-                          <div className="mt-2 flex items-center justify-between gap-2">
-                            <span>{t({ it: 'Perimetro', en: 'Perimeter' })}</span>
-                            <span className="font-mono">{roomMeasuresData.perimeterLabel}</span>
-                          </div>
-                        ) : null}
-                        {roomMeasuresData.areaLabel ? (
-                          <div className="mt-1 flex items-center justify-between gap-2">
-                            <span>{t({ it: 'Area', en: 'Area' })}</span>
-                            <span className="font-mono">{roomMeasuresData.areaLabel}</span>
-                          </div>
-                        ) : null}
-                        <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          {t({ it: 'Lati', en: 'Sides' })}
-                        </div>
-                        <div className="mt-1 max-h-48 space-y-1 overflow-auto text-[11px]">
-                          {(roomMeasuresData.segments || []).map((seg) => (
-                            <div key={seg.label} className="flex items-center justify-between gap-2">
-                              <span className="font-mono">{seg.label}</span>
-                              <span className="font-mono">{seg.lengthLabel || '-'}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <div className="mt-5 flex justify-end">
-                    <button
-                      onClick={() => setRoomMeasuresModal(null)}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      {t({ it: 'Chiudi', en: 'Close' })}
-                    </button>
-                  </div>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-
-      <Transition show={!!roomMeetingDuplicateModal && !meetingManagerOpen} as={Fragment}>
-        <Dialog
-          as="div"
-          className="relative z-[145]"
-          onClose={() => {
-            if (roomMeetingDuplicateModal?.saving) return;
-            setRoomMeetingDuplicateModal(null);
-          }}
-        >
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-150"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-100"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-slate-900/35 backdrop-blur-sm" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto p-4">
-            <div className="flex min-h-full items-center justify-center">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-150"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-100"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-[760px] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
-                  {(() => {
-              const dup = roomMeetingDuplicateModal;
-              if (!dup) return null;
-              const monthDate = new Date(`${dup.monthAnchor}T00:00:00`);
-              const validMonth = Number.isFinite(monthDate.getTime());
-              const y = validMonth ? monthDate.getFullYear() : new Date().getFullYear();
-              const m = validMonth ? monthDate.getMonth() : new Date().getMonth();
-              const daysInMonth = new Date(y, m + 1, 0).getDate();
-              const firstWeekday = (() => {
-                const w = new Date(y, m, 1).getDay();
-                return (w + 6) % 7; // Monday first
-              })();
-              const monthLabel = new Date(y, m, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-              const baseDay = dup.baseDay;
-              const booking = dup.booking;
-              const startHm = meetingClockFromTs(Number(booking.startAt || 0));
-              const endHm = meetingClockFromTs(Number(booking.endAt || 0));
-              const sourceRoomId = String((booking as any)?.roomId || '').trim();
-              const sourceRoomName = String((booking as any)?.roomName || '').trim();
-              const selectedRoomOption = dup.roomOptions.find((entry) => String(entry.roomId) === String(dup.selectedRoomId));
-              const customFromMin = hmToMinutes(String(dup.customFromHm || ''));
-              const customToMin = hmToMinutes(String(dup.customToHm || ''));
-              const customWindowValid = Number.isFinite(customFromMin) && Number.isFinite(customToMin) && customFromMin < customToMin;
-              const today = new Date().toISOString().slice(0, 10);
-              const canGoPrev = dup.monthAnchor > monthAnchorFromIso(baseDay);
-              const isFollowUpMode = dup.mode === 'followup';
-              const cells: Array<{ iso: string | null; dayNum: number | null }> = [];
-              for (let i = 0; i < firstWeekday; i += 1) cells.push({ iso: null, dayNum: null });
-              for (let d = 1; d <= daysInMonth; d += 1) {
-                const dt = new Date(y, m, d);
-                const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-                cells.push({ iso, dayNum: d });
-              }
-              while (cells.length % 7) cells.push({ iso: null, dayNum: null });
-              const weekdayLabels = [
-                t({ it: 'Lun', en: 'Mon' }),
-                t({ it: 'Mar', en: 'Tue' }),
-                t({ it: 'Mer', en: 'Wed' }),
-                t({ it: 'Gio', en: 'Thu' }),
-                t({ it: 'Ven', en: 'Fri' }),
-                t({ it: 'Sab', en: 'Sat' }),
-                t({ it: 'Dom', en: 'Sun' })
-              ];
-              return (
-                <>
-                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
-                    <div>
-                      <div className="text-lg font-semibold text-ink">
-                        {isFollowUpMode ? t({ it: 'Create Follow-UP', en: 'Create Follow-UP' }) : t({ it: 'Duplica riunione', en: 'Duplicate meeting' })}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {booking.subject || t({ it: 'Meeting', en: 'Meeting' })} • {startHm} - {endHm}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {isFollowUpMode
-                          ? t({
-                              it: 'Pianifica il follow-up della stessa chain. Le date in rosso sono occupate nello stesso orario.',
-                              en: 'Schedule the follow-up of the same chain. Red dates are occupied at the same time.'
-                            })
-                          : t({
-                              it: 'Seleziona i giorni successivi. Le date in rosso sono occupate nello stesso orario.',
-                              en: 'Select future days. Red dates are occupied at the same time.'
-                            })}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (dup.saving) return;
-                        setRoomMeetingDuplicateModal(null);
-                      }}
-                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-ink"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-
-                  {dup.step === 'setup' ? (
-                    <>
-                      <div className="mt-3 space-y-3">
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {t({ it: 'Scelta saletta', en: 'Room selection' })}
-                          </div>
-                          <div ref={roomMeetingDuplicateRoomPickerRef} className="relative mt-2">
-                            <button
-                              type="button"
-                              onClick={() => setRoomMeetingDuplicateRoomPickerOpen((prev) => !prev)}
-                              className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm hover:border-primary/40"
-                            >
-                              <span className="truncate pr-2">
-                                {dup.roomMode === 'any'
-                                  ? t({
-                                      it: 'Qualsiasi meeting room disponibile in questa sede',
-                                      en: 'Any available meeting room in this site'
-                                    })
-                                  : `${selectedRoomOption?.roomName || '-'}${
-                                      selectedRoomOption?.floorPlanName ? ` • ${selectedRoomOption.floorPlanName}` : ''
-                                    }`}
-                              </span>
-                              <ChevronDown
-                                size={16}
-                                className={`shrink-0 text-slate-500 transition-transform ${roomMeetingDuplicateRoomPickerOpen ? 'rotate-180' : ''}`}
-                              />
-                            </button>
-                            {roomMeetingDuplicateRoomPickerOpen ? (
-                              <div className="absolute z-[220] mt-1 max-h-72 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setRoomMeetingDuplicateModal((prev) => (prev ? { ...prev, roomMode: 'any', error: null } : prev));
-                                    setRoomMeetingDuplicateRoomPickerOpen(false);
-                                  }}
-                                  className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
-                                    dup.roomMode === 'any' ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-100'
-                                  }`}
-                                >
-                                  <span>{t({ it: 'Qualsiasi meeting room disponibile in questa sede', en: 'Any available meeting room in this site' })}</span>
-                                  {dup.roomMode === 'any' ? <span className="text-xs font-semibold">✓</span> : null}
-                                </button>
-                                {dup.roomOptions.map((option) => {
-                                  const isSelected = dup.roomMode === 'selected' && String(option.roomId) === String(dup.selectedRoomId);
-                                  const isSource = String(option.roomId) === sourceRoomId;
-                                  return (
-                                    <button
-                                      key={option.roomId}
-                                      type="button"
-                                      onClick={() => {
-                                        setRoomMeetingDuplicateModal((prev) =>
-                                          prev ? { ...prev, roomMode: 'selected', selectedRoomId: option.roomId, error: null } : prev
-                                        );
-                                        setRoomMeetingDuplicateRoomPickerOpen(false);
-                                      }}
-                                      className={`mt-1 flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
-                                        isSelected ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-100'
-                                      }`}
-                                    >
-                                      <span className="flex min-w-0 items-center gap-2">
-                                        <span className="truncate">
-                                          {option.roomName}
-                                          {option.floorPlanName ? ` • ${option.floorPlanName}` : ''}
-                                        </span>
-                                        {isSource ? (
-                                          <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-700">
-                                            {t({ it: 'Origine', en: 'Source' })}
-                                          </span>
-                                        ) : null}
-                                      </span>
-                                      {isSelected ? <span className="text-xs font-semibold">✓</span> : null}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            ) : null}
-                          </div>
-                          <div className="mt-2 text-xs text-slate-500">
-                            {t({ it: 'Saletta di origine', en: 'Source room' })}:{' '}
-                            <span className="font-semibold text-slate-700">{sourceRoomName || '-'}</span>
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {t({ it: 'Selezione attuale', en: 'Current selection' })}:{' '}
-                            {dup.roomMode === 'any'
-                              ? t({
-                                  it: 'Qualsiasi meeting room disponibile in questa sede',
-                                  en: 'Any available meeting room in this site'
-                                })
-                              : `${selectedRoomOption?.roomName || '-'}${
-                                  selectedRoomOption?.floorPlanName ? ` • ${selectedRoomOption.floorPlanName}` : ''
-                                }`}
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {t({ it: 'Scelta orario', en: 'Time selection' })}
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRoomMeetingDuplicateModal((prev) =>
-                                  prev ? { ...prev, timeMode: 'same', error: null } : prev
-                                )
-                              }
-                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-                                dup.timeMode === 'same'
-                                  ? 'border-primary bg-primary/10 text-primary'
-                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {t({ it: 'Stesso di quello originale', en: 'Same as original' })}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRoomMeetingDuplicateModal((prev) =>
-                                  prev ? { ...prev, timeMode: 'any_08_18', error: null } : prev
-                                )
-                              }
-                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-                                dup.timeMode === 'any_08_18'
-                                  ? 'border-primary bg-primary/10 text-primary'
-                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {t({
-                                it: 'Qualsiasi disponibile tra 08:00 e 18:00',
-                                en: 'Any available between 08:00 and 18:00'
-                              })}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRoomMeetingDuplicateModal((prev) =>
-                                  prev ? { ...prev, timeMode: 'custom', error: null } : prev
-                                )
-                              }
-                              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-                                dup.timeMode === 'custom'
-                                  ? 'border-primary bg-primary/10 text-primary'
-                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {t({ it: 'Seleziona da - a', en: 'Select from - to' })}
-                            </button>
-                          </div>
-                          {dup.timeMode === 'custom' ? (
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              <label className="text-xs text-slate-500">
-                                {t({ it: 'Da', en: 'From' })}
-                                <input
-                                  type="time"
-                                  value={dup.customFromHm}
-                                  onChange={(event) =>
-                                    setRoomMeetingDuplicateModal((prev) =>
-                                      prev ? { ...prev, customFromHm: event.target.value, error: null } : prev
-                                    )
-                                  }
-                                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                                />
-                              </label>
-                              <label className="text-xs text-slate-500">
-                                {t({ it: 'A', en: 'To' })}
-                                <input
-                                  type="time"
-                                  value={dup.customToHm}
-                                  onChange={(event) =>
-                                    setRoomMeetingDuplicateModal((prev) =>
-                                      prev ? { ...prev, customToHm: event.target.value, error: null } : prev
-                                    )
-                                  }
-                                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                                />
-                              </label>
-                            </div>
-                          ) : null}
-                          <div className="mt-2 text-xs text-slate-500">
-                            {dup.timeMode === 'same'
-                              ? `${t({ it: 'Slot origine', en: 'Source slot' })}: ${startHm} - ${endHm}`
-                              : dup.timeMode === 'any_08_18'
-                                ? t({
-                                    it: 'Il sistema trova il primo slot utile tra 08:00 e 18:00.',
-                                    en: 'System picks the first available slot between 08:00 and 18:00.'
-                                  })
-                                : `${t({ it: 'Finestra scelta', en: 'Selected window' })}: ${dup.customFromHm} - ${dup.customToHm}`}
-                          </div>
-                          {dup.timeMode === 'custom' && !customWindowValid ? (
-                            <div className="mt-1 text-xs font-semibold text-rose-600">
-                              {t({
-                                it: "L'orario 'da' deve essere precedente all'orario 'a'.",
-                                en: "The 'from' time must be earlier than the 'to' time."
-                              })}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          disabled={dup.saving}
-                          onClick={() => setRoomMeetingDuplicateModal(null)}
-                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          {t({ it: 'Annulla', en: 'Cancel' })}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={(dup.roomMode === 'selected' && !dup.selectedRoomId) || (dup.timeMode === 'custom' && !customWindowValid)}
-                          onClick={() =>
-                            setRoomMeetingDuplicateModal((prev) =>
-                              prev
-                                ? {
-                                    ...prev,
-                                    step: 'calendar',
-                                    selectedDays: [],
-                                    availabilityByDay: {},
-                                    candidateByDay: {},
-                                    loadingMonth: false,
-                                    error: null
-                                  }
-                                : prev
-                            )
-                          }
-                          className="rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-105 disabled:opacity-50"
-                        >
-                          {isFollowUpMode ? t({ it: 'Vai alla pianificazione', en: 'Go to scheduling' }) : t({ it: 'Vai al calendario', en: 'Go to calendar' })}
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="mt-3 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setRoomMeetingDuplicateModal((prev) =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      step: 'setup',
-                                      selectedDays: [],
-                                      availabilityByDay: {},
-                                      candidateByDay: {},
-                                      loadingMonth: false,
-                                      error: null
-                                    }
-                                  : prev
-                              )
-                            }
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                          >
-                            <ChevronLeft size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!canGoPrev}
-                            onClick={() =>
-                              setRoomMeetingDuplicateModal((prev) =>
-                                prev ? { ...prev, monthAnchor: shiftMonthAnchor(prev.monthAnchor, -1), error: null } : prev
-                              )
-                            }
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            <ChevronLeft size={15} />
-                          </button>
-                          <div className="min-w-[220px] text-center text-sm font-semibold text-slate-700 capitalize">{monthLabel}</div>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setRoomMeetingDuplicateModal((prev) =>
-                                prev ? { ...prev, monthAnchor: shiftMonthAnchor(prev.monthAnchor, 1), error: null } : prev
-                              )
-                            }
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            <ChevronRight size={15} />
-                          </button>
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          {dup.loadingMonth ? (
-                            <span className="inline-flex items-center gap-1">
-                              <Loader2 size={12} className="animate-spin" />
-                              {t({ it: 'Verifica disponibilità…', en: 'Checking availability…' })}
-                            </span>
-                          ) : dup.selectedDays.length > 0
-                            ? t({
-                                it: `${dup.selectedDays.length} giorn${dup.selectedDays.length === 1 ? 'o selezionato' : 'i selezionati'}`,
-                                en: `${dup.selectedDays.length} day(s) selected`
-                              })
-                            : t({ it: 'Nessun giorno selezionato', en: 'No days selected' })}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <div className="grid grid-cols-7 gap-1">
-                          {weekdayLabels.map((label) => (
-                            <div key={`dup-weekday-${label}`} className="px-1 py-1 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                              {label}
-                            </div>
-                          ))}
-                          {cells.map((cell, idx) => {
-                            if (!cell.iso) {
-                              return <div key={`dup-empty-${idx}`} className="h-20 rounded-lg border border-transparent" />;
-                            }
-                            const status =
-                              dup.availabilityByDay[cell.iso] ||
-                              (cell.iso <= baseDay || cell.iso < today
-                                ? ({
-                                    state: 'blocked' as const,
-                                    reason:
-                                      cell.iso < today
-                                        ? t({ it: 'Giorno passato', en: 'Past day' })
-                                        : t({ it: 'Giorno di origine', en: 'Source day' })
-                                  } as const)
-                                : ({ state: 'loading' as const }));
-                            const candidate = dup.candidateByDay[cell.iso];
-                            const tooltipText = (() => {
-                              const dayLabel = new Date(`${cell.iso}T00:00:00`).toLocaleDateString();
-                              if (status.state === 'occupied') {
-                                return `${dayLabel}\n${t({ it: 'Occupata', en: 'Busy' })}\n${
-                                  status.reason || t({ it: 'Slot già occupato', en: 'Slot already occupied' })
-                                }`;
-                              }
-                              if (status.state === 'blocked') {
-                                return `${dayLabel}\n${status.reason || t({ it: 'Non selezionabile', en: 'Not selectable' })}`;
-                              }
-                              if (status.state === 'error') {
-                                return `${dayLabel}\n${status.reason || t({ it: 'Errore verifica', en: 'Check error' })}`;
-                              }
-                              if (status.state === 'loading') {
-                                return `${dayLabel}\n${t({ it: 'Verifica disponibilità in corso', en: 'Checking availability' })}`;
-                              }
-                              if (candidate) {
-                                return `${dayLabel}\n${candidate.roomName}\n${candidate.startHm} - ${candidate.endHm}`;
-                              }
-                              return `${dayLabel}\n${t({ it: 'Disponibile', en: 'Available' })}\n${startHm} - ${endHm}`;
-                            })();
-                            const selected = dup.selectedDays.includes(cell.iso);
-                            const blocked = status.state !== 'available';
-                            const classes =
-                              status.state === 'occupied'
-                                ? 'border-rose-300 bg-rose-50 text-rose-800'
-                                : status.state === 'available' && selected
-                                  ? 'border-primary bg-primary/10 text-primary'
-                                  : status.state === 'available'
-                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                                    : status.state === 'blocked'
-                                      ? 'border-slate-200 bg-slate-100 text-slate-400'
-                                      : status.state === 'loading'
-                                        ? 'border-slate-200 bg-white text-slate-500'
-                                        : 'border-amber-300 bg-amber-50 text-amber-800';
-                            return (
-                              <button
-                                key={cell.iso}
-                                type="button"
-                                disabled={blocked}
-                                title={tooltipText}
-                                aria-label={tooltipText}
-                                onClick={() =>
-                                  setRoomMeetingDuplicateModal((prev) => {
-                                    if (!prev) return prev;
-                                    const has = prev.selectedDays.includes(cell.iso!);
-                                    return {
-                                      ...prev,
-                                      error: null,
-                                      selectedDays: has
-                                        ? prev.selectedDays.filter((entry) => entry !== cell.iso)
-                                        : [...prev.selectedDays, cell.iso!]
-                                    };
-                                  })
-                                }
-                                className={`group relative h-20 rounded-lg border p-2 text-left transition ${classes} disabled:cursor-not-allowed`}
-                              >
-                                <span className="pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden max-w-[240px] whitespace-pre-line rounded-lg border border-slate-200 bg-slate-900 px-2 py-1 text-[10px] font-medium leading-snug text-white shadow-lg group-hover:block group-focus-visible:block">
-                                  {tooltipText}
-                                </span>
-                                <div className="flex items-start justify-between gap-1">
-                                  <span className="text-sm font-semibold">{cell.dayNum}</span>
-                                  {status.state === 'occupied' ? (
-                                    <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
-                                      {t({ it: 'Occupata', en: 'Busy' })}
-                                    </span>
-                                  ) : status.state === 'available' ? (
-                                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${selected ? 'bg-primary/15 text-primary' : 'bg-emerald-100 text-emerald-700'}`}>
-                                      {selected ? t({ it: 'Selez.', en: 'Selected' }) : t({ it: 'Libera', en: 'Free' })}
-                                    </span>
-                                  ) : status.state === 'loading' ? (
-                                    <Loader2 size={12} className="animate-spin text-slate-400" />
-                                  ) : null}
-                                </div>
-                                <div className="mt-1 line-clamp-2 text-[11px] leading-tight opacity-90">
-                                  {status.state === 'occupied'
-                                    ? status.reason || t({ it: 'Già occupata', en: 'Already occupied' })
-                                    : status.state === 'blocked'
-                                      ? status.reason || t({ it: 'Giorno non selezionabile', en: 'Day not selectable' })
-                                      : status.state === 'error'
-                                        ? status.reason || t({ it: 'Errore verifica', en: 'Check error' })
-                                        : candidate
-                                          ? `${candidate.roomName} • ${candidate.startHm} - ${candidate.endHm}`
-                                          : `${startHm} - ${endHm}`}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {dup.error ? (
-                        <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
-                          {dup.error}
-                        </div>
-                      ) : null}
-
-                      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          disabled={dup.saving}
-                          onClick={() => setRoomMeetingDuplicateModal(null)}
-                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                        >
-                          {t({ it: 'Annulla', en: 'Cancel' })}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={dup.saving || !dup.selectedDays.length}
-                          onClick={() => void saveRoomMeetingDuplicates()}
-                          className="rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-105 disabled:opacity-50"
-                        >
-                          {dup.saving ? (
-                            <>
-                              <Loader2 size={14} className="mr-1 inline-block animate-spin" />
-                              {isFollowUpMode ? t({ it: 'Creazione follow-up...', en: 'Creating follow-up...' }) : t({ it: 'Duplicazione...', en: 'Duplicating...' })}
-                            </>
-                          ) : (
-                            isFollowUpMode
-                              ? t({ it: 'Crea Follow-UP sui giorni selezionati', en: 'Create Follow-UP on selected days' })
-                              : t({ it: 'Duplica sui giorni selezionati', en: 'Duplicate on selected days' })
-                          )}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                    </>
-                  );
-                })()}
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
+      <RoomMeetingDuplicateModal
+        open={!!roomMeetingDuplicateModal && !meetingManagerOpen}
+        modal={roomMeetingDuplicateModal}
+        roomPickerOpen={roomMeetingDuplicateRoomPickerOpen}
+        roomPickerRef={roomMeetingDuplicateRoomPickerRef}
+        setModal={setRoomMeetingDuplicateModal}
+        setRoomPickerOpen={setRoomMeetingDuplicateRoomPickerOpen}
+        meetingClockFromTs={meetingClockFromTs}
+        hmToMinutes={hmToMinutes}
+        monthAnchorFromIso={monthAnchorFromIso}
+        shiftMonthAnchor={shiftMonthAnchor}
+        t={t}
+        onClose={() => setRoomMeetingDuplicateModal(null)}
+        onSave={saveRoomMeetingDuplicates}
+      />
 
       {meetingHubModalOpen ? (
         <Suspense fallback={null}>
@@ -22479,7 +21351,7 @@ const PlanView = ({ planId }: Props) => {
                 clientId: client?.id,
                 siteId: site?.id,
                 siteLocked: false,
-                day: new Date().toISOString().slice(0, 10),
+                day: currentLocalIsoDay(),
                 returnTo: 'hub'
               });
             }}
@@ -22514,7 +21386,7 @@ const PlanView = ({ planId }: Props) => {
                 clientId: String(topMeeting?.clientId || client?.id || '').trim() || undefined,
                 siteId: String(topMeeting?.siteId || site?.id || '').trim() || undefined,
                 siteLocked: false,
-                day: String((topMeeting as any)?.occurrenceDate || (topMeeting?.startAt ? meetingIsoDayFromTs(Number(topMeeting.startAt)) : new Date().toISOString().slice(0, 10))),
+                day: String((topMeeting as any)?.occurrenceDate || (topMeeting?.startAt ? meetingIsoDayFromTs(Number(topMeeting.startAt)) : currentLocalIsoDay())),
                 returnTo: 'myMeetings'
               });
             }}
@@ -22607,7 +21479,7 @@ const PlanView = ({ planId }: Props) => {
               const cid = String(client?.id || '').trim();
               const sid = String(site?.id || '').trim();
               if (cid && sid) {
-                void fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day: new Date().toISOString().slice(0, 10) })
+                void fetchMeetingOverview({ clientId: cid, siteId: sid, floorPlanId: planId, day: currentLocalIsoDay() })
                   .then((payload) => {
                     const nowTs = Date.now();
                     const next: Record<string, { hasMeetingToday: boolean; inProgress: boolean; hasFutureToday: boolean }> = {};

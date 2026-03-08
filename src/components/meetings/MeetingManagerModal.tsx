@@ -31,6 +31,7 @@ import { useT } from '../../i18n/useT';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
+import { currentLocalIsoDay } from '../../utils/localDate';
 import ClientBusinessPartnersModal from '../layout/ClientBusinessPartnersModal';
 import {
   createMeeting,
@@ -110,10 +111,7 @@ const KIOSK_LANG_OPTIONS: Array<{ key: KioskMeetingLanguage; flag: string; label
   { key: 'zh', flag: '🇨🇳', labels: { it: 'Cinese', en: 'Chinese' } }
 ];
 
-const todayIso = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
+const todayIso = () => currentLocalIsoDay();
 
 const defaultStartTime = () => {
   const d = new Date();

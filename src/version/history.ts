@@ -8,6 +8,33 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.5.4',
+    date: '2026-03-08',
+    type: 'fix',
+    notes: [
+      n(
+        'Configurazione runtime server centralizzata in `server/config.cjs`: parsing/default/env normalization in SSOT con validazione piu severa dei flag sensibili e supporto preservato a `PORT=0`',
+        'Server runtime configuration is now centralized in `server/config.cjs`: parsing/default/env normalization in one SSOT, with stricter validation for sensitive flags and preserved `PORT=0` support'
+      ),
+      n(
+        'Backend ulteriormente spezzato: auth/MFA, admin settings, meeting public/notes/lifecycle e moduli custom import dedicati riducono il carico del server monolitico',
+        'Backend was split further: auth/MFA, admin settings, meeting public/notes/lifecycle, and dedicated custom-import modules reduce the load on the monolithic server'
+      ),
+      n(
+        'Meetings e import piu robusti: update meeting fail-fast su email partecipanti mancanti quando le notifiche sono attive, audit globale coerente su cancel/update e protezioni SSRF/import piu strette',
+        'Meetings and import flows are more robust: meeting updates now fail fast on missing participant emails when notifications are enabled, cancel/update actions emit consistent global audit entries, and SSRF/import protections are tighter'
+      ),
+      n(
+        'PlanView/meeting UI piu modulare: estratti modal kiosk, misure stanza, export layout e duplicate/follow-up; la pianificazione usa ora il giorno locale e non interpreta piu input orari custom invalidi come mezzanotte',
+        'PlanView/meeting UI is more modular: kiosk, room measures, layout export, and duplicate/follow-up modals were extracted; scheduling now uses the local day and no longer interprets invalid custom time input as midnight'
+      ),
+      n(
+        'Nuovi test mirati coprono config server, route auth/settings/meeting lifecycle, local date handling, parsing orari custom, import custom, chat services e guardie salvataggio stato',
+        'New focused tests cover server config, auth/settings/meeting-lifecycle routes, local date handling, custom time parsing, custom import, chat services, and state-save guards'
+      )
+    ]
+  },
+  {
     version: '3.5.3',
     date: '2026-03-07',
     type: 'fix',

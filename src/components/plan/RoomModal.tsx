@@ -3,9 +3,8 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { ChevronLeft, ChevronRight, ChevronsRight, Copy, ExternalLink, HelpCircle, Image as ImageIcon, Ruler, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
-import QRCode from 'qrcode';
 import { useT } from '../../i18n/useT';
-import { fetchMeetingRoomSchedule } from '../../api/meetings';
+import { getMeetingRoomKioskFallbackLink, useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 import RoomShapePreview from './RoomShapePreview';
 import Icon from '../ui/Icon';
 import CapacityGauge from '../ui/CapacityGauge';
@@ -229,8 +228,6 @@ const RoomModal = ({
   const [departmentsModalOpen, setDepartmentsModalOpen] = useState(false);
   const [propertiesModalOpen, setPropertiesModalOpen] = useState(false);
   const [measuresModalOpen, setMeasuresModalOpen] = useState(false);
-  const [kioskQrDataUrl, setKioskQrDataUrl] = useState('');
-  const [kioskPublicLink, setKioskPublicLink] = useState('');
   const [departmentQuery, setDepartmentQuery] = useState('');
   const [availableSelection, setAvailableSelection] = useState<string[]>([]);
   const [selectedSelection, setSelectedSelection] = useState<string[]>([]);
@@ -243,6 +240,12 @@ const RoomModal = ({
   const roomObjects = objects || [];
   const shouldShowContents = typeof objects !== 'undefined';
   const resolveIsUser = (typeId: string) => (isUserObject ? isUserObject(typeId) : typeId === 'user' || typeId === 'real_user');
+  const { link: kioskPublicLink, qrDataUrl: kioskQrDataUrl } = useMeetingRoomKioskInfo({
+    roomId: kioskRoomId,
+    enabled: open && propertiesModalOpen && meetingRoom && meetingKioskEnabled && !!kioskRoomId,
+    qrWidth: 180
+  });
+  const kioskLink = kioskRoomId ? kioskPublicLink || getMeetingRoomKioskFallbackLink(kioskRoomId) : '';
   const users = roomObjects.filter((o) => resolveIsUser(o.type));
   const otherObjects = roomObjects.filter((o) => !resolveIsUser(o.type));
   const roomPhotos = roomObjects.filter((o) => o.type === 'photo' && Boolean((o as any).imageUrl));
@@ -324,7 +327,6 @@ const RoomModal = ({
     setDepartmentsModalOpen(!!initialDepartmentsOpen);
     setPropertiesModalOpen(false);
     setMeasuresModalOpen(false);
-    setKioskQrDataUrl('');
     setDepartmentQuery('');
     setAvailableSelection([]);
     setSelectedSelection([]);
@@ -376,30 +378,6 @@ const RoomModal = ({
     if (!open || !departmentsModalOpen) return;
     toast.dismiss();
   }, [departmentsModalOpen, open]);
-
-  useEffect(() => {
-    if (!open || !propertiesModalOpen || !meetingRoom || !meetingKioskEnabled || !kioskRoomId) {
-      setKioskQrDataUrl('');
-      setKioskPublicLink('');
-      return;
-    }
-    let cancelled = false;
-    const path = `/meetingroom/${encodeURIComponent(String(kioskRoomId))}`;
-    const fallback = typeof window === 'undefined' ? path : `${window.location.origin}${path}`;
-    fetchMeetingRoomSchedule(String(kioskRoomId))
-      .then((res: any) => String(res?.kioskPublicUrl || '').trim() || fallback)
-      .catch(() => fallback)
-      .then((absolute) => {
-        if (cancelled) return;
-        setKioskPublicLink(absolute);
-        return QRCode.toDataURL(absolute, { margin: 1, width: 180 })
-          .then((url: string) => !cancelled && setKioskQrDataUrl(url))
-          .catch(() => !cancelled && setKioskQrDataUrl(''));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [kioskRoomId, meetingKioskEnabled, meetingRoom, open, propertiesModalOpen]);
 
   useEffect(() => {
     if (meetingRoom && departmentsModalOpen) setDepartmentsModalOpen(false);
@@ -1460,24 +1438,14 @@ const RoomModal = ({
                                 )}
                                 <div className="min-w-0 flex-1">
                                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-[11px]">
-                                    <div className="truncate font-mono text-slate-700">
-                                      {kioskPublicLink ||
-                                        (typeof window === 'undefined'
-                                          ? `/meetingroom/${encodeURIComponent(String(kioskRoomId))}`
-                                          : `${window.location.origin}/meetingroom/${encodeURIComponent(String(kioskRoomId))}`)}
-                                    </div>
+                                    <div className="truncate font-mono text-slate-700">{kioskLink}</div>
                                   </div>
                                   <div className="mt-2 flex flex-wrap items-center gap-2">
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        const link =
-                                          kioskPublicLink ||
-                                          (typeof window === 'undefined'
-                                            ? `/meetingroom/${encodeURIComponent(String(kioskRoomId))}`
-                                            : `${window.location.origin}/meetingroom/${encodeURIComponent(String(kioskRoomId))}`);
-                                        if (typeof window !== 'undefined') {
-                                          window.open(link, '_blank', 'noopener,noreferrer');
+                                        if (typeof window !== 'undefined' && kioskLink) {
+                                          window.open(kioskLink, '_blank', 'noopener,noreferrer');
                                         }
                                       }}
                                       className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
@@ -1488,16 +1456,11 @@ const RoomModal = ({
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        const link =
-                                          kioskPublicLink ||
-                                          (typeof window === 'undefined'
-                                            ? `/meetingroom/${encodeURIComponent(String(kioskRoomId))}`
-                                            : `${window.location.origin}/meetingroom/${encodeURIComponent(String(kioskRoomId))}`);
                                         if (!navigator?.clipboard?.writeText) {
                                           toast.error(t({ it: 'Clipboard non disponibile', en: 'Clipboard not available' }));
                                           return;
                                         }
-                                        navigator.clipboard.writeText(link)
+                                        navigator.clipboard.writeText(kioskLink)
                                           .then(() => toast.success(t({ it: 'Link kiosk copiato', en: 'Kiosk link copied' })))
                                           .catch(() => toast.error(t({ it: 'Copia non riuscita', en: 'Copy failed' })));
                                       }}

@@ -2,49 +2,13 @@ const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 const crypto = require('crypto');
+const { readSecretInput, serverConfig } = require('./config.cjs');
 
-const readEnv = (name) => process.env[name];
-
-const resolveDefaultDbPath = () => {
-  const plixmapDb = path.join(process.cwd(), 'data', 'plixmap.sqlite');
-  const desklyDb = path.join(process.cwd(), 'data', 'deskly.sqlite');
-  if (fs.existsSync(plixmapDb)) return plixmapDb;
-  if (fs.existsSync(desklyDb)) return desklyDb;
-  return plixmapDb;
-};
-
-const dbPath = readEnv('PLIXMAP_DB_PATH') || resolveDefaultDbPath();
+const dbPath = serverConfig.dbPath;
 
 const defaultPaletteFavoritesJson = JSON.stringify(['real_user', 'user', 'desktop', 'rack']);
-const DEFAULT_MIN_SECRET_LENGTH = 32;
-
-const isEnabled = (value, fallback = false) => {
-  if (typeof value !== 'string') return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return fallback;
-  return ['1', 'true', 'yes', 'on'].includes(normalized);
-};
-
-const requireEnvSecrets = () => isEnabled(readEnv('PLIXMAP_REQUIRE_ENV_SECRETS'), false);
-const minSecretLength = () => {
-  const raw = Number(readEnv('PLIXMAP_SECRET_MIN_LENGTH') || DEFAULT_MIN_SECRET_LENGTH);
-  return Number.isFinite(raw) && raw >= 16 ? Math.round(raw) : DEFAULT_MIN_SECRET_LENGTH;
-};
-
-const readSecretInput = (baseName) => {
-  const fileVar = readEnv(`${baseName}_FILE`);
-  if (typeof fileVar === 'string' && fileVar.trim()) {
-    const filePath = String(fileVar).trim();
-    try {
-      return fs.readFileSync(filePath, 'utf8').trim();
-    } catch (error) {
-      throw new Error(`${baseName}_FILE unreadable (${filePath}): ${error?.message || 'read failed'}`);
-    }
-  }
-  const direct = readEnv(baseName);
-  if (typeof direct === 'string' && direct.trim()) return direct.trim();
-  return '';
-};
+const requireEnvSecrets = () => serverConfig.requireEnvSecrets;
+const minSecretLength = () => serverConfig.secretMinLength;
 
 const ensureSecretStrength = (value, name) => {
   const secret = String(value || '').trim();
@@ -1016,7 +980,7 @@ const getOrCreateAuthSecret = (db) => {
   if (strictEnv) throw new Error(`${secretName} is required when PLIXMAP_REQUIRE_ENV_SECRETS=1`);
   // In development, rotate the signing secret on each server start so a restart always forces re-login.
   // In production (NODE_ENV=production, e.g. Dockerfile), keep a stable secret in DB for persistent sessions.
-  if (process.env.NODE_ENV !== 'production') {
+  if (serverConfig.nodeEnv !== 'production') {
     return crypto.randomBytes(32).toString('base64');
   }
   const row = db.prepare('SELECT value FROM meta WHERE key = ?').get('authSecret');

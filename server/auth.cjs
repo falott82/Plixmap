@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { serverConfig } = require('./config.cjs');
 
 const base64UrlEncode = (buf) =>
   Buffer.from(buf)
@@ -105,7 +106,7 @@ const buildSessionCookie = (name, token, maxAgeSeconds, secure) => {
 const setSessionCookie = (res, token, maxAgeSeconds = 60 * 60 * 24 * 30, options = {}) => {
   const secure = Object.prototype.hasOwnProperty.call(options, 'secure')
     ? !!options.secure
-    : process.env.NODE_ENV === 'production';
+    : serverConfig.nodeEnv === 'production';
   appendSetCookie(res, buildSessionCookie(PRIMARY_SESSION_COOKIE, token, maxAgeSeconds, secure));
 };
 

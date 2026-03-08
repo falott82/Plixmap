@@ -569,6 +569,18 @@ const createMeetingServices = (deps) => {
     return Array.from(out);
   };
 
+  const resolvePersistedMeetingAdminIds = (value, fallback = []) => {
+    const fallbackIds = normalizeMeetingAdminIds([], fallback);
+    const requestedIds = normalizeMeetingAdminIds(value, fallbackIds);
+    if (!requestedIds.length) return fallbackIds;
+    const placeholders = requestedIds.map(() => '?').join(',');
+    const validRows = db
+      .prepare(`SELECT id FROM users WHERE disabled = 0 AND id IN (${placeholders})`)
+      .all(...requestedIds);
+    const validIds = validRows.map((row) => String(row?.id || '').trim()).filter(Boolean);
+    return normalizeMeetingAdminIds(validIds, fallbackIds);
+  };
+
   const createMeetingOccurrences = ({ startDate, endDate, startTime, endTime, maxDays = 30 }) => {
     const startDay = parseIsoDay(startDate);
     const endDay = parseIsoDay(endDate || startDate);
@@ -845,6 +857,32 @@ const createMeetingServices = (deps) => {
     };
   };
 
+  const MEETING_NOTE_SELECT = `id, meetingId, authorUserId, authorUsername, authorExternalId, authorEmail, authorDisplayName, title, contentText, contentHtml, contentLexical, shared, createdAt, updatedAt`;
+
+  const listMeetingNotesByMeetingId = (meetingId) =>
+    db
+      .prepare(
+        `SELECT ${MEETING_NOTE_SELECT}
+         FROM meeting_notes
+         WHERE meetingId = ?
+         ORDER BY updatedAt DESC, createdAt DESC`
+      )
+      .all(String(meetingId || '').trim())
+      .map(mapMeetingNoteRow)
+      .filter(Boolean);
+
+  const getMeetingNoteById = (meetingId, noteId) =>
+    mapMeetingNoteRow(
+      db
+        .prepare(
+          `SELECT ${MEETING_NOTE_SELECT}
+           FROM meeting_notes
+           WHERE id = ? AND meetingId = ?
+           LIMIT 1`
+        )
+        .get(String(noteId || '').trim(), String(meetingId || '').trim())
+    );
+
   const getVisibleMeetingRoomIdsForUser = (req) => {
     if (req.isAdmin || req.isSuperAdmin) return null;
     const state = readState();
@@ -987,10 +1025,18 @@ const createMeetingServices = (deps) => {
       const assignedTo = String(row?.assignedTo || '').trim().slice(0, 160);
       const openingDateRaw = String(row?.openingDate || '').trim().slice(0, 20);
       const openingDate = openingDateRaw && parseIsoDay(openingDateRaw) ? openingDateRaw : '';
-      const completionDate = String(row?.completionDate || '').trim().slice(0, 20);
+      const completionDateRaw = String(row?.completionDate || '').trim().slice(0, 20);
+      const completionDate = completionDateRaw && parseIsoDay(completionDateRaw) ? completionDateRaw : '';
       const progressPct = normalizeProgress(row?.progressPct);
       const statusRaw = normalizeStatus(row?.status);
-      const status = statusRaw === 'not_needed' ? 'not_needed' : progressPct >= 100 ? 'done' : 'open';
+      const status =
+        statusRaw === 'not_needed'
+          ? 'not_needed'
+          : statusRaw === 'reschedule'
+            ? 'reschedule'
+            : progressPct >= 100 || statusRaw === 'done'
+              ? 'done'
+              : 'open';
       if (!action && !assignedTo && !openingDate && !completionDate && progressPct <= 0) continue;
       actions.push({ action, assignedTo, openingDate, completionDate, progressPct, status });
       if (actions.length >= 200) break;
@@ -1124,6 +1170,7 @@ const createMeetingServices = (deps) => {
     sendMeetingMail,
     resolveParticipantEmails,
     normalizeMeetingAdminIds,
+    resolvePersistedMeetingAdminIds,
     createMeetingOccurrences,
     meetingSummaryText,
     meetingNotificationRecipientsFromBooking,
@@ -1136,6 +1183,8 @@ const createMeetingServices = (deps) => {
     resolveLinkedRealUserForPortalUser,
     findMeetingParticipantForLinkedUser,
     mapMeetingNoteRow,
+    listMeetingNotesByMeetingId,
+    getMeetingNoteById,
     getAccessibleMeetingBookingForUser,
     isMeetingParticipantForRequestUser,
     participantRosterFromMeetingBooking,

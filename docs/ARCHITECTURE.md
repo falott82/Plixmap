@@ -13,6 +13,7 @@
 - Shared meeting time SSOT now lives in `src/utils/meetingTime.ts` and is reused by mobile agenda, meeting timelines, and follow-up views.
 
 ## Server shared services
+- `server/config.cjs`: shared runtime env/config parsing with defaults for server modules.
 - `server/email.cjs`: SMTP settings, portal public URL SSOT, and email logging.
 - `server/publicUrls.cjs`: shared public URL builders for kiosk, mobile, and public uploads.
 - `server/services/users.cjs`: user-link normalization, imported-user conflict checks, and shared permission replacement helpers.

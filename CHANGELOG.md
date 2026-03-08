@@ -2,6 +2,13 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.5.4 - 2026-03-08
+- Centralized runtime server config in `server/config.cjs`: defaults, parsing, env normalization, and security-sensitive booleans now come from one source of truth, with strict validation and preserved `PORT=0` support for ephemeral binds.
+- Continued backend modularization: extracted auth/MFA, admin settings, meeting public/notes/lifecycle routes, custom import network/config-store modules, and state-save guards to reduce risk in the monolithic server bootstrap.
+- Hardened meetings/import flows: lifecycle updates now reject missing participant emails when notifications are enabled, cancel/update operations emit consistent global audit events, and custom import now blocks IPv4-mapped loopback targets and enforces byte limits more predictably.
+- Refined PlanView/meeting UX internals: kiosk, room measures, room layout export, and duplicate/follow-up scheduling are split into dedicated modules; duplicate scheduling now uses local-day logic and invalid custom time windows no longer fall back to midnight.
+- Added focused regression coverage across server config, auth/settings routes, meeting lifecycle/public flows, local-date handling, custom time parsing, custom import, chat services, and writable-plan state-save guards.
+
 ## 3.5.3 - 2026-03-07
 - Provisioning from imported users is now safer and more deterministic: invite links use a centralized public portal URL source (`Settings > Email > Portal public URL`, with `PUBLIC_APP_URL` as fallback), user creation is wrapped in a DB transaction, and linked imported-user uniqueness is enforced at database level.
 - Meeting visibility correctness improved for admin/superadmin flows: `/api/meetings/mine` now applies date filters before `LIMIT`, avoiding silent omissions on larger datasets.
