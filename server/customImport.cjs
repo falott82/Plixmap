@@ -13,10 +13,13 @@ const {
   decryptString,
   getImportConfig,
   getDeviceImportConfig,
+  getLdapImportConfig,
   getImportConfigSafe,
   getDeviceImportConfigSafe,
+  getLdapImportConfigSafe,
   upsertImportConfig,
-  upsertDeviceImportConfig
+  upsertDeviceImportConfig,
+  upsertLdapImportConfig
 } = require('./customImport/configStore.cjs');
 
 const MAX_IMPORT_RESPONSE_BYTES = serverConfig.importMaxResponseBytes;
@@ -67,25 +70,27 @@ const mapExternalDeviceRow = (r) => ({
   sourceKind: isManualDeviceId(r.devId) ? 'manual' : 'imported'
 });
 
-const normalizeManualExternalUserInput = (payload) => {
-  const toStr = (v) => (v === null || v === undefined ? '' : String(v).trim());
-  const normalizePhone = (v) => toStr(v).replace(/\s+/g, '');
+const toStr = (v) => (v === null || v === undefined ? '' : String(v).trim());
+const normalizePhone = (v) => toStr(v).replace(/\s+/g, '');
+const normalizeUpperText = (v) => toStr(v).toUpperCase();
+const normalizeExternalUserPayload = (payload) => {
   return {
     externalId: toStr(payload?.externalId),
-    firstName: toStr(payload?.firstName),
-    lastName: toStr(payload?.lastName),
-    role: toStr(payload?.role),
-    dept1: toStr(payload?.dept1),
-    dept2: toStr(payload?.dept2),
-    dept3: toStr(payload?.dept3),
-    email: toStr(payload?.email),
+    firstName: normalizeUpperText(payload?.firstName),
+    lastName: normalizeUpperText(payload?.lastName),
+    role: normalizeUpperText(payload?.role),
+    dept1: normalizeUpperText(payload?.dept1),
+    dept2: normalizeUpperText(payload?.dept2),
+    dept3: normalizeUpperText(payload?.dept3),
+    email: toStr(payload?.email).toLowerCase(),
     mobile: normalizePhone(payload?.mobile),
-    ext1: toStr(payload?.ext1),
-    ext2: toStr(payload?.ext2),
-    ext3: toStr(payload?.ext3),
+    ext1: normalizeUpperText(payload?.ext1),
+    ext2: normalizeUpperText(payload?.ext2),
+    ext3: normalizeUpperText(payload?.ext3),
     isExternal: !!payload?.isExternal
   };
 };
+const normalizeManualExternalUserInput = (payload) => normalizeExternalUserPayload(payload);
 
 const makeManualExternalId = () => `manual:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -134,13 +139,14 @@ const validateImportUrl = async (rawUrl, options = {}) =>
 const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   const now = Date.now();
   const shouldMarkMissing = options.markMissing !== false;
+  const normalizedEmployees = (employees || []).map((employee) => normalizeExternalUserPayload(employee));
   const existing = db
     .prepare(
       'SELECT externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present FROM external_users WHERE clientId = ?'
     )
     .all(clientId);
   const existingById = new Map(existing.map((r) => [String(r.externalId), r]));
-  const incomingIds = new Set(employees.map((e) => String(e.externalId)));
+  const incomingIds = new Set(normalizedEmployees.map((e) => String(e.externalId)));
 
   const insert = db.prepare(
     `INSERT INTO external_users (clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt)
@@ -158,7 +164,7 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   const missing = [];
   const duplicates = [];
   const incomingEmailCounts = new Map();
-  for (const e of employees || []) {
+  for (const e of normalizedEmployees) {
     const emailKey = normalizeEmailKey(e?.email);
     if (!emailKey) continue;
     incomingEmailCounts.set(emailKey, (incomingEmailCounts.get(emailKey) || 0) + 1);
@@ -171,7 +177,7 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
     if (!existingEmailOwner.has(emailKey)) existingEmailOwner.set(emailKey, key);
   }
 
-  for (const e of employees) {
+  for (const e of normalizedEmployees) {
     const id = String(e.externalId);
     const prev = existingById.get(id);
     const emailKey = normalizeEmailKey(e?.email);
@@ -269,7 +275,7 @@ const upsertExternalUsers = (db, clientId, employees, options = {}) => {
   return {
     summary: {
       totalBefore: existing.length,
-      totalNow: employees.length,
+      totalNow: normalizedEmployees.length,
       created: created.length,
       updated: updated.length,
       missing: missing.length,
@@ -326,6 +332,51 @@ const getExternalUser = (db, clientId, externalId) => {
     )
     .get(clientId, externalId);
   return row ? mapExternalUserRow(row) : null;
+};
+
+const updateExternalUser = (db, clientId, externalId, payload) => {
+  const now = Date.now();
+  const row = getExternalUser(db, clientId, externalId);
+  if (!row) {
+    const err = new Error('External user not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  const data = normalizeExternalUserPayload({ ...(payload || {}), externalId });
+  if (!data.firstName && !data.lastName && !data.email) {
+    const err = new Error('Missing user identity');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const emailConflict = findExternalEmailConflict(db, clientId, data.email, externalId);
+  if (emailConflict) {
+    const err = new Error(`Duplicate email: ${data.email}`);
+    err.code = 'DUPLICATE_EMAIL';
+    err.details = emailConflict;
+    throw err;
+  }
+  db.prepare(
+    `UPDATE external_users
+     SET firstName=?, lastName=?, role=?, dept1=?, dept2=?, dept3=?, email=?, mobile=?, ext1=?, ext2=?, ext3=?, isExternal=?, present=1, updatedAt=?
+     WHERE clientId=? AND externalId=?`
+  ).run(
+    data.firstName,
+    data.lastName,
+    data.role,
+    data.dept1,
+    data.dept2,
+    data.dept3,
+    data.email,
+    data.mobile,
+    data.ext1,
+    data.ext2,
+    data.ext3,
+    data.isExternal ? 1 : 0,
+    now,
+    clientId,
+    externalId
+  );
+  return getExternalUser(db, clientId, externalId);
 };
 
 const setExternalUserHidden = (db, clientId, externalId, hidden) => {
@@ -660,6 +711,7 @@ const listImportSummary = (db) => {
     )
     .all();
   const cfgRows = db.prepare('SELECT clientId, updatedAt FROM client_user_import').all();
+  const ldapCfgRows = db.prepare('SELECT clientId, updatedAt FROM client_ldap_import').all();
   const byClient = new Map();
   for (const row of userRows) {
     byClient.set(row.clientId, {
@@ -669,7 +721,8 @@ const listImportSummary = (db) => {
       missingCount: Number(row.missingCount || 0),
       hiddenCount: Number(row.hiddenCount || 0),
       lastImportAt: row.lastImportAt || null,
-      configUpdatedAt: null
+      configUpdatedAt: null,
+      ldapConfigUpdatedAt: null
     });
   }
   for (const row of cfgRows) {
@@ -680,9 +733,24 @@ const listImportSummary = (db) => {
       missingCount: 0,
       hiddenCount: 0,
       lastImportAt: null,
-      configUpdatedAt: null
+      configUpdatedAt: null,
+      ldapConfigUpdatedAt: null
     };
     entry.configUpdatedAt = row.updatedAt || null;
+    byClient.set(row.clientId, entry);
+  }
+  for (const row of ldapCfgRows) {
+    const entry = byClient.get(row.clientId) || {
+      clientId: row.clientId,
+      total: 0,
+      presentCount: 0,
+      missingCount: 0,
+      hiddenCount: 0,
+      lastImportAt: null,
+      configUpdatedAt: null,
+      ldapConfigUpdatedAt: null
+    };
+    entry.ldapConfigUpdatedAt = row.updatedAt || null;
     byClient.set(row.clientId, entry);
   }
   return Array.from(byClient.values());
@@ -697,22 +765,27 @@ module.exports = {
   fetchDevicesFromApi,
   getImportConfig,
   getDeviceImportConfig,
+  getLdapImportConfig,
   getImportConfigSafe,
   getDeviceImportConfigSafe,
+  getLdapImportConfigSafe,
   upsertImportConfig,
   upsertDeviceImportConfig,
+  upsertLdapImportConfig,
   upsertExternalUsers,
   upsertExternalDevices,
   listExternalUsers,
   listExternalDevices,
   getExternalUser,
   getExternalDevice,
+  updateExternalUser,
   setExternalUserHidden,
   setExternalDeviceHidden,
   listImportSummary,
   listDeviceImportSummary,
   isManualExternalId,
   isManualDeviceId,
+  normalizeExternalUserPayload,
   upsertManualExternalUser,
   upsertManualExternalDevice,
   deleteManualExternalUser

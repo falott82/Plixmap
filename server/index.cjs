@@ -52,16 +52,20 @@ const {
   fetchDevicesFromApi,
   getImportConfig,
   getDeviceImportConfig,
+  getLdapImportConfig,
   getImportConfigSafe,
   getDeviceImportConfigSafe,
+  getLdapImportConfigSafe,
   upsertImportConfig,
   upsertDeviceImportConfig,
+  upsertLdapImportConfig,
   upsertExternalUsers,
   upsertExternalDevices,
   listExternalUsers,
   listExternalDevices,
   getExternalUser,
   getExternalDevice,
+  updateExternalUser,
   setExternalUserHidden,
   setExternalDeviceHidden,
   listImportSummary,
@@ -72,8 +76,17 @@ const {
   deleteManualExternalUser,
   upsertManualExternalDevice,
   deleteManualExternalDevice,
-  findExternalEmailConflict
+  findExternalEmailConflict,
+  normalizeExternalUserPayload
 } = require('./customImport.cjs');
+const {
+  normalizeLdapImportConfig,
+  resolveLdapEffectiveConfig,
+  fetchEmployeesFromLdap,
+  prepareLdapImportPreview,
+  selectLdapImportRows,
+  applyLdapImportOverrides
+} = require('./customImport/ldap.cjs');
 const {
   getEmailConfig,
   getClientEmailConfig,
@@ -1786,7 +1799,10 @@ app.get('/api/import/summary', requireAuth, (req, res) => {
       missingCount: entry?.missingCount || 0,
       hiddenCount: entry?.hiddenCount || 0,
       configUpdatedAt: entry?.configUpdatedAt || null,
-      hasConfig: !!entry?.configUpdatedAt
+      ldapConfigUpdatedAt: entry?.ldapConfigUpdatedAt || null,
+      hasWebApiConfig: !!entry?.configUpdatedAt,
+      hasLdapConfig: !!entry?.ldapConfigUpdatedAt,
+      hasConfig: !!entry?.configUpdatedAt || !!entry?.ldapConfigUpdatedAt
     };
   });
   res.json({ ok: true, rows });
@@ -1858,6 +1874,58 @@ app.put('/api/import/config', requireAuth, rateByUser('import_config', 60 * 1000
       method: nextMethod,
       passwordChanged: password !== undefined,
       bodyChanged: bodyJson !== undefined
+    }
+  });
+  res.json({ ok: true, config: cfg });
+});
+
+app.get('/api/import/ldap/config', requireAuth, (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const clientId = String(req.query.clientId || '').trim();
+  if (!clientId) {
+    res.status(400).json({ error: 'Missing clientId' });
+    return;
+  }
+  res.json({ config: getLdapImportConfigSafe(db, clientId) });
+});
+
+app.put('/api/import/ldap/config', requireAuth, rateByUser('import_ldap_config', 60 * 1000, 10), (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const currentSafe = getLdapImportConfigSafe(db, String(req.body?.clientId || '').trim());
+  const normalized = normalizeLdapImportConfig({
+    ...req.body,
+    hasPassword: !!currentSafe?.hasPassword,
+    requirePassword: !currentSafe?.hasPassword
+  });
+  if (!normalized.ok) {
+    res.status(400).json({ error: normalized.error || 'Invalid LDAP configuration' });
+    return;
+  }
+  const cfg = upsertLdapImportConfig(db, dataSecret, normalized.config);
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'import_ldap_config_update',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: normalized.config.clientId,
+    ...requestMeta(req),
+    details: {
+      server: normalized.config.server,
+      port: normalized.config.port,
+      security: normalized.config.security,
+      authType: normalized.config.authType,
+      domain: normalized.config.domain,
+      username: normalized.config.username,
+      baseDn: normalized.config.baseDn,
+      userFilter: normalized.config.userFilter,
+      sizeLimit: normalized.config.sizeLimit,
+      passwordChanged: req.body?.password !== undefined
     }
   });
   res.json({ ok: true, config: cfg });
@@ -2163,20 +2231,22 @@ app.post('/api/device-import/csv', requireAuth, rateByUser('device_import_csv', 
 });
 
 const normalizeImportText = (value) => String(value || '').trim();
+const normalizeUpperImportText = (value) => normalizeImportText(value).toUpperCase();
+const normalizeImportPhone = (value) => normalizeImportText(value).replace(/\s+/g, '');
 
 const mapImportedEmployeeForPreview = (employee) => ({
   externalId: String(employee?.externalId || ''),
-  firstName: String(employee?.firstName || ''),
-  lastName: String(employee?.lastName || ''),
-  role: String(employee?.role || ''),
-  dept1: String(employee?.dept1 || ''),
-  dept2: String(employee?.dept2 || ''),
-  dept3: String(employee?.dept3 || ''),
-  email: String(employee?.email || ''),
-  mobile: String(employee?.mobile || ''),
-  ext1: String(employee?.ext1 || ''),
-  ext2: String(employee?.ext2 || ''),
-  ext3: String(employee?.ext3 || ''),
+  firstName: normalizeUpperImportText(employee?.firstName),
+  lastName: normalizeUpperImportText(employee?.lastName),
+  role: normalizeUpperImportText(employee?.role),
+  dept1: normalizeUpperImportText(employee?.dept1),
+  dept2: normalizeUpperImportText(employee?.dept2),
+  dept3: normalizeUpperImportText(employee?.dept3),
+  email: normalizeImportText(employee?.email).toLowerCase(),
+  mobile: normalizeImportPhone(employee?.mobile),
+  ext1: normalizeUpperImportText(employee?.ext1),
+  ext2: normalizeUpperImportText(employee?.ext2),
+  ext3: normalizeUpperImportText(employee?.ext3),
   isExternal: !!employee?.isExternal
 });
 
@@ -2202,6 +2272,31 @@ const mapExternalUserDbRowForPreview = (row, { includeFlags = false } = {}) => (
       }
     : {})
 });
+
+const loadExistingImportPreviewUsers = (clientId) =>
+  db
+    .prepare(
+      'SELECT clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present, updatedAt FROM external_users WHERE clientId = ? ORDER BY lastName COLLATE NOCASE, firstName COLLATE NOCASE'
+    )
+    .all(clientId)
+    .map((row) => ({
+      clientId: String(row.clientId || ''),
+      ...mapExternalUserDbRowForPreview(row, { includeFlags: true })
+    }));
+
+const resolveLdapRuntimeConfigForRequest = (req) => {
+  const cid = String(req.body?.clientId || '').trim();
+  if (!cid) {
+    return { ok: false, status: 400, error: 'Missing clientId' };
+  }
+  const saved = getLdapImportConfig(db, dataSecret, cid);
+  const draft = req.body?.config && typeof req.body.config === 'object' ? req.body.config : null;
+  const normalized = resolveLdapEffectiveConfig({ clientId: cid, savedConfig: saved, draftConfig: draft });
+  if (!normalized.ok) {
+    return { ok: false, status: 400, error: normalized.error || 'Invalid LDAP configuration' };
+  }
+  return { ok: true, clientId: cid, config: normalized.config };
+};
 
 const mapImportedDeviceForPreview = (device) => ({
   devId: String(device?.devId || ''),
@@ -2258,6 +2353,151 @@ const importedDeviceChangedAgainstRemote = (previous, remoteDevice) => {
     Number(previous.present || 1) !== 1
   );
 };
+
+app.post('/api/import/ldap/test', requireAuth, rateByUser('import_ldap_test', 60 * 1000, 10), async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const runtime = resolveLdapRuntimeConfigForRequest(req);
+  if (!runtime.ok) {
+    res.status(runtime.status).json({ error: runtime.error });
+    return;
+  }
+  const result = await fetchEmployeesFromLdap(runtime.config, { sizeLimit: Math.min(Number(runtime.config.sizeLimit || 25), 25) });
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'import_ldap_test',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: runtime.clientId,
+    ...requestMeta(req),
+    details: { ok: !!result.ok, status: result.status, returnedCount: result.returnedCount || 0 }
+  });
+  if (!result.ok) {
+    res.status(400).json({ ok: false, status: result.status, error: result.error || 'LDAP request failed' });
+    return;
+  }
+  res.json({
+    ok: true,
+    status: result.status,
+    count: (result.employees || []).length,
+    preview: (result.employees || []).slice(0, 25)
+  });
+});
+
+app.post('/api/import/ldap/preview', requireAuth, rateByUser('import_ldap_preview', 60 * 1000, 10), async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const runtime = resolveLdapRuntimeConfigForRequest(req);
+  if (!runtime.ok) {
+    res.status(runtime.status).json({ error: runtime.error });
+    return;
+  }
+  const result = await fetchEmployeesFromLdap(runtime.config);
+  if (!result.ok) {
+    res.status(400).json({ ok: false, status: result.status, error: result.error || 'LDAP request failed' });
+    return;
+  }
+  const existingRows = loadExistingImportPreviewUsers(runtime.clientId);
+  const preview = prepareLdapImportPreview(existingRows, (result.employees || []).map(mapImportedEmployeeForPreview));
+  writeAuditLog(db, {
+    level: 'verbose',
+    event: 'import_ldap_preview',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: runtime.clientId,
+    ...requestMeta(req),
+    details: {
+      remoteCount: preview.remoteCount,
+      importableCount: preview.importableCount,
+      existingCount: preview.existingCount,
+      skippedCount: preview.skippedCount
+    }
+  });
+  res.json({ ok: true, clientId: runtime.clientId, ...preview });
+});
+
+app.post('/api/import/ldap/sync', requireAuth, rateByUser('import_ldap_sync', 60 * 1000, 10), async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const runtime = resolveLdapRuntimeConfigForRequest(req);
+  if (!runtime.ok) {
+    res.status(runtime.status).json({ error: runtime.error });
+    return;
+  }
+  const result = await fetchEmployeesFromLdap(runtime.config);
+  if (!result.ok) {
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'import_ldap_sync',
+      userId: req.userId,
+      scopeType: 'client',
+      scopeId: runtime.clientId,
+      ...requestMeta(req),
+      details: { ok: false, status: result.status, error: result.error || 'LDAP request failed' }
+    });
+    res.status(400).json({ ok: false, status: result.status, error: result.error || 'LDAP request failed' });
+    return;
+  }
+  const existingRows = loadExistingImportPreviewUsers(runtime.clientId);
+  const remoteRows = (result.employees || []).map(mapImportedEmployeeForPreview);
+  const previewBeforeImport = prepareLdapImportPreview(existingRows, remoteRows);
+  const selectedRows = selectLdapImportRows(previewBeforeImport.importableRows, req.body?.selectedExternalIds);
+  if (!selectedRows.ok) {
+    res.status(400).json({ ok: false, error: selectedRows.error });
+    return;
+  }
+  const selectedRowsWithOverrides = applyLdapImportOverrides(selectedRows.rows, req.body?.overridesByExternalId);
+  if (!selectedRowsWithOverrides.ok) {
+    res.status(400).json({ ok: false, error: selectedRowsWithOverrides.error });
+    return;
+  }
+  const finalRows = selectedRowsWithOverrides.rows.map((row) => normalizeExternalUserPayload(row));
+  const sync = finalRows.length
+    ? upsertExternalUsers(db, runtime.clientId, finalRows, { markMissing: false })
+    : { summary: { created: 0, updated: 0, missing: 0, duplicateEmails: 0 }, created: [], updated: [], missing: [], duplicates: [] };
+  const preview = prepareLdapImportPreview(loadExistingImportPreviewUsers(runtime.clientId), remoteRows);
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'import_ldap_sync',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: runtime.clientId,
+    ...requestMeta(req),
+    details: {
+      fetched: previewBeforeImport.remoteCount,
+      importableBefore: previewBeforeImport.importableCount,
+      selectedRequested: selectedRows.requestedCount,
+      selectedImportable: selectedRows.selectedCount,
+      existingBefore: previewBeforeImport.existingCount,
+      skippedBefore: previewBeforeImport.skippedCount,
+      created: sync.summary?.created || 0,
+      updated: sync.summary?.updated || 0
+    }
+  });
+  res.json({
+    ok: true,
+    clientId: runtime.clientId,
+    preview,
+    summary: {
+      fetched: previewBeforeImport.remoteCount,
+      importable: previewBeforeImport.importableCount,
+      selected: selectedRows.selectedCount,
+      existing: previewBeforeImport.existingCount,
+      skipped: previewBeforeImport.skippedCount,
+      created: sync.summary?.created || 0,
+      updated: sync.summary?.updated || 0
+    },
+    created: sync.created || [],
+    updated: sync.updated || [],
+    skippedRows: preview.skippedRows || []
+  });
+});
 
 app.post('/api/import/diff', requireAuth, rateByUser('import_diff', 60 * 1000, 10), async (req, res) => {
   if (!req.isSuperAdmin) {
@@ -2762,6 +3002,51 @@ app.put('/api/external-users/manual', requireAuth, rateByUser('external_user_man
       return;
     }
     res.status(500).json({ error: 'Unable to update manual user' });
+  }
+});
+
+app.put('/api/external-users', requireAuth, rateByUser('external_user_update', 60 * 1000, 60), (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const { clientId, externalId, user } = req.body || {};
+  const cid = String(clientId || '').trim();
+  const eid = String(externalId || '').trim();
+  if (!cid || !eid) {
+    res.status(400).json({ error: 'Missing clientId/externalId' });
+    return;
+  }
+  try {
+    const before = getExternalUser(db, cid, eid);
+    const row = updateExternalUser(db, cid, eid, { ...(user || {}), externalId: eid });
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'external_user_update',
+      userId: req.userId,
+      scopeType: 'client',
+      scopeId: cid,
+      ...requestMeta(req),
+      details: {
+        externalId: eid,
+        sourceKind: before?.manual ? 'manual' : 'imported'
+      }
+    });
+    res.json({ ok: true, row });
+  } catch (err) {
+    if (err?.code === 'VALIDATION') {
+      res.status(400).json({ error: err.message || 'Invalid payload' });
+      return;
+    }
+    if (err?.code === 'DUPLICATE_EMAIL') {
+      res.status(409).json({ error: err.message || 'Duplicate email in client directory' });
+      return;
+    }
+    if (err?.code === 'NOT_FOUND') {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    res.status(500).json({ error: 'Unable to update user' });
   }
 });
 

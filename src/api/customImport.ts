@@ -94,7 +94,33 @@ export interface ImportSummaryRow {
   missingCount: number;
   hiddenCount: number;
   configUpdatedAt: number | null;
+  ldapConfigUpdatedAt?: number | null;
+  hasWebApiConfig?: boolean;
+  hasLdapConfig?: boolean;
   hasConfig: boolean;
+}
+
+export interface LdapImportConfigSafe {
+  clientId: string;
+  server: string;
+  port: number;
+  security: 'ldaps' | 'starttls' | 'ldap' | string;
+  scope: 'sub' | 'one' | string;
+  authType: 'anonymous' | 'simple' | 'domain_user' | 'user_principal_name' | string;
+  domain: string;
+  username: string;
+  hasPassword: boolean;
+  baseDn: string;
+  userFilter: string;
+  emailAttribute: string;
+  firstNameAttribute: string;
+  lastNameAttribute: string;
+  externalIdAttribute: string;
+  roleAttribute: string;
+  mobileAttribute: string;
+  dept1Attribute: string;
+  sizeLimit: number;
+  updatedAt: number;
 }
 
 export interface DeviceImportConfigSafe {
@@ -158,6 +184,79 @@ export const saveImportConfig = async (payload: {
   });
   if (!res.ok) throw new Error(`Failed to save import config (${res.status})`);
   return res.json();
+};
+
+export const getLdapImportConfig = async (clientId: string): Promise<{ config: LdapImportConfigSafe | null }> => {
+  const qs = new URLSearchParams({ clientId });
+  const res = await apiFetch(`/api/import/ldap/config?${qs.toString()}`, { credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to load LDAP import config (${res.status})`);
+  return res.json();
+};
+
+export const saveLdapImportConfig = async (payload: {
+  clientId: string;
+  server: string;
+  port: number;
+  security: string;
+  scope: string;
+  authType: string;
+  domain?: string;
+  username?: string;
+  password?: string;
+  baseDn: string;
+  userFilter?: string;
+  emailAttribute?: string;
+  firstNameAttribute?: string;
+  lastNameAttribute?: string;
+  externalIdAttribute?: string;
+  roleAttribute?: string;
+  mobileAttribute?: string;
+  dept1Attribute?: string;
+  sizeLimit?: number;
+}): Promise<{ ok: boolean; config: LdapImportConfigSafe }> => {
+  const res = await apiFetch('/api/import/ldap/config', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to save LDAP import config (${res.status})`);
+  return body;
+};
+
+export const testLdapImport = async (
+  clientId: string,
+  config?: {
+    server: string;
+    port: number;
+    security: string;
+    scope: string;
+    authType: string;
+    domain?: string;
+    username?: string;
+    password?: string;
+    baseDn: string;
+    userFilter?: string;
+    emailAttribute?: string;
+    firstNameAttribute?: string;
+    lastNameAttribute?: string;
+    externalIdAttribute?: string;
+    roleAttribute?: string;
+    mobileAttribute?: string;
+    dept1Attribute?: string;
+    sizeLimit?: number;
+  }
+): Promise<{ ok: boolean; status: number; count?: number; preview?: ImportPreviewRow[]; error?: string }> => {
+  const res = await apiFetch('/api/import/ldap/test', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId, config })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, status: body?.status || res.status, error: body?.error || `HTTP ${res.status}` };
+  return body;
 };
 
 export const testImport = async (
@@ -300,6 +399,22 @@ export const updateManualExternalUser = async (payload: {
   return body;
 };
 
+export const updateExternalUser = async (payload: {
+  clientId: string;
+  externalId: string;
+  user: Partial<ExternalUserRow>;
+}): Promise<{ ok: boolean; row: ExternalUserRow }> => {
+  const res = await apiFetch(`/api/external-users`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to update user (${res.status})`);
+  return body;
+};
+
 export const deleteManualExternalUser = async (payload: { clientId: string; externalId: string }): Promise<{ ok: boolean; removed: number }> => {
   const res = await apiFetch(`/api/external-users/manual`, {
     method: 'DELETE',
@@ -374,6 +489,29 @@ export interface ImportPreviewExistingRow {
   updatedAt: number | null;
 }
 
+export interface LdapImportSkippedRow extends ImportPreviewRow {
+  skipReason:
+    | 'missing_email'
+    | 'duplicate_email_in_ldap'
+    | 'duplicate_external_id_in_ldap'
+    | 'already_present_email'
+    | 'already_present_external_id';
+  existingExternalId?: string;
+}
+
+export interface LdapImportPreviewResponse {
+  ok: boolean;
+  clientId: string;
+  remoteCount: number;
+  importableCount: number;
+  existingCount: number;
+  skippedCount: number;
+  importableRows: ImportPreviewRow[];
+  existingRows: (ImportPreviewExistingRow & { clientId?: string })[];
+  skippedRows: LdapImportSkippedRow[];
+  error?: string;
+}
+
 export const previewImport = async (clientId: string): Promise<{
   ok: boolean;
   clientId: string;
@@ -393,6 +531,127 @@ export const previewImport = async (clientId: string): Promise<{
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, clientId, remoteCount: 0, existingCount: 0, remoteRows: [], existingRows: [], error: body?.error || `HTTP ${res.status}`, contentType: body?.contentType, rawSnippet: body?.rawSnippet } as any;
+  return body;
+};
+
+export const previewLdapImport = async (
+  clientId: string,
+  config?: {
+    server: string;
+    port: number;
+    security: string;
+    scope: string;
+    authType: string;
+    domain?: string;
+    username?: string;
+    password?: string;
+    baseDn: string;
+    userFilter?: string;
+    emailAttribute?: string;
+    firstNameAttribute?: string;
+    lastNameAttribute?: string;
+    externalIdAttribute?: string;
+    roleAttribute?: string;
+    mobileAttribute?: string;
+    dept1Attribute?: string;
+    sizeLimit?: number;
+  }
+): Promise<LdapImportPreviewResponse> => {
+  const res = await apiFetch('/api/import/ldap/preview', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId, config })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return {
+      ok: false,
+      clientId,
+      remoteCount: 0,
+      importableCount: 0,
+      existingCount: 0,
+      skippedCount: 0,
+      importableRows: [],
+      existingRows: [],
+      skippedRows: [],
+      error: body?.error || `HTTP ${res.status}`
+    };
+  }
+  return body;
+};
+
+export const syncLdapImport = async (
+  clientId: string,
+  config?: {
+    server: string;
+    port: number;
+    security: string;
+    scope: string;
+    authType: string;
+    domain?: string;
+    username?: string;
+    password?: string;
+    baseDn: string;
+    userFilter?: string;
+    emailAttribute?: string;
+    firstNameAttribute?: string;
+    lastNameAttribute?: string;
+    externalIdAttribute?: string;
+    roleAttribute?: string;
+    mobileAttribute?: string;
+    dept1Attribute?: string;
+    sizeLimit?: number;
+  },
+  selectedExternalIds?: string[],
+  overridesByExternalId?: Record<string, Partial<ImportPreviewRow>>
+): Promise<{
+  ok: boolean;
+  clientId: string;
+  preview: LdapImportPreviewResponse;
+  summary: {
+    fetched: number;
+    importable: number;
+    selected?: number;
+    existing: number;
+    skipped: number;
+    created: number;
+    updated: number;
+  };
+  created: ImportPreviewRow[];
+  updated: ImportPreviewRow[];
+  skippedRows: LdapImportSkippedRow[];
+  error?: string;
+}> => {
+  const res = await apiFetch('/api/import/ldap/sync', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId, config, selectedExternalIds, overridesByExternalId })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return {
+      ok: false,
+      clientId,
+      preview: {
+        ok: false,
+        clientId,
+        remoteCount: 0,
+        importableCount: 0,
+        existingCount: 0,
+        skippedCount: 0,
+        importableRows: [],
+        existingRows: [],
+        skippedRows: []
+      },
+      summary: { fetched: 0, importable: 0, selected: 0, existing: 0, skipped: 0, created: 0, updated: 0 },
+      created: [],
+      updated: [],
+      skippedRows: [],
+      error: body?.error || `HTTP ${res.status}`
+    };
+  }
   return body;
 };
 

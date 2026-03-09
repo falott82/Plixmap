@@ -8,6 +8,33 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.5.5',
+    date: '2026-03-09',
+    type: 'fix',
+    notes: [
+      n(
+        'Import LDAP utenti introdotto in sola lettura con server/autenticazione/Base DN/filtro/mapping configurabili, test connessione, confronto dedicato e import selettivo per email per evitare sovrapposizioni con il contenitore locale',
+        'Read-only LDAP user import added with configurable server/authentication/base DN/filter/mapping, connection testing, dedicated comparison, and selective import by email to avoid overlaps with the local container'
+      ),
+      n(
+        'UX LDAP piu controllata: confronto in modale separata, seconda modale per scegliere quali utenti importare, completamento manuale dei campi mancanti prima dell’import e supporto a scope OU corrente o subtree',
+        'LDAP UX is more controlled: dedicated comparison modal, second modal to choose which users to import, manual completion of missing fields before import, and support for current-OU or subtree scope'
+      ),
+      n(
+        'Contenitore utenti piu flessibile: ora anche gli utenti importati possono essere modificati localmente, con testi/tooltip espliciti sul fatto che un reimport futuro puo sovrascrivere i dati locali',
+        'The user container is more flexible: imported users can now be edited locally as well, with explicit copy/tooltips clarifying that future reimports may overwrite local values'
+      ),
+      n(
+        'Bug critico corretto nella persistenza config LDAP: il salvataggio non riallineava correttamente i campi SQL e poteva corrompere `Base DN` o stato password; aggiunti test dedicati su config store e override pre-import',
+        'Critical LDAP config persistence bug fixed: saved SQL field ordering was misaligned and could corrupt `Base DN` or password state; dedicated tests now cover config-store ordering and pre-import overrides'
+      ),
+      n(
+        'Release rifinita con passata su sicurezza, traduzioni e copertura tooltip/help nella sezione import, inclusa una guida LDAP completa in modale con gestione focus corretta',
+        'Release refined with an additional pass on security, translations, and tooltip/help coverage in the import section, including a full LDAP guide modal with proper focus handling'
+      )
+    ]
+  },
+  {
     version: '3.5.4',
     date: '2026-03-08',
     type: 'fix',

@@ -2,6 +2,13 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.5.5 - 2026-03-09
+- Added read-only LDAP user import with configurable server/authentication/base-DN/filter/attribute mapping, explicit connection testing, comparison against the local container by email, and selective import of only chosen users.
+- LDAP import UX is now multi-step and more controllable: compare runs in a dedicated modal, import opens a second selection modal, incomplete LDAP rows can be completed manually before import, and imported users can now be edited locally after synchronization.
+- Hardened LDAP persistence and normalization: fixed the config-store field ordering bug that could corrupt saved LDAP settings such as `Base DN`/password state, normalized imported/local user fields more consistently (uppercase names/roles/departments, lowercase email, compact phone), and kept LDAP strictly read-only (`bind/search/unbind` only).
+- Improved operator guidance with more explicit tooltips and a focus-safe LDAP guide modal that explains every configuration field and the meaning of filter/mapping/limit settings.
+- Ran a broader release pass for code quality, security, translations, and tooltip coverage, with updated regression tests for LDAP config storage, LDAP import overrides, and imported-user local editing.
+
 ## 3.5.4 - 2026-03-08
 - Centralized runtime server config in `server/config.cjs`: defaults, parsing, env normalization, and security-sensitive booleans now come from one source of truth, with strict validation and preserved `PORT=0` support for ephemeral binds.
 - Continued backend modularization: extracted auth/MFA, admin settings, meeting public/notes/lifecycle routes, custom import network/config-store modules, and state-save guards to reduce risk in the monolithic server bootstrap.

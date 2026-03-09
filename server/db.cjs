@@ -562,6 +562,15 @@ const migrations = [
         WHERE linkedExternalClientId <> '' AND linkedExternalId <> '';
       `);
     }
+  },
+  {
+    version: 27,
+    up: (db) => {
+      const ldapCols = db.prepare("PRAGMA table_info('client_ldap_import')").all().map((c) => String(c.name || ''));
+      if (ldapCols.length && !ldapCols.includes('scope')) {
+        db.exec("ALTER TABLE client_ldap_import ADD COLUMN scope TEXT NOT NULL DEFAULT 'sub'");
+      }
+    }
   }
 ];
 
@@ -769,6 +778,28 @@ const openDb = () => {
       passwordEnc TEXT,
       method TEXT NOT NULL DEFAULT 'POST',
       bodyJson TEXT,
+      updatedAt INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS client_ldap_import (
+      clientId TEXT PRIMARY KEY,
+      server TEXT NOT NULL,
+      port INTEGER NOT NULL,
+      security TEXT NOT NULL DEFAULT 'ldaps',
+      scope TEXT NOT NULL DEFAULT 'sub',
+      authType TEXT NOT NULL DEFAULT 'simple',
+      domain TEXT NOT NULL DEFAULT '',
+      username TEXT NOT NULL DEFAULT '',
+      passwordEnc TEXT,
+      baseDn TEXT NOT NULL,
+      userFilter TEXT NOT NULL DEFAULT '(mail=*)',
+      emailAttribute TEXT NOT NULL DEFAULT 'mail',
+      firstNameAttribute TEXT NOT NULL DEFAULT 'givenName',
+      lastNameAttribute TEXT NOT NULL DEFAULT 'sn',
+      externalIdAttribute TEXT NOT NULL DEFAULT 'sAMAccountName',
+      roleAttribute TEXT NOT NULL DEFAULT 'title',
+      mobileAttribute TEXT NOT NULL DEFAULT 'mobile',
+      dept1Attribute TEXT NOT NULL DEFAULT 'department',
+      sizeLimit INTEGER NOT NULL DEFAULT 1000,
       updatedAt INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS external_users (

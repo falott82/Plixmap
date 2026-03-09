@@ -5,6 +5,7 @@ const {
   getImportConfig,
   readResponseText,
   upsertImportConfig,
+  updateExternalUser,
   validateImportUrl
 } = require('../server/customImport.cjs');
 
@@ -49,6 +50,57 @@ const createImportConfigDb = () => {
               passwordEnc,
               method,
               bodyJson,
+              updatedAt
+            });
+            return { changes: 1 };
+          }
+        };
+      }
+      throw new Error(`Unsupported SQL in test: ${sql}`);
+    }
+  };
+};
+
+const createExternalUsersDb = (seedRows = []) => {
+  const rows = new Map(seedRows.map((row) => [`${row.clientId}:${row.externalId}`, { ...row }]));
+  return {
+    prepare(sql) {
+      if (sql.includes('SELECT clientId, externalId, firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, hidden, present, lastSeenAt, createdAt, updatedAt')) {
+        return {
+          get(clientId, externalId) {
+            return rows.get(`${clientId}:${externalId}`) || null;
+          }
+        };
+      }
+      if (sql.includes('SELECT externalId, firstName, lastName, email FROM external_users WHERE clientId = ?')) {
+        return {
+          all(clientId) {
+            return Array.from(rows.values()).filter((row) => row.clientId === clientId);
+          }
+        };
+      }
+      if (sql.includes('UPDATE external_users') && sql.includes('WHERE clientId=? AND externalId=?')) {
+        return {
+          run(firstName, lastName, role, dept1, dept2, dept3, email, mobile, ext1, ext2, ext3, isExternal, updatedAt, clientId, externalId) {
+            const key = `${clientId}:${externalId}`;
+            const prev = rows.get(key);
+            rows.set(key, {
+              ...prev,
+              clientId,
+              externalId,
+              firstName,
+              lastName,
+              role,
+              dept1,
+              dept2,
+              dept3,
+              email,
+              mobile,
+              ext1,
+              ext2,
+              ext3,
+              isExternal,
+              present: 1,
               updatedAt
             });
             return { changes: 1 };
@@ -108,4 +160,47 @@ test('upsertImportConfig preserves encrypted password when omitted on update', (
     method: 'GET',
     bodyJson: '{"page":1}'
   });
+});
+
+test('updateExternalUser edits imported users in the local container and normalizes fields', () => {
+  const db = createExternalUsersDb([
+    {
+      clientId: 'c1',
+      externalId: 'ldap:mrossi',
+      firstName: 'MARIO',
+      lastName: 'ROSSI',
+      role: 'IT',
+      dept1: 'TECH',
+      dept2: '',
+      dept3: '',
+      email: 'mario.rossi@example.com',
+      mobile: '+393331234567',
+      ext1: '',
+      ext2: '',
+      ext3: '',
+      isExternal: 0,
+      hidden: 0,
+      present: 1,
+      lastSeenAt: 0,
+      createdAt: 1,
+      updatedAt: 1
+    }
+  ]);
+
+  const updated = updateExternalUser(db, 'c1', 'ldap:mrossi', {
+    firstName: 'Mario',
+    lastName: 'Verdi',
+    role: 'Facility manager',
+    dept1: 'operations',
+    email: 'M.Verdi@Example.com',
+    mobile: '+39 333 000 1111'
+  });
+
+  assert.equal(updated.externalId, 'ldap:mrossi');
+  assert.equal(updated.firstName, 'MARIO');
+  assert.equal(updated.lastName, 'VERDI');
+  assert.equal(updated.role, 'FACILITY MANAGER');
+  assert.equal(updated.dept1, 'OPERATIONS');
+  assert.equal(updated.email, 'm.verdi@example.com');
+  assert.equal(updated.mobile, '+393330001111');
 });

@@ -1,7 +1,7 @@
 {
   "name": "plixmap",
   "description": "Collaborative workspace planning with floor plans, desks, racks, and network links.",
-  "version": "3.5.4",
+  "version": "3.5.5",
   "license": "MIT",
   "homepage": "https://www.plixmap.com",
   "repository": {
@@ -53,6 +53,7 @@
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.0",
     "konva": "^9.3.6",
+    "ldapts": "^8.1.7",
     "lexical": "^0.39.0",
     "lucide-react": "^0.308.0",
     "nanoid": "^5.1.6",

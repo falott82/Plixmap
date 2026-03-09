@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.5.4
+Current version: 3.5.5
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,12 +14,12 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.5.4
-- Server runtime configuration is now centralized in `server/config.cjs`, with stricter parsing for security-sensitive flags, preserved `PORT=0` support, and aligned documentation/tests for runtime env handling.
-- `server/index.cjs` has been reduced further by extracting auth/MFA and admin settings routes, while meeting lifecycle/public/notes flows now live in dedicated route modules with stronger audit coverage for critical changes.
-- Meeting and import flows were hardened: lifecycle updates now fail fast on missing participant emails when notifications are enabled, meeting cancel/update actions write consistent global audit events, and custom import SSRF/response-limit protections were reinforced.
-- `PlanView` and meeting UI were decomposed further (`RoomMeasuresModal`, `RoomLayoutExportModal`, `RoomMeetingDuplicateModal`, kiosk helpers), while duplicate/follow-up scheduling now uses local-day logic instead of UTC slicing and rejects invalid custom time windows correctly.
-- Added focused regression coverage for server config, auth/settings/meeting lifecycle, local-date usage, time parsing, custom import, chat services, and state-save guards to keep the 3.5.4 refactor verifiable.
+## What's new in 3.5.5
+- Added read-only LDAP user import with configurable server/auth/base DN/filter/attribute mapping, connection test, compare flow, and selective import by email to avoid overlaps with existing local users.
+- LDAP import UX is now safer and more explicit: compare opens in a dedicated modal, import opens a second selection modal, incomplete rows can be completed manually before import, and imported users can now be edited locally after sync.
+- LDAP fields and local imported-user data now normalize more predictably (uppercase person/role/department fields, lowercase emails, compact phones) while preserving read-only behavior toward the remote directory.
+- Fixed a critical LDAP config persistence bug that could misalign saved fields like `Base DN` and password encryption; added dedicated regression coverage for config-store ordering and import overrides.
+- Expanded tooltip/help coverage in the import section, including a focus-safe LDAP guide modal and clearer descriptions for import actions, local edits, duplicates, and visibility behavior.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.

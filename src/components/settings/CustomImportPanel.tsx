@@ -12,9 +12,11 @@ import {
   createManualExternalUser,
   deleteOneImportedUser,
   deleteManualExternalUser,
+  getLdapImportConfig,
   importOneWebApiUser,
   ImportPreviewExistingRow,
   ImportPreviewRow,
+  LdapImportSkippedRow,
   ExternalUserRow,
   fetchImportSummary,
   getImportConfig,
@@ -22,12 +24,16 @@ import {
   importCsv,
   listExternalUsers,
   previewImport,
+  previewLdapImport,
   provisionPortalUserFromImported,
   saveImportConfig,
+  saveLdapImportConfig,
   setExternalUserHidden,
   syncImport,
+  syncLdapImport,
+  testLdapImport,
   testImport,
-  updateManualExternalUser
+  updateExternalUser,
 } from '../../api/customImport';
 import { fetchState } from '../../api/state';
 
@@ -100,6 +106,81 @@ const humanizeProvisionMailReason = (reason: string, t: ReturnType<typeof useT>)
   }
 };
 
+const humanizeLdapSkipReason = (reason: string, t: ReturnType<typeof useT>) => {
+  switch (String(reason || '').trim()) {
+    case 'missing_email':
+      return t({ it: 'email mancante su LDAP', en: 'missing LDAP email' });
+    case 'duplicate_email_in_ldap':
+      return t({ it: 'email duplicata nel risultato LDAP', en: 'duplicate email in LDAP result' });
+    case 'duplicate_external_id_in_ldap':
+      return t({ it: 'external ID duplicato nel risultato LDAP', en: 'duplicate external ID in LDAP result' });
+    case 'already_present_email':
+      return t({ it: 'gia presente per email', en: 'already present by email' });
+    case 'already_present_external_id':
+      return t({ it: 'gia presente per external ID', en: 'already present by external ID' });
+    default:
+      return reason || t({ it: 'motivo sconosciuto', en: 'unknown reason' });
+  }
+};
+
+const normalizeUpperInput = (value: unknown) => String(value || '').trim().toUpperCase();
+const normalizeImportEmailInput = (value: unknown) => String(value || '').trim().toLowerCase();
+const normalizeImportMobileInput = (value: unknown) => String(value || '').trim().replace(/\s+/g, '');
+const mergeLdapImportDraft = (row: ImportPreviewRow, draft?: Partial<ImportPreviewRow> | null): ImportPreviewRow => ({
+  ...row,
+  ...(draft || {}),
+  firstName: Object.prototype.hasOwnProperty.call(draft || {}, 'firstName') ? normalizeUpperInput(draft?.firstName) : normalizeUpperInput(row.firstName),
+  lastName: Object.prototype.hasOwnProperty.call(draft || {}, 'lastName') ? normalizeUpperInput(draft?.lastName) : normalizeUpperInput(row.lastName),
+  role: Object.prototype.hasOwnProperty.call(draft || {}, 'role') ? normalizeUpperInput(draft?.role) : normalizeUpperInput(row.role),
+  dept1: Object.prototype.hasOwnProperty.call(draft || {}, 'dept1') ? normalizeUpperInput(draft?.dept1) : normalizeUpperInput(row.dept1),
+  dept2: Object.prototype.hasOwnProperty.call(draft || {}, 'dept2') ? normalizeUpperInput(draft?.dept2) : normalizeUpperInput(row.dept2),
+  dept3: Object.prototype.hasOwnProperty.call(draft || {}, 'dept3') ? normalizeUpperInput(draft?.dept3) : normalizeUpperInput(row.dept3),
+  email: Object.prototype.hasOwnProperty.call(draft || {}, 'email') ? normalizeImportEmailInput(draft?.email) : normalizeImportEmailInput(row.email),
+  mobile: Object.prototype.hasOwnProperty.call(draft || {}, 'mobile') ? normalizeImportMobileInput(draft?.mobile) : normalizeImportMobileInput(row.mobile)
+});
+const getLdapImportMissingFields = (row: ImportPreviewRow) =>
+  [
+    !String(row.firstName || '').trim() ? 'firstName' : '',
+    !String(row.lastName || '').trim() ? 'lastName' : '',
+    !String(row.email || '').trim() ? 'email' : '',
+    !String(row.mobile || '').trim() ? 'mobile' : '',
+    !String(row.role || '').trim() ? 'role' : '',
+    !String(row.dept1 || '').trim() ? 'dept1' : ''
+  ].filter(Boolean) as Array<'firstName' | 'lastName' | 'email' | 'mobile' | 'role' | 'dept1'>;
+const humanizeLdapImportField = (field: 'firstName' | 'lastName' | 'email' | 'mobile' | 'role' | 'dept1', t: ReturnType<typeof useT>) => {
+  switch (field) {
+    case 'firstName':
+      return t({ it: 'nome', en: 'first name' });
+    case 'lastName':
+      return t({ it: 'cognome', en: 'last name' });
+    case 'email':
+      return 'email';
+    case 'mobile':
+      return t({ it: 'cellulare', en: 'mobile' });
+    case 'role':
+      return t({ it: 'ruolo', en: 'role' });
+    case 'dept1':
+      return t({ it: 'reparto', en: 'department' });
+  }
+};
+
+const formatLdapActionError = (
+  action: 'save' | 'test' | 'preview' | 'import',
+  detail: string | null | undefined,
+  t: ReturnType<typeof useT>
+) => {
+  const fallback =
+    action === 'save'
+      ? t({ it: 'Salvataggio LDAP fallito', en: 'LDAP save failed' })
+      : action === 'preview'
+        ? t({ it: 'Anteprima LDAP non disponibile', en: 'LDAP preview unavailable' })
+        : action === 'import'
+          ? t({ it: 'Import LDAP fallito', en: 'LDAP import failed' })
+          : t({ it: 'Test LDAP fallito', en: 'LDAP test failed' });
+  const normalized = String(detail || '').trim();
+  return normalized ? `${fallback}: ${normalized}` : fallback;
+};
+
 const CustomImportPanel = (
   { initialClientId, lockClientSelection = false }: { initialClientId?: string | null; lockClientSelection?: boolean } = {}
 ) => {
@@ -118,7 +199,7 @@ const CustomImportPanel = (
   const [activeClientId, setActiveClientId] = useState<string | null>(null);
 
   const [configExpanded, setConfigExpanded] = useState(false);
-  const [importMode, setImportMode] = useState<'webapi' | 'csv' | 'manual'>('webapi');
+  const [importMode, setImportMode] = useState<'webapi' | 'ldap' | 'csv' | 'manual'>('webapi');
   const [cfg, setCfg] = useState<{ url: string; username: string; method: 'GET' | 'POST' | string; hasPassword: boolean; bodyJson: string; updatedAt?: number } | null>(null);
   const [password, setPassword] = useState('');
   const [savingCfg, setSavingCfg] = useState(false);
@@ -127,6 +208,68 @@ const CustomImportPanel = (
   const [testResult, setTestResult] = useState<{ ok: boolean; status: number; count?: number; error?: string; contentType?: string; rawSnippet?: string } | null>(null);
   const [webApiTestPassedByClient, setWebApiTestPassedByClient] = useState<Record<string, boolean>>({});
   const [syncResult, setSyncResult] = useState<any | null>(null);
+  const [ldapCfg, setLdapCfg] = useState<{
+    server: string;
+    port: number;
+    security: 'ldaps' | 'starttls' | 'ldap' | string;
+    scope: 'sub' | 'one' | string;
+    authType: 'anonymous' | 'simple' | 'domain_user' | 'user_principal_name' | string;
+    domain: string;
+    username: string;
+    hasPassword: boolean;
+    baseDn: string;
+    userFilter: string;
+    emailAttribute: string;
+    firstNameAttribute: string;
+    lastNameAttribute: string;
+    externalIdAttribute: string;
+    roleAttribute: string;
+    mobileAttribute: string;
+    dept1Attribute: string;
+    sizeLimit: number;
+    updatedAt?: number;
+  } | null>(null);
+  const [ldapPassword, setLdapPassword] = useState('');
+  const [savingLdapCfg, setSavingLdapCfg] = useState(false);
+  const [ldapTesting, setLdapTesting] = useState(false);
+  const [ldapTestResult, setLdapTestResult] = useState<{ ok: boolean; status: number; count?: number; error?: string } | null>(null);
+  const [ldapPreviewLoading, setLdapPreviewLoading] = useState(false);
+  const [ldapCompareOpen, setLdapCompareOpen] = useState(false);
+  const [ldapInfoOpen, setLdapInfoOpen] = useState(false);
+  const [ldapImportSelectOpen, setLdapImportSelectOpen] = useState(false);
+  const [ldapSelectedExternalIds, setLdapSelectedExternalIds] = useState<string[]>([]);
+  const [ldapImportDraftsById, setLdapImportDraftsById] = useState<Record<string, Partial<ImportPreviewRow>>>({});
+  const [ldapImportEditRowId, setLdapImportEditRowId] = useState<string | null>(null);
+  const [ldapImportEditForm, setLdapImportEditForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    mobile: '',
+    role: '',
+    dept1: '',
+    dept2: '',
+    dept3: ''
+  });
+  const [ldapPreviewResult, setLdapPreviewResult] = useState<{
+    remoteCount: number;
+    importableCount: number;
+    existingCount: number;
+    skippedCount: number;
+    importableRows: ImportPreviewRow[];
+    existingRows: (ImportPreviewExistingRow & { clientId?: string })[];
+    skippedRows: LdapImportSkippedRow[];
+  } | null>(null);
+  const [ldapPreviewFetchedAt, setLdapPreviewFetchedAt] = useState<number | null>(null);
+  const [ldapImporting, setLdapImporting] = useState(false);
+  const [ldapImportResult, setLdapImportResult] = useState<{
+    fetched: number;
+    importable: number;
+    selected?: number;
+    existing: number;
+    skipped: number;
+    created: number;
+    updated: number;
+  } | null>(null);
 
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -160,6 +303,7 @@ const CustomImportPanel = (
   const [infoClientId, setInfoClientId] = useState<string | null>(null);
   const [manualUserModalOpen, setManualUserModalOpen] = useState(false);
   const [manualUserEditingId, setManualUserEditingId] = useState<string | null>(null);
+  const [manualUserEditingKind, setManualUserEditingKind] = useState<'manual' | 'imported' | null>(null);
   const [manualUserSaving, setManualUserSaving] = useState(false);
   const [manualUserDeletingId, setManualUserDeletingId] = useState<string | null>(null);
   const [manualDeleteCandidate, setManualDeleteCandidate] = useState<ExternalUserRow | null>(null);
@@ -215,6 +359,10 @@ const CustomImportPanel = (
   const portalProvisionResultFocusRef = useRef<HTMLButtonElement | null>(null);
   const csvConfirmDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const infoDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const ldapInfoDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const ldapCompareDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const ldapImportSelectDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const ldapImportEditDialogFocusRef = useRef<HTMLButtonElement | null>(null);
 
   const summaryById = useMemo(() => new Map(summaryRows.map((r) => [r.clientId, r])), [summaryRows]);
   const visibleSummaryRows = useMemo(() => {
@@ -275,7 +423,16 @@ const CustomImportPanel = (
     }
     return set;
   }, [duplicateGroups]);
-  const configChildDialogOpen = csvConfirmOpen || clearConfirmOpen;
+  const configChildDialogOpen = csvConfirmOpen || clearConfirmOpen || ldapCompareOpen || ldapInfoOpen || ldapImportSelectOpen || !!ldapImportEditRowId;
+  const ldapSelectedExternalIdSet = useMemo(() => new Set(ldapSelectedExternalIds), [ldapSelectedExternalIds]);
+  const ldapSelectedImportableCount = useMemo(
+    () => (ldapPreviewResult?.importableRows || []).filter((row) => ldapSelectedExternalIdSet.has(row.externalId)).length,
+    [ldapPreviewResult, ldapSelectedExternalIdSet]
+  );
+  const ldapImportRowsWithDrafts = useMemo(
+    () => (ldapPreviewResult?.importableRows || []).map((row) => mergeLdapImportDraft(row, ldapImportDraftsById[row.externalId])),
+    [ldapImportDraftsById, ldapPreviewResult]
+  );
   const portalUserByImportedKey = useMemo(() => {
     const map = new Map<string, AdminUserRow>();
     for (const row of portalUsersRows || []) {
@@ -353,6 +510,65 @@ const CustomImportPanel = (
       );
     } catch {
       setCfg(null);
+    }
+  }, []);
+
+  const loadLdapConfig = useCallback(async (clientId: string) => {
+    setLdapCfg(null);
+    setLdapPassword('');
+    setLdapTestResult(null);
+    setLdapPreviewResult(null);
+    setLdapImportResult(null);
+    if (!clientId) return;
+    try {
+      const res = await getLdapImportConfig(clientId);
+      setLdapCfg(
+        res.config
+          ? {
+              server: res.config.server,
+              port: res.config.port || 636,
+              security: res.config.security || 'ldaps',
+              scope: res.config.scope || 'sub',
+              authType: res.config.authType || 'simple',
+              domain: res.config.domain || '',
+              username: res.config.username || '',
+              hasPassword: res.config.hasPassword,
+              baseDn: res.config.baseDn || '',
+              userFilter: res.config.userFilter || '(mail=*)',
+              emailAttribute: res.config.emailAttribute || 'mail',
+              firstNameAttribute: res.config.firstNameAttribute || 'givenName',
+              lastNameAttribute: res.config.lastNameAttribute || 'sn',
+              externalIdAttribute: res.config.externalIdAttribute || 'sAMAccountName',
+              roleAttribute: res.config.roleAttribute || 'title',
+              mobileAttribute: res.config.mobileAttribute || 'mobile',
+              dept1Attribute: res.config.dept1Attribute || 'department',
+              sizeLimit: res.config.sizeLimit || 1000,
+              updatedAt: res.config.updatedAt
+            }
+          : {
+              server: '',
+              port: 636,
+              security: 'ldaps',
+              scope: 'sub',
+              authType: 'simple',
+              domain: '',
+              username: '',
+              hasPassword: false,
+              baseDn: '',
+              userFilter: '(mail=*)',
+              emailAttribute: 'mail',
+              firstNameAttribute: 'givenName',
+              lastNameAttribute: 'sn',
+              externalIdAttribute: 'sAMAccountName',
+              roleAttribute: 'title',
+              mobileAttribute: 'mobile',
+              dept1Attribute: 'department',
+              sizeLimit: 1000,
+              updatedAt: undefined
+            }
+      );
+    } catch {
+      setLdapCfg(null);
     }
   }, []);
 
@@ -487,6 +703,7 @@ const CustomImportPanel = (
 
   const resetManualUserForm = useCallback(() => {
     setManualUserEditingId(null);
+    setManualUserEditingKind(null);
     setManualUserForm({
       externalId: '',
       firstName: '',
@@ -506,11 +723,13 @@ const CustomImportPanel = (
 
   const openManualUserCreate = useCallback(() => {
     resetManualUserForm();
+    setManualUserEditingKind('manual');
     setManualUserModalOpen(true);
   }, [resetManualUserForm]);
 
   const openManualUserEdit = useCallback((row: ExternalUserRow) => {
     setManualUserEditingId(row.externalId);
+    setManualUserEditingKind((row.manual || String(row.externalId || '').toLowerCase().startsWith('manual:')) ? 'manual' : 'imported');
     setManualUserForm({
       externalId: row.externalId,
       firstName: row.firstName || '',
@@ -634,16 +853,41 @@ const CustomImportPanel = (
     }
   };
 
-  const openConfig = async (clientId: string, mode?: 'webapi' | 'csv' | 'manual') => {
+  const buildActiveLdapRequestConfig = useCallback(() => {
+    if (!activeClientId || !ldapCfg) return null;
+    return {
+      clientId: activeClientId,
+      server: ldapCfg.server.trim(),
+      port: Number(ldapCfg.port) || (ldapCfg.security === 'ldaps' ? 636 : 389),
+      security: ldapCfg.security,
+      scope: ldapCfg.scope,
+      authType: ldapCfg.authType,
+      domain: ldapCfg.domain.trim(),
+      username: ldapCfg.username.trim(),
+      password: ldapPassword || undefined,
+      baseDn: ldapCfg.baseDn.trim(),
+      userFilter: ldapCfg.userFilter.trim(),
+      emailAttribute: ldapCfg.emailAttribute.trim(),
+      firstNameAttribute: ldapCfg.firstNameAttribute.trim(),
+      lastNameAttribute: ldapCfg.lastNameAttribute.trim(),
+      externalIdAttribute: ldapCfg.externalIdAttribute.trim(),
+      roleAttribute: ldapCfg.roleAttribute.trim(),
+      mobileAttribute: ldapCfg.mobileAttribute.trim(),
+      dept1Attribute: ldapCfg.dept1Attribute.trim(),
+      sizeLimit: Number(ldapCfg.sizeLimit) || 1000
+    };
+  }, [activeClientId, ldapCfg, ldapPassword]);
+
+  const openConfig = async (clientId: string, mode?: 'webapi' | 'ldap' | 'csv' | 'manual') => {
     setActiveClientId(clientId);
     setConfigOpen(true);
     setUsersOpen(false);
     const nextMode = mode || 'webapi';
-    setConfigExpanded(lockClientSelection ? nextMode === 'webapi' : false);
+    setConfigExpanded(lockClientSelection ? nextMode === 'webapi' || nextMode === 'ldap' : false);
     setImportMode(nextMode);
     setCsvFile(null);
     setWebApiPreviewOpen(false);
-    await loadConfig(clientId);
+    await Promise.all([loadConfig(clientId), loadLdapConfig(clientId)]);
   };
 
   const openUsers = async (clientId: string) => {
@@ -861,6 +1105,235 @@ const CustomImportPanel = (
     }
   };
 
+  const saveLdapConfigHandler = async () => {
+    if (!activeClientId || !ldapCfg) return;
+    if (!ldapCfg.server.trim() || !ldapCfg.baseDn.trim()) {
+      push(t({ it: 'Compila almeno server LDAP e base DN.', en: 'Fill at least LDAP server and base DN.' }), 'info');
+      return;
+    }
+    if (ldapCfg.authType !== 'anonymous' && !ldapCfg.username.trim()) {
+      push(t({ it: 'Compila lo username LDAP.', en: 'Fill the LDAP username.' }), 'info');
+      return;
+    }
+    setSavingLdapCfg(true);
+    try {
+      const res = await saveLdapImportConfig({
+        clientId: activeClientId,
+        server: ldapCfg.server.trim(),
+        port: Number(ldapCfg.port) || (ldapCfg.security === 'ldaps' ? 636 : 389),
+        security: ldapCfg.security,
+        scope: ldapCfg.scope,
+        authType: ldapCfg.authType,
+        domain: ldapCfg.domain.trim(),
+        username: ldapCfg.username.trim(),
+        password: ldapPassword || undefined,
+        baseDn: ldapCfg.baseDn.trim(),
+        userFilter: ldapCfg.userFilter.trim(),
+        emailAttribute: ldapCfg.emailAttribute.trim(),
+        firstNameAttribute: ldapCfg.firstNameAttribute.trim(),
+        lastNameAttribute: ldapCfg.lastNameAttribute.trim(),
+        externalIdAttribute: ldapCfg.externalIdAttribute.trim(),
+        roleAttribute: ldapCfg.roleAttribute.trim(),
+        mobileAttribute: ldapCfg.mobileAttribute.trim(),
+        dept1Attribute: ldapCfg.dept1Attribute.trim(),
+        sizeLimit: Number(ldapCfg.sizeLimit) || 1000
+      });
+      setLdapCfg(
+        res.config
+          ? {
+              server: res.config.server,
+              port: res.config.port,
+              security: res.config.security || 'ldaps',
+              scope: res.config.scope || 'sub',
+              authType: res.config.authType || 'simple',
+              domain: res.config.domain || '',
+              username: res.config.username || '',
+              hasPassword: res.config.hasPassword,
+              baseDn: res.config.baseDn || '',
+              userFilter: res.config.userFilter || '(mail=*)',
+              emailAttribute: res.config.emailAttribute || 'mail',
+              firstNameAttribute: res.config.firstNameAttribute || 'givenName',
+              lastNameAttribute: res.config.lastNameAttribute || 'sn',
+              externalIdAttribute: res.config.externalIdAttribute || 'sAMAccountName',
+              roleAttribute: res.config.roleAttribute || 'title',
+              mobileAttribute: res.config.mobileAttribute || 'mobile',
+              dept1Attribute: res.config.dept1Attribute || 'department',
+              sizeLimit: res.config.sizeLimit || 1000,
+              updatedAt: res.config.updatedAt
+            }
+          : null
+      );
+      setLdapPassword('');
+      push(t({ it: 'Configurazione LDAP salvata', en: 'LDAP configuration saved' }), 'success');
+      await loadSummary();
+    } catch (err: any) {
+      push(formatLdapActionError('save', err?.message, t), 'danger');
+    } finally {
+      setSavingLdapCfg(false);
+    }
+  };
+
+  const runLdapTest = async () => {
+    if (!activeClientId) return;
+    setLdapTesting(true);
+    setLdapTestResult(null);
+    try {
+      const requestConfig = buildActiveLdapRequestConfig();
+      const res = await testLdapImport(activeClientId, requestConfig || undefined);
+      setLdapTestResult({ ok: res.ok, status: res.status, count: res.count, error: res.error });
+      push(
+        res.ok ? t({ it: 'Test LDAP riuscito', en: 'LDAP test successful' }) : formatLdapActionError('test', res.error, t),
+        res.ok ? 'success' : 'danger'
+      );
+    } catch (err: any) {
+      const detail = err?.message || 'Request failed';
+      setLdapTestResult({ ok: false, status: 0, error: detail });
+      push(formatLdapActionError('test', detail, t), 'danger');
+    } finally {
+      setLdapTesting(false);
+    }
+  };
+
+  const runLdapPreview = async () => {
+    if (!activeClientId) return;
+    setLdapPreviewLoading(true);
+    setLdapImportSelectOpen(false);
+    setLdapSelectedExternalIds([]);
+    setLdapImportDraftsById({});
+    setLdapImportEditRowId(null);
+    setLdapPreviewResult(null);
+    setLdapPreviewFetchedAt(null);
+    setLdapImportResult(null);
+    try {
+      const requestConfig = buildActiveLdapRequestConfig();
+      const res = await previewLdapImport(activeClientId, requestConfig || undefined);
+      if (!res.ok) {
+        push(formatLdapActionError('preview', res.error, t), 'danger');
+        return;
+      }
+      setLdapPreviewResult({
+        remoteCount: res.remoteCount,
+        importableCount: res.importableCount,
+        existingCount: res.existingCount,
+        skippedCount: res.skippedCount,
+        importableRows: res.importableRows || [],
+        existingRows: res.existingRows || [],
+        skippedRows: res.skippedRows || []
+      });
+      setLdapPreviewFetchedAt(Date.now());
+      push(t({ it: 'Confronto LDAP aggiornato', en: 'LDAP comparison refreshed' }), 'success');
+    } catch (err: any) {
+      push(formatLdapActionError('preview', err?.message, t), 'danger');
+    } finally {
+      setLdapPreviewLoading(false);
+    }
+  };
+
+  const openLdapCompareModal = async () => {
+    setLdapCompareOpen(true);
+    await runLdapPreview();
+  };
+
+  const openLdapImportSelection = () => {
+    const rows = ldapPreviewResult?.importableRows || [];
+    if (!rows.length) {
+      push(t({ it: 'Nessun utente LDAP disponibile per importazione.', en: 'No LDAP users available for import.' }), 'info');
+      return;
+    }
+    setLdapSelectedExternalIds(rows.map((row) => row.externalId));
+    setLdapImportSelectOpen(true);
+  };
+
+  const toggleLdapImportSelection = (externalId: string) => {
+    setLdapSelectedExternalIds((prev) => {
+      const normalized = String(externalId || '').trim();
+      if (!normalized) return prev;
+      return prev.includes(normalized) ? prev.filter((value) => value !== normalized) : [...prev, normalized];
+    });
+  };
+
+  const selectAllLdapImportRows = () => {
+    setLdapSelectedExternalIds((ldapPreviewResult?.importableRows || []).map((row) => row.externalId));
+  };
+
+  const clearLdapImportSelection = () => {
+    setLdapSelectedExternalIds([]);
+  };
+
+  const openLdapImportEditModal = (row: ImportPreviewRow) => {
+    const merged = mergeLdapImportDraft(row, ldapImportDraftsById[row.externalId]);
+    setLdapImportEditRowId(row.externalId);
+    setLdapImportEditForm({
+      firstName: merged.firstName || '',
+      lastName: merged.lastName || '',
+      email: merged.email || '',
+      mobile: merged.mobile || '',
+      role: merged.role || '',
+      dept1: merged.dept1 || '',
+      dept2: merged.dept2 || '',
+      dept3: merged.dept3 || ''
+    });
+  };
+
+  const saveLdapImportEdit = () => {
+    if (!ldapImportEditRowId) return;
+    setLdapImportDraftsById((prev) => ({
+      ...prev,
+      [ldapImportEditRowId]: {
+        firstName: normalizeUpperInput(ldapImportEditForm.firstName),
+        lastName: normalizeUpperInput(ldapImportEditForm.lastName),
+        email: normalizeImportEmailInput(ldapImportEditForm.email),
+        mobile: normalizeImportMobileInput(ldapImportEditForm.mobile),
+        role: normalizeUpperInput(ldapImportEditForm.role),
+        dept1: normalizeUpperInput(ldapImportEditForm.dept1),
+        dept2: normalizeUpperInput(ldapImportEditForm.dept2),
+        dept3: normalizeUpperInput(ldapImportEditForm.dept3)
+      }
+    }));
+    setLdapImportEditRowId(null);
+    push(t({ it: 'Dati LDAP manuali aggiornati per l’import.', en: 'Manual LDAP import data updated.' }), 'success');
+  };
+
+  const runLdapImport = async () => {
+    if (!activeClientId) return;
+    if (!ldapSelectedExternalIds.length) {
+      push(t({ it: 'Seleziona almeno un utente LDAP da importare.', en: 'Select at least one LDAP user to import.' }), 'info');
+      return;
+    }
+    setLdapImporting(true);
+    try {
+      const requestConfig = buildActiveLdapRequestConfig();
+      const overridesByExternalId = Object.fromEntries(
+        Object.entries(ldapImportDraftsById).filter(([externalId]) => ldapSelectedExternalIdSet.has(externalId))
+      );
+      const res = await syncLdapImport(activeClientId, requestConfig || undefined, ldapSelectedExternalIds, overridesByExternalId);
+      if (!res.ok) {
+        push(formatLdapActionError('import', res.error, t), 'danger');
+        return;
+      }
+      setLdapPreviewResult(res.preview);
+      setLdapPreviewFetchedAt(Date.now());
+      setLdapImportResult(res.summary);
+      setLdapImportSelectOpen(false);
+      setLdapSelectedExternalIds([]);
+      setLdapImportDraftsById({});
+      setLdapImportEditRowId(null);
+      push(
+        t({
+          it: `Import LDAP completato (${res.summary.selected || 0} selezionati, ${res.summary.created} nuovi, ${res.summary.existing} gia presenti, ${res.summary.skipped} saltati).`,
+          en: `LDAP import completed (${res.summary.selected || 0} selected, ${res.summary.created} new, ${res.summary.existing} already present, ${res.summary.skipped} skipped).`
+        }),
+        'success'
+      );
+      await loadSummary();
+      await loadUsers(activeClientId);
+    } catch (err: any) {
+      push(formatLdapActionError('import', err?.message, t), 'danger');
+    } finally {
+      setLdapImporting(false);
+    }
+  };
+
   const clearImportData = async () => {
     if (!activeClientId) return;
     setClearing(true);
@@ -1000,12 +1473,17 @@ const CustomImportPanel = (
     setManualUserSaving(true);
     try {
       if (manualUserEditingId) {
-        await updateManualExternalUser({
+        await updateExternalUser({
           clientId: activeClientId,
           externalId: manualUserEditingId,
           user: manualUserForm
         });
-        push(t({ it: 'Utente manuale aggiornato', en: 'Manual user updated' }), 'success');
+        push(
+          manualUserEditingKind === 'imported'
+            ? t({ it: 'Utente importato aggiornato nel contenitore locale', en: 'Imported user updated in the local container' })
+            : t({ it: 'Utente manuale aggiornato', en: 'Manual user updated' }),
+          'success'
+        );
       } else {
         await createManualExternalUser({
           clientId: activeClientId,
@@ -1077,8 +1555,8 @@ const CustomImportPanel = (
                   type="button"
                   className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-ink"
                   title={t({
-                    it: 'Gestisci la rubrica utenti del cliente con tre sorgenti: WebAPI, CSV e inserimento manuale. Tutti gli utenti finiscono in un unico contenitore. I duplicati vengono segnalati per email o, se assente, per nome+cognome. Da questa schermata puoi configurare, testare e importare dalla WebAPI, importare da CSV e aggiungere utenti manuali.',
-                    en: 'Manage the client user directory with three sources: WebAPI, CSV and manual entry. All users go into one container. Duplicates are flagged by email or, if missing, by first and last name. From here you can configure, test and import from WebAPI, import from CSV and add manual users.'
+                    it: 'Gestisci la rubrica utenti del cliente con quattro sorgenti: WebAPI, LDAP, CSV e inserimento manuale. Tutti gli utenti finiscono in un unico contenitore. I duplicati vengono segnalati per email o, se assente, per nome+cognome. Da questa schermata puoi configurare, testare e importare da WebAPI e LDAP, importare da CSV e aggiungere utenti manuali.',
+                    en: 'Manage the client user directory with four sources: WebAPI, LDAP, CSV and manual entry. All users go into one container. Duplicates are flagged by email or, if missing, by first and last name. From here you can configure, test and import from WebAPI and LDAP, import from CSV and add manual users.'
                   })}
                   aria-label={t({ it: 'Informazioni import utenti', en: 'User import information' })}
                 >
@@ -1087,8 +1565,8 @@ const CustomImportPanel = (
               </div>
               <div className="modal-description">
                 {t({
-                  it: 'Tutti gli utenti reali (WebAPI, CSV e manuali) finiscono in un unico contenitore del cliente. I duplicati vengono segnalati per email oppure nome+cognome.',
-                  en: 'All real users (WebAPI, CSV and manual) go into a single client container. Duplicates are flagged by email or first+last name.'
+                  it: 'Tutti gli utenti reali (WebAPI, LDAP, CSV e manuali) finiscono in un unico contenitore del cliente. I duplicati vengono segnalati per email oppure nome+cognome.',
+                  en: 'All real users (WebAPI, LDAP, CSV and manual) go into a single client container. Duplicates are flagged by email or first+last name.'
                 })}
               </div>
             </div>
@@ -1103,8 +1581,8 @@ const CustomImportPanel = (
                 }`}
                 title={
                   (activeSummary?.total || 0) > 0
-                    ? t({ it: 'Apri il contenitore utenti importati', en: 'Open imported users container' })
-                    : t({ it: 'Nessun utente importato: fai prima una importazione o un inserimento manuale', en: 'No imported users yet: import or add manual users first' })
+                    ? t({ it: 'Apri il contenitore locale di tutti gli utenti del cliente. Qui trovi utenti importati e manuali, puoi cercarli, nasconderli, modificarli e creare eventuali utenti portale collegati.', en: 'Open the local container of all client users. Here you can find imported and manual users, search them, hide them, edit them, and create linked portal users when needed.' })
+                    : t({ it: 'Il contenitore utenti è ancora vuoto. Esegui prima un import da WebAPI, LDAP o CSV, oppure crea un utente manuale.', en: 'The user container is still empty. First run a WebAPI, LDAP, or CSV import, or create a manual user.' })
                 }
               >
                 <Users size={15} />
@@ -1119,14 +1597,15 @@ const CustomImportPanel = (
             </div>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => setImportMode('webapi')} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'webapi' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>WebAPI</button>
-            <button type="button" onClick={() => setImportMode('csv')} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'csv' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>CSV</button>
-            <button type="button" onClick={() => setImportMode('manual')} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'manual' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{t({ it: 'Inserimento manuale', en: 'Manual entry' })}</button>
+            <button type="button" onClick={() => setImportMode('webapi')} title={t({ it: 'Usa una WebAPI esterna per leggere utenti da un servizio remoto. Da qui puoi configurare endpoint, testare la risposta e poi importare nel contenitore locale.', en: 'Use an external WebAPI to read users from a remote service. From here you can configure the endpoint, test the response, and then import into the local container.' })} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'webapi' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>WebAPI</button>
+            <button type="button" onClick={() => setImportMode('ldap')} title={t({ it: 'Usa un server LDAP o Active Directory in sola lettura. Da qui puoi configurare connessione, fare test, confronto e import selettivo.', en: 'Use a read-only LDAP or Active Directory server. From here you can configure the connection, run tests, compare, and perform selective import.' })} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'ldap' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>LDAP</button>
+            <button type="button" onClick={() => setImportMode('csv')} title={t({ it: 'Importa utenti da un file CSV. Puoi scaricare un modello, preparare i dati e importarli nel contenitore locale.', en: 'Import users from a CSV file. You can download a template, prepare the data, and import it into the local container.' })} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'csv' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>CSV</button>
+            <button type="button" onClick={() => setImportMode('manual')} title={t({ it: 'Inserisci a mano un utente direttamente nel contenitore locale del cliente, senza sorgente esterna.', en: 'Manually add a user directly into the client local container, without any external source.' })} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'manual' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{t({ it: 'Inserimento manuale', en: 'Manual entry' })}</button>
           </div>
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             {importMode === 'webapi' ? (
               <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => openConfig(activeClientId, 'webapi')} className="btn-primary">
+                <button type="button" onClick={() => openConfig(activeClientId, 'webapi')} className="btn-primary" title={t({ it: 'Apri la configurazione WebAPI di questo cliente: URL, metodo HTTP, credenziali e payload opzionale.', en: 'Open the WebAPI configuration for this client: URL, HTTP method, credentials, and optional payload.' })}>
                   {t({ it: 'Configurazione', en: 'Configuration' })}
                 </button>
                 <button
@@ -1144,19 +1623,25 @@ const CustomImportPanel = (
                   {t({ it: 'Importazione', en: 'Import' })}
                 </button>
               </div>
+            ) : importMode === 'ldap' ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => openConfig(activeClientId, 'ldap')} className="btn-primary" title={t({ it: 'Apri la configurazione LDAP di questo cliente: server, sicurezza, autenticazione, Base DN, filtro, mapping attributi e limiti di lettura.', en: 'Open the LDAP configuration for this client: server, security, authentication, Base DN, filter, attribute mapping, and read limits.' })}>
+                  {t({ it: 'Configurazione LDAP', en: 'LDAP configuration' })}
+                </button>
+              </div>
             ) : importMode === 'csv' ? (
               <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => openConfig(activeClientId, 'csv')} className="btn-primary">
+                <button type="button" onClick={() => openConfig(activeClientId, 'csv')} className="btn-primary" title={t({ it: 'Apri il pannello CSV per incollare o caricare il file, scegliere la modalità e importare i dati nel contenitore locale.', en: 'Open the CSV panel to paste or upload the file, choose the mode, and import data into the local container.' })}>
                   {t({ it: 'Apri import CSV', en: 'Open CSV import' })}
                 </button>
-                <button type="button" onClick={downloadCsvTemplate} className="btn-secondary inline-flex items-center gap-2">
+                <button type="button" onClick={downloadCsvTemplate} className="btn-secondary inline-flex items-center gap-2" title={t({ it: 'Scarica un file CSV di esempio con le colonne corrette. Usalo come modello per preparare i dati da importare.', en: 'Download a sample CSV file with the correct columns. Use it as a template to prepare the data to import.' })}>
                   <FileDown size={16} />
                   {t({ it: 'Modello CSV', en: 'CSV template' })}
                 </button>
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={async () => { await openUsers(activeClientId); openManualUserCreate(); }} className="btn-secondary inline-flex items-center gap-2">
+                <button type="button" onClick={async () => { await openUsers(activeClientId); openManualUserCreate(); }} className="btn-secondary inline-flex items-center gap-2" title={t({ it: 'Crea un nuovo utente manuale direttamente nel contenitore locale del cliente. Questo utente non dipende da LDAP, WebAPI o CSV.', en: 'Create a new manual user directly in the client local container. This user does not depend on LDAP, WebAPI, or CSV.' })}>
                   <Plus size={16} />
                   {t({ it: 'Nuovo utente manuale', en: 'New manual user' })}
                 </button>
@@ -1171,6 +1656,7 @@ const CustomImportPanel = (
                     await openUsers(activeClientId);
                   }}
                   className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100"
+                  title={t({ it: 'Apri l’elenco dei potenziali duplicati nel contenitore locale. Qui puoi verificare collisioni per email oppure nome e cognome.', en: 'Open the list of possible duplicates in the local container. Here you can review collisions by email or by first and last name.' })}
                 >
                   {t({ it: 'Gestisci duplicati', en: 'Manage duplicates' })}
                 </button>
@@ -1248,7 +1734,7 @@ const CustomImportPanel = (
                     >
                       <Settings2 size={14} />
                     </button>
-                    {row.hasConfig ? (
+                    {row.hasWebApiConfig ? (
                       <button
                         onClick={() => runSync(row.clientId)}
                         className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
@@ -1256,6 +1742,14 @@ const CustomImportPanel = (
                         disabled={syncingClientId === row.clientId}
                       >
                         <RefreshCw size={14} className={syncingClientId === row.clientId ? 'animate-spin' : ''} />
+                      </button>
+                    ) : row.hasLdapConfig ? (
+                      <button
+                        onClick={() => openConfig(row.clientId, 'ldap')}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                        title={t({ it: 'Apri importazione LDAP per questo cliente', en: 'Open LDAP import for this client' })}
+                      >
+                        <UploadCloud size={14} />
                       </button>
                     ) : (
                       <button
@@ -1388,6 +1882,15 @@ const CustomImportPanel = (
                       WebAPI
                     </button>
                     <button
+                      onClick={() => setImportMode('ldap')}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                        importMode === 'ldap' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title={t({ it: 'Usa importazione da LDAP', en: 'Use LDAP import' })}
+                    >
+                      LDAP
+                    </button>
+                    <button
                       onClick={() => setImportMode('csv')}
                       className={`rounded-full border px-3 py-1 text-xs font-semibold ${
                         importMode === 'csv' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -1491,6 +1994,196 @@ const CustomImportPanel = (
                         </div>
                       </div>
                     )
+                  ) : importMode === 'ldap' ? (
+                    <div className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-slate-900">
+                            {t({ it: 'Configurazione LDAP', en: 'LDAP configuration' })}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {t({ it: 'Configurazione generica per LDAP, OpenLDAP e Active Directory.', en: 'Generic configuration for LDAP, OpenLDAP and Active Directory.' })}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setLdapInfoOpen(true)}
+                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                          title={t({ it: 'Apri guida completa LDAP', en: 'Open full LDAP guide' })}
+                          aria-label={t({ it: 'Guida configurazione LDAP', en: 'LDAP configuration guide' })}
+                        >
+                          <Info size={16} />
+                        </button>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Server LDAP', en: 'LDAP server' })}
+                          <input
+                            value={ldapCfg?.server || ''}
+                            onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), server: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder="ldap.example.com"
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Porta', en: 'Port' })}
+                          <input
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={String(ldapCfg?.port || '')}
+                            onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), port: Number(e.target.value || 0) }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder="636"
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Sicurezza trasporto', en: 'Transport security' })}
+                          <select
+                            value={ldapCfg?.security || 'ldaps'}
+                            onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), security: e.target.value as 'ldaps' | 'starttls' | 'ldap', port: e.target.value === 'ldaps' ? 636 : prev?.port || 389 }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                          >
+                            <option value="ldaps">LDAPS</option>
+                            <option value="starttls">LDAP + StartTLS</option>
+                            <option value="ldap">LDAP</option>
+                          </select>
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Scope ricerca', en: 'Search scope' })}
+                          <select
+                            value={ldapCfg?.scope || 'sub'}
+                            onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), scope: e.target.value as 'sub' | 'one' }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                          >
+                            <option value="sub">{t({ it: 'OU corrente + sotto-OU', en: 'Current OU + child OUs' })}</option>
+                            <option value="one">{t({ it: 'Solo OU corrente', en: 'Current OU only' })}</option>
+                          </select>
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Autenticazione', en: 'Authentication' })}
+                          <select
+                            value={ldapCfg?.authType || 'simple'}
+                            onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), authType: e.target.value as 'anonymous' | 'simple' | 'domain_user' | 'user_principal_name' }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                          >
+                            <option value="simple">{t({ it: 'Simple bind', en: 'Simple bind' })}</option>
+                            <option value="domain_user">{t({ it: 'Dominio\\utente', en: 'Domain\\user' })}</option>
+                            <option value="user_principal_name">{t({ it: 'utente@dominio', en: 'user@domain' })}</option>
+                            <option value="anonymous">{t({ it: 'Anonima', en: 'Anonymous' })}</option>
+                          </select>
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Dominio', en: 'Domain' })}
+                          <input
+                            value={ldapCfg?.domain || ''}
+                            onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), domain: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder="example.com"
+                            disabled={ldapCfg?.authType === 'anonymous' || ldapCfg?.authType === 'simple'}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Utente', en: 'User' })}
+                          <input
+                            value={ldapCfg?.username || ''}
+                            onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), username: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder="ldap-reader"
+                            disabled={ldapCfg?.authType === 'anonymous'}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Password', en: 'Password' })}
+                          <input
+                            type="password"
+                            value={ldapPassword}
+                            onChange={(e) => setLdapPassword(e.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder={ldapCfg?.hasPassword ? t({ it: 'Lascia vuoto per non cambiare', en: 'Leave empty to keep' }) : '••••••'}
+                            disabled={ldapCfg?.authType === 'anonymous'}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Base DN', en: 'Base DN' })}
+                          <input
+                            value={ldapCfg?.baseDn || ''}
+                            onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), baseDn: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder="DC=example,DC=com"
+                          />
+                        </label>
+                      </div>
+                      <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4">
+                        <div className="mb-4">
+                          <div className="text-sm font-semibold text-sky-900">
+                            {t({ it: 'Filtro, mapping attributi e limiti', en: 'Filter, attribute mapping, and limits' })}
+                          </div>
+                          <div className="mt-1 text-xs leading-6 text-sky-800">
+                            {t({
+                              it: 'Qui decidi quali utenti LDAP leggere e come copiare i dati nei campi locali. Il filtro sceglie i record da leggere. I campi sotto dicono quale attributo LDAP usare per email, nome, cognome, identificativo, ruolo, telefono e reparto. Se un attributo è vuoto o sbagliato, quel dato arriverà mancante.',
+                              en: 'Here you decide which LDAP users to read and how to copy the data into local fields. The filter chooses which records are read. The fields below tell the system which LDAP attribute to use for email, first name, last name, identifier, role, phone, and department. If an attribute is empty or wrong, that value will be missing.'
+                            })}
+                          </div>
+                        </div>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Filtro utenti LDAP', en: 'LDAP user filter' })}
+                          <input
+                            value={ldapCfg?.userFilter || ''}
+                            onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), userFilter: e.target.value }))}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder="(&(objectClass=user)(mail=*))"
+                            title={t({ it: 'Filtro LDAP RFC4515. Serve a limitare la lettura solo agli oggetti che ti interessano dentro il Base DN scelto.', en: 'RFC4515 LDAP filter. It limits the read to only the objects you need inside the selected Base DN.' })}
+                          />
+                          <div className="mt-1 text-[11px] text-sky-800">
+                            {t({
+                              it: 'Questo filtro si applica sopra il Base DN. Se è troppo largo, leggerai più utenti del necessario.',
+                              en: 'This filter is applied on top of the Base DN. If it is too broad, you will read more users than needed.'
+                            })}
+                          </div>
+                        </label>
+                        <div className="mt-4 grid gap-4 md:grid-cols-3">
+                        <label className="block text-sm font-medium text-slate-700">
+                          Email
+                          <input value={ldapCfg?.emailAttribute || ''} onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), emailAttribute: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" title={t({ it: 'Attributo LDAP che contiene l’email. Se manca, l’utente non può essere confrontato correttamente per evitare duplicati.', en: 'LDAP attribute that contains the email. If it is missing, the user cannot be compared correctly to avoid duplicates.' })} />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Nome', en: 'First name' })}
+                          <input value={ldapCfg?.firstNameAttribute || ''} onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), firstNameAttribute: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" title={t({ it: 'Attributo LDAP del nome. Esempio comune: givenName.', en: 'LDAP attribute for the first name. Common example: givenName.' })} />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Cognome', en: 'Last name' })}
+                          <input value={ldapCfg?.lastNameAttribute || ''} onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), lastNameAttribute: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" title={t({ it: 'Attributo LDAP del cognome. Esempio comune: sn.', en: 'LDAP attribute for the last name. Common example: sn.' })} />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          External ID
+                          <input value={ldapCfg?.externalIdAttribute || ''} onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), externalIdAttribute: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" title={t({ it: 'Identificativo stabile del record LDAP. Serve a riconoscere la stessa persona tra import successivi.', en: 'Stable identifier of the LDAP record. It is used to recognize the same person across future imports.' })} />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Ruolo', en: 'Role' })}
+                          <input value={ldapCfg?.roleAttribute || ''} onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), roleAttribute: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" title={t({ it: 'Attributo LDAP da usare come ruolo o job title. Se il tuo LDAP non lo ha, puoi lasciarlo vuoto.', en: 'LDAP attribute used as role or job title. If your LDAP does not have it, you can leave it empty.' })} />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Mobile', en: 'Mobile' })}
+                          <input value={ldapCfg?.mobileAttribute || ''} onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), mobileAttribute: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" title={t({ it: 'Attributo LDAP del numero di telefono o cellulare. Gli spazi vengono rimossi in salvataggio.', en: 'LDAP attribute for the phone or mobile number. Spaces are removed when saving.' })} />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Dipartimento', en: 'Department' })}
+                          <input value={ldapCfg?.dept1Attribute || ''} onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), dept1Attribute: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" title={t({ it: 'Attributo LDAP del reparto principale. Viene copiato nel campo locale reparto 1.', en: 'LDAP attribute for the main department. It is copied into the local department 1 field.' })} />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Max utenti', en: 'Max users' })}
+                          <input type="number" min={1} max={5000} value={String(ldapCfg?.sizeLimit || 1000)} onChange={(e) => setLdapCfg((prev) => ({ ...(prev || { server: '', port: 636, security: 'ldaps', scope: 'sub', authType: 'simple', domain: '', username: '', hasPassword: false, baseDn: '', userFilter: '(mail=*)', emailAttribute: 'mail', firstNameAttribute: 'givenName', lastNameAttribute: 'sn', externalIdAttribute: 'sAMAccountName', roleAttribute: 'title', mobileAttribute: 'mobile', dept1Attribute: 'department', sizeLimit: 1000 }), sizeLimit: Number(e.target.value || 1000) }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" title={t({ it: 'Limite massimo di utenti letti da LDAP nel confronto e nell’import. Il test connessione legge comunque solo un campione fino a 25 utenti.', en: 'Maximum number of users read from LDAP during compare and import. Connection test still reads only a sample up to 25 users.' })} />
+                        </label>
+                        </div>
+                        <div className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                          {t({
+                            it: 'LDAP è sempre in sola lettura: il backend usa solo bind, search e unbind. Nessuna operazione di scrittura, modifica o cancellazione viene mai inviata verso il server LDAP.',
+                            en: 'LDAP is always read-only: the backend uses only bind, search, and unbind. No write, update, or delete operation is ever sent to the LDAP server.'
+                          })}
+                        </div>
+                      </div>
+                    </div>
                   ) : importMode === 'csv' ? (
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1578,6 +2271,15 @@ const CustomImportPanel = (
                           <Save size={16} className={savingCfg ? 'animate-pulse' : ''} />
                         </button>
                       </>
+                    ) : importMode === 'ldap' ? (
+                      <button
+                        onClick={saveLdapConfigHandler}
+                        disabled={savingLdapCfg || !activeClientId || !ldapCfg}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+                        title={t({ it: 'Salva / aggiorna impostazioni LDAP', en: 'Save / update LDAP settings' })}
+                      >
+                        <Save size={16} className={savingLdapCfg ? 'animate-pulse' : ''} />
+                      </button>
                     ) : null}
                     {!lockClientSelection && (activeSummary?.total || syncResult?.ok || importMode === 'manual') ? (
                       <button
@@ -1652,6 +2354,59 @@ const CustomImportPanel = (
                           </>
                         ) : null}
                       </div>
+                    </div>
+                  ) : importMode === 'ldap' ? (
+                    <div className="mt-3 space-y-3">
+                      <div className="h-px w-full bg-slate-200" />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={runLdapTest}
+                          disabled={ldapTesting || !activeClientId || !ldapCfg}
+                          className="flex items-center gap-2 btn-secondary disabled:opacity-60"
+                          title={t({
+                            it: 'Verifica connessione e lettura LDAP con un campione limitato ai primi 25 utenti. Il test non importa nulla.',
+                            en: 'Check LDAP connectivity and read access with a sample limited to the first 25 users. The test does not import anything.'
+                          })}
+                        >
+                          <TestTube size={16} /> {ldapTesting ? t({ it: 'Test…', en: 'Testing…' }) : t({ it: 'Test connessione', en: 'Test connection' })}
+                        </button>
+                        <button
+                          onClick={openLdapCompareModal}
+                          disabled={ldapPreviewLoading || !activeClientId || !ldapCfg}
+                          className="flex items-center gap-2 btn-secondary disabled:opacity-60"
+                          title={t({
+                            it: 'Apri un confronto dedicato tra utenti LDAP e utenti gia presenti nel contenitore locale.',
+                            en: 'Open a dedicated comparison between LDAP users and users already present in the local container.'
+                          })}
+                        >
+                          <Search size={16} /> {ldapPreviewLoading ? t({ it: 'Confronto…', en: 'Comparing…' }) : t({ it: 'Confronta', en: 'Compare' })}
+                        </button>
+                        <button
+                          onClick={openLdapImportSelection}
+                          disabled={ldapImporting || !activeClientId || !ldapPreviewResult?.importableCount}
+                          className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/10 disabled:opacity-60"
+                        >
+                          <UploadCloud size={16} /> {ldapImporting ? t({ it: 'Import…', en: 'Importing…' }) : t({ it: 'Importa', en: 'Import' })}
+                        </button>
+                      </div>
+                      {ldapTestResult ? (
+                        <div className={`rounded-xl border px-3 py-2 text-sm ${ldapTestResult.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+                          {ldapTestResult.ok
+                            ? t({
+                                it: `Connessione LDAP ok. Campione letto nel test: ${ldapTestResult.count ?? 0} utenti su massimo 25.`,
+                                en: `LDAP connection ok. Sample read in test: ${ldapTestResult.count ?? 0} users out of max 25.`
+                              })
+                            : ldapTestResult.error || t({ it: 'Test LDAP fallito', en: 'LDAP test failed' })}
+                        </div>
+                      ) : null}
+                      {ldapImportResult ? (
+                        <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">
+                          {t({
+                            it: `Ultimo import LDAP: letti ${ldapImportResult.fetched}, selezionati ${ldapImportResult.selected || 0}, creati ${ldapImportResult.created}, gia presenti ${ldapImportResult.existing}, saltati ${ldapImportResult.skipped}.`,
+                            en: `Last LDAP import: fetched ${ldapImportResult.fetched}, selected ${ldapImportResult.selected || 0}, created ${ldapImportResult.created}, already present ${ldapImportResult.existing}, skipped ${ldapImportResult.skipped}.`
+                          })}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
 
@@ -1851,6 +2606,437 @@ const CustomImportPanel = (
         </Dialog>
       </Transition>
 
+      <Transition show={ldapCompareOpen} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-[132]"
+          onClose={() => {
+            if (ldapImporting || ldapPreviewLoading || ldapImportSelectOpen) return;
+            setLdapCompareOpen(false);
+          }}
+          initialFocus={ldapCompareDialogFocusRef}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-6xl modal-panel">
+                  <button ref={ldapCompareDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
+                  <div className="modal-header">
+                    <div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Confronto import LDAP', en: 'LDAP import comparison' })}</Dialog.Title>
+                      <div className="modal-description">
+                        {t({
+                          it: 'Confronta gli utenti letti da LDAP con quelli gia presenti nel contenitore locale. Il confronto usa principalmente l’indirizzo email.',
+                          en: 'Compare users read from LDAP with those already present in the local container. The comparison primarily uses the email address.'
+                        })}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setLdapCompareOpen(false)}
+                      className="icon-button"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                      disabled={ldapImporting || ldapPreviewLoading}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={runLdapPreview}
+                      disabled={ldapPreviewLoading}
+                      className="flex items-center gap-2 btn-secondary disabled:opacity-60"
+                      title={t({ it: 'Ricarica il confronto LDAP', en: 'Refresh LDAP comparison' })}
+                    >
+                      <RefreshCw size={16} className={ldapPreviewLoading ? 'animate-spin' : ''} />
+                      {ldapPreviewLoading ? t({ it: 'Confronto…', en: 'Comparing…' }) : t({ it: 'Aggiorna confronto', en: 'Refresh comparison' })}
+                    </button>
+                    <button
+                      onClick={openLdapImportSelection}
+                      disabled={ldapImporting || !ldapPreviewResult?.importableCount}
+                      className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/10 disabled:opacity-60"
+                      title={
+                        ldapPreviewResult?.importableCount
+                          ? t({ it: 'Apri la selezione degli utenti LDAP importabili.', en: 'Open the selection of importable LDAP users.' })
+                          : t({ it: 'Esegui prima il confronto e assicurati che ci siano utenti importabili.', en: 'Run the comparison first and ensure there are importable users.' })
+                      }
+                    >
+                      <UploadCloud size={16} />
+                      {ldapImporting ? t({ it: 'Import…', en: 'Importing…' }) : t({ it: 'Importa', en: 'Import' })}
+                    </button>
+                    {ldapPreviewResult ? (
+                      <div className="ml-auto flex flex-wrap items-center gap-2 text-xs font-semibold">
+                        <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-sky-700">
+                          {t({ it: 'Letti da LDAP', en: 'Read from LDAP' })}: {ldapPreviewResult.remoteCount}
+                        </span>
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700">
+                          {t({ it: 'Importabili', en: 'Importable' })}: {ldapPreviewResult.importableCount}
+                        </span>
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700">
+                          {t({ it: 'Gia presenti', en: 'Already present' })}: {ldapPreviewResult.existingCount}
+                        </span>
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+                          {t({ it: 'Saltati', en: 'Skipped' })}: {ldapPreviewResult.skippedCount}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    {ldapPreviewLoading
+                      ? t({
+                          it: 'Confronto LDAP in aggiornamento: i dati precedenti sono stati scartati e stiamo leggendo di nuovo dal server.',
+                          en: 'LDAP comparison is refreshing: previous data was discarded and we are reading again from the server.'
+                        })
+                      : ldapPreviewFetchedAt
+                        ? t({
+                            it: `Confronto aggiornato alle ${new Date(ldapPreviewFetchedAt).toLocaleString()}.`,
+                            en: `Comparison refreshed at ${new Date(ldapPreviewFetchedAt).toLocaleString()}.`
+                          })
+                        : t({
+                            it: 'Nessun confronto LDAP caricato in questa sessione.',
+                            en: 'No LDAP comparison loaded in this session.'
+                          })}
+                  </div>
+
+                  {!ldapPreviewResult && !ldapPreviewLoading ? (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+                      {t({
+                        it: 'Apri il confronto per caricare utenti importabili, gia presenti e saltati in una vista separata.',
+                        en: 'Open the comparison to load importable, already present, and skipped users in a separate view.'
+                      })}
+                    </div>
+                  ) : null}
+
+                  {ldapPreviewResult ? (
+                    <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                        <div className="text-xs font-semibold uppercase text-emerald-700">{t({ it: 'Importabili', en: 'Importable' })}</div>
+                        <div className="mt-1 text-2xl font-semibold text-emerald-900">{ldapPreviewResult.importableCount}</div>
+                        <div className="mt-3 max-h-[50vh] space-y-2 overflow-auto text-sm text-emerald-900">
+                          {ldapPreviewResult.importableRows.map((row) => (
+                            <div key={`ldap-importable-${row.externalId}`} className="rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                              <div className="font-semibold uppercase">{`${row.firstName || ''} ${row.lastName || ''}`.trim() || row.externalId}</div>
+                              <div className="text-xs text-emerald-700">{[row.email, row.mobile].filter(Boolean).join(' · ') || row.externalId}</div>
+                            </div>
+                          ))}
+                          {!ldapPreviewResult.importableRows.length ? <div className="text-sm text-emerald-700">{t({ it: 'Nessun nuovo utente da importare.', en: 'No new users to import.' })}</div> : null}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-xs font-semibold uppercase text-slate-600">{t({ it: 'Gia presenti nel contenitore locale', en: 'Already present in local container' })}</div>
+                        <div className="mt-1 text-2xl font-semibold text-ink">{ldapPreviewResult.existingCount}</div>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          {t({
+                            it: 'Questi record non arrivano da LDAP: sono utenti gia presenti localmente e abbinati per email.',
+                            en: 'These records do not come from LDAP: they are users already present locally and matched by email.'
+                          })}
+                        </div>
+                        <div className="mt-3 max-h-[50vh] space-y-2 overflow-auto text-sm text-slate-700">
+                          {ldapPreviewResult.existingRows.map((row) => (
+                            <div key={`ldap-existing-${row.externalId}`} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                              <div className="font-semibold uppercase">{`${row.firstName || ''} ${row.lastName || ''}`.trim() || row.externalId}</div>
+                              <div className="text-xs text-slate-500">{[row.email, row.mobile].filter(Boolean).join(' · ') || row.externalId}</div>
+                            </div>
+                          ))}
+                          {!ldapPreviewResult.existingRows.length ? <div className="text-sm text-slate-500">{t({ it: 'Nessuna sovrapposizione trovata.', en: 'No overlap found.' })}</div> : null}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                        <div className="text-xs font-semibold uppercase text-amber-700">{t({ it: 'Saltati', en: 'Skipped' })}</div>
+                        <div className="mt-1 text-2xl font-semibold text-amber-900">{ldapPreviewResult.skippedCount}</div>
+                        <div className="mt-3 max-h-[50vh] space-y-2 overflow-auto text-sm text-amber-900">
+                          {ldapPreviewResult.skippedRows.map((row) => (
+                            <div key={`ldap-skipped-${row.externalId}-${row.skipReason}`} className="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                              <div className="font-semibold uppercase">{`${row.firstName || ''} ${row.lastName || ''}`.trim() || row.externalId}</div>
+                              <div className="text-xs text-amber-700">{[row.email, row.mobile].filter(Boolean).join(' · ') || row.externalId}</div>
+                              <div className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700">{humanizeLdapSkipReason(row.skipReason, t)}</div>
+                            </div>
+                          ))}
+                          {!ldapPreviewResult.skippedRows.length ? <div className="text-sm text-amber-700">{t({ it: 'Nessun utente saltato.', en: 'No skipped users.' })}</div> : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={ldapImportSelectOpen} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-[133]"
+          onClose={() => {
+            if (ldapImporting) return;
+            setLdapImportSelectOpen(false);
+          }}
+          initialFocus={ldapImportSelectDialogFocusRef}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-4xl modal-panel">
+                  <button ref={ldapImportSelectDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
+                  <div className="modal-header">
+                    <div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Seleziona utenti LDAP da importare', en: 'Select LDAP users to import' })}</Dialog.Title>
+                      <div className="modal-description">
+                        {t({
+                          it: 'Scegli solo gli utenti importabili che vuoi importare nel contenitore locale. Il backend ricontrolla comunque il dataset LDAP prima di scrivere.',
+                          en: 'Choose only the importable users you want to import into the local container. The backend still rechecks the LDAP dataset before writing.'
+                        })}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setLdapImportSelectOpen(false)}
+                      className="icon-button"
+                      title={t({ it: 'Chiudi', en: 'Close' })}
+                      disabled={ldapImporting}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <button type="button" onClick={selectAllLdapImportRows} className="btn-secondary">
+                      {t({ it: 'Seleziona tutti', en: 'Select all' })}
+                    </button>
+                    <button type="button" onClick={clearLdapImportSelection} className="btn-secondary">
+                      {t({ it: 'Deseleziona tutti', en: 'Clear all' })}
+                    </button>
+                    <div className="ml-auto rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-semibold text-primary">
+                      {t({
+                        it: `${ldapSelectedImportableCount} selezionati su ${(ldapPreviewResult?.importableRows || []).length}`,
+                        en: `${ldapSelectedImportableCount} selected out of ${(ldapPreviewResult?.importableRows || []).length}`
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 max-h-[60vh] space-y-2 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    {ldapImportRowsWithDrafts.map((row) => {
+                      const checked = ldapSelectedExternalIdSet.has(row.externalId);
+                      const missingFields = getLdapImportMissingFields(row);
+                      return (
+                        <div
+                          key={`ldap-import-select-${row.externalId}`}
+                          className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 ${checked ? 'border-primary/30 bg-primary/5' : 'border-slate-200 bg-white'}`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                            checked={checked}
+                            onChange={() => toggleLdapImportSelection(row.externalId)}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold uppercase text-ink">
+                              {`${row.firstName || ''} ${row.lastName || ''}`.trim() || row.externalId}
+                            </div>
+                            <div className="truncate text-xs text-slate-500">{[row.email, row.mobile].filter(Boolean).join(' · ') || row.externalId}</div>
+                            <div className="mt-1 truncate text-[11px] uppercase text-slate-500">
+                              {[row.role, row.dept1, row.dept2, row.dept3].filter(Boolean).join(' · ') || row.externalId}
+                            </div>
+                            {missingFields.length ? (
+                              <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                                {t({ it: 'Campi mancanti', en: 'Missing fields' })}: {missingFields.map((field) => humanizeLdapImportField(field, t)).join(', ')}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => openLdapImportEditModal(row)}
+                              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${missingFields.length ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                            >
+                              <Pencil size={14} />
+                              {missingFields.length ? t({ it: 'Completa dati', en: 'Complete data' }) : t({ it: 'Modifica', en: 'Edit' })}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {!ldapImportRowsWithDrafts.length ? (
+                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                        {t({ it: 'Nessun utente LDAP disponibile per importazione.', en: 'No LDAP users available for import.' })}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="modal-footer">
+                    <button type="button" onClick={() => setLdapImportSelectOpen(false)} className="btn-secondary" disabled={ldapImporting}>
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={runLdapImport}
+                      disabled={ldapImporting || !ldapSelectedImportableCount}
+                      className="btn-primary disabled:opacity-60"
+                      title={
+                        ldapSelectedImportableCount
+                          ? t({ it: 'Importa solo gli utenti LDAP selezionati.', en: 'Import only the selected LDAP users.' })
+                          : t({ it: 'Seleziona almeno un utente da importare.', en: 'Select at least one user to import.' })
+                      }
+                    >
+                      {ldapImporting ? t({ it: 'Import…', en: 'Importing…' }) : t({ it: 'Importa selezionati', en: 'Import selected' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={!!ldapImportEditRowId} as={Fragment}>
+        <Dialog
+          as="div"
+          className="relative z-[134]"
+          onClose={() => {
+            if (ldapImporting) return;
+            setLdapImportEditRowId(null);
+          }}
+          initialFocus={ldapImportEditDialogFocusRef}
+        >
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-3xl modal-panel">
+                  <button ref={ldapImportEditDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
+                  <div className="modal-header">
+                    <div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Completa dati utente LDAP', en: 'Complete LDAP user data' })}</Dialog.Title>
+                      <div className="modal-description">
+                        {t({
+                          it: 'Questi valori vengono applicati solo all’import corrente dei record selezionati.',
+                          en: 'These values are applied only to the current import of the selected records.'
+                        })}
+                      </div>
+                    </div>
+                    <button onClick={() => setLdapImportEditRowId(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {[
+                      { key: 'firstName', label: t({ it: 'Nome', en: 'First name' }), placeholder: 'MARIO' },
+                      { key: 'lastName', label: t({ it: 'Cognome', en: 'Last name' }), placeholder: 'ROSSI' },
+                      { key: 'email', label: 'Email', placeholder: 'mario.rossi@example.com' },
+                      { key: 'mobile', label: t({ it: 'Cellulare', en: 'Mobile' }), placeholder: '+39...' },
+                      { key: 'role', label: t({ it: 'Ruolo', en: 'Role' }), placeholder: 'TECNICO' },
+                      { key: 'dept1', label: 'Reparto 1', placeholder: 'IT' },
+                      { key: 'dept2', label: 'Reparto 2', placeholder: '' },
+                      { key: 'dept3', label: 'Reparto 3', placeholder: '' }
+                    ].map((field) => (
+                      <label key={field.key} className="block text-sm font-medium text-slate-700">
+                        {field.label}
+                        <input
+                          value={(ldapImportEditForm as Record<string, string>)[field.key] || ''}
+                          onChange={(e) =>
+                            setLdapImportEditForm((prev) => ({
+                              ...prev,
+                              [field.key]:
+                                field.key === 'email'
+                                  ? normalizeImportEmailInput(e.target.value)
+                                  : field.key === 'mobile'
+                                    ? normalizeImportMobileInput(e.target.value)
+                                    : normalizeUpperInput(e.target.value)
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                          placeholder={field.placeholder}
+                        />
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                    {t({
+                      it: 'Nome, cognome, ruolo e reparti vengono salvati in maiuscolo. Email viene normalizzata in minuscolo, telefono senza spazi.',
+                      en: 'First name, last name, role, and departments are stored in uppercase. Email is normalized to lowercase, phone without spaces.'
+                    })}
+                  </div>
+
+                  <div className="modal-footer">
+                    <button type="button" onClick={() => setLdapImportEditRowId(null)} className="btn-secondary">
+                      {t({ it: 'Annulla', en: 'Cancel' })}
+                    </button>
+                    <button type="button" onClick={saveLdapImportEdit} className="btn-primary">
+                      {t({ it: 'Salva dati', en: 'Save data' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
       <Transition show={usersOpen} as={Fragment}>
         <Dialog
           as="div"
@@ -2027,7 +3213,7 @@ const CustomImportPanel = (
                               <th className="px-3 py-3 text-center" title={t({ it: 'Stato dell’utente del portale collegato all’utente importato.', en: 'Status of the portal user linked to the imported user.' })}>
                                 {t({ it: 'Portale', en: 'Portal' })}
                               </th>
-                              <th className="px-4 py-3 text-right" title={t({ it: 'Azioni disponibili: modifica/elimina manuale e nascondi/mostra o includi/escludi.', en: 'Available actions: edit/delete manual and hide/show or include/exclude.' })}>
+                              <th className="px-4 py-3 text-right" title={t({ it: 'Azioni disponibili sul record locale: modifica per tutti gli utenti, eliminazione solo per i manuali, creazione utente portale e gestione visibilità nel contenitore.', en: 'Actions available on the local record: edit for all users, deletion only for manual ones, portal-user creation, and visibility control in the container.' })}>
                                 {t({ it: 'Azioni', en: 'Actions' })}
                               </th>
                             </tr>
@@ -2129,26 +3315,28 @@ const CustomImportPanel = (
                                   </td>
                                   <td className="px-4 py-3">
                                     <div className="flex items-center justify-end gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => openManualUserEdit(r)}
+                                        className="btn-inline"
+                                        title={
+                                          (r.manual || String(r.externalId || '').toLowerCase().startsWith('manual:'))
+                                            ? t({ it: 'Modifica questo utente manuale nel contenitore locale. Puoi cambiare dati anagrafici, contatti, ruolo e reparti.', en: 'Edit this manual user in the local container. You can change profile data, contacts, role, and departments.' })
+                                            : t({ it: 'Modifica questo utente importato nel contenitore locale. Attenzione: un futuro reimport dalla sorgente può sovrascrivere questi dati.', en: 'Edit this imported user in the local container. Warning: a future reimport from the source may overwrite these values.' })
+                                        }
+                                      >
+                                        <Pencil size={12} />
+                                      </button>
                                       {(r.manual || String(r.externalId || '').toLowerCase().startsWith('manual:')) ? (
-                                        <>
-                                          <button
-                                            type="button"
-                                            onClick={() => openManualUserEdit(r)}
-                                            className="btn-inline"
-                                            title={t({ it: 'Modifica utente manuale', en: 'Edit manual user' })}
-                                          >
-                                            <Pencil size={12} />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => setManualDeleteCandidate(r)}
-                                            disabled={manualUserDeletingId === r.externalId}
-                                            className="btn-inline text-rose-700 hover:bg-rose-50"
-                                            title={t({ it: 'Rimuovi utente manuale', en: 'Delete manual user' })}
-                                          >
-                                            <Trash2 size={12} />
-                                          </button>
-                                        </>
+                                        <button
+                                          type="button"
+                                          onClick={() => setManualDeleteCandidate(r)}
+                                          disabled={manualUserDeletingId === r.externalId}
+                                          className="btn-inline text-rose-700 hover:bg-rose-50"
+                                          title={t({ it: 'Elimina definitivamente questo utente manuale dal contenitore locale. Questa azione non è disponibile per gli utenti importati.', en: 'Permanently delete this manual user from the local container. This action is not available for imported users.' })}
+                                        >
+                                          <Trash2 size={12} />
+                                        </button>
                                       ) : null}
                                       <button
                                         type="button"
@@ -2157,8 +3345,8 @@ const CustomImportPanel = (
                                         className={`btn-inline ${linkedPortalUser ? 'cursor-not-allowed opacity-50' : 'text-primary hover:bg-primary/10'}`}
                                         title={
                                           linkedPortalUser
-                                            ? t({ it: `Gia collegato a ${linkedPortalUser.username}`, en: `Already linked to ${linkedPortalUser.username}` })
-                                            : t({ it: 'Crea utente portale', en: 'Create portal user' })
+                                            ? t({ it: `Questo utente importato è già collegato all’utente portale ${linkedPortalUser.username}. Non serve crearne un altro.`, en: `This imported user is already linked to portal user ${linkedPortalUser.username}. There is no need to create another one.` })
+                                            : t({ it: 'Crea un utente portale collegato a questo record importato, così la persona può accedere al portale.', en: 'Create a portal user linked to this imported record so the person can access the portal.' })
                                         }
                                       >
                                         <UserPlus size={13} />
@@ -2178,11 +3366,11 @@ const CustomImportPanel = (
                                         title={
                                           !r.present
                                             ? r.hidden
-                                              ? t({ it: 'Includi nel contenitore utenti', en: 'Include in user container' })
-                                              : t({ it: 'Escludi dal contenitore utenti', en: 'Exclude from user container' })
+                                              ? t({ it: 'Il record è mancante dalla sorgente e nascosto. Clicca per reincluderlo visivamente nel contenitore locale.', en: 'The record is missing from the source and hidden. Click to include it again visually in the local container.' })
+                                              : t({ it: 'Il record è mancante dalla sorgente ma ancora visibile. Clicca per escluderlo dalla vista del contenitore locale.', en: 'The record is missing from the source but still visible. Click to exclude it from the local container view.' })
                                             : r.hidden
-                                              ? t({ it: 'Mostra utente', en: 'Unhide user' })
-                                              : t({ it: 'Nascondi utente', en: 'Hide user' })
+                                              ? t({ it: 'Mostra di nuovo questo utente nel contenitore locale senza cancellarlo.', en: 'Show this user again in the local container without deleting it.' })
+                                              : t({ it: 'Nascondi questo utente nel contenitore locale senza cancellarlo.', en: 'Hide this user in the local container without deleting it.' })
                                         }
                                       >
                                         {r.hidden ? <Eye size={13} /> : <EyeOff size={13} />}
@@ -2535,9 +3723,22 @@ const CustomImportPanel = (
                   <div className="modal-header">
                     <div>
                       <Dialog.Title className="modal-title">
-                        {manualUserEditingId ? t({ it: 'Modifica utente manuale', en: 'Edit manual user' }) : t({ it: 'Nuovo utente manuale', en: 'New manual user' })}
+                        {manualUserEditingId
+                          ? manualUserEditingKind === 'imported'
+                            ? t({ it: 'Modifica utente importato', en: 'Edit imported user' })
+                            : t({ it: 'Modifica utente manuale', en: 'Edit manual user' })
+                          : t({ it: 'Nuovo utente manuale', en: 'New manual user' })}
                       </Dialog.Title>
-                      <div className="modal-description">{activeClient ? activeClient.name : ''}</div>
+                      <div className="modal-description">
+                        {manualUserEditingId && manualUserEditingKind === 'imported'
+                          ? t({
+                              it: `Stai modificando un utente importato già presente nel contenitore locale di ${activeClient ? activeClient.name : ''}. Questa modifica è locale: un futuro reimport da LDAP/WebAPI/CSV può sovrascriverla.`,
+                              en: `You are editing an imported user already present in the local container of ${activeClient ? activeClient.name : ''}. This is a local edit: a future LDAP/WebAPI/CSV reimport may overwrite it.`
+                            })
+                          : activeClient
+                            ? activeClient.name
+                            : ''}
+                      </div>
                     </div>
                     <button onClick={() => setManualUserModalOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
                       <X size={18} />
@@ -2567,6 +3768,11 @@ const CustomImportPanel = (
                           disabled={field.key === 'externalId' && !!manualUserEditingId}
                           className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary disabled:bg-slate-50 disabled:text-slate-500"
                           placeholder={field.placeholder}
+                          title={
+                            field.key === 'externalId'
+                              ? t({ it: 'Identificativo tecnico del record nel contenitore locale. In modifica non è editabile per evitare di rompere i collegamenti esistenti.', en: 'Technical identifier of the record in the local container. In edit mode it is locked to avoid breaking existing links.' })
+                              : t({ it: `Campo ${field.label}. Il valore viene salvato nel contenitore locale del cliente.`, en: `${field.label} field. The value is saved in the client local container.` })
+                          }
                         />
                       </label>
                     ))}
@@ -2582,10 +3788,15 @@ const CustomImportPanel = (
                       {t({ it: 'Utente esterno', en: 'External user' })}
                     </label>
                     <div className="mt-1 text-xs text-slate-500">
-                      {t({
-                        it: 'Puoi lasciare vuoto External ID in creazione: verrà generato automaticamente con prefisso manual:.',
-                        en: 'You can leave External ID empty on creation: it will be generated automatically with manual: prefix.'
-                      })}
+                      {(manualUserEditingId && manualUserEditingKind === 'imported')
+                        ? t({
+                            it: 'Stai modificando un record importato. Il record resta collegato al suo external ID originale e può essere aggiornato di nuovo da una futura sincronizzazione della sorgente.',
+                            en: 'You are editing an imported record. The record stays linked to its original external ID and may be updated again by a future source synchronization.'
+                          })
+                        : t({
+                            it: 'Puoi lasciare vuoto External ID in creazione: verrà generato automaticamente con prefisso manual:.',
+                            en: 'You can leave External ID empty on creation: it will be generated automatically with manual: prefix.'
+                          })}
                     </div>
                   </div>
 
@@ -2603,6 +3814,13 @@ const CustomImportPanel = (
                       onClick={saveManualUser}
                       disabled={manualUserSaving || !activeClientId}
                       className="btn-primary disabled:opacity-60"
+                      title={
+                        manualUserEditingId
+                          ? manualUserEditingKind === 'imported'
+                            ? t({ it: 'Salva le modifiche locali su questo utente importato nel contenitore del cliente.', en: 'Save the local changes for this imported user in the client container.' })
+                            : t({ it: 'Salva le modifiche su questo utente manuale.', en: 'Save the changes for this manual user.' })
+                          : t({ it: 'Crea un nuovo utente manuale nel contenitore del cliente.', en: 'Create a new manual user in the client container.' })
+                      }
                     >
                       {manualUserSaving ? t({ it: 'Salvataggio…', en: 'Saving…' }) : t({ it: 'Salva', en: 'Save' })}
                     </button>
@@ -2678,6 +3896,82 @@ const CustomImportPanel = (
                       title={t({ it: 'Sostituisci tutti gli utenti con il CSV', en: 'Replace all users with CSV' })}
                     >
                       {t({ it: 'Sostituisci tutto', en: 'Replace all' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      <Transition show={ldapInfoOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-[135]" onClose={() => setLdapInfoOpen(false)} initialFocus={ldapInfoDialogFocusRef}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-150"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-100"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-150"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-100"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-4xl modal-panel">
+                  <button ref={ldapInfoDialogFocusRef} type="button" className="sr-only" tabIndex={0}>
+                    focus
+                  </button>
+                  <div className="modal-header">
+                    <div>
+                      <Dialog.Title className="modal-title">{t({ it: 'Guida completa configurazione LDAP', en: 'Full LDAP configuration guide' })}</Dialog.Title>
+                      <div className="modal-description">
+                        {t({
+                          it: 'Questa guida spiega in modo semplice a cosa serve ogni campo LDAP e come influisce su test, confronto e import.',
+                          en: 'This guide explains in simple terms what each LDAP field does and how it affects test, compare, and import.'
+                        })}
+                      </div>
+                    </div>
+                    <button onClick={() => setLdapInfoOpen(false)} className="icon-button" title={t({ it: 'Chiudi guida LDAP', en: 'Close LDAP guide' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="mt-4 max-h-[70vh] space-y-4 overflow-auto pr-1 text-sm text-slate-700">
+                    {[
+                      [t({ it: 'Server LDAP', en: 'LDAP server' }), t({ it: 'Indirizzo del server LDAP. Può essere un hostname o un URL ldap:// / ldaps://.', en: 'Address of the LDAP server. It can be a hostname or an ldap:// / ldaps:// URL.' })],
+                      [t({ it: 'Porta', en: 'Port' }), t({ it: 'Porta TCP del server. Di solito 636 per LDAPS e 389 per LDAP o StartTLS.', en: 'TCP port of the server. Usually 636 for LDAPS and 389 for LDAP or StartTLS.' })],
+                      [t({ it: 'Sicurezza trasporto', en: 'Transport security' }), t({ it: 'Decide se la connessione è cifrata subito con LDAPS, alzata poi con StartTLS oppure lasciata in LDAP semplice.', en: 'Decides whether the connection is encrypted immediately with LDAPS, upgraded with StartTLS, or left as plain LDAP.' })],
+                      [t({ it: 'Scope ricerca', en: 'Search scope' }), t({ it: 'Decide quanto in profondità cercare dal Base DN: solo figli diretti oppure tutta la subtree.', en: 'Decides how deep to search from the Base DN: only direct children or the whole subtree.' })],
+                      [t({ it: 'Autenticazione', en: 'Authentication' }), t({ it: 'Decide come costruire l’identità del bind: Simple usa solo Utente, Dominio\\utente usa entrambi i campi, utente@dominio costruisce la UPN, Anonima non usa credenziali.', en: 'Decides how to build the bind identity: Simple uses only User, Domain\\user uses both fields, user@domain builds the UPN, Anonymous uses no credentials.' })],
+                      [t({ it: 'Dominio', en: 'Domain' }), t({ it: 'Serve solo per Dominio\\utente e utente@dominio. In simple bind e anonima può restare vuoto.', en: 'Used only for Domain\\user and user@domain. It can stay empty for simple bind and anonymous.' })],
+                      [t({ it: 'Utente', en: 'User' }), t({ it: 'Nome dell’account LDAP usato per il bind.', en: 'Name of the LDAP account used for bind.' })],
+                      [t({ it: 'Password', en: 'Password' }), t({ it: 'Password dell’account LDAP. Se la lasci vuota durante una modifica, viene mantenuta quella già salvata.', en: 'Password of the LDAP account. If you leave it empty while editing, the previously saved one is kept.' })],
+                      [t({ it: 'Base DN', en: 'Base DN' }), t({ it: 'Punto di partenza della ricerca LDAP, per esempio DC=example,DC=com oppure OU=People,DC=example,DC=com.', en: 'Starting point of the LDAP search, for example DC=example,DC=com or OU=People,DC=example,DC=com.' })],
+                      [t({ it: 'Filtro utenti LDAP', en: 'LDAP user filter' }), t({ it: 'Filtro RFC4515 che restringe quali oggetti leggere dentro il Base DN. Se è troppo largo, leggerai più record del necessario.', en: 'RFC4515 filter that restricts which objects are read inside the Base DN. If it is too broad, you will read more records than necessary.' })],
+                      [t({ it: 'Campi Email / Nome / Cognome / External ID / Ruolo / Mobile / Dipartimento', en: 'Email / First name / Last name / External ID / Role / Mobile / Department fields' }), t({ it: 'Qui scrivi i nomi degli attributi LDAP da leggere, non i valori utente. Esempio: mail, givenName, sn, sAMAccountName, title, mobile, department.', en: 'Here you write the names of the LDAP attributes to read, not the user values. Example: mail, givenName, sn, sAMAccountName, title, mobile, department.' })],
+                      [t({ it: 'Max utenti', en: 'Max users' }), t({ it: 'Limite massimo di record letti da LDAP in confronto e import. Il test connessione legge comunque solo un campione fino a 25 utenti.', en: 'Maximum number of records read from LDAP during compare and import. Connection test still reads only a sample up to 25 users.' })],
+                      [t({ it: 'Sicurezza operativa', en: 'Operational security' }), t({ it: 'L’integrazione LDAP è solo in lettura. Il backend usa solo bind, search e unbind. Non esistono scritture verso LDAP.', en: 'The LDAP integration is read-only. The backend only uses bind, search, and unbind. There are no writes sent to LDAP.' })]
+                    ].map(([title, body]) => (
+                      <div key={String(title)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <div className="font-semibold text-ink">{title}</div>
+                        <div className="mt-1 text-slate-600">{body}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="modal-footer">
+                    <button type="button" onClick={() => setLdapInfoOpen(false)} className="btn-primary">
+                      {t({ it: 'Chiudi guida', en: 'Close guide' })}
                     </button>
                   </div>
                 </Dialog.Panel>
