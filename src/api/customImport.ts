@@ -260,13 +260,20 @@ export const testLdapImport = async (
 };
 
 export const testImport = async (
-  clientId: string
+  clientId: string,
+  config?: {
+    url: string;
+    username: string;
+    password?: string;
+    method?: string;
+    bodyJson?: string;
+  }
 ): Promise<{ ok: boolean; status: number; count?: number; preview?: any[]; error?: string; contentType?: string; rawSnippet?: string }> => {
   const res = await apiFetch(`/api/import/test`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clientId })
+    body: JSON.stringify({ clientId, config })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok)
@@ -512,7 +519,16 @@ export interface LdapImportPreviewResponse {
   error?: string;
 }
 
-export const previewImport = async (clientId: string): Promise<{
+export const previewImport = async (
+  clientId: string,
+  config?: {
+    url: string;
+    username: string;
+    password?: string;
+    method?: string;
+    bodyJson?: string;
+  }
+): Promise<{
   ok: boolean;
   clientId: string;
   remoteCount: number;
@@ -527,7 +543,7 @@ export const previewImport = async (clientId: string): Promise<{
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clientId })
+    body: JSON.stringify({ clientId, config })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, clientId, remoteCount: 0, existingCount: 0, remoteRows: [], existingRows: [], error: body?.error || `HTTP ${res.status}`, contentType: body?.contentType, rawSnippet: body?.rawSnippet } as any;
@@ -733,13 +749,20 @@ export const saveDeviceImportConfig = async (payload: {
 };
 
 export const testDeviceImport = async (
-  clientId: string
+  clientId: string,
+  config?: {
+    url: string;
+    username: string;
+    password?: string;
+    method?: string;
+    bodyJson?: string;
+  }
 ): Promise<{ ok: boolean; status: number; count?: number; preview?: any[]; error?: string; contentType?: string; rawSnippet?: string }> => {
   const res = await apiFetch('/api/device-import/test', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clientId })
+    body: JSON.stringify({ clientId, config })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -789,7 +812,16 @@ export const importDeviceCsv = async (payload: { clientId: string; csvText: stri
   return body;
 };
 
-export const previewDeviceImport = async (clientId: string): Promise<{
+export const previewDeviceImport = async (
+  clientId: string,
+  config?: {
+    url: string;
+    username: string;
+    password?: string;
+    method?: string;
+    bodyJson?: string;
+  }
+): Promise<{
   ok: boolean;
   clientId: string;
   remoteCount: number;
@@ -808,7 +840,7 @@ export const previewDeviceImport = async (clientId: string): Promise<{
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clientId })
+    body: JSON.stringify({ clientId, config })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok)

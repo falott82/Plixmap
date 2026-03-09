@@ -50,6 +50,7 @@ const {
 const {
   fetchEmployeesFromApi,
   fetchDevicesFromApi,
+  resolveEffectiveWebApiConfig,
   getImportConfig,
   getDeviceImportConfig,
   getLdapImportConfig,
@@ -2000,12 +2001,12 @@ app.post('/api/import/test', requireAuth, rateByUser('import_test', 60 * 1000, 1
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
-  const cfg = getImportConfig(db, dataSecret, cid);
-  if (!cfg || !cfg.url || !cfg.username) {
-    res.status(400).json({ error: 'Missing import config (url/username)' });
+  const resolved = resolveEffectiveWebApiConfig(getImportConfig(db, dataSecret, cid), req.body?.config);
+  if (!resolved.ok) {
+    res.status(400).json({ error: resolved.error || 'Missing import config (url/username)' });
     return;
   }
-  const result = await fetchEmployeesFromApi({ ...cfg, allowPrivate: allowPrivateImportForRequest(req) });
+  const result = await fetchEmployeesFromApi({ ...resolved.config, allowPrivate: allowPrivateImportForRequest(req) });
   writeAuditLog(db, { level: 'important', event: 'import_test', userId: req.userId, scopeType: 'client', scopeId: cid, ...requestMeta(req), details: { ok: !!result.ok, status: result.status } });
   if (!result.ok) {
     res.status(400).json({
@@ -2105,12 +2106,12 @@ app.post('/api/device-import/test', requireAuth, rateByUser('device_import_test'
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
-  const cfg = getDeviceImportConfig(db, dataSecret, cid);
-  if (!cfg || !cfg.url || !cfg.username) {
-    res.status(400).json({ error: 'Missing import config (url/username)' });
+  const resolved = resolveEffectiveWebApiConfig(getDeviceImportConfig(db, dataSecret, cid), req.body?.config);
+  if (!resolved.ok) {
+    res.status(400).json({ error: resolved.error || 'Missing import config (url/username)' });
     return;
   }
-  const result = await fetchDevicesFromApi({ ...cfg, allowPrivate: allowPrivateImportForRequest(req) });
+  const result = await fetchDevicesFromApi({ ...resolved.config, allowPrivate: allowPrivateImportForRequest(req) });
   writeAuditLog(db, {
     level: 'important',
     event: 'device_import_test',
@@ -2574,12 +2575,12 @@ app.post('/api/import/preview', requireAuth, rateByUser('import_preview', 60 * 1
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
-  const cfg = getImportConfig(db, dataSecret, cid);
-  if (!cfg || !cfg.url || !cfg.username) {
-    res.status(400).json({ error: 'Missing import config (url/username)' });
+  const resolved = resolveEffectiveWebApiConfig(getImportConfig(db, dataSecret, cid), req.body?.config);
+  if (!resolved.ok) {
+    res.status(400).json({ error: resolved.error || 'Missing import config (url/username)' });
     return;
   }
-  const result = await fetchEmployeesFromApi({ ...cfg, allowPrivate: allowPrivateImportForRequest(req) });
+  const result = await fetchEmployeesFromApi({ ...resolved.config, allowPrivate: allowPrivateImportForRequest(req) });
   if (!result.ok) {
     res.status(400).json({
       ok: false,
@@ -2720,12 +2721,12 @@ app.post('/api/device-import/preview', requireAuth, rateByUser('device_import_pr
     res.status(400).json({ error: 'Missing clientId' });
     return;
   }
-  const cfg = getDeviceImportConfig(db, dataSecret, cid);
-  if (!cfg || !cfg.url || !cfg.username) {
-    res.status(400).json({ error: 'Missing import config (url/username)' });
+  const resolved = resolveEffectiveWebApiConfig(getDeviceImportConfig(db, dataSecret, cid), req.body?.config);
+  if (!resolved.ok) {
+    res.status(400).json({ error: resolved.error || 'Missing import config (url/username)' });
     return;
   }
-  const result = await fetchDevicesFromApi({ ...cfg, allowPrivate: allowPrivateImportForRequest(req) });
+  const result = await fetchDevicesFromApi({ ...resolved.config, allowPrivate: allowPrivateImportForRequest(req) });
   if (!result.ok) {
     res.status(400).json({
       ok: false,

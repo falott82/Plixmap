@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.5.5
+Current version: 3.5.6
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,12 +14,12 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.5.5
-- Added read-only LDAP user import with configurable server/auth/base DN/filter/attribute mapping, connection test, compare flow, and selective import by email to avoid overlaps with existing local users.
-- LDAP import UX is now safer and more explicit: compare opens in a dedicated modal, import opens a second selection modal, incomplete rows can be completed manually before import, and imported users can now be edited locally after sync.
-- LDAP fields and local imported-user data now normalize more predictably (uppercase person/role/department fields, lowercase emails, compact phones) while preserving read-only behavior toward the remote directory.
-- Fixed a critical LDAP config persistence bug that could misalign saved fields like `Base DN` and password encryption; added dedicated regression coverage for config-store ordering and import overrides.
-- Expanded tooltip/help coverage in the import section, including a focus-safe LDAP guide modal and clearer descriptions for import actions, local edits, duplicates, and visibility behavior.
+## What's new in 3.5.6
+- Hardened WebAPI import reliability for both users and devices: test/preview now use the live configuration currently visible in the settings modal, not only the last saved server copy.
+- WebAPI transport is now more defensive in problematic local-network environments: deterministic direct-IP connect, fresh child-process retry, and final `curl` fallback when the long-lived backend process hits intermittent reachability errors such as `EHOSTUNREACH`.
+- Kept import security boundaries intact while improving diagnostics: credentials still stay out of URLs, password persistence still remains encrypted at rest, and error reporting is more explicit during failed tests.
+- Added targeted regression coverage for WebAPI config merging and network transport behavior so the same environment-specific import failure does not silently return after future refactors.
+- Applied minor UX polish in the import settings forms, including better browser hints on password fields and a final pass on release notes / translations / tooltip consistency for the import area.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.

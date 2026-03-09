@@ -130,6 +130,41 @@ const fetchDevicesFromApi = async (config) =>
     defaultAllowPrivate: ALLOW_PRIVATE_IMPORT
   });
 
+const resolveEffectiveWebApiConfig = (savedConfig, override) => {
+  const saved = savedConfig && typeof savedConfig === 'object' ? savedConfig : null;
+  const next = override && typeof override === 'object' ? override : null;
+  if (!saved && !next) return { ok: false, error: 'Missing import config (url/username)' };
+
+  const methodRaw =
+    next && next.method !== undefined ? String(next.method || '').trim().toUpperCase() : String(saved?.method || 'POST').trim().toUpperCase();
+  const method = methodRaw === 'GET' ? 'GET' : methodRaw === 'POST' || !methodRaw ? 'POST' : null;
+  if (!method) return { ok: false, error: 'Invalid method (use GET or POST)' };
+
+  const url = next && next.url !== undefined ? String(next.url || '').trim() : String(saved?.url || '').trim();
+  const username = next && next.username !== undefined ? String(next.username || '').trim() : String(saved?.username || '').trim();
+  const password = next && next.password !== undefined ? String(next.password || '') : String(saved?.password || '');
+  const bodyJson = next && next.bodyJson !== undefined ? String(next.bodyJson || '') : String(saved?.bodyJson || '');
+
+  if (!url || !username) return { ok: false, error: 'Missing import config (url/username)' };
+  if (bodyJson.trim()) {
+    try {
+      JSON.parse(bodyJson);
+    } catch {
+      return { ok: false, error: 'Invalid JSON body' };
+    }
+  }
+  return {
+    ok: true,
+    config: {
+      url,
+      username,
+      password,
+      method,
+      bodyJson
+    }
+  };
+};
+
 const validateImportUrl = async (rawUrl, options = {}) =>
   validateImportUrlInternal(rawUrl, {
     ...options,
@@ -763,6 +798,7 @@ module.exports = {
   normalizeDevicesResponse,
   fetchEmployeesFromApi,
   fetchDevicesFromApi,
+  resolveEffectiveWebApiConfig,
   getImportConfig,
   getDeviceImportConfig,
   getLdapImportConfig,

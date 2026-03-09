@@ -1,9 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const events = require('events');
+const https = require('https');
 
 const {
+  fetchDevicesFromApi,
   getImportConfig,
   readResponseText,
+  resolveEffectiveWebApiConfig,
   upsertImportConfig,
   updateExternalUser,
   validateImportUrl
@@ -117,6 +121,13 @@ test('validateImportUrl rejects IPv4-mapped loopback hosts when private imports 
   assert.deepEqual(result, { ok: false, error: 'Host not allowed' });
 });
 
+test('validateImportUrl returns a concrete address for direct IP hosts', async () => {
+  const result = await validateImportUrl('https://127.0.0.1/path', { allowPrivate: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.hostname, '127.0.0.1');
+  assert.equal(result.address, '127.0.0.1');
+});
+
 test('readResponseText enforces byte limits for non-stream utf8 responses', async () => {
   const result = await readResponseText(
     {
@@ -128,6 +139,60 @@ test('readResponseText enforces byte limits for non-stream utf8 responses', asyn
   );
 
   assert.deepEqual(result, { ok: false, error: 'Response too large' });
+});
+
+test('fetchDevicesFromApi uses https transport and parses uppercase Devices payload', async () => {
+  const originalRequest = https.request;
+  const calls = [];
+  https.request = (options, callback) => {
+    calls.push({ options });
+    const res = new events.EventEmitter();
+    res.statusCode = 200;
+    res.headers = { 'content-type': 'application/json' };
+    process.nextTick(() => {
+      callback(res);
+      res.emit('data', Buffer.from('{"Devices":[{"dev_id":"1","device_name":"AR-BI-NB002"}]}', 'utf8'));
+      res.emit('end');
+    });
+    return {
+      setTimeout() {},
+      on() {},
+      write() {},
+      end() {}
+    };
+  };
+
+  try {
+    const result = await fetchDevicesFromApi({
+      url: 'https://127.0.0.1/CEGLabels/Devices',
+      username: 'deskly',
+      password: 'top-secret',
+      method: 'POST',
+      bodyJson: '{}',
+      allowPrivate: true
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.devices, [
+      {
+        devId: '1',
+        deviceType: '',
+        deviceName: 'AR-BI-NB002',
+        manufacturer: '',
+        model: '',
+        serialNumber: ''
+      }
+    ]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].options.method, 'POST');
+    assert.equal(calls[0].options.headers['Content-Type'], 'application/json');
+    assert.equal(calls[0].options.hostname, '127.0.0.1');
+    assert.equal(calls[0].options.servername, undefined);
+    assert.match(calls[0].options.headers.Authorization, /^Basic /);
+  } finally {
+    https.request = originalRequest;
+  }
 });
 
 test('upsertImportConfig preserves encrypted password when omitted on update', () => {
@@ -159,6 +224,33 @@ test('upsertImportConfig preserves encrypted password when omitted on update', (
     password: 'top-secret',
     method: 'GET',
     bodyJson: '{"page":1}'
+  });
+});
+
+test('resolveEffectiveWebApiConfig merges live form values with saved password', () => {
+  const result = resolveEffectiveWebApiConfig(
+    {
+      url: 'https://api.example.com/devices',
+      username: 'deskly',
+      password: 'stored-secret',
+      method: 'POST',
+      bodyJson: '{}'
+    },
+    {
+      url: ' https://labels.cegelettronica.com/CEGLabels/Devices ',
+      username: ' test.user ',
+      method: 'post',
+      bodyJson: '{}'
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.config, {
+    url: 'https://labels.cegelettronica.com/CEGLabels/Devices',
+    username: 'test.user',
+    password: 'stored-secret',
+    method: 'POST',
+    bodyJson: '{}'
   });
 });
 

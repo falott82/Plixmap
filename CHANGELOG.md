@@ -2,6 +2,13 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.5.6 - 2026-03-09
+- Hardened WebAPI import reliability for both users and devices: `Test` and `Preview/Compare` now use the live configuration shown in the modal (URL/username/method/body/password override) instead of relying only on the last saved backend copy.
+- Refined the shared import transport for unstable local-network environments: direct-IP connection after URL validation, no shared agent/pool, retry in a fresh child Node process, and final `curl` fallback when the long-lived backend hits transient reachability errors such as `EHOSTUNREACH`.
+- Preserved security guarantees while improving resilience: credentials are still never embedded in URLs, saved passwords remain encrypted at rest, and the fallback subprocess paths pass secrets through `stdin` instead of command-line arguments.
+- Expanded regression coverage for custom import with tests on live-config merging, resolved-address handling, and the strengthened transport behavior used by WebAPI employee/device imports.
+- Applied a final UX/documentation pass on the import section with more explicit password-field browser hints and synchronized release notes across app documentation and website.
+
 ## 3.5.5 - 2026-03-09
 - Added read-only LDAP user import with configurable server/authentication/base-DN/filter/attribute mapping, explicit connection testing, comparison against the local container by email, and selective import of only chosen users.
 - LDAP import UX is now multi-step and more controllable: compare runs in a dedicated modal, import opens a second selection modal, incomplete LDAP rows can be completed manually before import, and imported users can now be edited locally after synchronization.

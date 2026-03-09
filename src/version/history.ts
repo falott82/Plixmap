@@ -8,6 +8,33 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.5.6',
+    date: '2026-03-09',
+    type: 'fix',
+    notes: [
+      n(
+        'Import WebAPI reso piu affidabile per utenti e dispositivi: test e anteprima usano ora la configurazione live visibile nella modale, non solo l’ultima copia salvata sul backend',
+        'WebAPI import is more reliable for both users and devices: test and preview now use the live configuration visible in the modal, not only the last copy saved on the backend'
+      ),
+      n(
+        'Transport import rafforzato per reti locali problematiche: connessione diretta all’IP risolto, nessun agent condiviso, retry in child process Node e fallback finale a `curl` per ambienti dove il processo server lungo riceve `EHOSTUNREACH`',
+        'The import transport is stronger on problematic local networks: direct connection to the resolved IP, no shared agent, retry in a fresh child Node process, and final `curl` fallback for environments where the long-lived server process hits `EHOSTUNREACH`'
+      ),
+      n(
+        'La sicurezza resta invariata: password sempre cifrate a riposo, niente credenziali in URL e passaggio dei secret via `stdin` nei fallback subprocess invece che negli argomenti shell',
+        'Security boundaries stay intact: passwords remain encrypted at rest, credentials are never placed in URLs, and fallback subprocesses receive secrets through `stdin` instead of shell arguments'
+      ),
+      n(
+        'Nuovi test coprono merge tra config live e config salvata, uso dell’indirizzo risolto nella validazione URL e comportamento del transport WebAPI condiviso',
+        'New tests cover live-config plus saved-config merging, use of the resolved address from URL validation, and the shared WebAPI transport behavior'
+      ),
+      n(
+        'Rifinitura finale su UX/documentazione import con hint browser piu corretti sui campi password e release notes riallineate tra app, changelog e sito',
+        'Final import UX/documentation polish with better browser hints on password fields and synchronized release notes across the app, changelog, and website'
+      )
+    ]
+  },
+  {
     version: '3.5.5',
     date: '2026-03-09',
     type: 'fix',

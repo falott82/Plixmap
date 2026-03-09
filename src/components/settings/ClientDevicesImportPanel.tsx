@@ -62,6 +62,17 @@ type DeviceImportConfigState = {
   updatedAt?: number;
 };
 
+const toDeviceConfigPayload = (cfg: DeviceImportConfigState | null, password: string) => {
+  if (!cfg) return undefined;
+  return {
+    url: String(cfg.url || '').trim(),
+    username: String(cfg.username || '').trim(),
+    method: String(cfg.method || 'POST').trim().toUpperCase(),
+    bodyJson: cfg.bodyJson || '',
+    ...(password ? { password } : {})
+  };
+};
+
 const normalizeSearchText = (value: unknown) => String(value || '').trim().toLowerCase();
 
 const deviceSearchIndex = (row: Partial<ExternalDeviceRow>) =>
@@ -361,7 +372,7 @@ const ClientDevicesImportPanel = ({ initialClientId, lockClientSelection = false
     setTesting(true);
     setTestResult(null);
     try {
-      const result = await testDeviceImport(activeClientId);
+      const result = await testDeviceImport(activeClientId, toDeviceConfigPayload(cfg, password));
       setTestResult(result);
       if (result.ok) {
         setWebApiTestPassedByClient((prev) => ({ ...prev, [activeClientId]: true }));
@@ -376,7 +387,7 @@ const ClientDevicesImportPanel = ({ initialClientId, lockClientSelection = false
       setPreviewLoading(true);
       setPreviewError(null);
       try {
-        const payload = await previewDeviceImport(clientId);
+        const payload = await previewDeviceImport(clientId, toDeviceConfigPayload(cfg, password));
         if (!payload.ok) {
           setPreviewError(payload.error || t({ it: 'Anteprima non disponibile', en: 'Preview not available' }));
           setPreviewRemoteRows([]);
@@ -393,7 +404,7 @@ const ClientDevicesImportPanel = ({ initialClientId, lockClientSelection = false
         setPreviewLoading(false);
       }
     },
-    [t]
+    [cfg, password, t]
   );
 
   const openPreview = async () => {
@@ -775,6 +786,7 @@ const ClientDevicesImportPanel = ({ initialClientId, lockClientSelection = false
                   {t({ it: 'Password', en: 'Password' })}
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"

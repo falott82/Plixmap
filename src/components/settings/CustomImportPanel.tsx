@@ -123,6 +123,20 @@ const humanizeLdapSkipReason = (reason: string, t: ReturnType<typeof useT>) => {
   }
 };
 
+const toWebApiConfigPayload = (
+  cfg: { url: string; username: string; method: 'GET' | 'POST' | string; bodyJson: string } | null,
+  password: string
+) => {
+  if (!cfg) return undefined;
+  return {
+    url: String(cfg.url || '').trim(),
+    username: String(cfg.username || '').trim(),
+    method: String(cfg.method || 'POST').trim().toUpperCase(),
+    bodyJson: cfg.bodyJson || '',
+    ...(password ? { password } : {})
+  };
+};
+
 const normalizeUpperInput = (value: unknown) => String(value || '').trim().toUpperCase();
 const normalizeImportEmailInput = (value: unknown) => String(value || '').trim().toLowerCase();
 const normalizeImportMobileInput = (value: unknown) => String(value || '').trim().replace(/\s+/g, '');
@@ -907,7 +921,7 @@ const CustomImportPanel = (
     setWebApiPreviewLoading(true);
     setWebApiPreviewError(null);
     try {
-      const res = await previewImport(clientId);
+      const res = await previewImport(clientId, toWebApiConfigPayload(cfg, password));
       if (!res.ok) {
         setWebApiPreviewError(res.error || t({ it: 'Anteprima non disponibile', en: 'Preview unavailable' }));
         setWebApiPreviewRemoteRows([]);
@@ -948,7 +962,7 @@ const CustomImportPanel = (
     } finally {
       setWebApiPreviewLoading(false);
     }
-  }, [loadUsers, setUsersRows, t]);
+  }, [cfg, loadUsers, password, setUsersRows, t]);
 
   const openWebApiPreview = useCallback(async () => {
     if (!activeClientId) return;
@@ -1091,7 +1105,7 @@ const CustomImportPanel = (
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testImport(activeClientId);
+      const res = await testImport(activeClientId, toWebApiConfigPayload(cfg, password));
       setTestResult({ ok: res.ok, status: res.status, count: res.count, error: res.error, contentType: res.contentType, rawSnippet: res.rawSnippet });
       setWebApiTestPassedByClient((prev) => ({ ...prev, [activeClientId]: !!res.ok }));
       if (res.ok) push(t({ it: 'Test riuscito', en: 'Test successful' }), 'success');
@@ -1954,6 +1968,7 @@ const CustomImportPanel = (
                             {t({ it: 'Password', en: 'Password' })}
                             <input
                               type="password"
+                              autoComplete="new-password"
                               value={password}
                               onChange={(e) => setPassword(e.target.value)}
                               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
@@ -2097,6 +2112,7 @@ const CustomImportPanel = (
                           {t({ it: 'Password', en: 'Password' })}
                           <input
                             type="password"
+                            autoComplete="new-password"
                             value={ldapPassword}
                             onChange={(e) => setLdapPassword(e.target.value)}
                             className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
