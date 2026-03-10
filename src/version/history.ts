@@ -8,6 +8,33 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.5.7',
+    date: '2026-03-10',
+    type: 'fix',
+    notes: [
+      n(
+        'Esperienza import utenti/dispositivi riallineata e resa piu coerente tra WebAPI, LDAP, CSV e manuale: barre azioni, pulsanti e stati sono ora uniformi e meno ridondanti',
+        'User/device import UX is now aligned and more consistent across WebAPI, LDAP, CSV and manual flows: action bars, buttons, and states are now uniform and less redundant'
+      ),
+      n(
+        'Selezione multipla nella preview import resa piu robusta: menu contestuale con “Seleziona tutto/Deseleziona tutto”, logica di selezione massiva piu prevedibile e applicazione finale con bottone unico “Apply selected” protetto',
+        'Multi-select in import preview is now more robust: context menu with “Select all/Deselect all”, more predictable bulk-selection behavior, and final execution through a single guarded “Apply selected” button'
+      ),
+      n(
+        'Configurazioni LDAP e WebAPI rifinite con layout piu chiaro, ordine azioni consistente e feedback espliciti in test/compare/import per ridurre errori operativi',
+        'LDAP and WebAPI configurations were refined with clearer layout, consistent action ordering, and explicit test/compare/import feedback to reduce operational errors'
+      ),
+      n(
+        'Aggiunta gestione retention log in settings con default deterministico a 30 giorni, controllo tipologie log e pulizia automatica configurabile',
+        'Log retention management was added in settings with a deterministic 30-day default, per-log-type controls, and configurable automatic cleanup'
+      ),
+      n(
+        'Copertura test e quality gate rieseguiti su import/retention per ridurre regressioni e garantire rilascio stabile',
+        'Tests and quality gates were rerun on import/retention paths to reduce regressions and ensure a stable release'
+      )
+    ]
+  },
+  {
     version: '3.5.6',
     date: '2026-03-09',
     type: 'fix',

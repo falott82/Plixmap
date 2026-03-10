@@ -251,6 +251,7 @@ const CustomImportPanel = (
   const [ldapCompareOpen, setLdapCompareOpen] = useState(false);
   const [ldapInfoOpen, setLdapInfoOpen] = useState(false);
   const [ldapImportSelectOpen, setLdapImportSelectOpen] = useState(false);
+  const [ldapConfigTab, setLdapConfigTab] = useState<'settings' | 'filters'>('settings');
   const [ldapSelectedExternalIds, setLdapSelectedExternalIds] = useState<string[]>([]);
   const [ldapImportDraftsById, setLdapImportDraftsById] = useState<Record<string, Partial<ImportPreviewRow>>>({});
   const [ldapImportEditRowId, setLdapImportEditRowId] = useState<string | null>(null);
@@ -307,6 +308,10 @@ const CustomImportPanel = (
   const [webApiPreviewRemoteRows, setWebApiPreviewRemoteRows] = useState<ImportPreviewRow[]>([]);
   const [webApiPreviewExistingRows, setWebApiPreviewExistingRows] = useState<ImportPreviewExistingRow[]>([]);
   const [webApiPreviewError, setWebApiPreviewError] = useState<string | null>(null);
+  const [webApiPreviewFilter, setWebApiPreviewFilter] = useState<'all' | 'remove' | 'update' | 'add'>('all');
+  const [webApiPreviewSelectedLeftIds, setWebApiPreviewSelectedLeftIds] = useState<string[]>([]);
+  const [webApiPreviewSelectedRightIds, setWebApiPreviewSelectedRightIds] = useState<string[]>([]);
+  const [webApiPreviewContextMenu, setWebApiPreviewContextMenu] = useState<null | { side: 'left' | 'right'; x: number; y: number }>(null);
   const [webApiPreviewImportingIds, setWebApiPreviewImportingIds] = useState<Record<string, boolean>>({});
   const [webApiPreviewDeletingIds, setWebApiPreviewDeletingIds] = useState<Record<string, boolean>>({});
 
@@ -367,6 +372,8 @@ const CustomImportPanel = (
   });
   const configDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const webApiPreviewDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const webApiPreviewContextMenuFocusRef = useRef<HTMLButtonElement | null>(null);
+  const webApiPreviewContextMenuRef = useRef<HTMLDivElement | null>(null);
   const usersDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const manualUserDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const portalProvisionDialogFocusRef = useRef<HTMLButtonElement | null>(null);
@@ -377,6 +384,8 @@ const CustomImportPanel = (
   const ldapCompareDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const ldapImportSelectDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const ldapImportEditDialogFocusRef = useRef<HTMLButtonElement | null>(null);
+  const lastWebApiPreviewLeftSelectionRef = useRef<number | null>(null);
+  const lastWebApiPreviewRightSelectionRef = useRef<number | null>(null);
 
   const summaryById = useMemo(() => new Map(summaryRows.map((r) => [r.clientId, r])), [summaryRows]);
   const visibleSummaryRows = useMemo(() => {
@@ -533,10 +542,10 @@ const CustomImportPanel = (
     setLdapTestResult(null);
     setLdapPreviewResult(null);
     setLdapImportResult(null);
-    if (!clientId) return;
+    if (!clientId) return null;
     try {
       const res = await getLdapImportConfig(clientId);
-      setLdapCfg(
+      const nextConfig =
         res.config
           ? {
               server: res.config.server,
@@ -579,10 +588,12 @@ const CustomImportPanel = (
               dept1Attribute: 'department',
               sizeLimit: 1000,
               updatedAt: undefined
-            }
-      );
+            };
+      setLdapCfg(nextConfig);
+      return nextConfig;
     } catch {
       setLdapCfg(null);
+      return null;
     }
   }, []);
 
@@ -640,6 +651,32 @@ const CustomImportPanel = (
     if (!activeClientId) return;
     void loadUsers(activeClientId);
   }, [activeClientId, loadUsers, lockClientSelection]);
+
+  useEffect(() => {
+    if (!webApiPreviewContextMenu) return;
+    const close = () => setWebApiPreviewContextMenu(null);
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && webApiPreviewContextMenuRef.current?.contains(target)) return;
+      close();
+    };
+    const onContextMenu = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && webApiPreviewContextMenuRef.current?.contains(target)) return;
+      close();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('contextmenu', onContextMenu);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('contextmenu', onContextMenu);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [webApiPreviewContextMenu]);
 
   const filteredUsers = useMemo(() => {
     const query = normalizeSearchText(usersQuery);
@@ -707,13 +744,34 @@ const CustomImportPanel = (
       else if (r.importStatus === 'update') rows.push({ ...r, variationType: 'update' });
     }
     for (const r of webApiMissingExistingRows) rows.push({ ...r, variationType: 'remove' });
-    const filtered = !q ? rows : rows.filter((r) => matchesImportUserQuery(r, q));
+    const filteredByType =
+      webApiPreviewFilter === 'all' ? rows : rows.filter((r) => String(r.variationType || '') === webApiPreviewFilter);
+    const filtered = !q ? filteredByType : filteredByType.filter((r) => matchesImportUserQuery(r, q));
     return filtered.sort((a, b) => {
       const d = importPreviewVariationRank(a.variationType) - importPreviewVariationRank(b.variationType);
       if (d) return d;
       return comparePeopleByName(a, b);
     });
-  }, [webApiMissingExistingRows, webApiPreviewRightQuery, webApiPreviewRemoteRows]);
+  }, [webApiMissingExistingRows, webApiPreviewFilter, webApiPreviewRightQuery, webApiPreviewRemoteRows]);
+
+  const webApiPreviewSelectedLeftIdSet = useMemo(() => new Set(webApiPreviewSelectedLeftIds), [webApiPreviewSelectedLeftIds]);
+  const webApiPreviewSelectedRightIdSet = useMemo(() => new Set(webApiPreviewSelectedRightIds), [webApiPreviewSelectedRightIds]);
+  const webApiPreviewSelectedVariationRows = useMemo(
+    () => webApiVariationRows.filter((row) => webApiPreviewSelectedRightIdSet.has(String(row.externalId))),
+    [webApiPreviewSelectedRightIdSet, webApiVariationRows]
+  );
+  const webApiPreviewSelectedAddRows = useMemo(
+    () => webApiPreviewSelectedVariationRows.filter((row: any) => row.variationType === 'add'),
+    [webApiPreviewSelectedVariationRows]
+  );
+  const webApiPreviewSelectedUpdateRows = useMemo(
+    () => webApiPreviewSelectedVariationRows.filter((row: any) => row.variationType === 'update'),
+    [webApiPreviewSelectedVariationRows]
+  );
+  const webApiPreviewSelectedDeleteRows = useMemo(
+    () => webApiPreviewSelectedVariationRows.filter((row: any) => row.variationType === 'remove'),
+    [webApiPreviewSelectedVariationRows]
+  );
 
   const resetManualUserForm = useCallback(() => {
     setManualUserEditingId(null);
@@ -899,6 +957,7 @@ const CustomImportPanel = (
     const nextMode = mode || 'webapi';
     setConfigExpanded(lockClientSelection ? nextMode === 'webapi' || nextMode === 'ldap' : false);
     setImportMode(nextMode);
+    if (nextMode === 'ldap') setLdapConfigTab('settings');
     setCsvFile(null);
     setWebApiPreviewOpen(false);
     await Promise.all([loadConfig(clientId), loadLdapConfig(clientId)]);
@@ -920,6 +979,9 @@ const CustomImportPanel = (
     if (!clientId) return;
     setWebApiPreviewLoading(true);
     setWebApiPreviewError(null);
+    setWebApiPreviewContextMenu(null);
+    setWebApiPreviewSelectedLeftIds([]);
+    setWebApiPreviewSelectedRightIds([]);
     try {
       const res = await previewImport(clientId, toWebApiConfigPayload(cfg, password));
       if (!res.ok) {
@@ -971,8 +1033,128 @@ const CustomImportPanel = (
     setUsersOpen(false);
     setWebApiPreviewLeftQuery('');
     setWebApiPreviewRightQuery('');
+    setWebApiPreviewFilter('all');
+    setWebApiPreviewSelectedLeftIds([]);
+    setWebApiPreviewSelectedRightIds([]);
+    setWebApiPreviewContextMenu(null);
     await refreshWebApiPreview(activeClientId);
   }, [activeClientId, refreshWebApiPreview]);
+
+  const selectWebApiPreviewRow = useCallback(
+    (
+      side: 'left' | 'right',
+      externalId: string,
+      rowIndex: number,
+      { shiftKey = false, toggle = false }: { shiftKey?: boolean; toggle?: boolean } = {}
+    ) => {
+      const normalized = String(externalId || '').trim();
+      if (!normalized) return;
+      const visibleIds =
+        side === 'left'
+          ? webApiPreviewExistingFiltered.map((row) => String(row.externalId))
+          : webApiVariationRows.map((row: any) => String(row.externalId));
+      const currentIndex = rowIndex >= 0 ? rowIndex : visibleIds.indexOf(normalized);
+      if (currentIndex < 0) return;
+      const anchorRef = side === 'left' ? lastWebApiPreviewLeftSelectionRef : lastWebApiPreviewRightSelectionRef;
+      const setSelected = side === 'left' ? setWebApiPreviewSelectedLeftIds : setWebApiPreviewSelectedRightIds;
+      const anchorIndexSnapshot = anchorRef.current;
+      setSelected((prev) => {
+        if (shiftKey) {
+          const fallbackAnchorId = prev.length ? prev[0] : '';
+          const fallbackAnchorIndex = fallbackAnchorId ? visibleIds.indexOf(fallbackAnchorId) : -1;
+          const anchorIndex =
+            anchorIndexSnapshot != null && anchorIndexSnapshot >= 0 && anchorIndexSnapshot < visibleIds.length
+              ? anchorIndexSnapshot
+              : fallbackAnchorIndex >= 0
+                ? fallbackAnchorIndex
+                : currentIndex;
+          const start = Math.min(anchorIndex, currentIndex);
+          const end = Math.max(anchorIndex, currentIndex);
+          return visibleIds.slice(start, end + 1);
+        }
+        if (toggle) {
+          return prev.includes(normalized) ? prev.filter((value) => value !== normalized) : [...prev, normalized];
+        }
+        return [normalized];
+      });
+      if (!shiftKey || anchorRef.current == null) {
+        anchorRef.current = currentIndex;
+      }
+    },
+    [webApiPreviewExistingFiltered, webApiVariationRows]
+  );
+
+  const handleWebApiPreviewRowMouseDown = useCallback(
+    (
+      side: 'left' | 'right',
+      externalId: string,
+      rowIndex: number,
+      event: React.MouseEvent
+    ) => {
+      if (event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('button')) return;
+      event.preventDefault();
+      selectWebApiPreviewRow(side, externalId, rowIndex, {
+        shiftKey: event.shiftKey,
+        toggle: event.metaKey || event.ctrlKey
+      });
+    },
+    [selectWebApiPreviewRow]
+  );
+
+  const selectAllWebApiPreviewRows = useCallback(
+    (side: 'left' | 'right') => {
+      if (side === 'left') {
+        setWebApiPreviewSelectedLeftIds(webApiPreviewExistingFiltered.map((row) => String(row.externalId)));
+        lastWebApiPreviewLeftSelectionRef.current = webApiPreviewExistingFiltered.length ? webApiPreviewExistingFiltered.length - 1 : null;
+        return;
+      }
+      setWebApiPreviewSelectedRightIds(webApiVariationRows.map((row: any) => String(row.externalId)));
+      lastWebApiPreviewRightSelectionRef.current = webApiVariationRows.length ? webApiVariationRows.length - 1 : null;
+    },
+    [webApiPreviewExistingFiltered, webApiVariationRows]
+  );
+
+  const clearWebApiPreviewSelection = useCallback((side?: 'left' | 'right') => {
+    if (!side || side === 'left') {
+      setWebApiPreviewSelectedLeftIds([]);
+      lastWebApiPreviewLeftSelectionRef.current = null;
+    }
+    if (!side || side === 'right') {
+      setWebApiPreviewSelectedRightIds([]);
+      lastWebApiPreviewRightSelectionRef.current = null;
+    }
+  }, []);
+
+  const openWebApiPreviewContextMenu = useCallback((side: 'left' | 'right', event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setWebApiPreviewContextMenu({ side, x: event.clientX, y: event.clientY });
+  }, []);
+
+  const openWebApiPreviewRowContextMenu = useCallback(
+    (side: 'left' | 'right', externalId: string, rowIndex: number, event: React.MouseEvent) => {
+      const normalized = String(externalId || '').trim();
+      if (normalized) {
+        if (event.shiftKey) {
+          selectWebApiPreviewRow(side, normalized, rowIndex, { shiftKey: true });
+        } else {
+          const selectedSet = side === 'left' ? webApiPreviewSelectedLeftIdSet : webApiPreviewSelectedRightIdSet;
+          if (!selectedSet.has(normalized)) {
+            selectWebApiPreviewRow(side, normalized, rowIndex, { shiftKey: false, toggle: false });
+          }
+        }
+      }
+      openWebApiPreviewContextMenu(side, event);
+    },
+    [
+      openWebApiPreviewContextMenu,
+      selectWebApiPreviewRow,
+      webApiPreviewSelectedLeftIdSet,
+      webApiPreviewSelectedRightIdSet
+    ]
+  );
 
   const importSingleWebApiUser = useCallback(
     async (row: ImportPreviewRow) => {
@@ -997,6 +1179,40 @@ const CustomImportPanel = (
     [activeClientId, loadSummary, loadUsers, push, refreshWebApiPreview, t]
   );
 
+  const importManyWebApiUsers = useCallback(
+    async (rows: ImportPreviewRow[]) => {
+      if (!activeClientId || !rows.length) return;
+      const keys = rows.map((row) => String(row.externalId || '')).filter(Boolean);
+      if (!keys.length) return;
+      setWebApiPreviewImportingIds((prev) => Object.fromEntries([...Object.entries(prev), ...keys.map((key) => [key, true])]));
+      try {
+        for (const row of rows) {
+          const key = String(row.externalId || '').trim();
+          if (!key) continue;
+          await importOneWebApiUser({ clientId: activeClientId, externalId: key, user: row });
+        }
+        push(
+          t({
+            it: `${rows.length} utenti importati/aggiornati.`,
+            en: `${rows.length} users imported/updated.`
+          }),
+          'success'
+        );
+        clearWebApiPreviewSelection('right');
+        await Promise.all([loadSummary(), refreshWebApiPreview(activeClientId)]);
+      } catch (err: any) {
+        push(err?.message || t({ it: 'Import massivo fallito', en: 'Bulk import failed' }), 'danger');
+      } finally {
+        setWebApiPreviewImportingIds((prev) => {
+          const next = { ...prev };
+          for (const key of keys) delete next[key];
+          return next;
+        });
+      }
+    },
+    [activeClientId, clearWebApiPreviewSelection, loadSummary, push, refreshWebApiPreview, t]
+  );
+
   const deleteSingleImportedUser = useCallback(
     async (externalId: string) => {
       if (!activeClientId || !externalId) return;
@@ -1017,6 +1233,50 @@ const CustomImportPanel = (
     },
     [activeClientId, loadSummary, loadUsers, push, refreshWebApiPreview, t]
   );
+
+  const deleteManyWebApiUsers = useCallback(
+    async (externalIds: string[]) => {
+      if (!activeClientId || !externalIds.length) return;
+      setWebApiPreviewDeletingIds((prev) => Object.fromEntries([...Object.entries(prev), ...externalIds.map((key) => [key, true])]));
+      try {
+        for (const externalId of externalIds) {
+          await deleteOneImportedUser({ clientId: activeClientId, externalId });
+        }
+        push(
+          t({
+            it: `${externalIds.length} utenti rimossi.`,
+            en: `${externalIds.length} users removed.`
+          }),
+          'success'
+        );
+        clearWebApiPreviewSelection();
+        await Promise.all([loadSummary(), refreshWebApiPreview(activeClientId)]);
+      } catch (err: any) {
+        push(err?.message || t({ it: 'Rimozione massiva fallita', en: 'Bulk delete failed' }), 'danger');
+      } finally {
+        setWebApiPreviewDeletingIds((prev) => {
+          const next = { ...prev };
+          for (const externalId of externalIds) delete next[externalId];
+          return next;
+        });
+      }
+    },
+    [activeClientId, clearWebApiPreviewSelection, loadSummary, push, refreshWebApiPreview, t]
+  );
+
+  const applySelectedWebApiVariations = useCallback(async () => {
+    if (!webApiPreviewSelectedVariationRows.length) return;
+    const addRows = webApiPreviewSelectedVariationRows.filter((row: any) => row.variationType === 'add') as ImportPreviewRow[];
+    const updateRows = webApiPreviewSelectedVariationRows.filter((row: any) => row.variationType === 'update') as ImportPreviewRow[];
+    const deleteIds = webApiPreviewSelectedVariationRows
+      .filter((row: any) => row.variationType === 'remove')
+      .map((row: any) => String(row.externalId || '').trim())
+      .filter(Boolean);
+
+    if (addRows.length) await importManyWebApiUsers(addRows);
+    if (updateRows.length) await importManyWebApiUsers(updateRows);
+    if (deleteIds.length) await deleteManyWebApiUsers(deleteIds);
+  }, [deleteManyWebApiUsers, importManyWebApiUsers, webApiPreviewSelectedVariationRows]);
 
   const runSync = async (clientId: string) => {
     setSyncingClientId(clientId);
@@ -1562,9 +1822,9 @@ const CustomImportPanel = (
       {lockClientSelection && activeClientId ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-                <span>{t({ it: 'Sorgente importazione', en: 'Import source' })} · {activeClient?.shortName || activeClient?.name || '—'}</span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[15px] font-semibold text-ink">
+                <span>{t({ it: 'Utenti cliente', en: 'Client users' })} · {activeClient?.shortName || activeClient?.name || '—'}</span>
                 <button
                   type="button"
                   className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-ink"
@@ -1577,18 +1837,12 @@ const CustomImportPanel = (
                   <Info size={14} />
                 </button>
               </div>
-              <div className="modal-description">
-                {t({
-                  it: 'Tutti gli utenti reali (WebAPI, LDAP, CSV e manuali) finiscono in un unico contenitore del cliente. I duplicati vengono segnalati per email oppure nome+cognome.',
-                  en: 'All real users (WebAPI, LDAP, CSV and manual) go into a single client container. Duplicates are flagged by email or first+last name.'
-                })}
-              </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => void openUsersOrExplain(activeClientId)}
-                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold ${
+                className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold ${
                   (activeSummary?.total || 0) > 0
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
@@ -1602,15 +1856,15 @@ const CustomImportPanel = (
                 <Users size={15} />
                 {t({ it: 'Utenti importati', en: 'Imported users' })}
               </button>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-700">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700">
                 {t({ it: 'Totale', en: 'Total' })}: {activeSummary?.total ?? 0}
               </span>
-              <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${duplicateGroups.length ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+              <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${duplicateGroups.length ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
                 {t({ it: 'Duplicati', en: 'Duplicates' })}: {duplicateGroups.length}
               </span>
             </div>
           </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="mt-5 flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => setImportMode('webapi')} title={t({ it: 'Usa una WebAPI esterna per leggere utenti da un servizio remoto. Da qui puoi configurare endpoint, testare la risposta e poi importare nel contenitore locale.', en: 'Use an external WebAPI to read users from a remote service. From here you can configure the endpoint, test the response, and then import into the local container.' })} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'webapi' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>WebAPI</button>
             <button type="button" onClick={() => setImportMode('ldap')} title={t({ it: 'Usa un server LDAP o Active Directory in sola lettura. Da qui puoi configurare connessione, fare test, confronto e import selettivo.', en: 'Use a read-only LDAP or Active Directory server. From here you can configure the connection, run tests, compare, and perform selective import.' })} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'ldap' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>LDAP</button>
             <button type="button" onClick={() => setImportMode('csv')} title={t({ it: 'Importa utenti da un file CSV. Puoi scaricare un modello, preparare i dati e importarli nel contenitore locale.', en: 'Import users from a CSV file. You can download a template, prepare the data, and import it into the local container.' })} className={`rounded-full border px-3 py-1 text-xs font-semibold ${importMode === 'csv' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>CSV</button>
@@ -1619,14 +1873,21 @@ const CustomImportPanel = (
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             {importMode === 'webapi' ? (
               <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => openConfig(activeClientId, 'webapi')} className="btn-primary" title={t({ it: 'Apri la configurazione WebAPI di questo cliente: URL, metodo HTTP, credenziali e payload opzionale.', en: 'Open the WebAPI configuration for this client: URL, HTTP method, credentials, and optional payload.' })}>
+                <button type="button" onClick={() => openConfig(activeClientId, 'webapi')} className="btn-secondary" disabled={!activeClientId} title={t({ it: 'Apri la configurazione WebAPI di questo cliente: URL, metodo HTTP, credenziali e payload opzionale.', en: 'Open the WebAPI configuration for this client: URL, HTTP method, credentials, and optional payload.' })}>
                   {t({ it: 'Configurazione', en: 'Configuration' })}
                 </button>
                 <button
                   type="button"
-                  onClick={() => void openWebApiPreview()}
-                  disabled={!canOpenWebApiImportPreview}
-                  className="btn-secondary inline-flex items-center gap-2 disabled:opacity-50"
+                  onClick={() => {
+                    if (!activeClientId) return;
+                    if (canOpenWebApiImportPreview) {
+                      void openWebApiPreview();
+                      return;
+                    }
+                    openConfig(activeClientId, 'webapi');
+                  }}
+                  disabled={!activeClientId}
+                  className="btn-primary inline-flex items-center gap-2 disabled:opacity-50"
                   title={
                     canOpenWebApiImportPreview
                       ? t({ it: 'Apri l’anteprima utenti trovati dalla WebAPI', en: 'Open WebAPI users preview' })
@@ -1634,30 +1895,50 @@ const CustomImportPanel = (
                   }
                 >
                   <UploadCloud size={16} />
-                  {t({ it: 'Importazione', en: 'Import' })}
+                  {t({ it: 'Import', en: 'Import' })}
                 </button>
               </div>
             ) : importMode === 'ldap' ? (
               <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => openConfig(activeClientId, 'ldap')} className="btn-primary" title={t({ it: 'Apri la configurazione LDAP di questo cliente: server, sicurezza, autenticazione, Base DN, filtro, mapping attributi e limiti di lettura.', en: 'Open the LDAP configuration for this client: server, security, authentication, Base DN, filter, attribute mapping, and read limits.' })}>
-                  {t({ it: 'Configurazione LDAP', en: 'LDAP configuration' })}
+                <button type="button" onClick={() => openConfig(activeClientId, 'ldap')} className="btn-secondary" disabled={!activeClientId} title={t({ it: 'Apri la configurazione LDAP di questo cliente: server, sicurezza, autenticazione, Base DN, filtro, mapping attributi e limiti di lettura.', en: 'Open the LDAP configuration for this client: server, security, authentication, Base DN, filter, attribute mapping, and read limits.' })}>
+                  {t({ it: 'Configurazione', en: 'Configuration' })}
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!activeClientId) return;
+                    const loadedConfig = await loadLdapConfig(activeClientId);
+                    const nextHasServer = String(loadedConfig?.server || '').trim();
+                    if (nextHasServer) {
+                      void openLdapCompareModal();
+                      return;
+                    }
+                    openConfig(activeClientId, 'ldap');
+                  }}
+                  className="btn-primary inline-flex items-center gap-2"
+                  disabled={!activeClientId}
+                  title={t({ it: 'Apri confronto LDAP per vedere utenti importabili, gia presenti e saltati. Se LDAP non e ancora configurato, apre prima la configurazione.', en: 'Open LDAP compare to inspect importable, existing and skipped users. If LDAP is not configured yet, it opens configuration first.' })}
+                >
+                  <UploadCloud size={16} />
+                  {t({ it: 'Import', en: 'Import' })}
                 </button>
               </div>
             ) : importMode === 'csv' ? (
               <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => openConfig(activeClientId, 'csv')} className="btn-primary" title={t({ it: 'Apri il pannello CSV per incollare o caricare il file, scegliere la modalità e importare i dati nel contenitore locale.', en: 'Open the CSV panel to paste or upload the file, choose the mode, and import data into the local container.' })}>
-                  {t({ it: 'Apri import CSV', en: 'Open CSV import' })}
-                </button>
-                <button type="button" onClick={downloadCsvTemplate} className="btn-secondary inline-flex items-center gap-2" title={t({ it: 'Scarica un file CSV di esempio con le colonne corrette. Usalo come modello per preparare i dati da importare.', en: 'Download a sample CSV file with the correct columns. Use it as a template to prepare the data to import.' })}>
+                <button type="button" onClick={downloadCsvTemplate} className="btn-secondary inline-flex items-center gap-2" disabled={!activeClientId} title={t({ it: 'Esporta il modello CSV da compilare offline.', en: 'Export the CSV template to fill offline.' })}>
                   <FileDown size={16} />
-                  {t({ it: 'Modello CSV', en: 'CSV template' })}
+                  {t({ it: 'Export template', en: 'Export template' })}
+                </button>
+                <button type="button" onClick={() => openConfig(activeClientId, 'csv')} className="btn-primary inline-flex items-center gap-2" disabled={!activeClientId} title={t({ it: 'Apri direttamente il flusso di import CSV per caricare il file o usare il modello.', en: 'Open the CSV import flow directly to upload the file or use the template.' })}>
+                  <UploadCloud size={16} />
+                  {t({ it: 'Import', en: 'Import' })}
                 </button>
               </div>
             ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={async () => { await openUsers(activeClientId); openManualUserCreate(); }} className="btn-secondary inline-flex items-center gap-2" title={t({ it: 'Crea un nuovo utente manuale direttamente nel contenitore locale del cliente. Questo utente non dipende da LDAP, WebAPI o CSV.', en: 'Create a new manual user directly in the client local container. This user does not depend on LDAP, WebAPI, or CSV.' })}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <button type="button" onClick={async () => { if (!activeClientId) return; await openUsers(activeClientId); }} className="btn-primary inline-flex items-center gap-2" disabled={!activeClientId} title={t({ it: 'Apri il contenitore locale degli utenti e aggiungi nuove entita con il pulsante + in alto a destra.', en: 'Open the local users container and add new entities with the + button in the top right.' })}>
                   <Plus size={16} />
-                  {t({ it: 'Nuovo utente manuale', en: 'New manual user' })}
+                  ADD
                 </button>
               </div>
             )}
@@ -1825,7 +2106,7 @@ const CustomImportPanel = (
                   <div className="modal-header">
                     <div>
                       <Dialog.Title className="modal-title">
-                        {t({ it: 'Configurazione importazione', en: 'Import configuration' })}
+                        {t({ it: 'Configurazione import utenti', en: 'User import configuration' })}
                       </Dialog.Title>
                       <div className="modal-description">
                         {activeClient ? activeClient.name : t({ it: 'Nessun cliente selezionato', en: 'No client selected' })}
@@ -1927,8 +2208,8 @@ const CustomImportPanel = (
 
                   {importMode === 'webapi' ? (
                     configExpanded ? (
-                      <div className="mt-4 grid gap-4 md:grid-cols-2">
-                        <label className="block text-sm font-medium text-slate-700">
+                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                        <label className="block text-sm font-medium text-slate-700 md:col-span-3">
                           {t({ it: 'WebAPI URL', en: 'WebAPI URL' })}
                           <input
                             value={cfg?.url || ''}
@@ -1951,6 +2232,17 @@ const CustomImportPanel = (
                           />
                         </label>
                         <label className="block text-sm font-medium text-slate-700">
+                          {t({ it: 'Password', en: 'Password' })}
+                          <input
+                            type="password"
+                            autoComplete="new-password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
+                            placeholder={cfg?.hasPassword ? t({ it: 'Lascia vuoto per non cambiare', en: 'Leave empty to keep' }) : '••••••'}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
                           {t({ it: 'Metodo', en: 'Method' })}
                           <select
                             value={cfg?.method || 'POST'}
@@ -1963,20 +2255,7 @@ const CustomImportPanel = (
                             <option value="GET">GET</option>
                           </select>
                         </label>
-                        <form onSubmit={(e) => e.preventDefault()} className="block">
-                          <label className="block text-sm font-medium text-slate-700">
-                            {t({ it: 'Password', en: 'Password' })}
-                            <input
-                              type="password"
-                              autoComplete="new-password"
-                              value={password}
-                              onChange={(e) => setPassword(e.target.value)}
-                              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                              placeholder={cfg?.hasPassword ? t({ it: 'Lascia vuoto per non cambiare', en: 'Leave empty to keep' }) : '••••••'}
-                            />
-                          </label>
-                        </form>
-                        <label className="block text-sm font-medium text-slate-700">
+                        <label className="block text-sm font-medium text-slate-700 md:col-span-3">
                           {t({ it: 'Body JSON (opzionale)', en: 'Body JSON (optional)' })}
                           <textarea
                             value={cfg?.bodyJson || ''}
@@ -2030,6 +2309,23 @@ const CustomImportPanel = (
                           <Info size={16} />
                         </button>
                       </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setLdapConfigTab('settings')}
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold ${ldapConfigTab === 'settings' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                        >
+                          Settings
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLdapConfigTab('filters')}
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold ${ldapConfigTab === 'filters' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                        >
+                          Filters
+                        </button>
+                      </div>
+                      {ldapConfigTab === 'settings' ? (
                       <div className="grid gap-4 md:grid-cols-2">
                         <label className="block text-sm font-medium text-slate-700">
                           {t({ it: 'Server LDAP', en: 'LDAP server' })}
@@ -2120,7 +2416,7 @@ const CustomImportPanel = (
                             disabled={ldapCfg?.authType === 'anonymous'}
                           />
                         </label>
-                        <label className="block text-sm font-medium text-slate-700">
+                        <label className="block text-sm font-medium text-slate-700 md:col-span-2">
                           {t({ it: 'Base DN', en: 'Base DN' })}
                           <input
                             value={ldapCfg?.baseDn || ''}
@@ -2130,6 +2426,8 @@ const CustomImportPanel = (
                           />
                         </label>
                       </div>
+                      ) : null}
+                      {ldapConfigTab === 'filters' ? (
                       <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4">
                         <div className="mb-4">
                           <div className="text-sm font-semibold text-sky-900">
@@ -2199,6 +2497,7 @@ const CustomImportPanel = (
                           })}
                         </div>
                       </div>
+                      ) : null}
                     </div>
                   ) : importMode === 'csv' ? (
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
@@ -2286,18 +2585,21 @@ const CustomImportPanel = (
                         >
                           <Save size={16} className={savingCfg ? 'animate-pulse' : ''} />
                         </button>
+                        <button
+                          onClick={runTest}
+                          disabled={testing || !activeClientId || !canRunWebApiTest}
+                          className="flex items-center gap-2 btn-secondary disabled:opacity-60"
+                          title={
+                            !canRunWebApiTest
+                              ? t({ it: 'Configura prima le impostazioni WebAPI.', en: 'Configure WebAPI settings first.' })
+                              : t({ it: 'Verifica connessione WebAPI', en: 'Test WebAPI connection' })
+                          }
+                        >
+                          <TestTube size={16} /> {testing ? t({ it: 'Test…', en: 'Testing…' }) : t({ it: 'Test', en: 'Test' })}
+                        </button>
                       </>
-                    ) : importMode === 'ldap' ? (
-                      <button
-                        onClick={saveLdapConfigHandler}
-                        disabled={savingLdapCfg || !activeClientId || !ldapCfg}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
-                        title={t({ it: 'Salva / aggiorna impostazioni LDAP', en: 'Save / update LDAP settings' })}
-                      >
-                        <Save size={16} className={savingLdapCfg ? 'animate-pulse' : ''} />
-                      </button>
                     ) : null}
-                    {!lockClientSelection && (activeSummary?.total || syncResult?.ok || importMode === 'manual') ? (
+                    {importMode !== 'webapi' && !lockClientSelection && (activeSummary?.total || syncResult?.ok || importMode === 'manual') ? (
                       <button
                         onClick={() => activeClientId && openUsers(activeClientId)}
                         className="flex items-center gap-2 btn-secondary"
@@ -2306,7 +2608,7 @@ const CustomImportPanel = (
                         <Users size={16} /> {t({ it: 'Utenti importati', en: 'Imported users' })}
                       </button>
                     ) : null}
-                    {importMode !== 'webapi' ? (
+                    {importMode !== 'webapi' && importMode !== 'ldap' ? (
                       <button
                         onClick={() => setClearConfirmOpen(true)}
                         disabled={!activeClientId || clearing || !canClearWebApiImport}
@@ -2324,57 +2626,17 @@ const CustomImportPanel = (
                       </button>
                     ) : null}
                   </div>
-                  {importMode === 'webapi' ? (
-                    <div className="mt-3">
-                      <div className="h-px w-full bg-slate-200" />
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={runTest}
-                          disabled={testing || !activeClientId || !canRunWebApiTest}
-                          className="flex items-center gap-2 btn-secondary disabled:opacity-60"
-                          title={
-                            !canRunWebApiTest
-                              ? t({ it: 'Configura prima le impostazioni WebAPI.', en: 'Configure WebAPI settings first.' })
-                              : t({ it: 'Verifica connessione WebAPI', en: 'Test WebAPI connection' })
-                          }
-                        >
-                          <TestTube size={16} /> {testing ? t({ it: 'Test…', en: 'Testing…' }) : t({ it: 'Test', en: 'Test' })}
-                        </button>
-                        {!lockClientSelection ? (
-                          <>
-                            <button
-                              onClick={() => void openWebApiPreview()}
-                              disabled={!canOpenWebApiImportPreview}
-                              className="flex items-center gap-2 btn-secondary disabled:opacity-60"
-                              title={
-                                !canOpenWebApiImportPreview
-                                  ? t({ it: 'Configura e testa prima la WebAPI.', en: 'Configure and test WebAPI first.' })
-                                  : t({ it: 'Apri anteprima importazione WebAPI', en: 'Open WebAPI import preview' })
-                              }
-                            >
-                              <UploadCloud size={16} />
-                              {t({ it: 'Importa', en: 'Import' })}
-                            </button>
-                            <button
-                              onClick={() => setClearConfirmOpen(true)}
-                              disabled={!activeClientId || clearing || !canClearWebApiImport}
-                              className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
-                              title={
-                                !canClearWebApiImport
-                                  ? t({ it: 'Disponibile solo dopo almeno una importazione.', en: 'Available only after at least one import.' })
-                                  : t({ it: 'Elimina utenti importati dal contenitore', en: 'Delete imported users from the container' })
-                              }
-                            >
-                              <Trash2 size={16} /> {clearing ? t({ it: 'Eliminazione…', en: 'Deleting…' }) : t({ it: 'Elimina', en: 'Delete' })}
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : importMode === 'ldap' ? (
+                  {importMode === 'ldap' ? (
                     <div className="mt-3 space-y-3">
-                      <div className="h-px w-full bg-slate-200" />
                       <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={saveLdapConfigHandler}
+                          disabled={savingLdapCfg || !activeClientId || !ldapCfg}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+                          title={t({ it: 'Salva / aggiorna impostazioni LDAP', en: 'Save / update LDAP settings' })}
+                        >
+                          <Save size={16} className={savingLdapCfg ? 'animate-pulse' : ''} />
+                        </button>
                         <button
                           onClick={runLdapTest}
                           disabled={ldapTesting || !activeClientId || !ldapCfg}
@@ -2480,29 +2742,51 @@ const CustomImportPanel = (
                       <Dialog.Title className="modal-title">{t({ it: 'Importazione WebAPI', en: 'WebAPI import' })}</Dialog.Title>
                       <div className="modal-description">{activeClient ? activeClient.name : ''}</div>
                     </div>
-                    <button onClick={() => setWebApiPreviewOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
-                      <X size={18} />
-                    </button>
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
                     <button type="button" onClick={() => activeClientId && refreshWebApiPreview(activeClientId)} className="btn-secondary inline-flex items-center gap-2">
                       <RefreshCw size={16} className={webApiPreviewLoading ? 'animate-spin' : ''} />
                       {t({ it: 'Ricarica', en: 'Reload' })}
                     </button>
                   </div>
-                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                    <div className="font-semibold text-ink">
-                      {t({ it: 'Totali da importazione', en: 'Total from import' })}: {webApiPreviewRemoteRows.length} · {t({ it: 'Utenti esistenti', en: 'Existing users' })}: {webApiPreviewExistingRows.length}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                      <span className="text-rose-700">{t({ it: 'Da eliminare', en: 'To delete' })}: {previewSummaryCounts.remove}</span>
-                      <span className="text-amber-700">{t({ it: 'Da aggiornare', en: 'To update' })}: {previewSummaryCounts.update}</span>
-                      <span className="text-emerald-700">{t({ it: 'Da aggiungere', en: 'To add' })}: {previewSummaryCounts.add}</span>
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="font-semibold text-ink">
+                        {t({ it: 'Totali da importazione', en: 'Total from import' })}: {webApiPreviewRemoteRows.length} · {t({ it: 'Utenti esistenti', en: 'Existing users' })}: {webApiPreviewExistingRows.length}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setWebApiPreviewFilter('remove')}
+                          className={`rounded-full border px-3 py-1 ${webApiPreviewFilter === 'remove' ? 'border-rose-300 bg-rose-100 text-rose-700' : 'border-rose-200 bg-white text-rose-700 hover:bg-rose-50'}`}
+                        >
+                          {t({ it: 'Da eliminare', en: 'To delete' })}: {previewSummaryCounts.remove}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWebApiPreviewFilter('update')}
+                          className={`rounded-full border px-3 py-1 ${webApiPreviewFilter === 'update' ? 'border-amber-300 bg-amber-100 text-amber-700' : 'border-amber-200 bg-white text-amber-700 hover:bg-amber-50'}`}
+                        >
+                          {t({ it: 'Da aggiornare', en: 'To update' })}: {previewSummaryCounts.update}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWebApiPreviewFilter('add')}
+                          className={`rounded-full border px-3 py-1 ${webApiPreviewFilter === 'add' ? 'border-emerald-300 bg-emerald-100 text-emerald-700' : 'border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50'}`}
+                        >
+                          {t({ it: 'Da aggiungere', en: 'To add' })}: {previewSummaryCounts.add}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWebApiPreviewFilter('all')}
+                          className={`rounded-full border px-3 py-1 ${webApiPreviewFilter === 'all' ? 'border-slate-300 bg-slate-200 text-slate-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                        >
+                          {t({ it: 'Tutti', en: 'All' })}
+                        </button>
+                      </div>
                     </div>
                   </div>
                   {webApiPreviewError ? <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{webApiPreviewError}</div> : null}
                   <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                    <div className="overflow-hidden rounded-2xl border border-slate-200">
+                    <div className="overflow-hidden rounded-2xl border border-slate-200" onContextMenu={(event) => openWebApiPreviewContextMenu('left', event)}>
                       <div className="flex items-center justify-between bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-600">
                         <span>{t({ it: 'Utenti esistenti', en: 'Existing users' })}</span>
                         <span className="text-slate-500">{webApiPreviewExistingFiltered.length}</span>
@@ -2521,11 +2805,16 @@ const CustomImportPanel = (
                       </div>
                       <div className="max-h-[420px] overflow-auto">
                         {!webApiPreviewExistingFiltered.length && !webApiPreviewLoading ? <div className="px-4 py-4 text-sm text-slate-500">{t({ it: 'Nessun utente esistente.', en: 'No existing users.' })}</div> : null}
-                        {webApiPreviewExistingFiltered.map((r) => {
+                        {webApiPreviewExistingFiltered.map((r, rowIndex) => {
                           const name = `${r.firstName || ''} ${r.lastName || ''}`.trim() || r.email || r.externalId;
                           const isMissingFromImport = !webApiPreviewRemoteById.has(String(r.externalId));
                           return (
-                            <div key={`existing:${r.externalId}`} className="border-t border-slate-100 px-4 py-3 text-sm">
+                            <div
+                              key={`existing:${r.externalId}`}
+                              onMouseDown={(event) => handleWebApiPreviewRowMouseDown('left', String(r.externalId), rowIndex, event)}
+                              onContextMenu={(event) => openWebApiPreviewRowContextMenu('left', String(r.externalId), rowIndex, event)}
+                              className={`cursor-pointer select-none border-t border-slate-100 px-4 py-3 text-sm ${webApiPreviewSelectedLeftIdSet.has(String(r.externalId)) ? 'bg-primary/20 ring-1 ring-primary/30' : 'bg-white hover:bg-slate-50'}`}
+                            >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
@@ -2546,7 +2835,7 @@ const CustomImportPanel = (
                         })}
                       </div>
                     </div>
-                    <div className="overflow-hidden rounded-2xl border border-slate-200">
+                    <div className="overflow-hidden rounded-2xl border border-slate-200" onContextMenu={(event) => openWebApiPreviewContextMenu('right', event)}>
                       <div className="flex items-center justify-between bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-600">
                         <span>{t({ it: 'Variazioni da importazione', en: 'Import variations' })}</span>
                         <span className="text-slate-500">{webApiVariationRows.length}</span>
@@ -2565,19 +2854,27 @@ const CustomImportPanel = (
                       <div className="max-h-[420px] overflow-auto">
                         {webApiPreviewLoading ? <div className="px-4 py-4 text-sm text-slate-500">{t({ it: 'Ricerca in corso…', en: 'Searching…' })}</div> : null}
                         {!webApiPreviewLoading && !webApiVariationRows.length ? <div className="px-4 py-4 text-sm text-slate-500">{t({ it: 'Nessuna variazione rilevata.', en: 'No variations detected.' })}</div> : null}
-                        {webApiVariationRows.map((r: any) => {
+                        {webApiVariationRows.map((r: any, rowIndex: number) => {
                           const name = `${r.firstName || ''} ${r.lastName || ''}`.trim() || r.email || r.externalId;
                           const variationType = String(r.variationType || '');
                           const isAdd = variationType === 'add';
                           const isUpdate = variationType === 'update';
                           const tagClass = isAdd ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : isUpdate ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-rose-200 bg-rose-50 text-rose-700';
                           return (
-                            <div key={`remote:${r.externalId}`} className="border-t border-slate-100 px-4 py-3 text-sm">
+                            <div
+                              key={`remote:${r.externalId}`}
+                              onMouseDown={(event) => handleWebApiPreviewRowMouseDown('right', String(r.externalId), rowIndex, event)}
+                              onContextMenu={(event) => openWebApiPreviewRowContextMenu('right', String(r.externalId), rowIndex, event)}
+                              className={`cursor-pointer select-none border-t border-slate-100 px-4 py-3 text-sm ${webApiPreviewSelectedRightIdSet.has(String(r.externalId)) ? 'bg-primary/20 ring-1 ring-primary/30' : 'bg-white hover:bg-slate-50'}`}
+                            >
                               <div className="flex items-start gap-2">
                                 {isAdd || isUpdate ? (
                                   <button
                                     type="button"
-                                    onClick={() => void importSingleWebApiUser(r)}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void importSingleWebApiUser(r);
+                                    }}
                                     disabled={!!webApiPreviewImportingIds[r.externalId]}
                                     className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-lg border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 disabled:opacity-40"
                                     title={isAdd ? t({ it: 'Aggiungi utente', en: 'Add user' }) : t({ it: 'Aggiorna utente esistente', en: 'Update existing user' })}
@@ -2587,7 +2884,10 @@ const CustomImportPanel = (
                                 ) : (
                                   <button
                                     type="button"
-                                    onClick={() => void deleteSingleImportedUser(r.externalId)}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void deleteSingleImportedUser(r.externalId);
+                                    }}
                                     disabled={!!webApiPreviewDeletingIds[r.externalId]}
                                     className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-40"
                                     title={t({ it: 'Elimina dal contenitore utenti', en: 'Delete from users container' })}
@@ -2612,8 +2912,43 @@ const CustomImportPanel = (
                       </div>
                     </div>
                   </div>
-                  <div className="modal-footer">
-                    <button onClick={() => setWebApiPreviewOpen(false)} className="btn-secondary">{t({ it: 'Chiudi', en: 'Close' })}</button>
+                  {webApiPreviewContextMenu ? (
+                    <div
+                      ref={webApiPreviewContextMenuRef}
+                      className="fixed z-[140] min-w-[200px] rounded-xl border border-slate-200 bg-white p-1 shadow-xl"
+                      style={{ left: webApiPreviewContextMenu.x, top: webApiPreviewContextMenu.y }}
+                    >
+                      <button ref={webApiPreviewContextMenuFocusRef} type="button" className="sr-only" tabIndex={0}>focus</button>
+                      <button type="button" onClick={() => selectAllWebApiPreviewRows(webApiPreviewContextMenu.side)} className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">
+                        {t({ it: 'Seleziona tutto', en: 'Select all' })}
+                      </button>
+                      <button type="button" onClick={() => clearWebApiPreviewSelection(webApiPreviewContextMenu.side)} className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50">
+                        {t({ it: 'Deseleziona tutto', en: 'Deselect all' })}
+                      </button>
+                    </div>
+                  ) : null}
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                      <span>{t({ it: 'Selezionati', en: 'Selected' })}: <span className="font-semibold text-ink">{webApiPreviewSelectedVariationRows.length}</span></span>
+                      <span className="text-emerald-700">{t({ it: 'Add', en: 'Add' })}: {webApiPreviewSelectedAddRows.length}</span>
+                      <span className="text-amber-700">{t({ it: 'Update', en: 'Update' })}: {webApiPreviewSelectedUpdateRows.length}</span>
+                      <span className="text-rose-700">{t({ it: 'Delete', en: 'Delete' })}: {webApiPreviewSelectedDeleteRows.length}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void applySelectedWebApiVariations()}
+                        disabled={
+                          !webApiPreviewSelectedVariationRows.length ||
+                          Object.keys(webApiPreviewImportingIds).length > 0 ||
+                          Object.keys(webApiPreviewDeletingIds).length > 0
+                        }
+                        className="btn-secondary disabled:opacity-50"
+                      >
+                        {t({ it: 'Apply selected', en: 'Apply selected' })}
+                      </button>
+                      <button onClick={() => setWebApiPreviewOpen(false)} className="btn-secondary">{t({ it: 'Chiudi', en: 'Close' })}</button>
+                    </div>
                   </div>
                 </Dialog.Panel>
               </Transition.Child>
@@ -2746,15 +3081,30 @@ const CustomImportPanel = (
                   ) : null}
 
                   {ldapPreviewResult ? (
-                    <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                    <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.2fr),minmax(0,1fr),minmax(0,1fr)]">
                       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                         <div className="text-xs font-semibold uppercase text-emerald-700">{t({ it: 'Importabili', en: 'Importable' })}</div>
                         <div className="mt-1 text-2xl font-semibold text-emerald-900">{ldapPreviewResult.importableCount}</div>
                         <div className="mt-3 max-h-[50vh] space-y-2 overflow-auto text-sm text-emerald-900">
                           {ldapPreviewResult.importableRows.map((row) => (
                             <div key={`ldap-importable-${row.externalId}`} className="rounded-lg border border-emerald-200 bg-white px-3 py-2">
-                              <div className="font-semibold uppercase">{`${row.firstName || ''} ${row.lastName || ''}`.trim() || row.externalId}</div>
-                              <div className="text-xs text-emerald-700">{[row.email, row.mobile].filter(Boolean).join(' · ') || row.externalId}</div>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1 pr-2">
+                                  <div className="font-semibold uppercase">{`${row.firstName || ''} ${row.lastName || ''}`.trim() || row.externalId}</div>
+                                  <div className="break-all text-xs leading-5 text-emerald-700">{[row.email, row.mobile].filter(Boolean).join(' · ') || row.externalId}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setLdapSelectedExternalIds([row.externalId]);
+                                    setLdapImportSelectOpen(true);
+                                  }}
+                                  className="inline-flex shrink-0 items-center gap-1 self-start rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                                >
+                                  <UploadCloud size={12} />
+                                  {t({ it: 'Importa', en: 'Import' })}
+                                </button>
+                              </div>
                             </div>
                           ))}
                           {!ldapPreviewResult.importableRows.length ? <div className="text-sm text-emerald-700">{t({ it: 'Nessun nuovo utente da importare.', en: 'No new users to import.' })}</div> : null}

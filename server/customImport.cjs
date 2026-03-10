@@ -57,7 +57,7 @@ const mapExternalDeviceRow = (r) => ({
   clientId: String(r.clientId || ''),
   devId: String(r.devId || ''),
   deviceType: String(r.deviceType || ''),
-  deviceName: String(r.deviceName || ''),
+  deviceName: normalizeDeviceName(r.deviceName),
   manufacturer: String(r.manufacturer || ''),
   model: String(r.model || ''),
   serialNumber: String(r.serialNumber || ''),
@@ -73,6 +73,7 @@ const mapExternalDeviceRow = (r) => ({
 const toStr = (v) => (v === null || v === undefined ? '' : String(v).trim());
 const normalizePhone = (v) => toStr(v).replace(/\s+/g, '');
 const normalizeUpperText = (v) => toStr(v).toUpperCase();
+const normalizeDeviceName = (v) => toStr(v).toUpperCase();
 const normalizeExternalUserPayload = (payload) => {
   return {
     externalId: toStr(payload?.externalId),
@@ -91,6 +92,14 @@ const normalizeExternalUserPayload = (payload) => {
   };
 };
 const normalizeManualExternalUserInput = (payload) => normalizeExternalUserPayload(payload);
+const normalizeExternalDevicePayload = (payload) => ({
+  devId: toStr(payload?.devId),
+  deviceType: toStr(payload?.deviceType),
+  deviceName: normalizeDeviceName(payload?.deviceName),
+  manufacturer: toStr(payload?.manufacturer),
+  model: toStr(payload?.model),
+  serialNumber: toStr(payload?.serialNumber)
+});
 
 const makeManualExternalId = () => `manual:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -505,30 +514,21 @@ const deleteManualExternalUser = (db, clientId, externalId) => {
   return { ok: true, removed: Number(result.changes || 0), row };
 };
 
-const normalizeManualDeviceInput = (payload) => {
-  const toStr = (v) => (v === null || v === undefined ? '' : String(v).trim());
-  return {
-    devId: toStr(payload?.devId),
-    deviceType: toStr(payload?.deviceType),
-    deviceName: toStr(payload?.deviceName),
-    manufacturer: toStr(payload?.manufacturer),
-    model: toStr(payload?.model),
-    serialNumber: toStr(payload?.serialNumber)
-  };
-};
+const normalizeManualDeviceInput = (payload) => normalizeExternalDevicePayload(payload);
 
 const makeManualDeviceId = () => `manual:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const upsertExternalDevices = (db, clientId, devices, options = {}) => {
   const now = Date.now();
   const shouldMarkMissing = options.markMissing !== false;
+  const normalizedDevices = (devices || []).map((device) => normalizeExternalDevicePayload(device || {}));
   const existing = db
     .prepare(
       'SELECT devId, deviceType, deviceName, manufacturer, model, serialNumber, hidden, present FROM external_devices WHERE clientId = ?'
     )
     .all(clientId);
   const existingById = new Map(existing.map((r) => [String(r.devId), r]));
-  const incomingIds = new Set((devices || []).map((d) => String(d.devId || '').trim()).filter(Boolean));
+  const incomingIds = new Set(normalizedDevices.map((d) => String(d.devId || '').trim()).filter(Boolean));
 
   const insert = db.prepare(
     `INSERT INTO external_devices (clientId, devId, deviceType, deviceName, manufacturer, model, serialNumber, hidden, present, lastSeenAt, createdAt, updatedAt)
@@ -545,8 +545,7 @@ const upsertExternalDevices = (db, clientId, devices, options = {}) => {
   const updated = [];
   const missing = [];
 
-  for (const raw of devices || []) {
-    const row = normalizeManualDeviceInput(raw || {});
+  for (const row of normalizedDevices) {
     const devId = String(row.devId || '').trim();
     if (!devId) continue;
     const prev = existingById.get(devId);
@@ -593,7 +592,7 @@ const upsertExternalDevices = (db, clientId, devices, options = {}) => {
   return {
     summary: {
       totalBefore: existing.length,
-      totalNow: devices.length,
+      totalNow: normalizedDevices.length,
       created: created.length,
       updated: updated.length,
       missing: missing.length
@@ -822,6 +821,7 @@ module.exports = {
   isManualExternalId,
   isManualDeviceId,
   normalizeExternalUserPayload,
+  normalizeExternalDevicePayload,
   upsertManualExternalUser,
   upsertManualExternalDevice,
   deleteManualExternalUser

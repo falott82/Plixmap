@@ -3,6 +3,7 @@ import { useT } from '../../i18n/useT';
 import LogsPanel from './LogsPanel';
 import EmailLogsPanel from './EmailLogsPanel';
 import AuditTrailPanel from './AuditTrailPanel';
+import LogsRetentionPanel from './LogsRetentionPanel';
 import { fetchLogsMeta, LogsMeta } from '../../api/logs';
 import { useToastStore } from '../../store/useToast';
 
@@ -14,6 +15,7 @@ const LogsTabsPanel = () => {
   const [tab, setTab] = useState<LogsTab>('auth');
   const push = useToastStore((s) => s.push);
   const [meta, setMeta] = useState<LogsMeta>({});
+  const [refreshToken, setRefreshToken] = useState(0);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -47,6 +49,13 @@ const LogsTabsPanel = () => {
 
   return (
     <div className="space-y-6">
+      <LogsRetentionPanel
+        onApplied={() => {
+          loadMeta().catch(() => {});
+          setRefreshToken((value) => value + 1);
+        }}
+      />
+
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={() => setTab('auth')}
@@ -80,9 +89,9 @@ const LogsTabsPanel = () => {
         </button>
       </div>
 
-      {tab === 'auth' ? <LogsPanel clearInfo={meta.auth} onCleared={loadMeta} /> : null}
-      {tab === 'mail' ? <EmailLogsPanel clearInfo={meta.mail} onCleared={loadMeta} /> : null}
-      {tab === 'audit' ? <AuditTrailPanel clearInfo={meta.audit} onCleared={loadMeta} /> : null}
+      {tab === 'auth' ? <LogsPanel clearInfo={meta.auth} onCleared={loadMeta} refreshToken={refreshToken} /> : null}
+      {tab === 'mail' ? <EmailLogsPanel clearInfo={meta.mail} onCleared={loadMeta} refreshToken={refreshToken} /> : null}
+      {tab === 'audit' ? <AuditTrailPanel clearInfo={meta.audit} onCleared={loadMeta} refreshToken={refreshToken} /> : null}
     </div>
   );
 };

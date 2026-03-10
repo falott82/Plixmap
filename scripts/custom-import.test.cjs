@@ -6,6 +6,7 @@ const https = require('https');
 const {
   fetchDevicesFromApi,
   getImportConfig,
+  normalizeExternalDevicePayload,
   readResponseText,
   resolveEffectiveWebApiConfig,
   upsertImportConfig,
@@ -251,6 +252,26 @@ test('resolveEffectiveWebApiConfig merges live form values with saved password',
     password: 'stored-secret',
     method: 'POST',
     bodyJson: '{}'
+  });
+});
+
+test('normalizeExternalDevicePayload uppercases device names and trims fields', () => {
+  const normalized = normalizeExternalDevicePayload({
+    devId: ' 676 ',
+    deviceType: 'Notebook',
+    deviceName: 'Florante Mag-Aso',
+    manufacturer: ' Dell ',
+    model: ' latitude 5420 ',
+    serialNumber: ' sn-001 '
+  });
+
+  assert.deepEqual(normalized, {
+    devId: '676',
+    deviceType: 'Notebook',
+    deviceName: 'FLORANTE MAG-ASO',
+    manufacturer: 'Dell',
+    model: 'latitude 5420',
+    serialNumber: 'sn-001'
   });
 });
 

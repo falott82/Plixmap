@@ -17,9 +17,10 @@ type Props = {
   scopeType?: string;
   scopeId?: string;
   compact?: boolean;
+  refreshToken?: number;
 };
 
-const AuditTrailPanel = ({ clearInfo, onCleared, scopeType, scopeId, compact = false }: Props) => {
+const AuditTrailPanel = ({ clearInfo, onCleared, scopeType, scopeId, compact = false, refreshToken = 0 }: Props) => {
   const t = useT();
   const push = useToastStore((s) => s.push);
   const [query, setQuery] = useState('');
@@ -70,7 +71,11 @@ const AuditTrailPanel = ({ clearInfo, onCleared, scopeType, scopeId, compact = f
   useEffect(() => {
     load().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit, offset, level, scopeType, scopeId]);
+  }, [limit, offset, level, scopeType, scopeId, refreshToken]);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [refreshToken]);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);

@@ -31,6 +31,7 @@ const { registerMeetingRoutes } = require('./routes/meetings.cjs');
 const { registerObjectTypeRequestRoutes } = require('./routes/objectTypeRequests.cjs');
 const { registerAdminLogRoutes } = require('./routes/adminLogs.cjs');
 const { registerSettingsRoutes } = require('./routes/settings.cjs');
+const { hasStoredLogRetentionSettings, purgeExpiredLogs, readLogRetentionSettings } = require('./logRetention.cjs');
 const { createRealtimeRuntime } = require('./realtime.cjs');
 const { createChatServices } = require('./services/chat.cjs');
 const { createMeetingServices } = require('./services/meetings.cjs');
@@ -78,7 +79,8 @@ const {
   upsertManualExternalDevice,
   deleteManualExternalDevice,
   findExternalEmailConflict,
-  normalizeExternalUserPayload
+  normalizeExternalUserPayload,
+  normalizeExternalDevicePayload
 } = require('./customImport.cjs');
 const {
   normalizeLdapImportConfig,
@@ -625,6 +627,27 @@ const markLogsCleared = (kind, userId, username) => {
   meta[kind] = { clearedAt: Date.now(), userId: userId || null, username: resolved || null };
   writeLogsMeta(meta);
   return meta;
+};
+
+const runLogRetentionCleanup = (reason = 'scheduled') => {
+  try {
+    if (!hasStoredLogRetentionSettings(db)) return null;
+    const summary = purgeExpiredLogs(db, readLogRetentionSettings(db));
+    if (summary.totalDeleted > 0) {
+      writeAuditLog(db, {
+        level: 'important',
+        event: 'logs_retention_cleanup',
+        details: {
+          reason,
+          totalDeleted: summary.totalDeleted,
+          byKind: summary.byKind
+        }
+      });
+    }
+    return summary;
+  } catch {
+    return null;
+  }
 };
 
 const parseDataUrl = (value) => {
@@ -1735,6 +1758,13 @@ const clearDeviceImportDataForClient = (cid) => {
   return { removedDevices };
 };
 
+const buildDeviceDeletePlacementInfo = () => ({
+  supported: false,
+  linkedPlanObjects: 0,
+  warning:
+    'Imported devices are not structurally tracked on floor plans yet. Deleting them removes only the local inventory row: verify any manual floor-plan placements before continuing.'
+});
+
 const deleteImportedExternalUserForClient = (cid, externalId) => {
   const eid = String(externalId || '').trim();
   if (!cid || !eid) return { removedUsers: 0, removedObjects: 0, updatedAt: null };
@@ -1762,10 +1792,40 @@ const deleteImportedExternalUserForClient = (cid, externalId) => {
 };
 
 const deleteImportedExternalDeviceForClient = (cid, devId) => {
-  const did = String(devId || '').trim();
-  if (!cid || !did) return { removedDevices: 0 };
-  const removedDevices = db.prepare('DELETE FROM external_devices WHERE clientId = ? AND devId = ?').run(cid, did).changes || 0;
-  return { removedDevices };
+  const cleanup = deleteImportedExternalDevicesForClient(cid, [devId]);
+  return {
+    removedDevices: cleanup.removedDevices,
+    removedIds: cleanup.removedIds,
+    missingIds: cleanup.missingIds,
+    placementInfo: cleanup.placementInfo
+  };
+};
+
+const deleteImportedExternalDevicesForClient = (cid, devIds) => {
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(devIds) ? devIds : [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
+  if (!cid || !ids.length) {
+    return { removedDevices: 0, removedIds: [], missingIds: [], placementInfo: buildDeviceDeletePlacementInfo() };
+  }
+  const removeStmt = db.prepare("DELETE FROM external_devices WHERE clientId = ? AND devId = ? AND lower(devId) NOT LIKE 'manual:%'");
+  const removedIds = [];
+  const missingIds = [];
+  for (const devId of ids) {
+    const changes = removeStmt.run(cid, devId).changes || 0;
+    if (changes > 0) removedIds.push(devId);
+    else missingIds.push(devId);
+  }
+  return {
+    removedDevices: removedIds.length,
+    removedIds,
+    missingIds,
+    placementInfo: buildDeviceDeletePlacementInfo()
+  };
 };
 
 app.get('/api/import/config', requireAuth, (req, res) => {
@@ -2300,18 +2360,13 @@ const resolveLdapRuntimeConfigForRequest = (req) => {
 };
 
 const mapImportedDeviceForPreview = (device) => ({
-  devId: String(device?.devId || ''),
-  deviceType: String(device?.deviceType || ''),
-  deviceName: String(device?.deviceName || ''),
-  manufacturer: String(device?.manufacturer || ''),
-  model: String(device?.model || ''),
-  serialNumber: String(device?.serialNumber || '')
+  ...normalizeExternalDevicePayload(device || {})
 });
 
 const mapExternalDeviceDbRowForPreview = (row, { includeFlags = false } = {}) => ({
   devId: String(row?.devId || ''),
   deviceType: String(row?.deviceType || ''),
-  deviceName: String(row?.deviceName || ''),
+  deviceName: normalizeExternalDevicePayload(row || {}).deviceName,
   manufacturer: String(row?.manufacturer || ''),
   model: String(row?.model || ''),
   serialNumber: String(row?.serialNumber || ''),
@@ -2343,16 +2398,45 @@ const importedUserChangedAgainstRemote = (previous, remoteUser) => {
   );
 };
 
-const importedDeviceChangedAgainstRemote = (previous, remoteDevice) => {
-  if (!previous || !remoteDevice) return true;
-  return (
-    normalizeImportText(previous.deviceType) !== normalizeImportText(remoteDevice.deviceType) ||
-    normalizeImportText(previous.deviceName) !== normalizeImportText(remoteDevice.deviceName) ||
-    normalizeImportText(previous.manufacturer) !== normalizeImportText(remoteDevice.manufacturer) ||
-    normalizeImportText(previous.model) !== normalizeImportText(remoteDevice.model) ||
-    normalizeImportText(previous.serialNumber) !== normalizeImportText(remoteDevice.serialNumber) ||
-    Number(previous.present || 1) !== 1
-  );
+const buildImportedDeviceDiff = (previous, remoteDevice) => {
+  if (!previous || !remoteDevice) return [];
+  const changes = [];
+  const fields = [
+    ['deviceName', previous.deviceName, remoteDevice.deviceName],
+    ['deviceType', previous.deviceType, remoteDevice.deviceType],
+    ['manufacturer', previous.manufacturer, remoteDevice.manufacturer],
+    ['model', previous.model, remoteDevice.model],
+    ['serialNumber', previous.serialNumber, remoteDevice.serialNumber]
+  ];
+  for (const [field, before, after] of fields) {
+    if (normalizeImportText(before) === normalizeImportText(after)) continue;
+    changes.push({
+      field,
+      previous: String(before || ''),
+      next: String(after || '')
+    });
+  }
+  if (Number(previous.present || 1) !== 1) {
+    changes.push({
+      field: 'present',
+      previous: 'missing',
+      next: 'present'
+    });
+  }
+  return changes;
+};
+
+const mapRemoteDevicePreviewRow = (remoteDevice, previous) => {
+  const normalized = mapImportedDeviceForPreview(remoteDevice);
+  if (!previous) {
+    return { ...normalized, importStatus: 'new', changes: [] };
+  }
+  const changes = buildImportedDeviceDiff(previous, normalized);
+  return {
+    ...normalized,
+    importStatus: changes.length ? 'update' : 'existing',
+    changes
+  };
 };
 
 app.post('/api/import/ldap/test', requireAuth, rateByUser('import_ldap_test', 60 * 1000, 10), async (req, res) => {
@@ -2740,17 +2824,12 @@ app.post('/api/device-import/preview', requireAuth, rateByUser('device_import_pr
   const remote = (result.devices || []).map(mapImportedDeviceForPreview);
   const existing = db
     .prepare(
-      'SELECT devId, deviceType, deviceName, manufacturer, model, serialNumber, hidden, present, updatedAt FROM external_devices WHERE clientId = ? ORDER BY deviceName COLLATE NOCASE, devId COLLATE NOCASE'
+      "SELECT devId, deviceType, deviceName, manufacturer, model, serialNumber, hidden, present, updatedAt FROM external_devices WHERE clientId = ? AND lower(devId) NOT LIKE 'manual:%' ORDER BY deviceName COLLATE NOCASE, devId COLLATE NOCASE"
     )
     .all(cid)
     .map((row) => mapExternalDeviceDbRowForPreview(row, { includeFlags: true }));
   const existingById = new Map(existing.map((r) => [String(r.devId), r]));
-  const remoteRows = remote.map((d) => {
-    const prev = existingById.get(String(d.devId));
-    if (!prev) return { ...d, importStatus: 'new' };
-    const changed = importedDeviceChangedAgainstRemote(prev, d);
-    return { ...d, importStatus: changed ? 'update' : 'existing' };
-  });
+  const remoteRows = remote.map((d) => mapRemoteDevicePreviewRow(d, existingById.get(String(d.devId))));
   res.json({
     ok: true,
     clientId: cid,
@@ -2758,6 +2837,85 @@ app.post('/api/device-import/preview', requireAuth, rateByUser('device_import_pr
     existingCount: existing.length,
     remoteRows,
     existingRows: existing
+  });
+});
+
+app.post('/api/device-import/import-many', requireAuth, rateByUser('device_import_many', 60 * 1000, 10), async (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const cid = String(req.body?.clientId || '').trim();
+  const devIds = Array.from(
+    new Set(
+      (Array.isArray(req.body?.devIds) ? req.body.devIds : [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
+  if (!cid || !devIds.length) {
+    res.status(400).json({ error: 'Missing clientId/devIds' });
+    return;
+  }
+  const draftDevices = Array.isArray(req.body?.devices) ? req.body.devices : [];
+  const draftById = new Map(
+    draftDevices
+      .map((device) => mapImportedDeviceForPreview(device))
+      .filter((device) => !!String(device.devId || '').trim())
+      .map((device) => [String(device.devId), device])
+  );
+  let selectedDevices = devIds.map((devId) => draftById.get(devId)).filter(Boolean);
+  if (selectedDevices.length !== devIds.length) {
+    const resolved = resolveEffectiveWebApiConfig(getDeviceImportConfig(db, dataSecret, cid), req.body?.config);
+    if (!resolved.ok) {
+      res.status(400).json({ error: resolved.error || 'Missing import config (url/username)' });
+      return;
+    }
+    const result = await fetchDevicesFromApi({ ...resolved.config, allowPrivate: allowPrivateImportForRequest(req) });
+    if (!result.ok) {
+      res.status(400).json({
+        ok: false,
+        status: result.status,
+        error: result.error || 'Request failed',
+        contentType: result.contentType || '',
+        rawSnippet: result.rawSnippet || ''
+      });
+      return;
+    }
+    const remoteById = new Map((result.devices || []).map((device) => [String(device.devId), mapImportedDeviceForPreview(device)]));
+    selectedDevices = devIds.map((devId) => draftById.get(devId) || remoteById.get(devId)).filter(Boolean);
+  }
+  const selectedById = new Map(selectedDevices.map((device) => [String(device.devId), device]));
+  const missingDevIds = devIds.filter((devId) => !selectedById.has(devId));
+  if (!selectedDevices.length) {
+    res.status(404).json({ error: 'No selected remote devices found', missingDevIds });
+    return;
+  }
+  const sync = upsertExternalDevices(db, cid, selectedDevices, { markMissing: false });
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'device_import_many',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: cid,
+    ...requestMeta(req),
+    details: {
+      requestedCount: devIds.length,
+      importedCount: selectedDevices.length,
+      missingDevIds,
+      created: sync.summary?.created || 0,
+      updated: sync.summary?.updated || 0
+    }
+  });
+  res.json({
+    ok: true,
+    clientId: cid,
+    requestedCount: devIds.length,
+    importedCount: selectedDevices.length,
+    missingDevIds,
+    summary: sync.summary,
+    created: sync.created || [],
+    updated: sync.updated || []
   });
 });
 
@@ -2832,9 +2990,43 @@ app.post('/api/device-import/delete-one', requireAuth, rateByUser('device_import
     scopeType: 'client',
     scopeId: cid,
     ...requestMeta(req),
-    details: { devId, removedDevices: cleanup.removedDevices }
+    details: { devId, removedDevices: cleanup.removedDevices, trackingSupported: cleanup.placementInfo?.supported === true }
   });
   res.json({ ok: true, devId, ...cleanup });
+});
+
+app.post('/api/device-import/delete-many', requireAuth, rateByUser('device_import_delete_many', 60 * 1000, 10), (req, res) => {
+  if (!req.isSuperAdmin) {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const cid = String(req.body?.clientId || '').trim();
+  const devIds = Array.from(
+    new Set(
+      (Array.isArray(req.body?.devIds) ? req.body.devIds : [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
+  if (!cid || !devIds.length) {
+    res.status(400).json({ error: 'Missing clientId/devIds' });
+    return;
+  }
+  const cleanup = deleteImportedExternalDevicesForClient(cid, devIds);
+  writeAuditLog(db, {
+    level: 'important',
+    event: 'device_import_delete_many',
+    userId: req.userId,
+    scopeType: 'client',
+    scopeId: cid,
+    ...requestMeta(req),
+    details: {
+      requestedCount: devIds.length,
+      removedDevices: cleanup.removedDevices,
+      missingIds: cleanup.missingIds
+    }
+  });
+  res.json({ ok: true, clientId: cid, requestedCount: devIds.length, ...cleanup });
 });
 
 app.post('/api/device-import/clear', requireAuth, rateByUser('device_import_clear', 60 * 1000, 10), (req, res) => {
@@ -3743,6 +3935,12 @@ registerAdminLogRoutes(app, {
   writeAuditLog,
   requestMeta
 });
+
+runLogRetentionCleanup('startup');
+const logsRetentionCleanupTimer = setInterval(() => {
+  runLogRetentionCleanup('interval');
+}, 12 * 60 * 60 * 1000);
+if (typeof logsRetentionCleanupTimer.unref === 'function') logsRetentionCleanupTimer.unref();
 
 attachStaticApp(app, { distDir: path.join(process.cwd(), 'dist') });
 

@@ -1,4 +1,12 @@
 const nodemailer = require('nodemailer');
+const {
+  buildExpiredLogsCsv,
+  buildLogRetentionPreview,
+  normalizeLogRetentionSettings,
+  purgeExpiredLogs,
+  readLogRetentionSettings,
+  writeLogRetentionSettings
+} = require('../logRetention.cjs');
 
 const requireSuperAdmin = (req, res) => {
   if (req.isSuperAdmin) return true;
@@ -429,6 +437,66 @@ const registerSettingsRoutes = (app, deps) => {
   app.get('/api/settings/logs-meta', requireAuth, (req, res) => {
     if (!requireSuperAdmin(req, res)) return;
     res.json({ meta: normalizeLogsMeta(readLogsMeta(), resolveUsername) });
+  });
+
+  app.get('/api/settings/logs-retention', requireAuth, (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    res.json({ settings: readLogRetentionSettings(db) });
+  });
+
+  app.post('/api/settings/logs-retention/preview', requireAuth, rateByUser('logs_retention_preview', 5 * 60 * 1000, 60), (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const settings = normalizeLogRetentionSettings(req.body?.settings);
+    res.json({ preview: buildLogRetentionPreview(db, settings) });
+  });
+
+  app.post('/api/settings/logs-retention/export', requireAuth, rateByUser('logs_retention_export', 5 * 60 * 1000, 15), (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const kind = String(req.body?.kind || '').trim().toLowerCase();
+    if (!kind) {
+      res.status(400).json({ error: 'Missing kind' });
+      return;
+    }
+    try {
+      const settings = normalizeLogRetentionSettings(req.body?.settings);
+      const csv = buildExpiredLogsCsv(db, kind, settings);
+      writeAuditLog(db, {
+        level: 'important',
+        event: 'logs_retention_export',
+        userId: req.userId,
+        username: req.username,
+        ...requestMeta(req),
+        details: { kind, days: settings[kind]?.days || null }
+      });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="plixmap-${kind}-logs-export.csv"`);
+      res.send(csv);
+    } catch (err) {
+      res.status(400).json({ error: err?.message || 'Invalid retention export request' });
+    }
+  });
+
+  app.put('/api/settings/logs-retention', requireAuth, rateByUser('logs_retention_update', 5 * 60 * 1000, 20), (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    const settings = normalizeLogRetentionSettings(req.body?.settings);
+    const purgeNow = req.body?.purgeNow !== false;
+    const saved = writeLogRetentionSettings(db, settings);
+    const preview = buildLogRetentionPreview(db, saved);
+    const purgeSummary = purgeNow ? purgeExpiredLogs(db, saved) : null;
+    writeAuditLog(db, {
+      level: 'important',
+      event: 'logs_retention_update',
+      userId: req.userId,
+      username: req.username,
+      ...requestMeta(req),
+      details: {
+        settings: saved,
+        purgeNow,
+        totalEligible: preview.totalCount,
+        totalDeleted: purgeSummary?.totalDeleted || 0
+      }
+    });
+    res.json({ ok: true, settings: saved, preview, purgeSummary });
   });
 };
 

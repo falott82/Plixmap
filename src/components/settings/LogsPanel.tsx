@@ -53,9 +53,10 @@ const toCsv = (rows: AuditLogRow[]) => {
 type Props = {
   clearInfo?: LogsClearMeta;
   onCleared?: () => void;
+  refreshToken?: number;
 };
 
-const LogsPanel = ({ clearInfo, onCleared }: Props) => {
+const LogsPanel = ({ clearInfo, onCleared, refreshToken = 0 }: Props) => {
   const { push } = useToastStore();
   const t = useT();
   const [query, setQuery] = useState('');
@@ -82,7 +83,11 @@ const LogsPanel = ({ clearInfo, onCleared }: Props) => {
   useEffect(() => {
     load().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit, offset]);
+  }, [limit, offset, refreshToken]);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [refreshToken]);
 
   const rangeLabel = useMemo(() => {
     if (!total) return '0';

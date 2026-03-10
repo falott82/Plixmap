@@ -148,6 +148,12 @@ export interface ExternalDeviceRow {
   updatedAt: number;
   manual?: boolean;
   sourceKind?: 'manual' | 'imported';
+  importStatus?: 'new' | 'update' | 'existing';
+  changes?: Array<{
+    field: 'deviceName' | 'deviceType' | 'manufacturer' | 'model' | 'serialNumber' | 'present';
+    previous: string;
+    next: string;
+  }>;
 }
 
 export interface ExternalDevicesResponse {
@@ -827,9 +833,7 @@ export const previewDeviceImport = async (
   remoteCount: number;
   existingCount: number;
   remoteRows: Array<
-    ExternalDeviceRow & {
-      importStatus: 'new' | 'update' | 'existing';
-    }
+    ExternalDeviceRow
   >;
   existingRows: ExternalDeviceRow[];
   error?: string;
@@ -870,6 +874,38 @@ export const importOneWebApiDevice = async (payload: { clientId: string; devId: 
   return body as { ok: boolean; devId: string; summary: any; created: any[]; updated: any[] };
 };
 
+export const importManyWebApiDevices = async (payload: {
+  clientId: string;
+  devIds: string[];
+  devices?: Array<Partial<ExternalDeviceRow>>;
+  config?: {
+    url: string;
+    username: string;
+    password?: string;
+    method?: string;
+    bodyJson?: string;
+  };
+}) => {
+  const res = await apiFetch('/api/device-import/import-many', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to import selected devices (${res.status})`);
+  return body as {
+    ok: boolean;
+    clientId: string;
+    requestedCount: number;
+    importedCount: number;
+    missingDevIds: string[];
+    summary: any;
+    created: any[];
+    updated: any[];
+  };
+};
+
 export const deleteOneImportedDevice = async (payload: { clientId: string; devId: string }) => {
   const res = await apiFetch('/api/device-import/delete-one', {
     method: 'POST',
@@ -879,7 +915,34 @@ export const deleteOneImportedDevice = async (payload: { clientId: string; devId
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body?.error || `Failed to delete device (${res.status})`);
-  return body as { ok: boolean; devId: string; removedDevices: number };
+  return body as {
+    ok: boolean;
+    devId: string;
+    removedDevices: number;
+    removedIds?: string[];
+    missingIds?: string[];
+    placementInfo?: { supported: boolean; linkedPlanObjects: number; warning?: string };
+  };
+};
+
+export const deleteManyImportedDevices = async (payload: { clientId: string; devIds: string[] }) => {
+  const res = await apiFetch('/api/device-import/delete-many', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Failed to delete selected devices (${res.status})`);
+  return body as {
+    ok: boolean;
+    clientId: string;
+    requestedCount: number;
+    removedDevices: number;
+    removedIds: string[];
+    missingIds: string[];
+    placementInfo?: { supported: boolean; linkedPlanObjects: number; warning?: string };
+  };
 };
 
 export const clearDeviceImport = async (clientId: string): Promise<{ ok: boolean; removedDevices: number }> => {

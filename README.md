@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.5.6
+Current version: 3.5.7
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,12 +14,12 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.5.6
-- Hardened WebAPI import reliability for both users and devices: test/preview now use the live configuration currently visible in the settings modal, not only the last saved server copy.
-- WebAPI transport is now more defensive in problematic local-network environments: deterministic direct-IP connect, fresh child-process retry, and final `curl` fallback when the long-lived backend process hits intermittent reachability errors such as `EHOSTUNREACH`.
-- Kept import security boundaries intact while improving diagnostics: credentials still stay out of URLs, password persistence still remains encrypted at rest, and error reporting is more explicit during failed tests.
-- Added targeted regression coverage for WebAPI config merging and network transport behavior so the same environment-specific import failure does not silently return after future refactors.
-- Applied minor UX polish in the import settings forms, including better browser hints on password fields and a final pass on release notes / translations / tooltip consistency for the import area.
+## What's new in 3.5.7
+- Unified and hardened import UX across users/devices: aligned WebAPI, LDAP, CSV, and manual flows with consistent action bars, clearer status chips, and less redundant controls.
+- Improved selection ergonomics in import preview modals: right-click context actions (`Select all` / `Deselect all`), stricter multi-select behavior, and safer mass action flow through a single guarded `Apply selected` command.
+- Refined LDAP and WebAPI settings surfaces with clearer layout and guidance: cleaner action ordering, stronger inline feedback, and reduced confusion during test/compare/import sequences.
+- Added configurable log retention and cleanup controls in settings with deterministic defaults and safer retention-change handling.
+- Extended regression coverage for import and retention paths and revalidated release quality gates (lint/test/build/release checks) before shipping.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
