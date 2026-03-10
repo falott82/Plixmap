@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.5.8',
+    date: '2026-03-10',
+    type: 'fix',
+    notes: [
+      n(
+        'Nella modale changelog il numero versione e ora evidenziato in rosso sia nell’intestazione sia su ogni card release, per rendere piu immediata la lettura',
+        'In the changelog modal, version numbers are now highlighted in red both in the header and on each release card for faster readability'
+      ),
+      n(
+        'Passata finale di rilascio rieseguita dopo il polish UI: quality gate, test, build e check di coerenza versione/documentazione',
+        'Final release pass rerun after the UI polish: quality gates, tests, build, and version/documentation consistency checks'
+      ),
+      n(
+        'Metadati release riallineati tra applicativo e sito per mantenere aggiornamento e comunicazione versione coerenti',
+        'Release metadata was realigned across app and website to keep version communication and update tracking consistent'
+      )
+    ]
+  },
+  {
     version: '3.5.7',
     date: '2026-03-10',
     type: 'fix',

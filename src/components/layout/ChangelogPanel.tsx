@@ -67,7 +67,7 @@ const ChangelogPanel = () => {
                       <History size={18} className="text-primary" />
                       {t({ it: 'Changelog', en: 'Changelog' })}
                     </Dialog.Title>
-                    {latest?.version ? <div className="text-xs font-semibold text-slate-500">v{latest.version}</div> : null}
+                    {latest?.version ? <div className="text-xs font-semibold text-rose-600">v{latest.version}</div> : null}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -98,7 +98,7 @@ const ChangelogPanel = () => {
                   {filtered.map((rel) => (
                     <div key={rel.version} className="rounded-2xl border border-slate-200 bg-white p-3">
                       <div className="flex items-center justify-between gap-2 text-sm font-semibold text-ink">
-                        <span className="shrink-0">v{rel.version}</span>
+                        <span className="shrink-0 text-rose-600">v{rel.version}</span>
                         <span className="shrink-0 text-xs font-semibold text-slate-500">{rel.date}</span>
                       </div>
                       <ul className="ml-4 list-disc space-y-1 pt-2 text-sm text-slate-700">
@@ -124,4 +124,3 @@ const ChangelogPanel = () => {
 };
 
 export default ChangelogPanel;
-

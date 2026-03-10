@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.5.7
+Current version: 3.5.8
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,12 +14,10 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.5.7
-- Unified and hardened import UX across users/devices: aligned WebAPI, LDAP, CSV, and manual flows with consistent action bars, clearer status chips, and less redundant controls.
-- Improved selection ergonomics in import preview modals: right-click context actions (`Select all` / `Deselect all`), stricter multi-select behavior, and safer mass action flow through a single guarded `Apply selected` command.
-- Refined LDAP and WebAPI settings surfaces with clearer layout and guidance: cleaner action ordering, stronger inline feedback, and reduced confusion during test/compare/import sequences.
-- Added configurable log retention and cleanup controls in settings with deterministic defaults and safer retention-change handling.
-- Extended regression coverage for import and retention paths and revalidated release quality gates (lint/test/build/release checks) before shipping.
+## What's new in 3.5.8
+- Changelog modal visual polish: release version numbers are now highlighted in red for faster readability in both the header and each release row.
+- Consolidated release pass after UI polish: quality gates, tests, build validation, and release/version consistency checks rerun before shipping.
+- Documentation and release metadata aligned to keep app and website update signals consistent.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
