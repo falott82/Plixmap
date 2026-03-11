@@ -1938,7 +1938,7 @@ const CustomImportPanel = (
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <button type="button" onClick={async () => { if (!activeClientId) return; await openUsers(activeClientId); }} className="btn-primary inline-flex items-center gap-2" disabled={!activeClientId} title={t({ it: 'Apri il contenitore locale degli utenti e aggiungi nuove entita con il pulsante + in alto a destra.', en: 'Open the local users container and add new entities with the + button in the top right.' })}>
                   <Plus size={16} />
-                  ADD
+                  Add
                 </button>
               </div>
             )}

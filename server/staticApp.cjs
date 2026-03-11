@@ -2,34 +2,62 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 
-const attachStaticApp = (app, deps = {}) => {
-  const distDir = deps.distDir || path.join(process.cwd(), 'dist');
-  if (!fs.existsSync(distDir)) return;
+const createStaticIndexRenderer = (distDir) => {
+  const indexPath = path.join(distDir, 'index.html');
+  const MAX_KIOSK_CACHE = 200;
+  let cachedMtimeMs = -1;
+  let cachedBaseHtml = '';
+  let cachedMobileHtml = '';
+  const cachedKioskHtmlByRoomId = new Map();
 
-  const readIndexHtml = () => fs.readFileSync(path.join(distDir, 'index.html'), 'utf8');
+  const replaceManifestHref = (html, href) => {
+    if (html.includes('rel="manifest"')) {
+      return html.replace(/<link\s+rel="manifest"\s+href="[^"]*"\s*\/?>/i, `<link rel="manifest" href="${href}">`);
+    }
+    return html.replace(/<\/head>/i, `  <link rel="manifest" href="${href}"></head>`);
+  };
+
+  const ensureBaseHtml = () => {
+    const stat = fs.statSync(indexPath);
+    if (!cachedBaseHtml || stat.mtimeMs !== cachedMtimeMs) {
+      cachedMtimeMs = stat.mtimeMs;
+      cachedBaseHtml = fs.readFileSync(indexPath, 'utf8');
+      cachedMobileHtml = '';
+      cachedKioskHtmlByRoomId.clear();
+    }
+    return cachedBaseHtml;
+  };
 
   const renderKioskIndexHtml = (roomId) => {
     const rid = encodeURIComponent(String(roomId || '').trim());
-    let html = readIndexHtml();
-    const kioskManifestHref = `/manifest-kiosk/${rid}.webmanifest`;
-    if (html.includes('rel="manifest"')) {
-      html = html.replace(/<link\s+rel="manifest"\s+href="[^"]*"\s*\/?>/i, `<link rel="manifest" href="${kioskManifestHref}">`);
-    } else {
-      html = html.replace(/<\/head>/i, `  <link rel="manifest" href="${kioskManifestHref}"></head>`);
+    if (!rid) return ensureBaseHtml();
+    const cached = cachedKioskHtmlByRoomId.get(rid);
+    if (cached) return cached;
+    const html = replaceManifestHref(ensureBaseHtml(), `/manifest-kiosk/${rid}.webmanifest`);
+    if (cachedKioskHtmlByRoomId.size >= MAX_KIOSK_CACHE) {
+      const firstKey = cachedKioskHtmlByRoomId.keys().next().value;
+      if (firstKey) cachedKioskHtmlByRoomId.delete(firstKey);
     }
+    cachedKioskHtmlByRoomId.set(rid, html);
     return html;
   };
 
   const renderMobileIndexHtml = () => {
-    let html = readIndexHtml();
-    const mobileManifestHref = `/manifest-mobile.webmanifest`;
-    if (html.includes('rel="manifest"')) {
-      html = html.replace(/<link\s+rel="manifest"\s+href="[^"]*"\s*\/?>/i, `<link rel="manifest" href="${mobileManifestHref}">`);
-    } else {
-      html = html.replace(/<\/head>/i, `  <link rel="manifest" href="${mobileManifestHref}"></head>`);
-    }
-    return html;
+    if (cachedMobileHtml) return cachedMobileHtml;
+    cachedMobileHtml = replaceManifestHref(ensureBaseHtml(), '/manifest-mobile.webmanifest');
+    return cachedMobileHtml;
   };
+
+  return {
+    renderKioskIndexHtml,
+    renderMobileIndexHtml
+  };
+};
+
+const attachStaticApp = (app, deps = {}) => {
+  const distDir = deps.distDir || path.join(process.cwd(), 'dist');
+  if (!fs.existsSync(distDir)) return;
+  const { renderKioskIndexHtml, renderMobileIndexHtml } = createStaticIndexRenderer(distDir);
 
   app.get(/^\/meetingroom\/([^/]+)\/?$/, (req, res) => {
     try {
@@ -72,4 +100,4 @@ const attachStaticApp = (app, deps = {}) => {
   });
 };
 
-module.exports = { attachStaticApp };
+module.exports = { attachStaticApp, createStaticIndexRenderer };

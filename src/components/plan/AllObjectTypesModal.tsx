@@ -14,14 +14,17 @@ interface Props {
   onPick: (typeId: string) => void;
   paletteTypeIds?: string[];
   onAddToPalette?: (typeId: string) => void;
-  defaultTab?: 'all' | 'objects' | 'security' | 'desks' | 'walls' | 'text' | 'notes';
+  defaultTab?: 'all' | 'objects' | 'security' | 'desks' | 'text' | 'notes' | 'walls';
 }
+
+type ModalTab = 'all' | 'objects' | 'security' | 'desks' | 'text' | 'notes';
 
 const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAddToPalette, defaultTab = 'all' }: Props) => {
   const t = useT();
   const lang = useLang();
   const [q, setQ] = useState('');
-  const [tab, setTab] = useState<'all' | 'objects' | 'security' | 'desks' | 'walls' | 'text' | 'notes'>(defaultTab);
+  const initialTab: ModalTab = defaultTab === 'walls' ? 'objects' : defaultTab;
+  const [tab, setTab] = useState<ModalTab>(initialTab);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -31,7 +34,6 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
   const categoryStyles = useMemo(
     () => ({
       desks: { border: '#a78bfa', bg: 'rgba(167, 139, 250, 0.14)', text: '#6d28d9' },
-      walls: { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', text: '#b45309' },
       text: { border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.16)', text: '#0284c7' },
       notes: { border: '#facc15', bg: 'rgba(250, 204, 21, 0.18)', text: '#a16207' },
       security: { border: '#f43f5e', bg: 'rgba(244, 63, 94, 0.15)', text: '#be123c' },
@@ -54,7 +56,9 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
   }, [context]);
 
   const sortedDefs = useMemo(() => {
-    const list = (defs || []).filter((d) => d.category !== 'door').slice();
+    const list = (defs || [])
+      .filter((d) => d.category !== 'door' && d.category !== 'wall' && !String(d.id).startsWith('wall_'))
+      .slice();
     list.sort((a, b) => ((a?.name?.[lang] || a.id) as string).localeCompare((b?.name?.[lang] || b.id) as string));
     return list;
   }, [defs, lang]);
@@ -69,10 +73,6 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
   }, [lang, q, sortedDefs]);
 
   const allDeskDefs = useMemo(() => sortedDefs.filter((d) => isDeskType(d.id)), [sortedDefs]);
-  const allWallDefs = useMemo(
-    () => sortedDefs.filter((d) => d.category === 'wall' || String(d.id).startsWith('wall_')),
-    [sortedDefs]
-  );
   const allSecurityDefs = useMemo(() => sortedDefs.filter((d) => isSecurityTypeId(d.id)), [sortedDefs]);
   const allTextDefs = useMemo(() => sortedDefs.filter((d) => d.id === 'text'), [sortedDefs]);
   const allNoteDefs = useMemo(() => sortedDefs.filter((d) => d.id === 'postit'), [sortedDefs]);
@@ -82,7 +82,6 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
         (d) =>
           !isSecurityTypeId(d.id) &&
           !isDeskType(d.id) &&
-          !(d.category === 'wall' || String(d.id).startsWith('wall_')) &&
           d.id !== 'text' &&
           d.id !== 'postit'
       ),
@@ -90,10 +89,6 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
   );
 
   const deskDefs = useMemo(() => filtered.filter((d) => isDeskType(d.id)), [filtered]);
-  const wallDefs = useMemo(
-    () => filtered.filter((d) => d.category === 'wall' || String(d.id).startsWith('wall_')),
-    [filtered]
-  );
   const securityDefs = useMemo(() => filtered.filter((d) => isSecurityTypeId(d.id)), [filtered]);
   const textDefs = useMemo(() => filtered.filter((d) => d.id === 'text'), [filtered]);
   const noteDefs = useMemo(() => filtered.filter((d) => d.id === 'postit'), [filtered]);
@@ -104,7 +99,6 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
         (d) =>
           !isSecurityTypeId(d.id) &&
           !isDeskType(d.id) &&
-          !(d.category === 'wall' || String(d.id).startsWith('wall_')) &&
           d.id !== 'text' &&
           d.id !== 'postit'
       ),
@@ -115,9 +109,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
       ? allDefs
       : tab === 'desks'
       ? deskDefs
-      : tab === 'walls'
-        ? wallDefs
-        : tab === 'security'
+      : tab === 'security'
           ? securityDefs
         : tab === 'text'
           ? textDefs
@@ -133,27 +125,24 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
       defaultTab === 'all'
         ? 'all'
         : (defaultTab === 'desks' && allDeskDefs.length) ||
-            (defaultTab === 'walls' && allWallDefs.length) ||
             (defaultTab === 'security' && allSecurityDefs.length) ||
             (defaultTab === 'text' && allTextDefs.length) ||
             (defaultTab === 'notes' && allNoteDefs.length) ||
-            (defaultTab === 'objects' && allOtherDefs.length)
-          ? defaultTab
+            ((defaultTab === 'objects' || defaultTab === 'walls') && allOtherDefs.length)
+          ? (defaultTab === 'walls' ? 'objects' : defaultTab)
           : allDeskDefs.length
             ? 'desks'
-            : allWallDefs.length
-              ? 'walls'
-              : allSecurityDefs.length
+            : allSecurityDefs.length
                 ? 'security'
               : allTextDefs.length
                 ? 'text'
                 : allNoteDefs.length
                   ? 'notes'
                   : 'all';
-    setTab(fallbackTab);
+    setTab(fallbackTab as ModalTab);
     setActiveIndex(0);
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [allDeskDefs.length, allNoteDefs.length, allOtherDefs.length, allSecurityDefs.length, allTextDefs.length, allWallDefs.length, defaultTab, open]);
+  }, [allDeskDefs.length, allNoteDefs.length, allOtherDefs.length, allSecurityDefs.length, allTextDefs.length, defaultTab, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -264,27 +253,6 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                     {t({ it: 'Scrivanie', en: 'Desks' })}
                   </button>
                   <button
-                    onClick={() => setTab('walls')}
-                    disabled={!allWallDefs.length}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
-                      tab === 'walls'
-                        ? 'bg-primary/10'
-                        : 'hover:bg-slate-50'
-                    } disabled:cursor-not-allowed disabled:opacity-50`}
-                    title={t({ it: 'Mura', en: 'Walls' })}
-                    style={
-                      tab === 'walls'
-                        ? {
-                            borderColor: categoryStyles.walls.border,
-                            color: categoryStyles.walls.text,
-                            backgroundColor: categoryStyles.walls.bg
-                          }
-                        : { borderColor: categoryStyles.walls.border, color: categoryStyles.walls.text }
-                    }
-                  >
-                    {t({ it: 'Mura', en: 'Walls' })}
-                  </button>
-                  <button
                     onClick={() => setTab('text')}
                     disabled={!allTextDefs.length}
                     className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
@@ -375,9 +343,7 @@ const AllObjectTypesModal = ({ open, defs, onClose, onPick, paletteTypeIds, onAd
                       const isActive = index === activeIndex;
                       const category = isDeskType(d.id)
                         ? 'desks'
-                        : d.category === 'wall' || String(d.id).startsWith('wall_')
-                          ? 'walls'
-                          : isSecurityTypeId(d.id)
+                        : isSecurityTypeId(d.id)
                             ? 'security'
                           : d.id === 'text'
                             ? 'text'

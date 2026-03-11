@@ -475,9 +475,12 @@ const ClientDevicesImportPanel = ({ initialClientId, lockClientSelection = false
         rawSnippet: result.rawSnippet
       });
       setWebApiTestPassedByClient((prev) => ({ ...prev, [activeClientId]: !!result.ok }));
+      if (result.ok) push(t({ it: 'Test riuscito', en: 'Test successful' }), 'success');
+      else push(t({ it: 'Test fallito', en: 'Test failed' }), 'danger');
     } catch {
       setTestResult({ ok: false, status: 0, error: 'Request failed' });
       setWebApiTestPassedByClient((prev) => ({ ...prev, [activeClientId]: false }));
+      push(t({ it: 'Test fallito', en: 'Test failed' }), 'danger');
     } finally {
       setTesting(false);
     }
@@ -1007,7 +1010,7 @@ const ClientDevicesImportPanel = ({ initialClientId, lockClientSelection = false
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <button type="button" onClick={() => activeClientId && void openDevices(activeClientId)} className="btn-primary inline-flex items-center gap-2" disabled={!activeClientId}>
                     <Plus size={16} />
-                    ADD
+                    Add
                   </button>
                 </div>
               )}
@@ -1169,7 +1172,7 @@ const ClientDevicesImportPanel = ({ initialClientId, lockClientSelection = false
 
             {testResult ? (
               testResult.ok ? (
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
                   {t({
                     it: `Test OK: ${testResult.count ?? 0} entita trovate.`,
                     en: `Test OK: ${testResult.count ?? 0} entities found.`

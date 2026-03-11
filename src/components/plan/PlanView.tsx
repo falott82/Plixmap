@@ -99,7 +99,6 @@ import RoomMeetingDuplicateModal, { type RoomMeetingDuplicateModalState } from '
 import BulkEditDescriptionModal from './BulkEditDescriptionModal';
 import BulkEditSelectionModal from './BulkEditSelectionModal';
 import type { CrossPlanSearchResult } from './CrossPlanSearchModal';
-import type { PhotoItem } from './PhotoViewerModal';
 import { useClipboard } from './useClipboard';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
@@ -139,6 +138,32 @@ import { closeSocketSafely, getWsUrl } from '../../utils/ws';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 import RoomKioskInfoModal from './RoomKioskInfoModal';
 import { usePresentationWebcamHands } from './presentation/usePresentationWebcamHands';
+import {
+  getRoomPolygon,
+  googleMapsUrlFromCoords,
+  inferCorridorDoorLinkedRoomIds,
+  isRackLinkId,
+  getSharedRoomSides,
+  normalizeDoorVerificationHistory,
+  normalizeRoomConnectionDoorInput,
+  projectPointToSegment
+} from './planViewUtils';
+import type { SharedRoomSide } from './planViewUtils';
+import { samePlanSnapshot as samePlanSnapshotUtil, type PlanSnapshotComparable } from './planSnapshotCompare';
+import { toPlanHistorySnapshot, toPlanSnapshot, type PlanHistorySnapshot, type PlanSnapshot } from './planSnapshots';
+import { getLatestRevision, getRevisionVersion, toRevisionSnapshot } from './planRevisions';
+import { getCachedUnsavedAgainstLatest } from './planUnsavedChanges';
+import { createPlanDeleteShortcutHandler } from './planKeyboardDeleteShortcuts';
+import { createPlanConfirmDeleteShortcutHandler } from './planKeyboardConfirmDeleteShortcuts';
+import { createPlanTextShortcutHandler } from './planKeyboardTextShortcuts';
+import { createPlanArrowShortcutHandler, createPlanScaleShortcutHandler } from './planKeyboardMoveScaleShortcuts';
+import { createPlanCtrlArrowQuoteShortcutHandler, createPlanRotateShortcutHandler } from './planKeyboardTransformShortcuts';
+import { createPlanSaveShortcutHandler, createPlanUndoRedoShortcutHandler } from './planKeyboardSaveHistoryShortcuts';
+import { createPlanEscapeSelectionShortcutHandler, createPlanSelectAllShortcutHandler } from './planKeyboardSelectionShortcuts';
+import { createPlanBlockingUiShortcutHandler, createPlanDraftCancelShortcutHandler } from './planKeyboardUiShortcuts';
+import { createPlanDrawingShortcutHandler } from './planKeyboardDrawingShortcuts';
+import { usePlanSelectionState } from './usePlanSelectionState';
+import { usePlanDrawingState } from './usePlanDrawingState';
 
 const SelectedObjectsModal = lazy(() => import('./SelectedObjectsModal'));
 const CrossPlanSearchModal = lazy(() => import('./CrossPlanSearchModal'));
@@ -173,7 +198,6 @@ interface Props {
   planId: string;
 }
 
-const isRackLinkId = (id?: string | null) => typeof id === 'string' && id.startsWith('racklink:');
 const UNLOCK_REQUEST_EVENT = 'plixmap_unlock_request';
 const FORCE_UNLOCK_EVENT = 'plixmap_force_unlock';
 const OPEN_CLIENT_MEETINGS_EVENT = 'plixmap_open_client_meetings';
@@ -182,58 +206,8 @@ const OPEN_MY_MEETINGS_EVENT = 'plixmap_open_my_meetings';
 const OPEN_MEETING_MANAGER_EVENT = 'plixmap_open_meeting_manager';
 const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
 const DEFAULT_SAFETY_CARD_LAYOUT = { x: 24, y: 24, w: 420, h: 84, fontSize: 10, fontIndex: 0, colorIndex: 0, textBgIndex: 0 } as const;
-const normalizeDoorVerificationHistory = (history: any): DoorVerificationEntry[] => {
-  if (!Array.isArray(history)) return [];
-  return history
-    .map((entry) => {
-      const company = String(entry?.company || '').trim();
-      const date = typeof entry?.date === 'string' ? String(entry.date).trim() : '';
-      const notes = typeof entry?.notes === 'string' ? String(entry.notes).trim() : '';
-      const createdAtRaw = Number(entry?.createdAt);
-      return {
-        id: String(entry?.id || nanoid()),
-        company,
-        date: date || undefined,
-        notes: notes || undefined,
-        createdAt: Number.isFinite(createdAtRaw) ? createdAtRaw : Date.now()
-      } as DoorVerificationEntry;
-    })
-    .filter((entry) => !!entry.company || !!entry.date)
-    .sort((a, b) => b.createdAt - a.createdAt);
-};
-const parseGoogleMapsCoordinates = (rawValue: string): { lat: number; lng: number } | null => {
-  const raw = String(rawValue || '').trim();
-  if (!raw) return null;
-  const decimal = '[-+]?\\d{1,3}(?:\\.\\d+)?';
-  const pair = new RegExp(`(${decimal})\\s*,\\s*(${decimal})`);
-  const direct = raw.match(pair);
-  const fromPair = direct || raw.match(/[@?&]q=([-+]?\d{1,3}(?:\.\d+)?),\s*([-+]?\d{1,3}(?:\.\d+)?)/);
-  if (!fromPair) return null;
-  const lat = Number(fromPair[1]);
-  const lng = Number(fromPair[2]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-  return { lat, lng };
-};
-const googleMapsUrlFromCoords = (rawValue: string) => {
-  const raw = String(rawValue || '').trim();
-  if (!raw) return '';
-  if (/^https?:\/\//i.test(raw)) return raw;
-  const parsed = parseGoogleMapsCoordinates(raw);
-  if (!parsed) return '';
-  return `https://www.google.com/maps?q=${encodeURIComponent(`${parsed.lat},${parsed.lng}`)}`;
-};
-
-type SharedRoomSide = {
-  anchorRoomId: string;
-  otherRoomId: string;
-  edgeIndex: number;
-  otherEdgeIndex: number;
-  tMin: number;
-  tMax: number;
-  a: { x: number; y: number };
-  b: { x: number; y: number };
-};
+const TEXT_FONT_VALUES = TEXT_FONT_OPTIONS.map((opt) => opt.value);
+const TEXT_COLOR_VALUES = TEXT_COLOR_OPTIONS.map((opt) => opt.value);
 
 type RoomKioskInfoModalState = {
   roomId: string;
@@ -241,253 +215,6 @@ type RoomKioskInfoModalState = {
   clientName: string;
   siteName: string;
   planName: string;
-};
-
-const getRoomPolygon = (room: any): Array<{ x: number; y: number }> => {
-  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-  if (kind === 'poly') {
-    const pts = Array.isArray(room?.points) ? room.points : [];
-    return pts.length >= 3 ? pts : [];
-  }
-  const x = Number(room?.x || 0);
-  const y = Number(room?.y || 0);
-  const w = Number(room?.width || 0);
-  const h = Number(room?.height || 0);
-  if (!w || !h) return [];
-  return [
-    { x, y },
-    { x: x + w, y },
-    { x: x + w, y: y + h },
-    { x, y: y + h }
-  ];
-};
-
-const projectPointToSegment = (a: { x: number; y: number }, b: { x: number; y: number }, p: { x: number; y: number }) => {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq <= 0.0000001) {
-    return { t: 0, x: a.x, y: a.y, distSq: (p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y) };
-  }
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
-  const x = a.x + dx * t;
-  const y = a.y + dy * t;
-  const distSq = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
-  return { t, x, y, distSq };
-};
-
-const pointInPolygon = (point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>) => {
-  if (!polygon.length) return false;
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const a = polygon[i];
-    const b = polygon[j];
-    const intersects = a.y > point.y !== b.y > point.y && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y + 0.000001) + a.x;
-    if (intersects) inside = !inside;
-  }
-  return inside;
-};
-
-const pointOnPolygonBoundary = (point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>, tolerance = 1.25) => {
-  if (!polygon.length) return false;
-  const toleranceSq = tolerance * tolerance;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    if (projectPointToSegment(a, b, point).distSq <= toleranceSq) return true;
-  }
-  return false;
-};
-
-const getCorridorPolygonForDoorLink = (corridor: any): Array<{ x: number; y: number }> => {
-  const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-  if (kind === 'poly') {
-    const pts = Array.isArray(corridor?.points) ? corridor.points : [];
-    if (pts.length >= 3) return pts;
-  }
-  const x = Number(corridor?.x || 0);
-  const y = Number(corridor?.y || 0);
-  const w = Number(corridor?.width || 0);
-  const h = Number(corridor?.height || 0);
-  if (!w || !h) return [];
-  return [
-    { x, y },
-    { x: x + w, y },
-    { x: x + w, y: y + h },
-    { x, y: y + h }
-  ];
-};
-
-const getCorridorEdgePointForDoorLink = (corridor: any, edgeIndex: number, t: number) => {
-  const points = getCorridorPolygonForDoorLink(corridor);
-  if (points.length < 2) return null;
-  const idx = ((Math.floor(edgeIndex) % points.length) + points.length) % points.length;
-  const a = points[idx];
-  const b = points[(idx + 1) % points.length];
-  if (!a || !b) return null;
-  const ratio = Math.max(0, Math.min(1, Number(t) || 0));
-  return { x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio };
-};
-
-const inferCorridorDoorLinkedRoomIds = (corridor: Corridor, door: any, rooms: Room[]) => {
-  const availableRooms = (rooms || []).filter(Boolean);
-  if (!availableRooms.length) return [] as string[];
-  const validRoomIdSet = new Set(availableRooms.map((room) => String(room.id || '')).filter(Boolean));
-  const explicitRoomIds = Array.isArray((door as any)?.linkedRoomIds)
-    ? Array.from(new Set((door as any).linkedRoomIds.map((id: any) => String(id || '').trim()).filter((id: string) => validRoomIdSet.has(id))))
-    : [];
-  if (explicitRoomIds.length) return explicitRoomIds;
-  const corridorPoly = getCorridorPolygonForDoorLink(corridor);
-  const anchor = getCorridorEdgePointForDoorLink(corridor, Number((door as any)?.edgeIndex), Number((door as any)?.t));
-  if (!anchor || corridorPoly.length < 2) return [] as string[];
-  const roomEntries = availableRooms
-    .map((room) => ({ id: String(room.id || ''), poly: getRoomPolygon(room as any) }))
-    .filter((entry) => entry.id && entry.poly.length >= 3);
-  if (!roomEntries.length) return [] as string[];
-  const probeMatches: string[] = [];
-  const edgeIndex = Number((door as any)?.edgeIndex);
-  if (Number.isFinite(edgeIndex)) {
-    const idx = ((Math.floor(edgeIndex) % corridorPoly.length) + corridorPoly.length) % corridorPoly.length;
-    const a = corridorPoly[idx];
-    const b = corridorPoly[(idx + 1) % corridorPoly.length];
-    const dx = (b?.x || 0) - (a?.x || 0);
-    const dy = (b?.y || 0) - (a?.y || 0);
-    const len = Math.hypot(dx, dy);
-    if (len > 0.0001) {
-      const nx = -dy / len;
-      const ny = dx / len;
-      const seen = new Set<string>();
-      const probeDistances = [2, 4, 8, 12, 18, 26, 36, 48, 64];
-      const pushProbeMatches = (probe: { x: number; y: number }, tolerance: number) => {
-        for (const entry of roomEntries) {
-          if (!pointInPolygon(probe, entry.poly) && !pointOnPolygonBoundary(probe, entry.poly, tolerance)) continue;
-          if (seen.has(entry.id)) continue;
-          seen.add(entry.id);
-          probeMatches.push(entry.id);
-        }
-      };
-      for (const dist of probeDistances) {
-        const tolerance = dist <= 12 ? 2.6 : 3.4;
-        pushProbeMatches({ x: anchor.x + nx * dist, y: anchor.y + ny * dist }, tolerance);
-        pushProbeMatches({ x: anchor.x - nx * dist, y: anchor.y - ny * dist }, tolerance);
-        if (probeMatches.length >= 2 && dist >= 18) break;
-      }
-    }
-  }
-  if (probeMatches.length) return probeMatches;
-  const ranked = roomEntries
-    .map((entry) => {
-      let bestDistSq = Number.POSITIVE_INFINITY;
-      for (let i = 0; i < entry.poly.length; i += 1) {
-        const a = entry.poly[i];
-        const b = entry.poly[(i + 1) % entry.poly.length];
-        const proj = projectPointToSegment(a, b, anchor);
-        if (proj.distSq < bestDistSq) bestDistSq = proj.distSq;
-      }
-      return { id: entry.id, dist: Math.sqrt(bestDistSq) };
-    })
-    .filter((entry) => Number.isFinite(entry.dist))
-    .sort((a, b) => a.dist - b.dist);
-  if (!ranked.length) return [] as string[];
-  const best = ranked[0].dist;
-  const maxAllowed = Math.max(42, best + 2.5);
-  return ranked
-    .filter((entry) => entry.dist <= maxAllowed)
-    .slice(0, 4)
-    .map((entry) => entry.id);
-};
-
-const getSharedRoomSides = (roomA: Room, roomB: Room): SharedRoomSide[] => {
-  const polyA = getRoomPolygon(roomA as any);
-  const polyB = getRoomPolygon(roomB as any);
-  if (polyA.length < 2 || polyB.length < 2) return [];
-  const out: SharedRoomSide[] = [];
-  const minOverlap = 8;
-  const collinearTolerance = 1.8;
-  const parallelTolerance = 0.03;
-  const pushShared = (
-    sourcePoly: { x: number; y: number }[],
-    sourceRoomId: string,
-    targetPoly: { x: number; y: number }[],
-    targetRoomId: string
-  ) => {
-    for (let i = 0; i < sourcePoly.length; i += 1) {
-      const a = sourcePoly[i];
-      const b = sourcePoly[(i + 1) % sourcePoly.length];
-      const ux = b.x - a.x;
-      const uy = b.y - a.y;
-      const len = Math.hypot(ux, uy);
-      if (len < 0.0001) continue;
-      const uxn = ux / len;
-      const uyn = uy / len;
-      for (let j = 0; j < targetPoly.length; j += 1) {
-        const c = targetPoly[j];
-        const d = targetPoly[(j + 1) % targetPoly.length];
-        const vx = d.x - c.x;
-        const vy = d.y - c.y;
-        const vLen = Math.hypot(vx, vy);
-        if (vLen < 0.0001) continue;
-        const cross = Math.abs(uxn * (vy / vLen) - uyn * (vx / vLen));
-        if (cross > parallelTolerance) continue;
-        const lineDistC = Math.abs((c.x - a.x) * uy - (c.y - a.y) * ux) / len;
-        const lineDistD = Math.abs((d.x - a.x) * uy - (d.y - a.y) * ux) / len;
-        if (Math.min(lineDistC, lineDistD) > collinearTolerance) continue;
-        const projC = (c.x - a.x) * uxn + (c.y - a.y) * uyn;
-        const projD = (d.x - a.x) * uxn + (d.y - a.y) * uyn;
-        const from = Math.max(0, Math.min(projC, projD));
-        const to = Math.min(len, Math.max(projC, projD));
-        const overlap = to - from;
-        if (overlap < minOverlap) continue;
-        const tMin = Math.max(0, Math.min(1, from / len));
-        const tMax = Math.max(0, Math.min(1, to / len));
-        if (tMax - tMin < 0.0001) continue;
-        out.push({
-          anchorRoomId: sourceRoomId,
-          otherRoomId: targetRoomId,
-          edgeIndex: i,
-          otherEdgeIndex: j,
-          tMin,
-          tMax,
-          a: { x: a.x + ux * tMin, y: a.y + uy * tMin },
-          b: { x: a.x + ux * tMax, y: a.y + uy * tMax }
-        });
-      }
-    }
-  };
-  pushShared(polyA, String(roomA.id), polyB, String(roomB.id));
-  pushShared(polyB, String(roomB.id), polyA, String(roomA.id));
-  return out;
-};
-
-const normalizeRoomConnectionDoorInput = (door: any): RoomConnectionDoor | null => {
-  const roomAId = String(door?.roomAId || '').trim();
-  const roomBId = String(door?.roomBId || '').trim();
-  if (!roomAId || !roomBId || roomAId === roomBId) return null;
-  const anchorRoomIdRaw = String(door?.anchorRoomId || '').trim();
-  const anchorRoomId = anchorRoomIdRaw === roomAId || anchorRoomIdRaw === roomBId ? anchorRoomIdRaw : roomAId;
-  const edgeIndex = Number(door?.edgeIndex);
-  const t = Number(door?.t);
-  if (!Number.isFinite(edgeIndex) || !Number.isFinite(t)) return null;
-  return {
-    ...door,
-    id: String(door?.id || nanoid()),
-    roomAId,
-    roomBId,
-    anchorRoomId,
-    edgeIndex: Number(edgeIndex),
-    t: Math.max(0, Math.min(1, Number(t))),
-    catalogTypeId: typeof door?.catalogTypeId === 'string' ? String(door.catalogTypeId).trim() || undefined : undefined,
-    mode: door?.mode === 'auto_sensor' || door?.mode === 'automated' ? door.mode : 'static',
-    automationUrl: typeof door?.automationUrl === 'string' ? String(door.automationUrl).trim() || undefined : undefined,
-    description: typeof door?.description === 'string' ? String(door.description).trim() || undefined : undefined,
-    isEmergency: !!door?.isEmergency,
-    isMainEntrance: !!door?.isMainEntrance,
-    isExternal: !!door?.isExternal,
-    isFireDoor: !!door?.isFireDoor,
-    lastVerificationAt: typeof door?.lastVerificationAt === 'string' ? String(door.lastVerificationAt).trim() || undefined : undefined,
-    verifierCompany: typeof door?.verifierCompany === 'string' ? String(door.verifierCompany).trim() || undefined : undefined,
-    verificationHistory: normalizeDoorVerificationHistory(door?.verificationHistory)
-  };
 };
 
 const PlanView = ({ planId }: Props) => {
@@ -1177,71 +904,92 @@ const PlanView = ({ planId }: Props) => {
   const [scalePromptDismissed, setScalePromptDismissed] = useState(false);
   const layersPopoverRef = useRef<HTMLDivElement | null>(null);
   const layersQuickMenuRef = useRef<HTMLDivElement | null>(null);
-  const [panToolActive, setPanToolActive] = useState(false);
-  const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
-  const [selectedRoomId, setSelectedRoomId] = useState<string | undefined>(undefined);
-  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
-  const [selectedCorridorId, setSelectedCorridorId] = useState<string | undefined>(undefined);
-  const [selectedCorridorDoor, setSelectedCorridorDoor] = useState<{ corridorId: string; doorId: string } | null>(null);
-  const [selectedRoomDoorId, setSelectedRoomDoorId] = useState<string | null>(null);
-  const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
-  const [wallQuickMenu, setWallQuickMenu] = useState<{
-    id: string;
-    x: number;
-    y: number;
-    world: { x: number; y: number };
-  } | null>(null);
-  const [corridorQuickMenu, setCorridorQuickMenu] = useState<{
-    id: string;
-    x: number;
-    y: number;
-    world: { x: number; y: number };
-  } | null>(null);
-  const [corridorDoorDraft, setCorridorDoorDraft] = useState<{
-    corridorId: string;
-    start?: { edgeIndex: number; t: number; x: number; y: number };
-  } | null>(null);
-  const [roomDoorDraft, setRoomDoorDraft] = useState<{
-    roomAId: string;
-    roomBId: string;
-    sharedSides: SharedRoomSide[];
-  } | null>(null);
-  const [wallTypeMenu, setWallTypeMenu] = useState<{ ids: string[]; x: number; y: number } | null>(null);
-  const [mapSubmenu, setMapSubmenu] = useState<null | 'view' | 'measure' | 'create' | 'print' | 'manage'>(null);
-  const [linkFromId, setLinkFromId] = useState<string | null>(null);
-  const [cableModal, setCableModal] = useState<{ mode: 'create'; fromId: string; toId: string } | { mode: 'edit'; linkId: string } | null>(null);
-  const [linksModalObjectId, setLinksModalObjectId] = useState<string | null>(null);
-  const [linkEditId, setLinkEditId] = useState<string | null>(null);
-  const [realUserDetailsId, setRealUserDetailsId] = useState<string | null>(null);
-  const [photoViewer, setPhotoViewer] = useState<{
-    photos: PhotoItem[];
-    initialId?: string;
-    title?: { it: string; en: string };
-    countLabel?: { it: string; en: string };
-    itemLabel?: { it: string; en: string };
-    emptyLabel?: { it: string; en: string };
-  } | null>(null);
-  const [roomDrawMode, setRoomDrawMode] = useState<'rect' | 'poly' | null>(null);
-  const [corridorDrawMode, setCorridorDrawMode] = useState<'poly' | null>(null);
-  const [wallDrawMode, setWallDrawMode] = useState(false);
-  const [wallDrawType, setWallDrawType] = useState<MapObjectType | null>(null);
-  const [wallDraftPoints, setWallDraftPoints] = useState<{ x: number; y: number }[]>([]);
-  const [wallDraftPointer, setWallDraftPointer] = useState<{ x: number; y: number } | null>(null);
+  const {
+    panToolActive,
+    setPanToolActive,
+    expandedRoomId,
+    setExpandedRoomId,
+    selectedRoomId,
+    setSelectedRoomId,
+    selectedRoomIds,
+    setSelectedRoomIds,
+    selectedCorridorId,
+    setSelectedCorridorId,
+    selectedCorridorDoor,
+    setSelectedCorridorDoor,
+    selectedRoomDoorId,
+    setSelectedRoomDoorId,
+    selectedLinkId,
+    setSelectedLinkId,
+    wallQuickMenu,
+    setWallQuickMenu,
+    corridorQuickMenu,
+    setCorridorQuickMenu,
+    corridorDoorDraft,
+    setCorridorDoorDraft,
+    roomDoorDraft,
+    setRoomDoorDraft,
+    wallTypeMenu,
+    setWallTypeMenu,
+    mapSubmenu,
+    setMapSubmenu,
+    linkFromId,
+    setLinkFromId,
+    cableModal,
+    setCableModal,
+    linksModalObjectId,
+    setLinksModalObjectId,
+    linkEditId,
+    setLinkEditId,
+    realUserDetailsId,
+    setRealUserDetailsId,
+    photoViewer,
+    setPhotoViewer
+  } = usePlanSelectionState();
+  const {
+    roomDrawMode,
+    setRoomDrawMode,
+    corridorDrawMode,
+    setCorridorDrawMode,
+    wallDrawMode,
+    setWallDrawMode,
+    wallDrawType,
+    setWallDrawType,
+    wallDraftPoints,
+    setWallDraftPoints,
+    wallDraftPointer,
+    setWallDraftPointer,
+    scaleMode,
+    setScaleMode,
+    scaleDraft,
+    setScaleDraft,
+    scaleDraftPointer,
+    setScaleDraftPointer,
+    scaleModal,
+    setScaleModal,
+    scaleMetersInput,
+    setScaleMetersInput,
+    showScaleLine,
+    setShowScaleLine,
+    measureMode,
+    setMeasureMode,
+    measurePoints,
+    setMeasurePoints,
+    measurePointer,
+    setMeasurePointer,
+    measureClosed,
+    setMeasureClosed,
+    measureFinished,
+    setMeasureFinished,
+    quoteMode,
+    setQuoteMode,
+    quotePoints,
+    setQuotePoints,
+    quotePointer,
+    setQuotePointer
+  } = usePlanDrawingState();
   const wallDraftPointsRef = useRef<{ x: number; y: number }[]>([]);
   const wallDraftSegmentIdsRef = useRef<string[]>([]);
-  const [scaleMode, setScaleMode] = useState(false);
-  const [scaleDraft, setScaleDraft] = useState<{ start?: { x: number; y: number }; end?: { x: number; y: number } } | null>(null);
-  const [scaleDraftPointer, setScaleDraftPointer] = useState<{ x: number; y: number } | null>(null);
-  const [scaleModal, setScaleModal] = useState<{ start: { x: number; y: number }; end: { x: number; y: number }; distance: number } | null>(
-    null
-  );
-  const [scaleMetersInput, setScaleMetersInput] = useState('');
-  const [showScaleLine, setShowScaleLine] = useState(true);
-  const [measureMode, setMeasureMode] = useState(false);
-  const [measurePoints, setMeasurePoints] = useState<{ x: number; y: number }[]>([]);
-  const [measurePointer, setMeasurePointer] = useState<{ x: number; y: number } | null>(null);
-  const [measureClosed, setMeasureClosed] = useState(false);
-  const [measureFinished, setMeasureFinished] = useState(false);
   const measurePointsRef = useRef<{ x: number; y: number }[]>([]);
   const measureClosedRef = useRef(false);
   const measureFinishedRef = useRef(false);
@@ -1258,9 +1006,6 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     measureFinishedRef.current = measureFinished;
   }, [measureFinished]);
-  const [quoteMode, setQuoteMode] = useState(false);
-  const [quotePoints, setQuotePoints] = useState<{ x: number; y: number }[]>([]);
-  const [quotePointer, setQuotePointer] = useState<{ x: number; y: number } | null>(null);
   const toolMode = scaleMode ? 'scale' : wallDrawMode ? 'wall' : quoteMode ? 'quote' : measureMode ? 'measure' : null;
   const [newRoomMenuOpen, setNewRoomMenuOpen] = useState(false);
   const [highlightRoom, setHighlightRoom] = useState<{ roomId: string; until: number } | null>(null);
@@ -4890,16 +4635,8 @@ const PlanView = ({ planId }: Props) => {
   );
 
   const latestRev = useMemo(() => {
-    const revs: any[] = plan?.revisions || [];
-    const sorted = [...revs].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0));
-    const first = sorted[0];
-    if (first && typeof first.revMajor === 'number' && typeof first.revMinor === 'number') {
-      return { major: first.revMajor, minor: first.revMinor };
-    }
-    if (first && typeof first.version === 'number') {
-      return { major: 1, minor: Math.max(0, Number(first.version) - 1) };
-    }
-    return { major: 1, minor: 0 };
+    const latest = getLatestRevision(plan?.revisions as any[] | undefined);
+    return getRevisionVersion(latest as any);
   }, [plan?.revisions]);
 
   const hasAnyRevision = !!(plan?.revisions || []).length;
@@ -4995,54 +4732,54 @@ const PlanView = ({ planId }: Props) => {
     [getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan, selectedObjectIds, updateObject]
   );
 
-  const toSnapshot = useCallback((p: any) => {
-    return {
-      imageUrl: p?.imageUrl || '',
-      width: p?.width,
-      height: p?.height,
-      scale: p?.scale,
-      safetyCardLayout: (p as any)?.safetyCardLayout
-        ? {
-            x: Number((p as any).safetyCardLayout.x || 0),
-            y: Number((p as any).safetyCardLayout.y || 0),
-            w: Number((p as any).safetyCardLayout.w || 420),
-            h: Number((p as any).safetyCardLayout.h || 84),
-            fontSize: Number((p as any).safetyCardLayout.fontSize || 10),
-            fontIndex: Number((p as any).safetyCardLayout.fontIndex || 0),
-            colorIndex: Number((p as any).safetyCardLayout.colorIndex || 0),
-            textBgIndex: Number((p as any).safetyCardLayout.textBgIndex || 0)
-          }
-        : undefined,
-      objects: Array.isArray(p?.objects) ? p.objects : [],
-      views: Array.isArray(p?.views) ? p.views : [],
-      rooms: Array.isArray(p?.rooms) ? p.rooms : [],
-      corridors: Array.isArray((p as any)?.corridors) ? (p as any).corridors : [],
-      roomDoors: Array.isArray((p as any)?.roomDoors) ? (p as any).roomDoors : [],
-      racks: Array.isArray((p as any)?.racks) ? (p as any).racks : [],
-      rackItems: Array.isArray((p as any)?.rackItems) ? (p as any).rackItems : [],
-      rackLinks: Array.isArray((p as any)?.rackLinks) ? (p as any).rackLinks : []
-    };
+  const snapshotCacheRef = useRef<WeakMap<object, PlanSnapshot>>(new WeakMap());
+  const latestRevisionCacheRef = useRef<WeakMap<object, any>>(new WeakMap());
+  const revisionSnapshotCacheRef = useRef<WeakMap<object, PlanSnapshotComparable>>(new WeakMap());
+  const unsavedAgainstLatestCacheRef = useRef<WeakMap<object, WeakMap<object, boolean>>>(new WeakMap());
+  const getPlanSnapshot = useCallback((p: any): PlanSnapshot => {
+    if (p && typeof p === 'object') {
+      const cached = snapshotCacheRef.current.get(p as object);
+      if (cached) return cached;
+      const snap = toPlanSnapshot(p);
+      snapshotCacheRef.current.set(p as object, snap);
+      return snap;
+    }
+    return toPlanSnapshot(p);
+  }, []);
+  const getLatestRevisionCached = useCallback((revisions: any[] | undefined | null) => {
+    if (!Array.isArray(revisions)) return null;
+    const key = revisions as unknown as object;
+    const cached = latestRevisionCacheRef.current.get(key);
+    if (cached !== undefined) return cached;
+    const latest = getLatestRevision(revisions as any[]);
+    latestRevisionCacheRef.current.set(key, latest || null);
+    return latest;
+  }, []);
+  const getRevisionSnapshotCached = useCallback((revision: any): PlanSnapshotComparable => {
+    if (revision && typeof revision === 'object') {
+      const key = revision as object;
+      const cached = revisionSnapshotCacheRef.current.get(key);
+      if (cached) return cached;
+      const snap = toRevisionSnapshot(revision);
+      revisionSnapshotCacheRef.current.set(key, snap);
+      return snap;
+    }
+    return toRevisionSnapshot(revision);
   }, []);
 
-  type HistorySnapshot = ReturnType<typeof toSnapshot> & {
-    printArea?: { x: number; y: number; width: number; height: number } | null;
-    links?: any[];
-  };
+  type HistorySnapshot = PlanHistorySnapshot;
+  type HistoryEntry = { snap: HistorySnapshot; key: string };
 
   const [historyTick, setHistoryTick] = useState(0);
   const historySnapshotRef = useRef<HistorySnapshot | null>(null);
   const historyKeyRef = useRef('');
-  const undoStackRef = useRef<HistorySnapshot[]>([]);
-  const redoStackRef = useRef<HistorySnapshot[]>([]);
+  const undoStackRef = useRef<HistoryEntry[]>([]);
+  const redoStackRef = useRef<HistoryEntry[]>([]);
   const historyLockRef = useRef(false);
 
   const toHistorySnapshot = useCallback(
-    (p: any): HistorySnapshot => ({
-      ...toSnapshot(p),
-      printArea: (p as any)?.printArea ?? null,
-      links: Array.isArray((p as any)?.links) ? (p as any).links : []
-    }),
-    [toSnapshot]
+    (p: any): HistorySnapshot => toPlanHistorySnapshot(p, getPlanSnapshot(p)),
+    [getPlanSnapshot]
   );
 
   const resetHistory = useCallback(() => {
@@ -5054,6 +4791,10 @@ const PlanView = ({ planId }: Props) => {
   }, []);
 
   useEffect(() => {
+    snapshotCacheRef.current = new WeakMap();
+    latestRevisionCacheRef.current = new WeakMap();
+    revisionSnapshotCacheRef.current = new WeakMap();
+    unsavedAgainstLatestCacheRef.current = new WeakMap();
     baselineSnapshotRef.current = null;
     entrySnapshotRef.current = null;
     touchedRef.current = false;
@@ -5068,375 +4809,30 @@ const PlanView = ({ planId }: Props) => {
       baselineSnapshotRef.current = null;
       return;
     }
-    const snap = toSnapshot(plan);
+    const snap = getPlanSnapshot(plan);
     // Keep baseline aligned with background normalizations until the user edits.
     if (!baselineSnapshotRef.current || !touchedRef.current) baselineSnapshotRef.current = snap;
-  }, [plan, toSnapshot]);
+  }, [plan, getPlanSnapshot]);
 
 
-  const samePlanSnapshot = useCallback((
-    current: {
-      imageUrl: string;
-      width?: number;
-      height?: number;
-      scale?: any;
-      safetyCardLayout?: { x: number; y: number; w: number; h: number; fontSize?: number; fontIndex?: number; colorIndex?: number; textBgIndex?: number };
-      objects: any[];
-      views?: any[];
-      rooms?: any[];
-      corridors?: any[];
-      roomDoors?: any[];
-      racks?: any[];
-      rackItems?: any[];
-      rackLinks?: any[];
-    },
-    latest: {
-      imageUrl: string;
-      width?: number;
-      height?: number;
-      scale?: any;
-      safetyCardLayout?: { x: number; y: number; w: number; h: number; fontSize?: number; fontIndex?: number; colorIndex?: number; textBgIndex?: number };
-      objects: any[];
-      views?: any[];
-      rooms?: any[];
-      corridors?: any[];
-      roomDoors?: any[];
-      racks?: any[];
-      rackItems?: any[];
-      rackLinks?: any[];
-    }
-  ) => {
-    if (current.imageUrl !== latest.imageUrl) return false;
-    if ((current.width ?? null) !== (latest.width ?? null)) return false;
-    if ((current.height ?? null) !== (latest.height ?? null)) return false;
-    const aScale = current.scale;
-    const bScale = latest.scale;
-    if (!!aScale || !!bScale) {
-      if (!aScale || !bScale) return false;
-      if (Number(aScale.meters || 0) !== Number(bScale.meters || 0)) return false;
-      if (Number(aScale.metersPerPixel || 0) !== Number(bScale.metersPerPixel || 0)) return false;
-      if ((aScale.start?.x ?? 0) !== (bScale.start?.x ?? 0)) return false;
-      if ((aScale.start?.y ?? 0) !== (bScale.start?.y ?? 0)) return false;
-      if ((aScale.end?.x ?? 0) !== (bScale.end?.x ?? 0)) return false;
-      if ((aScale.end?.y ?? 0) !== (bScale.end?.y ?? 0)) return false;
-    }
-    const aSafetyCard = current.safetyCardLayout;
-    const bSafetyCard = latest.safetyCardLayout;
-    if (!!aSafetyCard || !!bSafetyCard) {
-      if (!aSafetyCard || !bSafetyCard) return false;
-      if (Number(aSafetyCard.x || 0) !== Number(bSafetyCard.x || 0)) return false;
-      if (Number(aSafetyCard.y || 0) !== Number(bSafetyCard.y || 0)) return false;
-      if (Number(aSafetyCard.w || 0) !== Number(bSafetyCard.w || 0)) return false;
-      if (Number(aSafetyCard.h || 0) !== Number(bSafetyCard.h || 0)) return false;
-      if (Number(aSafetyCard.fontSize || 10) !== Number(bSafetyCard.fontSize || 10)) return false;
-      if (Number(aSafetyCard.fontIndex || 0) !== Number(bSafetyCard.fontIndex || 0)) return false;
-      if (Number(aSafetyCard.colorIndex || 0) !== Number(bSafetyCard.colorIndex || 0)) return false;
-      if (Number(aSafetyCard.textBgIndex || 0) !== Number(bSafetyCard.textBgIndex || 0)) return false;
-    }
-
-    const sameList = (a?: string[], b?: string[]) => {
-      const aList = a || [];
-      const bList = b || [];
-      if (aList.length !== bList.length) return false;
-      for (let i = 0; i < aList.length; i += 1) {
-        if ((aList[i] || '') !== (bList[i] || '')) return false;
-      }
-      return true;
-    };
-
-    const normalizeForCompare = (value: any): any => {
-      if (value === undefined) return undefined;
-      if (value === null) return null;
-      if (Array.isArray(value)) return value.map((entry) => normalizeForCompare(entry));
-      if (typeof value === 'number' && !Number.isFinite(value)) return null;
-      if (typeof value !== 'object') return value;
-      const out: Record<string, any> = {};
-      const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
-      for (const key of keys) {
-        const next = normalizeForCompare(value[key]);
-        if (next === undefined) continue;
-        out[key] = next;
-      }
-      return out;
-    };
-
-    const normalizeRoomForCompare = (room: any) => {
-      const base = room || {};
-      const normalized: Record<string, any> = {};
-      const falseIfMissingKeys = new Set([
-        'logical',
-        'meetingRoom',
-        'meetingProjector',
-        'meetingTv',
-        'meetingVideoConf',
-        'meetingCoffeeService',
-        'meetingWhiteboard',
-        'meetingKioskEnabled',
-        'wifiAvailable',
-        'fridgeAvailable',
-        'noWindows',
-        'storageRoom',
-        'bathroom',
-        'technicalRoom'
-      ]);
-      const keys = Object.keys(base).sort((a, b) => a.localeCompare(b));
-      for (const key of keys) {
-        const value = (base as any)[key];
-        if (value === undefined) continue;
-        if (key === 'showName' && value === true) continue;
-        if (falseIfMissingKeys.has(key) && value === false) continue;
-        if (key === 'capacity' && Number(value) === 0) continue;
-        if (typeof value === 'string' && String(value) === '') continue;
-        if (key === 'labelPosition' && (value === 'top' || value === '' || value == null)) continue;
-        if (key === 'labelScale' && (value === null || value === undefined || Number(value) === 1)) continue;
-        if (key === 'fillOpacity' && (value === null || value === undefined || Math.abs(Number(value) - 0.08) < 0.0001)) continue;
-        if ((key === 'color' || key === 'fillColor' || key === 'strokeColor') && String(value || '').trim() === '') continue;
-        if (key === 'departmentTags') {
-          normalized[key] = Array.isArray(value)
-            ? value
-                .map((entry: any) => String(entry || '').trim())
-                .filter(Boolean)
-                .sort((a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-            : [];
-          continue;
-        }
-        if (key === 'points') {
-          normalized[key] = Array.isArray(value)
-            ? value.map((point: any) => ({
-                x: Number(point?.x ?? 0),
-                y: Number(point?.y ?? 0)
-              }))
-            : [];
-          continue;
-        }
-        normalized[key] = normalizeForCompare(value);
-      }
-      return normalized;
-    };
-
-    const aObjs = current.objects || [];
-    const bObjs = latest.objects || [];
-    if (aObjs.length !== bObjs.length) return false;
-    const bById = new Map<string, any>();
-    for (const o of bObjs) bById.set(o.id, o);
-    for (const o of aObjs) {
-      const other = bById.get(o.id);
-      if (!other) return false;
-      if (JSON.stringify(normalizeForCompare(o)) !== JSON.stringify(normalizeForCompare(other))) return false;
-    }
-
-    const aViews = current.views || [];
-    const bViews = latest.views || [];
-    if (aViews.length !== bViews.length) return false;
-    const bViewsById = new Map<string, any>();
-    for (const v of bViews) bViewsById.set(v.id, v);
-    for (const v of aViews) {
-      const other = bViewsById.get(v.id);
-      if (!other) return false;
-      if (v.name !== other.name) return false;
-      if ((v.description || '') !== (other.description || '')) return false;
-      if (v.zoom !== other.zoom) return false;
-      if ((v.pan?.x ?? 0) !== (other.pan?.x ?? 0)) return false;
-      if ((v.pan?.y ?? 0) !== (other.pan?.y ?? 0)) return false;
-      if (!!v.isDefault !== !!other.isDefault) return false;
-    }
-
-    const aRooms = current.rooms || [];
-    const bRooms = latest.rooms || [];
-    if (aRooms.length !== bRooms.length) return false;
-    const bRoomsById = new Map<string, any>();
-    for (const r of bRooms) bRoomsById.set(r.id, r);
-    for (const r of aRooms) {
-      const other = bRoomsById.get(r.id);
-      if (!other) return false;
-      if (JSON.stringify(normalizeRoomForCompare(r)) !== JSON.stringify(normalizeRoomForCompare(other))) return false;
-    }
-
-    const aCorridors = current.corridors || [];
-    const bCorridors = latest.corridors || [];
-    if (aCorridors.length !== bCorridors.length) return false;
-    const bCorridorsById = new Map<string, any>();
-    for (const c of bCorridors) bCorridorsById.set(c.id, c);
-    for (const c of aCorridors) {
-      const other = bCorridorsById.get(c.id);
-      if (!other) return false;
-      if (c.name !== other.name) return false;
-      if ((c.showName !== false) !== (other.showName !== false)) return false;
-      if (Number((c as any).labelX ?? -1) !== Number((other as any).labelX ?? -1)) return false;
-      if (Number((c as any).labelY ?? -1) !== Number((other as any).labelY ?? -1)) return false;
-      if (Number((c as any).labelScale ?? 1) !== Number((other as any).labelScale ?? 1)) return false;
-      if ((c.kind || 'poly') !== (other.kind || 'poly')) return false;
-      if ((c.color || '') !== (other.color || '')) return false;
-      if ((c.x ?? null) !== (other.x ?? null)) return false;
-      if ((c.y ?? null) !== (other.y ?? null)) return false;
-      if ((c.width ?? null) !== (other.width ?? null)) return false;
-      if ((c.height ?? null) !== (other.height ?? null)) return false;
-      const cPts = Array.isArray(c.points) ? c.points : [];
-      const oPts = Array.isArray(other.points) ? other.points : [];
-      if (cPts.length !== oPts.length) return false;
-      for (let i = 0; i < cPts.length; i += 1) {
-        if ((cPts[i]?.x ?? 0) !== (oPts[i]?.x ?? 0)) return false;
-        if ((cPts[i]?.y ?? 0) !== (oPts[i]?.y ?? 0)) return false;
-      }
-      const cDoors = Array.isArray(c.doors) ? c.doors : [];
-      const oDoors = Array.isArray(other.doors) ? other.doors : [];
-      if (cDoors.length !== oDoors.length) return false;
-      const oDoorsById = new Map<string, any>();
-      for (const d of oDoors) oDoorsById.set(d.id, d);
-      for (const d of cDoors) {
-        const od = oDoorsById.get(d.id);
-        if (!od) return false;
-        if (Number(d.edgeIndex) !== Number(od.edgeIndex)) return false;
-        if (Number(d.t) !== Number(od.t)) return false;
-        if (Number((d as any).edgeIndexTo ?? -1) !== Number((od as any).edgeIndexTo ?? -1)) return false;
-        if (Number((d as any).tTo ?? -1) !== Number((od as any).tTo ?? -1)) return false;
-        if (String((d as any).mode || 'static') !== String((od as any).mode || 'static')) return false;
-        if (String((d as any).automationUrl || '') !== String((od as any).automationUrl || '')) return false;
-        const aLinked = Array.isArray((d as any).linkedRoomIds) ? (d as any).linkedRoomIds.map((id: any) => String(id)).sort() : [];
-        const bLinked = Array.isArray((od as any).linkedRoomIds) ? (od as any).linkedRoomIds.map((id: any) => String(id)).sort() : [];
-        if (aLinked.length !== bLinked.length) return false;
-        for (let i = 0; i < aLinked.length; i += 1) {
-          if (aLinked[i] !== bLinked[i]) return false;
-        }
-      }
-      const cConn = Array.isArray(c.connections) ? c.connections : [];
-      const oConn = Array.isArray(other.connections) ? other.connections : [];
-      if (cConn.length !== oConn.length) return false;
-      const oConnById = new Map<string, any>();
-      for (const cp of oConn) oConnById.set(cp.id, cp);
-      for (const cp of cConn) {
-        const ocp = oConnById.get(cp.id);
-        if (!ocp) return false;
-        if (Number(cp.edgeIndex) !== Number(ocp.edgeIndex)) return false;
-        if (Number(cp.t) !== Number(ocp.t)) return false;
-        if (Number((cp as any).x ?? -1) !== Number((ocp as any).x ?? -1)) return false;
-        if (Number((cp as any).y ?? -1) !== Number((ocp as any).y ?? -1)) return false;
-        if (String((cp as any).transitionType || 'stairs') !== String((ocp as any).transitionType || 'stairs')) return false;
-        const aPlanIds = Array.isArray(cp.planIds) ? cp.planIds.map((id: any) => String(id)).sort() : [];
-        const bPlanIds = Array.isArray(ocp.planIds) ? ocp.planIds.map((id: any) => String(id)).sort() : [];
-        if (aPlanIds.length !== bPlanIds.length) return false;
-        for (let i = 0; i < aPlanIds.length; i += 1) {
-          if (aPlanIds[i] !== bPlanIds[i]) return false;
-        }
-      }
-    }
-
-    const aRoomDoors = Array.isArray((current as any).roomDoors) ? ((current as any).roomDoors as any[]) : [];
-    const bRoomDoors = Array.isArray((latest as any).roomDoors) ? ((latest as any).roomDoors as any[]) : [];
-    if (aRoomDoors.length !== bRoomDoors.length) return false;
-    const bRoomDoorsById = new Map<string, any>();
-    for (const door of bRoomDoors) bRoomDoorsById.set(String((door as any)?.id || ''), door);
-    for (const door of aRoomDoors) {
-      const id = String((door as any)?.id || '');
-      const other = bRoomDoorsById.get(id);
-      if (!other) return false;
-      if (String((door as any)?.roomAId || '') !== String((other as any)?.roomAId || '')) return false;
-      if (String((door as any)?.roomBId || '') !== String((other as any)?.roomBId || '')) return false;
-      if (String((door as any)?.anchorRoomId || '') !== String((other as any)?.anchorRoomId || '')) return false;
-      if (Number((door as any)?.edgeIndex) !== Number((other as any)?.edgeIndex)) return false;
-      if (Number((door as any)?.t) !== Number((other as any)?.t)) return false;
-      if (String((door as any)?.mode || 'static') !== String((other as any)?.mode || 'static')) return false;
-      if (String((door as any)?.automationUrl || '') !== String((other as any)?.automationUrl || '')) return false;
-    }
-
-    const aRacks = current.racks || [];
-    const bRacks = latest.racks || [];
-    if (aRacks.length !== bRacks.length) return false;
-    const bRacksById = new Map<string, any>();
-    for (const r of bRacks) bRacksById.set(r.id, r);
-    for (const r of aRacks) {
-      const other = bRacksById.get(r.id);
-      if (!other) return false;
-      if (r.name !== other.name) return false;
-      if (Number(r.totalUnits || 0) !== Number(other.totalUnits || 0)) return false;
-    }
-
-    const aItems = current.rackItems || [];
-    const bItems = latest.rackItems || [];
-    if (aItems.length !== bItems.length) return false;
-    const bItemsById = new Map<string, any>();
-    for (const i of bItems) bItemsById.set(i.id, i);
-    for (const i of aItems) {
-      const other = bItemsById.get(i.id);
-      if (!other) return false;
-      if (i.rackId !== other.rackId) return false;
-      if (i.type !== other.type) return false;
-      if (i.name !== other.name) return false;
-      if ((i.brand || '') !== (other.brand || '')) return false;
-      if ((i.model || '') !== (other.model || '')) return false;
-      if ((i.ip || '') !== (other.ip || '')) return false;
-      if (Number(i.unitStart) !== Number(other.unitStart)) return false;
-      if (Number(i.unitSize) !== Number(other.unitSize)) return false;
-      if (Number(i.ethPorts || 0) !== Number(other.ethPorts || 0)) return false;
-      if (Number(i.fiberPorts || 0) !== Number(other.fiberPorts || 0)) return false;
-      if (Number(i.ethRangeStart || 0) !== Number(other.ethRangeStart || 0)) return false;
-      if (Number(i.fiberRangeStart || 0) !== Number(other.fiberRangeStart || 0)) return false;
-      if (!sameList(i.ethPortNames, other.ethPortNames)) return false;
-      if (!sameList(i.fiberPortNames, other.fiberPortNames)) return false;
-      if (!sameList(i.ethPortNotes, other.ethPortNotes)) return false;
-      if (!sameList(i.fiberPortNotes, other.fiberPortNotes)) return false;
-    }
-
-    const aLinks = current.rackLinks || [];
-    const bLinks = latest.rackLinks || [];
-    if (aLinks.length !== bLinks.length) return false;
-    const bLinksById = new Map<string, any>();
-    for (const l of bLinks) bLinksById.set(l.id, l);
-    for (const l of aLinks) {
-      const other = bLinksById.get(l.id);
-      if (!other) return false;
-      if (l.fromItemId !== other.fromItemId) return false;
-      if (l.toItemId !== other.toItemId) return false;
-      if (l.fromPortKind !== other.fromPortKind) return false;
-      if (l.toPortKind !== other.toPortKind) return false;
-      if (Number(l.fromPortIndex) !== Number(other.fromPortIndex)) return false;
-      if (Number(l.toPortIndex) !== Number(other.toPortIndex)) return false;
-      if (l.kind !== other.kind) return false;
-      if (l.color !== other.color) return false;
-      if ((l.name || '') !== (other.name || '')) return false;
-    }
-
-    return true;
-  }, []);
+  const samePlanSnapshot = useCallback(
+    (current: PlanSnapshotComparable, latest: PlanSnapshotComparable, options?: { ignoreDims?: boolean }) =>
+      samePlanSnapshotUtil(current, latest, options),
+    []
+  );
 
   const samePlanSnapshotIgnoringDims = useCallback(
-    (
-      a: {
-        imageUrl: string;
-        width?: number;
-        height?: number;
-        scale?: any;
-        objects: any[];
-        views?: any[];
-        rooms?: any[];
-        corridors?: any[];
-        racks?: any[];
-        rackItems?: any[];
-        rackLinks?: any[];
-      },
-      b: {
-        imageUrl: string;
-        width?: number;
-        height?: number;
-        scale?: any;
-        objects: any[];
-        views?: any[];
-        rooms?: any[];
-        corridors?: any[];
-        racks?: any[];
-        rackItems?: any[];
-        rackLinks?: any[];
-      }
-    ) => samePlanSnapshot({ ...a, width: undefined, height: undefined }, { ...b, width: undefined, height: undefined }),
+    (a: PlanSnapshotComparable, b: PlanSnapshotComparable) => samePlanSnapshot(a, b, { ignoreDims: true }),
     [samePlanSnapshot]
   );
 
   const applyHistorySnapshot = useCallback(
-    (snap: HistorySnapshot) => {
+    (entry: HistoryEntry) => {
       if (!planId) return;
+      const snap = entry.snap;
       historyLockRef.current = true;
       historySnapshotRef.current = snap;
-      historyKeyRef.current = JSON.stringify(snap);
+      historyKeyRef.current = entry.key;
       setFloorPlanContent(planId, {
         ...snap,
         printArea: snap.printArea ?? undefined,
@@ -5462,7 +4858,7 @@ const PlanView = ({ planId }: Props) => {
     const current = historySnapshotRef.current;
     const prev = undoStackRef.current.pop();
     if (!prev || !current) return false;
-    redoStackRef.current.push(current);
+    redoStackRef.current.push({ snap: current, key: historyKeyRef.current });
     applyHistorySnapshot(prev);
     return true;
   }, [applyHistorySnapshot]);
@@ -5471,7 +4867,7 @@ const PlanView = ({ planId }: Props) => {
     const current = historySnapshotRef.current;
     const next = redoStackRef.current.pop();
     if (!next || !current) return false;
-    undoStackRef.current.push(current);
+    undoStackRef.current.push({ snap: current, key: historyKeyRef.current });
     applyHistorySnapshot(next);
     return true;
   }, [applyHistorySnapshot]);
@@ -5494,7 +4890,7 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     if (prevKey === nextKey) return;
-    undoStackRef.current.push(prev);
+    undoStackRef.current.push({ snap: prev, key: prevKey });
     if (undoStackRef.current.length > 80) undoStackRef.current.shift();
     redoStackRef.current = [];
     historySnapshotRef.current = snap;
@@ -5505,48 +4901,31 @@ const PlanView = ({ planId }: Props) => {
   // Track plan state when the user enters it. Used for the navigation prompt.
   useEffect(() => {
     if (!plan) return;
-    const snap = toSnapshot(plan);
+    const snap = getPlanSnapshot(plan);
     if (!entrySnapshotRef.current || !touchedRef.current) entrySnapshotRef.current = snap;
-  }, [plan, toSnapshot]);
+  }, [plan, getPlanSnapshot]);
 
   const getPlanUnsavedChanges = useCallback(
     (targetPlan?: FloorPlan | null) => {
       if (!targetPlan) return false;
       const revisions = targetPlan.revisions || [];
-      const current = toSnapshot(targetPlan);
+      const current = getPlanSnapshot(targetPlan);
       if (!revisions.length) {
         const base = baselineSnapshotRef.current;
         if (!base) return false;
         return !samePlanSnapshot(current, base);
       }
-      const latest: any = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))[0];
-      const latestSnapshot = {
-        imageUrl: latest.imageUrl,
-        width: latest.width,
-        height: latest.height,
-        scale: latest.scale,
-        safetyCardLayout: latest.safetyCardLayout,
-        objects: latest.objects,
-        views: latest.views,
-        rooms: latest.rooms,
-        corridors: latest.corridors,
-        roomDoors: (latest as any).roomDoors,
-        racks: latest.racks,
-        rackItems: latest.rackItems,
-        rackLinks: latest.rackLinks
-      };
-      const normalizedCurrent = {
-        ...current,
-        corridors: latestSnapshot.corridors === undefined ? undefined : current.corridors,
-        roomDoors: (latestSnapshot as any).roomDoors === undefined ? undefined : (current as any).roomDoors,
-        racks: latestSnapshot.racks === undefined ? undefined : current.racks,
-        rackItems: latestSnapshot.rackItems === undefined ? undefined : current.rackItems,
-        rackLinks: latestSnapshot.rackLinks === undefined ? undefined : current.rackLinks,
-        safetyCardLayout: latestSnapshot.safetyCardLayout === undefined ? undefined : current.safetyCardLayout
-      };
-      return !samePlanSnapshot(normalizedCurrent, latestSnapshot);
+      const latest = getLatestRevisionCached(revisions as any[]);
+      if (!latest) return false;
+      const latestSnapshot = getRevisionSnapshotCached(latest);
+      return getCachedUnsavedAgainstLatest(
+        unsavedAgainstLatestCacheRef.current,
+        current,
+        latestSnapshot,
+        samePlanSnapshot
+      );
     },
-    [samePlanSnapshot, toSnapshot]
+    [getLatestRevisionCached, getPlanSnapshot, getRevisionSnapshotCached, samePlanSnapshot]
   );
 
   const { canUndo, canRedo } = useMemo(
@@ -5561,8 +4940,8 @@ const PlanView = ({ planId }: Props) => {
     if (!plan) return false;
     const entry = entrySnapshotRef.current;
     if (!entry) return false;
-    return !samePlanSnapshotIgnoringDims(entry, toSnapshot(plan));
-  }, [plan, samePlanSnapshotIgnoringDims, toSnapshot]);
+    return !samePlanSnapshotIgnoringDims(entry, getPlanSnapshot(plan));
+  }, [plan, samePlanSnapshotIgnoringDims, getPlanSnapshot]);
 
   const hasNavigationEdits = useMemo(
     () => touchedRef.current && hasLocalEdits,
@@ -5580,7 +4959,7 @@ const PlanView = ({ planId }: Props) => {
     if (revisions.length) return;
     const base = baselineSnapshotRef.current;
     if (!base) return;
-    const current = toSnapshot(plan);
+    const current = getPlanSnapshot(plan);
     if (samePlanSnapshot(current, base)) return;
 
     const baseDimsMissing = (base.width ?? null) === null && (base.height ?? null) === null;
@@ -5589,7 +4968,7 @@ const PlanView = ({ planId }: Props) => {
     if (!samePlanSnapshotIgnoringDims(base, current)) return;
 
     baselineSnapshotRef.current = current;
-  }, [plan, samePlanSnapshotIgnoringDims, toSnapshot]);
+  }, [plan, samePlanSnapshotIgnoringDims, getPlanSnapshot]);
 
   const pendingNavigateRef = useRef<string | null>(null);
 
@@ -5838,7 +5217,7 @@ const PlanView = ({ planId }: Props) => {
     if (!plan) return;
     const revisions = plan.revisions || [];
     if (revisions.length) {
-      const latest = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0))[0];
+      const latest = getLatestRevisionCached(revisions as any[]);
       if (latest?.id) restoreRevision(plan.id, latest.id);
       return;
     }
@@ -5858,7 +5237,7 @@ const PlanView = ({ planId }: Props) => {
       rackItems: base.rackItems,
       rackLinks: base.rackLinks
     });
-  }, [plan, restoreRevision, setFloorPlanContent]);
+  }, [getLatestRevisionCached, plan, restoreRevision, setFloorPlanContent]);
 
   const forceSaveNow = useCallback(async () => {
     try {
@@ -5900,9 +5279,9 @@ const PlanView = ({ planId }: Props) => {
       details: { bump, rev: `${next.major}.${next.minor}`, note: 'Unlock request' }
     });
     resetTouched();
-    entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+    entrySnapshotRef.current = getPlanSnapshot(planRef.current || plan);
     return forceSaveNow();
-  }, [addRevision, forceSaveNow, hasAnyRevision, hasNavigationEdits, latestRev.major, latestRev.minor, plan, postAuditEvent, push, resetTouched, t, toSnapshot]);
+  }, [addRevision, forceSaveNow, hasAnyRevision, hasNavigationEdits, latestRev.major, latestRev.minor, plan, postAuditEvent, push, resetTouched, t, getPlanSnapshot]);
 
 	  const handleUnlockResponse = useCallback(
 	    async (action: 'grant' | 'grant_save' | 'grant_discard' | 'deny') => {
@@ -5924,7 +5303,7 @@ const PlanView = ({ planId }: Props) => {
         if (hasNavigationEdits) {
           revertUnsavedChanges();
           resetTouched();
-          entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+          entrySnapshotRef.current = getPlanSnapshot(planRef.current || plan);
         }
       }
       sendWs({ type: 'unlock_response', requestId: unlockPrompt.requestId, planId: unlockPrompt.planId, action });
@@ -5947,7 +5326,7 @@ const PlanView = ({ planId }: Props) => {
       saveRevisionForUnlock,
       sendWs,
       t,
-      toSnapshot,
+      getPlanSnapshot,
       unlockBusy,
       unlockPrompt
     ]
@@ -6004,7 +5383,7 @@ const PlanView = ({ planId }: Props) => {
 	        if (hasNavigationEdits) {
 	          revertUnsavedChanges();
 	          resetTouched();
-	          entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+	          entrySnapshotRef.current = getPlanSnapshot(planRef.current || plan);
 	        }
 	      }
 	      // Release lock (best-effort); the server will also enforce the deadline.
@@ -6013,7 +5392,7 @@ const PlanView = ({ planId }: Props) => {
 	      setForceUnlockIncoming(null);
 	      return ok;
 	    },
-	    [hasNavigationEdits, plan, planId, resetTouched, revertUnsavedChanges, saveRevisionForUnlock, sendWs, toSnapshot]
+	    [hasNavigationEdits, plan, planId, resetTouched, revertUnsavedChanges, saveRevisionForUnlock, sendWs, getPlanSnapshot]
 	  );
 
 	  useEffect(() => {
@@ -9556,6 +8935,267 @@ const PlanView = ({ planId }: Props) => {
     updateObject
   ]);
 
+  const runDeleteShortcut = useMemo(
+    () =>
+      createPlanDeleteShortcutHandler({
+        markTouched,
+        updateFloorPlan,
+        setSelectedCorridorDoor,
+        setSelectedRoomDoorId,
+        setConfirmDeleteRoomId,
+        setConfirmDeleteRoomIds,
+        setConfirmDeleteCorridorId,
+        deleteLink,
+        postAuditEvent,
+        push,
+        setSelectedLinkId,
+        setPendingRoomDeletes,
+        setConfirmDelete,
+        isRackLinkId,
+        t
+      }),
+    [
+      deleteLink,
+      markTouched,
+      postAuditEvent,
+      push,
+      setConfirmDelete,
+      setConfirmDeleteCorridorId,
+      setConfirmDeleteRoomId,
+      setConfirmDeleteRoomIds,
+      setPendingRoomDeletes,
+      setSelectedCorridorDoor,
+      setSelectedLinkId,
+      setSelectedRoomDoorId,
+      t,
+      updateFloorPlan
+    ]
+  );
+
+  const runTextShortcut = useMemo(
+    () =>
+      createPlanTextShortcutHandler({
+        markTouched,
+        updateObject,
+        textFontValues: TEXT_FONT_VALUES,
+        textColorValues: TEXT_COLOR_VALUES
+      }),
+    [markTouched, updateObject]
+  );
+
+  const runConfirmDeleteShortcut = useMemo(
+    () =>
+      createPlanConfirmDeleteShortcutHandler({
+        deleteObject,
+        push,
+        setConfirmDelete,
+        setContextMenu,
+        clearSelection,
+        t
+      }),
+    [clearSelection, deleteObject, push, setConfirmDelete, setContextMenu, t]
+  );
+
+  const runScaleShortcut = useMemo(
+    () =>
+      createPlanScaleShortcutHandler({
+        markTouched,
+        updateObject,
+        updateRoom,
+        setLastQuoteScale,
+        setLastObjectScale
+      }),
+    [markTouched, setLastObjectScale, setLastQuoteScale, updateObject, updateRoom]
+  );
+
+  const runArrowShortcut = useMemo(
+    () =>
+      createPlanArrowShortcutHandler({
+        markTouched,
+        moveObject,
+        updateObject,
+        updateRoom,
+        notifyNonPeopleRoomBlocked
+      }),
+    [markTouched, moveObject, notifyNonPeopleRoomBlocked, updateObject, updateRoom]
+  );
+
+  const runCtrlArrowQuoteShortcut = useMemo(
+    () =>
+      createPlanCtrlArrowQuoteShortcutHandler({
+        markTouched,
+        getQuoteOrientation,
+        updateQuoteLabelPos
+      }),
+    [getQuoteOrientation, markTouched, updateQuoteLabelPos]
+  );
+
+  const runRotateShortcut = useMemo(
+    () =>
+      createPlanRotateShortcutHandler({
+        markTouched,
+        updateObject,
+        isDeskType,
+        isCameraType
+      }),
+    [isCameraType, markTouched, updateObject]
+  );
+
+  const captureEntrySnapshot = useCallback(
+    (fallbackPlan: FloorPlan) => {
+      entrySnapshotRef.current = getPlanSnapshot(planRef.current || fallbackPlan);
+    },
+    [getPlanSnapshot]
+  );
+
+  const getLastInserted = useCallback(() => lastInsertedRef.current, []);
+  const clearLastInserted = useCallback(() => {
+    lastInsertedRef.current = null;
+  }, []);
+
+  const runSaveShortcut = useMemo(
+    () =>
+      createPlanSaveShortcutHandler({
+        getPlanUnsavedChanges,
+        push,
+        t,
+        setSaveRevisionModalPreset,
+        setSaveRevisionOpen,
+        addRevision,
+        postAuditEvent,
+        resetTouched,
+        captureEntrySnapshot,
+        getLatestRevisionCached,
+        getRevisionVersion
+      }),
+    [
+      addRevision,
+      captureEntrySnapshot,
+      getLatestRevisionCached,
+      getPlanUnsavedChanges,
+      postAuditEvent,
+      push,
+      resetTouched,
+      setSaveRevisionModalPreset,
+      t
+    ]
+  );
+
+  const runUndoRedoShortcut = useMemo(
+    () =>
+      createPlanUndoRedoShortcutHandler({
+        performUndo,
+        performRedo,
+        getLastInserted,
+        clearLastInserted,
+        setUndoConfirm
+      }),
+    [clearLastInserted, getLastInserted, performRedo, performUndo, setUndoConfirm]
+  );
+
+  const runSelectAllShortcut = useMemo(
+    () =>
+      createPlanSelectAllShortcutHandler({
+        setSelectedCorridorId,
+        setSelectedCorridorDoor,
+        setSelectedRoomDoorId,
+        setSelection,
+        setContextMenu,
+        setSelectedRoomId,
+        setSelectedRoomIds,
+        setSelectedLinkId,
+        push,
+        t
+      }),
+    [push, setSelection, setSelectedCorridorId, setSelectedCorridorDoor, setSelectedRoomDoorId, t]
+  );
+
+  const runEscapeSelectionShortcut = useMemo(
+    () =>
+      createPlanEscapeSelectionShortcutHandler({
+        setContextMenu,
+        clearSelection,
+        setSelectedRoomId,
+        setSelectedRoomIds,
+        setSelectedCorridorId,
+        setSelectedCorridorDoor,
+        setSelectedRoomDoorId,
+        setSelectedLinkId
+      }),
+    [clearSelection, setSelectedCorridorId, setSelectedCorridorDoor, setSelectedRoomDoorId]
+  );
+
+  const runBlockingUiShortcut = useMemo(
+    () =>
+      createPlanBlockingUiShortcutHandler({
+        setCorridorDoorLinkModal,
+        setCorridorDoorModal,
+        setCorridorConnectionModal,
+        setCorridorModal
+      }),
+    [setCorridorConnectionModal, setCorridorDoorLinkModal, setCorridorDoorModal, setCorridorModal]
+  );
+
+  const runDraftCancelShortcut = useMemo(
+    () =>
+      createPlanDraftCancelShortcutHandler({
+        setRoomDrawMode,
+        setCorridorDrawMode,
+        setCorridorDoorDraft,
+        setRoomDoorDraft,
+        setLinkFromId,
+        push,
+        t
+      }),
+    [push, setCorridorDrawMode, setCorridorDoorDraft, setLinkFromId, setRoomDoorDraft, setRoomDrawMode, t]
+  );
+
+  const runDrawingShortcut = useMemo(
+    () =>
+      createPlanDrawingShortcutHandler({
+        cancelScaleMode,
+        markTouched,
+        deleteObject,
+        setWallDraftPoints,
+        setWallDraftPointer,
+        finishWallDraw,
+        startWallDraw,
+        startMeasure,
+        stopMeasure,
+        startQuote,
+        stopQuote,
+        convertMeasurementToQuotes,
+        setMeasureClosed,
+        setMeasureFinished,
+        setMeasurePointer,
+        setMeasurePoints,
+        showMeasureToast,
+        setQuotePoints,
+        setQuotePointer,
+        wallDraftSegmentIdsRef,
+        wallDraftPointsRef,
+        measureClosedRef,
+        measureFinishedRef,
+        measurePointsRef
+      }),
+    [
+      cancelScaleMode,
+      convertMeasurementToQuotes,
+      deleteObject,
+      finishWallDraw,
+      markTouched,
+      setMeasureClosed,
+      setMeasureFinished,
+      setMeasurePoints,
+      showMeasureToast,
+      startMeasure,
+      startQuote,
+      startWallDraw,
+      stopMeasure,
+      stopQuote
+    ]
+  );
+
 	  useEffect(() => {
 	    const handler = (e: KeyboardEvent) => {
 	      if ((useUIStore.getState() as any)?.clientChatOpen) return;
@@ -9566,91 +9206,40 @@ const PlanView = ({ planId }: Props) => {
       const currentConfirm = confirmDeleteRef.current;
       const currentSelectedIds = selectedObjectIdsRef.current;
       const currentPlan = planRef.current;
-      const hasBlockingModal = !!corridorModal || !!corridorConnectionModal || !!corridorDoorModal || !!corridorDoorLinkModal;
-      const hasObjectSearchModal = !!allTypesOpen;
-
-      // While the "All objects" search modal is open, do not trigger plan keyboard shortcuts.
-      // Let keys flow to the modal (including Enter / Escape) without interception here.
-      if (hasObjectSearchModal) return;
-
-      if (hasBlockingModal && e.key === 'Escape') {
-        e.preventDefault();
-        if (corridorDoorLinkModal) setCorridorDoorLinkModal(null);
-        else if (corridorDoorModal) setCorridorDoorModal(null);
-        else if (corridorConnectionModal) setCorridorConnectionModal(null);
-        else if (corridorModal) setCorridorModal(null);
-        return;
-      }
-      if (hasBlockingModal) return;
-
-      if (scaleMode && e.key === 'Escape') {
-        e.preventDefault();
-        cancelScaleMode();
-        return;
-      }
-
-      if (wallDrawMode && e.key === 'Escape') {
-        e.preventDefault();
-        const ids = wallDraftSegmentIdsRef.current;
-        if (ids.length) {
-          const lastId = ids.pop();
-          if (lastId) {
-            markTouched();
-            deleteObject(lastId);
+      const currentPlanObjects = (((currentPlan as FloorPlan | null)?.objects || []) as MapObject[]);
+      let selectedObjectLookup: Map<string, MapObject> | null = null;
+      const getSelectedObjectById = (id: string): MapObject | undefined => {
+        if (!currentPlanObjects.length) return undefined;
+        if (currentSelectedIds.length >= 6) {
+          if (!selectedObjectLookup) {
+            selectedObjectLookup = new Map(currentPlanObjects.map((obj) => [obj.id, obj] as const));
           }
-          const next = wallDraftPointsRef.current.slice(0, -1);
-          wallDraftPointsRef.current = next;
-          setWallDraftPoints(next);
-          setWallDraftPointer(null);
-        } else {
-          finishWallDraw({ cancel: true });
+          return selectedObjectLookup.get(id);
         }
-        return;
-      }
-
-      if (!isTyping && wallDrawMode && e.key === 'Enter') {
-        e.preventDefault();
-        finishWallDraw();
-        return;
-      }
-
-      if (measureMode && e.key === 'Escape') {
-        e.preventDefault();
-        stopMeasure();
-        return;
-      }
-
-      if (quoteMode && e.key === 'Escape') {
-        e.preventDefault();
-        stopQuote();
-        return;
-      }
-
-      if (!isTyping && e.key.toLowerCase() === 'm') {
-        e.preventDefault();
-        if (measureMode) {
-          stopMeasure();
-        } else {
-          startMeasure();
-        }
-        return;
-      }
-
-	      if (!isTyping && measureMode && e.key.toLowerCase() === 'q') {
-	        e.preventDefault();
-	        convertMeasurementToQuotes();
-	        return;
-	      }
-
-	      if (!isTyping && e.key.toLowerCase() === 'q') {
-	        e.preventDefault();
-	        if (quoteMode) {
-	          stopQuote();
-	        } else {
-	          startQuote();
-	        }
-	        return;
-	      }
+        return currentPlanObjects.find((obj) => obj.id === id);
+      };
+      const resolveObjectsByIds = (ids: string[]) =>
+        ids.map((id) => getSelectedObjectById(id)).filter((obj): obj is MapObject => !!obj);
+      if (runBlockingUiShortcut(
+        e,
+        !!allTypesOpen,
+        corridorModal,
+        corridorConnectionModal,
+        corridorDoorModal,
+        corridorDoorLinkModal
+      )) return;
+      const isDrawingKey =
+        e.key === 'Escape' ||
+        e.key === 'Enter' ||
+        e.key === 'Backspace' ||
+        e.key === 'Delete' ||
+        e.key === 'm' ||
+        e.key === 'M' ||
+        e.key === 'q' ||
+        e.key === 'Q' ||
+        e.key === 'w' ||
+        e.key === 'W';
+      if (isDrawingKey && runDrawingShortcut(e, isTyping, scaleMode, wallDrawMode, measureMode, quoteMode)) return;
 
 	      if (!isTyping && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'a') {
 	        e.preventDefault();
@@ -9714,120 +9303,16 @@ const PlanView = ({ planId }: Props) => {
         return;
       }
 
-      if (!isTyping && e.key.toLowerCase() === 'w') {
-        e.preventDefault();
-        if (wallDrawMode) {
-          finishWallDraw();
-        } else {
-          startWallDraw();
-        }
-        return;
-      }
+      if (runDraftCancelShortcut(
+        e,
+        roomDrawMode,
+        corridorDrawMode,
+        corridorDoorDraft,
+        roomDoorDraft,
+        linkFromId
+      )) return;
 
-      if (!isTyping && wallDrawMode && (e.key === 'Backspace' || e.key === 'Delete')) {
-        e.preventDefault();
-        const ids = wallDraftSegmentIdsRef.current;
-        if (ids.length) {
-          const lastId = ids.pop();
-          if (lastId) {
-            markTouched();
-            deleteObject(lastId);
-          }
-          const next = wallDraftPointsRef.current.slice(0, -1);
-          wallDraftPointsRef.current = next;
-          setWallDraftPoints(next);
-          setWallDraftPointer(null);
-        } else {
-          finishWallDraw({ cancel: true });
-        }
-        return;
-      }
-
-      if (!isTyping && measureMode && (e.key === 'Backspace' || e.key === 'Delete')) {
-        e.preventDefault();
-        setMeasureClosed(false);
-        setMeasureFinished(false);
-        measureClosedRef.current = false;
-        measureFinishedRef.current = false;
-        const next = measurePointsRef.current.slice(0, -1);
-        measurePointsRef.current = next;
-        setMeasurePoints(next);
-        showMeasureToast(next, { closed: false, finished: false });
-        return;
-      }
-
-      if (!isTyping && quoteMode && (e.key === 'Backspace' || e.key === 'Delete')) {
-        e.preventDefault();
-        setQuotePoints((prev) => prev.slice(0, -1));
-        setQuotePointer(null);
-        return;
-      }
-
-      if (!isTyping && measureMode && e.key === 'Enter') {
-        e.preventDefault();
-        setMeasureFinished(true);
-        measureFinishedRef.current = true;
-        setMeasurePointer(null);
-        showMeasureToast(measurePointsRef.current, { closed: measureClosedRef.current, finished: true });
-        return;
-      }
-
-      if (roomDrawMode && e.key === 'Escape') {
-        e.preventDefault();
-        setRoomDrawMode(null);
-        push(t({ it: 'Disegno stanza annullato', en: 'Room drawing cancelled' }), 'info');
-        return;
-      }
-
-      if (corridorDrawMode && e.key === 'Escape') {
-        e.preventDefault();
-        setCorridorDrawMode(null);
-        push(t({ it: 'Disegno corridoio annullato', en: 'Corridor drawing cancelled' }), 'info');
-        return;
-      }
-
-      if (corridorDoorDraft && e.key === 'Escape') {
-        e.preventDefault();
-        setCorridorDoorDraft(null);
-        push(t({ it: 'Disegno porta corridoio annullato', en: 'Corridor door drawing cancelled' }), 'info');
-        return;
-      }
-
-      if (roomDoorDraft && e.key === 'Escape') {
-        e.preventDefault();
-        setRoomDoorDraft(null);
-        push(t({ it: 'Inserimento porta di collegamento annullato', en: 'Connecting door placement cancelled' }), 'info');
-        return;
-      }
-
-      if (e.key === 'Escape' && linkFromId) {
-        e.preventDefault();
-        setLinkFromId(null);
-        push(t({ it: 'Creazione collegamento annullata', en: 'Link creation cancelled' }), 'info');
-        return;
-      }
-
-      if (currentConfirm) {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          setConfirmDelete(null);
-          return;
-        }
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          currentConfirm.forEach((id) => deleteObject(id));
-          push(
-            currentConfirm.length === 1
-              ? t({ it: 'Oggetto eliminato', en: 'Object deleted' })
-              : t({ it: 'Oggetti eliminati', en: 'Objects deleted' }),
-            'info'
-          );
-          setConfirmDelete(null);
-          setContextMenu(null);
-          clearSelection();
-          return;
-        }
-      }
+      if (runConfirmDeleteShortcut(e, currentConfirm)) return;
 
       const isCopy = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c';
       if (!isTyping && isCopy) {
@@ -9847,55 +9332,7 @@ const PlanView = ({ planId }: Props) => {
 
       const isCmdS = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
       if (isCmdS) {
-        if (saveRevisionOpen) {
-          e.preventDefault();
-          return;
-        }
-        if (!currentPlan || isReadOnlyRef.current) return;
-        if (!getPlanUnsavedChanges(currentPlan as FloorPlan)) {
-          e.preventDefault();
-          push(t({ it: 'Nessuna modifica da salvare', en: 'No changes to save' }), 'info');
-          return;
-        }
-        if (e.shiftKey) {
-          e.preventDefault();
-          setSaveRevisionModalPreset({ initialBump: 'major', requireNoteForMajor: true });
-          setSaveRevisionOpen(true);
-          return;
-        }
-        e.preventDefault();
-        const revisions: any[] = (currentPlan as FloorPlan).revisions || [];
-        const sorted = [...revisions].sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0));
-        const first = sorted[0];
-        const latest =
-          first && typeof first.revMajor === 'number' && typeof first.revMinor === 'number'
-            ? { major: first.revMajor, minor: first.revMinor }
-            : first && typeof first.version === 'number'
-              ? { major: 1, minor: Math.max(0, Number(first.version) - 1) }
-              : { major: 1, minor: 0 };
-        const next = revisions.length ? { major: latest.major, minor: latest.minor + 1 } : { major: 1, minor: 0 };
-        const stamp = new Date().toLocaleString();
-        const quickName = t({ it: 'Aggiornamento rapido', en: 'Quick update' });
-        addRevision((currentPlan as FloorPlan).id, {
-          bump: 'minor',
-          name: quickName,
-          description: t({ it: `Aggiornamento rapido ${stamp}`, en: `Quick update ${stamp}` })
-        });
-        push(
-          t({
-            it: `Aggiornamento rapido Ver: ${next.major}.${next.minor}`,
-            en: `Quick update Ver: ${next.major}.${next.minor}`
-          }),
-          'success'
-        );
-        postAuditEvent({
-          event: 'revision_quick_save',
-          scopeType: 'plan',
-          scopeId: (currentPlan as FloorPlan).id,
-          details: { rev: `${next.major}.${next.minor}`, note: stamp }
-        });
-        resetTouched();
-        entrySnapshotRef.current = toSnapshot(planRef.current || currentPlan);
+        runSaveShortcut(e, (currentPlan as FloorPlan) || null, !!isReadOnlyRef.current, saveRevisionOpen);
         return;
       }
 
@@ -9905,76 +9342,27 @@ const PlanView = ({ planId }: Props) => {
       const isArrowDown = e.key === 'ArrowDown' || e.code === 'ArrowDown';
       const isArrow = isArrowUp || isArrowDown || isArrowLeft || isArrowRight;
       const isCtrlArrow = (e.ctrlKey || e.metaKey) && isArrow;
-      if (isCtrlArrow) {
-        const ids = currentSelectedIds.length
-          ? currentSelectedIds
-          : (selectedObjectIdRef.current ? [selectedObjectIdRef.current] : []);
-        if (!ids.length || !currentPlan || isReadOnlyRef.current) return;
-        const quoteObjs = ids
-          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
-          .filter((obj): obj is MapObject => !!obj && obj.type === 'quote');
-        if (quoteObjs.length) {
-          e.preventDefault();
-          markTouched();
-          for (const obj of quoteObjs) {
-            const orientation = getQuoteOrientation(obj.points);
-            const currentRaw = String((obj as any)?.quoteLabelPos || 'center');
-            const currentPos =
-              orientation === 'vertical'
-                ? (currentRaw === 'left' || currentRaw === 'right' || currentRaw === 'center' ? currentRaw : 'center')
-                : (currentRaw === 'above' || currentRaw === 'below' || currentRaw === 'center' ? currentRaw : 'center');
-            let nextPos: 'center' | 'above' | 'below' | 'left' | 'right' | null = null;
-            if (orientation === 'vertical') {
-              if (isArrowLeft) {
-                if (currentPos === 'right') nextPos = 'center';
-                else if (currentPos === 'center') nextPos = 'left';
-                else nextPos = 'left';
-              } else if (isArrowRight) {
-                if (currentPos === 'left') nextPos = 'center';
-                else if (currentPos === 'center') nextPos = 'right';
-                else nextPos = 'right';
-              } else if (isArrowUp || isArrowDown) {
-                nextPos = 'center';
-              }
-            } else {
-              if (isArrowUp) {
-                if (currentPos === 'below') nextPos = 'center';
-                else if (currentPos === 'center') nextPos = 'above';
-                else nextPos = 'above';
-              } else if (isArrowDown) {
-                if (currentPos === 'above') nextPos = 'center';
-                else if (currentPos === 'center') nextPos = 'below';
-                else nextPos = 'below';
-              } else if (isArrowLeft || isArrowRight) {
-                nextPos = 'center';
-              }
-            }
-            if (nextPos) updateQuoteLabelPos(obj.id, nextPos, orientation);
-          }
-          return;
-        }
-      }
+      if (isCtrlArrow && runCtrlArrowQuoteShortcut(
+        e,
+        (currentPlan as FloorPlan) || null,
+        currentSelectedIds,
+        selectedObjectIdRef.current,
+        !!isReadOnlyRef.current,
+        resolveObjectsByIds,
+        isArrowLeft,
+        isArrowRight,
+        isArrowUp,
+        isArrowDown
+      )) return;
       const isRotateShortcut = (e.ctrlKey || e.metaKey) && (isArrowLeft || isArrowRight);
-      if (isRotateShortcut) {
-        if (!currentSelectedIds.length || !currentPlan) return;
-        if (isReadOnlyRef.current) return;
-        const rotatable = currentSelectedIds
-          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
-          .filter(
-            (obj): obj is MapObject =>
-              !!obj &&
-              (isDeskType(obj.type) || isCameraType(obj.type) || obj.type === 'text' || obj.type === 'image' || obj.type === 'photo')
-          );
-        if (!rotatable.length) return;
-        e.preventDefault();
-        markTouched();
-        const delta = isArrowLeft ? -90 : 90;
-        for (const obj of rotatable) {
-          const current = Number(obj.rotation || 0);
-          updateObject(obj.id, { rotation: (current + delta + 360) % 360 });
-        }
-        return;
-      }
+      if (isRotateShortcut && runRotateShortcut(
+        e,
+        (currentPlan as FloorPlan) || null,
+        currentSelectedIds,
+        !!isReadOnlyRef.current,
+        resolveObjectsByIds,
+        isArrowLeft
+      )) return;
 
       if (isTyping) return;
 
@@ -9984,7 +9372,7 @@ const PlanView = ({ planId }: Props) => {
         if (currentSelectedIds.length) {
           if (currentSelectedIds.length !== 1) return;
           const targetId = currentSelectedIds[0];
-          const obj = (currentPlan as FloorPlan).objects?.find((o) => o.id === targetId);
+          const obj = getSelectedObjectById(targetId);
           if (!obj || isDeskType(obj.type)) return;
           e.preventDefault();
           handleEdit(targetId);
@@ -10003,318 +9391,76 @@ const PlanView = ({ planId }: Props) => {
         }
         return;
       }
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && key === 'b' && !e.shiftKey) {
-        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
-        const textObjs = currentSelectedIds
-          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
-          .filter((obj): obj is MapObject => !!obj && obj.type === 'text');
-        if (!textObjs.length) return;
-        e.preventDefault();
-        markTouched();
-        for (const obj of textObjs) {
-          const current = !!(obj as any).textBg;
-          updateObject(obj.id, { textBg: !current });
-        }
-        return;
-      }
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && (key === 'f' || (key === 'b' && e.shiftKey))) {
-        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
-        const textObjs = currentSelectedIds
-          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
-          .filter((obj): obj is MapObject => !!obj && obj.type === 'text');
-        if (!textObjs.length) return;
-        e.preventDefault();
-        markTouched();
-        const fontValues = TEXT_FONT_OPTIONS.map((opt) => opt.value);
-        if (!fontValues.length) return;
-        const delta = key === 'f' ? 1 : -1;
-        for (const obj of textObjs) {
-          const currentFont = String((obj as any).textFont || fontValues[0]);
-          const currentIndex = fontValues.indexOf(currentFont);
-          const safeIndex = currentIndex >= 0 ? currentIndex : 0;
-          const nextFont = fontValues[(safeIndex + delta + fontValues.length) % fontValues.length];
-          updateObject(obj.id, { textFont: nextFont });
-        }
-        return;
-      }
-
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && key === 'c') {
-        if (!currentSelectedIds.length || !currentPlan || isReadOnlyRef.current) return;
-        const textObjs = currentSelectedIds
-          .map((id) => (currentPlan as FloorPlan).objects?.find((o) => o.id === id))
-          .filter((obj): obj is MapObject => !!obj && obj.type === 'text');
-        if (!textObjs.length) return;
-        e.preventDefault();
-        markTouched();
-        const colorValues = TEXT_COLOR_OPTIONS.map((opt) => opt.value);
-        if (!colorValues.length) return;
-        const delta = e.shiftKey ? -1 : 1;
-        for (const obj of textObjs) {
-          const currentColor = String((obj as any).textColor || colorValues[0]).toLowerCase();
-          const currentIndex = colorValues.findIndex((c) => c.toLowerCase() === currentColor);
-          const safeIndex = currentIndex >= 0 ? currentIndex : 0;
-          const nextColor = colorValues[(safeIndex + delta + colorValues.length) % colorValues.length];
-          updateObject(obj.id, { textColor: nextColor });
-        }
-        return;
-      }
-
-		      const isScaleUp = (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !e.ctrlKey && !e.metaKey;
-	      const isScaleDown = (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') && !e.ctrlKey && !e.metaKey;
-	      if (isScaleUp || isScaleDown) {
-	        if (!currentPlan) return;
-	        if (isReadOnlyRef.current) return;
-          const selectedRoomKey = selectedRoomIdRef.current;
-          if (!currentSelectedIds.length && selectedRoomKey) {
-            const room = ((currentPlan as FloorPlan).rooms || []).find((entry) => entry.id === selectedRoomKey);
-            if (!room) return;
-            e.preventDefault();
-            markTouched();
-            const step = e.shiftKey ? 0.2 : 0.1;
-            const delta = isScaleUp ? step : -step;
-            const currentScale = Number((room as any).labelScale ?? 1) || 1;
-            const nextScale = Math.max(0.3, Math.min(3, currentScale + delta));
-            updateRoom((currentPlan as FloorPlan).id, room.id, { labelScale: nextScale } as any);
-            return;
-          }
-	        if (!currentSelectedIds.length) return;
-	        e.preventDefault();
-	        markTouched();
-	        const step = e.shiftKey ? 0.2 : 0.1;
-        const delta = isScaleUp ? step : -step;
-        const fontStep = e.shiftKey ? 4 : 2;
-        for (const id of currentSelectedIds) {
-          const obj = (currentPlan as FloorPlan).objects?.find((o) => o.id === id);
-          if (!obj || isWallType(obj.type)) continue;
-          if (obj.type === 'text') {
-            const currentSize = Number((obj as any).textSize ?? 18) || 18;
-            const nextSize = Math.max(6, Math.min(160, currentSize + (isScaleUp ? fontStep : -fontStep)));
-            updateObject(id, { textSize: nextSize });
-            continue;
-          }
-          if (obj.type === 'image') {
-            const nextScaleX = Math.max(0.2, Math.min(6, Number(obj.scaleX ?? 1) + delta));
-            const nextScaleY = Math.max(0.2, Math.min(6, Number(obj.scaleY ?? 1) + delta));
-            updateObject(id, { scaleX: nextScaleX, scaleY: nextScaleY });
-            continue;
-          }
-          if (obj.type === 'photo') {
-            const nextScale = Math.max(0.2, Math.min(2.4, Number(obj.scale ?? 1) + delta));
-            updateObject(id, { scale: nextScale });
-            continue;
-          }
-          const min = obj.type === 'quote' ? 0.5 : 0.2;
-          const max = obj.type === 'quote' ? 1.6 : 2.4;
-          const nextScale = Math.max(min, Math.min(max, Number(obj.scale ?? 1) + delta));
-          updateObject(id, { scale: nextScale });
-          if (obj.type === 'quote') {
-            setLastQuoteScale(nextScale);
-          } else {
-            setLastObjectScale(nextScale);
-          }
-        }
-        return;
-      }
+      if (runTextShortcut(e, (currentPlan as FloorPlan) || null, currentSelectedIds, !!isReadOnlyRef.current, resolveObjectsByIds)) return;
+      const isScaleKey = (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd' || e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract')
+        && !e.ctrlKey
+        && !e.metaKey;
+      if (isScaleKey && runScaleShortcut(
+        e,
+        (currentPlan as FloorPlan) || null,
+        currentSelectedIds,
+        selectedRoomIdRef.current,
+        !!isReadOnlyRef.current,
+        getSelectedObjectById,
+        isWallType
+      )) return;
 
       const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z';
       const isRedo =
         (e.ctrlKey || e.metaKey) &&
         (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'));
-      if (isUndo) {
-        if (!currentPlan || isReadOnlyRef.current) return;
-        e.preventDefault();
-        if (performUndo()) return;
-        const last = lastInsertedRef.current;
-        if (!last) return;
-        const exists = (currentPlan as FloorPlan).objects?.some((o) => o.id === last.id);
-        if (!exists) {
-          lastInsertedRef.current = null;
-          return;
-        }
-        setUndoConfirm(last);
-        return;
-      }
-      if (isRedo) {
-        if (!currentPlan || isReadOnlyRef.current) return;
-        e.preventDefault();
-        performRedo();
+      if (isUndo || isRedo) {
+        runUndoRedoShortcut(e, (currentPlan as FloorPlan) || null, !!isReadOnlyRef.current, isUndo);
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-        if (!currentPlan) return;
-        e.preventDefault();
-        const allIds = ((currentPlan as FloorPlan).objects || []).map((o) => o.id);
-        const allRoomIds = ((currentPlan as FloorPlan).rooms || []).map((r) => r.id);
-        setSelectedCorridorId(undefined);
-        setSelectedCorridorDoor(null);
-        setSelectedRoomDoorId(null);
-        setSelection(allIds);
-        setContextMenu(null);
-        setSelectedRoomId(allRoomIds.length === 1 ? allRoomIds[0] : undefined);
-        setSelectedRoomIds(allRoomIds);
-        setSelectedLinkId(null);
-        push(
-          t({
-            it: `Selezionati ${allIds.length} oggetti e ${allRoomIds.length} stanze (Ctrl/Cmd+A).`,
-            en: `Selected ${allIds.length} objects and ${allRoomIds.length} rooms (Ctrl/Cmd+A).`
-          }),
-          'info'
-        );
+      const isSelectAllShortcut = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a';
+      if (isSelectAllShortcut) {
+        runSelectAllShortcut(e, (currentPlan as FloorPlan) || null);
         return;
       }
 
       if (e.key === 'Escape') {
-        if (photoViewer) {
-          return;
-        }
-        if (currentSelectedIds.length || selectedRoomId || selectedRoomIds.length || selectedCorridorId || selectedCorridorDoor || selectedRoomDoorId) {
-          e.preventDefault();
-          setContextMenu(null);
-          clearSelection();
-          setSelectedRoomId(undefined);
-          setSelectedRoomIds([]);
-          setSelectedCorridorId(undefined);
-          setSelectedCorridorDoor(null);
-          setSelectedRoomDoorId(null);
-          setSelectedLinkId(null);
-        }
+        runEscapeSelectionShortcut(
+          e,
+          !!photoViewer,
+          currentSelectedIds,
+          selectedRoomId,
+          selectedRoomIds,
+          selectedCorridorId,
+          selectedCorridorDoor,
+          selectedRoomDoorId
+        );
         return;
       }
 
-	      if (isArrow) {
-	        if (!currentPlan) return;
-	        if (isReadOnlyRef.current) return;
-          const selectedRoomKey = selectedRoomIdRef.current;
-          if (!currentSelectedIds.length && selectedRoomKey && (isArrowUp || isArrowDown || isArrowLeft || isArrowRight)) {
-            const room = ((currentPlan as FloorPlan).rooms || []).find((entry) => entry.id === selectedRoomKey);
-            if (!room) return;
-            e.preventDefault();
-            markTouched();
-            if (e.shiftKey) {
-              const nextPos = isArrowUp ? 'top' : isArrowDown ? 'bottom' : isArrowLeft ? 'left' : 'right';
-              updateRoom((currentPlan as FloorPlan).id, room.id, { labelPosition: nextPos } as any);
-              return;
-            }
-            const z = zoomRef.current || 1;
-            const step = 1 / Math.max(0.2, z);
-            const dx = isArrowLeft ? -step : isArrowRight ? step : 0;
-            const dy = isArrowUp ? -step : isArrowDown ? step : 0;
-            const kind = (room.kind || (Array.isArray(room.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-            if (kind === 'poly') {
-              const points = (room.points || []).map((p) => ({ x: Number(p.x || 0) + dx, y: Number(p.y || 0) + dy }));
-              updateRoom((currentPlan as FloorPlan).id, room.id, { kind: 'poly', points } as any);
-            } else {
-              updateRoom((currentPlan as FloorPlan).id, room.id, {
-                kind: 'rect',
-                x: Number(room.x || 0) + dx,
-                y: Number(room.y || 0) + dy,
-                width: Number(room.width || 0),
-                height: Number(room.height || 0)
-              } as any);
-            }
-            return;
-          }
-	        if (!currentSelectedIds.length) return;
-	        e.preventDefault();
-	        const z = zoomRef.current || 1;
-        const step = (e.shiftKey ? 10 : 1) / Math.max(0.2, z);
-        const dx = isArrowLeft ? -step : isArrowRight ? step : 0;
-        const dy = isArrowUp ? -step : isArrowDown ? step : 0;
-        let didMutate = false;
-        for (const id of currentSelectedIds) {
-          const obj = (currentPlan as FloorPlan).objects?.find((o) => o.id === id);
-          if (!obj || isWallType(obj.type)) continue;
-          if (obj.type === 'quote') {
-            const pts = Array.isArray(obj.points) ? obj.points : [];
-            if (pts.length >= 2) {
-              didMutate = true;
-              updateObject(id, {
-                x: obj.x + dx,
-                y: obj.y + dy,
-                points: pts.map((p) => ({ x: p.x + dx, y: p.y + dy }))
-              });
-            }
-            continue;
-          }
-          const nextX = obj.x + dx;
-          const nextY = obj.y + dy;
-          const rawNextRoomId = getRoomIdAt((currentPlan as FloorPlan).rooms, nextX, nextY);
-          const nextRoomId = resolveRoomAssignmentForObject(rawNextRoomId, obj.type, ((currentPlan as FloorPlan).rooms || []) as Room[]);
-          if (rawNextRoomId && !nextRoomId && isUserType(obj.type)) {
-            notifyNonPeopleRoomBlocked();
-            continue;
-          }
-          const currentRoomId = obj.roomId ?? undefined;
-          didMutate = true;
-          moveObject(id, nextX, nextY);
-          if (currentRoomId !== nextRoomId) {
-            updateObject(id, { roomId: nextRoomId });
-          }
-        }
-        if (didMutate) markTouched();
-        return;
-      }
-      const isDeleteKey = e.key === 'Delete' || e.key === 'Backspace';
-      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && selectedCorridorDoor && isDeleteKey && currentPlan) {
-        e.preventDefault();
-        if (isReadOnlyRef.current) return;
-        const currentCorridors = ((((currentPlan as FloorPlan).corridors || []) as Corridor[])).filter(Boolean);
-        const next = currentCorridors.map((corridor) => {
-          if (corridor.id !== selectedCorridorDoor.corridorId) return corridor;
-          const doors = Array.isArray(corridor.doors) ? corridor.doors.filter((door) => door.id !== selectedCorridorDoor.doorId) : [];
-          return { ...corridor, doors };
-        });
-        markTouched();
-        updateFloorPlan((currentPlan as FloorPlan).id, { corridors: next } as any);
-        setSelectedCorridorDoor(null);
-        push(t({ it: 'Porta del corridoio eliminata', en: 'Corridor door deleted' }), 'info');
-        return;
-      }
-      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && selectedRoomDoorId && isDeleteKey && currentPlan) {
-        e.preventDefault();
-        if (isReadOnlyRef.current) return;
-        const currentDoors = Array.isArray((currentPlan as any).roomDoors) ? ((currentPlan as any).roomDoors as any[]) : [];
-        const nextDoors = currentDoors.filter((door) => String((door as any)?.id || '') !== String(selectedRoomDoorId));
-        markTouched();
-        updateFloorPlan((currentPlan as FloorPlan).id, { roomDoors: nextDoors as any } as any);
-        setSelectedRoomDoorId(null);
-        push(t({ it: 'Porta di collegamento eliminata', en: 'Connecting door deleted' }), 'info');
-        return;
-      }
-      if (!currentSelectedIds.length && selectedRoomIds.length && isDeleteKey && currentPlan) {
-        e.preventDefault();
-        if (isReadOnlyRef.current) return;
-        if (selectedRoomIds.length === 1) {
-          setConfirmDeleteRoomId(selectedRoomIds[0]);
-        } else {
-          setConfirmDeleteRoomIds([...selectedRoomIds]);
-        }
-        return;
-      }
-      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && selectedCorridorId && isDeleteKey && currentPlan) {
-        e.preventDefault();
-        if (isReadOnlyRef.current) return;
-        setConfirmDeleteCorridorId(selectedCorridorId);
-        return;
-      }
-      const linkId = selectedLinkIdRef.current;
-      if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && !selectedCorridorId && linkId && isDeleteKey && currentPlan) {
-        e.preventDefault();
-        if (isRackLinkId(linkId)) return;
-        if (isReadOnlyRef.current) return;
-        markTouched();
-        deleteLink((currentPlan as FloorPlan).id, linkId);
-        postAuditEvent({ event: 'link_delete', scopeType: 'plan', scopeId: (currentPlan as FloorPlan).id, details: { id: linkId } });
-        push(t({ it: 'Collegamento eliminato', en: 'Link deleted' }), 'info');
-        setSelectedLinkId(null);
-        return;
-      }
-      if (!currentSelectedIds.length || !currentPlan) return;
-      if (isDeleteKey) {
-        e.preventDefault();
-        setPendingRoomDeletes([...selectedRoomIds]);
-        setConfirmDelete([...currentSelectedIds]);
+      if (isArrow && runArrowShortcut(
+        e,
+        (currentPlan as FloorPlan) || null,
+        currentSelectedIds,
+        selectedRoomIdRef.current,
+        !!isReadOnlyRef.current,
+        zoomRef.current || 1,
+        getSelectedObjectById,
+        getRoomIdAt,
+        resolveRoomAssignmentForObject,
+        isUserType,
+        isWallType
+      )) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const handledDeleteShortcut = runDeleteShortcut(
+          e,
+          (currentPlan as FloorPlan) || null,
+          currentSelectedIds,
+          selectedRoomId,
+          selectedRoomIds,
+          selectedCorridorId,
+          selectedCorridorDoor,
+          selectedRoomDoorId,
+          selectedLinkIdRef.current,
+          !!isReadOnlyRef.current
+        );
+        if (handledDeleteShortcut) return;
       }
     };
     window.addEventListener('keydown', handler, true);
@@ -10331,6 +9477,7 @@ const PlanView = ({ planId }: Props) => {
     deleteObject,
     finishWallDraw,
     getPlanUnsavedChanges,
+    getLatestRevisionCached,
     getQuoteOrientation,
     isDeskType,
     isWallType,
@@ -10346,6 +9493,19 @@ const PlanView = ({ planId }: Props) => {
     quoteMode,
     requestPaste,
     resetTouched,
+    runArrowShortcut,
+    runConfirmDeleteShortcut,
+    runBlockingUiShortcut,
+    runCtrlArrowQuoteShortcut,
+    runDrawingShortcut,
+    runDraftCancelShortcut,
+    runEscapeSelectionShortcut,
+    runRotateShortcut,
+    runSaveShortcut,
+    runScaleShortcut,
+    runSelectAllShortcut,
+    runTextShortcut,
+    runUndoRedoShortcut,
     corridorDoorDraft,
     roomDoorDraft,
     corridorDrawMode,
@@ -10378,8 +9538,9 @@ const PlanView = ({ planId }: Props) => {
     stopQuote,
     showMeasureToast,
     t,
-    toSnapshot,
+    getPlanSnapshot,
     resolveRoomAssignmentForObject,
+    runDeleteShortcut,
 	    updateFloorPlan,
 	    updateObject,
     updateRoom,
@@ -22890,7 +22051,7 @@ const PlanView = ({ planId }: Props) => {
                 pendingNavigateRef.current = null;
                 revertUnsavedChanges();
                 resetTouched();
-                entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+                entrySnapshotRef.current = getPlanSnapshot(planRef.current || plan);
                 clearPendingSaveNavigate?.();
                 setSaveRevisionOpen(false);
                 if (to) navigate(to);
@@ -22901,7 +22062,7 @@ const PlanView = ({ planId }: Props) => {
                   clearPendingPostSaveAction();
                   revertUnsavedChanges();
                   resetTouched();
-                  entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+                  entrySnapshotRef.current = getPlanSnapshot(planRef.current || plan);
                   setSaveRevisionOpen(false);
                   if (action) void performPendingPostSaveAction(action);
                 }
@@ -22911,7 +22072,7 @@ const PlanView = ({ planId }: Props) => {
                     setPendingMeetingManagerPreset(null);
                     revertUnsavedChanges();
                     resetTouched();
-                    entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+                    entrySnapshotRef.current = getPlanSnapshot(planRef.current || plan);
                     setSaveRevisionOpen(false);
                     if (preset) {
                       setMeetingManagerPreset(preset);
@@ -22924,7 +22085,7 @@ const PlanView = ({ planId }: Props) => {
                       setPendingClientMeetingsPreset(null);
                       revertUnsavedChanges();
                       resetTouched();
-                      entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+                      entrySnapshotRef.current = getPlanSnapshot(planRef.current || plan);
                       setSaveRevisionOpen(false);
                       if (preset) {
                         dispatchOpenClientMeetingsTimeline(preset);
@@ -22968,7 +22129,7 @@ const PlanView = ({ planId }: Props) => {
           });
           // New revision = clean state for navigation prompts.
           resetTouched();
-          entrySnapshotRef.current = toSnapshot(planRef.current || plan);
+          entrySnapshotRef.current = getPlanSnapshot(planRef.current || plan);
           if (pendingPostSaveAction) {
             const action = pendingPostSaveAction;
             clearPendingPostSaveAction();
