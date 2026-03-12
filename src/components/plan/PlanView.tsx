@@ -1528,24 +1528,32 @@ const PlanView = ({ planId }: Props) => {
 
   useEffect(() => {
     const modal = roomMeetingsTimelineModal;
+    const resetSearchStateIfNeeded = () => {
+      if (
+        !roomMeetingsTimelineSearchLoading &&
+        roomMeetingsTimelineSearchResults.length === 0 &&
+        roomMeetingsTimelineSearchActiveIndex === -1 &&
+        roomMeetingsTimelineSearchError === null
+      ) {
+        return;
+      }
+      if (roomMeetingsTimelineSearchLoading) setRoomMeetingsTimelineSearchLoading(false);
+      if (roomMeetingsTimelineSearchResults.length) setRoomMeetingsTimelineSearchResults([]);
+      if (roomMeetingsTimelineSearchActiveIndex !== -1) setRoomMeetingsTimelineSearchActiveIndex(-1);
+      if (roomMeetingsTimelineSearchError !== null) setRoomMeetingsTimelineSearchError(null);
+    };
     if (!modal?.roomId) {
-      setRoomMeetingsTimelineSearchLoading((prev) => (prev ? false : prev));
-      setRoomMeetingsTimelineSearchResults((prev) => (prev.length ? [] : prev));
-      setRoomMeetingsTimelineSearchActiveIndex((prev) => (prev !== -1 ? -1 : prev));
-      setRoomMeetingsTimelineSearchError((prev) => (prev !== null ? null : prev));
+      resetSearchStateIfNeeded();
       return;
     }
     const term = String(roomMeetingsTimelineSearchTerm || '').trim();
     if (!term) {
-      setRoomMeetingsTimelineSearchLoading((prev) => (prev ? false : prev));
-      setRoomMeetingsTimelineSearchResults((prev) => (prev.length ? [] : prev));
-      setRoomMeetingsTimelineSearchActiveIndex((prev) => (prev !== -1 ? -1 : prev));
-      setRoomMeetingsTimelineSearchError((prev) => (prev !== null ? null : prev));
+      resetSearchStateIfNeeded();
       return;
     }
     let cancelled = false;
-    setRoomMeetingsTimelineSearchLoading(true);
-    setRoomMeetingsTimelineSearchError(null);
+    if (!roomMeetingsTimelineSearchLoading) setRoomMeetingsTimelineSearchLoading(true);
+    if (roomMeetingsTimelineSearchError !== null) setRoomMeetingsTimelineSearchError(null);
     const timer = window.setTimeout(async () => {
       try {
         const now = Date.now();
@@ -1608,7 +1616,16 @@ const PlanView = ({ planId }: Props) => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [meetingIsoDayFromTs, roomMeetingsTimelineModal?.roomId, roomMeetingsTimelineSearchTerm, t]);
+  }, [
+    meetingIsoDayFromTs,
+    roomMeetingsTimelineModal?.roomId,
+    roomMeetingsTimelineSearchTerm,
+    roomMeetingsTimelineSearchLoading,
+    roomMeetingsTimelineSearchResults.length,
+    roomMeetingsTimelineSearchActiveIndex,
+    roomMeetingsTimelineSearchError,
+    t
+  ]);
 
   const jumpToTimelineMeetingFromSearch = useCallback(
     (result: { booking: MeetingBooking; dayIso: string }) => {
