@@ -589,9 +589,11 @@ export function usePresentationWebcamHands(opts: {
   }, [active, starting, requestCalibrate, webcamEnabled, calib, calibrating]);
 
   const disableWebcam = useCallback(() => {
-    setWebcamEnabled(false);
+    if (webcamEnabled) {
+      setWebcamEnabled(false);
+    }
     stop();
-  }, [setWebcamEnabled, stop]);
+  }, [setWebcamEnabled, stop, webcamEnabled]);
 
   const toggleWebcam = useCallback(() => {
     if (starting) return;
@@ -605,14 +607,15 @@ export function usePresentationWebcamHands(opts: {
 
   useEffect(() => {
     if (active) return;
-    if (webcamEnabled || streamRef.current || landmarkerRef.current) {
+    const hasActiveWebcamState = webcamEnabled || !!streamRef.current || !!landmarkerRef.current || webcamReady || handDetected || starting;
+    if (hasActiveWebcamState) {
       onInfo({
         it: 'Webcam disattivata: hai lasciato la modalità Presentazione.',
         en: 'Webcam disabled: you left Presentation mode.'
       });
+      disableWebcam();
     }
-    disableWebcam();
-  }, [active, disableWebcam, onInfo, webcamEnabled]);
+  }, [active, disableWebcam, handDetected, onInfo, starting, webcamEnabled, webcamReady]);
 
   const guideStep: PresentationGuideStep = !webcamEnabled
     ? 'enable'

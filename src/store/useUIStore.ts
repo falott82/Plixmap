@@ -266,9 +266,20 @@ export const useUIStore = create<UIState>()(
       ,
       setPresentationMode: (enabled) => set({ presentationMode: !!enabled }),
       togglePresentationMode: () => set((state) => ({ presentationMode: !state.presentationMode })),
-      setPresentationWebcamEnabled: (enabled) => set({ presentationWebcamEnabled: !!enabled }),
+      setPresentationWebcamEnabled: (enabled) =>
+        set((state) => {
+          const next = !!enabled;
+          return state.presentationWebcamEnabled === next ? state : { presentationWebcamEnabled: next };
+        }),
       setPresentationWebcamCalib: (calib) =>
-        set(() => ({ presentationWebcamCalib: calib && Number.isFinite((calib as any).pinchRatio) ? calib : null })),
+        set((state) => {
+          const next = calib && Number.isFinite((calib as any).pinchRatio) ? { pinchRatio: Number((calib as any).pinchRatio) } : null;
+          const prev = state.presentationWebcamCalib;
+          const same =
+            (prev === null && next === null) ||
+            (prev !== null && next !== null && Math.abs(Number(prev.pinchRatio || 0) - Number(next.pinchRatio || 0)) < 0.00001);
+          return same ? state : { presentationWebcamCalib: next };
+        }),
       requestPresentationEnter: () => set({ presentationEnterRequested: true }),
       clearPresentationEnterRequest: () => set({ presentationEnterRequested: false }),
       setCameraPermissionState: (state) => set({ cameraPermissionState: state || 'unknown' }),
