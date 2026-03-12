@@ -70,6 +70,12 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - You can block/unblock users (WhatsApp-like behavior). When blocked, messages stay with a single check while the block is active.
 
 ## Screenshots
+### Mobile app (Agenda + Chat)
+![Mobile app (Agenda + Chat)](docs/screenshots/mobile-web-app-showcase.png)
+
+### Meeting room kiosk mode
+![Meeting room kiosk mode](docs/screenshots/meeting-room-kiosk-showcase.png)
+
 ### Workspace overview + Internal Chat Service
 ![Workspace overview + Internal Chat Service](docs/screenshots/workspace-overview.png)
 
