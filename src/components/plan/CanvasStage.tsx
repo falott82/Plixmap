@@ -287,6 +287,41 @@ const SAFETY_CARD_COLOR_VARIANTS = [
 const SAFETY_CARD_TEXT_BG_VARIANTS = ['transparent', '#ecfeff', '#dbeafe', '#e0f2fe'] as const;
 const SAFETY_CARD_FONT_VALUES = (TEXT_FONT_OPTIONS || []).map((entry) => String(entry.value || '').trim()).filter(Boolean);
 
+const sameSafetyCardDraftLayout = (
+  a: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    fontSize: number;
+    fontIndex: number;
+    colorIndex: number;
+    textBgIndex: number;
+  } | null,
+  b: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    fontSize: number;
+    fontIndex: number;
+    colorIndex: number;
+    textBgIndex: number;
+  } | null
+) => {
+  if (!a || !b) return false;
+  return (
+    Math.abs(a.x - b.x) < 0.01 &&
+    Math.abs(a.y - b.y) < 0.01 &&
+    Math.abs(a.w - b.w) < 0.01 &&
+    Math.abs(a.h - b.h) < 0.01 &&
+    Math.abs(a.fontSize - b.fontSize) < 0.01 &&
+    a.fontIndex === b.fontIndex &&
+    a.colorIndex === b.colorIndex &&
+    a.textBgIndex === b.textBgIndex
+  );
+};
+
 const getDeskBounds = (
   type: string,
   dims: {
@@ -673,6 +708,7 @@ const CanvasStageImpl = (
     colorIndex: number;
     textBgIndex: number;
   } | null>(null);
+  const safetyCardDraftRef = useRef<typeof safetyCardDraft>(null);
   const [safetyCardSelected, setSafetyCardSelected] = useState(false);
   const safetyCardRectRef = useRef<any>(null);
   const safetyCardTransformerRef = useRef<any>(null);
@@ -690,8 +726,14 @@ const CanvasStageImpl = (
     return false;
   }, []);
   useEffect(() => {
+    safetyCardDraftRef.current = safetyCardDraft;
+  }, [safetyCardDraft]);
+  useEffect(() => {
     if (!safetyCard) {
-      setSafetyCardDraft(null);
+      if (safetyCardDraftRef.current) {
+        safetyCardDraftRef.current = null;
+        setSafetyCardDraft(null);
+      }
       return;
     }
     const next = {
@@ -704,20 +746,11 @@ const CanvasStageImpl = (
       colorIndex: Number.isFinite(Number(safetyCard.colorIndex)) ? Math.max(0, Math.floor(Number(safetyCard.colorIndex))) : 0,
       textBgIndex: Number.isFinite(Number(safetyCard.textBgIndex)) ? Math.max(0, Math.floor(Number(safetyCard.textBgIndex))) : 0
     };
-    setSafetyCardDraft((prev) => {
-      if (!prev) return next;
-      if (safetyCardDraggingRef.current) return prev;
-      const same =
-        Math.abs(prev.x - next.x) < 0.01 &&
-        Math.abs(prev.y - next.y) < 0.01 &&
-        Math.abs(prev.w - next.w) < 0.01 &&
-        Math.abs(prev.h - next.h) < 0.01 &&
-        Math.abs(prev.fontSize - next.fontSize) < 0.01 &&
-        prev.fontIndex === next.fontIndex &&
-        prev.colorIndex === next.colorIndex &&
-        prev.textBgIndex === next.textBgIndex;
-      return same ? prev : next;
-    });
+    const prev = safetyCardDraftRef.current;
+    if (safetyCardDraggingRef.current && prev) return;
+    if (sameSafetyCardDraftLayout(prev, next)) return;
+    safetyCardDraftRef.current = next;
+    setSafetyCardDraft(next);
   }, [safetyCard]);
   useEffect(() => {
     if (!safetyCard?.visible) {
