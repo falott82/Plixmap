@@ -1529,18 +1529,18 @@ const PlanView = ({ planId }: Props) => {
   useEffect(() => {
     const modal = roomMeetingsTimelineModal;
     if (!modal?.roomId) {
-      setRoomMeetingsTimelineSearchLoading(false);
-      setRoomMeetingsTimelineSearchResults([]);
-      setRoomMeetingsTimelineSearchActiveIndex(-1);
-      setRoomMeetingsTimelineSearchError(null);
+      setRoomMeetingsTimelineSearchLoading((prev) => (prev ? false : prev));
+      setRoomMeetingsTimelineSearchResults((prev) => (prev.length ? [] : prev));
+      setRoomMeetingsTimelineSearchActiveIndex((prev) => (prev !== -1 ? -1 : prev));
+      setRoomMeetingsTimelineSearchError((prev) => (prev !== null ? null : prev));
       return;
     }
     const term = String(roomMeetingsTimelineSearchTerm || '').trim();
     if (!term) {
-      setRoomMeetingsTimelineSearchLoading(false);
-      setRoomMeetingsTimelineSearchResults([]);
-      setRoomMeetingsTimelineSearchActiveIndex(-1);
-      setRoomMeetingsTimelineSearchError(null);
+      setRoomMeetingsTimelineSearchLoading((prev) => (prev ? false : prev));
+      setRoomMeetingsTimelineSearchResults((prev) => (prev.length ? [] : prev));
+      setRoomMeetingsTimelineSearchActiveIndex((prev) => (prev !== -1 ? -1 : prev));
+      setRoomMeetingsTimelineSearchError((prev) => (prev !== null ? null : prev));
       return;
     }
     let cancelled = false;
