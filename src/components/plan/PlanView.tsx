@@ -83,21 +83,14 @@ import { updateMyProfile } from '../../api/auth';
 import { saveState } from '../../api/state';
 import PrinterMenuButton from './PrinterMenuButton';
 import UserAvatar from '../ui/UserAvatar';
-import UnlockRequestComposeModal, { UnlockRequestLock } from './UnlockRequestComposeModal';
+import type { UnlockRequestLock } from './UnlockRequestComposeModal';
 import SearchResultsPopover from './SearchResultsPopover';
 import ChooseDefaultViewModal from './ChooseDefaultViewModal';
 import Icon from '../ui/Icon';
 import { DESK_TYPE_IDS, isDeskType } from './deskTypes';
 import RoomShapePreview from './RoomShapePreview';
-import RoomMeasuresModal from './RoomMeasuresModal';
-import RoomLayoutExportModal, {
-  type RoomLayoutExportModalState,
-  type RoomLayoutExportModalSortKey,
-  type RoomLayoutExportRow
-} from './RoomLayoutExportModal';
-import RoomMeetingDuplicateModal, { type RoomMeetingDuplicateModalState } from './RoomMeetingDuplicateModal';
-import BulkEditDescriptionModal from './BulkEditDescriptionModal';
-import BulkEditSelectionModal from './BulkEditSelectionModal';
+import type { RoomLayoutExportModalState, RoomLayoutExportModalSortKey, RoomLayoutExportRow } from './RoomLayoutExportModal';
+import type { RoomMeetingDuplicateModalState } from './RoomMeetingDuplicateModal';
 import type { CrossPlanSearchResult } from './CrossPlanSearchModal';
 import { useClipboard } from './useClipboard';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -185,6 +178,12 @@ const RackModal = lazy(() => import('./RackModal'));
 const RackPortsModal = lazy(() => import('./RackPortsModal'));
 const RealUserPickerModal = lazy(() => import('./RealUserPickerModal'));
 const PrintModal = lazy(() => import('./PrintModal'));
+const RoomMeasuresModal = lazy(() => import('./RoomMeasuresModal'));
+const RoomLayoutExportModal = lazy(() => import('./RoomLayoutExportModal'));
+const RoomMeetingDuplicateModal = lazy(() => import('./RoomMeetingDuplicateModal'));
+const BulkEditDescriptionModal = lazy(() => import('./BulkEditDescriptionModal'));
+const BulkEditSelectionModal = lazy(() => import('./BulkEditSelectionModal'));
+const UnlockRequestComposeModal = lazy(() => import('./UnlockRequestComposeModal'));
 const AllObjectTypesModal = lazy(() => import('./AllObjectTypesModal'));
 const CableModal = lazy(() => import('./CableModal'));
 const LinksModal = lazy(() => import('./LinksModal'));
@@ -3762,6 +3761,56 @@ const PlanView = ({ planId }: Props) => {
       views: effectiveViews as any
     } as FloorPlan;
   }, [activeRevision, plan]);
+  const basePlan = plan as FloorPlan;
+  const renderPlanObjectById = useMemo(() => {
+    const map = new Map<string, MapObject>();
+    const objects = (renderPlan?.objects || []) as MapObject[];
+    for (const obj of objects) {
+      map.set(obj.id, obj);
+    }
+    return map;
+  }, [renderPlan?.objects]);
+  const basePlanObjectById = useMemo(() => {
+    const map = new Map<string, MapObject>();
+    const objects = (basePlan?.objects || []) as MapObject[];
+    for (const obj of objects) {
+      map.set(obj.id, obj);
+    }
+    return map;
+  }, [basePlan?.objects]);
+  const renderPlanRoomById = useMemo(() => {
+    const map = new Map<string, Room>();
+    const rooms = (renderPlan?.rooms || []) as Room[];
+    for (const room of rooms) {
+      map.set(room.id, room);
+    }
+    return map;
+  }, [renderPlan?.rooms]);
+  const basePlanRoomById = useMemo(() => {
+    const map = new Map<string, Room>();
+    const rooms = (basePlan?.rooms || []) as Room[];
+    for (const room of rooms) {
+      map.set(room.id, room);
+    }
+    return map;
+  }, [basePlan?.rooms]);
+  const roomModalBaseRoom = useMemo(() => {
+    if (!roomModal || roomModal.mode !== 'edit') return undefined;
+    return basePlanRoomById.get(roomModal.roomId);
+  }, [basePlanRoomById, roomModal]);
+  const selectedObjects = useMemo(() => {
+    if (!selectedObjectIds.length) return [] as MapObject[];
+    const out: MapObject[] = [];
+    for (const id of selectedObjectIds) {
+      const obj = renderPlanObjectById.get(id);
+      if (obj) out.push(obj);
+    }
+    return out;
+  }, [renderPlanObjectById, selectedObjectIds]);
+  const selectedSingleObject = useMemo(() => {
+    if (selectedObjectIds.length !== 1) return undefined;
+    return renderPlanObjectById.get(selectedObjectIds[0]);
+  }, [renderPlanObjectById, selectedObjectIds]);
   const planScale = renderPlan?.scale;
   const metersPerPixel = useMemo(() => {
     const value = Number(planScale?.metersPerPixel);
@@ -3883,7 +3932,7 @@ const PlanView = ({ planId }: Props) => {
   const getWallPolygonData = useCallback(
     (wallId: string) => {
       if (!renderPlan) return null;
-      const wall = renderPlan.objects.find((o) => o.id === wallId);
+      const wall = renderPlanObjectById.get(wallId);
       if (!wall || !isWallType(wall.type)) return null;
 
       const groupId = String((wall as any).wallGroupId || '');
@@ -3892,7 +3941,7 @@ const PlanView = ({ planId }: Props) => {
           (o) => isWallType(o.type) && String((o as any).wallGroupId || '') === groupId
         );
         if (groupWalls.length >= 3) {
-          const room = (renderPlan.rooms || []).find((r) => r.id === groupId);
+          const room = renderPlanRoomById.get(groupId);
           const ordered = groupWalls
             .slice()
             .sort((a, b) => Number((a as any).wallGroupIndex ?? 0) - Number((b as any).wallGroupIndex ?? 0));
@@ -3995,7 +4044,7 @@ const PlanView = ({ planId }: Props) => {
         wallTypes
       };
     },
-    [buildRoomWallSegments, defaultWallTypeId, formatCornerLabel, isWallType, renderPlan, t]
+    [buildRoomWallSegments, defaultWallTypeId, formatCornerLabel, isWallType, renderPlan, renderPlanObjectById, renderPlanRoomById, t]
   );
   useEffect(() => {
     setWallDrawMode(false);
@@ -4692,10 +4741,8 @@ const PlanView = ({ planId }: Props) => {
   const alignSelection = useCallback(
     (mode: 'horizontal' | 'vertical', referenceId?: string) => {
       if (isReadOnly || !renderPlan) return;
-      if (selectedObjectIds.length < 2) return;
-      const objects = selectedObjectIds
-        .map((id) => renderPlan.objects.find((o) => o.id === id))
-        .filter(Boolean) as MapObject[];
+      if (selectedObjects.length < 2) return;
+      const objects = selectedObjects;
       if (objects.length < 2) return;
       const fallbackRef = objects[0];
       const refObject = referenceId ? objects.find((obj) => obj.id === referenceId) || fallbackRef : fallbackRef;
@@ -4732,7 +4779,7 @@ const PlanView = ({ planId }: Props) => {
         if (Number.isFinite(nextX) && Number.isFinite(nextY)) moveObject(obj.id, nextX, nextY);
       }
     },
-    [getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan, selectedObjectIds, updateObject]
+    [getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan, selectedObjects, updateObject]
   );
 
   const snapshotCacheRef = useRef<WeakMap<object, PlanSnapshot>>(new WeakMap());
@@ -5465,8 +5512,8 @@ const PlanView = ({ planId }: Props) => {
   }, [pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction]);
   const contextObject = useMemo(() => {
     if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return undefined;
-    return renderPlan.objects.find((o) => o.id === contextMenu.id);
-  }, [renderPlan, contextMenu]);
+    return renderPlanObjectById.get(contextMenu.id);
+  }, [contextMenu, renderPlan, renderPlanObjectById]);
   const contextObjectTypeLabel = useMemo(() => {
     if (!contextObject) return '';
     return objectTypeLabels[contextObject.type] || contextObject.type;
@@ -5474,7 +5521,7 @@ const PlanView = ({ planId }: Props) => {
 
   const realUserDetails = useMemo(() => {
     if (!realUserDetailsId || !renderPlan) return null;
-    const obj = renderPlan.objects.find((o: any) => o.id === realUserDetailsId);
+    const obj = renderPlanObjectById.get(realUserDetailsId);
     if (!obj || obj.type !== 'real_user') return null;
     return {
       externalUserId: (obj as any).externalUserId,
@@ -5490,13 +5537,13 @@ const PlanView = ({ planId }: Props) => {
       externalExt3: (obj as any).externalExt3,
       externalIsExternal: (obj as any).externalIsExternal
     };
-  }, [realUserDetailsId, renderPlan]);
+  }, [realUserDetailsId, renderPlan, renderPlanObjectById]);
 
   const realUserDetailsName = useMemo(() => {
     if (!realUserDetailsId || !renderPlan) return '';
-    const obj = renderPlan.objects.find((o: any) => o.id === realUserDetailsId);
+    const obj = renderPlanObjectById.get(realUserDetailsId);
     return String(obj?.name || realUserDetailsId);
-  }, [realUserDetailsId, renderPlan]);
+  }, [realUserDetailsId, renderPlan, renderPlanObjectById]);
 
     const contextLink = useMemo(() => {
       if (!renderPlan || !contextMenu || contextMenu.kind !== 'link') return undefined;
@@ -5536,12 +5583,12 @@ const PlanView = ({ planId }: Props) => {
     if (!contextIsPhoto || !renderPlan) return [];
     const ids =
       contextIsMulti && selectedObjectIds.length
-        ? selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'photo')
+        ? selectedObjects.filter((obj) => obj.type === 'photo').map((obj) => obj.id)
         : contextMenu && contextMenu.kind === 'object'
           ? [contextMenu.id]
           : [];
     return ids;
-  }, [contextIsMulti, contextIsPhoto, contextMenu, renderPlan, selectedObjectIds]);
+  }, [contextIsMulti, contextIsPhoto, contextMenu, renderPlan, selectedObjectIds, selectedObjects]);
   const contextPhotoMulti = contextPhotoSelectionIds.length > 1;
   const planPhotoIds = useMemo(() => {
     if (!renderPlan) return [];
@@ -5597,41 +5644,36 @@ const PlanView = ({ planId }: Props) => {
   }, [defaultWallTypeId, roomWallTypeSelections]);
   const selectionAllWalls = useMemo(() => {
     if (!renderPlan) return false;
-    if (!selectedObjectIds?.length) return false;
-    return selectedObjectIds.every((id) => {
-      const obj = renderPlan.objects.find((o) => o.id === id);
-      return !!obj && isWallType(obj.type);
-    });
-  }, [isWallType, renderPlan, selectedObjectIds]);
+    if (!selectedObjects.length) return false;
+    return selectedObjects.every((obj) => isWallType(obj.type));
+  }, [isWallType, renderPlan, selectedObjects]);
   const canEditWallType = contextIsMulti ? selectionAllWalls : contextIsWall;
 
   const selectionHasRack = useMemo(() => {
     if (!renderPlan) return false;
-    if (!selectedObjectIds?.length) return false;
-    return selectedObjectIds.some((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'rack');
-  }, [renderPlan, selectedObjectIds]);
+    return selectedObjects.some((obj) => obj.type === 'rack');
+  }, [renderPlan, selectedObjects]);
   const selectionHasDesk = useMemo(() => {
     if (!renderPlan) return false;
-    if (!selectedObjectIds?.length) return false;
-    return selectedObjectIds.some((id) => {
-      const obj = renderPlan.objects.find((o) => o.id === id);
-      return !!obj && isDeskType(obj.type);
-    });
-  }, [renderPlan, selectedObjectIds]);
+    return selectedObjects.some((obj) => isDeskType(obj.type));
+  }, [renderPlan, selectedObjects]);
   const selectionHasPhoto = useMemo(() => {
     if (!renderPlan) return false;
-    if (!selectedObjectIds?.length) return false;
-    return selectedObjectIds.some((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'photo');
-  }, [renderPlan, selectedObjectIds]);
+    return selectedObjects.some((obj) => obj.type === 'photo');
+  }, [renderPlan, selectedObjects]);
   const selectionPhotoIds = useMemo(() => {
-    if (!renderPlan || !selectedObjectIds?.length) return [];
-    return selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'photo');
-  }, [renderPlan, selectedObjectIds]);
+    if (!renderPlan) return [];
+    return selectedObjects.filter((obj) => obj.type === 'photo').map((obj) => obj.id);
+  }, [renderPlan, selectedObjects]);
+  const selectedWifiIds = useMemo(() => {
+    if (!renderPlan) return [];
+    return selectedObjects.filter((obj) => obj.type === 'wifi').map((obj) => obj.id);
+  }, [renderPlan, selectedObjects]);
   const selectionAllRealUsers = useMemo(() => {
     if (!renderPlan) return false;
-    if (!selectedObjectIds?.length) return false;
-    return selectedObjectIds.every((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'real_user');
-  }, [renderPlan, selectedObjectIds]);
+    if (!selectedObjects.length) return false;
+    return selectedObjects.every((obj) => obj.type === 'real_user');
+  }, [renderPlan, selectedObjects]);
 
   useEffect(() => {
     planRef.current = renderPlan;
@@ -5689,10 +5731,8 @@ const PlanView = ({ planId }: Props) => {
       }
       return;
     }
-    const deskIds = selectedObjectIds.filter((id) => {
-      const obj = renderPlan.objects.find((o) => o.id === id);
-      return !!obj && isDeskType(obj.type);
-    });
+    const selectedId = selectedObjectIds[0];
+    const deskIds = selectedSingleObject && isDeskType(selectedSingleObject.type) ? [selectedId] : [];
     if (!deskIds.length) {
       deskToastKeyRef.current = '';
       if (deskToastIdRef.current != null) {
@@ -5718,7 +5758,7 @@ const PlanView = ({ planId }: Props) => {
       ),
       { duration: Infinity, id: selectionHintToastIds.current.desk }
     );
-  }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
+  }, [contextMenu, isDeskType, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject]);
   useEffect(() => {
     if (contextMenu || !renderPlan || selectedObjectIds.length !== 1) {
       quoteToastKeyRef.current = '';
@@ -5728,10 +5768,8 @@ const PlanView = ({ planId }: Props) => {
       }
       return;
     }
-    const quoteIds = selectedObjectIds.filter((id) => {
-      const obj = renderPlan.objects.find((o) => o.id === id);
-      return !!obj && obj.type === 'quote';
-    });
+    const selectedId = selectedObjectIds[0];
+    const quoteIds = selectedSingleObject?.type === 'quote' ? [selectedId] : [];
     if (!quoteIds.length) {
       quoteToastKeyRef.current = '';
       if (quoteToastIdRef.current != null) {
@@ -5764,7 +5802,7 @@ const PlanView = ({ planId }: Props) => {
       ),
       { duration: Infinity, id: selectionHintToastIds.current.quote }
     );
-  }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
+  }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject]);
   useEffect(() => {
     if (contextMenu || !renderPlan || selectedObjectIds.length !== 1) {
       mediaToastKeyRef.current = '';
@@ -5774,10 +5812,12 @@ const PlanView = ({ planId }: Props) => {
       }
       return;
     }
-    const textIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'text');
-    const imageIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'image');
-    const photoIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'photo');
-    const postitIds = selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'postit');
+    const selectedId = selectedObjectIds[0];
+    const selectedType = selectedSingleObject?.type || '';
+    const textIds = selectedType === 'text' ? [selectedId] : [];
+    const imageIds = selectedType === 'image' ? [selectedId] : [];
+    const photoIds = selectedType === 'photo' ? [selectedId] : [];
+    const postitIds = selectedType === 'postit' ? [selectedId] : [];
     if (!textIds.length && !imageIds.length && !photoIds.length && !postitIds.length) {
       mediaToastKeyRef.current = '';
       if (mediaToastIdRef.current != null) {
@@ -5867,7 +5907,7 @@ const PlanView = ({ planId }: Props) => {
                 return renderKeybindToast({ it: 'Annotazioni selezionate', en: 'Annotations selected' }, base);
               })();
     mediaToastIdRef.current = toast.info(message, { duration: Infinity, id: selectionHintToastIds.current.media });
-  }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
+  }, [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject]);
   useEffect(() => {
     if (contextMenu || !renderPlan || selectedObjectIds.length !== 1) {
       selectionToastKeyRef.current = '';
@@ -5878,7 +5918,7 @@ const PlanView = ({ planId }: Props) => {
       return;
     }
     const id = selectedObjectIds[0];
-    const obj = renderPlan.objects.find((o) => o.id === id);
+    const obj = selectedSingleObject;
     if (!obj) return;
     if (
       isDeskType(obj.type) ||
@@ -5917,7 +5957,7 @@ const PlanView = ({ planId }: Props) => {
       ),
       { duration: Infinity, id: selectionHintToastIds.current.selection }
     );
-  }, [contextMenu, getTypeLabel, renderKeybindToast, renderPlan, selectedObjectIds, t]);
+  }, [contextMenu, getTypeLabel, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject, t]);
   useEffect(() => {
     selectedLinkIdRef.current = selectedLinkId;
   }, [selectedLinkId]);
@@ -7352,7 +7392,7 @@ const PlanView = ({ planId }: Props) => {
 
   const roomMeasuresData = useMemo(() => {
     if (!roomMeasuresModal || !renderPlan) return null;
-    const room = (renderPlan.rooms || []).find((r) => r.id === roomMeasuresModal.roomId);
+    const room = renderPlanRoomById.get(roomMeasuresModal.roomId);
     if (!room) return null;
     const points = getRoomPolygon(room);
     if (points.length < 2) return null;
@@ -7382,6 +7422,7 @@ const PlanView = ({ planId }: Props) => {
     lang,
     metersPerPixel,
     renderPlan,
+    renderPlanRoomById,
     roomMeasuresModal
   ]);
 
@@ -7583,7 +7624,7 @@ const PlanView = ({ planId }: Props) => {
         points = roomModal.points || [];
       }
     } else if (roomModal.mode === 'edit' && renderPlan) {
-      const room = (renderPlan.rooms || []).find((r) => r.id === roomModal.roomId);
+      const room = renderPlanRoomById.get(roomModal.roomId);
       if (room) points = getRoomPolygon(room);
     }
     if (points.length < 2) return null;
@@ -7613,7 +7654,8 @@ const PlanView = ({ planId }: Props) => {
     lang,
     metersPerPixel,
     renderPlan,
-    roomModal
+    roomModal,
+    renderPlanRoomById
   ]);
   const roomModalPreview = useMemo(() => {
     if (!roomModal) return null;
@@ -7631,11 +7673,11 @@ const PlanView = ({ planId }: Props) => {
         points = roomModal.points || [];
       }
     } else if (roomModal.mode === 'edit' && renderPlan) {
-      const room = (renderPlan.rooms || []).find((r) => r.id === roomModal.roomId);
+      const room = renderPlanRoomById.get(roomModal.roomId);
       if (room) points = getRoomPolygon(room);
     }
     return buildRoomPreview(points);
-  }, [buildRoomPreview, getRoomPolygon, renderPlan, roomModal]);
+  }, [buildRoomPreview, getRoomPolygon, renderPlan, renderPlanRoomById, roomModal]);
   const roomHasWalls = useMemo(() => {
     if (!roomModal || roomModal.mode !== 'edit' || !renderPlan) return false;
     return (renderPlan.objects || []).some(
@@ -9591,6 +9633,11 @@ const PlanView = ({ planId }: Props) => {
 
   const rooms = useMemo(() => renderPlan?.rooms || [], [renderPlan?.rooms]);
   const corridors = useMemo(() => (renderPlan?.corridors || []) as Corridor[], [renderPlan?.corridors]);
+  const corridorById = useMemo(() => {
+    const map = new Map<string, Corridor>();
+    for (const corridor of corridors) map.set(corridor.id, corridor);
+    return map;
+  }, [corridors]);
   const roomDoors = useMemo(() => ((renderPlan as any)?.roomDoors || []) as RoomConnectionDoor[], [(renderPlan as any)?.roomDoors]);
   const corridorLabelHelpToastId = 'corridor-label-help';
   const corridorPolyHelpToastId = 'corridor-poly-help';
@@ -9601,7 +9648,7 @@ const PlanView = ({ planId }: Props) => {
       toast.dismiss(corridorLabelHelpToastId);
       return;
     }
-    const selected = corridors.find((c) => c.id === selectedCorridorId);
+    const selected = corridorById.get(selectedCorridorId);
     if (!selected || selected.showName === false || !String(selected.name || '').trim()) {
       toast.dismiss(corridorLabelHelpToastId);
       return;
@@ -9616,7 +9663,7 @@ const PlanView = ({ planId }: Props) => {
         duration: Infinity
       }
     );
-  }, [corridors, isReadOnly, selectedCorridorId, t]);
+  }, [corridorById, isReadOnly, selectedCorridorId, t]);
   useEffect(() => {
     return () => {
       toast.dismiss(corridorLabelHelpToastId);
@@ -10293,7 +10340,7 @@ const PlanView = ({ planId }: Props) => {
 
   const openEditCorridor = useCallback(
     (corridorId: string) => {
-      const corridor = corridors.find((c) => c.id === corridorId);
+      const corridor = corridorById.get(corridorId);
       if (!corridor || isReadOnly) return;
       setCorridorModal({
         mode: 'edit',
@@ -10306,7 +10353,7 @@ const PlanView = ({ planId }: Props) => {
       setCorridorNameEnInput((corridor as any).nameEn || '');
       setCorridorShowNameInput(corridor.showName !== false);
     },
-    [corridors, isReadOnly]
+    [corridorById, isReadOnly]
   );
 
   const handleCreateCorridorFromPoly = useCallback(
@@ -10372,7 +10419,7 @@ const PlanView = ({ planId }: Props) => {
 
   const openCorridorDoorModal = useCallback(
     (corridorId: string, doorId: string) => {
-      const corridor = corridors.find((c) => c.id === corridorId);
+      const corridor = corridorById.get(corridorId);
       const door = (corridor?.doors || []).find((d) => d.id === doorId);
       if (!corridor || !door) return;
       const rawCatalogTypeId = typeof (door as any)?.catalogTypeId === 'string' ? String((door as any).catalogTypeId) : '';
@@ -10394,7 +10441,7 @@ const PlanView = ({ planId }: Props) => {
         automationUrl: String((door as any).automationUrl || '')
       });
     },
-    [corridors, defaultDoorCatalogId, doorTypeIdSet, objectTypeById]
+    [corridorById, defaultDoorCatalogId, doorTypeIdSet, objectTypeById]
   );
   const openRoomDoorModal = useCallback(
     (doorId: string) => {
@@ -10423,7 +10470,7 @@ const PlanView = ({ planId }: Props) => {
   );
   const openCorridorDoorLinkModal = useCallback(
     (corridorId: string, doorId: string) => {
-      const corridor = corridors.find((c) => c.id === corridorId);
+      const corridor = corridorById.get(corridorId);
       const door = (corridor?.doors || []).find((d) => d.id === doorId);
       if (!corridor || !door) return;
       // Force rooms layer visible for better context while linking door->rooms.
@@ -10498,7 +10545,7 @@ const PlanView = ({ planId }: Props) => {
       setCorridorDoorLinkQuery('');
     },
     [
-      corridors,
+      corridorById,
       getCorridorEdgePoint,
       getRoomPolygon,
       normalizeLayerSelection,
@@ -10791,7 +10838,7 @@ const PlanView = ({ planId }: Props) => {
 
   const openCorridorConnectionModalAt = useCallback(
     (corridorId: string, point: { x: number; y: number }) => {
-      const corridor = corridors.find((c) => c.id === corridorId);
+      const corridor = corridorById.get(corridorId);
       if (!corridor) return;
       const anchor = getClosestCorridorEdge(corridor, point);
       if (!anchor) return;
@@ -10806,12 +10853,12 @@ const PlanView = ({ planId }: Props) => {
         transitionType: 'stairs'
       });
     },
-    [corridors, getClosestCorridorEdge]
+    [corridorById, getClosestCorridorEdge]
   );
 
   const openEditCorridorConnectionModal = useCallback(
     (corridorId: string, connectionId: string, point?: { x: number; y: number }) => {
-      const corridor = corridors.find((c) => c.id === corridorId);
+      const corridor = corridorById.get(corridorId);
       if (!corridor) return;
       const connection = (corridor.connections || []).find((cp) => cp.id === connectionId);
       if (!connection) return;
@@ -10834,7 +10881,7 @@ const PlanView = ({ planId }: Props) => {
         transitionType: (connection as any)?.transitionType === 'elevator' ? 'elevator' : 'stairs'
       });
     },
-    [corridors, getClosestCorridorEdge, getCorridorEdgePoint]
+    [corridorById, getClosestCorridorEdge, getCorridorEdgePoint]
   );
 
   const saveCorridorConnectionModal = useCallback(() => {
@@ -10916,7 +10963,7 @@ const PlanView = ({ planId }: Props) => {
 
   const handleCreateWallsForRoom = useCallback(() => {
     if (!roomModal || roomModal.mode !== 'edit' || !renderPlan) return;
-    const room = (renderPlan.rooms || []).find((r) => r.id === roomModal.roomId);
+    const room = renderPlanRoomById.get(roomModal.roomId);
     if (!room) return;
     const kind = (room.kind || (Array.isArray(room.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
     openRoomWallTypes({
@@ -10927,7 +10974,7 @@ const PlanView = ({ planId }: Props) => {
       points: kind === 'poly' ? room.points || [] : undefined
     });
     setRoomModal(null);
-  }, [openRoomWallTypes, renderPlan, roomModal, t]);
+  }, [openRoomWallTypes, renderPlan, renderPlanRoomById, roomModal, t]);
 
   const openRealUserPickerAt = useCallback(
     async (x: number, y: number) => {
@@ -11372,7 +11419,7 @@ const PlanView = ({ planId }: Props) => {
   const openEditFromSelectionList = (objectId: string) => {
     returnToSelectionListRef.current = true;
     setSelectedObjectsModalOpen(false);
-    const obj = renderPlan?.objects.find((o) => o.id === objectId);
+    const obj = renderPlanObjectById.get(objectId);
     if (obj && isDeskType(obj.type)) return;
     if (obj && isWallType(obj.type)) {
       if (openWallGroupModal(obj.id)) return;
@@ -11407,7 +11454,7 @@ const PlanView = ({ planId }: Props) => {
         roomNameById.set(String(room.id), String(room.name || '').trim());
       }
       const items = selection
-        .map((id) => renderPlan.objects.find((o) => o.id === id))
+        .map((id) => renderPlanObjectById.get(id))
         .filter((obj): obj is MapObject => !!obj && payload.types.includes(obj.type) && !!(obj as any).imageUrl)
         .map((obj) => ({
           id: obj.id,
@@ -11430,7 +11477,7 @@ const PlanView = ({ planId }: Props) => {
         emptyLabel: payload.emptyLabel
       });
     },
-    [push, renderPlan, t]
+    [push, renderPlan, renderPlanObjectById, t]
   );
 
   const openPhotoViewer = useCallback(
@@ -11467,7 +11514,7 @@ const PlanView = ({ planId }: Props) => {
     (id: string) => {
       if (!renderPlan) return;
       returnToBulkEditRef.current = false;
-      const obj = renderPlan.objects.find((o) => o.id === id);
+      const obj = renderPlanObjectById.get(id);
       if (!obj) return;
       setSelection([id]);
       setSelectedObject(id);
@@ -11476,7 +11523,7 @@ const PlanView = ({ planId }: Props) => {
       setSelectedLinkId(null);
       triggerHighlight(id);
     },
-    [renderPlan, setSelectedLinkId, setSelectedObject, setSelectedRoomId, setSelectedRoomIds, setSelection, triggerHighlight]
+    [renderPlan, renderPlanObjectById, setSelectedLinkId, setSelectedObject, setSelectedRoomId, setSelectedRoomIds, setSelection, triggerHighlight]
   );
 
   useEffect(() => {
@@ -11814,9 +11861,9 @@ const PlanView = ({ planId }: Props) => {
     const indexObjectIds = Array.from(new Set(indexMatches.filter((m) => m.kind === 'object').map((m) => (m as any).objectId).filter(Boolean)));
     const indexRoomIds = Array.from(new Set(indexMatches.filter((m) => m.kind === 'room').map((m) => (m as any).roomId).filter(Boolean)));
     const findObjectById = (id: string) =>
-      renderPlan.objects.find((o) => o.id === id) || (plan?.objects || []).find((o) => o.id === id);
+      renderPlanObjectById.get(id) || basePlanObjectById.get(id);
     const findRoomById = (id: string) =>
-      (renderPlan.rooms || []).find((r) => r.id === id) || (plan?.rooms || []).find((r) => r.id === id);
+      renderPlanRoomById.get(id) || basePlanRoomById.get(id);
     const indexObjects = indexObjectIds
       .map((id) => findObjectById(id))
       .filter((obj): obj is MapObject => !!obj && !isDeskType(obj.type));
@@ -11933,7 +11980,7 @@ const PlanView = ({ planId }: Props) => {
           : {})
       };
     }
-    const obj = renderPlan.objects.find((o) => o.id === modalState.objectId);
+    const obj = renderPlanObjectById.get(modalState.objectId);
     if (!obj) return null;
     const quoteLabel = obj.type === 'quote' ? formatQuoteLabel(obj.points || []) : undefined;
     return {
@@ -12001,7 +12048,8 @@ const PlanView = ({ planId }: Props) => {
     lastQuoteLabelBg,
     lastQuoteLabelScale,
     modalState,
-    renderPlan
+    renderPlan,
+    renderPlanObjectById
   ]);
 
   const assignedCounts = useMemo(() => {
@@ -12050,7 +12098,6 @@ const PlanView = ({ planId }: Props) => {
     );
   }
 
-  const basePlan = plan as FloorPlan;
   const orderedViews = useMemo(() => {
     const list = basePlan.views || [];
     if (!list.length) return list;
@@ -12089,8 +12136,8 @@ const PlanView = ({ planId }: Props) => {
   }, [basePlan, selectedLinkId, selectedObjectIds, selectionAllRealUsers]);
 
   const getObjectNameById = useCallback(
-    (id: string) => renderPlan.objects.find((o) => o.id === id)?.name || id,
-    [renderPlan.objects]
+    (id: string) => renderPlanObjectById.get(id)?.name || id,
+    [renderPlanObjectById]
   );
 
   return (
@@ -12801,7 +12848,7 @@ const PlanView = ({ planId }: Props) => {
 	                          it: `${selectedObjectIds.length + linksInSelection.length} elementi`,
 	                          en: `${selectedObjectIds.length + linksInSelection.length} items`
                         })
-                      : renderPlan.objects.find((o) => o.id === selectedObjectId)?.name}
+                      : renderPlanObjectById.get(selectedObjectId)?.name}
                   </span>
                   <button
                     onClick={() => {
@@ -14278,20 +14325,24 @@ const PlanView = ({ planId }: Props) => {
         </div>
       ) : null}
 
-      <UnlockRequestComposeModal
-        open={!!unlockCompose}
-        target={
-          unlockCompose
-            ? { userId: unlockCompose.target.userId, username: unlockCompose.target.username, avatarUrl: (unlockCompose.target as any).avatarUrl }
-            : null
-        }
-        locks={unlockCompose?.locks || []}
-        onClose={() => setUnlockCompose(null)}
-	        onSend={({ targetUserId, planId, message, grantMinutes }) => {
-	          sendWs({ type: 'unlock_request', targetUserId, planId, message, grantMinutes });
-	          setUnlockCompose(null);
-	        }}
-	      />
+      {unlockCompose ? (
+        <Suspense fallback={null}>
+          <UnlockRequestComposeModal
+            open={!!unlockCompose}
+            target={
+              unlockCompose
+                ? { userId: unlockCompose.target.userId, username: unlockCompose.target.username, avatarUrl: (unlockCompose.target as any).avatarUrl }
+                : null
+            }
+            locks={unlockCompose?.locks || []}
+            onClose={() => setUnlockCompose(null)}
+	          onSend={({ targetUserId, planId, message, grantMinutes }) => {
+	            sendWs({ type: 'unlock_request', targetUserId, planId, message, grantMinutes });
+	            setUnlockCompose(null);
+	          }}
+	        />
+        </Suspense>
+      ) : null}
 
       {contextMenu && plan ? (
         <>
@@ -14342,8 +14393,8 @@ const PlanView = ({ planId }: Props) => {
                   {contextLink ? (
                     <div className="mt-1 text-[11px] text-slate-600">
                       {(() => {
-                        const from = renderPlan.objects.find((o) => o.id === contextLink.fromId);
-                        const to = renderPlan.objects.find((o) => o.id === contextLink.toId);
+                        const from = renderPlanObjectById.get(contextLink.fromId);
+                        const to = renderPlanObjectById.get(contextLink.toId);
                         return `${from?.name || contextLink.fromId} → ${to?.name || contextLink.toId}`;
                       })()}
                     </div>
@@ -14522,7 +14573,7 @@ const PlanView = ({ planId }: Props) => {
                             onClick={() => {
                               const ids =
                                 contextIsMulti && selectedObjectIds.length
-                                  ? selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'wifi')
+                                  ? selectedWifiIds
                                   : [contextMenu.id];
                               const nextValue = !contextWifiRangeOn;
                               ids.forEach((id) => updateObject(id, { wifiShowRange: nextValue }));
@@ -14562,7 +14613,7 @@ const PlanView = ({ planId }: Props) => {
                                   const next = Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, Number(e.target.value) || 0));
                                   const ids =
                                     contextIsMulti && selectedObjectIds.length
-                                      ? selectedObjectIds.filter((id) => renderPlan.objects.find((o) => o.id === id)?.type === 'wifi')
+                                      ? selectedWifiIds
                                       : [contextMenu.id];
                                   ids.forEach((id) => updateObject(id, { wifiRangeScale: next }));
                                 }}
@@ -15308,7 +15359,7 @@ const PlanView = ({ planId }: Props) => {
               ) : null}
               {!isReadOnly ? (
                 (() => {
-                  const corridor = corridors.find((c) => c.id === contextMenu.corridorId);
+                  const corridor = corridorById.get(contextMenu.corridorId);
                   const door = (corridor?.doors || []).find((d) => d.id === contextMenu.doorId);
                   const mode = door?.mode || 'static';
                   const url = String((door as any)?.automationUrl || '').trim();
@@ -16001,7 +16052,7 @@ const PlanView = ({ planId }: Props) => {
             open={!!rackModal}
             plan={basePlan}
             rackObjectId={rackModal.objectId}
-            rackObjectName={renderPlan.objects.find((o) => o.id === rackModal.objectId)?.name || t({ it: 'Rack', en: 'Rack' })}
+            rackObjectName={renderPlanObjectById.get(rackModal.objectId)?.name || t({ it: 'Rack', en: 'Rack' })}
             readOnly={isReadOnly}
             onClose={() => setRackModal(null)}
           />
@@ -16413,11 +16464,7 @@ const PlanView = ({ planId }: Props) => {
       <Suspense fallback={null}>
         <SelectedObjectsModal
           open={selectedObjectsModalOpen}
-          objects={
-            selectedObjectIds
-              .map((id) => renderPlan.objects.find((o) => o.id === id))
-              .filter(Boolean) as MapObject[]
-          }
+          objects={selectedObjects}
           links={linksInSelection}
           getTypeLabel={getTypeLabel}
           getTypeIcon={getTypeIcon}
@@ -16426,7 +16473,7 @@ const PlanView = ({ planId }: Props) => {
           onPickLink={openLinkEditFromSelectionList}
           onPreviewObject={(objectId) => {
             if (!renderPlan) return;
-            const obj = renderPlan.objects.find((o) => o.id === objectId);
+            const obj = renderPlanObjectById.get(objectId);
             if (!obj) return;
             if (obj.type !== 'photo' && obj.type !== 'image') return;
             returnToSelectionListRef.current = true;
@@ -16844,118 +16891,74 @@ const PlanView = ({ planId }: Props) => {
         initialName={roomModal?.mode === 'edit' ? roomModal.initialName : ''}
         initialNameEn={roomModal?.mode === 'edit' ? roomModal.initialNameEn : ''}
         initialDepartmentTags={
-          roomModal?.mode === 'edit'
-            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.departmentTags
-            : undefined
+          roomModal?.mode === 'edit' ? roomModalBaseRoom?.departmentTags : undefined
         }
         departmentOptions={roomDepartmentOptions}
         initialColor={
-          roomModal?.mode === 'edit'
-            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.color
-            : undefined
+          roomModal?.mode === 'edit' ? roomModalBaseRoom?.color : undefined
         }
         initialFillOpacity={
-          roomModal?.mode === 'edit'
-            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.fillOpacity
-            : undefined
+          roomModal?.mode === 'edit' ? roomModalBaseRoom?.fillOpacity : undefined
         }
         initialCapacity={
-          roomModal?.mode === 'edit'
-            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.capacity
-            : undefined
+          roomModal?.mode === 'edit' ? roomModalBaseRoom?.capacity : undefined
         }
         initialLabelScale={
-          roomModal?.mode === 'edit'
-            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.labelScale
-            : undefined
+          roomModal?.mode === 'edit' ? roomModalBaseRoom?.labelScale : undefined
         }
         initialShowName={
-          roomModal?.mode === 'edit'
-            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.showName
-            : undefined
+          roomModal?.mode === 'edit' ? roomModalBaseRoom?.showName : undefined
         }
         initialSurfaceSqm={
-          roomModal?.mode === 'edit'
-            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.surfaceSqm
-            : roomModalInitialSurfaceSqm
+          roomModal?.mode === 'edit' ? roomModalBaseRoom?.surfaceSqm : roomModalInitialSurfaceSqm
         }
         surfaceLocked={!!metersPerPixel}
         measurements={roomModalMetrics}
         shapePreview={roomModalPreview}
         initialNotes={
-          roomModal?.mode === 'edit'
-            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.notes
-            : undefined
+          roomModal?.mode === 'edit' ? roomModalBaseRoom?.notes : undefined
         }
         initialLogical={
-          roomModal?.mode === 'edit'
-            ? (basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.logical
-            : undefined
+          roomModal?.mode === 'edit' ? roomModalBaseRoom?.logical : undefined
         }
         initialMeetingRoom={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingRoom
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.meetingRoom : undefined
         }
         initialMeetingProjector={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingProjector
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.meetingProjector : undefined
         }
         initialMeetingTv={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingTv
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.meetingTv : undefined
         }
         initialMeetingVideoConf={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingVideoConf
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.meetingVideoConf : undefined
         }
         initialMeetingCoffeeService={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingCoffeeService
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.meetingCoffeeService : undefined
         }
         initialMeetingWhiteboard={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingWhiteboard
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.meetingWhiteboard : undefined
         }
         initialMeetingKioskEnabled={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.meetingKioskEnabled
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.meetingKioskEnabled : undefined
         }
         initialNoWindows={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.noWindows
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.noWindows : undefined
         }
         initialWifiAvailable={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.wifiAvailable
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.wifiAvailable : undefined
         }
         initialFridgeAvailable={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.fridgeAvailable
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.fridgeAvailable : undefined
         }
         initialStorageRoom={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.storageRoom
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.storageRoom : undefined
         }
         initialBathroom={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.bathroom
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.bathroom : undefined
         }
         initialTechnicalRoom={
-          roomModal?.mode === 'edit'
-            ? !!(basePlan.rooms || []).find((r) => r.id === roomModal.roomId)?.technicalRoom
-            : undefined
+          roomModal?.mode === 'edit' ? !!roomModalBaseRoom?.technicalRoom : undefined
         }
         objects={roomModal?.mode === 'edit' ? roomStatsById.get(roomModal.roomId)?.items || [] : undefined}
         getTypeLabel={getTypeLabel}
@@ -17026,7 +17029,7 @@ const PlanView = ({ planId }: Props) => {
               );
               return false;
             }
-            const existing = (basePlan.rooms || []).find((r) => r.id === roomModal.roomId);
+            const existing = roomModalBaseRoom;
             const nextRoom = {
               ...(existing || {}),
               name,
@@ -20244,43 +20247,55 @@ const PlanView = ({ planId }: Props) => {
         </Dialog>
       </Transition>
 
-      <RoomLayoutExportModal
-        open={!!roomLayoutExportModal}
-        modal={roomLayoutExportModal}
-        rows={roomLayoutExportRows}
-        source={roomLayoutExportSource}
-        t={t}
-        onClose={closeRoomLayoutExportModal}
-        onSelectAll={selectAllRoomLayoutExportRows}
-        onClearSelection={clearRoomLayoutExportSelection}
-        onToggleAll={toggleAllRoomLayoutExportRows}
-        onToggleRow={toggleRoomLayoutExportRow}
-        onSort={sortRoomLayoutExportRows}
-        onApply={applyRoomLayoutExportToSelection}
-      />
+      {roomLayoutExportModal ? (
+        <Suspense fallback={null}>
+          <RoomLayoutExportModal
+            open={!!roomLayoutExportModal}
+            modal={roomLayoutExportModal}
+            rows={roomLayoutExportRows}
+            source={roomLayoutExportSource}
+            t={t}
+            onClose={closeRoomLayoutExportModal}
+            onSelectAll={selectAllRoomLayoutExportRows}
+            onClearSelection={clearRoomLayoutExportSelection}
+            onToggleAll={toggleAllRoomLayoutExportRows}
+            onToggleRow={toggleRoomLayoutExportRow}
+            onSort={sortRoomLayoutExportRows}
+            onApply={applyRoomLayoutExportToSelection}
+          />
+        </Suspense>
+      ) : null}
 
-      <RoomMeasuresModal
-        open={!!roomMeasuresModal}
-        data={roomMeasuresData}
-        t={t}
-        onClose={() => setRoomMeasuresModal(null)}
-      />
+      {roomMeasuresModal ? (
+        <Suspense fallback={null}>
+          <RoomMeasuresModal
+            open={!!roomMeasuresModal}
+            data={roomMeasuresData}
+            t={t}
+            onClose={() => setRoomMeasuresModal(null)}
+          />
+        </Suspense>
+      ) : null}
 
-      <RoomMeetingDuplicateModal
-        open={!!roomMeetingDuplicateModal && !meetingManagerOpen}
-        modal={roomMeetingDuplicateModal}
-        roomPickerOpen={roomMeetingDuplicateRoomPickerOpen}
-        roomPickerRef={roomMeetingDuplicateRoomPickerRef}
-        setModal={setRoomMeetingDuplicateModal}
-        setRoomPickerOpen={setRoomMeetingDuplicateRoomPickerOpen}
-        meetingClockFromTs={meetingClockFromTs}
-        hmToMinutes={hmToMinutes}
-        monthAnchorFromIso={monthAnchorFromIso}
-        shiftMonthAnchor={shiftMonthAnchor}
-        t={t}
-        onClose={() => setRoomMeetingDuplicateModal(null)}
-        onSave={saveRoomMeetingDuplicates}
-      />
+      {roomMeetingDuplicateModal ? (
+        <Suspense fallback={null}>
+          <RoomMeetingDuplicateModal
+            open={!!roomMeetingDuplicateModal && !meetingManagerOpen}
+            modal={roomMeetingDuplicateModal}
+            roomPickerOpen={roomMeetingDuplicateRoomPickerOpen}
+            roomPickerRef={roomMeetingDuplicateRoomPickerRef}
+            setModal={setRoomMeetingDuplicateModal}
+            setRoomPickerOpen={setRoomMeetingDuplicateRoomPickerOpen}
+            meetingClockFromTs={meetingClockFromTs}
+            hmToMinutes={hmToMinutes}
+            monthAnchorFromIso={monthAnchorFromIso}
+            shiftMonthAnchor={shiftMonthAnchor}
+            t={t}
+            onClose={() => setRoomMeetingDuplicateModal(null)}
+            onSave={saveRoomMeetingDuplicates}
+          />
+        </Suspense>
+      ) : null}
 
       {meetingHubModalOpen ? (
         <Suspense fallback={null}>
@@ -20512,73 +20527,81 @@ const PlanView = ({ planId }: Props) => {
         </Suspense>
       ) : null}
 
-      {/* kept for potential future use */}
-      <BulkEditDescriptionModal
-        open={bulkEditOpen}
-        count={selectedObjectIds.filter((id) => {
-          const obj = renderPlan?.objects?.find((o) => o.id === id);
-          return !!obj && !isDeskType(obj.type);
-        }).length}
-        onClose={() => setBulkEditOpen(false)}
-        onSubmit={({ description }) => {
-          if (isReadOnly) return;
-          const targetIds = selectedObjectIds.filter((id) => {
-            const obj = renderPlan?.objects?.find((o) => o.id === id);
-            return !!obj && !isDeskType(obj.type);
-          });
-          if (targetIds.length) markTouched();
-          for (const id of targetIds) {
-            updateObject(id, { description });
-          }
-          push(t({ it: 'Descrizione aggiornata', en: 'Description updated' }), 'success');
-          if (targetIds.length) {
-            postAuditEvent({
-              event: 'objects_bulk_update',
-              scopeType: 'plan',
-              scopeId: planId,
-              details: { ids: targetIds, changes: { description } }
-            });
-          }
-        }}
-      />
+      {bulkEditOpen ? (
+        <Suspense fallback={null}>
+          {/* kept for potential future use */}
+          <BulkEditDescriptionModal
+            open={bulkEditOpen}
+            count={selectedObjectIds.filter((id) => {
+              const obj = renderPlan?.objects?.find((o) => o.id === id);
+              return !!obj && !isDeskType(obj.type);
+            }).length}
+            onClose={() => setBulkEditOpen(false)}
+            onSubmit={({ description }) => {
+              if (isReadOnly) return;
+              const targetIds = selectedObjectIds.filter((id) => {
+                const obj = renderPlan?.objects?.find((o) => o.id === id);
+                return !!obj && !isDeskType(obj.type);
+              });
+              if (targetIds.length) markTouched();
+              for (const id of targetIds) {
+                updateObject(id, { description });
+              }
+              push(t({ it: 'Descrizione aggiornata', en: 'Description updated' }), 'success');
+              if (targetIds.length) {
+                postAuditEvent({
+                  event: 'objects_bulk_update',
+                  scopeType: 'plan',
+                  scopeId: planId,
+                  details: { ids: targetIds, changes: { description } }
+                });
+              }
+            }}
+          />
+        </Suspense>
+      ) : null}
 
-      <BulkEditSelectionModal
-        open={bulkEditSelectionOpen}
-        objects={(renderPlan?.objects || []).filter((o) => selectedObjectIds.includes(o.id))}
-        getTypeLabel={getTypeLabel}
-        getTypeIcon={getTypeIcon}
-        onPreviewObject={(objectId) => {
-          if (!renderPlan) return;
-          const obj = renderPlan.objects.find((o) => o.id === objectId);
-          if (!obj) return;
-          if (obj.type !== 'photo' && obj.type !== 'image') return;
-          returnToBulkEditRef.current = true;
-          setBulkEditSelectionOpen(false);
-          if (obj.type === 'photo') {
-            openPhotoViewer({ id: objectId, selectionIds: [objectId] });
-          } else {
-            openImageViewer({ id: objectId, selectionIds: [objectId] });
-          }
-        }}
-        onClose={() => setBulkEditSelectionOpen(false)}
-        onApply={(changesById) => {
-          if (isReadOnly) return;
-          if (Object.keys(changesById || {}).length) markTouched();
-          const ids = Object.keys(changesById || {});
-          for (const id of ids) {
-            updateObject(id, changesById[id]);
-          }
-          if (ids.length) push(t({ it: 'Oggetti aggiornati', en: 'Objects updated' }), 'success');
-          if (ids.length) {
-            postAuditEvent({
-              event: 'objects_bulk_update',
-              scopeType: 'plan',
-              scopeId: planId,
-              details: { ids, changesById }
-            });
-          }
-        }}
-      />
+      {bulkEditSelectionOpen ? (
+        <Suspense fallback={null}>
+          <BulkEditSelectionModal
+            open={bulkEditSelectionOpen}
+            objects={(renderPlan?.objects || []).filter((o) => selectedObjectIds.includes(o.id))}
+            getTypeLabel={getTypeLabel}
+            getTypeIcon={getTypeIcon}
+            onPreviewObject={(objectId) => {
+              if (!renderPlan) return;
+              const obj = renderPlanObjectById.get(objectId);
+              if (!obj) return;
+              if (obj.type !== 'photo' && obj.type !== 'image') return;
+              returnToBulkEditRef.current = true;
+              setBulkEditSelectionOpen(false);
+              if (obj.type === 'photo') {
+                openPhotoViewer({ id: objectId, selectionIds: [objectId] });
+              } else {
+                openImageViewer({ id: objectId, selectionIds: [objectId] });
+              }
+            }}
+            onClose={() => setBulkEditSelectionOpen(false)}
+            onApply={(changesById) => {
+              if (isReadOnly) return;
+              if (Object.keys(changesById || {}).length) markTouched();
+              const ids = Object.keys(changesById || {});
+              for (const id of ids) {
+                updateObject(id, changesById[id]);
+              }
+              if (ids.length) push(t({ it: 'Oggetti aggiornati', en: 'Objects updated' }), 'success');
+              if (ids.length) {
+                postAuditEvent({
+                  event: 'objects_bulk_update',
+                  scopeType: 'plan',
+                  scopeId: planId,
+                  details: { ids, changesById }
+                });
+              }
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       <ConfirmDialog
         open={!!layerRevealPrompt}
@@ -20625,7 +20648,7 @@ const PlanView = ({ planId }: Props) => {
                   en: 'The object will be removed from the floor plan.'
                 });
             if (confirmDelete.length === 1) {
-              const obj = renderPlan.objects.find((o) => o.id === confirmDelete[0]);
+              const obj = renderPlanObjectById.get(confirmDelete[0]);
               const label = obj ? getTypeLabel(obj.type) : undefined;
               const name = obj?.name || t({ it: 'oggetto', en: 'object' });
               const normalizedLabel = label ? label.trim().toLowerCase() : '';

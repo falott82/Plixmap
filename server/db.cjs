@@ -571,6 +571,17 @@ const migrations = [
         db.exec("ALTER TABLE client_ldap_import ADD COLUMN scope TEXT NOT NULL DEFAULT 'sub'");
       }
     }
+  },
+  {
+    version: 28,
+    up: (db) => {
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_auth_log_ts_id ON auth_log(ts DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_email_log_ts_id ON email_log(ts DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_ts_id ON audit_log(ts DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_external_users_client_present ON external_users(clientId, present, hidden);
+      `);
+    }
   }
 ];
 
@@ -731,6 +742,7 @@ const openDb = () => {
       userAgent TEXT,
       details TEXT
     );
+    CREATE INDEX IF NOT EXISTS idx_auth_log_ts_id ON auth_log(ts DESC, id DESC);
     CREATE TABLE IF NOT EXISTS email_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ts INTEGER NOT NULL,
@@ -742,6 +754,7 @@ const openDb = () => {
       error TEXT,
       details TEXT
     );
+    CREATE INDEX IF NOT EXISTS idx_email_log_ts_id ON email_log(ts DESC, id DESC);
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -762,6 +775,7 @@ const openDb = () => {
       scopeId TEXT,
       details TEXT
     );
+    CREATE INDEX IF NOT EXISTS idx_audit_log_ts_id ON audit_log(ts DESC, id DESC);
     CREATE TABLE IF NOT EXISTS client_user_import (
       clientId TEXT PRIMARY KEY,
       url TEXT NOT NULL,
@@ -825,6 +839,7 @@ const openDb = () => {
       updatedAt INTEGER NOT NULL,
       UNIQUE(clientId, externalId)
     );
+    CREATE INDEX IF NOT EXISTS idx_external_users_client_present ON external_users(clientId, present, hidden);
     CREATE TABLE IF NOT EXISTS external_devices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       clientId TEXT NOT NULL,

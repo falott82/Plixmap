@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.6.0
+Current version: 3.6.1
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,10 +14,10 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.6.0
-- Removed all residual presentation-webcam gesture code paths (store state, PlanView flow, CanvasStage controls, and dedicated hook), keeping presentation mode focused and simpler.
-- Reduced frontend/runtime surface by deleting dead webcam UI logic and related permission handling branches that were no longer active.
-- Full MegaUpdate audit pass rerun with evidence: security checks, test suite, build, and release consistency checks completed before release.
+## What's new in 3.6.1
+- PlanView optimized on high-traffic lookups: memoized maps for objects, rooms, and corridors (`id -> entity`) now replace repeated linear scans in selection/context/modal flows.
+- Targeted refactor keeps behavior unchanged while reducing hot-path overhead in room/corridor actions and bulk operations.
+- MegaUpdate rerun with evidence: lint, tests, build, release consistency checks, and runtime dependency audit completed with no high-severity vulnerabilities.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
@@ -106,6 +106,8 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - Upgrade guide: `docs/UPGRADE.md`
 
 ## Quality and testing
+GitHub Actions runs a blocking `quality-gate` on pull requests and `main`: `quality:check` + end-to-end smoke (`/`, health checks, bootstrap status, login, auth session, logout).
+
 ```bash
 # Type safety
 npm run lint

@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.6.1',
+    date: '2026-03-12',
+    type: 'fix',
+    notes: [
+      n(
+        'PlanView ottimizzato sui lookup ad alto traffico: introdotte mappe memoizzate per oggetti, stanze e corridoi (`id -> entity`) per ridurre i costi O(n) ripetuti nei render e nelle action UI',
+        'PlanView optimized on high-traffic lookups: memoized maps for objects, rooms, and corridors (`id -> entity`) reduce repeated O(n) costs in renders and UI actions'
+      ),
+      n(
+        'Refactor mirato con comportamento invariato: rimosse lookup lineari ridondanti su selezione, context menu, modali stanza/corridoio e azioni bulk, mantenendo piena compatibilita funzionale',
+        'Targeted refactor with unchanged behavior: removed redundant linear lookups across selection, context menu, room/corridor modals, and bulk actions while preserving full functional compatibility'
+      ),
+      n(
+        'MegaUpdate rieseguito con evidenze: lint/test/build/release-check tutti verdi, audit dipendenze runtime senza vulnerabilita high, e controlli sicurezza/deploy riallineati con il sito ufficiale',
+        'MegaUpdate rerun with evidence: lint/test/build/release-check all green, runtime dependency audit with no high vulnerabilities, and security/deploy checks aligned with the official website'
+      )
+    ]
+  },
+  {
     version: '3.6.0',
     date: '2026-03-12',
     type: 'minor',
