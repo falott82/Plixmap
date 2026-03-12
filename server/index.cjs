@@ -283,7 +283,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // Needed for voice notes in client chat + presentation mode webcam controls (getUserMedia).
+  // Needed for media capture features (for example voice notes in client chat via getUserMedia).
   // Browser permission prompts still apply; this only controls whether the feature is allowed at all.
   res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');

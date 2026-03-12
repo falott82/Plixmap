@@ -19,10 +19,7 @@ interface UIState {
   updateCheckOpen: boolean;
   sidebarCollapsed: boolean;
   presentationMode: boolean;
-  presentationWebcamEnabled: boolean;
-  presentationWebcamCalib: { pinchRatio: number } | null;
   presentationEnterRequested: boolean;
-  cameraPermissionState: 'granted' | 'denied' | 'prompt' | 'unknown';
   lastObjectScale: number;
   dirtyByPlan: Record<string, boolean>;
   pendingSaveNavigateTo?: string | null;
@@ -101,11 +98,8 @@ interface UIState {
   toggleSidebar: () => void;
   setPresentationMode: (enabled: boolean) => void;
   togglePresentationMode: () => void;
-  setPresentationWebcamEnabled: (enabled: boolean) => void;
-  setPresentationWebcamCalib: (calib: { pinchRatio: number } | null) => void;
   requestPresentationEnter: () => void;
   clearPresentationEnterRequest: () => void;
-  setCameraPermissionState: (state: 'granted' | 'denied' | 'prompt' | 'unknown') => void;
   setPlanDirty: (planId: string, dirty: boolean) => void;
   requestSaveAndNavigate: (to: string) => void;
   clearPendingSaveNavigate: () => void;
@@ -181,10 +175,7 @@ export const useUIStore = create<UIState>()(
       updateCheckOpen: false,
       sidebarCollapsed: false,
       presentationMode: false,
-      presentationWebcamEnabled: false,
-      presentationWebcamCalib: null,
       presentationEnterRequested: false,
-      cameraPermissionState: 'unknown',
       lastObjectScale: 1,
       dirtyByPlan: {},
       pendingSaveNavigateTo: null,
@@ -266,23 +257,8 @@ export const useUIStore = create<UIState>()(
       ,
       setPresentationMode: (enabled) => set({ presentationMode: !!enabled }),
       togglePresentationMode: () => set((state) => ({ presentationMode: !state.presentationMode })),
-      setPresentationWebcamEnabled: (enabled) =>
-        set((state) => {
-          const next = !!enabled;
-          return state.presentationWebcamEnabled === next ? state : { presentationWebcamEnabled: next };
-        }),
-      setPresentationWebcamCalib: (calib) =>
-        set((state) => {
-          const next = calib && Number.isFinite((calib as any).pinchRatio) ? { pinchRatio: Number((calib as any).pinchRatio) } : null;
-          const prev = state.presentationWebcamCalib;
-          const same =
-            (prev === null && next === null) ||
-            (prev !== null && next !== null && Math.abs(Number(prev.pinchRatio || 0) - Number(next.pinchRatio || 0)) < 0.00001);
-          return same ? state : { presentationWebcamCalib: next };
-        }),
       requestPresentationEnter: () => set({ presentationEnterRequested: true }),
       clearPresentationEnterRequest: () => set({ presentationEnterRequested: false }),
-      setCameraPermissionState: (state) => set({ cameraPermissionState: state || 'unknown' }),
       setPlanDirty: (planId, dirty) =>
         set((state) => ({
           dirtyByPlan: { ...state.dirtyByPlan, [planId]: dirty }

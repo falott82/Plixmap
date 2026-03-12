@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.6.0',
+    date: '2026-03-12',
+    type: 'minor',
+    notes: [
+      n(
+        'Rimosso completamente il rimasuglio della webcam per la navigazione in presentazione: eliminati hook dedicato, stato store, controlli toolbar e flow di permessi non piu necessari',
+        'Completely removed residual presentation-webcam navigation code: deleted dedicated hook, store state, toolbar controls, and now-unneeded permission flow'
+      ),
+      n(
+        'PlanView e CanvasStage semplificati dopo cleanup: meno rami condizionali, meno codice morto e comportamento di presentazione piu lineare',
+        'PlanView and CanvasStage were simplified after cleanup: fewer conditional branches, less dead code, and a more linear presentation-mode behavior'
+      ),
+      n(
+        'MegaUpdate: audit tecnico e sicurezza rieseguiti con quality gate completo (sensitive check, lint, test, build, release check) e dipendenze runtime verificate senza vulnerabilita ad alta severita',
+        'MegaUpdate: technical and security audit rerun with full quality gate (sensitive check, lint, test, build, release check) and runtime dependencies verified with no high-severity vulnerabilities'
+      )
+    ]
+  },
+  {
     version: '3.5.9',
     date: '2026-03-12',
     type: 'fix',

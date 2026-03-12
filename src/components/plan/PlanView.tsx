@@ -137,7 +137,6 @@ import { isNonPeopleRoom } from '../../utils/roomProperties';
 import { closeSocketSafely, getWsUrl } from '../../utils/ws';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 import RoomKioskInfoModal from './RoomKioskInfoModal';
-import { usePresentationWebcamHands } from './presentation/usePresentationWebcamHands';
 import {
   getRoomPolygon,
   googleMapsUrlFromCoords,
@@ -239,7 +238,6 @@ const PlanView = ({ planId }: Props) => {
   );
   const [autoFitEnabled, setAutoFitEnabled] = useState(true);
   const presentationViewportRef = useRef<{ zoom: number; pan: { x: number; y: number }; autoFitEnabled: boolean } | null>(null);
-  const viewportLiveRef = useRef<{ zoom: number; pan: { x: number; y: number } }>({ zoom: 1, pan: { x: 0, y: 0 } });
   const {
     addObject,
     updateObject,
@@ -490,21 +488,15 @@ const PlanView = ({ planId }: Props) => {
     setShowGrid,
     showPrintAreaByPlan,
     toggleShowPrintArea,
-    roomCapacityStateByPlan,
-    setRoomCapacityState,
-	    perfOverlayEnabled,
-	    presentationMode,
-	    togglePresentationMode,
-	    presentationWebcamEnabled,
-	    setPresentationWebcamEnabled,
-	    presentationWebcamCalib,
-	    setPresentationWebcamCalib,
-	    presentationEnterRequested,
-	    clearPresentationEnterRequest,
-      cameraPermissionState,
-      setCameraPermissionState,
-	    hiddenLayersByPlan,
-	    setHideAllLayers,
+	    roomCapacityStateByPlan,
+	    setRoomCapacityState,
+		    perfOverlayEnabled,
+		    presentationMode,
+		    togglePresentationMode,
+		    presentationEnterRequested,
+		    clearPresentationEnterRequest,
+		    hiddenLayersByPlan,
+		    setHideAllLayers,
 	    setLockedPlans,
     setPlanDirty,
     requestSaveAndNavigate,
@@ -561,21 +553,15 @@ const PlanView = ({ planId }: Props) => {
       setShowGrid: (s as any).setShowGrid,
       showPrintAreaByPlan: (s as any).showPrintAreaByPlan,
       toggleShowPrintArea: (s as any).toggleShowPrintArea,
-      roomCapacityStateByPlan: (s as any).roomCapacityStateByPlan,
-      setRoomCapacityState: (s as any).setRoomCapacityState,
-	      perfOverlayEnabled: (s as any).perfOverlayEnabled,
-	      presentationMode: (s as any).presentationMode,
-	      togglePresentationMode: (s as any).togglePresentationMode,
-	      presentationWebcamEnabled: (s as any).presentationWebcamEnabled,
-	      setPresentationWebcamEnabled: (s as any).setPresentationWebcamEnabled,
-	      presentationWebcamCalib: (s as any).presentationWebcamCalib,
-	      setPresentationWebcamCalib: (s as any).setPresentationWebcamCalib,
-	      presentationEnterRequested: (s as any).presentationEnterRequested,
-	      clearPresentationEnterRequest: (s as any).clearPresentationEnterRequest,
-        cameraPermissionState: (s as any).cameraPermissionState,
-        setCameraPermissionState: (s as any).setCameraPermissionState,
-	      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
-	      setHideAllLayers: (s as any).setHideAllLayers,
+	      roomCapacityStateByPlan: (s as any).roomCapacityStateByPlan,
+	      setRoomCapacityState: (s as any).setRoomCapacityState,
+		      perfOverlayEnabled: (s as any).perfOverlayEnabled,
+		      presentationMode: (s as any).presentationMode,
+		      togglePresentationMode: (s as any).togglePresentationMode,
+		      presentationEnterRequested: (s as any).presentationEnterRequested,
+		      clearPresentationEnterRequest: (s as any).clearPresentationEnterRequest,
+		      hiddenLayersByPlan: (s as any).hiddenLayersByPlan,
+		      setHideAllLayers: (s as any).setHideAllLayers,
 	      setLockedPlans: (s as any).setLockedPlans,
       setPlanDirty: (s as any).setPlanDirty,
       requestSaveAndNavigate: (s as any).requestSaveAndNavigate,
@@ -4989,16 +4975,6 @@ const PlanView = ({ planId }: Props) => {
 
   const pendingNavigateRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    viewportLiveRef.current = { zoom, pan };
-  }, [pan, zoom]);
-
-  const getViewport = useCallback(() => viewportLiveRef.current, []);
-
-  const [presentationEnterModalOpen, setPresentationEnterModalOpen] = useState(false);
-  const [presentationEnterBusy, setPresentationEnterBusy] = useState(false);
-  const webcamGesturesEnabled = false;
-
   const enterFullscreenFromGesture = useCallback(() => {
     try {
       const doc: any = document as any;
@@ -5015,33 +4991,11 @@ const PlanView = ({ planId }: Props) => {
     }
   }, []);
 
-  const queryCameraPermission = useCallback(async () => {
-    try {
-      const p: any = (navigator as any)?.permissions;
-      if (!p?.query) return 'unknown' as const;
-      const status = await p.query({ name: 'camera' as any });
-      const state = String(status?.state || '');
-      if (state === 'granted' || state === 'denied' || state === 'prompt') return state as any;
-      return 'unknown' as const;
-    } catch {
-      return 'unknown' as const;
-    }
-  }, []);
-
   const requestEnterPresentation = useCallback(() => {
-    if (presentationEnterBusy) return;
-    setPresentationWebcamEnabled(false);
-    setPresentationWebcamCalib(null);
-    setPresentationEnterModalOpen(false);
+    if (presentationMode) return;
     enterFullscreenFromGesture();
     togglePresentationMode?.();
-  }, [
-    enterFullscreenFromGesture,
-    presentationEnterBusy,
-    setPresentationWebcamCalib,
-    setPresentationWebcamEnabled,
-    togglePresentationMode
-  ]);
+  }, [enterFullscreenFromGesture, presentationMode, togglePresentationMode]);
 
   const handleTogglePresentation = useCallback(() => {
     if (presentationMode) {
@@ -5057,81 +5011,6 @@ const PlanView = ({ planId }: Props) => {
     if (presentationMode) return;
     requestEnterPresentation();
   }, [clearPresentationEnterRequest, presentationEnterRequested, presentationMode, requestEnterPresentation]);
-
-  useEffect(() => {
-    if (!presentationEnterModalOpen) return;
-    let cancelled = false;
-    void (async () => {
-      const perm = await queryCameraPermission();
-      if (cancelled) return;
-      setCameraPermissionState?.(perm);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [presentationEnterModalOpen, queryCameraPermission, setCameraPermissionState]);
-
-  const requestCameraPermissionOnce = useCallback(async () => {
-    try {
-      const md: any = (navigator as any)?.mediaDevices;
-      if (!md?.getUserMedia) return false;
-      const stream: MediaStream = await md.getUserMedia({ video: true, audio: false });
-      try {
-        stream.getTracks().forEach((t) => t.stop());
-      } catch {}
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
-
-  const resetToDefaultViewFromGesture = useCallback(() => {
-    const current = renderPlan;
-    if (!current) return;
-    const def = current.views?.find((v) => v.isDefault);
-    if (!def) {
-      canvasStageRef.current?.fitView?.();
-      return;
-    }
-    setAutoFitEnabled(false);
-    setZoom(def.zoom);
-    setPan(def.pan);
-    saveViewport(current.id, def.zoom, def.pan);
-    setSelectedViewId(def.id);
-  }, [renderPlan, saveViewport, setAutoFitEnabled, setPan, setZoom]);
-
-  const {
-    guideStep: webcamGuideStep,
-    guideVisible: webcamGuideVisible,
-    calibrationProgress: webcamCalibrationProgress,
-    calibrationPinchSeen: webcamCalibrationPinchSeen,
-    guidePanDone: webcamGuidePanDone,
-    guideOpenDone: webcamGuideOpenDone,
-  } = usePresentationWebcamHands({
-    active: presentationMode && webcamGesturesEnabled,
-    webcamEnabled: webcamGesturesEnabled && presentationWebcamEnabled,
-    setWebcamEnabled: setPresentationWebcamEnabled,
-    calib: presentationWebcamCalib,
-    setCalib: setPresentationWebcamCalib,
-    mapRef,
-    getViewport,
-    setPan,
-    onResetView: resetToDefaultViewFromGesture,
-    onInfo: (msg) => push(t(msg), 'info'),
-    onError: (msg) => push(t(msg), 'danger')
-  });
-
-  useEffect(() => {
-    if (webcamGesturesEnabled) return;
-    if (presentationWebcamEnabled) setPresentationWebcamEnabled(false);
-    if (presentationWebcamCalib) setPresentationWebcamCalib(null);
-  }, [
-    presentationWebcamCalib,
-    presentationWebcamEnabled,
-    setPresentationWebcamCalib,
-    setPresentationWebcamEnabled,
-    webcamGesturesEnabled
-  ]);
 
   useEffect(() => {
     const sp = new URLSearchParams(location.search || '');
@@ -13387,124 +13266,12 @@ const PlanView = ({ planId }: Props) => {
                     </div>
                   </div>
                 ) : null}
-                {webcamGesturesEnabled && presentationMode && webcamGuideVisible ? (
-                  <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center px-4">
-                    <div className="w-full max-w-md rounded-2xl border border-sky-200 bg-white/95 p-4 shadow-2xl backdrop-blur">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-                        {t({ it: 'Assistente Webcam', en: 'Webcam Assistant' })}
-                      </div>
-                      <div className="mt-1 text-base font-semibold text-slate-900">
-                        {webcamGuideStep === 'enable'
-                          ? t({ it: '1. Clicca sull’icona webcam', en: '1. Click the webcam icon' })
-                          : webcamGuideStep === 'calibrate'
-                            ? t({ it: '2. Calibrazione in corso', en: '2. Calibration in progress' })
-                            : webcamGuideStep === 'pan'
-                              ? t({ it: '3. Prova il gesto PAN', en: '3. Try the PAN gesture' })
-                              : webcamGuideStep === 'open'
-                                ? t({ it: '4. Prova il gesto mano aperta', en: '4. Try the open-hand gesture' })
-                                : t({ it: 'Configurazione completata', en: 'Setup completed' })}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-700">
-                        {webcamGuideStep === 'enable'
-                          ? t({
-                              it: 'Premi il pulsante videocamera nella barra per iniziare. Se necessario, autorizza l’accesso alla webcam.',
-                              en: 'Press the camera button in the toolbar to start. If needed, allow webcam access.'
-                            })
-                          : webcamGuideStep === 'calibrate'
-                            ? t({
-                                it: 'Mostra una mano e fai pinch (pollice + indice) tenendolo fermo per circa 1 secondo.',
-                                en: 'Show one hand and pinch (thumb + index), keeping it steady for about 1 second.'
-                              })
-                            : webcamGuideStep === 'pan'
-                              ? t({
-                                  it: 'Tieni la mano aperta con dita ravvicinate e spostala lentamente per muovere la planimetria.',
-                                  en: 'Keep your hand open with close fingers and move slowly to pan the floor plan.'
-                                })
-                              : webcamGuideStep === 'open'
-                                ? t({
-                                    it: 'Apri la mano a “5” e tienila ferma per un attimo: la vista torna alla posizione predefinita.',
-                                    en: 'Open your hand like “5” and hold briefly: the view returns to default.'
-                                  })
-                                : t({
-                                    it: 'Ottimo. I controlli gesture sono pronti. Puoi continuare a usare pan e reset vista.',
-                                    en: 'Great. Gesture controls are ready. You can keep using pan and view reset.'
-                                  })}
-                      </div>
-                      <div className="mt-3 flex items-center justify-center">
-                        {webcamGuideStep === 'calibrate' ? (
-                          <svg viewBox="0 0 240 88" className="h-20 w-full max-w-[280px]" aria-hidden="true">
-                            <rect x="2" y="2" width="236" height="84" rx="14" fill="#eff6ff" stroke="#bfdbfe" />
-                            <circle cx="82" cy="44" r="18" fill="#dbeafe" stroke="#60a5fa" strokeWidth="2" />
-                            <circle cx="158" cy="44" r="18" fill="#dbeafe" stroke="#60a5fa" strokeWidth="2" />
-                            <path d="M102 44 H138" stroke="#0ea5e9" strokeWidth="4" strokeLinecap="round" strokeDasharray="5 4" />
-                            <path d="M113 34 L102 44 L113 54" fill="none" stroke="#0ea5e9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M127 34 L138 44 L127 54" fill="none" stroke="#0ea5e9" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                            <text x="120" y="77" textAnchor="middle" fontSize="11" fill="#0369a1" fontWeight="700">
-                              PINCH: avvicina pollice e indice
-                            </text>
-                          </svg>
-                        ) : webcamGuideStep === 'pan' ? (
-                          <svg viewBox="0 0 240 88" className="h-20 w-full max-w-[280px]" aria-hidden="true">
-                            <rect x="2" y="2" width="236" height="84" rx="14" fill="#ecfeff" stroke="#a5f3fc" />
-                            <rect x="95" y="22" width="50" height="44" rx="18" fill="#cffafe" stroke="#06b6d4" strokeWidth="2" />
-                            <path d="M62 44 H178" stroke="#0891b2" strokeWidth="4" strokeLinecap="round" />
-                            <path d="M72 34 L62 44 L72 54" fill="none" stroke="#0891b2" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M168 34 L178 44 L168 54" fill="none" stroke="#0891b2" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                            <text x="120" y="77" textAnchor="middle" fontSize="11" fill="#0e7490" fontWeight="700">
-                              PAN: muovi la mano lentamente
-                            </text>
-                          </svg>
-                        ) : webcamGuideStep === 'open' ? (
-                          <svg viewBox="0 0 240 88" className="h-20 w-full max-w-[280px]" aria-hidden="true">
-                            <rect x="2" y="2" width="236" height="84" rx="14" fill="#f0fdf4" stroke="#bbf7d0" />
-                            <rect x="100" y="26" width="40" height="40" rx="16" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
-                            <rect x="78" y="16" width="10" height="28" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
-                            <rect x="94" y="12" width="10" height="30" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
-                            <rect x="110" y="10" width="10" height="32" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
-                            <rect x="126" y="12" width="10" height="30" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
-                            <rect x="142" y="16" width="10" height="28" rx="5" fill="#dcfce7" stroke="#22c55e" strokeWidth="2" />
-                            <text x="120" y="77" textAnchor="middle" fontSize="11" fill="#15803d" fontWeight="700">
-                              MANO APERTA: reset vista default
-                            </text>
-                          </svg>
-                        ) : null}
-                      </div>
-                      <div className="mt-3 space-y-2 text-xs">
-                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${presentationWebcamEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          <span>{t({ it: 'Webcam attiva', en: 'Webcam enabled' })}</span>
-                          <span>{presentationWebcamEnabled ? '✓' : '•'}</span>
-                        </div>
-                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${presentationWebcamCalib ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          <span>{t({ it: 'Calibrazione', en: 'Calibration' })}</span>
-                          <span>{presentationWebcamCalib ? '✓' : `${Math.max(0, Math.min(100, Math.round(webcamCalibrationProgress || 0)))}%`}</span>
-                        </div>
-                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamCalibrationPinchSeen ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          <span>{t({ it: 'Pinch rilevato', en: 'Pinch detected' })}</span>
-                          <span>{webcamCalibrationPinchSeen ? '✓' : '•'}</span>
-                        </div>
-                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamGuidePanDone ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          <span>{t({ it: 'Gesto PAN', en: 'PAN gesture' })}</span>
-                          <span>{webcamGuidePanDone ? '✓' : '•'}</span>
-                        </div>
-                        <div className={`flex items-center justify-between rounded-lg px-2 py-1 ${webcamGuideOpenDone ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          <span>{t({ it: 'Gesto mano aperta', en: 'Open-hand gesture' })}</span>
-                          <span>{webcamGuideOpenDone ? '✓' : '•'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-	                        <CanvasStage
-	                        ref={canvasStageRef}
-	                        containerRef={mapRef}
-	                        presentationMode={presentationMode}
-	                        onTogglePresentation={() => handleTogglePresentation()}
-	                        webcamEnabled={false}
-	                        webcamReady={false}
-                          webcamHandDetected={false}
-	                        onToggleWebcam={undefined}
-	                        onCalibrateWebcam={undefined}
-	                        plan={(canvasPlan || renderPlan) as any}
+		                        <CanvasStage
+		                        ref={canvasStageRef}
+		                        containerRef={mapRef}
+		                        presentationMode={presentationMode}
+		                        onTogglePresentation={() => handleTogglePresentation()}
+		                        plan={(canvasPlan || renderPlan) as any}
 	                        selectedId={selectedObjectId}
 	                        selectedIds={selectedObjectIds}
 	                    selectedRoomId={selectedRoomId}
@@ -22265,132 +22032,6 @@ const PlanView = ({ planId }: Props) => {
           />
         </Suspense>
       ) : null}
-
-      <Transition appear show={webcamGesturesEnabled && presentationEnterModalOpen} as={Fragment}>
-        <Dialog
-          as="div"
-          className="relative z-50"
-          onClose={() => {
-            if (presentationEnterBusy) return;
-            setPresentationEnterModalOpen(false);
-          }}
-        >
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-150"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-100"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4 text-center">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-150"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-100"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="modal-panel w-full max-w-lg transform overflow-hidden text-left align-middle transition-all">
-                  <div className="modal-header">
-                    <Dialog.Title className="modal-title">
-                      {t({ it: 'Modalità presentazione', en: 'Presentation mode' })}
-                    </Dialog.Title>
-                    <button
-                      onClick={() => {
-                        if (presentationEnterBusy) return;
-                        setPresentationEnterModalOpen(false);
-                      }}
-                      className="icon-button"
-                      title={t({ it: 'Chiudi', en: 'Close' })}
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                  <Dialog.Description className="modal-description">
-                    {t({
-                      it: 'Stai per passare alla modalità Presentazione a schermo intero. Puoi usare la webcam e i gesti per zoomare e spostarti nella planimetria. Vuoi concedere l’accesso alla webcam e procedere, oppure procedere senza webcam?',
-                      en: 'You are about to enter fullscreen Presentation mode. You can use the webcam and hand gestures to pan and zoom the floor plan. Do you want to grant webcam access and proceed, or proceed without the webcam?'
-                    })}
-                  </Dialog.Description>
-                  {cameraPermissionState === 'denied' ? (
-                    <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
-                      {t({
-                        it: 'La webcam risulta bloccata per questo sito nelle impostazioni del browser. Per procedere con i gesti, abilita la camera per questo sito e riprova.',
-                        en: 'The webcam appears to be blocked for this site in your browser settings. To use gestures, allow camera access for this site and try again.'
-                      })}
-                    </div>
-                  ) : null}
-                  <div className="modal-footer flex flex-wrap gap-2">
-                    <button
-                      onClick={() => {
-                        if (presentationEnterBusy) return;
-                        setPresentationEnterModalOpen(false);
-                      }}
-                      className="btn-secondary"
-                      title={t({ it: 'Resta nella modalità attuale', en: 'Stay in the current mode' })}
-                    >
-                      {t({ it: 'Annulla', en: 'Cancel' })}
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (presentationEnterBusy) return;
-                        setPresentationWebcamEnabled(false);
-                        setPresentationWebcamCalib(null);
-                        setPresentationEnterModalOpen(false);
-                        enterFullscreenFromGesture();
-                        togglePresentationMode?.();
-                      }}
-                      className="btn-secondary"
-                      title={t({ it: 'Entra in presentazione senza webcam', en: 'Enter presentation without the webcam' })}
-                    >
-                      {t({ it: 'Procedi senza webcam', en: 'Proceed without webcam' })}
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (presentationEnterBusy) return;
-                        setPresentationEnterBusy(true);
-                        setPresentationWebcamEnabled(false);
-                        setPresentationWebcamCalib(null);
-                        setPresentationEnterModalOpen(false);
-                        enterFullscreenFromGesture();
-                        togglePresentationMode?.();
-                        const p = requestCameraPermissionOnce();
-                        void p
-                          .then(async (ok) => {
-                            const perm = await queryCameraPermission();
-                            setCameraPermissionState?.(perm);
-                            if (!ok) {
-                              push(
-                                t({
-                                  it: 'Accesso alla webcam non concesso. Puoi usare la presentazione senza webcam.',
-                                  en: 'Webcam access was not granted. You can still use presentation mode without the webcam.'
-                                }),
-                                'danger'
-                              );
-                            }
-                          })
-                          .finally(() => setPresentationEnterBusy(false));
-                      }}
-                      className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={presentationEnterBusy}
-                      title={t({ it: 'Concedi accesso alla webcam e procedi', en: 'Grant webcam access and proceed' })}
-                    >
-                      {presentationEnterBusy ? t({ it: 'Attendere…', en: 'Please wait…' }) : t({ it: 'Concedi accesso e procedi', en: 'Grant access and proceed' })}
-                    </button>
-                  </div>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
 
       {/* legacy multi-print modal kept for future use */}
     </div>

@@ -2,6 +2,11 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.6.0 - 2026-03-12
+- Removed all residual presentation-webcam gesture paths: deleted the dedicated webcam hook, related UI store fields/setters, PlanView webcam prompt/assistant flow, and CanvasStage webcam/calibration controls.
+- Simplified presentation behavior by keeping only fullscreen presentation toggling and removing dead conditional branches tied to webcam-specific onboarding and calibration.
+- Ran a full MegaUpdate verification pass with evidence: `quality:check` succeeded end-to-end and `npm audit --omit=dev --audit-level=high` reported `0` vulnerabilities.
+
 ## 3.5.9 - 2026-03-12
 - Reworked object-layer selection UX in `ObjectModal`: by default it now shows only the primary layer, while full multi-layer selection is available by clicking the layer chip itself or the dedicated `+ More` control.
 - Hardened object-layer assignment logic: selected IDs are normalized against currently available layers and the editor now preserves at least one selected layer to avoid invalid empty states.

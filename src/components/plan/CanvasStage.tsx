@@ -2,7 +2,7 @@ import { Fragment, forwardRef, memo, useCallback, useEffect, useImperativeHandle
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer, Wedge } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
-import { Crosshair, Eye, Hand, MonitorPlay, Video } from 'lucide-react';
+import { Eye, Hand, MonitorPlay } from 'lucide-react';
 import { toast } from 'sonner';
 import { Corridor, FloorPlan, IconName, MapObject, MapObjectType, RoomConnectionDoor } from '../../store/types';
 import { TEXT_FONT_OPTIONS, WALL_LAYER_COLOR, WIFI_RANGE_SCALE_MAX } from '../../store/data';
@@ -86,11 +86,6 @@ interface Props {
   suspendKeyboardShortcuts?: boolean;
   presentationMode?: boolean;
   onTogglePresentation?: () => void;
-  webcamEnabled?: boolean;
-  webcamReady?: boolean;
-  webcamHandDetected?: boolean;
-  onToggleWebcam?: () => void;
-  onCalibrateWebcam?: () => void;
   perfEnabled?: boolean;
   onZoomChange: (zoom: number) => void;
   onPanChange: (pan: { x: number; y: number }) => void;
@@ -474,11 +469,6 @@ const CanvasStageImpl = (
   suspendKeyboardShortcuts = false,
   presentationMode = false,
   onTogglePresentation,
-  webcamEnabled = false,
-  webcamReady = false,
-  webcamHandDetected = false,
-  onToggleWebcam,
-  onCalibrateWebcam,
   perfEnabled = false,
   onZoomChange,
   onPanChange,
@@ -7176,35 +7166,6 @@ const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number,
             }`}
 	          >
 	            <MonitorPlay size={16} />
-	          </button>
-	        ) : null}
-	        {presentationMode && onToggleWebcam ? (
-	          <button
-	            title={
-	              webcamEnabled
-	                ? webcamHandDetected
-                    ? t({ it: 'Webcam attiva (mano rilevata)', en: 'Webcam enabled (hand detected)' })
-                    : t({ it: 'Webcam attiva (nessuna mano)', en: 'Webcam enabled (no hand detected)' })
-	                : t({ it: 'Attiva webcam (per gesti)', en: 'Enable webcam (for gestures)' })
-	            }
-	            aria-pressed={webcamEnabled}
-	            onClick={() => onToggleWebcam?.()}
-	            className={`flex h-8 w-8 items-center justify-center rounded-lg border hover:bg-slate-50 ${
-	              webcamEnabled ? 'border-primary text-primary' : 'border-slate-200 text-ink'
-	            }`}
-	          >
-	            <Video size={16} />
-	            {webcamEnabled && webcamReady ? <span className="sr-only">{t({ it: 'Tracking attivo', en: 'Tracking active' })}</span> : null}
-	          </button>
-	        ) : null}
-	        {presentationMode && onCalibrateWebcam ? (
-	          <button
-	            title={t({ it: 'Calibra (pinch)', en: 'Calibrate (pinch)' })}
-	            onClick={() => onCalibrateWebcam?.()}
-	            disabled={!webcamEnabled}
-	            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-	          >
-	            <Crosshair size={16} />
 	          </button>
 	        ) : null}
       </div>
