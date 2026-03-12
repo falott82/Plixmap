@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.5.8
+Current version: 3.5.9
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,10 +14,10 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.5.8
-- Changelog modal visual polish: release version numbers are now highlighted in red for faster readability in both the header and each release row.
-- Consolidated release pass after UI polish: quality gates, tests, build validation, and release/version consistency checks rerun before shipping.
-- Documentation and release metadata aligned to keep app and website update signals consistent.
+## What's new in 3.5.9
+- Object modal layers are now compact by default: it shows the primary layer first, with `+ More` (or click on the layer itself) to expand the full multi-layer selector.
+- Layer assignment in object modal is now safer and deterministic: selected layers are normalized against available layers and at least one selected layer is always preserved.
+- Stability hardening for presentation webcam state updates to prevent redundant state loops that could trigger React runtime error `#185` in production builds.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.

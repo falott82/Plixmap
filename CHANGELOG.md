@@ -2,6 +2,11 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.5.9 - 2026-03-12
+- Reworked object-layer selection UX in `ObjectModal`: by default it now shows only the primary layer, while full multi-layer selection is available by clicking the layer chip itself or the dedicated `+ More` control.
+- Hardened object-layer assignment logic: selected IDs are normalized against currently available layers and the editor now preserves at least one selected layer to avoid invalid empty states.
+- Stabilized presentation webcam flows after React 19 migration by making webcam/calibration setters and teardown paths idempotent, reducing redundant updates that could trigger runtime React `#185` loops in production bundles.
+
 ## 3.5.6 - 2026-03-09
 - Hardened WebAPI import reliability for both users and devices: `Test` and `Preview/Compare` now use the live configuration shown in the modal (URL/username/method/body/password override) instead of relying only on the last saved backend copy.
 - Refined the shared import transport for unstable local-network environments: direct-IP connection after URL validation, no shared agent/pool, retry in a fresh child Node process, and final `curl` fallback when the long-lived backend hits transient reachability errors such as `EHOSTUNREACH`.

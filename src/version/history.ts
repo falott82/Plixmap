@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.5.9',
+    date: '2026-03-12',
+    type: 'fix',
+    notes: [
+      n(
+        'Modale oggetto: sezione livelli resa compatta di default. Ora mostra prima il layer principale e apre la selezione completa con il pulsante + o clic diretto sul layer',
+        'Object modal: layers section is compact by default. It now shows the primary layer first and opens the full selector with the + button or by clicking the layer itself'
+      ),
+      n(
+        'Assegnazione layer negli oggetti resa piu robusta: normalizzazione rispetto ai layer realmente disponibili e vincolo di almeno un layer sempre selezionato per evitare stati inconsistenti',
+        'Object layer assignment is now more robust: normalization against actually available layers and an at-least-one-layer guard to prevent inconsistent states'
+      ),
+      n(
+        'Modalita presentazione/webcam: introdotti guard idempotenti su store ed effetti per prevenire update ridondanti e loop di rendering che potevano causare React error #185 in build minificate',
+        'Presentation/webcam mode: added idempotent guards in store setters and effects to prevent redundant updates and render loops that could cause React error #185 in minified builds'
+      )
+    ]
+  },
+  {
     version: '3.5.8',
     date: '2026-03-10',
     type: 'fix',

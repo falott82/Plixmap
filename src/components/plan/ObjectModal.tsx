@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ArrowUpDown, FileText, History, Plus, Search, Trash2, X } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, FileText, History, Plus, Search, Trash2, X } from 'lucide-react';
 import { IconName, MapObjectType, WifiAntennaModel } from '../../store/types';
 import Icon from '../ui/Icon';
 import { useT } from '../../i18n/useT';
@@ -287,6 +287,7 @@ const ObjectModal = ({
     dir: 'desc'
   });
   const [layerIds, setLayerIds] = useState<string[]>(initialLayerIds);
+  const [layersPickerOpen, setLayersPickerOpen] = useState(false);
   const [scale, setScale] = useState<number>(initialScale);
   const [quoteLabelScale, setQuoteLabelScale] = useState<number>(initialQuoteLabelScale);
   const [quoteLabelBg, setQuoteLabelBg] = useState<boolean>(!!initialQuoteLabelBg);
@@ -344,6 +345,48 @@ const ObjectModal = ({
   const isAssemblyPoint = type === 'safety_assembly_point';
   const isDesk = type ? isDeskType(type) : false;
   const isWall = typeof type === 'string' && String(type).startsWith('wall_');
+  const canEditLayers = !isQuote && !isText && !isImageLike && !isPostIt && !isSecurityType && layers.length > 0;
+  const orderedLayerIds = useMemo(
+    () =>
+      layers
+        .map((layer) => String(layer.id || ''))
+        .filter(Boolean),
+    [layers]
+  );
+  const normalizeLayerIds = useCallback(
+    (ids: string[]) => {
+      const unique = new Set((ids || []).map((id) => String(id || '')).filter(Boolean));
+      return orderedLayerIds.filter((id) => unique.has(id));
+    },
+    [orderedLayerIds]
+  );
+  const initialLayerIdsOrdered = useMemo(() => normalizeLayerIds(initialLayerIds), [initialLayerIds, normalizeLayerIds]);
+  const fallbackLayerId = useMemo(() => initialLayerIdsOrdered[0] || orderedLayerIds[0] || '', [initialLayerIdsOrdered, orderedLayerIds]);
+  const normalizedSelectedLayerIds = useMemo(() => {
+    const current = normalizeLayerIds(layerIds);
+    if (current.length) return current;
+    return canEditLayers && fallbackLayerId ? [fallbackLayerId] : current;
+  }, [canEditLayers, fallbackLayerId, layerIds, normalizeLayerIds]);
+  const primaryLayerId = normalizedSelectedLayerIds[0] || '';
+  const primaryLayer = useMemo(
+    () => (primaryLayerId ? layers.find((layer) => String(layer.id) === primaryLayerId) || null : null),
+    [layers, primaryLayerId]
+  );
+  const extraSelectedLayerCount = Math.max(0, normalizedSelectedLayerIds.length - (primaryLayer ? 1 : 0));
+  const toggleLayerId = useCallback(
+    (layerId: string) => {
+      if (readOnly) return;
+      setLayerIds((prev) => {
+        const current = normalizeLayerIds(prev);
+        if (current.includes(layerId)) {
+          if (current.length <= 1) return current;
+          return current.filter((id) => id !== layerId);
+        }
+        return normalizeLayerIds([...current, layerId]);
+      });
+    },
+    [normalizeLayerIds, readOnly]
+  );
   const canHaveNetworkFields =
     !!type &&
     !isSecurityType &&
@@ -596,7 +639,8 @@ const ObjectModal = ({
     setSecurityDocsSearch('');
     setSecurityDocsHideExpired(false);
     setSecurityDocsSort({ key: 'uploadedAt', dir: 'desc' });
-    setLayerIds(initialLayerIds);
+    setLayerIds(normalizeLayerIds(initialLayerIds));
+    setLayersPickerOpen(false);
     setScale(Number.isFinite(initialScale) ? initialScale : 1);
     setQuoteLabelScale(Number.isFinite(initialQuoteLabelScale) ? initialQuoteLabelScale : 1);
     setQuoteLabelBg(!!initialQuoteLabelBg);
@@ -726,9 +770,20 @@ const ObjectModal = ({
     objectId,
     type,
     open,
+    normalizeLayerIds,
     wifiModels,
     wifiModelsById
   ]);
+
+  useEffect(() => {
+    if (!open || !canEditLayers) return;
+    setLayerIds((prev) => {
+      const normalized = normalizeLayerIds(prev);
+      const next = normalized.length ? normalized : (fallbackLayerId ? [fallbackLayerId] : []);
+      if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) return prev;
+      return next;
+    });
+  }, [canEditLayers, fallbackLayerId, normalizeLayerIds, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -1065,6 +1120,7 @@ const ObjectModal = ({
       }
     }
     const safeName = name.trim();
+    const safeLayerIds = canEditLayers ? normalizedSelectedLayerIds : normalizeLayerIds(layerIds);
     onSubmit({
       name: safeName,
       description: description.trim() || undefined,
@@ -1078,7 +1134,7 @@ const ObjectModal = ({
             securityCheckHistory
           }
         : {}),
-      layerIds: isQuote ? undefined : (layerIds.length ? layerIds : undefined),
+      layerIds: isQuote ? undefined : (safeLayerIds.length ? safeLayerIds : undefined),
       customValues: customFields.length ? customValues : undefined,
       scale: Number.isFinite(scale) ? Math.max(0.2, Math.min(2.4, scale)) : undefined,
       quoteLabelScale: Number.isFinite(quoteLabelScale) ? Math.max(0.6, Math.min(2, quoteLabelScale)) : undefined,
@@ -1829,34 +1885,81 @@ const ObjectModal = ({
                       </div>
                     </div>
                   ) : null}
-                  {!isQuote && !isText && !isImageLike && !isPostIt && !isSecurityType && layers.length ? (
+                  {canEditLayers ? (
                     <div>
                       <div className="text-sm font-medium text-slate-700">{t({ it: 'Livelli', en: 'Layers' })}</div>
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        {layers.map((l) => {
-                          const on = layerIds.includes(l.id);
-                          return (
-                            <button
-                              key={l.id}
-                              type="button"
-                              onClick={() =>
-                                setLayerIds((prev) => (prev.includes(l.id) ? prev.filter((x) => x !== l.id) : [...prev, l.id]))
-                              }
-                              className={`flex items-center justify-between rounded-xl border px-3 py-2 text-sm font-semibold ${
-                                on ? 'border-primary bg-primary/5 text-primary' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                              }`}
-                              title={l.label}
-                            >
-                              <span className="truncate">{l.label}</span>
-                              <span className="ml-2 h-2 w-2 rounded-full" style={{ background: l.color || (on ? '#2563eb' : '#cbd5e1') }} />
-                            </button>
-                          );
-                        })}
+                      <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => !readOnly && setLayersPickerOpen((prev) => !prev)}
+                            disabled={readOnly}
+                            className={`flex min-w-0 flex-1 items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${
+                              readOnly
+                                ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500'
+                                : 'border-primary bg-primary/5 text-primary hover:bg-primary/10'
+                            }`}
+                            title={primaryLayer?.label || t({ it: 'Layer principale', en: 'Primary layer' })}
+                          >
+                            <span className="truncate">{primaryLayer?.label || t({ it: 'Layer principale', en: 'Primary layer' })}</span>
+                            <span className="ml-2 flex items-center gap-2">
+                              {extraSelectedLayerCount > 0 ? (
+                                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">+{extraSelectedLayerCount}</span>
+                              ) : null}
+                              <span
+                                className="h-2 w-2 rounded-full"
+                                style={{ background: primaryLayer?.color || '#2563eb' }}
+                              />
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => !readOnly && setLayersPickerOpen((prev) => !prev)}
+                            disabled={readOnly}
+                            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-2 text-xs font-semibold ${
+                              readOnly
+                                ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500'
+                                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                            title={t({ it: 'Mostra altri livelli', en: 'Show more layers' })}
+                          >
+                            <Plus size={12} />
+                            <span>{t({ it: 'Altri', en: 'More' })}</span>
+                            <ChevronDown size={12} className={`transition-transform ${layersPickerOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                        </div>
+                        {layersPickerOpen ? (
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            {layers.map((l) => {
+                              const on = normalizedSelectedLayerIds.includes(l.id);
+                              const lastSelected = on && normalizedSelectedLayerIds.length <= 1;
+                              return (
+                                <button
+                                  key={l.id}
+                                  type="button"
+                                  onClick={() => toggleLayerId(l.id)}
+                                  disabled={readOnly || lastSelected}
+                                  className={`flex items-center justify-between rounded-xl border px-3 py-2 text-sm font-semibold ${
+                                    on ? 'border-primary bg-primary/5 text-primary' : 'border-slate-200 bg-white text-slate-600'
+                                  } ${readOnly || lastSelected ? 'cursor-not-allowed opacity-70' : 'hover:bg-slate-50'}`}
+                                  title={
+                                    lastSelected
+                                      ? t({ it: 'Almeno un layer deve restare selezionato.', en: 'At least one layer must stay selected.' })
+                                      : l.label
+                                  }
+                                >
+                                  <span className="truncate">{l.label}</span>
+                                  <span className="ml-2 h-2 w-2 rounded-full" style={{ background: l.color || (on ? '#2563eb' : '#cbd5e1') }} />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="mt-2 text-xs text-slate-500">
                         {t({
-                          it: 'Seleziona uno o più livelli: serve per filtrare e organizzare gli oggetti.',
-                          en: 'Select one or more layers to filter and organize objects.'
+                          it: 'Mostriamo il layer principale. Premi sul layer o sul pulsante + per gestire anche gli altri.',
+                          en: 'The primary layer is shown by default. Press the layer or the + button to manage others.'
                         })}
                       </div>
                     </div>
