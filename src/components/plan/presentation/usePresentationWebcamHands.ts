@@ -101,7 +101,7 @@ export function usePresentationWebcamHands(opts: {
   setWebcamEnabled: (enabled: boolean) => void;
   calib: PresentationWebcamCalib | null;
   setCalib: (calib: PresentationWebcamCalib | null) => void;
-  mapRef: RefObject<HTMLDivElement>;
+  mapRef: RefObject<HTMLDivElement | null>;
   getViewport: () => { zoom: number; pan: { x: number; y: number } };
   setPan: (pan: { x: number; y: number }) => void;
   onResetView?: () => void;

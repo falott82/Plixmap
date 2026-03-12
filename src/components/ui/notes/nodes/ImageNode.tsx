@@ -227,7 +227,7 @@ export class ImageNode extends DecoratorBlockNode {
     return false;
   }
 
-  decorate(): JSX.Element {
+  decorate(): React.JSX.Element {
     return <ImageComponent nodeKey={this.getKey()} src={this.__src} altText={this.__altText} width={this.__width} />;
   }
 }

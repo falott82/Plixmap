@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { createWithEqualityFn as create } from 'zustand/traditional';
 import type { CustomField } from '../api/customFields';
 import { fetchCustomFields, fetchObjectCustomValues, saveObjectCustomValues } from '../api/customFields';
 
@@ -50,4 +50,3 @@ export const useCustomFieldsStore = create<State>()((set, get) => ({
       return { valuesByObjectId: next };
     })
 }));
-

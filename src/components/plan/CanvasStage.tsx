@@ -78,7 +78,7 @@ interface Props {
   metersPerPixel?: number | null;
   zoom: number;
   pan: { x: number; y: number };
-  containerRef: React.RefObject<HTMLDivElement>;
+  containerRef: React.RefObject<HTMLDivElement | null>;
   autoFit?: boolean;
   onGoDefaultView?: () => void;
   hasDefaultView?: boolean;

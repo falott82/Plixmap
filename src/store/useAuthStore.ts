@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { createWithEqualityFn as create } from 'zustand/traditional';
 import { AuthUser, Permission, fetchMe, login as apiLogin, logout as apiLogout } from '../api/auth';
 import { useCustomFieldsStore } from './useCustomFieldsStore';
 import { useUIStore } from './useUIStore';

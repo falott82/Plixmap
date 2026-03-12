@@ -5,7 +5,7 @@ import { useT } from '../../i18n/useT';
 interface Props {
   onSearch: (term: string) => void;
   onEnter?: (term: string) => void;
-  inputRef?: React.RefObject<HTMLInputElement>;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
   className?: string;
 }
 

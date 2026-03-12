@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { createWithEqualityFn as create } from 'zustand/traditional';
 import { toast } from 'sonner';
 
 export type ToastTone = 'success' | 'info' | 'danger';

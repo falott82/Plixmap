@@ -13,7 +13,7 @@ interface Props {
   onClose: () => void;
   onSelectObject: (objectId: string) => void;
   onSelectRoom: (roomId: string) => void;
-  anchorRef: RefObject<HTMLElement>;
+  anchorRef: RefObject<HTMLElement | null>;
 }
 
 const SearchResultsPopover = ({
