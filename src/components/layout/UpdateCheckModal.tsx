@@ -11,6 +11,11 @@ import { useAuthStore } from '../../store/useAuthStore';
 const UPDATE_CHECK_CACHE_KEY = 'plixmap_update_check_cache_v1';
 const UPDATE_CHECK_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+const normalizeSemver = (value: string | null | undefined): string | null => {
+  const raw = String(value || '').trim();
+  return /^\d+\.\d+\.\d+$/.test(raw) ? raw : null;
+};
+
 const UpdateCheckModal = () => {
   const { updateCheckOpen, closeUpdateCheck } = useUIStore(
     (s) => ({ updateCheckOpen: s.updateCheckOpen, closeUpdateCheck: s.closeUpdateCheck }),
@@ -43,8 +48,15 @@ const UpdateCheckModal = () => {
         if (raw) {
           const parsed = JSON.parse(raw);
           const checkedAt = Number(parsed?.checkedAt || 0);
-          if (checkedAt && Date.now() - checkedAt <= UPDATE_CHECK_CACHE_TTL_MS && parsed?.result) {
-            setUpdateStatus(parsed.result as UpdateStatusResponse);
+          const cachedResult = parsed?.result as UpdateStatusResponse | undefined;
+          const cachedCurrent = normalizeSemver(cachedResult?.currentVersion);
+          const localCurrent = normalizeSemver(localVersion);
+          // Invalidate stale cache automatically after a local app update/restart.
+          const cacheVersionMismatch = !!(cachedCurrent && localCurrent && cachedCurrent !== localCurrent);
+          if (cacheVersionMismatch) {
+            localStorage.removeItem(UPDATE_CHECK_CACHE_KEY);
+          } else if (checkedAt && Date.now() - checkedAt <= UPDATE_CHECK_CACHE_TTL_MS && cachedResult) {
+            setUpdateStatus(cachedResult);
             return;
           }
         }
