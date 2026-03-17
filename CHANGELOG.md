@@ -2,6 +2,11 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.6.2 - 2026-03-17
+- Security hardening on the build supply chain: forced `@rollup/plugin-terser@1.0.0` and `serialize-javascript@7.0.4`, removing high-severity `npm audit` findings in the PWA/workbox dependency path.
+- Website security headers upgraded with a strict server-side `Content-Security-Policy` in `.htaccess`, allowing only local scripts plus explicit SHA-256 hashes for inline JSON-LD blocks.
+- Re-ran full validation after hardening (`npm audit`, lint, tests, build), confirming stable release behavior for 3.6.2.
+
 ## 3.6.0 - 2026-03-12
 - Removed all residual presentation-webcam gesture paths: deleted the dedicated webcam hook, related UI store fields/setters, PlanView webcam prompt/assistant flow, and CanvasStage webcam/calibration controls.
 - Simplified presentation behavior by keeping only fullscreen presentation toggling and removing dead conditional branches tied to webcam-specific onboarding and calibration.

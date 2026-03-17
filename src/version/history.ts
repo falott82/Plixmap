@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.6.2',
+    date: '2026-03-17',
+    type: 'fix',
+    notes: [
+      n(
+        'Hardening sicurezza sulla supply chain di build: forzato `@rollup/plugin-terser@1.0.0` con `serialize-javascript@7.0.4`, eliminando le vulnerabilita high rilevate da npm audit nella catena PWA/workbox',
+        'Build supply-chain security hardening: forced `@rollup/plugin-terser@1.0.0` with `serialize-javascript@7.0.4`, removing high-severity npm audit findings in the PWA/workbox chain'
+      ),
+      n(
+        'Sito ufficiale rinforzato con Content-Security-Policy server-side (`.htaccess`) e allowlist minimale: script locali + hash SHA-256 dei blocchi JSON-LD inline, frame/object bloccati e upgrade-insecure-requests attivo',
+        'Official website hardened with server-side Content-Security-Policy (`.htaccess`) and a minimal allowlist: local scripts + SHA-256 hashes for inline JSON-LD blocks, frame/object blocked, and upgrade-insecure-requests enabled'
+      ),
+      n(
+        'MegaUpdate di validazione rieseguito dopo il fix: audit, lint, test e build confermano il rilascio stabile 3.6.2',
+        'Validation MegaUpdate rerun after the fix: audit, lint, tests, and build confirm a stable 3.6.2 release'
+      )
+    ]
+  },
+  {
     version: '3.6.1',
     date: '2026-03-12',
     type: 'fix',

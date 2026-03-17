@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.6.1
+Current version: 3.6.2
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,10 +14,10 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.6.1
-- PlanView optimized on high-traffic lookups: memoized maps for objects, rooms, and corridors (`id -> entity`) now replace repeated linear scans in selection/context/modal flows.
-- Targeted refactor keeps behavior unchanged while reducing hot-path overhead in room/corridor actions and bulk operations.
-- MegaUpdate rerun with evidence: lint, tests, build, release consistency checks, and runtime dependency audit completed with no high-severity vulnerabilities.
+## What's new in 3.6.2
+- Security hardening on build supply chain: forced `@rollup/plugin-terser@1.0.0` and `serialize-javascript@7.0.4`, removing high-severity `npm audit` findings on the PWA toolchain.
+- Website security headers strengthened with a strict `Content-Security-Policy` in `.htaccess`, allowing only local scripts plus explicit SHA-256 hashes for JSON-LD blocks.
+- MegaUpdate rerun with evidence: `npm audit` clean, plus lint/test/build all green after dependency and security-header updates.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
