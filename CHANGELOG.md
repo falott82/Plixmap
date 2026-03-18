@@ -2,6 +2,12 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## Unreleased
+- Meeting notes close-confirm dialog now supports a third explicit path: `Continue without saving`, preventing save/cancel loops when exiting with unsaved edits.
+- Client notes now support OpenAI text actions on selected text (`Translate selection`, `Correct selection`) with backend validation and client-scope access checks.
+- Added keyboard shortcuts for AI note actions on both meeting and client notes: `Cmd/Ctrl+Shift+C` (correct) and `Cmd/Ctrl+Shift+T` (translate).
+- Updated in-app Help and README documentation for the new note workflows and shortcuts.
+
 ## 3.6.2 - 2026-03-17
 - Security hardening on the build supply chain: forced `@rollup/plugin-terser@1.0.0` and `serialize-javascript@7.0.4`, removing high-severity `npm audit` findings in the PWA/workbox dependency path.
 - Website security headers upgraded with a strict server-side `Content-Security-Policy` in `.htaccess`, allowing only local scripts plus explicit SHA-256 hashes for inline JSON-LD blocks.

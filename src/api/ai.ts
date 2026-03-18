@@ -32,3 +32,20 @@ export const transformMeetingNoteWithAi = async (
   }
   return body;
 };
+
+export const transformClientNoteWithAi = async (
+  clientId: string,
+  payload: { mode: 'translate' | 'correct'; text: string; targetLanguage?: string }
+): Promise<{ ok: true; mode: 'translate' | 'correct'; transformedText: string; targetLanguage?: string | null }> => {
+  const res = await apiFetch(`/api/clients/${encodeURIComponent(String(clientId || '').trim())}/notes/ai-transform`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {})
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body?.detail || body?.error || `AI transform failed (${res.status})`);
+  }
+  return body;
+};

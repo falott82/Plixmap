@@ -19,6 +19,7 @@ const registerMeetingNoteRoutes = (app, deps) => {
     isMeetingParticipantForRequestUser,
     participantRosterFromMeetingBooking,
     participantKeysFromMeetingNote,
+    getVisibleClientsForMeetings,
     canEditMeetingManagerFieldsForUser,
     sanitizeMeetingManagerActions,
     getMeetingManagerFields,
@@ -486,6 +487,166 @@ const registerMeetingNoteRoutes = (app, deps) => {
           scopeId: String(booking.clientId || ''),
           ...requestMeta(req),
           details: { meetingId, mode, detail: String(detail || '').slice(0, 300) }
+        });
+        res.status(500).json({ error: 'Failed to process AI request', detail });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+  );
+
+  app.post(
+    '/api/clients/:clientId/notes/ai-transform',
+    requireAuth,
+    rateByUser('client_notes_ai', 60 * 1000, 30),
+    express.json({ limit: '512kb' }),
+    async (req, res) => {
+      const clientId = String(req.params.clientId || '').trim();
+      if (!clientId) {
+        res.status(400).json({ error: 'Missing client id' });
+        return;
+      }
+      const mode = String(req.body?.mode || '').trim().toLowerCase();
+      if (mode !== 'translate' && mode !== 'correct') {
+        res.status(400).json({ error: 'Invalid mode' });
+        return;
+      }
+      const sourceText = String(req.body?.text || '')
+        .replace(/\r\n?/g, '\n')
+        .trim();
+      if (!sourceText) {
+        res.status(400).json({ error: 'Missing text' });
+        return;
+      }
+      if (sourceText.length > 20000) {
+        res.status(400).json({ error: 'Text too long (max 20000 chars)' });
+        return;
+      }
+      const targetLanguage = mode === 'translate' ? String(req.body?.targetLanguage || '').trim() : '';
+      if (mode === 'translate' && !targetLanguage) {
+        res.status(400).json({ error: 'Missing target language' });
+        return;
+      }
+
+      const state = readState();
+      const clients = Array.isArray(state.clients) ? state.clients : [];
+      const client = clients.find((entry) => String(entry?.id || '').trim() === clientId) || null;
+      if (!client) {
+        res.status(404).json({ error: 'Client not found' });
+        return;
+      }
+      if (!req.isAdmin && !req.isSuperAdmin) {
+        const visibleClients = getVisibleClientsForMeetings(req, state);
+        const allowed = visibleClients.some((entry) => String(entry?.id || '').trim() === clientId);
+        if (!allowed) {
+          res.status(403).json({ error: 'Client not accessible' });
+          return;
+        }
+      }
+
+      const apiKey = String(client?.openAiApiKey || '').trim();
+      if (!apiKey) {
+        const clientLabel = String(client?.shortName || client?.name || clientId);
+        res.status(400).json({ error: `OpenAI API key non configurata per il cliente ${clientLabel}` });
+        return;
+      }
+
+      const tokenLimitPerUserDaily = Math.max(0, Number(client?.openAiDailyTokensPerUser || 0) || 0);
+      const usageDay = new Date().toISOString().slice(0, 10);
+      const usageKey = `${usageDay}|${clientId}|${String(req.userId || '')}`;
+      const estimatedInputTokens = Math.max(1, Math.ceil(sourceText.length / 4));
+      const usedSoFar = Number(aiDailyUsageByScope.get(usageKey) || 0);
+      if (tokenLimitPerUserDaily > 0 && usedSoFar + estimatedInputTokens > tokenLimitPerUserDaily) {
+        res.status(429).json({ error: `Limite token giornaliero raggiunto (${usedSoFar}/${tokenLimitPerUserDaily})` });
+        return;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      try {
+        const systemPrompt =
+          mode === 'translate'
+            ? `Translate the user text to ${targetLanguage}. Keep the original meaning, structure and bulleting. Return only the translated text with no preface.`
+            : 'Correct grammar, spelling and punctuation of the user text while preserving meaning and structure. Return only the corrected text with no preface.';
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            temperature: 0.2,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: sourceText }
+            ]
+          }),
+          signal: controller.signal
+        });
+        const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+        const body = contentType.includes('application/json')
+          ? await response.json().catch(() => null)
+          : await response.text().catch(() => null);
+        if (!response.ok) {
+          const detail =
+            (body && typeof body === 'object' && (body.error?.message || body.message)) ||
+            `OpenAI request failed (${response.status})`;
+          writeAuditLog(db, {
+            level: 'important',
+            event: 'client_notes_ai_transform_failed',
+            userId: req.userId,
+            username: req.username,
+            scopeType: 'client',
+            scopeId: clientId,
+            ...requestMeta(req),
+            details: { mode, status: response.status, detail: String(detail || '').slice(0, 300) }
+          });
+          res.status(400).json({ error: detail, status: response.status });
+          return;
+        }
+        const transformedText = String(body?.choices?.[0]?.message?.content || '').trim();
+        if (!transformedText) {
+          res.status(502).json({ error: 'AI response is empty' });
+          return;
+        }
+        const usageTokensRaw = Number(body?.usage?.total_tokens || 0);
+        const estimatedOutputTokens = Math.max(1, Math.ceil(transformedText.length / 4));
+        const consumed = usageTokensRaw > 0 ? usageTokensRaw : estimatedInputTokens + estimatedOutputTokens;
+        aiDailyUsageByScope.set(usageKey, usedSoFar + consumed);
+        writeAuditLog(db, {
+          level: 'important',
+          event: 'client_notes_ai_transform_ok',
+          userId: req.userId,
+          username: req.username,
+          scopeType: 'client',
+          scopeId: clientId,
+          ...requestMeta(req),
+          details: {
+            mode,
+            targetLanguage: targetLanguage || null,
+            tokenLimitPerUserDaily: tokenLimitPerUserDaily || null,
+            tokensUsedNow: consumed,
+            tokensUsedToday: usedSoFar + consumed
+          }
+        });
+        res.json({
+          ok: true,
+          mode,
+          targetLanguage: targetLanguage || null,
+          transformedText
+        });
+      } catch (err) {
+        const detail = err?.name === 'AbortError' ? 'OpenAI request timeout' : err?.message || 'OpenAI request failed';
+        writeAuditLog(db, {
+          level: 'important',
+          event: 'client_notes_ai_transform_failed',
+          userId: req.userId,
+          username: req.username,
+          scopeType: 'client',
+          scopeId: clientId,
+          ...requestMeta(req),
+          details: { mode, detail: String(detail || '').slice(0, 300) }
         });
         res.status(500).json({ error: 'Failed to process AI request', detail });
       } finally {

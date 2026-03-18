@@ -1004,56 +1004,6 @@ const MeetingNotesModal = ({
     }
   };
 
-  useEffect(() => {
-    if (!open || activeTab !== 'notes') return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      const useMeta = event.metaKey || event.ctrlKey;
-      if (!useMeta) return;
-      if (
-        aiPreview ||
-        translateLanguageModalOpen ||
-        pdfSelectionModalOpen ||
-        pdfReviewModalOpen ||
-        actionsInsightsModalOpen ||
-        timelineActivityModalOpen ||
-        manageActionModalIndex >= 0 ||
-        !!confirmState
-      ) {
-        return;
-      }
-      const key = String(event.key || '').toLowerCase();
-      if (key === 's') {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!canEditSelected) return;
-        void save();
-        return;
-      }
-      if (key === 'n') {
-        event.preventDefault();
-        event.stopPropagation();
-        requestNewNote();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [
-    activeTab,
-    actionsInsightsModalOpen,
-    aiPreview,
-    canEditSelected,
-    confirmState,
-    manageActionModalIndex,
-    open,
-    pdfReviewModalOpen,
-    pdfSelectionModalOpen,
-    requestNewNote,
-    save,
-    timelineActivityModalOpen,
-    translateLanguageModalOpen
-  ]);
-
   const getSelectedNoteText = () => {
     return String(editorRef.current?.getSelectedText() || '').trim();
   };
@@ -1129,6 +1079,73 @@ const MeetingNotesModal = ({
     closeTranslateLanguageModal();
     await runAiTransform('translate', selected.aiLabel);
   };
+
+  useEffect(() => {
+    if (!open || activeTab !== 'notes') return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const useMeta = event.metaKey || event.ctrlKey;
+      if (!useMeta) return;
+      if (
+        aiPreview ||
+        translateLanguageModalOpen ||
+        pdfSelectionModalOpen ||
+        pdfReviewModalOpen ||
+        actionsInsightsModalOpen ||
+        timelineActivityModalOpen ||
+        manageActionModalIndex >= 0 ||
+        !!confirmState
+      ) {
+        return;
+      }
+      const key = String(event.key || '').toLowerCase();
+      if (event.shiftKey && key === 'c') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!canEditSelected || !!aiBusy) return;
+        void runAiTransform('correct');
+        return;
+      }
+      if (event.shiftKey && key === 't') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!canEditSelected || !!aiBusy) return;
+        openTranslateLanguageModal();
+        return;
+      }
+      if (key === 's') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!canEditSelected) return;
+        void save();
+        return;
+      }
+      if (key === 'n') {
+        event.preventDefault();
+        event.stopPropagation();
+        requestNewNote();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    activeTab,
+    actionsInsightsModalOpen,
+    aiPreview,
+    canEditSelected,
+    confirmState,
+    manageActionModalIndex,
+    open,
+    openTranslateLanguageModal,
+    pdfReviewModalOpen,
+    pdfSelectionModalOpen,
+    requestNewNote,
+    runAiTransform,
+    save,
+    timelineActivityModalOpen,
+    translateLanguageModalOpen,
+    aiBusy
+  ]);
 
   const applyAiPreviewToNote = (event?: MouseEvent<HTMLButtonElement>) => {
     event?.preventDefault();
@@ -1534,13 +1551,13 @@ const MeetingNotesModal = ({
     switch (confirmState?.kind) {
       case 'close':
         return t({
-          it: 'Hai modifiche non salvate nella nota corrente. Puoi salvare o annullare.',
-          en: 'You have unsaved changes in the current note. You can save or cancel.'
+          it: 'Hai modifiche non salvate nella nota corrente. Puoi salvare, uscire senza salvare o annullare.',
+          en: 'You have unsaved changes in the current note. You can save, continue without saving, or cancel.'
         });
       case 'switch':
         return t({
-          it: 'Hai modifiche non salvate nella nota corrente. Puoi salvare e poi passare alla nota selezionata.',
-          en: 'You have unsaved changes in the current note. You can save and then switch to the selected note.'
+          it: 'Hai modifiche non salvate nella nota corrente. Puoi salvare, passare senza salvare o annullare.',
+          en: 'You have unsaved changes in the current note. You can save, switch without saving, or cancel.'
         });
       case 'delete':
         return t({
@@ -1572,6 +1589,20 @@ const MeetingNotesModal = ({
     }
     if (current.kind === 'delete') {
       await deleteSelectedNote();
+    }
+  }, [confirmState, onClose]);
+
+  const continueWithoutSaving = useCallback(() => {
+    if (!confirmState) return;
+    const current = confirmState;
+    setConfirmState(null);
+    setDirty(false);
+    if (current.kind === 'close') {
+      onClose();
+      return;
+    }
+    if (current.kind === 'switch' && current.nextId) {
+      setSelectedId(current.nextId);
     }
   }, [confirmState, onClose]);
 
@@ -2912,8 +2943,8 @@ const MeetingNotesModal = ({
                                     disabled={!!aiBusy}
                                     className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                                     title={t({
-                                      it: 'Traduce solo la selezione di testo con AI',
-                                      en: 'Translate only selected text with AI'
+                                      it: 'Traduce solo la selezione di testo con AI (⌘/Ctrl+Shift+T)',
+                                      en: 'Translate only selected text with AI (⌘/Ctrl+Shift+T)'
                                     })}
                                   >
                                     {aiBusy === 'translate' ? <Loader2 size={13} className="animate-spin" /> : <Languages size={13} />}
@@ -2925,8 +2956,8 @@ const MeetingNotesModal = ({
                                     disabled={!!aiBusy}
                                     className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                                     title={t({
-                                      it: 'Corregge solo la selezione di testo con AI',
-                                      en: 'Correct only selected text with AI'
+                                      it: 'Corregge solo la selezione di testo con AI (⌘/Ctrl+Shift+C)',
+                                      en: 'Correct only selected text with AI (⌘/Ctrl+Shift+C)'
                                     })}
                                   >
                                     {aiBusy === 'correct' ? <Loader2 size={13} className="animate-spin" /> : <SpellCheck size={13} />}
@@ -4001,6 +4032,19 @@ const MeetingNotesModal = ({
                     >
                       {t({ it: 'Annulla', en: 'Cancel' })}
                     </button>
+                    {confirmState?.kind !== 'delete' ? (
+                      <button
+                        type="button"
+                        onClick={continueWithoutSaving}
+                        className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                        title={t({
+                          it: 'Esci o passa alla nota selezionata senza salvare le modifiche correnti',
+                          en: 'Close or switch note without saving current changes'
+                        })}
+                      >
+                        {t({ it: 'Continua senza salvare', en: 'Continue without saving' })}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => void confirmAction()}

@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { ChevronDown, Eye, FileDown, FileText, Plus, Search, Trash2, Upload, X } from 'lucide-react';
+import { ChevronDown, Eye, FileDown, FileText, Languages, Loader2, Plus, Search, SpellCheck, Trash2, Upload, X } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { Client, ClientNote } from '../../store/types';
 import { useLang, useT } from '../../i18n/useT';
@@ -11,6 +11,7 @@ import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile
 import LexicalNotesEditor, { type LexicalNotesEditorHandle } from '../ui/notes/LexicalNotesEditor';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
+import { transformClientNoteWithAi } from '../../api/ai';
 
 interface Props {
   open: boolean;
@@ -45,6 +46,21 @@ const toNotesArray = (client?: Client): ClientNote[] => {
   ];
 };
 
+const TRANSLATE_LANGUAGE_OPTIONS: Array<{ code: string; label: string; native: string; aiLabel: string }> = [
+  { code: 'en', label: 'English', native: 'English', aiLabel: 'English' },
+  { code: 'zh', label: 'Chinese', native: '中文', aiLabel: 'Chinese (Mandarin)' },
+  { code: 'hi', label: 'Hindi', native: 'हिन्दी', aiLabel: 'Hindi' },
+  { code: 'es', label: 'Spanish', native: 'Español', aiLabel: 'Spanish' },
+  { code: 'fr', label: 'French', native: 'Français', aiLabel: 'French' },
+  { code: 'ar', label: 'Arabic', native: 'العربية', aiLabel: 'Arabic' },
+  { code: 'pt', label: 'Portuguese', native: 'Português', aiLabel: 'Portuguese' },
+  { code: 'ru', label: 'Russian', native: 'Русский', aiLabel: 'Russian' },
+  { code: 'de', label: 'German', native: 'Deutsch', aiLabel: 'German' },
+  { code: 'ko', label: 'Korean', native: '한국어', aiLabel: 'Korean' },
+  { code: 'sv', label: 'Swedish', native: 'Svenska', aiLabel: 'Swedish' },
+  { code: 'it', label: 'Italian', native: 'Italiano', aiLabel: 'Italian' }
+];
+
 const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: Props) => {
   const t = useT();
   const lang = useLang();
@@ -65,6 +81,9 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
   const [confirmAction, setConfirmAction] = useState<null | { kind: 'close' | 'switch' | 'delete'; nextId?: string; deleteId?: string }>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [aiBusy, setAiBusy] = useState<null | 'translate' | 'correct'>(null);
+  const [translateLanguageModalOpen, setTranslateLanguageModalOpen] = useState(false);
+  const [translateLanguageCode, setTranslateLanguageCode] = useState('en');
   const newTitleRef = useRef<HTMLInputElement | null>(null);
 
   const [attachments, setAttachments] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
@@ -128,6 +147,8 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
   useEffect(() => {
     if (!open) {
       initializedRef.current = { open: false, clientId: undefined };
+      setTranslateLanguageModalOpen(false);
+      setAiBusy(null);
     }
   }, [open]);
 
@@ -227,6 +248,108 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
     persistAll(nextNotes);
   };
 
+  const getSelectedNoteText = useCallback(() => String(editorRef.current?.getSelectedText() || '').trim(), []);
+
+  const runAiTransform = useCallback(
+    async (mode: 'translate' | 'correct', explicitTargetLanguage?: string) => {
+      if (!canEdit || !selected || !client?.id || aiBusy) return;
+      const sourceText = getSelectedNoteText();
+      if (!sourceText) {
+        push(
+          t({
+            it: 'Seleziona prima una parte di testo da tradurre o correggere.',
+            en: 'Select a portion of text first to translate or correct.'
+          }),
+          'info'
+        );
+        return;
+      }
+      const targetLanguage = mode === 'translate' ? String(explicitTargetLanguage || '').trim() : '';
+      if (mode === 'translate' && !targetLanguage) return;
+      setAiBusy(mode);
+      try {
+        const result = await transformClientNoteWithAi(String(client.id), {
+          mode,
+          text: sourceText,
+          ...(mode === 'translate' ? { targetLanguage } : {})
+        });
+        const nextText = String(result.transformedText || '').trim();
+        if (!nextText) {
+          push(t({ it: 'Risposta AI vuota', en: 'AI response is empty' }), 'danger');
+          return;
+        }
+        const replaced = !!editorRef.current?.replaceSelectedText(nextText);
+        if (!replaced) {
+          push(
+            t({
+              it: 'Selezione non disponibile. Seleziona di nuovo il testo e riprova.',
+              en: 'Selection is no longer available. Select the text again and retry.'
+            }),
+            'danger'
+          );
+          return;
+        }
+        setDirty(true);
+        push(
+          mode === 'translate'
+            ? t({ it: 'Traduzione applicata alla selezione', en: 'Translation applied to selection' })
+            : t({ it: 'Correzione applicata alla selezione', en: 'Correction applied to selection' }),
+          'success'
+        );
+      } catch (e: any) {
+        push(String(e?.message || t({ it: 'Operazione AI fallita.', en: 'AI operation failed.' })), 'danger');
+      } finally {
+        setAiBusy(null);
+      }
+    },
+    [aiBusy, canEdit, client?.id, getSelectedNoteText, push, selected, t]
+  );
+
+  const openTranslateLanguageModal = useCallback(() => {
+    if (!canEdit || !selected || aiBusy) return;
+    if (!getSelectedNoteText()) {
+      push(
+        t({
+          it: 'Seleziona prima una parte di testo da tradurre.',
+          en: 'Select a portion of text first to translate.'
+        }),
+        'info'
+      );
+      return;
+    }
+    setTranslateLanguageModalOpen(true);
+  }, [aiBusy, canEdit, getSelectedNoteText, push, selected, t]);
+
+  const confirmTranslateLanguage = useCallback(() => {
+    const language = TRANSLATE_LANGUAGE_OPTIONS.find((entry) => entry.code === translateLanguageCode) || TRANSLATE_LANGUAGE_OPTIONS[0];
+    setTranslateLanguageModalOpen(false);
+    void runAiTransform('translate', language.aiLabel);
+  }, [runAiTransform, translateLanguageCode]);
+
+  useEffect(() => {
+    if (!open || !selected || !canEdit) return;
+    if (createOpen || copyOpen || !!confirmAction || translateLanguageModalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const useMeta = event.metaKey || event.ctrlKey;
+      if (!useMeta || !event.shiftKey) return;
+      const key = String(event.key || '').toLowerCase();
+      if (key === 'c') {
+        event.preventDefault();
+        event.stopPropagation();
+        void runAiTransform('correct');
+        return;
+      }
+      if (key === 't') {
+        event.preventDefault();
+        event.stopPropagation();
+        openTranslateLanguageModal();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [canEdit, confirmAction, copyOpen, createOpen, open, openTranslateLanguageModal, runAiTransform, selected, translateLanguageModalOpen]);
+
   const requestClose = () => {
     if (!dirty) {
       onClose();
@@ -322,7 +445,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
           className="relative z-50"
           onClose={() => {
             // Prevent closing the main modal while a confirmation dialog is open (it would treat it as an outside click).
-            if (confirmAction || createOpen) return;
+            if (confirmAction || createOpen || copyOpen || translateLanguageModalOpen) return;
             requestClose();
           }}
         >
@@ -494,6 +617,30 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                             {t({ it: 'Esporta PDF', en: 'Export PDF' })}
                           </button>
                           <button
+                            onClick={openTranslateLanguageModal}
+                            disabled={!canEdit || !selected || !!aiBusy}
+                            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            title={t({
+                              it: 'Traduce solo il testo selezionato (⌘/Ctrl+Shift+T)',
+                              en: 'Translate selected text only (⌘/Ctrl+Shift+T)'
+                            })}
+                          >
+                            {aiBusy === 'translate' ? <Loader2 size={16} className="animate-spin text-slate-600" /> : <Languages size={16} className="text-slate-600" />}
+                            {t({ it: 'Traduci selezione', en: 'Translate selection' })}
+                          </button>
+                          <button
+                            onClick={() => void runAiTransform('correct')}
+                            disabled={!canEdit || !selected || !!aiBusy}
+                            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            title={t({
+                              it: 'Corregge solo il testo selezionato (⌘/Ctrl+Shift+C)',
+                              en: 'Correct selected text only (⌘/Ctrl+Shift+C)'
+                            })}
+                          >
+                            {aiBusy === 'correct' ? <Loader2 size={16} className="animate-spin text-slate-600" /> : <SpellCheck size={16} className="text-slate-600" />}
+                            {t({ it: 'Correggi selezione', en: 'Correct selection' })}
+                          </button>
+                          <button
                             onClick={doSave}
                             disabled={!canEdit || !selected}
                             className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
@@ -504,10 +651,11 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                         </div>
                       </div>
 
-                      <div className="mt-4 flex-1 overflow-y-auto pr-1">
+                      <div className="mt-4 flex-1 min-h-0 pr-1">
                         {selected ? (
                           <LexicalNotesEditor
                             ref={editorRef}
+                            className="h-full"
                             key={`${client?.id || 'client'}:${selected.id}:${selected.updatedAt || 0}`}
                             initialStateJson={selected.notesLexical || undefined}
                             initialHtml={sanitizeHtmlBasic(String(selected.notesHtml || '')) || undefined}
@@ -743,6 +891,68 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
                               className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
                             >
                               {t({ it: 'Copia', en: 'Copy' })}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {translateLanguageModalOpen ? (
+                    <div className="fixed inset-0 z-[70]" onMouseDown={() => setTranslateLanguageModalOpen(false)}>
+                      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+                      <div className="relative flex min-h-full items-center justify-center p-4">
+                        <div className="w-full max-w-md modal-panel" onMouseDown={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-between">
+                            <div className="modal-title">{t({ it: 'Scegli lingua traduzione', en: 'Choose translation language' })}</div>
+                            <button
+                              onClick={() => setTranslateLanguageModalOpen(false)}
+                              className="text-slate-500 hover:text-ink"
+                              title={t({ it: 'Chiudi', en: 'Close' })}
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+                          <div className="mt-2 text-sm text-slate-600">
+                            {t({
+                              it: 'La traduzione AI sostituisce solo il testo attualmente selezionato.',
+                              en: 'AI translation replaces only the currently selected text.'
+                            })}
+                          </div>
+
+                          <div className="mt-4 max-h-72 overflow-auto rounded-xl border border-slate-200">
+                            {TRANSLATE_LANGUAGE_OPTIONS.map((option) => {
+                              const active = translateLanguageCode === option.code;
+                              return (
+                                <button
+                                  key={`client-notes-translate-${option.code}`}
+                                  type="button"
+                                  onClick={() => setTranslateLanguageCode(option.code)}
+                                  className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
+                                    active ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <span className="font-semibold">{option.label}</span>
+                                  <span className="text-xs text-slate-500">{option.native}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <div className="mt-5 flex justify-end gap-2">
+                            <button
+                              onClick={() => setTranslateLanguageModalOpen(false)}
+                              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-50"
+                            >
+                              {t({ it: 'Annulla', en: 'Cancel' })}
+                            </button>
+                            <button
+                              disabled={!!aiBusy}
+                              onClick={confirmTranslateLanguage}
+                              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white enabled:hover:bg-primary/90 disabled:opacity-60"
+                            >
+                              {aiBusy === 'translate' ? <Loader2 size={14} className="animate-spin" /> : <Languages size={14} />}
+                              {t({ it: 'Traduci selezione', en: 'Translate selection' })}
                             </button>
                           </div>
                         </div>

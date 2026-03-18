@@ -27,6 +27,7 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - Creation and management of virtual offices and rooms.
 - Wi‑Fi coverage and CCTV planning, with wall drawing and automatic signal attenuation calculations.
 - Centralized client notes and documentation, easy to browse and consult.
+- Notes workflow upgraded (client + meeting): AI correction/translation on selected text, dedicated shortcuts (`Cmd/Ctrl+Shift+C` and `Cmd/Ctrl+Shift+T`), and explicit `Continue without saving` path in close-confirm dialogs.
 - Internal messaging system with a dedicated interface.
 - Real-user import via Web API and a centralized corporate directory and CSV files.
 - Rack configurator and structured cabling management.

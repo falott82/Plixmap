@@ -226,8 +226,8 @@ const HelpPanel = () => {
                       </li>
                       <li>
                         {t({
-                          it: 'Note cliente: per modificare una tabella posiziona il cursore in una cella e usa i pulsanti “+ Riga/+ Col”. Per ridimensionare un’immagine cliccala e scegli la percentuale. Puoi anche esportare le note in PDF.',
-                          en: 'Client notes: to edit a table place the cursor in a cell and use the “+ Row/+ Col” buttons. To resize an image click it and choose a percentage. You can also export notes to PDF.'
+                          it: 'Note cliente: per modificare una tabella posiziona il cursore in una cella e usa i pulsanti “+ Riga/+ Col”. Per ridimensionare un’immagine cliccala e scegli la percentuale. Puoi esportare in PDF, correggere la selezione con AI o tradurla.',
+                          en: 'Client notes: to edit a table place the cursor in a cell and use the “+ Row/+ Col” buttons. You can resize images, export to PDF, and use AI to correct or translate the current text selection.'
                         })}
                       </li>
                       <li>
@@ -248,6 +248,12 @@ const HelpPanel = () => {
 	                          en: 'In the Client notes modal you can also manage the client PDF attachments and see the last saved info. If you close with unsaved changes, you will be prompted.'
 	                        })}
 	                      </li>
+                      <li>
+                        {t({
+                          it: 'Note meeting: se provi a chiudere con modifiche non salvate puoi scegliere Salva, Continua senza salvare oppure Annulla.',
+                          en: 'Meeting notes: when closing with unsaved changes you can choose Save, Continue without saving, or Cancel.'
+                        })}
+                      </li>
                       <li>
                         {t({
                           it: 'Revisione immutabile: il superadmin può bloccare una revisione per impedirne la cancellazione da parte di altri utenti.',
@@ -716,6 +722,14 @@ const HelpPanel = () => {
                       <li>
                         <KeyHint>Ctrl+Shift+S</KeyHint> / <KeyHint>Cmd+Shift+S</KeyHint>{' '}
                         {t({ it: 'apre il salvataggio revisione in modalità major con nota richiesta.', en: 'opens revision save in major mode with required note.' })}
+                      </li>
+                      <li>
+                        <KeyHint>Ctrl+Shift+C</KeyHint> / <KeyHint>Cmd+Shift+C</KeyHint>{' '}
+                        {t({ it: '(nelle note cliente/meeting) corregge con AI il testo selezionato.', en: '(in client/meeting notes) corrects the selected text with AI.' })}
+                      </li>
+                      <li>
+                        <KeyHint>Ctrl+Shift+T</KeyHint> / <KeyHint>Cmd+Shift+T</KeyHint>{' '}
+                        {t({ it: '(nelle note cliente/meeting) apre la traduzione AI del testo selezionato.', en: '(in client/meeting notes) opens AI translation for the selected text.' })}
                       </li>
                       <li>
                         <KeyHint>Ctrl+Z</KeyHint> / <KeyHint>Cmd+Z</KeyHint>{' '}
