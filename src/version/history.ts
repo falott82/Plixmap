@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.6.3',
+    date: '2026-03-18',
+    type: 'fix',
+    notes: [
+      n(
+        'Note meeting: la conferma di chiusura con modifiche non salvate include ora anche \"Continua senza salvare\" per evitare loop Salva/Annulla',
+        'Meeting notes: unsaved-close confirmation now includes \"Continue without saving\" to avoid Save/Cancel loops'
+      ),
+      n(
+        'Note cliente: aggiunte azioni OpenAI su testo selezionato (traduci/correggi) con scorciatoie Cmd/Ctrl+Shift+T e Cmd/Ctrl+Shift+C, allineate anche alle note meeting',
+        'Client notes: added OpenAI actions on selected text (translate/correct) with Cmd/Ctrl+Shift+T and Cmd/Ctrl+Shift+C shortcuts, aligned with meeting notes'
+      ),
+      n(
+        'MegaUpdate sicurezza: aggiornato jspdf a ^4.2.1 e rieseguiti audit dipendenze + quality gate completo con esito verde',
+        'Security MegaUpdate: upgraded jspdf to ^4.2.1 and reran dependency audit + full quality gate with green outcome'
+      )
+    ]
+  },
+  {
     version: '3.6.2',
     date: '2026-03-17',
     type: 'fix',
