@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.6.4',
+    date: '2026-04-13',
+    type: 'fix',
+    notes: [
+      n(
+        'CI/Release: aggiornate le GitHub Actions alla linea v5 e allineato Node 22 nel pipeline di qualita e sicurezza',
+        'CI/Release: upgraded GitHub Actions to the v5 line and aligned Node 22 in the quality/security pipeline'
+      ),
+      n(
+        'Release operations: aggiunto il workflow ufficiale per esportare uno snapshot SQLite versionabile in Git (`npm run release:db:export` -> `release-data/plixmap-db-latest.sqlite.gz`)',
+        'Release operations: added the official workflow to export a Git-versionable SQLite snapshot (`npm run release:db:export` -> `release-data/plixmap-db-latest.sqlite.gz`)'
+      ),
+      n(
+        'Documentazione/versione riallineate per la 3.6.4 tra package metadata, README, changelog e release history in-app',
+        'Documentation/version metadata aligned for 3.6.4 across package metadata, README, changelog, and in-app release history'
+      )
+    ]
+  },
+  {
     version: '3.6.3',
     date: '2026-03-18',
     type: 'fix',

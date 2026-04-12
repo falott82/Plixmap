@@ -2,6 +2,11 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.6.4 - 2026-04-13
+- CI/runtime alignment: upgraded the GitHub Actions workflows to the current `v5` action line and aligned the Node version used in CI to 22, keeping the quality/security pipelines current with the toolchain already expected by the project.
+- Release operations: added a repo-safe database snapshot workflow (`npm run release:db:export`) that exports the active SQLite database to `release-data/plixmap-db-latest.sqlite.gz` instead of tracking live runtime files under `data/`.
+- Documentation/release hygiene: synchronized package metadata, README “current version”, in-app release history, upgrade guide, and DB snapshot instructions for the 3.6.4 release.
+
 ## 3.6.3 - 2026-03-18
 - Meeting notes close-confirm dialog now supports a third explicit path: `Continue without saving`, preventing save/cancel loops when exiting with unsaved edits.
 - Client notes now support OpenAI text actions on selected text (`Translate selection`, `Correct selection`) with backend validation and client-scope access checks.

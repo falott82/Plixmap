@@ -27,6 +27,7 @@
     "test:e2e:playwright": "npx playwright test",
     "lint:i18n": "node scripts/lint-i18n.cjs",
     "backup:db": "node scripts/db-backup.cjs",
+    "release:db:export": "node scripts/release-db-export.cjs",
     "sensitive:check": "node scripts/check-sensitive-data.cjs",
     "sensitive:check:staged": "node scripts/check-sensitive-data.cjs --staged",
     "hooks:install": "git config core.hooksPath .githooks",
@@ -94,5 +95,5 @@
     "qs": "^6.14.1",
     "lodash": "^4.17.23"
   },
-  "version": "3.6.3"
+  "version": "3.6.4"
 }

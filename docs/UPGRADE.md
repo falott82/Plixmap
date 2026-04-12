@@ -5,6 +5,7 @@ This guide is for installations that already run Plixmap and need to move to a n
 ## Before you start
 - Read the release notes in [`CHANGELOG.md`](../CHANGELOG.md).
 - Create a backup first.
+- If you want to ship a database snapshot together with the code release, run `npm run release:db:export` before committing and verify `release-data/plixmap-db-latest.sqlite.gz`.
 - If you use customer SMTP/provisioning emails, verify `Settings > Email > Portal public URL` after the upgrade.
 - If you customized service names, ports, or reverse proxy rules, keep your current deployment-specific values.
 
@@ -54,6 +55,15 @@ What happens:
 - the frontend bundle is rebuilt
 - database migrations run automatically when the backend starts
 - the SQLite database and uploads remain in your current `data/` path
+
+## Versioned DB snapshot (optional)
+If you explicitly want to publish the current SQLite instance together with a Git release, use:
+
+```bash
+npm run release:db:export
+```
+
+This creates a compressed snapshot in `release-data/plixmap-db-latest.sqlite.gz`, keeping the live operational `data/` directory untracked.
 
 ## Suggested post-upgrade checks
 - Open the app and verify login.

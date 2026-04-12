@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.6.3
+Current version: 3.6.4
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,10 +14,10 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.6.3
-- Notes workflow hardened: meeting notes close confirmation now includes an explicit `Continue without saving` path to avoid save/cancel loops.
-- Client notes now include OpenAI actions on selected text (`Translate selection` and `Correct selection`) with keyboard shortcuts `Cmd/Ctrl+Shift+T` and `Cmd/Ctrl+Shift+C` (same shortcuts also available in meeting notes).
-- Security maintenance rerun during MegaUpdate: upgraded `jspdf` to `^4.2.1`; `npm audit` (runtime + full), quality gate (`sensitive`, lint, tests, build, release-check) all green.
+## What's new in 3.6.4
+- CI maintenance: GitHub Actions upgraded to the `v5` action line with Node 22 alignment in the pipeline.
+- Release ops: added a repo-safe database snapshot workflow via `npm run release:db:export`, which writes `release-data/plixmap-db-latest.sqlite.gz` instead of tracking live runtime files under `data/`.
+- Documentation/versioning synchronized for the 3.6.4 release across package metadata, README, changelog, and in-app release history.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.
