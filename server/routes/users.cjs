@@ -11,7 +11,7 @@ const {
   mapAdminUsersResponse,
   replaceUserPermissions,
   searchImportedUsers,
-  listDirectoryUsers
+  listDirectoryUsersForRequester
 } = require('../services/users.cjs');
 const { getPortalPublicUrl } = require('../email.cjs');
 
@@ -67,6 +67,140 @@ const generateTemporaryPassword = () => {
   return chars.join('');
 };
 
+const createProvisioningMailSender = (deps) => {
+  const {
+    db,
+    dataSecret,
+    APP_BRAND,
+    getEmailConfig,
+    getClientEmailConfig,
+    logEmailAttempt,
+    fallbackPortalPublicUrl,
+    transportFactory = nodemailer.createTransport
+  } = deps;
+
+  return async ({
+    actorUserId,
+    actorUsername,
+    clientId,
+    clientName,
+    recipient,
+    username,
+    temporaryPassword,
+    fullName,
+    language
+  }) => {
+    const target = normalizeUserEmailKey(recipient);
+    if (!target) return { ok: false, skipped: true, reason: 'missing_recipient' };
+    const clientConfig = clientId ? getClientEmailConfig(db, dataSecret, clientId) : null;
+    const globalConfig = getEmailConfig(db, dataSecret);
+    const configCandidates = [
+      { config: clientConfig, scope: 'client' },
+      { config: globalConfig, scope: 'global' }
+    ];
+    const selected = configCandidates.find(
+      (entry) =>
+        entry.config &&
+        entry.config.host &&
+        (!entry.config.username || entry.config.password) &&
+        (entry.config.fromEmail || entry.config.username)
+    );
+    const config = selected?.config || null;
+    const source = selected?.scope || (clientConfig?.host ? 'client' : 'global');
+    if (!config || !config.host) {
+      if (clientConfig?.host && clientConfig.username && !clientConfig.password && !selected) {
+        return { ok: false, skipped: true, reason: 'smtp_client_missing_password' };
+      }
+      return { ok: false, skipped: true, reason: source === 'client' ? 'smtp_client_not_configured' : 'smtp_not_configured' };
+    }
+    if (config.username && !config.password) {
+      return { ok: false, skipped: true, reason: source === 'client' ? 'smtp_client_missing_password' : 'smtp_missing_password' };
+    }
+    const fromEmail = config.fromEmail || config.username;
+    if (!fromEmail) return { ok: false, skipped: true, reason: 'smtp_missing_from' };
+    const fromLabel = config.fromName ? `"${String(config.fromName).replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
+    const securityMode = config.securityMode || (config.secure ? 'ssl' : 'starttls');
+    const transport = transportFactory({
+      host: config.host,
+      port: config.port,
+      secure: securityMode === 'ssl',
+      requireTLS: securityMode === 'starttls',
+      ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
+    });
+    const portalUrl = getPortalPublicUrl(db, fallbackPortalPublicUrl || '');
+    if (!portalUrl) {
+      return { ok: false, skipped: true, reason: 'portal_url_not_configured' };
+    }
+    const lang = language === 'en' ? 'en' : 'it';
+    const safeClientName = String(clientName || clientId || APP_BRAND);
+    const safeFullName = String(fullName || '').trim() || username;
+    const subject =
+      lang === 'en'
+        ? `[${APP_BRAND}] Your portal account for ${safeClientName}`
+        : `[${APP_BRAND}] Il tuo account portale per ${safeClientName}`;
+    const text =
+      lang === 'en'
+        ? [
+            `Hello ${safeFullName},`,
+            '',
+            `a portal account has been created for you on ${APP_BRAND}.`,
+            '',
+            `Portal: ${portalUrl}`,
+            `Username: ${username}`,
+            `Temporary password: ${temporaryPassword}`,
+            '',
+            'At first login you will be required to change the password before accessing the portal.',
+            '',
+            'If you did not expect this message, please contact your administrator.'
+          ].join('\n')
+        : [
+            `Ciao ${safeFullName},`,
+            '',
+            `e stato creato per te un account portale su ${APP_BRAND}.`,
+            '',
+            `Portale: ${portalUrl}`,
+            `Username: ${username}`,
+            `Password temporanea: ${temporaryPassword}`,
+            '',
+            'Al primo accesso ti verra richiesto il cambio password prima di poter usare il portale.',
+            '',
+            'Se non ti aspettavi questo messaggio, contatta il tuo amministratore.'
+          ].join('\n');
+    try {
+      const info = await transport.sendMail({ from: fromLabel, to: target, subject, text });
+      logEmailAttempt(db, {
+        userId: actorUserId || null,
+        username: actorUsername || null,
+        recipient: target,
+        subject,
+        success: true,
+        details: {
+          kind: 'portal_user_provision',
+          clientId: clientId || null,
+          messageId: info?.messageId || null,
+          smtpScope: source
+        }
+      });
+      return { ok: true, messageId: info?.messageId || null, smtpScope: source };
+    } catch (error) {
+      logEmailAttempt(db, {
+        userId: actorUserId || null,
+        username: actorUsername || null,
+        recipient: target,
+        subject,
+        success: false,
+        error: error?.message || 'portal_user_provision_mail_failed',
+        details: {
+          kind: 'portal_user_provision',
+          clientId: clientId || null,
+          smtpScope: source
+        }
+      });
+      return { ok: false, skipped: false, reason: error?.message || 'send_failed' };
+    }
+  };
+};
+
 const registerUserRoutes = (app, deps) => {
   const {
     db,
@@ -90,6 +224,15 @@ const registerUserRoutes = (app, deps) => {
     logEmailAttempt,
     fallbackPortalPublicUrl
   } = deps;
+  const sendProvisioningMail = createProvisioningMailSender({
+    db,
+    dataSecret,
+    APP_BRAND,
+    getEmailConfig,
+    getClientEmailConfig,
+    logEmailAttempt,
+    fallbackPortalPublicUrl
+  });
   const insertProvisionedPortalUser = db.transaction((payload) => {
     const {
       req,
@@ -180,124 +323,6 @@ const registerUserRoutes = (app, deps) => {
       }
     });
   });
-  const sendProvisioningMail = async ({
-    clientId,
-    clientName,
-    recipient,
-    username,
-    temporaryPassword,
-    fullName,
-    language
-  }) => {
-    const target = normalizeUserEmailKey(recipient);
-    if (!target) return { ok: false, skipped: true, reason: 'missing_recipient' };
-    const clientConfig = clientId ? getClientEmailConfig(db, dataSecret, clientId) : null;
-    const globalConfig = getEmailConfig(db, dataSecret);
-    const configCandidates = [
-      { config: clientConfig, scope: 'client' },
-      { config: globalConfig, scope: 'global' }
-    ];
-    const selected = configCandidates.find(
-      (entry) =>
-        entry.config &&
-        entry.config.host &&
-        (!entry.config.username || entry.config.password) &&
-        (entry.config.fromEmail || entry.config.username)
-    );
-    const config = selected?.config || null;
-    const source = (selected?.scope || (clientConfig?.host ? 'client' : 'global'));
-    if (!config || !config.host) {
-      if (clientConfig?.host && clientConfig.username && !clientConfig.password && !selected) {
-        return { ok: false, skipped: true, reason: 'smtp_client_missing_password' };
-      }
-      return { ok: false, skipped: true, reason: source === 'client' ? 'smtp_client_not_configured' : 'smtp_not_configured' };
-    }
-    if (config.username && !config.password) {
-      return { ok: false, skipped: true, reason: source === 'client' ? 'smtp_client_missing_password' : 'smtp_missing_password' };
-    }
-    const fromEmail = config.fromEmail || config.username;
-    if (!fromEmail) return { ok: false, skipped: true, reason: 'smtp_missing_from' };
-    const fromLabel = config.fromName ? `"${String(config.fromName).replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
-    const securityMode = config.securityMode || (config.secure ? 'ssl' : 'starttls');
-    const transport = nodemailer.createTransport({
-      host: config.host,
-      port: config.port,
-      secure: securityMode === 'ssl',
-      requireTLS: securityMode === 'starttls',
-      ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
-    });
-    const portalUrl = getPortalPublicUrl(db, fallbackPortalPublicUrl || '');
-    if (!portalUrl) {
-      return { ok: false, skipped: true, reason: 'portal_url_not_configured' };
-    }
-    const lang = language === 'en' ? 'en' : 'it';
-    const safeClientName = String(clientName || clientId || APP_BRAND);
-    const safeFullName = String(fullName || '').trim() || username;
-    const subject =
-      lang === 'en'
-        ? `[${APP_BRAND}] Your portal account for ${safeClientName}`
-        : `[${APP_BRAND}] Il tuo account portale per ${safeClientName}`;
-    const text =
-      lang === 'en'
-        ? [
-            `Hello ${safeFullName},`,
-            '',
-            `a portal account has been created for you on ${APP_BRAND}.`,
-            '',
-            `Portal: ${portalUrl}`,
-            `Username: ${username}`,
-            `Temporary password: ${temporaryPassword}`,
-            '',
-            'At first login you will be required to change the password before accessing the portal.',
-            '',
-            'If you did not expect this message, please contact your administrator.'
-          ].join('\n')
-        : [
-            `Ciao ${safeFullName},`,
-            '',
-            `e stato creato per te un account portale su ${APP_BRAND}.`,
-            '',
-            `Portale: ${portalUrl}`,
-            `Username: ${username}`,
-            `Password temporanea: ${temporaryPassword}`,
-            '',
-            'Al primo accesso ti verra richiesto il cambio password prima di poter usare il portale.',
-            '',
-            'Se non ti aspettavi questo messaggio, contatta il tuo amministratore.'
-          ].join('\n');
-    try {
-      const info = await transport.sendMail({ from: fromLabel, to: target, subject, text });
-      logEmailAttempt(db, {
-        userId: req.userId,
-        username: req.username,
-        recipient: target,
-        subject,
-        success: true,
-        details: {
-          kind: 'portal_user_provision',
-          clientId: clientId || null,
-          messageId: info?.messageId || null,
-          smtpScope: source
-        }
-      });
-      return { ok: true, messageId: info?.messageId || null, smtpScope: source };
-    } catch (error) {
-      logEmailAttempt(db, {
-        userId: req.userId,
-        username: req.username,
-        recipient: target,
-        subject,
-        success: false,
-        error: error?.message || 'portal_user_provision_mail_failed',
-        details: {
-          kind: 'portal_user_provision',
-          clientId: clientId || null,
-          smtpScope: source
-        }
-      });
-      return { ok: false, skipped: false, reason: error?.message || 'send_failed' };
-    }
-  };
 
   app.get('/api/users', requireAuth, (req, res) => {
     if (!isAdminLike(req)) {
@@ -345,8 +370,14 @@ const registerUserRoutes = (app, deps) => {
     res.json({ ok: true, rows });
   });
 
-  app.get('/api/users/directory', requireAuth, (_req, res) => {
-    res.json({ users: listDirectoryUsers(db) });
+  app.get('/api/users/directory', requireAuth, (req, res) => {
+    res.json({
+      users: listDirectoryUsersForRequester(
+        db,
+        { userId: req.userId, isAdmin: isAdminLike(req) },
+        getChatClientIdsForUser
+      )
+    });
   });
 
   app.get('/api/users/:id/profile', requireAuth, (req, res) => {
@@ -628,6 +659,8 @@ const registerUserRoutes = (app, deps) => {
         mailResult = { ok: false, skipped: true, reason: 'missing_recipient' };
       } else {
         mailResult = await sendProvisioningMail({
+          actorUserId: req.userId,
+          actorUsername: req.username,
           clientId: linkedClientId,
           clientName: String(client?.shortName || client?.name || linkedClientId),
           recipient: nextEmail,
@@ -922,5 +955,6 @@ const registerUserRoutes = (app, deps) => {
 };
 
 module.exports = {
-  registerUserRoutes
+  registerUserRoutes,
+  createProvisioningMailSender
 };

@@ -24,7 +24,7 @@ const {
 const { isAdminLike, isStrictSuperAdmin } = require('./access.cjs');
 const { getUserWithPermissions, computePlanAccess, filterStateForUser, mergeWritablePlanContent } = require('./permissions.cjs');
 const { createAuthRuntime, registerAuthRoutes } = require('./routes/auth.cjs');
-const { getWritablePlanIdsForStateSave } = require('./stateSaveGuards.cjs');
+const { getWritablePlanIdsForStateSave, hasStateSaveVersionConflict } = require('./stateSaveGuards.cjs');
 const { registerUserRoutes } = require('./routes/users.cjs');
 const { registerChatRoutes } = require('./routes/chat.cjs');
 const { registerMeetingRoutes } = require('./routes/meetings.cjs');
@@ -888,6 +888,78 @@ const externalizeAssetsInClients = (clients) => {
   }
 };
 
+const planRevisionsCache = new Map();
+
+const parseRevisionListJson = (raw) => {
+  try {
+    const parsed = JSON.parse(String(raw || '[]'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const getPlanRevisions = (planId) => {
+  const key = String(planId || '').trim();
+  if (!key) return [];
+  if (planRevisionsCache.has(key)) return planRevisionsCache.get(key) || [];
+  const row = db.prepare('SELECT revisionsJson FROM plan_revisions WHERE planId = ?').get(key);
+  const revisions = parseRevisionListJson(row?.revisionsJson);
+  planRevisionsCache.set(key, revisions);
+  return revisions;
+};
+
+const setPlanRevisions = (planId, revisions, updatedAt = Date.now()) => {
+  const key = String(planId || '').trim();
+  if (!key) return [];
+  const normalized = Array.isArray(revisions) ? revisions : [];
+  if (normalized.length) {
+    db.prepare(
+      `INSERT INTO plan_revisions (planId, revisionsJson, updatedAt) VALUES (?, ?, ?)
+       ON CONFLICT(planId) DO UPDATE SET revisionsJson = excluded.revisionsJson, updatedAt = excluded.updatedAt`
+    ).run(key, JSON.stringify(normalized), updatedAt);
+  } else {
+    db.prepare('DELETE FROM plan_revisions WHERE planId = ?').run(key);
+  }
+  planRevisionsCache.set(key, normalized);
+  return normalized;
+};
+
+const stripPlanRevisionsFromClients = (clients) => {
+  if (!Array.isArray(clients)) return;
+  for (const client of clients || []) {
+    for (const site of client?.sites || []) {
+      for (const plan of site?.floorPlans || []) {
+        if (plan && typeof plan === 'object' && 'revisions' in plan) delete plan.revisions;
+      }
+    }
+  }
+};
+
+const replaceStoredPlanRevisionsFromClients = (clients, updatedAt) => {
+  const nextPlanIds = new Set();
+  if (Array.isArray(clients)) {
+    for (const client of clients || []) {
+      for (const site of client?.sites || []) {
+        for (const plan of site?.floorPlans || []) {
+          const planId = String(plan?.id || '').trim();
+          if (!planId) continue;
+          nextPlanIds.add(planId);
+          setPlanRevisions(planId, Array.isArray(plan?.revisions) ? plan.revisions : [], updatedAt);
+        }
+      }
+    }
+  }
+  const existingRows = db.prepare('SELECT planId FROM plan_revisions').all();
+  const deleteRevisionSet = db.prepare('DELETE FROM plan_revisions WHERE planId = ?');
+  for (const row of existingRows || []) {
+    const planId = String(row?.planId || '').trim();
+    if (!planId || nextPlanIds.has(planId)) continue;
+    deleteRevisionSet.run(planId);
+    planRevisionsCache.delete(planId);
+  }
+};
+
 let stateSnapshotCache = null;
 const filteredStateCache = new Map();
 
@@ -1054,11 +1126,16 @@ const meetingServices = createMeetingServices({
   chat: chatServices
 });
 
-const writeState = (payload) => {
+const writeState = (payload, options = {}) => {
   const now = Date.now();
+  const replacePlanRevisions = !!options?.replacePlanRevisions;
   // Store large binary blobs (plan images, client logos, pdf attachments) as files instead of inline data URLs.
   // This keeps the JSON state small and avoids huge stringify/GC churn on clients.
-  if (payload && payload.clients) externalizeAssetsInClients(payload.clients);
+  if (payload && payload.clients) {
+    externalizeAssetsInClients(payload.clients);
+    if (replacePlanRevisions) replaceStoredPlanRevisionsFromClients(payload.clients, now);
+    stripPlanRevisionsFromClients(payload.clients);
+  }
   const json = JSON.stringify(payload);
   db.prepare(
     `INSERT INTO state (id, json, updatedAt) VALUES (1, ?, ?)
@@ -1644,14 +1721,18 @@ registerDataRoutes(app, {
   validateValuesAgainstFields,
   readState,
   writeState,
+  getPlanRevisions,
+  setPlanRevisions,
   getUserWithPermissions,
   buildPermissionCacheKey,
   filteredStateCache,
   computePlanAccess,
   filterStateForUser,
   getWritablePlanIdsForStateSave,
+  hasStateSaveVersionConflict,
   mergeWritablePlanContent,
   validateAssetsInClients,
+  externalizeAssetsInClients,
   purgeExpiredLocks,
   planLocks,
   planLockGrants

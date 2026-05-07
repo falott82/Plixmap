@@ -1,11 +1,11 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ToastStack from './components/ui/ToastStack';
 import ConfirmDialog from './components/ui/ConfirmDialog';
 import { useDataStore } from './store/useDataStore';
 import { defaultData } from './store/data';
 import { useUIStore } from './store/useUIStore';
-import { fetchState, saveState } from './api/state';
+import { fetchState, savePlanState, saveState, StateConflictError } from './api/state';
 import LoginView from './components/auth/LoginView';
 import FirstRunView from './components/auth/FirstRunView';
 import { useAuthStore } from './store/useAuthStore';
@@ -15,6 +15,7 @@ import { useT } from './i18n/useT';
 import PerfOverlay from './components/dev/PerfOverlay';
 import { perfMetrics } from './utils/perfMetrics';
 import ClientChatWs from './components/chat/ClientChatWs';
+import { useToastStore } from './store/useToast';
 
 const SidebarTree = lazy(() => import('./components/layout/SidebarTree'));
 const PlanView = lazy(() => import('./components/plan/PlanView'));
@@ -118,6 +119,7 @@ const App = () => {
   );
   const presentationMode = useUIStore((s) => (s as any).presentationMode || false);
   const { user, hydrated: authHydrated, hydrate: hydrateAuth } = useAuthStore();
+  const pushToast = useToastStore((s) => s.push);
   const location = useLocation();
   const navigate = useNavigate();
   const isMeetingRoomRoute = location.pathname.startsWith('/meetingroom/');
@@ -140,12 +142,69 @@ const App = () => {
   const saveTimer = useRef<number | null>(null);
   const saveInFlight = useRef(false);
   const saveQueued = useRef(false);
+  const saveConflictRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const lastSaveAtRef = useRef(0);
   const SAVE_DEBOUNCE_MS = 1200;
   const SAVE_MIN_INTERVAL_MS = 3000;
   const hasUnsavedEditsRef = useRef(false);
   const unsubscribeUnsavedRef = useRef<(() => void) | null>(null);
+  const saveFullState = useCallback(
+    async (signal?: AbortSignal) => {
+      const store = useDataStore.getState() as any;
+      const currentClients = store.clients;
+      const currentTypes = store.objectTypes;
+      const res = await saveState(currentClients, currentTypes, { signal });
+      if (!Array.isArray(res.clients)) {
+        store.markSaved();
+        return;
+      }
+      const isAdmin = !!user?.isAdmin;
+      const hasDataUrls = (clients: any[]) => {
+        for (const c of clients || []) {
+          if (typeof c?.logoUrl === 'string' && c.logoUrl.startsWith('data:')) return true;
+          for (const a of c?.attachments || []) {
+            if (typeof a?.dataUrl === 'string' && a.dataUrl.startsWith('data:')) return true;
+          }
+          for (const s of c?.sites || []) {
+            for (const p of s?.floorPlans || []) {
+              if (typeof p?.imageUrl === 'string' && p.imageUrl.startsWith('data:')) return true;
+            }
+          }
+        }
+        return false;
+      };
+      if (!isAdmin || hasDataUrls(currentClients)) {
+        store.setServerState({ clients: res.clients, objectTypes: res.objectTypes });
+      } else {
+        store.markSaved();
+      }
+    },
+    [user?.isAdmin]
+  );
+  const saveActivePlanState = useCallback(
+    async (signal?: AbortSignal) => {
+      const routeOnPlan = location.pathname.startsWith('/plan/');
+      const planId = String(useUIStore.getState().selectedPlanId || '').trim();
+      if (!routeOnPlan || !planId) {
+        await saveFullState(signal);
+        return;
+      }
+      const store = useDataStore.getState() as any;
+      const currentPlan = store.findFloorPlan(planId);
+      if (!currentPlan) {
+        await saveFullState(signal);
+        return;
+      }
+      const res = await savePlanState(planId, currentPlan, currentPlan.revisions || [], { signal });
+      if (res?.plan) {
+        store.commitSavedFloorPlan(planId, res.plan, res.revisions);
+      } else {
+        store.markSaved();
+      }
+    },
+    [location.pathname, saveFullState]
+  );
 
   useEffect(() => {
     const applyTooltip = (el: HTMLElement) => {
@@ -401,6 +460,10 @@ const App = () => {
   }, [authHydrated, user]);
 
   useEffect(() => {
+    saveConflictRef.current = false;
+  }, [user?.id, hydrated]);
+
+  useEffect(() => {
     if (!hydrated || !user) return;
     if (clients.length) return;
     if (version !== 0) return;
@@ -414,6 +477,7 @@ const App = () => {
     if (!user) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     if (version === savedVersion) return;
+    if (saveConflictRef.current) return;
     // Do not autosave while the user has unsaved edits that must be committed as a revision.
     // This prevents "implicit saves" when navigating to Settings or switching floor plans.
     const dirtyByPlan = (useUIStore.getState() as any)?.dirtyByPlan || {};
@@ -432,42 +496,24 @@ const App = () => {
       perfMetrics.autosaveLastAt = Date.now();
       const saveStart = performance.now();
       lastSaveAtRef.current = Date.now();
-      const currentClients = useDataStore.getState().clients;
-      const currentTypes = useDataStore.getState().objectTypes;
-      saveState(currentClients, currentTypes, { signal: abortRef.current.signal })
+      saveActivePlanState(abortRef.current.signal)
         .then((res) => {
-          if (!Array.isArray(res.clients)) {
-            markSaved();
+          return res;
+        })
+        .catch((error) => {
+          if (error instanceof StateConflictError || (error && typeof error === 'object' && (error as any).status === 409)) {
+            if (!saveConflictRef.current) {
+              saveConflictRef.current = true;
+              pushToast(
+                t({
+                  it: 'Salvataggio fermato: i dati sul server sono cambiati da un’altra sessione. Ricarica prima di continuare.',
+                  en: 'Saving paused: server data changed in another session. Reload before continuing.'
+                }),
+                'danger'
+              );
+            }
             return;
           }
-          const isAdmin = !!user?.isAdmin;
-          const hasDataUrls = (clients: any[]) => {
-            for (const c of clients || []) {
-              if (typeof c?.logoUrl === 'string' && c.logoUrl.startsWith('data:')) return true;
-              for (const a of c?.attachments || []) {
-                if (typeof a?.dataUrl === 'string' && a.dataUrl.startsWith('data:')) return true;
-              }
-              for (const s of c?.sites || []) {
-                for (const p of s?.floorPlans || []) {
-                  if (typeof p?.imageUrl === 'string' && p.imageUrl.startsWith('data:')) return true;
-                  for (const r of p?.revisions || []) {
-                    if (typeof r?.imageUrl === 'string' && r.imageUrl.startsWith('data:')) return true;
-                  }
-                }
-              }
-            }
-            return false;
-          };
-          // Avoid replacing the whole state graph on every save (reduces GC + Konva churn).
-          // We only need the server echo for non-admin merges or to normalize data URLs → /uploads.
-          if (!isAdmin || hasDataUrls(currentClients)) {
-            setServerState({ clients: res.clients, objectTypes: res.objectTypes });
-          } else {
-            markSaved();
-          }
-        })
-        .catch((_e) => {
-          // ignore; keeps working offline/local
         })
         .finally(() => {
           perfMetrics.autosaveLastDurationMs = Math.round(performance.now() - saveStart);
@@ -487,39 +533,24 @@ const App = () => {
               perfMetrics.autosaveLastAt = Date.now();
               const followupStart = performance.now();
               lastSaveAtRef.current = Date.now();
-              const latestClients = useDataStore.getState().clients;
-              const latestTypes = useDataStore.getState().objectTypes;
-              saveState(latestClients, latestTypes, { signal: abortRef.current.signal })
+              saveActivePlanState(abortRef.current.signal)
                 .then((res) => {
-                  if (!Array.isArray(res.clients)) {
-                    markSaved();
-                    return;
-                  }
-                  const isAdmin = !!user?.isAdmin;
-                  const hasDataUrls = (clients: any[]) => {
-                    for (const c of clients || []) {
-                      if (typeof c?.logoUrl === 'string' && c.logoUrl.startsWith('data:')) return true;
-                      for (const a of c?.attachments || []) {
-                        if (typeof a?.dataUrl === 'string' && a.dataUrl.startsWith('data:')) return true;
-                      }
-                      for (const s of c?.sites || []) {
-                        for (const p of s?.floorPlans || []) {
-                          if (typeof p?.imageUrl === 'string' && p.imageUrl.startsWith('data:')) return true;
-                          for (const r of p?.revisions || []) {
-                            if (typeof r?.imageUrl === 'string' && r.imageUrl.startsWith('data:')) return true;
-                          }
-                        }
-                      }
+                  return res;
+                })
+                .catch((error) => {
+                  if (error instanceof StateConflictError || (error && typeof error === 'object' && (error as any).status === 409)) {
+                    if (!saveConflictRef.current) {
+                      saveConflictRef.current = true;
+                      pushToast(
+                        t({
+                          it: 'Salvataggio fermato: i dati sul server sono cambiati da un’altra sessione. Ricarica prima di continuare.',
+                          en: 'Saving paused: server data changed in another session. Reload before continuing.'
+                        }),
+                        'danger'
+                      );
                     }
-                    return false;
-                  };
-                  if (!isAdmin || hasDataUrls(latestClients)) {
-                    setServerState({ clients: res.clients, objectTypes: res.objectTypes });
-                  } else {
-                    markSaved();
                   }
                 })
-                .catch(() => {})
                 .finally(() => {
                   perfMetrics.autosaveLastDurationMs = Math.round(performance.now() - followupStart);
                   saveInFlight.current = false;
@@ -531,7 +562,7 @@ const App = () => {
     return () => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
     };
-  }, [clients, hydrated, markSaved, objectTypes, savedVersion, setServerState, user, version]);
+  }, [clients, hydrated, pushToast, saveActivePlanState, savedVersion, t, user, version]);
 
   useEffect(() => {
     const hasPlanId = (id?: string | null) => {

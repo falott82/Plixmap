@@ -175,6 +175,32 @@ const listDirectoryUsers = (db) =>
       };
     });
 
+const listDirectoryUsersForRequester = (db, requester, getChatClientIdsForUser) => {
+  const users = listDirectoryUsers(db);
+  if (requester?.isAdmin) return users;
+
+  const requesterId = String(requester?.userId || '').trim();
+  if (!requesterId || typeof getChatClientIdsForUser !== 'function') {
+    return users
+      .filter((user) => String(user?.id || '') === requesterId)
+      .map(({ isAdmin, isSuperAdmin, ...safeUser }) => safeUser);
+  }
+
+  const requesterClientIds = getChatClientIdsForUser(requesterId, false);
+  return users
+    .filter((user) => {
+      const targetId = String(user?.id || '').trim();
+      if (!targetId) return false;
+      if (targetId === requesterId) return true;
+      const targetClientIds = getChatClientIdsForUser(targetId, !!user?.isAdmin || !!user?.isSuperAdmin);
+      for (const clientId of requesterClientIds) {
+        if (targetClientIds.has(clientId)) return true;
+      }
+      return false;
+    })
+    .map(({ isAdmin, isSuperAdmin, ...safeUser }) => safeUser);
+};
+
 module.exports = {
   normalizeUserEmailKey,
   normalizeLinkedImportedRef,
@@ -184,5 +210,6 @@ module.exports = {
   replaceUserPermissions,
   mapAdminUsersResponse,
   searchImportedUsers,
-  listDirectoryUsers
+  listDirectoryUsers,
+  listDirectoryUsersForRequester
 };

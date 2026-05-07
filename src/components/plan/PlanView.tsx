@@ -80,7 +80,7 @@ import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
-import { saveState } from '../../api/state';
+import { fetchPlanRevisions, savePlanState } from '../../api/state';
 import PrinterMenuButton from './PrinterMenuButton';
 import UserAvatar from '../ui/UserAvatar';
 import type { UnlockRequestLock } from './UnlockRequestComposeModal';
@@ -258,6 +258,7 @@ const PlanView = ({ planId }: Props) => {
     updateRevision,
     deleteRevision,
     clearRevisions,
+    setFloorPlanRevisions,
     addLink,
     deleteLink,
     updateLink,
@@ -287,6 +288,7 @@ const PlanView = ({ planId }: Props) => {
       updateRevision: (s as any).updateRevision,
       deleteRevision: s.deleteRevision,
       clearRevisions: s.clearRevisions,
+      setFloorPlanRevisions: (s as any).setFloorPlanRevisions,
       addLink: (s as any).addLink,
       deleteLink: (s as any).deleteLink,
       updateLink: (s as any).updateLink,
@@ -1257,6 +1259,20 @@ const PlanView = ({ planId }: Props) => {
     useCallback((s) => s.findSiteByPlan(planId), [planId])
   );
   const siteFloorPlans = useMemo(() => ((site?.floorPlans || []) as FloorPlan[]).filter(Boolean), [site?.floorPlans]);
+  useEffect(() => {
+    if (!planId) return;
+    if (plan?.revisionsLoaded) return;
+    let cancelled = false;
+    fetchPlanRevisions(planId)
+      .then((payload) => {
+        if (cancelled) return;
+        setFloorPlanRevisions(planId, Array.isArray(payload?.revisions) ? payload.revisions : []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [plan?.revisionsLoaded, planId, setFloorPlanRevisions]);
   const clientBusinessPartnerNames = useMemo(
     () =>
       Array.isArray((client as any)?.businessPartners)
@@ -5185,9 +5201,15 @@ const PlanView = ({ planId }: Props) => {
   const forceSaveNow = useCallback(async () => {
     try {
       const store = useDataStore.getState() as any;
-      const res = await saveState(store.clients, store.objectTypes);
-      if (Array.isArray(res.clients)) {
-        store.setServerState({ clients: res.clients, objectTypes: res.objectTypes });
+      const currentPlan = store.findFloorPlan(plan?.id || planId);
+      const targetPlanId = String(currentPlan?.id || plan?.id || planId || '').trim();
+      if (currentPlan && targetPlanId) {
+        const res = await savePlanState(targetPlanId, currentPlan, currentPlan.revisions || []);
+        if (res?.plan) {
+          store.commitSavedFloorPlan(targetPlanId, res.plan, res.revisions);
+        } else if (typeof store.markSaved === 'function') {
+          store.markSaved();
+        }
       } else if (typeof store.markSaved === 'function') {
         store.markSaved();
       }
@@ -5195,7 +5217,7 @@ const PlanView = ({ planId }: Props) => {
     } catch {
       return false;
     }
-  }, []);
+  }, [plan?.id, planId]);
 
   const saveRevisionForUnlock = useCallback(async () => {
     if (!plan || !hasNavigationEdits) return true;

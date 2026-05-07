@@ -10,7 +10,8 @@ const {
 const {
   normalizeLinkedImportedRef,
   findLinkedPortalUserConflict,
-  replaceUserPermissions
+  replaceUserPermissions,
+  listDirectoryUsersForRequester
 } = require('../server/services/users.cjs');
 
 const createDb = () => {
@@ -24,6 +25,12 @@ const createDb = () => {
     CREATE TABLE users (
       id TEXT PRIMARY KEY,
       username TEXT NOT NULL,
+      isAdmin INTEGER NOT NULL DEFAULT 0,
+      isSuperAdmin INTEGER NOT NULL DEFAULT 0,
+      disabled INTEGER NOT NULL DEFAULT 0,
+      firstName TEXT NOT NULL DEFAULT '',
+      lastName TEXT NOT NULL DEFAULT '',
+      avatarUrl TEXT NOT NULL DEFAULT '',
       email TEXT NOT NULL DEFAULT '',
       linkedExternalClientId TEXT NOT NULL DEFAULT '',
       linkedExternalId TEXT NOT NULL DEFAULT ''
@@ -82,4 +89,42 @@ test('replaceUserPermissions rewrites permissions from a single source', () => {
     { scopeType: 'client', scopeId: 'c2', access: 'ro', chat: 1 },
     { scopeType: 'site', scopeId: 's1', access: 'ro', chat: 0 }
   ]);
+});
+
+test('listDirectoryUsersForRequester only returns visible users for non-admins and strips role flags', () => {
+  const db = createDb();
+  db.prepare(
+    'INSERT INTO users (id, username, isAdmin, isSuperAdmin, firstName, lastName, avatarUrl) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run('u1', 'mario', 0, 0, 'Mario', 'Rossi', '/uploads/mario.png');
+  db.prepare(
+    'INSERT INTO users (id, username, isAdmin, isSuperAdmin, firstName, lastName) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run('u2', 'admin', 1, 0, 'Admin', 'User');
+  db.prepare(
+    'INSERT INTO users (id, username, isAdmin, isSuperAdmin, firstName, lastName) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run('u3', 'other', 0, 0, 'Other', 'User');
+
+  const clientIdsByUserId = new Map([
+    ['u1', new Set(['c1'])],
+    ['u2', new Set(['c1', 'c2'])],
+    ['u3', new Set(['c2'])]
+  ]);
+  const getChatClientIdsForUser = (userId) => clientIdsByUserId.get(String(userId)) || new Set();
+
+  const visibleToUser = listDirectoryUsersForRequester(
+    db,
+    { userId: 'u1', isAdmin: false },
+    getChatClientIdsForUser
+  );
+  assert.deepEqual(visibleToUser, [
+    { id: 'u2', username: 'admin', firstName: 'Admin', lastName: 'User', avatarUrl: '' },
+    { id: 'u1', username: 'mario', firstName: 'Mario', lastName: 'Rossi', avatarUrl: '/uploads/mario.png' }
+  ]);
+
+  const visibleToAdmin = listDirectoryUsersForRequester(
+    db,
+    { userId: 'u2', isAdmin: true },
+    getChatClientIdsForUser
+  );
+  assert.equal(visibleToAdmin.length, 3);
+  assert.equal(visibleToAdmin.find((row) => row.id === 'u2')?.isAdmin, true);
 });

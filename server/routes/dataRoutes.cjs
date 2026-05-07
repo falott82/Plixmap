@@ -15,18 +15,80 @@ const registerDataRoutes = (app, deps) => {
     validateValuesAgainstFields,
     readState,
     writeState,
+    getPlanRevisions,
+    setPlanRevisions,
     getUserWithPermissions,
     buildPermissionCacheKey,
     filteredStateCache,
     computePlanAccess,
     filterStateForUser,
     getWritablePlanIdsForStateSave,
+    hasStateSaveVersionConflict,
     mergeWritablePlanContent,
     validateAssetsInClients,
+    externalizeAssetsInClients,
     purgeExpiredLocks,
     planLocks,
     planLockGrants
   } = deps;
+
+  const findPlanRecord = (clients, planId) => {
+    for (let ci = 0; ci < (clients || []).length; ci += 1) {
+      const client = clients[ci];
+      for (let si = 0; si < (client?.sites || []).length; si += 1) {
+        const site = client.sites[si];
+        for (let pi = 0; pi < (site?.floorPlans || []).length; pi += 1) {
+          const plan = site.floorPlans[pi];
+          if (String(plan?.id || '') !== String(planId || '')) continue;
+          return { client, site, plan, ci, si, pi };
+        }
+      }
+    }
+    return null;
+  };
+
+  const replacePlanInClients = (clients, planId, nextPlan) =>
+    (clients || []).map((client) => ({
+      ...client,
+      sites: (client?.sites || []).map((site) => ({
+        ...site,
+        floorPlans: (site?.floorPlans || []).map((plan) =>
+          String(plan?.id || '') === String(planId || '') ? nextPlan : plan
+        )
+      }))
+    }));
+
+  const validatePlanPayload = (plan, revisions) =>
+    validateAssetsInClients([
+      {
+        id: '__validation__',
+        sites: [{ id: '__validation__', floorPlans: [{ ...(plan || {}), revisions: Array.isArray(revisions) ? revisions : [] }] }]
+      }
+    ]);
+
+  const externalizePlanPayload = (plan, revisions) => {
+    const wrapper = [
+      {
+        id: '__externalize__',
+        sites: [{ id: '__externalize__', floorPlans: [{ ...(plan || {}), revisions: Array.isArray(revisions) ? revisions : [] }] }]
+      }
+    ];
+    externalizeAssetsInClients?.(wrapper);
+    const wrappedPlan = wrapper[0]?.sites?.[0]?.floorPlans?.[0] || {};
+    const nextRevisions = Array.isArray(wrappedPlan.revisions) ? wrappedPlan.revisions : [];
+    delete wrappedPlan.revisions;
+    return { plan: wrappedPlan, revisions: nextRevisions };
+  };
+
+  const isPlanLockedByOtherUser = (planId, userId) => {
+    purgeExpiredLocks();
+    const activeLock = planLocks.get(planId);
+    if (activeLock?.userId && activeLock.userId !== userId) return true;
+    const activeGrant = planLockGrants.get(planId);
+    if (!activeGrant) return false;
+    if (activeGrant.expiresAt && activeGrant.expiresAt <= Date.now()) return false;
+    return !!activeGrant.userId && activeGrant.userId !== userId && !activeLock?.userId;
+  };
 
   app.post('/api/audit', requireAuth, (req, res) => {
     const { event, level, scopeType, scopeId, details } = req.body || {};
@@ -222,6 +284,92 @@ const registerDataRoutes = (app, deps) => {
     setObjectCustomValues(db, req.userId, objectId, next);
     res.json({ ok: true });
   });
+
+  app.get('/api/plans/:planId/revisions', requireAuth, (req, res) => {
+    const planId = String(req.params.planId || '').trim();
+    if (!planId) {
+      res.status(400).json({ error: 'Missing planId' });
+      return;
+    }
+    const state = readState();
+    const hit = findPlanRecord(state.clients, planId);
+    if (!hit) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (!req.isAdmin) {
+      const ctx = getUserWithPermissions(db, req.userId);
+      const access = computePlanAccess(state.clients, ctx?.permissions || []);
+      if (!access.get(planId)) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+    }
+    res.json({ planId, revisions: getPlanRevisions(planId) });
+  });
+
+  app.put('/api/plans/:planId/state', requireAuth, rateByUser('plan_state_save', 60 * 1000, 360), (req, res) => {
+    const planId = String(req.params.planId || '').trim();
+    const incomingPlan = req.body?.plan;
+    const requestedPlanId = String(req.body?.plan?.id || '').trim();
+    if (!planId || !incomingPlan || typeof incomingPlan !== 'object') {
+      res.status(400).json({ error: 'Invalid payload (expected {plan})' });
+      return;
+    }
+    if (requestedPlanId && requestedPlanId !== planId) {
+      res.status(400).json({ error: 'Plan id mismatch' });
+      return;
+    }
+    const serverState = readState();
+    if (hasStateSaveVersionConflict(req.body?.updatedAt, serverState?.updatedAt)) {
+      res.status(409).json({
+        error: 'State version conflict',
+        expectedUpdatedAt: Number(req.body?.updatedAt || 0) || null,
+        currentUpdatedAt: Number(serverState?.updatedAt || 0) || null
+      });
+      return;
+    }
+    const current = findPlanRecord(serverState.clients, planId);
+    if (!current) {
+      res.status(404).json({ error: 'Not found' });
+      return;
+    }
+    if (isPlanLockedByOtherUser(planId, req.userId)) {
+      res.status(423).json({ error: 'Plan is locked', planId });
+      return;
+    }
+    if (!req.isAdmin) {
+      const ctx = getUserWithPermissions(db, req.userId);
+      const access = computePlanAccess(serverState.clients, ctx?.permissions || []);
+      if (access.get(planId) !== 'rw') {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+    }
+    const nextRevisions = Array.isArray(req.body?.revisions) ? req.body.revisions : getPlanRevisions(planId);
+    const validation = validatePlanPayload(incomingPlan, nextRevisions);
+    if (!validation.ok) {
+      res.status(400).json({
+        error: 'Invalid upload',
+        details: {
+          field: validation.field,
+          reason: validation.reason,
+          mime: validation.mime,
+          maxBytes: validation.maxBytes
+        }
+      });
+      return;
+    }
+    const { plan: persistedPlan, revisions: persistedRevisions } = externalizePlanPayload(
+      { ...current.plan, ...incomingPlan, id: planId, siteId: current.plan?.siteId || incomingPlan.siteId },
+      nextRevisions
+    );
+    const nextClients = replacePlanInClients(serverState.clients, planId, persistedPlan);
+    const payload = { clients: nextClients, objectTypes: serverState.objectTypes };
+    const updatedAt = writeState(payload);
+    setPlanRevisions(planId, persistedRevisions, updatedAt);
+    res.json({ ok: true, updatedAt, plan: persistedPlan, revisions: persistedRevisions });
+  });
   
   app.get('/api/state', requireAuth, (req, res) => {
     const state = readState();
@@ -265,6 +413,14 @@ const registerDataRoutes = (app, deps) => {
       return;
     }
     const serverState = readState();
+    if (hasStateSaveVersionConflict(body.updatedAt, serverState?.updatedAt)) {
+      res.status(409).json({
+        error: 'State version conflict',
+        expectedUpdatedAt: Number(body.updatedAt || 0) || null,
+        currentUpdatedAt: Number(serverState?.updatedAt || 0) || null
+      });
+      return;
+    }
     const lockedByOthers = new Set();
     purgeExpiredLocks();
     for (const [planId, lock] of planLocks.entries()) {
@@ -348,7 +504,7 @@ const registerDataRoutes = (app, deps) => {
         }
       }
       const payload = { clients: lockedApplied, objectTypes: Array.isArray(body.objectTypes) ? body.objectTypes : serverState.objectTypes };
-      const updatedAt = writeState(payload);
+      const updatedAt = writeState(payload, { replacePlanRevisions: !!body.replacePlanRevisions });
       res.json({ ok: true, updatedAt, clients: payload.clients, objectTypes: payload.objectTypes });
       return;
     }
@@ -361,7 +517,7 @@ const registerDataRoutes = (app, deps) => {
     }
     const nextClients = mergeWritablePlanContent(serverState.clients, body.clients, writablePlanIds);
     const payload = { clients: nextClients, objectTypes: serverState.objectTypes };
-    const updatedAt = writeState(payload);
+    const updatedAt = writeState(payload, { replacePlanRevisions: !!body.replacePlanRevisions });
     const filtered = filterStateForUser(payload.clients, access, false, { meetingOperatorOnly: !!ctx?.user?.isMeetingOperator });
     res.json({ ok: true, updatedAt, clients: filtered, objectTypes: payload.objectTypes });
   });

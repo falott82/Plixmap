@@ -2,6 +2,13 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.6.5 - 2026-05-07
+- Plan persistence was split into more targeted flows: the active floor plan and its revision history now use dedicated endpoints/storage, reducing full-state churn while keeping backup import/export consistent.
+- Autosave now detects stale server versions and stops with an explicit reload warning instead of silently overwriting changes coming from another session.
+- Non-admin directory visibility is now scoped to users that are actually reachable through shared chat/client permissions, and privileged role flags are stripped from regular directory responses.
+- Security maintenance: upgraded `nodemailer` to `^8.0.7`, forced `dompurify` to `^3.4.2`, and kept `path-to-regexp` on the fixed `8.4.2` line to satisfy the runtime audit gate.
+- Release verification rerun: `quality:check`, `lint:i18n`, and `npm audit --omit=dev --audit-level=high` all succeeded.
+
 ## 3.6.4 - 2026-04-13
 - CI/runtime alignment: upgraded the GitHub Actions workflows to the current `v5` action line and aligned the Node version used in CI to 22, keeping the quality/security pipelines current with the toolchain already expected by the project.
 - Release operations: added a repo-safe database snapshot workflow (`npm run release:db:export`) that exports the active SQLite database to `release-data/plixmap-db-latest.sqlite.gz` instead of tracking live runtime files under `data/`.

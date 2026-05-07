@@ -4,8 +4,9 @@ import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
 import { useT } from '../../i18n/useT';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
+import type { FloorPlanRevision } from '../../store/types';
 import { createCustomField } from '../../api/customFields';
-import { saveState } from '../../api/state';
+import { fetchPlanRevisions, saveState } from '../../api/state';
 import { createServerBackup, fetchServerBackups, getServerBackupDownloadUrl, type ServerBackupRow } from '../../api/backup';
 import ConfirmDialog from '../ui/ConfirmDialog';
 
@@ -227,6 +228,21 @@ const BackupPanel = () => {
     }
     setBusy(true);
     try {
+      const selectedPlanList = Object.entries(selectedPlanIds)
+        .filter(([, enabled]) => !!enabled)
+        .map(([planId]) => planId);
+      const revisionEntries = await Promise.all(
+        selectedPlanList.map(async (planId) => {
+          try {
+            const payload = await fetchPlanRevisions(planId);
+            const revisions: FloorPlanRevision[] = Array.isArray(payload?.revisions) ? payload.revisions : [];
+            return [planId, revisions] as const;
+          } catch {
+            return [planId, [] as FloorPlanRevision[]] as const;
+          }
+        })
+      );
+      const revisionsByPlanId = new Map(revisionEntries);
       const payload: any = {
         kind: 'plixmap-workspace',
         version: 2,
@@ -236,6 +252,17 @@ const BackupPanel = () => {
         customFields: customFields || [],
         clients: structuredClone(filteredClients)
       };
+      for (const c of payload.clients || []) {
+        for (const s of c.sites || []) {
+          for (const p of s.floorPlans || []) {
+            const revisions = revisionsByPlanId.get(String(p.id || '')) || [];
+            p.revisions = revisions.map((revision: any) => ({
+              ...revision,
+              objects: Array.isArray(revision?.objects) ? revision.objects.filter((obj: any) => obj?.type !== 'real_user') : revision?.objects
+            }));
+          }
+        }
+      }
 
       if (exportAssets) {
         const rewriteUrl = async (value: any) => {
@@ -514,7 +541,7 @@ const BackupPanel = () => {
 
         // Persist on server (also externalizes embedded data URLs into /uploads) then update the local store.
         try {
-          await saveState(nextClients, nextObjectTypes);
+          await saveState(nextClients, nextObjectTypes, { replacePlanRevisions: true });
         } catch {
           // If server isn't reachable (offline), we still update locally.
         }

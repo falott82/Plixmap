@@ -456,6 +456,7 @@ export const normalizePlan = (plan: FloorPlan): FloorPlan => {
       .filter((door): door is RoomConnectionDoor => !!door)
       .filter((door) => validRoomIds.has(door.roomAId) && validRoomIds.has(door.roomBId));
   }
+  (next as any).revisionsLoaded = !!(next as any).revisionsLoaded || (Array.isArray((next as any).revisions) && (next as any).revisions.length > 0);
   if (!Array.isArray(next.objects)) next.objects = [];
   if (Array.isArray(next.objects)) {
     next.objects = next.objects.map((obj: MapObject) => {

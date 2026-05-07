@@ -15,6 +15,15 @@ const getWritablePlanIdsForStateSave = (access, blockedPlanIds = []) => {
   return writablePlanIds;
 };
 
+const hasStateSaveVersionConflict = (expectedUpdatedAt, currentUpdatedAt) => {
+  const expected = Number(expectedUpdatedAt || 0);
+  const current = Number(currentUpdatedAt || 0);
+  if (!Number.isFinite(expected) || expected <= 0) return false;
+  if (!Number.isFinite(current) || current <= 0) return false;
+  return expected !== current;
+};
+
 module.exports = {
-  getWritablePlanIdsForStateSave
+  getWritablePlanIdsForStateSave,
+  hasStateSaveVersionConflict
 };

@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.6.4
+Current version: 3.6.5
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,10 +14,11 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.6.4
-- CI maintenance: GitHub Actions upgraded to the `v5` action line with Node 22 alignment in the pipeline.
-- Release ops: added a repo-safe database snapshot workflow via `npm run release:db:export`, which writes `release-data/plixmap-db-latest.sqlite.gz` instead of tracking live runtime files under `data/`.
-- Documentation/versioning synchronized for the 3.6.4 release across package metadata, README, changelog, and in-app release history.
+## What's new in 3.6.5
+- Plan saves are now more targeted: the active floor plan and its revisions are synced through dedicated endpoints, reducing full-state churn during everyday editing.
+- Autosave now detects stale server state and stops with a clear reload warning instead of risking silent overwrites from concurrent sessions.
+- User directory visibility is now scoped for non-admins: only users reachable through shared chat/client visibility are exposed, and privileged role flags are not leaked.
+- Security maintenance: upgraded `nodemailer` to `^8.0.7`, forced `dompurify` to `^3.4.2`, and kept the `path-to-regexp` fix in place; `quality:check`, `lint:i18n`, and `npm audit --omit=dev --audit-level=high` all green.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.

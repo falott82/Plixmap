@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { getWritablePlanIdsForStateSave } = require('../server/stateSaveGuards.cjs');
+const { getWritablePlanIdsForStateSave, hasStateSaveVersionConflict } = require('../server/stateSaveGuards.cjs');
 
 test('getWritablePlanIdsForStateSave keeps only rw plans not blocked by locks', () => {
   const access = new Map([
@@ -24,4 +24,12 @@ test('getWritablePlanIdsForStateSave returns empty set when user cannot save any
   const writable = getWritablePlanIdsForStateSave(access, ['plan-b']);
 
   assert.equal(writable.size, 0);
+});
+
+test('hasStateSaveVersionConflict only rejects stale positive versions', () => {
+  assert.equal(hasStateSaveVersionConflict(null, 10), false);
+  assert.equal(hasStateSaveVersionConflict(0, 10), false);
+  assert.equal(hasStateSaveVersionConflict(10, null), false);
+  assert.equal(hasStateSaveVersionConflict(10, 10), false);
+  assert.equal(hasStateSaveVersionConflict(9, 10), true);
 });

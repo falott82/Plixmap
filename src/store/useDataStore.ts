@@ -322,6 +322,8 @@ interface DataState {
   updateRevision: (floorPlanId: string, revisionId: string, changes: Partial<FloorPlanRevision>) => void;
   deleteRevision: (floorPlanId: string, revisionId: string) => void;
   clearRevisions: (floorPlanId: string) => void;
+  setFloorPlanRevisions: (floorPlanId: string, revisions: FloorPlanRevision[]) => void;
+  commitSavedFloorPlan: (floorPlanId: string, plan: FloorPlan, revisions?: FloorPlanRevision[]) => void;
   findFloorPlan: (id: string) => FloorPlan | undefined;
   findClientByPlan: (planId: string) => Client | undefined;
   findSiteByPlan: (planId: string) => Site | undefined;
@@ -845,6 +847,7 @@ const normalizePlan = (plan: FloorPlan): FloorPlan => {
         return validRoomIds.has(door.roomAId) && validRoomIds.has(door.roomBId);
       });
   }
+  next.revisionsLoaded = !!next.revisionsLoaded || (Array.isArray(next.revisions) && next.revisions.length > 0);
   if (!Array.isArray(next.revisions)) next.revisions = [];
   if (!Array.isArray(next.objects)) next.objects = [];
   if (Array.isArray(next.objects)) {
@@ -1537,6 +1540,33 @@ export const useDataStore = create<DataState>()(
           clients: updateFloorPlanById(state.clients, floorPlanId, (plan) => ({ ...plan, revisions: [] })),
           version: state.version + 1
         }));
+      },
+      setFloorPlanRevisions: (floorPlanId, revisions) => {
+        set((state) => {
+          const nextClients = updateFloorPlanById(state.clients, floorPlanId, (plan) => ({
+            ...plan,
+            revisions: Array.isArray(revisions) ? revisions : [],
+            revisionsLoaded: true
+          }));
+          if (nextClients === state.clients) return state;
+          return { clients: nextClients };
+        });
+      },
+      commitSavedFloorPlan: (floorPlanId, plan, revisions) => {
+        set((state) => {
+          const nextClients = updateFloorPlanById(state.clients, floorPlanId, (currentPlan) =>
+            normalizePlan({
+              ...currentPlan,
+              ...(plan || {}),
+              id: floorPlanId,
+              siteId: currentPlan.siteId || plan?.siteId,
+              revisions: Array.isArray(revisions) ? revisions : currentPlan.revisions || [],
+              revisionsLoaded: Array.isArray(revisions) ? true : !!currentPlan.revisionsLoaded
+            } as FloorPlan)
+          );
+          if (nextClients === state.clients) return state;
+          return { clients: nextClients, savedVersion: state.version };
+        });
       },
       findFloorPlan: (id) => {
         const clients = get().clients;

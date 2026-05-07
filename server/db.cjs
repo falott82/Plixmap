@@ -582,6 +582,53 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_external_users_client_present ON external_users(clientId, present, hidden);
       `);
     }
+  },
+  {
+    version: 29,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plan_revisions (
+          planId TEXT PRIMARY KEY,
+          revisionsJson TEXT NOT NULL DEFAULT '[]',
+          updatedAt INTEGER NOT NULL
+        );
+      `);
+      let row = null;
+      try {
+        row = db.prepare('SELECT json, updatedAt FROM state WHERE id = 1').get();
+      } catch {
+        row = null;
+      }
+      if (!row?.json) return;
+      let parsed = null;
+      try {
+        parsed = JSON.parse(row.json) || {};
+      } catch {
+        parsed = null;
+      }
+      if (!parsed || !Array.isArray(parsed.clients)) return;
+      const upsertRevisionSet = db.prepare(
+        `INSERT INTO plan_revisions (planId, revisionsJson, updatedAt)
+         VALUES (?, ?, ?)
+         ON CONFLICT(planId) DO UPDATE SET revisionsJson = excluded.revisionsJson, updatedAt = excluded.updatedAt`
+      );
+      let changed = false;
+      const ts = Number(row.updatedAt || Date.now()) || Date.now();
+      for (const client of parsed.clients || []) {
+        for (const site of client?.sites || []) {
+          for (const plan of site?.floorPlans || []) {
+            const planId = String(plan?.id || '').trim();
+            if (!planId) continue;
+            if (!Array.isArray(plan.revisions)) continue;
+            upsertRevisionSet.run(planId, JSON.stringify(plan.revisions), ts);
+            delete plan.revisions;
+            changed = true;
+          }
+        }
+      }
+      if (!changed) return;
+      db.prepare('UPDATE state SET json = ? WHERE id = 1').run(JSON.stringify(parsed));
+    }
   }
 ];
 
@@ -654,6 +701,11 @@ const openDb = () => {
     CREATE TABLE IF NOT EXISTS state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       json TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS plan_revisions (
+      planId TEXT PRIMARY KEY,
+      revisionsJson TEXT NOT NULL DEFAULT '[]',
       updatedAt INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS meta (

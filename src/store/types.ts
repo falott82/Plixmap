@@ -452,6 +452,7 @@ export interface FloorPlan {
   layers?: LayerDefinition[];
   views?: FloorPlanView[];
   revisions?: FloorPlanRevision[];
+  revisionsLoaded?: boolean;
   rooms?: Room[];
   corridors?: Corridor[];
   roomDoors?: RoomConnectionDoor[];

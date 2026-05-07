@@ -8,6 +8,25 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.6.5',
+    date: '2026-05-07',
+    type: 'fix',
+    notes: [
+      n(
+        'Salvataggio planimetrie piu mirato: piano attivo e revisioni usano endpoint/storage dedicati, riducendo churn sull’intero stato senza perdere coerenza su backup/import',
+        'More targeted floor-plan persistence: the active plan and its revisions use dedicated endpoints/storage, reducing full-state churn without losing backup/import consistency'
+      ),
+      n(
+        'Autosave con guard di concorrenza: se lo stato server cambia da un’altra sessione, il salvataggio si ferma e mostra un avviso esplicito di ricarica invece di sovrascrivere silenziosamente',
+        'Autosave now includes a concurrency guard: if server state changes from another session, saving pauses and shows an explicit reload warning instead of silently overwriting'
+      ),
+      n(
+        'Hardening sicurezza e privacy: directory utenti filtrata per visibilita reale dei non-admin; aggiornati `nodemailer` a ^8.0.7 e `dompurify` a ^3.4.2 con audit runtime nuovamente verde',
+        'Security and privacy hardening: non-admin user directory is filtered by actual visibility; `nodemailer` upgraded to ^8.0.7 and `dompurify` forced to ^3.4.2 with the runtime audit green again'
+      )
+    ]
+  },
+  {
     version: '3.6.4',
     date: '2026-04-13',
     type: 'fix',
