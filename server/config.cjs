@@ -143,6 +143,32 @@ const createServerConfig = (env = process.env, options = {}) => {
   });
 };
 
+// Fail-fast validation of filesystem-backed config at startup. Ensures the
+// directories the server depends on (database, backups, uploads) exist and are
+// writable, so misconfiguration surfaces immediately instead of as a confusing
+// runtime error on the first write. Throws an Error listing every problem.
+const ensureWritableDir = (dir, label, problems) => {
+  if (!dir) return;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.accessSync(dir, fs.constants.W_OK);
+  } catch (error) {
+    problems.push(`${label} (${dir}): ${error?.message || 'not writable'}`);
+  }
+};
+
+const validateServerConfig = (config = serverConfig, extraDirs = {}) => {
+  const problems = [];
+  const dbDir = config.dbPath ? path.dirname(config.dbPath) : '';
+  ensureWritableDir(dbDir, 'database directory (PLIXMAP_DB_PATH)', problems);
+  ensureWritableDir(config.backupDir, 'backup directory (PLIXMAP_BACKUP_DIR)', problems);
+  if (extraDirs.uploadsDir) ensureWritableDir(extraDirs.uploadsDir, 'uploads directory', problems);
+  if (problems.length) {
+    throw new Error(`Invalid server configuration:\n  - ${problems.join('\n  - ')}`);
+  }
+  return config;
+};
+
 const serverConfig = createServerConfig();
 
 module.exports = {
@@ -157,5 +183,6 @@ module.exports = {
   readSecretInput,
   resolveDefaultDbPath,
   createServerConfig,
+  validateServerConfig,
   serverConfig
 };

@@ -2,6 +2,18 @@
 
 All notable changes are listed here in reverse chronological order.
 
+## 3.7.0 - 2026-06-01
+This release implements the actionable, low-risk findings from a full codebase audit (see `IMPROVEMENTS.md`).
+- Security / supply chain: production `npm audit` now reports **0 vulnerabilities**. Updated `ws` to `^8.21.0` (GHSA-58qx-3vcg-4xpx, memory disclosure) and `nodemailer` to `^8.0.10` (SMTP command injection), and refreshed the `overrides` to `dompurify@^3.4.7`, `qs@^6.15.2`, and a new `path-to-regexp@^8.4.2` (DoS/ReDoS).
+- Stored-XSS hardening: meeting-note rich text (`contentHtml`) is now sanitized server-side before persistence via a new dependency-free `server/utils/sanitizeHtml.cjs` (strips script/style/iframe/object/embed/link/meta/base/form, inline `on*` handlers, and `javascript:`/`vbscript:`/`data:text/html`/`srcdoc` payloads). Backed by `scripts/sanitize-html.test.cjs`.
+- Resilience: the Konva canvas in `PlanView` is wrapped in a dedicated `CanvasErrorBoundary`, so a canvas rendering error is isolated (with in-place retry) instead of falling back to the full-app boundary and a page reload.
+- Startup safety: the server now validates that the database, backup, and uploads directories exist and are writable via `validateServerConfig`, failing fast with a clear error instead of crashing on the first write.
+- Observability: replaced the silent `catch {}` blocks around DB reads in `server/routes/chat.cjs` with structured `serverLog('warn', …)` calls (benign `JSON.parse`-with-fallback catches were intentionally left in place).
+- TypeScript: extracted a typed `src/utils/fullscreen.ts` helper and removed unnecessary `as any` casts in `src/App.tsx`.
+- Tooling: the `.githooks/pre-commit` hook now also runs `tsc --noEmit` and the unit test suite.
+- Audit notes: two audit findings were verified as **false positives** and intentionally not changed — the `permissions(userId)` index (already covered by the `UNIQUE(userId, scopeType, scopeId)` autoindex) and `filteredStateCache` permission invalidation (the cache key already embeds a full permission fingerprint via `buildPermissionCacheKey`). The unauthenticated `/public-uploads` path is a deliberate capability-URL channel for public kiosk/mobile surfaces, protected by unguessable `crypto.randomUUID()` filenames, and was left unchanged. The large architectural refactors (splitting `PlanView.tsx`, `CanvasStage.tsx`, the Zustand store) remain documented in `IMPROVEMENTS.md` as follow-up work.
+- Verification: `tsc --noEmit`, `npm run build`, the HTML-sanitizer unit tests, and `npm audit --omit=dev --audit-level=high` (0 vulnerabilities) all pass.
+
 ## 3.6.5 - 2026-05-07
 - Plan persistence was split into more targeted flows: the active floor plan and its revision history now use dedicated endpoints/storage, reducing full-state churn while keeping backup import/export consistent.
 - Autosave now detects stale server versions and stops with an explicit reload warning instead of silently overwriting changes coming from another session.

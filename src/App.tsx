@@ -14,6 +14,7 @@ import EmptyWorkspace from './components/layout/EmptyWorkspace';
 import { useT } from './i18n/useT';
 import PerfOverlay from './components/dev/PerfOverlay';
 import { perfMetrics } from './utils/perfMetrics';
+import { isFullscreen, exitFullscreen } from './utils/fullscreen';
 import ClientChatWs from './components/chat/ClientChatWs';
 import { useToastStore } from './store/useToast';
 
@@ -117,7 +118,7 @@ const App = () => {
     }),
     shallow
   );
-  const presentationMode = useUIStore((s) => (s as any).presentationMode || false);
+  const presentationMode = useUIStore((s) => s.presentationMode || false);
   const { user, hydrated: authHydrated, hydrate: hydrateAuth } = useAuthStore();
   const pushToast = useToastStore((s) => s.push);
   const location = useLocation();
@@ -355,36 +356,29 @@ const App = () => {
   const prevSidebarCollapsedRef = useRef(false);
   const forcedPresentationRef = useRef(false);
   useEffect(() => {
-    const doc: any = document as any;
     const want = !!useUIStore.getState().presentationMode;
-    const inFs = !!doc.fullscreenElement;
+    const inFs = isFullscreen();
     if (want) {
       if (!forcedPresentationRef.current) {
         prevSidebarCollapsedRef.current = !!useUIStore.getState().sidebarCollapsed;
         forcedPresentationRef.current = true;
       }
-      useUIStore.setState({ sidebarCollapsed: true } as any);
+      useUIStore.setState({ sidebarCollapsed: true });
       return;
     }
     if (forcedPresentationRef.current) {
-      useUIStore.setState({ sidebarCollapsed: prevSidebarCollapsedRef.current } as any);
+      useUIStore.setState({ sidebarCollapsed: prevSidebarCollapsedRef.current });
       forcedPresentationRef.current = false;
     }
     if (inFs) {
-      try {
-        doc?.exitFullscreen?.();
-      } catch {
-        // ignore
-      }
+      exitFullscreen();
     }
   }, [presentationMode]);
 
   useEffect(() => {
     const onFsChange = () => {
       // If the browser exits fullscreen (ESC), exit presentation mode too.
-      const doc: any = document as any;
-      const inFs = !!doc.fullscreenElement;
-      if (inFs) return;
+      if (isFullscreen()) return;
       if (useUIStore.getState().presentationMode) {
         useUIStore.getState().setPresentationMode?.(false);
       }

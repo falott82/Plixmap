@@ -6,7 +6,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { WebSocketServer } = require('ws');
-const { normalizeHttpUrl, serverConfig } = require('./config.cjs');
+const { normalizeHttpUrl, serverConfig, validateServerConfig } = require('./config.cjs');
 const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret, listMigrationStatus } = require('./db.cjs');
 const { createDatabaseBackup, listBackups, resolveBackupDir, resolveBackupRetention } = require('./backup.cjs');
 const {
@@ -381,9 +381,17 @@ app.use('/api', (req, res, next) => {
 });
 
 const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
+
+// Fail fast if the directories the server needs are missing or not writable,
+// rather than surfacing as a confusing error on the first DB/upload write.
 try {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-} catch {}
+  validateServerConfig(serverConfig, { uploadsDir });
+} catch (error) {
+  serverLog('error', 'invalid_server_config', { error: String(error?.message || error) });
+  // eslint-disable-next-line no-console
+  console.error(String(error?.message || error));
+  process.exit(1);
+}
 
 const db = openDb();
 ensureBootstrapAdmins(db);
@@ -1811,6 +1819,7 @@ registerChatRoutes(app, {
   wsClientInfo,
   sendToUser,
   broadcastToChatClient,
+  serverLog,
   chat: chatServices
 });
 

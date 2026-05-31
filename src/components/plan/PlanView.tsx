@@ -56,6 +56,7 @@ import {
 		} from 'lucide-react';
 import Toolbar from './Toolbar';
 import CanvasStage, { CanvasStageHandle } from './CanvasStage';
+import CanvasErrorBoundary from './CanvasErrorBoundary';
 import SearchBar from './SearchBar';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import {
@@ -13335,6 +13336,7 @@ const PlanView = ({ planId }: Props) => {
                     </div>
                   </div>
                 ) : null}
+		                        <CanvasErrorBoundary>
 		                        <CanvasStage
 		                        ref={canvasStageRef}
 		                        containerRef={mapRef}
@@ -13713,6 +13715,7 @@ const PlanView = ({ planId }: Props) => {
                       ((site as any)?.floorPlans || []).map((fp: any) => [String(fp?.id || ''), String(fp?.name || fp?.id || '')])
                     )}
 	              />
+		                        </CanvasErrorBoundary>
 	            </div>
 	          </div>
             {!presentationMode && linkCreateHint ? (

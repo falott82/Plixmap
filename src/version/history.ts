@@ -8,6 +8,29 @@ export interface ReleaseNote {
 const n = (it: string, en: string): { it: string; en: string } => ({ it, en });
 export const releaseHistory: ReleaseNote[] = [
   {
+    version: '3.7.0',
+    date: '2026-06-01',
+    type: 'minor',
+    notes: [
+      n(
+        'Sicurezza/supply chain: azzerate tutte le vulnerabilita di produzione (npm audit = 0) aggiornando ws, nodemailer e gli override dompurify/qs/path-to-regexp',
+        'Security/supply chain: cleared all production npm audit findings (0 vulnerabilities) by updating ws, nodemailer and the dompurify/qs/path-to-regexp overrides'
+      ),
+      n(
+        'Hardening XSS: il testo ricco delle note meeting viene ora sanitizzato lato server prima del salvataggio (nuovo server/utils/sanitizeHtml.cjs senza dipendenze)',
+        'XSS hardening: meeting-note rich text is now sanitized server-side before persistence (new dependency-free server/utils/sanitizeHtml.cjs)'
+      ),
+      n(
+        'Resilienza: la mappa e ora isolata in un CanvasErrorBoundary dedicato e lo startup del server fallisce subito se le cartelle database/backup/uploads non sono scrivibili',
+        'Resilience: the canvas is now isolated in a dedicated CanvasErrorBoundary and the server fails fast at startup if the database/backup/uploads directories are not writable'
+      ),
+      n(
+        'Osservabilita/tooling: sostituiti i catch {} silenziosi nelle route chat con log strutturati; il pre-commit ora esegue type-check e test e sono stati aggiunti test per il sanitizzatore HTML',
+        'Observability/tooling: replaced silent catch {} blocks in the chat routes with structured logs; the pre-commit hook now type-checks and runs tests, and unit tests were added for the HTML sanitizer'
+      )
+    ]
+  },
+  {
     version: '3.6.5',
     date: '2026-05-07',
     type: 'fix',

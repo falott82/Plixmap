@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.6.5
+Current version: 3.7.0
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -14,11 +14,13 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
 
-## What's new in 3.6.5
-- Plan saves are now more targeted: the active floor plan and its revisions are synced through dedicated endpoints, reducing full-state churn during everyday editing.
-- Autosave now detects stale server state and stops with a clear reload warning instead of risking silent overwrites from concurrent sessions.
-- User directory visibility is now scoped for non-admins: only users reachable through shared chat/client visibility are exposed, and privileged role flags are not leaked.
-- Security maintenance: upgraded `nodemailer` to `^8.0.7`, forced `dompurify` to `^3.4.2`, and kept the `path-to-regexp` fix in place; `quality:check`, `lint:i18n`, and `npm audit --omit=dev --audit-level=high` all green.
+## What's new in 3.7.0
+- Security/supply chain: cleared all production `npm audit` findings (0 vulnerabilities) by updating `ws`, `nodemailer`, and the `dompurify`/`qs`/`path-to-regexp` overrides.
+- Stored-XSS hardening: meeting-note rich text is now sanitized server-side before persistence via a new dependency-free `server/utils/sanitizeHtml.cjs`.
+- Resilience: the canvas is wrapped in a dedicated `CanvasErrorBoundary` so a Konva rendering error no longer takes down the whole app; server startup now fail-fasts on unwritable database/backup/uploads directories.
+- Observability: replaced silent `catch {}` blocks in the chat routes with structured warning logs.
+- Tooling: the pre-commit hook now type-checks and runs unit tests; added unit tests for the HTML sanitizer.
+- See [`IMPROVEMENTS.md`](IMPROVEMENTS.md) for the full codebase audit that drove this release.
 
 ## Highlights
 - Floor plan management starting from custom floor plan uploads, with a structured and centralized way to handle multiple clients, sites, and floor plans.

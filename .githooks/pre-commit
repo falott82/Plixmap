@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 1. Block commits that would leak sensitive data.
 node scripts/check-sensitive-data.cjs --staged
+
+# 2. Type-check the codebase so broken TypeScript never lands.
+echo "pre-commit: type-checking (tsc --noEmit)…"
+npm run --silent lint
+
+# 3. Run the fast unit test suite.
+echo "pre-commit: running unit tests…"
+npm run --silent test

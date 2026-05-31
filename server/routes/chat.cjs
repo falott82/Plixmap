@@ -32,8 +32,21 @@ const registerChatRoutes = (app, deps) => {
     wsClientInfo,
     sendToUser,
     broadcastToChatClient,
+    serverLog,
     chat
   } = deps;
+
+  // Structured warning for non-fatal DB read failures that would otherwise be
+  // swallowed silently (e.g. unread/DM aggregation). Never throws.
+  const logChatWarn = (event, err) => {
+    try {
+      if (typeof serverLog === 'function') {
+        serverLog('warn', event, { error: String((err && err.message) || err || 'unknown') });
+      }
+    } catch {
+      /* logging must never break the request */
+    }
+  };
 
   app.get('/api/chat/unread', requireAuth, (req, res) => {
     const allowedClientIds = Array.from(getChatClientIdsForUser(req.userId, isAdminReq(req)));
@@ -63,7 +76,9 @@ const registerChatRoutes = (app, deps) => {
         grouped.set(key, Number(grouped.get(key) || 0) + 1);
       }
       for (const [key, count] of grouped.entries()) out[`dm:${key}`] = count;
-    } catch {}
+    } catch (err) {
+      logChatWarn('chat_unread_dm_query_failed', err);
+    }
     res.json({ unreadByClientId: out });
   });
 
@@ -86,7 +101,9 @@ const registerChatRoutes = (app, deps) => {
           if (row?.userId) senderIds.add(String(row.userId));
         }
       }
-    } catch {}
+    } catch (err) {
+      logChatWarn('chat_unread_senders_client_query_failed', err);
+    }
     try {
       const rows = db
         .prepare(
@@ -99,7 +116,9 @@ const registerChatRoutes = (app, deps) => {
         if (chat.isMessageHiddenForUser(row, req.userId)) continue;
         if (row?.fromUserId) senderIds.add(String(row.fromUserId));
       }
-    } catch {}
+    } catch (err) {
+      logChatWarn('chat_unread_senders_dm_query_failed', err);
+    }
     res.json({ count: senderIds.size, senderIds: Array.from(senderIds) });
   });
 
@@ -157,7 +176,9 @@ const registerChatRoutes = (app, deps) => {
         const key = String(row.pairKey || '').trim();
         if (key) lastDmAtByPair.set(key, Number(row.lastMessageAt) || 0);
       }
-    } catch {}
+    } catch (err) {
+      logChatWarn('chat_overview_last_dm_query_failed', err);
+    }
 
     const unreadDmByPair = new Map();
     try {
@@ -174,7 +195,9 @@ const registerChatRoutes = (app, deps) => {
         if (!key) continue;
         unreadDmByPair.set(key, Number(unreadDmByPair.get(key) || 0) + 1);
       }
-    } catch {}
+    } catch (err) {
+      logChatWarn('chat_overview_unread_dm_query_failed', err);
+    }
 
     const dmHistoryOtherIds = new Set();
     try {
@@ -192,7 +215,9 @@ const registerChatRoutes = (app, deps) => {
         const id = String(row.otherId || '').trim();
         if (id && id !== meId) dmHistoryOtherIds.add(id);
       }
-    } catch {}
+    } catch (err) {
+      logChatWarn('chat_overview_dm_history_query_failed', err);
+    }
 
     const myClients = getChatClientIdsForUser(meId, isAdminReq(req));
     const dms = db

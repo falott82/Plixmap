@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const express = require('express');
+const { sanitizeHtmlBasic } = require('../utils/sanitizeHtml.cjs');
 
 const registerMeetingNoteRoutes = (app, deps) => {
   const {
@@ -214,7 +215,7 @@ const registerMeetingNoteRoutes = (app, deps) => {
     const now = Date.now();
     const title = String(payload.title || '').trim().slice(0, 140) || 'Meeting note';
     const contentText = String(payload.contentText || '').trim().slice(0, 200000);
-    const contentHtml = String(payload.contentHtml || '').slice(0, 1500000);
+    const contentHtml = sanitizeHtmlBasic(String(payload.contentHtml || '').slice(0, 1500000));
     const contentLexical = String(payload.contentLexical || '').slice(0, 1500000);
     const shared = !!payload.shared;
     const authorDisplayName = `${String(userRow.firstName || '').trim()} ${String(userRow.lastName || '').trim()}`.trim() || String(userRow.username || '');
