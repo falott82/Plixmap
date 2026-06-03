@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Client, Corridor, FloorPlan, Room } from '../../store/types';
 import { useLang, useT } from '../../i18n/useT';
+import { polygonCentroid as polygonCentroidShared, pointInPolygon, distancePointToSegment } from './planViewUtils';
 
 export type Point = { x: number; y: number };
 type Axis = 'x' | 'y';
@@ -65,48 +66,8 @@ interface Props {
 
 const SPEED_MPS = 1.4;
 
-const pointInPolygon = (p: Point, polygon: Point[]) => {
-  if (!polygon.length) return false;
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const a = polygon[i];
-    const b = polygon[j];
-    const intersects = a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y + 0.000001) + a.x;
-    if (intersects) inside = !inside;
-  }
-  return inside;
-};
-
-const polygonCentroid = (polygon: Point[]) => {
-  if (!polygon.length) return { x: 0, y: 0 };
-  let area2 = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    const cross = a.x * b.y - b.x * a.y;
-    area2 += cross;
-    cx += (a.x + b.x) * cross;
-    cy += (a.y + b.y) * cross;
-  }
-  if (Math.abs(area2) < 0.000001) {
-    const sum = polygon.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
-    return { x: sum.x / polygon.length, y: sum.y / polygon.length };
-  }
-  return { x: cx / (3 * area2), y: cy / (3 * area2) };
-};
-
-const distancePointToSegment = (p: Point, a: Point, b: Point) => {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (!lenSq) return Math.hypot(p.x - a.x, p.y - a.y);
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
-  const x = a.x + dx * t;
-  const y = a.y + dy * t;
-  return Math.hypot(p.x - x, p.y - y);
-};
+// Shares the area-weighted centroid math; preserves this modal's {0,0}-for-empty contract.
+const polygonCentroid = (polygon: Point[]) => polygonCentroidShared(polygon) ?? { x: 0, y: 0 };
 
 const pointOnPolygonBoundary = (point: Point, polygon: Point[], tolerance = 1.25) => {
   if (!polygon.length) return false;

@@ -93,6 +93,34 @@ export const projectPointToSegment = (a: Point, b: Point, p: Point) => {
   return { t, x, y, distSq };
 };
 
+// Perpendicular distance from point p to segment a–b. Shared by the plan modals
+// (was duplicated verbatim in InternalMapModal/EscapeRouteModal).
+export const distancePointToSegment = (p: Point, a: Point, b: Point): number =>
+  Math.sqrt(projectPointToSegment(a, b, p).distSq);
+
+// Area-weighted polygon centroid; falls back to the vertex average for degenerate
+// (near-zero-area) polygons. Returns null for an empty polygon — callers needing a
+// {0,0} fallback should apply `?? { x: 0, y: 0 }` (preserving their prior behaviour).
+export const polygonCentroid = (polygon: Point[]): Point | null => {
+  if (!polygon.length) return null;
+  let area2 = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    const cross = a.x * b.y - b.x * a.y;
+    area2 += cross;
+    cx += (a.x + b.x) * cross;
+    cy += (a.y + b.y) * cross;
+  }
+  if (Math.abs(area2) < 0.000001) {
+    const sum = polygon.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
+    return { x: sum.x / polygon.length, y: sum.y / polygon.length };
+  }
+  return { x: cx / (3 * area2), y: cy / (3 * area2) };
+};
+
 export const pointInPolygon = (point: Point, polygon: Point[]) => {
   if (!polygon.length) return false;
   let inside = false;

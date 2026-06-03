@@ -6,6 +6,7 @@ import html2canvas from 'html2canvas';
 import { Corridor, FloorPlan, Room } from '../../store/types';
 import { useT } from '../../i18n/useT';
 import { computeMultiFloorRoute, MultiFloorRouteResult, Point, RoutePlanSegment, RouteResult } from './InternalMapModal';
+import { polygonCentroid as polygonCentroidShared, pointInPolygon, distancePointToSegment } from './planViewUtils';
 
 type ConnectionTransitionType = 'stairs' | 'elevator';
 
@@ -84,25 +85,8 @@ const googleMapsCoordsLabel = (rawValue: string) => {
 const getAssemblyPointCoordsLabel = (point: EscapeAssemblyPoint) =>
   point.googleCoords || point.gps || `${Math.round(point.point.x)}, ${Math.round(point.point.y)}`;
 
-const polygonCentroid = (polygon: Point[]) => {
-  if (!polygon.length) return { x: 0, y: 0 };
-  let area2 = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    const cross = a.x * b.y - b.x * a.y;
-    area2 += cross;
-    cx += (a.x + b.x) * cross;
-    cy += (a.y + b.y) * cross;
-  }
-  if (Math.abs(area2) < 0.000001) {
-    const sum = polygon.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
-    return { x: sum.x / polygon.length, y: sum.y / polygon.length };
-  }
-  return { x: cx / (3 * area2), y: cy / (3 * area2) };
-};
+// Shares the area-weighted centroid math; preserves this modal's {0,0}-for-empty contract.
+const polygonCentroid = (polygon: Point[]) => polygonCentroidShared(polygon) ?? { x: 0, y: 0 };
 
 const getRoomLabelLayout = (room: Room, polygon: Point[]) => {
   const minX = Math.min(...polygon.map((point) => point.x));
@@ -160,15 +144,6 @@ const roomPolygon = (room: Room): Point[] => {
   ];
 };
 
-const distancePointToSegment = (point: Point, a: Point, b: Point) => {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq <= 0.0000001) return Math.hypot(point.x - a.x, point.y - a.y);
-  const ratio = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-  const projected = { x: a.x + dx * ratio, y: a.y + dy * ratio };
-  return Math.hypot(point.x - projected.x, point.y - projected.y);
-};
 
 const pointOnPolygonBoundary = (point: Point, polygon: Point[], tolerance = 1.8) => {
   if (polygon.length < 2) return false;
@@ -180,18 +155,6 @@ const pointOnPolygonBoundary = (point: Point, polygon: Point[], tolerance = 1.8)
   return false;
 };
 
-const pointInPolygon = (point: Point, polygon: Point[]) => {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    const xi = polygon[i].x;
-    const yi = polygon[i].y;
-    const xj = polygon[j].x;
-    const yj = polygon[j].y;
-    const intersects = yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi || 0.0000001) + xi;
-    if (intersects) inside = !inside;
-  }
-  return inside;
-};
 
 const getCorridorDoorAnchor = (corridor: Corridor, door: any): Point | null => {
   const points = corridorPolygon(corridor);

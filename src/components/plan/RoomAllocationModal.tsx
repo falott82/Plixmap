@@ -5,6 +5,7 @@ import { useT } from '../../i18n/useT';
 import { Client, FloorPlan, MapObject, Room } from '../../store/types';
 import { buildCapacityMetrics, findCapacityClientMetric, findCapacitySiteMetric } from '../../utils/capacityMetrics';
 import { isNonPeopleRoom } from '../../utils/roomProperties';
+import { polygonCentroid } from './planViewUtils';
 
 type Point = { x: number; y: number };
 
@@ -60,25 +61,6 @@ const roomPolygon = (room: Room): Point[] => {
   ];
 };
 
-const polygonCentroid = (polygon: Point[]) => {
-  if (!polygon.length) return null;
-  let area2 = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    const cross = a.x * b.y - b.x * a.y;
-    area2 += cross;
-    cx += (a.x + b.x) * cross;
-    cy += (a.y + b.y) * cross;
-  }
-  if (Math.abs(area2) < 0.000001) {
-    const sum = polygon.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
-    return { x: sum.x / polygon.length, y: sum.y / polygon.length };
-  }
-  return { x: cx / (3 * area2), y: cy / (3 * area2) };
-};
 
 const formatDistanceLabel = (meters: number | null, px: number | null) => {
   if (meters !== null && Number.isFinite(meters)) {
