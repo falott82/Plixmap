@@ -33,8 +33,12 @@ test.describe('authenticated editor', () => {
       if (m.type() === 'error') errors.push(m.text());
     });
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    // 'networkidle' never settles once the realtime WebSocket connects, so gate on the URL.
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 12000 }).catch(() => {});
     await expect(page.locator('#root')).not.toBeEmpty();
+    // Guard against silently testing the login page: we must be authenticated.
+    await expect(page, 'session should be authenticated, not bounced to /login').not.toHaveURL(/\/login(?:\/|$)/);
 
     const fatal = errors.filter((e) => !/favicon|manifest|sw\.js|Failed to load resource/i.test(e));
     expect(fatal, `console/page errors under auth:\n${fatal.join('\n')}`).toHaveLength(0);
@@ -44,13 +48,16 @@ test.describe('authenticated editor', () => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(String(e)));
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    // In fixture mode global.setup.ts seeds a plan at this id; with a real account we just
+    // land on the default plan from the home route.
+    const target = U && P ? '/' : '/plan/seed-plan-floor-0';
+    await page.goto(target, { waitUntil: 'domcontentloaded' });
 
     // The editor renders react-konva, which mounts a <canvas>. Give the SPA a moment to
     // route to the default plan and hydrate the stage.
     const canvas = page.locator('canvas').first();
     const appeared = await canvas
-      .waitFor({ state: 'visible', timeout: 8000 })
+      .waitFor({ state: 'visible', timeout: 12000 })
       .then(() => true)
       .catch(() => false);
 

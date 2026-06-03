@@ -2,24 +2,38 @@
   "cookies": [
     {
       "name": "plixmap_csrf",
-      "value": "YIa3pzdmOaBkKi2O5iKBBOAqJXM5OEgcQPWWocu2g2k%3D",
+      "value": "nNli55IGAROf3BIA1WauQdcoz1OSC0mQMkqa8B96jBU%3D",
       "domain": "127.0.0.1",
       "path": "/",
-      "expires": 1783096202.841,
+      "expires": 1783096792.242,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "plixmap_session",
-      "value": "eyJ1c2VySWQiOiJmMTllYmIyYS1jZThmLTQwN2QtOTUxMi1jMDEwZjBiNmRkZDAiLCJ0b2tlblZlcnNpb24iOjIsInNpZCI6Ijc2Y2FmNzU3NTZlMWEzNGJjN2Q4MTQ1YzBhODkwOGI2IiwiaWF0IjoxNzgwNTA0MjAyODcwfQ.APGFVIVKK-CAR0t-pYv5FHLAfglJq_mBJjUtjWV5BcU",
+      "value": "eyJ1c2VySWQiOiI2NWVmNmFjYS0xMTgxLTRlMmMtOGQyOC04NjUzZGEwY2I3NGQiLCJ0b2tlblZlcnNpb24iOjIsInNpZCI6ImNhYTdjMDNhMDAzMWEyYzAzNmQ1MGFlYzhjZDVkNzk5IiwiaWF0IjoxNzgwNTA0NzkyMjczfQ.ijqpxhnWBc2tqQxE8917yM3KQqdvwGrhwMiteQMIhj8",
       "domain": "127.0.0.1",
       "path": "/",
-      "expires": 1783096202.871,
+      "expires": 1783096792.273,
       "httpOnly": true,
       "secure": false,
       "sameSite": "Lax"
     }
   ],
-  "origins": []
+  "origins": [
+    {
+      "origin": "http://127.0.0.1:8899",
+      "localStorage": [
+        {
+          "name": "plixmap_session_hint",
+          "value": "1"
+        },
+        {
+          "name": "plixmap-ui",
+          "value": "{\"state\":{\"panForPlan\":{},\"sidebarCollapsed\":false,\"lastObjectScale\":1,\"visibleLayerIdsByPlan\":{\"seed-plan-floor-0\":[\"users\",\"devices\",\"wifi\",\"cctv\",\"desks\",\"cabling\",\"walls\",\"quotes\",\"rooms\",\"corridors\",\"racks\",\"text\",\"images\",\"photos\"]},\"hiddenLayersByPlan\":{},\"gridSnapEnabled\":false,\"gridSize\":20,\"showGrid\":false,\"showPrintAreaByPlan\":{},\"roomCapacityStateByPlan\":{},\"perfOverlayEnabled\":false,\"expandedClients\":{},\"expandedSites\":{},\"chatUnreadByClientId\":{\"e2e-client\":0},\"clientChatDockPreferredHeight\":720,\"clientChatDockWidth\":980,\"clientChatDividerLeftWidth\":340,\"lastQuoteScale\":1,\"lastQuoteColor\":\"#f97316\",\"lastQuoteLabelPosH\":\"center\",\"lastQuoteLabelPosV\":\"center\",\"lastQuoteLabelScale\":1,\"lastQuoteLabelBg\":false,\"lastQuoteLabelColor\":\"#0f172a\",\"lastQuoteDashed\":false,\"lastQuoteEndpoint\":\"arrows\"},\"version\":10}"
+        }
+      ]
+    }
+  ]
 }

@@ -36,9 +36,13 @@ setup('authenticate + seed', async ({ page, baseURL }) => {
   // Best-effort: seed a minimal plan at the superadmin's defaultPlanId so '/' opens an editor.
   try {
     const state = await (await page.request.get('/api/state')).json();
+    // A 1x1 PNG so the editor mounts its Konva <Stage> (CanvasStage reads plan.imageUrl).
+    const onePxPng =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     const plan = {
       id: 'seed-plan-floor-0',
       name: 'E2E Plan',
+      imageUrl: onePxPng,
       objects: [],
       revisions: [],
       views: []
@@ -54,6 +58,21 @@ setup('authenticate + seed', async ({ page, baseURL }) => {
   } catch {
     // ignore seed failures — the editor canvas test skips gracefully without a plan.
   }
+
+  // Boot the SPA with the valid session. useAuthStore.hydrate() only calls /api/auth/me when
+  // localStorage.plixmap_session_hint === '1' (a cold-start 401-noise guard), so we set the
+  // hint and reload: hydrate then fetches /me, populates the user, and the router stays
+  // authenticated. storageState must capture this localStorage (origins) + the cookies,
+  // otherwise the client-side gate redirects to /login despite a valid session cookie.
+  // (waitUntil 'networkidle' never settles here — the realtime WebSocket keeps the network
+  // active — so we gate on the URL instead.)
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => window.localStorage.setItem('plixmap_session_hint', '1'));
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  // hydrate() now fetches /me; the app briefly shows /login during the async call, then
+  // settles on an authenticated route. Wait for that, then let the persist middleware flush.
+  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 12000 }).catch(() => {});
+  await page.waitForTimeout(500);
 
   fs.mkdirSync(path.dirname(AUTH_FILE), { recursive: true });
   await page.context().storageState({ path: AUTH_FILE });
