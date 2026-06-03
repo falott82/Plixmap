@@ -498,7 +498,7 @@ const PlanHeaderBar = (props: PlanHeaderBarProps) => {
 	                    <span className="text-xs font-semibold text-slate-600">{t({ it: 'Collegamento:', en: 'Link:' })}</span>
 	                    <span className="inline-flex min-w-0 max-w-[320px] items-center truncate rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-ink">
 	                      {(() => {
-	                        const l = ((basePlan as any).links || []).find((x: any) => x.id === selectedLinkId);
+	                        const l = (basePlan.links || []).find((x: any) => x.id === selectedLinkId);
 	                        const a = l ? getObjectNameById(String(l.fromId)) : '';
 	                        const b = l ? getObjectNameById(String(l.toId)) : '';
                         const label = l ? String(l.name || l.label || t({ it: 'Collegamento', en: 'Link' })) : t({ it: 'Collegamento', en: 'Link' });

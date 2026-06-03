@@ -57,10 +57,10 @@ export type LinksModalRowsDeps = {
 export const computeLinksModalRows = (deps: LinksModalRowsDeps) => {
   const { linksModalObjectId, renderPlan, objectTypeDefs, lang } = deps;
     if (!linksModalObjectId || !renderPlan) return [];
-    const links = (((renderPlan as any).links || []) as any[]).filter(
+    const links = ((renderPlan.links || []) as any[]).filter(
       (l) => String(l?.fromId || '') === linksModalObjectId || String(l?.toId || '') === linksModalObjectId
     );
-    const byId = new Map<string, any>(((renderPlan as any).objects || []).map((o: any) => [o.id, o]));
+    const byId = new Map<string, any>((renderPlan.objects || []).map((o: any) => [o.id, o]));
     const typeLabelById = new Map<string, string>();
     for (const d of objectTypeDefs || []) {
       typeLabelById.set(String(d.id), String((d as any)?.name?.[lang] || (d as any)?.name?.it || d.id));

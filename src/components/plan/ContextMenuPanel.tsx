@@ -892,7 +892,7 @@ const ContextMenuPanel = (props: ContextMenuPanelProps) => {
                           onClick={() => {
                             const [a, b] = selectedObjectIds;
                             if (!a || !b) return;
-                            const links = (((basePlan as any).links || []) as any[]).filter(Boolean);
+                            const links = ((basePlan.links || []) as any[]).filter(Boolean);
                             const existing = links.find(
                               (l) =>
                                 (String((l as any).fromId || '') === a && String((l as any).toId || '') === b) ||

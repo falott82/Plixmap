@@ -132,12 +132,12 @@ export function usePlanContextDerived(deps: UsePlanContextDerivedDeps) {
 
     const contextLink = useMemo(() => {
       if (!renderPlan || !contextMenu || contextMenu.kind !== 'link') return undefined;
-      return ((renderPlan as any).links || []).find((l: any) => l.id === contextMenu.id);
+      return (renderPlan.links || []).find((l: any) => l.id === contextMenu.id);
     }, [renderPlan, contextMenu]);
 
   const contextObjectLinkCount = useMemo(() => {
     if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return 0;
-    const links = ((renderPlan as any).links || []) as any[];
+    const links = (renderPlan.links || []) as any[];
     const id = contextMenu.id;
     return links.filter((l) => String(l?.fromId || '') === id || String(l?.toId || '') === id).length;
   }, [contextMenu, renderPlan]);

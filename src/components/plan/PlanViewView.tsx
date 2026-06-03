@@ -14,7 +14,7 @@ import { currentLocalIsoDay } from '../../utils/localDate';
 import { ChevronLeft, ChevronRight, Eye, LayoutGrid, Trash, Copy, MoveDiagonal, Square, X, Pencil, Plus, DoorOpen, Cog, EyeOff, User, Search, Loader2 } from 'lucide-react';
 
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { Corridor, FloorPlan, Room } from '../../store/types';
+import { FloorPlan, Room } from '../../store/types';
 
 import { useUIStore } from '../../store/useUIStore';
 
@@ -4006,15 +4006,15 @@ const PlanViewView = (props: ViewProps) => {
         description={
           confirmDeleteCorridorId
             ? t({
-                it: `Eliminare il corridoio "${(((basePlan as any).corridors || []) as Corridor[]).find((c) => c.id === confirmDeleteCorridorId)?.name || 'corridoio'}" insieme a porte e punti di connessione?`,
-                en: `Delete corridor "${(((basePlan as any).corridors || []) as Corridor[]).find((c) => c.id === confirmDeleteCorridorId)?.name || 'corridor'}" including doors and connection points?`
+                it: `Eliminare il corridoio "${(basePlan.corridors || []).find((c) => c.id === confirmDeleteCorridorId)?.name || 'corridoio'}" insieme a porte e punti di connessione?`,
+                en: `Delete corridor "${(basePlan.corridors || []).find((c) => c.id === confirmDeleteCorridorId)?.name || 'corridor'}" including doors and connection points?`
               })
             : undefined
         }
         onCancel={() => setConfirmDeleteCorridorId(null)}
         onConfirm={() => {
           if (!confirmDeleteCorridorId) return;
-          const current = (((basePlan as any).corridors || []) as Corridor[]).filter(Boolean);
+          const current = (basePlan.corridors || []).filter(Boolean);
           const target = current.find((c) => c.id === confirmDeleteCorridorId);
           if (!target) {
             setConfirmDeleteCorridorId(null);
@@ -4150,7 +4150,7 @@ const PlanViewView = (props: ViewProps) => {
         initial={
           linkEditId
             ? (() => {
-                const l = ((basePlan as any).links || []).find((x: any) => x.id === linkEditId);
+                const l = (basePlan.links || []).find((x: any) => x.id === linkEditId);
                 if (!l) return undefined;
                 return {
                   name: String(l.name || l.label || ''),

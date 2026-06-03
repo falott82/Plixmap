@@ -31,7 +31,7 @@ const CableModalPanel = (props: CableModalPanelProps) => {
         initial={
           cableModal?.mode === 'edit'
             ? (() => {
-                const l = ((basePlan as any).links || []).find((x: any) => x.id === (cableModal as any).linkId);
+                const l = (basePlan.links || []).find((x: any) => x.id === (cableModal as any).linkId);
                 if (!l) return undefined;
                 return {
                   name: l.name || l.label || '',

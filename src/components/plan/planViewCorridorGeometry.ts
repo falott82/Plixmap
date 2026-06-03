@@ -238,7 +238,7 @@ export const computeCreateRoomDoorFromDraft = (
   const tValue = side.tMin + (side.tMax - side.tMin) * best.along;
   const roomAId = String(draft.roomAId);
   const roomBId = String(draft.roomBId);
-  const existingDoors = Array.isArray((currentPlan as any).roomDoors) ? ((currentPlan as any).roomDoors as any[]) : [];
+  const existingDoors = Array.isArray(currentPlan?.roomDoors) ? (currentPlan?.roomDoors as any[]) : [];
   const duplicate = existingDoors.some((door) => {
     const normalized = normalizeRoomConnectionDoorInput(door);
     if (!normalized) return false;
@@ -432,7 +432,7 @@ export const computeSaveCorridorDoorModal = (deps: SaveCorridorDoorModalDeps) =>
     }
   }
   if (corridorDoorModal.corridorId === '__room__') {
-    const currentRoomDoors = Array.isArray((plan as any).roomDoors) ? ((plan as any).roomDoors as any[]) : [];
+    const currentRoomDoors = Array.isArray(plan?.roomDoors) ? (plan?.roomDoors as any[]) : [];
     const nextRoomDoors = currentRoomDoors.map((door) =>
       String((door as any)?.id || '') === corridorDoorModal.doorId
         ? {

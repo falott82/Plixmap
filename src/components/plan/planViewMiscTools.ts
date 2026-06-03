@@ -246,10 +246,10 @@ export const computeCanvasPlan = (deps: CanvasPlanDeps) => {
         return ids.some((id: string) => visible.has(id));
       });
   const rooms = showAll || visible.has('rooms') ? renderPlan.rooms : [];
-  const corridors = showAll || visible.has('corridors') ? (renderPlan as any).corridors : [];
+  const corridors = showAll || visible.has('corridors') ? renderPlan.corridors : [];
   const visibleObjectIds = new Set(objects.map((o: any) => o.id));
-  const baseLinks = Array.isArray((renderPlan as any).links)
-    ? ((renderPlan as any).links as any[]).filter((l) => {
+  const baseLinks = Array.isArray(renderPlan.links)
+    ? (renderPlan.links as any[]).filter((l) => {
         if (!showAll && !visible.has('cabling')) return false;
         return visibleObjectIds.has(String((l as any).fromId || '')) && visibleObjectIds.has(String((l as any).toId || ''));
       })

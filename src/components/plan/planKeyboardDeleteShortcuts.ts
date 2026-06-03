@@ -71,7 +71,7 @@ export const createPlanDeleteShortcutHandler = ({
     if (!currentSelectedIds.length && !selectedRoomId && !selectedRoomIds.length && selectedRoomDoorId) {
       e.preventDefault();
       if (isReadOnly) return true;
-      const currentDoors = Array.isArray((currentPlan as any).roomDoors) ? ((currentPlan as any).roomDoors as any[]) : [];
+      const currentDoors = Array.isArray(currentPlan?.roomDoors) ? (currentPlan?.roomDoors as any[]) : [];
       const nextDoors = currentDoors.filter((door) => String((door as any)?.id || '') !== String(selectedRoomDoorId));
       markTouched();
       updateFloorPlan(currentPlan.id, { roomDoors: nextDoors as any } as any);

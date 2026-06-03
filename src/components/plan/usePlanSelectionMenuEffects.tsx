@@ -162,7 +162,7 @@ export function usePlanSelectionMenuEffects(deps: UsePlanSelectionMenuEffectsDep
   }, [selectedCorridorDoor, selectedCorridorId]);
   useEffect(() => {
     if (!selectedRoomDoorId) return;
-    const currentRoomDoors = Array.isArray((renderPlan as any)?.roomDoors) ? (((renderPlan as any).roomDoors as RoomConnectionDoor[]).filter(Boolean)) : [];
+    const currentRoomDoors = Array.isArray(renderPlan?.roomDoors) ? ((renderPlan?.roomDoors as RoomConnectionDoor[]).filter(Boolean)) : [];
     const exists = currentRoomDoors.some((door) => door.id === selectedRoomDoorId);
     if (!exists) setSelectedRoomDoorId(null);
   }, [renderPlan, selectedRoomDoorId]);
