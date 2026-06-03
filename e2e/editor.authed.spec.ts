@@ -4,23 +4,26 @@ import { expect, test } from '@playwright/test';
 // PlanViewView / CanvasStage under a real session. These are the flows that otherwise
 // need manual QA after the stateful extractions.
 //
-// Opt-in: set E2E_USERNAME and E2E_PASSWORD for an existing, past-first-run account that
-// has at least one floor plan. Without them, the suite skips (so CI stays green).
-//   E2E_USERNAME=admin E2E_PASSWORD=*** npm run test:e2e:playwright
+// Two ways to authenticate:
+//   1. CI fixture (default config): the `authed` project loads storageState produced by
+//      global.setup.ts against a throwaway server — no credentials needed.
+//   2. Real account: set E2E_USERNAME/E2E_PASSWORD (+ E2E_BASE_URL) to log in directly.
+// Runs in the `authed` Playwright project; skips only when neither path is available.
 const U = process.env.E2E_USERNAME;
 const P = process.env.E2E_PASSWORD;
 
 test.describe('authenticated editor', () => {
-  test.skip(!U || !P, 'set E2E_USERNAME/E2E_PASSWORD to run authenticated editor e2e');
-
   test.beforeEach(async ({ page }) => {
-    // Logging in via the page's request context sets the session cookie on the same
-    // BrowserContext, so subsequent page.goto() calls are authenticated.
-    const res = await page.request.post('/api/auth/login', {
-      data: { username: U, password: P, otp: process.env.E2E_OTP || undefined },
-      failOnStatusCode: false
-    });
-    expect(res.status(), 'login should succeed (check creds / MFA / mustChangePassword)').toBe(200);
+    if (U && P) {
+      // Real-account override: logging in via the page's request context sets the session
+      // cookie on the same BrowserContext, so subsequent page.goto() calls are authenticated.
+      const res = await page.request.post('/api/auth/login', {
+        data: { username: U, password: P, otp: process.env.E2E_OTP || undefined },
+        failOnStatusCode: false
+      });
+      expect(res.status(), 'login should succeed (check creds / MFA / mustChangePassword)').toBe(200);
+    }
+    // Otherwise the project's storageState (CI fixture) already carries a logged-in session.
   });
 
   test('authenticated app shell renders without runtime errors', async ({ page }) => {
