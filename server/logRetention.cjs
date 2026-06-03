@@ -33,8 +33,11 @@ const formatTimestamp = (ts) => {
 };
 
 const escapeCsv = (value) => {
-  const raw = String(value ?? '');
-  if (!/[,"\n]/.test(raw)) return raw;
+  let raw = String(value ?? '');
+  // Neutralize CSV formula injection: a leading =, +, -, @, tab or CR makes spreadsheet
+  // apps (Excel/Sheets) evaluate the cell as a formula. Prefix with a single quote.
+  if (/^[=+\-@\t\r]/.test(raw)) raw = `'${raw}`;
+  if (!/[,"\r\n]/.test(raw)) return raw;
   return `"${raw.replace(/"/g, '""')}"`;
 };
 

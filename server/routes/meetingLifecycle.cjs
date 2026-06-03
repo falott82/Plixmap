@@ -241,9 +241,9 @@ const registerMeetingLifecycleRoutes = (app, deps) => {
       for (const booking of createdBookings) notifyAdminsForMeetingRequest(booking);
       broadcastMeetingPendingSummary();
     }
+    const mailWarnings = [];
     if (canCreateAutonomously && sendEmail) {
       const recipients = [...participantResolution.emails, ...effectiveExternalGuestsList];
-      const mailWarnings = [];
       for (const booking of createdBookings) {
         const mailRes = await sendMeetingMail({
           recipients,
@@ -264,16 +264,9 @@ const registerMeetingLifecycleRoutes = (app, deps) => {
           if (!mailWarnings.includes(message)) mailWarnings.push(message);
         }
       }
-      if (mailWarnings.length) {
-        res.json({
-          ok: true,
-          status,
-          approvalRequired: !!approvalRequired,
-          bookings: createdBookings,
-          warnings: mailWarnings
-        });
-        return;
-      }
+      // NOTE: do NOT return early on SMTP warnings. A misconfigured client SMTP must not
+      // prevent the technical-setup notification/DM below nor the meeting_created audit log.
+      // Warnings are accumulated and surfaced in the single final response instead.
     }
     if (technicalSetup && technicalEmail) {
       for (const booking of createdBookings) {
@@ -313,7 +306,8 @@ const registerMeetingLifecycleRoutes = (app, deps) => {
       ok: true,
       status,
       approvalRequired: !!approvalRequired,
-      bookings: createdBookings
+      bookings: createdBookings,
+      ...(mailWarnings.length ? { warnings: mailWarnings } : {})
     });
   });
 

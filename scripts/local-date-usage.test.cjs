@@ -6,7 +6,8 @@ const path = require('node:path');
 const read = (relativePath) => fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
 
 test('plan meeting flows do not use UTC day slicing for current-day logic', () => {
-  const planView = read('src/components/plan/PlanView.tsx');
+  // PlanView meeting-flow logic now lives in the usePlanView hook.
+  const planView = read('src/components/plan/usePlanView.tsx');
   const duplicateModal = read('src/components/plan/RoomMeetingDuplicateModal.tsx');
   const meetingManager = read('src/components/meetings/MeetingManagerModal.tsx');
 

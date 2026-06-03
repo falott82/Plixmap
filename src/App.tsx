@@ -9,7 +9,7 @@ import { fetchState, savePlanState, saveState, StateConflictError } from './api/
 import LoginView from './components/auth/LoginView';
 import FirstRunView from './components/auth/FirstRunView';
 import { useAuthStore } from './store/useAuthStore';
-import { shallow } from 'zustand/shallow';
+import { useShallow } from 'zustand/react/shallow';
 import EmptyWorkspace from './components/layout/EmptyWorkspace';
 import { useT } from './i18n/useT';
 import PerfOverlay from './components/dev/PerfOverlay';
@@ -49,11 +49,10 @@ const PlanRoute = () => {
 const HomeRoute = () => {
   const clients = useDataStore((s) => s.clients);
   const { selectedPlanId, setSelectedPlan } = useUIStore(
-    (s) => ({
+    useShallow((s) => ({
       selectedPlanId: s.selectedPlanId,
       setSelectedPlan: s.setSelectedPlan
-    }),
-    shallow
+    }))
   );
   const { user } = useAuthStore();
 
@@ -100,23 +99,21 @@ const HomeRoute = () => {
 const App = () => {
   const t = useT();
   const { clients, objectTypes, version, savedVersion, setServerState, markSaved } = useDataStore(
-    (s) => ({
+    useShallow((s) => ({
       clients: s.clients,
       objectTypes: s.objectTypes,
       version: s.version,
       savedVersion: s.savedVersion,
       setServerState: s.setServerState,
       markSaved: s.markSaved
-    }),
-    shallow
+    }))
   );
   const { selectedPlanId, setSelectedPlan, perfOverlayEnabled } = useUIStore(
-    (s) => ({
+    useShallow((s) => ({
       selectedPlanId: s.selectedPlanId,
       setSelectedPlan: s.setSelectedPlan,
       perfOverlayEnabled: s.perfOverlayEnabled
-    }),
-    shallow
+    }))
   );
   const presentationMode = useUIStore((s) => s.presentationMode || false);
   const { user, hydrated: authHydrated, hydrate: hydrateAuth } = useAuthStore();

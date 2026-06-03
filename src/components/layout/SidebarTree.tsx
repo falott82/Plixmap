@@ -7,7 +7,7 @@ import { useUIStore } from '../../store/useUIStore';
 import { useT } from '../../i18n/useT';
 import UserAvatar from '../ui/UserAvatar';
 import FooterInfo from './FooterInfo';
-import { shallow } from 'zustand/shallow';
+import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
 import ClientInfoModal from './ClientInfoModal';
@@ -310,20 +310,18 @@ const SidebarTree = () => {
     sameTree
   );
   const { deleteClient, deleteFloorPlan, reorderFloorPlans } = useDataStore(
-    (s) => ({
+    useShallow((s) => ({
       deleteClient: s.deleteClient,
       deleteFloorPlan: s.deleteFloorPlan,
       reorderFloorPlans: s.reorderFloorPlans
-    }),
-    shallow
+    }))
   );
   const updateFloorPlan = useDataStore((s) => s.updateFloorPlan);
   const updateSite = useDataStore((s) => s.updateSite);
   const cloneFloorPlan = useDataStore((s) => (s as any).cloneFloorPlan);
   const pushToast = useToastStore((s) => s.push);
   const { dataVersion, savedDataVersion } = useDataStore(
-    (s) => ({ dataVersion: s.version, savedDataVersion: s.savedVersion }),
-    shallow
+    useShallow((s) => ({ dataVersion: s.version, savedDataVersion: s.savedVersion }))
   );
   const {
     selectedPlanId,
@@ -344,7 +342,7 @@ const SidebarTree = () => {
     setVisibleLayerIds,
     setHideAllLayers
   } = useUIStore(
-    (s) => ({
+    useShallow((s) => ({
       selectedPlanId: s.selectedPlanId,
       setSelectedPlan: s.setSelectedPlan,
       sidebarCollapsed: s.sidebarCollapsed,
@@ -362,12 +360,10 @@ const SidebarTree = () => {
       hiddenLayersByPlan: (s as any).hiddenLayersByPlan || {},
       setVisibleLayerIds: (s as any).setVisibleLayerIds,
       setHideAllLayers: (s as any).setHideAllLayers
-    }),
-    shallow
+    }))
   );
   const { requestSaveAndNavigate, dirtyByPlan } = useUIStore(
-    (s) => ({ requestSaveAndNavigate: s.requestSaveAndNavigate, dirtyByPlan: s.dirtyByPlan }),
-    shallow
+    useShallow((s) => ({ requestSaveAndNavigate: s.requestSaveAndNavigate, dirtyByPlan: s.dirtyByPlan }))
   );
   const t = useT();
   const navigate = useNavigate();

@@ -6,12 +6,17 @@ const path = require('node:path');
 const read = (relativePath) => fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
 
 test('PlanView treats invalid time strings as invalid instead of midnight', () => {
-  const source = read('src/components/plan/PlanView.tsx');
+  // PlanView logic now lives in the usePlanView hook; the pure time helpers were extracted
+  // into planViewTime.ts (plain functions instead of useCallback wrappers). The
+  // room-meetings timeline subsystem (including resolveRoomDuplicateSlot) was further
+  // extracted into the useRoomMeetingsTimeline hook.
+  const timeUtils = read('src/components/plan/planViewTime.ts');
+  const hook = read('src/components/plan/useRoomMeetingsTimeline.tsx');
 
-  assert.match(source, /const hmToMinutes = useCallback\(\(hm: string\): number \| null => \{/);
-  assert.match(source, /if \(!m\) return null;/);
-  assert.match(source, /const parsedSourceStartMin = hmToMinutes\(sourceStartHm\);/);
-  assert.match(source, /if \(!Number\.isFinite\(parsedSourceStartMin\)\) return null;/);
+  assert.match(timeUtils, /export const hmToMinutes = \(hm: string\): number \| null => \{/);
+  assert.match(timeUtils, /if \(!m\) return null;/);
+  assert.match(hook, /const parsedSourceStartMin = hmToMinutes\(sourceStartHm\);/);
+  assert.match(hook, /if \(!Number\.isFinite\(parsedSourceStartMin\)\) return null;/);
 });
 
 test('RoomMeetingDuplicateModal accepts nullable time parsing for custom windows', () => {

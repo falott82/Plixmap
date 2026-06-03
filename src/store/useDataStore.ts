@@ -21,6 +21,7 @@ import {
 } from './types';
 import {
   ALL_ITEMS_LAYER_ID,
+  SYSTEM_LAYER_IDS,
   ALL_ITEMS_LAYER_COLOR,
   DEFAULT_CCTV_TYPES,
   DEFAULT_DESK_TYPES,
@@ -492,8 +493,6 @@ const defaultLayers = (): LayerDefinition[] => [
   { id: 'images', name: { it: 'Immagini', en: 'Images' }, color: '#64748b', order: 15, typeIds: DEFAULT_IMAGE_TYPES },
   { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 16, typeIds: DEFAULT_PHOTO_TYPES }
 ];
-
-const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
 
 const normalizeSupportContactValue = (value: any) => {
   const email = String(value?.email || '').trim();

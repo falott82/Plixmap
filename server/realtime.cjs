@@ -68,6 +68,20 @@ const createRealtimeRuntime = (deps) => {
     for (const ws of wss?.clients || []) jsonSend(ws, obj);
   };
 
+  // Presence payloads carry each user's IP, which is admin-only data. Strip it for
+  // non-admin recipients at the server boundary so it never leaves the process.
+  const redactPresenceIps = (users) =>
+    (Array.isArray(users) ? users : []).map(({ ip, ...rest }) => rest);
+
+  const broadcastPresencePayload = (recipients, buildPayload, fullUsers) => {
+    const redactedUsers = redactPresenceIps(fullUsers);
+    for (const ws of recipients || []) {
+      const info = wsClientInfo.get(ws);
+      const isAdmin = !!info?.isAdmin || !!info?.isSuperAdmin;
+      jsonSend(ws, buildPayload(isAdmin ? fullUsers : redactedUsers));
+    }
+  };
+
   const sendToUser = (userId, obj) => {
     let sent = 0;
     for (const [ws, info] of wsClientInfo.entries()) {
@@ -282,16 +296,39 @@ const createRealtimeRuntime = (deps) => {
     return out;
   };
 
+  // Canonical wire shapes for lock/grant payloads, shared by emitLockState, the join
+  // handshake and the lock_denied responses so the shape can never drift between paths.
+  const buildGrantPayload = (grant) =>
+    grant
+      ? {
+          userId: grant.userId,
+          username: grant.username,
+          avatarUrl: grant.avatarUrl || '',
+          grantedAt: grant.grantedAt || null,
+          expiresAt: grant.expiresAt || null,
+          minutes: grant.minutes || null,
+          grantedBy: { userId: grant.grantedById || '', username: grant.grantedByName || '' }
+        }
+      : null;
+
+  const buildLockedByPayload = (lock) =>
+    lock ? { userId: lock.userId, username: lock.username, avatarUrl: lock.avatarUrl || '' } : null;
+
   const emitGlobalPresence = () => {
-    broadcastToAll({
-      type: 'global_presence',
-      users: computeGlobalPresence(),
-      lockedPlans: getLockedPlansSnapshot()
-    });
+    const users = computeGlobalPresence();
+    const lockedPlans = getLockedPlansSnapshot();
+    broadcastPresencePayload(
+      wss?.clients || [],
+      (u) => ({ type: 'global_presence', users: u, lockedPlans }),
+      users
+    );
   };
 
   const emitPresence = (planId) => {
-    broadcastToPlan(planId, { type: 'presence', planId, users: computePresence(planId) });
+    const members = wsPlanMembers.get(planId);
+    if (!members) return;
+    const users = computePresence(planId);
+    broadcastPresencePayload(members, (u) => ({ type: 'presence', planId, users: u }), users);
   };
 
   const emitLockState = (planId) => {
@@ -303,18 +340,8 @@ const createRealtimeRuntime = (deps) => {
     broadcastToPlan(planId, {
       type: 'lock_state',
       planId,
-      lockedBy: lock ? { userId: lock.userId, username: lock.username, avatarUrl: lock.avatarUrl || '' } : null,
-      grant: grant
-        ? {
-            userId: grant.userId,
-            username: grant.username,
-            avatarUrl: grant.avatarUrl || '',
-            grantedAt: grant.grantedAt || null,
-            expiresAt: grant.expiresAt || null,
-            minutes: grant.minutes || null,
-            grantedBy: { userId: grant.grantedById || '', username: grant.grantedByName || '' }
-          }
-        : null,
+      lockedBy: buildLockedByPayload(lock),
+      grant: buildGrantPayload(grant),
       meta: {
         lastActionAt: lock?.lastActionAt || grant?.lastActionAt || null,
         lastSavedAt: path?.lastSavedAt ?? null,
@@ -323,6 +350,26 @@ const createRealtimeRuntime = (deps) => {
     });
     emitPresence(planId);
     emitGlobalPresence();
+  };
+
+  // Shared lock-acquisition: claim the lock for the requesting user (taking over the user's
+  // own active grant if present), audit it, and broadcast the new lock state. Used identically
+  // by the join/wantLock branch and the request_lock handler. Caller-specific side effects
+  // (extra presence emits, denial audits) stay in the callers.
+  const acquireLockFor = (info, planId, activeGrant) => {
+    const now = Date.now();
+    if (activeGrant && activeGrant.userId === info.userId) planLockGrants.delete(planId);
+    planLocks.set(planId, {
+      userId: info.userId,
+      username: info.username,
+      avatarUrl: info.avatarUrl || '',
+      acquiredAt: now,
+      ts: now,
+      lastActionAt: null,
+      dirty: false
+    });
+    writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
+    emitLockState(planId);
   };
 
   const finalizeForceUnlockTakeover = (planId, requestedById, requestedByName, lastActionAt, requestId, reason) => {
@@ -523,18 +570,8 @@ const createRealtimeRuntime = (deps) => {
           jsonSend(ws, {
             type: 'lock_state',
             planId,
-            lockedBy: lock ? { userId: lock.userId, username: lock.username, avatarUrl: lock.avatarUrl || '' } : null,
-            grant: grant
-              ? {
-                  userId: grant.userId,
-                  username: grant.username,
-                  avatarUrl: grant.avatarUrl || '',
-                  grantedAt: grant.grantedAt || null,
-                  expiresAt: grant.expiresAt || null,
-                  minutes: grant.minutes || null,
-                  grantedBy: { userId: grant.grantedById || '', username: grant.grantedByName || '' }
-                }
-              : null,
+            lockedBy: buildLockedByPayload(lock),
+            grant: buildGrantPayload(grant),
             meta: {
               lastActionAt: lock?.lastActionAt || grant?.lastActionAt || null,
               lastSavedAt: path?.lastSavedAt ?? null,
@@ -552,42 +589,17 @@ const createRealtimeRuntime = (deps) => {
             const existing = getValidLock(planId);
             const activeGrant = existing ? null : getValidGrant(planId);
             if (activeGrant && activeGrant.userId && activeGrant.userId !== info.userId) {
-              jsonSend(ws, {
-                type: 'lock_denied',
-                planId,
-                lockedBy: null,
-                grant: {
-                  userId: activeGrant.userId,
-                  username: activeGrant.username,
-                  avatarUrl: activeGrant.avatarUrl || '',
-                  grantedAt: activeGrant.grantedAt || null,
-                  expiresAt: activeGrant.expiresAt || null,
-                  minutes: activeGrant.minutes || null,
-                  grantedBy: { userId: activeGrant.grantedById || '', username: activeGrant.grantedByName || '' }
-                }
-              });
+              jsonSend(ws, { type: 'lock_denied', planId, lockedBy: null, grant: buildGrantPayload(activeGrant) });
               emitPresence(planId);
               return;
             }
             if (!existing || existing.userId === info.userId) {
-              const now = Date.now();
-              if (activeGrant && activeGrant.userId === info.userId) planLockGrants.delete(planId);
-              planLocks.set(planId, {
-                userId: info.userId,
-                username: info.username,
-                avatarUrl: info.avatarUrl || '',
-                acquiredAt: now,
-                ts: now,
-                lastActionAt: null,
-                dirty: false
-              });
-              writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
-              emitLockState(planId);
+              acquireLockFor(info, planId, activeGrant);
             } else {
               jsonSend(ws, {
                 type: 'lock_denied',
                 planId,
-                lockedBy: { userId: existing.userId, username: existing.username, avatarUrl: existing.avatarUrl || '' },
+                lockedBy: buildLockedByPayload(existing),
                 grant: null
               });
               writeAuditLog(db, {
@@ -617,41 +629,16 @@ const createRealtimeRuntime = (deps) => {
           const existing = getValidLock(planId);
           const activeGrant = existing ? null : getValidGrant(planId);
           if (activeGrant && activeGrant.userId && activeGrant.userId !== info.userId) {
-            jsonSend(ws, {
-              type: 'lock_denied',
-              planId,
-              lockedBy: null,
-              grant: {
-                userId: activeGrant.userId,
-                username: activeGrant.username,
-                avatarUrl: activeGrant.avatarUrl || '',
-                grantedAt: activeGrant.grantedAt || null,
-                expiresAt: activeGrant.expiresAt || null,
-                minutes: activeGrant.minutes || null,
-                grantedBy: { userId: activeGrant.grantedById || '', username: activeGrant.grantedByName || '' }
-              }
-            });
+            jsonSend(ws, { type: 'lock_denied', planId, lockedBy: null, grant: buildGrantPayload(activeGrant) });
             return;
           }
           if (!existing || existing.userId === info.userId) {
-            const now = Date.now();
-            if (activeGrant && activeGrant.userId === info.userId) planLockGrants.delete(planId);
-            planLocks.set(planId, {
-              userId: info.userId,
-              username: info.username,
-              avatarUrl: info.avatarUrl || '',
-              acquiredAt: now,
-              ts: now,
-              lastActionAt: null,
-              dirty: false
-            });
-            writeAuditLog(db, { level: 'important', event: 'plan_lock_acquired', userId: info.userId, username: info.username, scopeType: 'plan', scopeId: planId });
-            emitLockState(planId);
+            acquireLockFor(info, planId, activeGrant);
           } else {
             jsonSend(ws, {
               type: 'lock_denied',
               planId,
-              lockedBy: { userId: existing.userId, username: existing.username, avatarUrl: existing.avatarUrl || '' },
+              lockedBy: buildLockedByPayload(existing),
               grant: null
             });
           }

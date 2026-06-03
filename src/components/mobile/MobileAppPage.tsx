@@ -545,8 +545,6 @@ const MobileAppPage = () => {
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [rememberUsername, setRememberUsername] = useState(true);
-  const [rememberPassword, setRememberPassword] = useState(false);
-  const [autoLoginEnabled, setAutoLoginEnabled] = useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [chatClientId, setChatClientId] = useState('');
@@ -615,7 +613,6 @@ const MobileAppPage = () => {
   const voiceChunksRef = useRef<BlobPart[]>([]);
   const voiceStreamRef = useRef<MediaStream | null>(null);
   const settingsMenuRef = useRef<HTMLDivElement | null>(null);
-  const mobileAutoLoginAttemptedRef = useRef(false);
   const agendaRequestSeqRef = useRef(0);
   const agendaMonthRequestSeqRef = useRef(0);
   const chatLoadSeqRef = useRef(0);
@@ -824,41 +821,15 @@ const MobileAppPage = () => {
       if (!raw) return;
       const parsed = JSON.parse(raw || '{}');
       const nextUsername = String(parsed?.username || '');
-      const nextPassword = String(parsed?.password || '');
       const nextRememberUsername = !!parsed?.rememberUsername;
-      const nextRememberPassword = !!parsed?.rememberPassword;
-      const nextAutoLogin = !!parsed?.autoLogin;
       if (nextUsername) setLoginUsername(nextUsername);
-      if (nextRememberPassword && nextPassword) setLoginPassword(nextPassword);
       setRememberUsername(nextRememberUsername);
-      setRememberPassword(nextRememberPassword);
-      setAutoLoginEnabled(nextAutoLogin && nextRememberPassword);
     } catch {
       // ignore
     }
   }, []);
-
-  useEffect(() => {
-    if (user || loginBusy || otpRequired) return;
-    if (!autoLoginEnabled || !rememberPassword) return;
-    if (mobileAutoLoginAttemptedRef.current) return;
-    if (!String(loginUsername || '').trim() || !String(loginPassword || '').trim()) return;
-    mobileAutoLoginAttemptedRef.current = true;
-    void (async () => {
-      try {
-        setLoginBusy(true);
-        await login(String(loginUsername || '').trim().toLowerCase(), loginPassword);
-      } catch (err: any) {
-        if (err instanceof MFARequiredError || err?.name === 'MFARequiredError') {
-          setOtpRequired(true);
-        } else {
-          setLoginError(String(err?.message || 'Login failed'));
-        }
-      } finally {
-        setLoginBusy(false);
-      }
-    })();
-  }, [user, loginBusy, otpRequired, autoLoginEnabled, rememberPassword, loginUsername, loginPassword, login]);
+  // NOTE: passwords are never persisted. Staying logged in across reloads relies on the
+  // HttpOnly session cookie (fetchMe / /api/auth/me), not a stored credential.
 
   useEffect(() => {
     if (!notice) return;
@@ -1004,21 +975,14 @@ const MobileAppPage = () => {
   };
 
   const handleMobileLogout = useCallback(async () => {
-    mobileAutoLoginAttemptedRef.current = true;
-    setAutoLoginEnabled(false);
     setSettingsMenuOpen(false);
     if (typeof window !== 'undefined') {
       try {
-        const raw = window.localStorage.getItem(MOBILE_LOGIN_STORAGE_KEY);
-        const parsed = raw ? JSON.parse(raw || '{}') : {};
         window.localStorage.setItem(
           MOBILE_LOGIN_STORAGE_KEY,
           JSON.stringify({
-            username: String(parsed?.username || loginUsername || '').trim().toLowerCase(),
-            password: rememberPassword ? String(parsed?.password || loginPassword || '') : '',
-            rememberUsername,
-            rememberPassword,
-            autoLogin: false
+            username: rememberUsername ? String(loginUsername || '').trim().toLowerCase() : '',
+            rememberUsername
           })
         );
       } catch {
@@ -1030,7 +994,7 @@ const MobileAppPage = () => {
     setChatViewMode('list');
     setChatClientId('');
     setChatMessages([]);
-  }, [loginPassword, loginUsername, logout, rememberPassword, rememberUsername]);
+  }, [loginUsername, logout, rememberUsername]);
 
   const handleMobileLanguageChange = useCallback(
     async (lang: 'it' | 'en') => {
@@ -1518,10 +1482,7 @@ const MobileAppPage = () => {
             MOBILE_LOGIN_STORAGE_KEY,
             JSON.stringify({
               username: rememberUsername ? String(loginUsername || '').trim().toLowerCase() : '',
-              password: rememberPassword ? loginPassword : '',
-              rememberUsername,
-              rememberPassword,
-              autoLogin: rememberPassword && autoLoginEnabled
+              rememberUsername
             })
           );
         } catch {
@@ -2177,22 +2138,6 @@ const MobileAppPage = () => {
           <label className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${isDayTheme ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-white/10 bg-black/10 text-slate-300'}`}>
             <input type="checkbox" checked={rememberUsername} onChange={(e) => setRememberUsername(e.target.checked)} />
             {tr({ it: 'Ricorda utente', en: 'Remember username' })}
-          </label>
-          <label className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${isDayTheme ? 'border-slate-200 bg-slate-50 text-slate-600' : 'border-white/10 bg-black/10 text-slate-300'}`}>
-            <input
-              type="checkbox"
-              checked={rememberPassword}
-              onChange={(e) => {
-                const checked = e.target.checked;
-                setRememberPassword(checked);
-                if (!checked) setAutoLoginEnabled(false);
-              }}
-            />
-            {tr({ it: 'Salva password su questo dispositivo', en: 'Save password on this device' })}
-          </label>
-          <label className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${rememberPassword ? 'border-white/10 bg-black/10 text-slate-300' : 'border-white/5 bg-black/5 text-slate-500'}`}>
-            <input type="checkbox" checked={autoLoginEnabled} disabled={!rememberPassword} onChange={(e) => setAutoLoginEnabled(e.target.checked)} />
-            {tr({ it: 'Accesso automatico (salva sessione locale)', en: 'Auto login (save local session)' })}
           </label>
           {loginError ? <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{loginError}</div> : null}
             <button

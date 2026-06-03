@@ -719,6 +719,17 @@ const registerUserRoutes = (app, deps) => {
       res.status(403).json({ error: 'Only superadmin can promote admin' });
       return;
     }
+    // Only a superadmin may change another admin's privileges (demote / disable / re-permission).
+    // A regular admin can still edit non-admins and their own profile.
+    if (target.isAdmin && !req.isSuperAdmin && String(target.id) !== String(req.userId)) {
+      const demoting = isAdmin === false;
+      const changingDisabled = typeof disabled === 'boolean' && Number(target.disabled) !== (disabled ? 1 : 0);
+      const changingPermissions = Array.isArray(permissions);
+      if (demoting || changingDisabled || changingPermissions) {
+        res.status(403).json({ error: 'Only superadmin can modify another admin’s privileges' });
+        return;
+      }
+    }
     if (language && language !== 'it' && language !== 'en') {
       res.status(400).json({ error: 'Invalid language' });
       return;
@@ -933,9 +944,14 @@ const registerUserRoutes = (app, deps) => {
       res.status(400).json({ error: 'Cannot delete self' });
       return;
     }
-    const target = db.prepare('SELECT username, isSuperAdmin FROM users WHERE id = ?').get(targetId);
+    const target = db.prepare('SELECT username, isAdmin, isSuperAdmin FROM users WHERE id = ?').get(targetId);
     if (target?.isSuperAdmin && !req.isSuperAdmin) {
       res.status(403).json({ error: 'Cannot delete superadmin' });
+      return;
+    }
+    // Only a superadmin may delete another admin (self-deletion is already blocked above).
+    if (target?.isAdmin && !req.isSuperAdmin) {
+      res.status(403).json({ error: 'Only superadmin can delete an admin' });
       return;
     }
     db.prepare('DELETE FROM users WHERE id = ?').run(targetId);

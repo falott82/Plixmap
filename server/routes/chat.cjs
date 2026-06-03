@@ -48,7 +48,7 @@ const registerChatRoutes = (app, deps) => {
     }
   };
 
-  app.get('/api/chat/unread', requireAuth, (req, res) => {
+  app.get('/api/chat/unread', requireAuth, rateByUser('chat_unread', 60 * 1000, 120), (req, res) => {
     const allowedClientIds = Array.from(getChatClientIdsForUser(req.userId, isAdminReq(req)));
     const reads = db.prepare('SELECT clientId, lastReadAt FROM client_chat_reads WHERE userId = ?').all(req.userId);
     const lastReadAtByClient = new Map();
@@ -122,7 +122,7 @@ const registerChatRoutes = (app, deps) => {
     res.json({ count: senderIds.size, senderIds: Array.from(senderIds) });
   });
 
-  app.get('/api/chat/mobile/overview', requireAuth, (req, res) => {
+  app.get('/api/chat/mobile/overview', requireAuth, rateByUser('chat_mobile_overview', 60 * 1000, 120), (req, res) => {
     const meId = String(req.userId || '').trim();
     const state = readState();
     const clientMetaById = new Map();
@@ -325,6 +325,16 @@ const registerChatRoutes = (app, deps) => {
         }
       })();
       if (!canChat && !hasHistory) return res.status(403).json({ error: 'Forbidden' });
+
+      // Opening a DM thread over REST must behave like a WS connect for delivery purposes:
+      // mark any still-undelivered DMs to this user as delivered (and emit sender receipts).
+      // Otherwise REST-only clients (e.g. mobile) leave messages stuck in an undelivered
+      // limbo — never counted as unread and never markable as read (deliveredAt IS NULL).
+      try {
+        chat.deliverPendingDmMessagesToUser(req.userId);
+      } catch (err) {
+        logChatWarn('dm_deliver_on_rest_open_failed', err);
+      }
 
       const state = readState();
       const nameByClientId = new Map();

@@ -2,7 +2,7 @@ import { Fragment, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Lock, Layers, History, Keyboard, MessageSquare, Server } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
-import { shallow } from 'zustand/shallow';
+import { useShallow } from 'zustand/react/shallow';
 import { useT } from '../../i18n/useT';
 import { releaseHistory } from '../../version/history';
 import jsPDF from 'jspdf';
@@ -13,7 +13,7 @@ const KeyHint = ({ children }: { children: any }) => (
 );
 
 const HelpPanel = () => {
-  const { helpOpen, closeHelp } = useUIStore((s) => ({ helpOpen: s.helpOpen, closeHelp: s.closeHelp }), shallow);
+  const { helpOpen, closeHelp } = useUIStore(useShallow((s) => ({ helpOpen: s.helpOpen, closeHelp: s.closeHelp })));
   const t = useT();
   const latestVersion = releaseHistory[0]?.version || '0.0.0';
   const contentRef = useRef<HTMLDivElement | null>(null);

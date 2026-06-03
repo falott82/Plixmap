@@ -1255,19 +1255,44 @@ export const exportClientNotesToPdf = async (params: {
   `;
   wrapper.appendChild(style);
 
+  // Build the header via DOM nodes (textContent) rather than innerHTML so that
+  // user-controlled values like clientLabel cannot inject markup/script (stored XSS).
   const header = document.createElement('div');
   header.className = 'deskly-card';
-  header.innerHTML = `
-    ${desklyLogo ? `<img src="${desklyLogo}" style="width:30px;height:30px" />` : ''}
-    <div>
-      <div class="deskly-title">Plixmap</div>
-      <div class="deskly-sub">${lang === 'en' ? 'Client notes' : 'Note cliente'}</div>
-    </div>
-    <div class="deskly-meta">
-      <div><strong>${params.clientLabel || ''}</strong></div>
-      <div>${lang === 'en' ? 'Generated on' : 'Generato il'} ${date}</div>
-    </div>
-  `;
+
+  // Only emit the logo when it is a real image data URL (it always is here — produced
+  // by canvas.toDataURL above — but guard defensively).
+  if (desklyLogo && desklyLogo.startsWith('data:image/')) {
+    const logoImg = document.createElement('img');
+    logoImg.src = desklyLogo;
+    logoImg.style.width = '30px';
+    logoImg.style.height = '30px';
+    header.appendChild(logoImg);
+  }
+
+  const titleBlock = document.createElement('div');
+  const titleEl = document.createElement('div');
+  titleEl.className = 'deskly-title';
+  titleEl.textContent = 'Plixmap';
+  const subEl = document.createElement('div');
+  subEl.className = 'deskly-sub';
+  subEl.textContent = lang === 'en' ? 'Client notes' : 'Note cliente';
+  titleBlock.appendChild(titleEl);
+  titleBlock.appendChild(subEl);
+  header.appendChild(titleBlock);
+
+  const metaBlock = document.createElement('div');
+  metaBlock.className = 'deskly-meta';
+  const clientEl = document.createElement('div');
+  const clientStrong = document.createElement('strong');
+  clientStrong.textContent = params.clientLabel || '';
+  clientEl.appendChild(clientStrong);
+  const dateEl = document.createElement('div');
+  dateEl.textContent = `${lang === 'en' ? 'Generated on' : 'Generato il'} ${date}`;
+  metaBlock.appendChild(clientEl);
+  metaBlock.appendChild(dateEl);
+  header.appendChild(metaBlock);
+
   wrapper.appendChild(header);
 
   const content = document.createElement('div');

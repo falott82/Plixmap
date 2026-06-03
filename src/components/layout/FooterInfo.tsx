@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { Github, Globe, Heart, Mail, X } from 'lucide-react';
+import { GitFork, Globe, Heart, Mail, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 import { releaseHistory } from '../../version/history';
 import { useUIStore } from '../../store/useUIStore';
@@ -33,7 +33,7 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
           className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 hover:text-ink"
           title={t({ it: 'Apri GitHub', en: 'Open GitHub' })}
         >
-          <Github size={16} />
+          <GitFork size={16} />
         </a>
         <button
           onClick={() => setDonationOpen(true)}
@@ -83,7 +83,7 @@ const FooterInfo = ({ variant = 'sidebar' }: Props) => {
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-slate-700 hover:bg-slate-100 hover:text-ink"
               title={t({ it: 'Apri GitHub', en: 'Open GitHub' })}
             >
-              <Github size={14} />
+              <GitFork size={14} />
               <span className="sr-only">GitHub</span>
             </a>
             <button

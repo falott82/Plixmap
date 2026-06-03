@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Download, RefreshCw, X } from 'lucide-react';
 import { useUIStore } from '../../store/useUIStore';
-import { shallow } from 'zustand/shallow';
+import { useShallow } from 'zustand/react/shallow';
 import { useT } from '../../i18n/useT';
 import { fetchUpdateStatus, type UpdateStatusResponse } from '../../api/update';
 import { releaseHistory } from '../../version/history';
@@ -18,8 +18,7 @@ const normalizeSemver = (value: string | null | undefined): string | null => {
 
 const UpdateCheckModal = () => {
   const { updateCheckOpen, closeUpdateCheck } = useUIStore(
-    (s) => ({ updateCheckOpen: s.updateCheckOpen, closeUpdateCheck: s.closeUpdateCheck }),
-    shallow
+    useShallow((s) => ({ updateCheckOpen: s.updateCheckOpen, closeUpdateCheck: s.closeUpdateCheck }))
   );
   const { user } = useAuthStore();
   const t = useT();

@@ -128,9 +128,15 @@ const createAuthRuntime = (deps) => {
     const session = verifySession(authSecret, cookies[PRIMARY_SESSION_COOKIE]);
     if (!session?.userId || !session?.tokenVersion || !session?.sid) return null;
     if (session.sid !== serverInstanceId) return null;
-    const row = db.prepare('SELECT id, username, isAdmin, isSuperAdmin, disabled, avatarUrl FROM users WHERE id = ?').get(session.userId);
+    const row = db.prepare('SELECT id, username, tokenVersion, isAdmin, isSuperAdmin, disabled, mustChangePassword, avatarUrl FROM users WHERE id = ?').get(session.userId);
     if (!row) return null;
     if (Number(row.disabled) === 1) return null;
+    // Enforce session revocation on the realtime channel, mirroring requireAuth.
+    // tokenVersion is bumped on password change / MFA disable / reset, so a stale
+    // or revoked cookie must not be allowed to open or keep a WebSocket.
+    if (Number(row.tokenVersion) !== Number(session.tokenVersion)) return null;
+    // Keep first-run-locked accounts off the realtime channel until they change password.
+    if (Number(row.mustChangePassword) === 1) return null;
     const normalizedUsername = String(row.username || '').toLowerCase();
     return {
       userId: row.id,

@@ -6,6 +6,9 @@ export const SEED_SITE_ID = 'seed-site-wall-street-01';
 export const SEED_PLAN_ID = 'seed-plan-floor-0';
 export const SEED_PLAN_IMAGE_URL = '/seed/new-default-plan.png';
 export const ALL_ITEMS_LAYER_ID = 'all-items';
+// Single source of truth for the built-in (non-deletable) layer ids. Imported by the
+// store, the normalizer and the plan view so the set never drifts between modules.
+export const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
 export const ALL_ITEMS_LAYER_COLOR = '#e11d48';
 export const WALL_LAYER_COLOR = '#fb923c';
 export const WIFI_LAYER_COLOR = '#0ea5e9';
