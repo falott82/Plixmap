@@ -57,11 +57,6 @@ import {
 import { computeHandleStageMove, computeHandleCreateTypeLayer, computeHandleMapContextMenu, computeHandleStageSelect } from './planViewStageHandlers';
 import { runPlanKeydownEffect } from './planViewKeydown';
 import {
-  runMultiSelectionToastEffect,
-  runDeskSelectionToastEffect,
-  runQuoteSelectionToastEffect,
-  runMediaSelectionToastEffect,
-  runObjectSelectionToastEffect,
   runDismissSelectionHintToasts
 } from './planViewSelectionToasts';
 import {
@@ -121,7 +116,7 @@ import {
 
 import { CanvasStageHandle } from './CanvasStage';
 
-import { Corridor, DoorVerificationEntry, FloorPlan, FloorPlanView, IconName, LayerDefinition, MapObject, MapObjectType, RackItem, RackPortKind, Room, RoomConnectionDoor } from '../../store/types';
+import { Corridor, FloorPlan, FloorPlanView, IconName, LayerDefinition, MapObject, MapObjectType, RackItem, RackPortKind, Room, RoomConnectionDoor } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
@@ -133,11 +128,18 @@ import type { UnlockRequestLock } from './UnlockRequestComposeModal';
 
 import { DESK_TYPE_IDS, isDeskType } from './deskTypes';
 
-import type { RoomLayoutExportModalState, RoomLayoutExportModalSortKey } from './RoomLayoutExportModal';
+import type { RoomLayoutExportModalSortKey } from './RoomLayoutExportModal';
 import type { CrossPlanSearchResult } from './CrossPlanSearchModal';
 import { useRoomMeetingsTimeline, type MyMeetingsModalState } from './useRoomMeetingsTimeline';
 import { usePlanSafetyCard } from './usePlanSafetyCard';
 import { usePlanCapacity } from './usePlanCapacity';
+import { usePlanContextDerived } from './usePlanContextDerived';
+import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
+import { usePlanModalState } from './usePlanModalState';
+import { usePlanPopoverEffects } from './usePlanPopoverEffects';
+import { usePlanHelpToastEffects } from './usePlanHelpToastEffects';
+import { usePlanDeeplinkEffects } from './usePlanDeeplinkEffects';
+import { usePlanPaletteSectionEffects } from './usePlanPaletteSectionEffects';
 import { useClipboard } from './useClipboard';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
@@ -148,14 +150,14 @@ import { type MeetingBooking } from '../../api/meetings';
 
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
-import { ALL_ITEMS_LAYER_ID, SYSTEM_LAYER_IDS, DEFAULT_WALL_TYPES, WALL_TYPE_IDS, WIFI_RANGE_SCALE_MAX } from '../../store/data';
+import { ALL_ITEMS_LAYER_ID, SYSTEM_LAYER_IDS, DEFAULT_WALL_TYPES, WALL_TYPE_IDS } from '../../store/data';
 import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 import { getDefaultVisiblePlanLayerIds, normalizePlanLayerSelection } from '../../utils/layerVisibility';
 import { getWallTypeColor } from '../../utils/wallColors';
 import { isNonPeopleRoom } from '../../utils/roomProperties';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 
-import { getRoomPolygon, googleMapsUrlFromCoords, inferCorridorDoorLinkedRoomIds, isRackLinkId, getSharedRoomSides, projectPointToSegment } from './planViewUtils';
+import { getRoomPolygon, inferCorridorDoorLinkedRoomIds, isRackLinkId, getSharedRoomSides, projectPointToSegment } from './planViewUtils';
 import { samePlanSnapshot as samePlanSnapshotUtil, type PlanSnapshotComparable } from './planSnapshotCompare';
 import { toPlanHistorySnapshot, toPlanSnapshot, type PlanHistorySnapshot, type PlanSnapshot } from './planSnapshots';
 import { getLatestRevision, getRevisionVersion, toRevisionSnapshot } from './planRevisions';
@@ -781,88 +783,47 @@ export const usePlanView = (planId: string) => {
   const toolMode: 'scale' | 'wall' | 'quote' | 'measure' | null = scaleMode ? 'scale' : wallDrawMode ? 'wall' : quoteMode ? 'quote' : measureMode ? 'measure' : null;
   const [newRoomMenuOpen, setNewRoomMenuOpen] = useState(false);
   const [highlightRoom, setHighlightRoom] = useState<{ roomId: string; until: number } | null>(null);
-  const [roomModal, setRoomModal] = useState<
-    | { mode: 'create'; kind: 'rect'; rect: { x: number; y: number; width: number; height: number } }
-    | { mode: 'create'; kind: 'poly'; points: { x: number; y: number }[] }
-    | {
-        mode: 'edit';
-        roomId: string;
-        openDepartments?: boolean;
-        initialName: string;
-        initialNameEn?: string;
-        initialCapacity?: number;
-        initialShowName?: boolean;
-        initialSurfaceSqm?: number;
-        initialNotes?: string;
-        initialLogical?: boolean;
-        initialMeetingRoom?: boolean;
-        initialMeetingProjector?: boolean;
-        initialMeetingTv?: boolean;
-        initialMeetingVideoConf?: boolean;
-        initialMeetingCoffeeService?: boolean;
-        initialMeetingWhiteboard?: boolean;
-        initialNoWindows?: boolean;
-        initialWifiAvailable?: boolean;
-        initialFridgeAvailable?: boolean;
-        initialStorageRoom?: boolean;
-        initialBathroom?: boolean;
-        initialTechnicalRoom?: boolean;
-      }
-    | null
-  >(null);
-  const [roomMeasuresModal, setRoomMeasuresModal] = useState<{ roomId: string } | null>(null);
-  const [roomLayoutExportModal, setRoomLayoutExportModal] = useState<RoomLayoutExportModalState | null>(null);
-  const [confirmDeleteRoomId, setConfirmDeleteRoomId] = useState<string | null>(null);
-  const [confirmDeleteRoomIds, setConfirmDeleteRoomIds] = useState<string[] | null>(null);
-  const [confirmDeleteCorridorId, setConfirmDeleteCorridorId] = useState<string | null>(null);
-  const [corridorModal, setCorridorModal] = useState<
-    | {
-        mode: 'create';
-        kind: 'poly';
-        points: { x: number; y: number }[];
-        initialName?: string;
-        initialNameEn?: string;
-        initialShowName?: boolean;
-      }
-    | { mode: 'edit'; corridorId: string; initialName: string; initialNameEn?: string; initialShowName?: boolean }
-    | null
-  >(null);
-  const [corridorNameInput, setCorridorNameInput] = useState('');
-  const [corridorNameEnInput, setCorridorNameEnInput] = useState('');
-  const corridorNameInputRef = useRef<HTMLInputElement | null>(null);
-  const [corridorShowNameInput, setCorridorShowNameInput] = useState(true);
-  const [corridorDoorModal, setCorridorDoorModal] = useState<{
-    corridorId: string;
-    doorId: string;
-    description: string;
-    isEmergency: boolean;
-    isMainEntrance: boolean;
-    isExternal: boolean;
-    isFireDoor: boolean;
-    lastVerificationAt: string;
-    verifierCompany: string;
-    verificationHistory: DoorVerificationEntry[];
-    mode: 'static' | 'auto_sensor' | 'automated';
-    automationUrl: string;
-  } | null>(null);
-  const [corridorDoorLinkModal, setCorridorDoorLinkModal] = useState<{
-    corridorId: string;
-    doorId: string;
-    selectedRoomIds: string[];
-    nearestRoomId?: string;
-    magneticRoomIds?: string[];
-  } | null>(null);
-  const [corridorDoorLinkQuery, setCorridorDoorLinkQuery] = useState('');
-  const [corridorConnectionModal, setCorridorConnectionModal] = useState<{
-    connectionId?: string | null;
-    corridorId: string;
-    edgeIndex: number;
-    t: number;
-    x: number;
-    y: number;
-    selectedPlanIds: string[];
-    transitionType: 'stairs' | 'elevator';
-  } | null>(null);
+  const {
+    roomModal,
+    setRoomModal,
+    roomMeasuresModal,
+    setRoomMeasuresModal,
+    roomLayoutExportModal,
+    setRoomLayoutExportModal,
+    confirmDeleteRoomId,
+    setConfirmDeleteRoomId,
+    confirmDeleteRoomIds,
+    setConfirmDeleteRoomIds,
+    confirmDeleteCorridorId,
+    setConfirmDeleteCorridorId,
+    corridorModal,
+    setCorridorModal,
+    corridorNameInput,
+    setCorridorNameInput,
+    corridorNameEnInput,
+    setCorridorNameEnInput,
+    corridorNameInputRef,
+    corridorShowNameInput,
+    setCorridorShowNameInput,
+    corridorDoorModal,
+    setCorridorDoorModal,
+    corridorDoorLinkModal,
+    setCorridorDoorLinkModal,
+    corridorDoorLinkQuery,
+    setCorridorDoorLinkQuery,
+    corridorConnectionModal,
+    setCorridorConnectionModal,
+    wallTypeModal,
+    setWallTypeModal,
+    wallTypeDraft,
+    setWallTypeDraft,
+    roomWallTypeModal,
+    setRoomWallTypeModal,
+    roomWallTypeSelections,
+    setRoomWallTypeSelections,
+    roomWallPrompt,
+    setRoomWallPrompt
+  } = usePlanModalState();
   useEffect(() => {
     if (!corridorModal) return;
     setCorridorNameInput(corridorModal.initialName || '');
@@ -888,25 +849,6 @@ export const usePlanView = (planId: string) => {
     if (corridorDoorLinkModal) return;
     if (corridorDoorLinkQuery) setCorridorDoorLinkQuery('');
   }, [corridorDoorLinkModal, corridorDoorLinkQuery]);
-  const [wallTypeModal, setWallTypeModal] = useState<{ ids: string[]; typeId: string } | null>(null);
-  const [wallTypeDraft, setWallTypeDraft] = useState<string>('');
-  const [roomWallTypeModal, setRoomWallTypeModal] = useState<{
-    roomId: string;
-    roomName: string;
-    segments: { start: { x: number; y: number }; end: { x: number; y: number }; label: string }[];
-    mode?: 'create' | 'edit';
-    wallIds?: string[];
-    wallTypes?: string[];
-  } | null>(null);
-  const [roomWallTypeSelections, setRoomWallTypeSelections] = useState<string[]>([]);
-  const [roomWallPrompt, setRoomWallPrompt] = useState<{
-    roomId: string;
-    roomName: string;
-    kind: 'rect' | 'poly';
-    rect?: { x: number; y: number; width: number; height: number };
-    points?: { x: number; y: number }[];
-  } | null>(null);
-
   const planRef = useRef<FloorPlan | undefined>(undefined);
   const selectedObjectIdRef = useRef<string | undefined>(selectedObjectId);
   const selectedObjectIdsRef = useRef<string[]>(selectedObjectIds);
@@ -2455,71 +2397,24 @@ export const usePlanView = (planId: string) => {
     requestEnterPresentation();
   }, [clearPresentationEnterRequest, presentationEnterRequested, presentationMode, requestEnterPresentation]);
 
-  useEffect(() => {
-    const sp = new URLSearchParams(location.search || '');
-    const focusObject = sp.get('focusObject');
-    const focusRoom = sp.get('focusRoom');
-    if (!focusObject && !focusRoom) return;
-    const timer = window.setTimeout(() => {
-      if (focusObject) {
-        setSelectedObject(focusObject);
-        triggerHighlight(focusObject);
-      }
-      if (focusRoom) {
-        clearSelection();
-        setSelectedRoomId(focusRoom);
-        setSelectedRoomIds([focusRoom]);
-        setHighlightRoom({ roomId: focusRoom, until: Date.now() + 3200 });
-      }
-      navigate(`/plan/${planId}`, { replace: true });
-    }, 40);
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planId, location.search]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('tm') !== '1') return;
-    setRevisionsOpen(true);
-    params.delete('tm');
-    const search = params.toString();
-    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
-  }, [location.pathname, location.search, navigate]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('pa') !== '1') return;
-    if (isReadOnly) return;
-    setPrintAreaMode(true);
-    push(
-      t({
-        it: 'Disegna un rettangolo sulla mappa per impostare l’area di stampa.',
-        en: 'Draw a rectangle on the map to set the print area.'
-      }),
-      'info'
-    );
-    params.delete('pa');
-    const search = params.toString();
-    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('fa') !== '1') return;
-    const presetClientId = String(params.get('faClient') || '').trim();
-    const presetSiteId = String(params.get('faSite') || '').trim();
-    setRoomAllocationPreset({
-      clientId: presetClientId || undefined,
-      siteId: presetSiteId || undefined
-    });
-    setRoomAllocationOpen(true);
-    params.delete('fa');
-    params.delete('faClient');
-    params.delete('faSite');
-    const search = params.toString();
-    navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
-  }, [location.pathname, location.search, navigate]);
+  usePlanDeeplinkEffects({
+    location,
+    navigate,
+    planId,
+    isReadOnly,
+    push,
+    t,
+    setSelectedObject,
+    triggerHighlight,
+    clearSelection,
+    setSelectedRoomId,
+    setSelectedRoomIds,
+    setHighlightRoom,
+    setRevisionsOpen,
+    setPrintAreaMode,
+    setRoomAllocationPreset,
+    setRoomAllocationOpen
+  });
 
 		  useEffect(() => {
 		    if (!printAreaMode) return;
@@ -2719,271 +2614,117 @@ export const usePlanView = (planId: string) => {
       pendingNavigateRef
     });
   }, [pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction]);
-  const contextObject = useMemo(() => {
-    if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return undefined;
-    return renderPlanObjectById.get(contextMenu.id);
-  }, [contextMenu, renderPlan, renderPlanObjectById]);
-  const contextObjectTypeLabel = useMemo(() => {
-    if (!contextObject) return '';
-    return objectTypeLabels[contextObject.type] || contextObject.type;
-  }, [contextObject, objectTypeLabels]);
+  const {
+    contextObject,
+    contextObjectTypeLabel,
+    realUserDetails,
+    realUserDetailsName,
+    contextLink,
+    contextObjectLinkCount,
+    hasDefaultView,
+    contextIsMulti,
+    contextIsRack,
+    contextIsDesk,
+    contextIsCamera,
+    contextIsWall,
+    contextIsQuote,
+    contextIsWifi,
+    contextIsPhoto,
+    contextIsText,
+    contextIsAssemblyPoint,
+    contextAssemblyMapsUrl,
+    contextPhotoMulti,
+    planPhotoIds,
+    contextWifiRangeOn,
+    contextWifiRangeScale,
+    contextWifiBaseRadiusM,
+    contextWifiBaseDiameterM,
+    contextWifiBaseAreaSqm,
+    contextWifiEffectiveRadiusM,
+    contextWifiEffectiveDiameterM,
+    contextWifiEffectiveAreaSqm,
+    contextWallPolygon,
+    contextQuoteOrientation,
+    contextQuoteLabelPos,
+    roomModalInitialSurfaceSqm,
+    roomWallTypeAllValue,
+    canEditWallType,
+    selectionHasRack,
+    selectionHasDesk,
+    selectionHasPhoto,
+    selectionPhotoIds,
+    selectedWifiIds,
+    selectionAllRealUsers
+  } = usePlanContextDerived({
+    renderPlan,
+    contextMenu,
+    renderPlanObjectById,
+    objectTypeLabels,
+    realUserDetailsId,
+    selectedObjectIds,
+    selectedObjects,
+    isDeskType,
+    isWallType,
+    getWallPolygonData,
+    getQuoteOrientation,
+    lastQuoteLabelPosV,
+    lastQuoteLabelPosH,
+    roomModal,
+    computeRoomSurfaceSqm,
+    metersPerPixel,
+    roomWallTypeSelections,
+    defaultWallTypeId
+  });
 
-  const realUserDetails = useMemo(() => {
-    if (!realUserDetailsId || !renderPlan) return null;
-    const obj = renderPlanObjectById.get(realUserDetailsId);
-    if (!obj || obj.type !== 'real_user') return null;
-    return {
-      externalUserId: (obj as any).externalUserId,
-      firstName: (obj as any).firstName,
-      lastName: (obj as any).lastName,
-      externalEmail: (obj as any).externalEmail,
-      externalRole: (obj as any).externalRole,
-      externalDept1: (obj as any).externalDept1,
-      externalDept2: (obj as any).externalDept2,
-      externalDept3: (obj as any).externalDept3,
-      externalExt1: (obj as any).externalExt1,
-      externalExt2: (obj as any).externalExt2,
-      externalExt3: (obj as any).externalExt3,
-      externalIsExternal: (obj as any).externalIsExternal
-    };
-  }, [realUserDetailsId, renderPlan, renderPlanObjectById]);
-
-  const realUserDetailsName = useMemo(() => {
-    if (!realUserDetailsId || !renderPlan) return '';
-    const obj = renderPlanObjectById.get(realUserDetailsId);
-    return String(obj?.name || realUserDetailsId);
-  }, [realUserDetailsId, renderPlan, renderPlanObjectById]);
-
-    const contextLink = useMemo(() => {
-      if (!renderPlan || !contextMenu || contextMenu.kind !== 'link') return undefined;
-      return ((renderPlan as any).links || []).find((l: any) => l.id === contextMenu.id);
-    }, [renderPlan, contextMenu]);
-
-  const contextObjectLinkCount = useMemo(() => {
-    if (!renderPlan || !contextMenu || contextMenu.kind !== 'object') return 0;
-    const links = ((renderPlan as any).links || []) as any[];
-    const id = contextMenu.id;
-    return links.filter((l) => String(l?.fromId || '') === id || String(l?.toId || '') === id).length;
-  }, [contextMenu, renderPlan]);
-
-  const hasDefaultView = useMemo(
-    () => !!(renderPlan?.views || []).find((v) => v.isDefault),
-    [renderPlan?.views]
-  );
-
-  const contextIsMulti = useMemo(() => {
-    if (!contextMenu || contextMenu.kind !== 'object') return false;
-    if (!selectedObjectIds?.length || selectedObjectIds.length < 2) return false;
-    return selectedObjectIds.includes(contextMenu.id);
-  }, [contextMenu, selectedObjectIds]);
-
-  const contextIsRack = contextObject?.type === 'rack';
-  const contextIsDesk = contextObject ? isDeskType(contextObject.type) : false;
-  const contextIsCamera = contextObject?.type === 'camera';
-  const contextIsWall = contextObject ? isWallType(contextObject.type) : false;
-  const contextIsQuote = contextObject?.type === 'quote';
-  const contextIsWifi = contextObject?.type === 'wifi';
-  const contextIsPhoto = contextObject?.type === 'photo';
-  const contextIsText = contextObject?.type === 'text';
-  const contextIsAssemblyPoint = contextObject?.type === 'safety_assembly_point';
-  const contextAssemblyGps = contextIsAssemblyPoint ? String((contextObject as any)?.gpsCoords || '') : '';
-  const contextAssemblyMapsUrl = useMemo(() => googleMapsUrlFromCoords(contextAssemblyGps), [contextAssemblyGps]);
-  const contextPhotoSelectionIds = useMemo(() => {
-    if (!contextIsPhoto || !renderPlan) return [];
-    const ids =
-      contextIsMulti && selectedObjectIds.length
-        ? selectedObjects.filter((obj) => obj.type === 'photo').map((obj) => obj.id)
-        : contextMenu && contextMenu.kind === 'object'
-          ? [contextMenu.id]
-          : [];
-    return ids;
-  }, [contextIsMulti, contextIsPhoto, contextMenu, renderPlan, selectedObjectIds, selectedObjects]);
-  const contextPhotoMulti = contextPhotoSelectionIds.length > 1;
-  const planPhotoIds = useMemo(() => {
-    if (!renderPlan) return [];
-    return renderPlan.objects.filter((o) => o.type === 'photo').map((o) => o.id);
-  }, [renderPlan]);
-  const contextWifiRangeOn = contextIsWifi ? (contextObject as any)?.wifiShowRange !== false : false;
-  const contextWifiRangeScale = contextIsWifi
-    ? Math.max(0, Math.min(WIFI_RANGE_SCALE_MAX, Number((contextObject as any)?.wifiRangeScale ?? 1) || 1))
-    : 1;
-  const contextWifiCoverageSqm = contextIsWifi ? Number((contextObject as any)?.wifiCoverageSqm || 0) : 0;
-  const contextWifiBaseRadiusM =
-    contextIsWifi && Number.isFinite(contextWifiCoverageSqm) && contextWifiCoverageSqm > 0
-      ? Math.sqrt(contextWifiCoverageSqm / Math.PI)
-      : 0;
-  const contextWifiBaseDiameterM = contextWifiBaseRadiusM > 0 ? contextWifiBaseRadiusM * 2 : 0;
-  const contextWifiBaseAreaSqm = Number.isFinite(contextWifiCoverageSqm) && contextWifiCoverageSqm > 0 ? contextWifiCoverageSqm : 0;
-  const contextWifiEffectiveRadiusM = contextWifiBaseRadiusM > 0 ? contextWifiBaseRadiusM * contextWifiRangeScale : 0;
-  const contextWifiEffectiveDiameterM = contextWifiBaseDiameterM > 0 ? contextWifiBaseDiameterM * contextWifiRangeScale : 0;
-  const contextWifiEffectiveAreaSqm =
-    contextWifiBaseAreaSqm > 0 ? contextWifiBaseAreaSqm * Math.pow(contextWifiRangeScale, 2) : 0;
-  const contextWallPolygon = useMemo(() => {
-    if (!contextIsWall || !contextMenu || contextMenu.kind !== 'object') return null;
-    return getWallPolygonData(contextMenu.id);
-  }, [contextIsWall, contextMenu, getWallPolygonData]);
-  const contextQuoteOrientation = useMemo(() => {
-    if (!contextIsQuote) return 'horizontal' as const;
-    const pts = (contextObject as any)?.points as { x: number; y: number }[] | undefined;
-    return getQuoteOrientation(pts);
-  }, [contextIsQuote, contextObject, getQuoteOrientation]);
-  const contextQuoteLabelPos = useMemo(() => {
-    if (!contextIsQuote) return 'center' as const;
-    const current = String((contextObject as any)?.quoteLabelPos || 'center');
-    if (contextQuoteOrientation === 'vertical') {
-      return current === 'left' || current === 'right' || current === 'center' ? (current as any) : lastQuoteLabelPosV;
-    }
-    return current === 'above' || current === 'below' || current === 'center' ? (current as any) : lastQuoteLabelPosH;
-  }, [contextIsQuote, contextObject, contextQuoteOrientation, lastQuoteLabelPosH, lastQuoteLabelPosV]);
-  const roomModalInitialSurfaceSqm = useMemo(() => {
-    if (!roomModal || roomModal.mode !== 'create') return undefined;
-    if (roomModal.kind === 'rect' && roomModal.rect) {
-      return computeRoomSurfaceSqm(roomModal.rect, metersPerPixel);
-    }
-    if (roomModal.kind === 'poly') {
-      return computeRoomSurfaceSqm({ kind: 'poly', points: roomModal.points }, metersPerPixel);
-    }
-    return undefined;
-  }, [computeRoomSurfaceSqm, metersPerPixel, roomModal]);
-  const roomWallTypeAllValue = useMemo(() => {
-    if (!roomWallTypeSelections.length) return defaultWallTypeId;
-    const first = roomWallTypeSelections[0];
-    if (!first) return defaultWallTypeId;
-    return roomWallTypeSelections.every((value) => value === first) ? first : '';
-  }, [defaultWallTypeId, roomWallTypeSelections]);
-  const selectionAllWalls = useMemo(() => {
-    if (!renderPlan) return false;
-    if (!selectedObjects.length) return false;
-    return selectedObjects.every((obj) => isWallType(obj.type));
-  }, [isWallType, renderPlan, selectedObjects]);
-  const canEditWallType = contextIsMulti ? selectionAllWalls : contextIsWall;
-
-  const selectionHasRack = useMemo(() => {
-    if (!renderPlan) return false;
-    return selectedObjects.some((obj) => obj.type === 'rack');
-  }, [renderPlan, selectedObjects]);
-  const selectionHasDesk = useMemo(() => {
-    if (!renderPlan) return false;
-    return selectedObjects.some((obj) => isDeskType(obj.type));
-  }, [renderPlan, selectedObjects]);
-  const selectionHasPhoto = useMemo(() => {
-    if (!renderPlan) return false;
-    return selectedObjects.some((obj) => obj.type === 'photo');
-  }, [renderPlan, selectedObjects]);
-  const selectionPhotoIds = useMemo(() => {
-    if (!renderPlan) return [];
-    return selectedObjects.filter((obj) => obj.type === 'photo').map((obj) => obj.id);
-  }, [renderPlan, selectedObjects]);
-  const selectedWifiIds = useMemo(() => {
-    if (!renderPlan) return [];
-    return selectedObjects.filter((obj) => obj.type === 'wifi').map((obj) => obj.id);
-  }, [renderPlan, selectedObjects]);
-  const selectionAllRealUsers = useMemo(() => {
-    if (!renderPlan) return false;
-    if (!selectedObjects.length) return false;
-    return selectedObjects.every((obj) => obj.type === 'real_user');
-  }, [renderPlan, selectedObjects]);
-
-  useEffect(() => {
-    planRef.current = renderPlan;
-  }, [renderPlan]);
-  useEffect(() => {
-    selectedObjectIdRef.current = selectedObjectId;
-  }, [selectedObjectId]);
-  useEffect(() => {
-    selectedObjectIdsRef.current = selectedObjectIds;
-  }, [selectedObjectIds]);
-  useEffect(() => runMultiSelectionToastEffect({
-    contextMenu, renderPlan, selectedObjectIds, renderKeybindToast, selectionHintToastIds,
-    multiToastKeyRef, multiToastIdRef
-  }), [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
-  useEffect(() => runDeskSelectionToastEffect({
-    contextMenu, renderPlan, selectedObjectIds, selectedSingleObject, isDeskType, renderKeybindToast,
-    selectionHintToastIds, deskToastKeyRef, deskToastIdRef
-  }), [contextMenu, isDeskType, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject]);
-  useEffect(() => runQuoteSelectionToastEffect({
-    contextMenu, renderPlan, selectedObjectIds, selectedSingleObject, renderKeybindToast,
-    selectionHintToastIds, quoteToastKeyRef, quoteToastIdRef
-  }), [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject]);
-  useEffect(() => runMediaSelectionToastEffect({
-    contextMenu, renderPlan, selectedObjectIds, selectedSingleObject, renderKeybindToast,
-    selectionHintToastIds, mediaToastKeyRef, mediaToastIdRef
-  }), [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject]);
-  useEffect(() => runObjectSelectionToastEffect({
-    contextMenu, renderPlan, selectedObjectIds, selectedSingleObject, isDeskType, getTypeLabel, t,
-    renderKeybindToast, selectionHintToastIds, selectionToastKeyRef, selectionToastIdRef
-  }), [contextMenu, getTypeLabel, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject, t]);
-  useEffect(() => {
-    selectedLinkIdRef.current = selectedLinkId;
-  }, [selectedLinkId]);
-  useEffect(() => {
-    if (!internalMapOpen) return;
-    dismissSelectionHintToasts();
-  }, [dismissSelectionHintToasts, internalMapOpen]);
-  useEffect(() => {
-    selectedRoomIdRef.current = selectedRoomId;
-  }, [selectedRoomId]);
-  useEffect(() => {
-    if (!selectedCorridorDoor) return;
-    if (selectedCorridorId && selectedCorridorDoor.corridorId !== selectedCorridorId) {
-      setSelectedCorridorDoor(null);
-    }
-  }, [selectedCorridorDoor, selectedCorridorId]);
-  useEffect(() => {
-    if (!selectedRoomDoorId) return;
-    const currentRoomDoors = Array.isArray((renderPlan as any)?.roomDoors) ? (((renderPlan as any).roomDoors as RoomConnectionDoor[]).filter(Boolean)) : [];
-    const exists = currentRoomDoors.some((door) => door.id === selectedRoomDoorId);
-    if (!exists) setSelectedRoomDoorId(null);
-  }, [renderPlan, selectedRoomDoorId]);
-  useEffect(() => {
-    confirmDeleteRef.current = confirmDelete;
-  }, [confirmDelete]);
-  useEffect(() => {
-    pendingRoomDeletesRef.current = pendingRoomDeletes;
-  }, [pendingRoomDeletes]);
-
-  useEffect(() => {
-    if (!wallQuickMenu) return;
-    const selectedIds = selectedObjectIds || [];
-    const stillSelected =
-      selectedObjectId === wallQuickMenu.id || (selectedIds.length ? selectedIds.includes(wallQuickMenu.id) : false);
-    if (!stillSelected) setWallQuickMenu(null);
-  }, [selectedObjectId, selectedObjectIds, wallQuickMenu]);
-
-  useEffect(() => {
-    if (wallQuickMenu) return;
-    setWallTypeMenu(null);
-  }, [wallQuickMenu]);
-
-  useEffect(() => {
-    if (!corridorQuickMenu) return;
-    if (selectedCorridorId !== corridorQuickMenu.id) setCorridorQuickMenu(null);
-  }, [corridorQuickMenu, selectedCorridorId]);
-
-  useEffect(() => {
-    if (!contextMenu) return;
-    dismissSelectionHintToasts();
-    setWallQuickMenu(null);
-    setWallTypeMenu(null);
-    setCorridorQuickMenu(null);
-    setAlignMenuOpen(false);
-    setLayersContextMenu(null);
-    if (contextMenu.kind === 'map') {
-      setMapSubmenu(null);
-    }
-  }, [contextMenu, dismissSelectionHintToasts]);
-
-  useEffect(() => {
-    if (contextMenu) return;
-    setLayersContextMenu(null);
-  }, [contextMenu]);
-
-  useEffect(() => {
-    if (!toolMode) return;
-    setWallQuickMenu(null);
-    setWallTypeMenu(null);
-    setCorridorQuickMenu(null);
-  }, [toolMode]);
+  usePlanSelectionMenuEffects({
+    planRef,
+    renderPlan,
+    selectedObjectIdRef,
+    selectedObjectId,
+    selectedObjectIdsRef,
+    selectedObjectIds,
+    contextMenu,
+    renderKeybindToast,
+    selectionHintToastIds,
+    multiToastKeyRef,
+    multiToastIdRef,
+    selectedSingleObject,
+    isDeskType,
+    deskToastKeyRef,
+    deskToastIdRef,
+    quoteToastKeyRef,
+    quoteToastIdRef,
+    mediaToastKeyRef,
+    mediaToastIdRef,
+    getTypeLabel,
+    t,
+    selectionToastKeyRef,
+    selectionToastIdRef,
+    selectedLinkIdRef,
+    selectedLinkId,
+    internalMapOpen,
+    dismissSelectionHintToasts,
+    selectedRoomIdRef,
+    selectedRoomId,
+    selectedCorridorDoor,
+    selectedCorridorId,
+    setSelectedCorridorDoor,
+    selectedRoomDoorId,
+    setSelectedRoomDoorId,
+    confirmDeleteRef,
+    confirmDelete,
+    pendingRoomDeletesRef,
+    pendingRoomDeletes,
+    wallQuickMenu,
+    setWallQuickMenu,
+    setWallTypeMenu,
+    corridorQuickMenu,
+    setCorridorQuickMenu,
+    setAlignMenuOpen,
+    setLayersContextMenu,
+    setMapSubmenu,
+    toolMode
+  });
 
   const getSubmenuStyle = useCallback(
     (submenuWidth: number) => {
@@ -5068,95 +4809,15 @@ export const usePlanView = (planId: string) => {
     return map;
   }, [corridors]);
   const roomDoors = useMemo(() => ((renderPlan as any)?.roomDoors || []) as RoomConnectionDoor[], [(renderPlan as any)?.roomDoors]);
-  const corridorLabelHelpToastId = 'corridor-label-help';
-  const corridorPolyHelpToastId = 'corridor-poly-help';
-  const roomPolyHelpToastId = 'room-poly-help';
-  const roomLabelHelpToastId = 'room-label-help';
-  useEffect(() => {
-    if (isReadOnly || !selectedCorridorId) {
-      toast.dismiss(corridorLabelHelpToastId);
-      return;
-    }
-    const selected = corridorById.get(selectedCorridorId);
-    if (!selected || selected.showName === false || !String(selected.name || '').trim()) {
-      toast.dismiss(corridorLabelHelpToastId);
-      return;
-    }
-    toast.info(
-      t({
-        it: 'Comandi corridoio: trascina etichetta per spostarla, usa + / - per dimensione testo, premi E per rinomina; tasto centrale del mouse sul corridoio = aggiungi punto di snodo.',
-        en: 'Corridor commands: drag label to move, use + / - to resize text, press E to rename; middle mouse button on corridor = add junction point.'
-      }),
-      {
-        id: corridorLabelHelpToastId,
-        duration: Infinity
-      }
-    );
-  }, [corridorById, isReadOnly, selectedCorridorId, t]);
-  useEffect(() => {
-    return () => {
-      toast.dismiss(corridorLabelHelpToastId);
-    };
-  }, []);
-  useEffect(() => {
-    if (isReadOnly || corridorDrawMode !== 'poly') {
-      toast.dismiss(corridorPolyHelpToastId);
-      return;
-    }
-    toast.info(
-      t({
-        it:
-          'Disegno corridoio: clicca i vertici del perimetro. Click destro rimuove l’ultimo punto. Esc interrompe il disegno. Invio conclude il corridoio (oppure chiudi tornando sul primo punto).',
-        en:
-          'Corridor drawing: click perimeter vertices. Right click removes the last point. Esc cancels drawing. Enter finalizes the corridor (or close by returning to the first point).'
-      }),
-      {
-        id: corridorPolyHelpToastId,
-        duration: Infinity
-      }
-    );
-  }, [corridorDrawMode, isReadOnly, t]);
-  useEffect(() => {
-    if (isReadOnly || roomDrawMode !== 'poly') {
-      toast.dismiss(roomPolyHelpToastId);
-      return;
-    }
-    toast.info(
-      t({
-        it:
-          'Disegno stanza poligonale: linee orizzontali/verticali di default. Tieni premuto Shift per tracciare linee oblique. Per chiudere il poligono torna sul punto iniziale o premi Invio. Backspace annulla l’ultimo vertice.',
-        en:
-          'Polygon room drawing: horizontal/vertical lines by default. Hold Shift to draw oblique lines. Close the polygon by returning to the starting point or pressing Enter. Backspace removes the last vertex.'
-      }),
-      {
-        id: roomPolyHelpToastId,
-        duration: Infinity
-      }
-    );
-  }, [isReadOnly, roomDrawMode, t]);
-  useEffect(() => {
-    if (isReadOnly || !selectedRoomId || roomDrawMode) {
-      toast.dismiss(roomLabelHelpToastId);
-      return;
-    }
-    toast.info(
-      t({
-        it: 'Stanza selezionata: frecce per spostare la stanza, Shift+frecce per spostare la scritta (alto/basso/sinistra/destra), + / - per dimensione testo.',
-        en: 'Selected room: arrows move the room, Shift+arrows move the label (top/bottom/left/right), + / - changes text size.'
-      }),
-      {
-        id: roomLabelHelpToastId,
-        duration: Infinity
-      }
-    );
-  }, [isReadOnly, roomDrawMode, selectedRoomId, t]);
-  useEffect(() => {
-    return () => {
-      toast.dismiss(corridorPolyHelpToastId);
-      toast.dismiss(roomPolyHelpToastId);
-      toast.dismiss(roomLabelHelpToastId);
-    };
-  }, []);
+  usePlanHelpToastEffects({
+    t,
+    isReadOnly,
+    selectedCorridorId,
+    corridorById,
+    corridorDrawMode,
+    roomDrawMode,
+    selectedRoomId
+  });
 
   const paletteFavorites = useAuthStore((s) => (s.user as any)?.paletteFavorites) as string[] | undefined;
   const paletteOrder = useMemo(() => {
@@ -5197,23 +4858,16 @@ export const usePlanView = (planId: string) => {
   const [objectsOpen, setObjectsOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
 
-  useEffect(() => {
-    if (paletteSection === 'desks' && !deskPaletteDefs.length) {
-      setPaletteSection('objects');
-    } else if (paletteSection === 'objects' && !otherPaletteDefs.length && deskPaletteDefs.length) {
-      setPaletteSection('desks');
-    } else if (paletteSection === 'objects' && !otherPaletteDefs.length && !deskPaletteDefs.length && securityPaletteDefs.length) {
-      setPaletteSection('security');
-    } else if (paletteSection === 'security' && !securityPaletteDefs.length) {
-      setPaletteSection(otherPaletteDefs.length ? 'objects' : 'desks');
-    }
-  }, [deskPaletteDefs.length, otherPaletteDefs.length, paletteSection, securityPaletteDefs.length]);
-
-  useEffect(() => {
-    if (!deskPaletteDefs.length) setDesksOpen(false);
-    if (!otherPaletteDefs.length) setObjectsOpen(false);
-    if (!securityPaletteDefs.length) setSecurityOpen(false);
-  }, [deskPaletteDefs.length, otherPaletteDefs.length, securityPaletteDefs.length]);
+  usePlanPaletteSectionEffects({
+    paletteSection,
+    setPaletteSection,
+    deskPaletteDefs,
+    otherPaletteDefs,
+    securityPaletteDefs,
+    setDesksOpen,
+    setObjectsOpen,
+    setSecurityOpen
+  });
   const paletteSettingsSection: 'desks' | 'security' | 'objects' = paletteSection === 'desks' ? 'desks' : paletteSection === 'security' ? 'security' : 'objects';
 
   const addTypeToPalette = useCallback(
@@ -5358,72 +5012,30 @@ export const usePlanView = (planId: string) => {
     );
   }, [objectListQuery, renderPlan?.objects]);
 
-  useEffect(() => {
-    if (!countsOpen) return;
-    setObjectListQuery('');
-    setExpandedType(null);
-  }, [countsOpen]);
-
-  useEffect(() => {
-    if (countsOpen) return;
-    setTypeMenu(null);
-  }, [countsOpen]);
-
-  useEffect(() => {
-    if (!typeMenu) return;
-    const handleClick = (event: globalThis.MouseEvent) => {
-      if (!typeMenuRef.current) return;
-      if (typeMenuRef.current.contains(event.target as Node)) return;
-      setTypeMenu(null);
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [typeMenu]);
-
-  useEffect(() => {
-    if (!typeLayerModal) return;
-    setTypeLayerName(typeLayerModal.label);
-    setTypeLayerColor('#0ea5e9');
-    window.setTimeout(() => typeLayerNameRef.current?.focus(), 0);
-  }, [typeLayerModal]);
-
-  useEffect(() => {
-    if (!presenceOpen) return;
-    const handleClick = (event: globalThis.MouseEvent) => {
-      if (!presenceRef.current) return;
-      if (presenceRef.current.contains(event.target as Node)) return;
-      setPresenceOpen(false);
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [presenceOpen]);
-
-  useEffect(() => {
-    if (!layersPopoverOpen) return;
-    const handleClick = (event: globalThis.MouseEvent) => {
-      if (!layersPopoverRef.current) return;
-      if (layersPopoverRef.current.contains(event.target as Node)) return;
-      setLayersPopoverOpen(false);
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [layersPopoverOpen]);
-
-  useEffect(() => {
-    if (!layersQuickMenu) return;
-    const handleClick = (event: globalThis.MouseEvent) => {
-      if (layersQuickMenuRef.current?.contains(event.target as Node)) return;
-      setLayersQuickMenu(null);
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [layersQuickMenu]);
-
-  useEffect(() => {
-    if (!roomsOpen) return;
-    setExpandedRoomId(null);
-    setNewRoomMenuOpen(false);
-  }, [roomsOpen]);
+  usePlanPopoverEffects({
+    countsOpen,
+    setObjectListQuery,
+    setExpandedType,
+    setTypeMenu,
+    typeMenu,
+    typeMenuRef,
+    typeLayerModal,
+    setTypeLayerName,
+    setTypeLayerColor,
+    typeLayerNameRef,
+    presenceOpen,
+    presenceRef,
+    setPresenceOpen,
+    layersPopoverOpen,
+    layersPopoverRef,
+    setLayersPopoverOpen,
+    layersQuickMenu,
+    layersQuickMenuRef,
+    setLayersQuickMenu,
+    roomsOpen,
+    setExpandedRoomId,
+    setNewRoomMenuOpen
+  });
 
   useEffect(() => {
     if (!user) return;

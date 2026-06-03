@@ -8,12 +8,12 @@ import type { useT } from '../../i18n/useT';
 // dependency array plus the refs it reads). The effect wrappers and dependency arrays in
 // usePlanView remain unchanged. These effects have no cleanup.
 
-type RenderKeybindToast = (
+export type RenderKeybindToast = (
   title: { it: string; en: string },
   items: Array<{ cmd: string; it: string; en: string }>
 ) => ReactNode;
 
-type SelectionHintToastIds = MutableRefObject<{
+export type SelectionHintToastIds = MutableRefObject<{
   selection: string;
   multi: string;
   desk: string;
