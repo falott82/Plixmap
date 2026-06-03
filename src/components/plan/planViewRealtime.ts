@@ -184,23 +184,41 @@ export const runRealtimeWsEffect = (deps: RealtimeWsDeps): void | (() => void) =
 
   if (!user?.id || realtimeDisabledRef.current || realtimeDisabled) return;
   const canRequestLock = !activeRevision && planAccess === 'rw';
-  const ws = new WebSocket(getWsUrl());
-  wsRef.current = ws;
   let closed = false;
-  let opened = false;
+  let attempts = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const MAX_ATTEMPTS = 5;
 
-  const send = (obj: any) => {
-    try {
-      ws.send(JSON.stringify(obj));
-    } catch {
-      // ignore
+  const scheduleReconnect = () => {
+    if (closed) return;
+    if (attempts >= MAX_ATTEMPTS) {
+      // Sustained outage: give up reconnecting for this session (remount to retry).
+      realtimeDisabledRef.current = true;
+      setRealtimeDisabled(true);
+      return;
     }
+    attempts += 1;
+    const delay = Math.min(1000 * 2 ** (attempts - 1), 15000);
+    retryTimer = setTimeout(connect, delay);
   };
 
-  ws.onopen = () => {
-    opened = true;
-    send({ type: 'join', planId, wantLock: canRequestLock });
-  };
+  function connect() {
+    if (closed) return;
+    const ws = new WebSocket(getWsUrl());
+    wsRef.current = ws;
+
+    const send = (obj: any) => {
+      try {
+        ws.send(JSON.stringify(obj));
+      } catch {
+        // ignore
+      }
+    };
+
+    ws.onopen = () => {
+      attempts = 0; // recovered: reset the backoff counter
+      send({ type: 'join', planId, wantLock: canRequestLock });
+    };
   ws.onmessage = (ev) => {
     if (perfEnabled) perfMetrics.wsMessages += 1;
     let msg: any;
@@ -213,7 +231,7 @@ export const runRealtimeWsEffect = (deps: RealtimeWsDeps): void | (() => void) =
       const lockedBy = msg.lockedBy || null;
       setLockState({
         lockedBy,
-        mine: !!lockedBy && lockedBy.userId === user.id,
+        mine: !!lockedBy && lockedBy.userId === user?.id,
         grant: msg.grant || null,
         meta: msg.meta || null
       });
@@ -403,35 +421,35 @@ export const runRealtimeWsEffect = (deps: RealtimeWsDeps): void | (() => void) =
       setForceUnlockExecuteCommand({ requestId, action });
     }
   };
-  ws.onclose = () => {
-    if (closed) return;
-    closed = true;
-    if (!opened) {
-      realtimeDisabledRef.current = true;
-      setRealtimeDisabled(true);
-    }
-    setPresenceUsers([]);
-    setGlobalPresenceUsers([]);
-    setLockedPlans({});
-    setLockState({ lockedBy: null, mine: false, grant: null, meta: null });
-    wsRef.current = null;
-  };
-  ws.onerror = () => {
-    if (!opened) {
-      realtimeDisabledRef.current = true;
-      setRealtimeDisabled(true);
-    }
-    wsRef.current = null;
-  };
+    ws.onclose = () => {
+      setPresenceUsers([]);
+      setGlobalPresenceUsers([]);
+      setLockedPlans({});
+      setLockState({ lockedBy: null, mine: false, grant: null, meta: null });
+      if (wsRef.current === ws) wsRef.current = null;
+      if (closed) return;
+      // Transient drop (pre- or post-open): attempt bounded reconnection rather than
+      // permanently disabling realtime (which would silently un-gate the collaborative lock).
+      scheduleReconnect();
+    };
+    ws.onerror = () => {
+      // onclose fires after onerror and drives reconnection; just drop the stale ref here.
+      if (wsRef.current === ws) wsRef.current = null;
+    };
+  }
+
+  connect();
 
   return () => {
     closed = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    const ws = wsRef.current;
     try {
-      if (ws.readyState === WebSocket.OPEN) {
-        if (lockMineRef.current) send({ type: 'release_lock', planId });
-        send({ type: 'leave', planId });
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        if (lockMineRef.current) ws.send(JSON.stringify({ type: 'release_lock', planId }));
+        ws.send(JSON.stringify({ type: 'leave', planId }));
       }
-      closeSocketSafely(ws);
+      if (ws) closeSocketSafely(ws);
     } catch {
       // ignore
     } finally {
