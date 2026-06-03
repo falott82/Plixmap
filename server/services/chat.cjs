@@ -227,6 +227,33 @@ const createChatServices = (deps) => {
     return hiddenFor.has(String(userId));
   };
 
+  // Unread client-chat message counts per client, in ONE query (vs the previous
+  // per-client N+1). A LEFT JOIN to client_chat_reads applies each client's own
+  // lastReadAt threshold in SQL, so semantics are identical; per-row hidden-for-user
+  // filtering still happens in JS. Returns Map<clientId, count> with an entry for every
+  // allowed client (0 when none unread).
+  const computeClientUnreadCounts = (userId, allowedClientIds) => {
+    const ids = Array.from(allowedClientIds || [], (v) => String(v));
+    const out = new Map();
+    for (const cid of ids) out.set(cid, 0);
+    if (!ids.length) return out;
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT m.clientId AS clientId, m.deletedForJson AS deletedForJson
+         FROM client_chat_messages m
+         LEFT JOIN client_chat_reads r ON r.clientId = m.clientId AND r.userId = ?
+         WHERE m.clientId IN (${placeholders}) AND m.deleted = 0 AND m.createdAt > COALESCE(r.lastReadAt, 0)`
+      )
+      .all(String(userId), ...ids);
+    for (const row of rows || []) {
+      if (isMessageHiddenForUser(row, userId)) continue;
+      const cid = String(row.clientId);
+      out.set(cid, (out.get(cid) || 0) + 1);
+    }
+    return out;
+  };
+
   const normalizeChatMessageRow = (row) => {
     const deleted = Number(row.deleted) === 1;
     const attachments = deleted ? [] : normalizeChatAttachmentList(row.attachmentsJson);
@@ -600,6 +627,7 @@ const createChatServices = (deps) => {
     getNormalizedClientChatMessageById,
     getNormalizedDmChatMessageById,
     getLatestVisibleClientChatMessage,
+    computeClientUnreadCounts,
     getLatestVisibleDmChatMessage,
     findChatMessageById,
     emitDmMessageEvent,

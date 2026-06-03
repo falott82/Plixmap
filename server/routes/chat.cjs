@@ -50,15 +50,9 @@ const registerChatRoutes = (app, deps) => {
 
   app.get('/api/chat/unread', requireAuth, rateByUser('chat_unread', 60 * 1000, 120), (req, res) => {
     const allowedClientIds = Array.from(getChatClientIdsForUser(req.userId, isAdminReq(req)));
-    const reads = db.prepare('SELECT clientId, lastReadAt FROM client_chat_reads WHERE userId = ?').all(req.userId);
-    const lastReadAtByClient = new Map();
-    for (const row of reads || []) lastReadAtByClient.set(String(row.clientId), Number(row.lastReadAt) || 0);
-    const countStmt = db.prepare('SELECT id, deletedForJson FROM client_chat_messages WHERE clientId = ? AND deleted = 0 AND createdAt > ?');
     const out = {};
-    for (const clientId of allowedClientIds) {
-      const lastReadAt = lastReadAtByClient.get(clientId) || 0;
-      const rows = countStmt.all(clientId, lastReadAt);
-      out[clientId] = (rows || []).filter((row) => !chat.isMessageHiddenForUser(row, req.userId)).length;
+    for (const [clientId, count] of chat.computeClientUnreadCounts(req.userId, allowedClientIds)) {
+      out[clientId] = count;
     }
     try {
       const dmRows = db
@@ -85,17 +79,17 @@ const registerChatRoutes = (app, deps) => {
   app.get('/api/chat/unread-senders', requireAuth, (req, res) => {
     const senderIds = new Set();
     try {
-      const allowedClientIds = Array.from(getChatClientIdsForUser(req.userId, isAdminReq(req)));
-      const reads = db.prepare('SELECT clientId, lastReadAt FROM client_chat_reads WHERE userId = ?').all(req.userId);
-      const lastReadAtByClient = new Map();
-      for (const row of reads || []) lastReadAtByClient.set(String(row.clientId), Number(row.lastReadAt) || 0);
-      const stmt = db.prepare(
-        `SELECT userId, deletedForJson
-         FROM client_chat_messages
-         WHERE clientId = ? AND deleted = 0 AND createdAt > ? AND userId != ?`
-      );
-      for (const clientId of allowedClientIds) {
-        const rows = stmt.all(clientId, lastReadAtByClient.get(clientId) || 0, req.userId);
+      const allowedClientIds = Array.from(getChatClientIdsForUser(req.userId, isAdminReq(req))).map(String);
+      if (allowedClientIds.length) {
+        const placeholders = allowedClientIds.map(() => '?').join(',');
+        const rows = db
+          .prepare(
+            `SELECT m.userId AS userId, m.deletedForJson AS deletedForJson
+             FROM client_chat_messages m
+             LEFT JOIN client_chat_reads r ON r.clientId = m.clientId AND r.userId = ?
+             WHERE m.clientId IN (${placeholders}) AND m.deleted = 0 AND m.createdAt > COALESCE(r.lastReadAt, 0) AND m.userId != ?`
+          )
+          .all(req.userId, ...allowedClientIds, req.userId);
         for (const row of rows || []) {
           if (chat.isMessageHiddenForUser(row, req.userId)) continue;
           if (row?.userId) senderIds.add(String(row.userId));
@@ -135,16 +129,12 @@ const registerChatRoutes = (app, deps) => {
       });
     }
     const allowedClientIds = Array.from(getChatClientIdsForUser(meId, isAdminReq(req)));
-    const reads = db.prepare('SELECT clientId, lastReadAt FROM client_chat_reads WHERE userId = ?').all(meId);
-    const lastReadAtByClient = new Map();
-    for (const row of reads || []) lastReadAtByClient.set(String(row.clientId), Number(row.lastReadAt) || 0);
-    const clientUnreadStmt = db.prepare('SELECT id, deletedForJson FROM client_chat_messages WHERE clientId = ? AND deleted = 0 AND createdAt > ?');
+    const clientUnreadCounts = chat.computeClientUnreadCounts(meId, allowedClientIds);
 
     const clients = allowedClientIds
       .map((clientId) => {
         const meta = clientMetaById.get(String(clientId)) || { id: String(clientId), name: String(clientId), logoUrl: '' };
-        const lastReadAt = lastReadAtByClient.get(String(clientId)) || 0;
-        const unreadCount = (clientUnreadStmt.all(String(clientId), lastReadAt) || []).filter((row) => !chat.isMessageHiddenForUser(row, meId)).length;
+        const unreadCount = clientUnreadCounts.get(String(clientId)) || 0;
         const lastMessage = chat.getLatestVisibleClientChatMessage(clientId, meId);
         return {
           id: meta.id,
