@@ -22,6 +22,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "lint:eslint": "eslint \"src/**/*.{ts,tsx}\"",
+    "lint:eslint:ci": "eslint \"src/**/*.{ts,tsx}\" --max-warnings 415",
     "test": "node --test scripts/*.test.cjs",
     "test:unit": "vitest run",
     "test:e2e:smoke": "node scripts/e2e-smoke.cjs",
@@ -33,7 +35,7 @@
     "sensitive:check:staged": "node scripts/check-sensitive-data.cjs --staged",
     "hooks:install": "git config core.hooksPath .githooks",
     "release:check": "node scripts/check-release-version.cjs",
-    "quality:check": "npm run sensitive:check && npm run lint && npm run test && npm run test:unit && npm run build && npm run release:check",
+    "quality:check": "npm run sensitive:check && npm run lint && npm run lint:eslint:ci && npm run test && npm run test:unit && npm run build && npm run release:check",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "start": "node server/index.cjs"
   },
