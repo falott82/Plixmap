@@ -3310,7 +3310,7 @@ export const usePlanView = (planId: string) => {
     []
   );
 
-  const { startScaleMode, cancelScaleMode, handleScalePoint, applyScale } = usePlanScaleModeHandlers({
+  const { startScaleMode, cancelScaleMode, handleScalePoint, applyScale, clearScaleNow, requestClearScale, closeScaleModal } = usePlanScaleModeHandlers({
     isReadOnly,
     scaleMode,
     scaleDraft,
@@ -3340,35 +3340,9 @@ export const usePlanView = (planId: string) => {
     setQuotePoints,
     setQuotePointer,
     setPendingType,
-    setShowScaleLine
+    setShowScaleLine,
+    setClearScaleConfirmOpen
   });
-
-  const clearScaleNow = useCallback(() => {
-    if (!plan || isReadOnly) return;
-    markTouched();
-    updateFloorPlan(plan.id, { scale: undefined });
-    setScaleMode(false);
-    setScaleDraft(null);
-    setScaleDraftPointer(null);
-    setScaleMetersInput('');
-    setShowScaleLine(false);
-    setScaleModal(null);
-    dismissScaleToast();
-    push(t({ it: 'Scala rimossa', en: 'Scale cleared' }), 'success');
-  }, [dismissScaleToast, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
-
-  const requestClearScale = useCallback(() => {
-    if (!plan || isReadOnly) return;
-    setClearScaleConfirmOpen(true);
-  }, [isReadOnly, plan]);
-
-  const closeScaleModal = useCallback(() => {
-    setScaleModal(null);
-    setScaleDraft(null);
-    setScaleDraftPointer(null);
-    setScaleMetersInput('');
-    dismissScaleToast();
-  }, [dismissScaleToast]);
 
   const { startWallDraw, finishWallDraw } = usePlanWallDrawToggles({
     isReadOnly,
