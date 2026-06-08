@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Clock3, Copy, Crop, Eye, EyeOff, FileText, FolderOpen, History, Hourglass, Image as ImageIcon, Info, Mail, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, PhoneCall, Search, ShieldAlert, Star, Trash, Users } from 'lucide-react';
+import { BarChart3, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Clock3, Crop, FileText, FolderOpen, Hourglass, Info, Mail, Map as MapIcon, MapPinned, MessageCircle, Network, Paperclip, PhoneCall, Search, ShieldAlert, Star, Trash, Users } from 'lucide-react';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
@@ -49,6 +49,7 @@ import {
   resolveClientDuplicateSlot
 } from './SidebarTree.helpers';
 import { SidebarLockMenu } from './SidebarLockMenu';
+import { SidebarPlanMenu } from './SidebarPlanMenu';
 import { SidebarSiteSupportContactsModal } from './SidebarSiteSupportContactsModal';
 import { SidebarClientMeetingsModal } from './SidebarClientMeetingsModal';
 import { SidebarClientMeetingsRoomPreviewModal } from './SidebarClientMeetingsRoomPreviewModal';
@@ -1914,174 +1915,7 @@ const SidebarTree = () => {
 
       {(planMenu || clientMenu || siteMenu) ? (
         <div ref={menuRef} className="fixed z-50">
-          {planMenu ? (
-            <div
-              className="fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
-              style={{ top: planMenu.y, left: planMenu.x }}
-            >
-              <div className="px-2 pb-2 text-xs font-semibold uppercase text-slate-500">
-                {t({ it: 'Planimetria', en: 'Floor plan' })}
-              </div>
-              {parseCoords(planMenu.coords) ? (
-                <a
-                  href={`https://www.google.com/maps?q=${parseCoords(planMenu.coords)!.lat},${parseCoords(planMenu.coords)!.lng}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
-                >
-                  <MapPinned size={14} className="text-emerald-700" />
-                  {t({ it: 'Apri su Google Maps', en: 'View in Google Maps' })}
-                </a>
-              ) : null}
-              <button
-                onClick={() => {
-                  openCapacityDashboard(planMenu.planId, { clientId: planMenu.clientId, siteId: planMenu.siteId });
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
-                title={t({ it: 'Apri dashboard capienza', en: 'Open capacity dashboard' })}
-              >
-                <BarChart3 size={14} className="text-slate-600" />
-                {t({ it: 'Dashboard capienza', en: 'Capacity dashboard' })}
-              </button>
-              {planMenuPhotoCount ? (
-                <button
-                  onClick={() => {
-                    const to = `/plan/${planMenu.planId}?pg=1`;
-                    setPlanMenu(null);
-                    if (shouldPromptUnsavedPlanSwitch(planMenu.planId)) {
-                      requestSaveAndNavigate?.(to);
-                      return;
-                    }
-                    setSelectedPlan(planMenu.planId);
-                    navigate(to);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
-                >
-                  <ImageIcon size={14} className="text-slate-600" />
-                  {t({ it: 'Vedi galleria foto', en: 'View photo gallery' })}
-                </button>
-              ) : null}
-              <button
-                onClick={() => {
-                  toggleSecurityCardVisibilityForPlan(planMenu.planId);
-                  setPlanMenu(null);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
-                title={t({
-                  it: planMenuSecurityVisible ? 'Nascondi scheda sicurezza' : 'Mostra scheda sicurezza',
-                  en: planMenuSecurityVisible ? 'Hide safety card' : 'Show safety card'
-                })}
-              >
-                {planMenuSecurityVisible ? <EyeOff size={14} className="text-slate-600" /> : <Eye size={14} className="text-slate-600" />}
-                {t({
-                  it: planMenuSecurityVisible ? 'Nascondi scheda sicurezza' : 'Mostra scheda sicurezza',
-                  en: planMenuSecurityVisible ? 'Hide safety card' : 'Show safety card'
-                })}
-              </button>
-              <button
-                onClick={async () => {
-                  const next = defaultPlanId === planMenu.planId ? null : planMenu.planId;
-                  try {
-                    await updateMyProfile({ defaultPlanId: next });
-                    useAuthStore.setState((s) =>
-                      s.user
-                        ? { user: { ...(s.user as any), defaultPlanId: next }, permissions: s.permissions, hydrated: s.hydrated }
-                        : s
-                    );
-                  } finally {
-                    setPlanMenu(null);
-                  }
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
-              >
-                <Star size={14} className={defaultPlanId === planMenu.planId ? 'text-slate-400' : 'text-amber-500'} />
-                {defaultPlanId === planMenu.planId
-                  ? t({ it: 'Rimuovi preferita', en: 'Remove favorite' })
-                  : t({ it: 'Preferita', en: 'Favorite' })}
-              </button>
-              <button
-                onClick={() => {
-                  const to = `/plan/${planMenu.planId}?tm=1`;
-                  setPlanMenu(null);
-                  if (shouldPromptUnsavedPlanSwitch(planMenu.planId)) {
-                    requestSaveAndNavigate?.(to);
-                    return;
-                  }
-                  setSelectedPlan(planMenu.planId);
-                  navigate(to);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
-              >
-                <History size={14} className="text-slate-600" />
-                {t({ it: 'Time machine', en: 'Time machine' })}
-              </button>
-              <button
-                onClick={() => {
-                  const to = `/plan/${planMenu.planId}?pa=1`;
-                  setPlanMenu(null);
-                  if (shouldPromptUnsavedPlanSwitch(planMenu.planId)) {
-                    requestSaveAndNavigate?.(to);
-                    return;
-                  }
-                  setSelectedPlan(planMenu.planId);
-                  navigate(to);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
-              >
-                <Crop size={14} className="text-sky-700" />
-                {t({ it: 'Imposta area di stampa', en: 'Set print area' })}
-              </button>
-              {(() => {
-                const has = clients
-                  .flatMap((c) => c.sites.flatMap((s) => s.floorPlans))
-                  .find((p) => p.id === planMenu.planId)?.printArea;
-                if (!has) return null;
-                return (
-                  <button
-                    onClick={() => {
-                      updateFloorPlan(planMenu.planId, { printArea: undefined });
-                      setPlanMenu(null);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
-                  >
-                    <Crop size={14} className="text-slate-500" />
-                    {t({ it: 'Rimuovi area di stampa', en: 'Clear print area' })}
-                  </button>
-                );
-              })()}
-              {user?.isAdmin ? (
-                <button
-                  onClick={() => {
-                    const label =
-                      clients
-                        .flatMap((c) => c.sites.flatMap((s) => s.floorPlans))
-                        .find((p) => p.id === planMenu.planId)?.name || planMenu.planId;
-                    setClonePlan({ planId: planMenu.planId, name: label });
-                    setPlanMenu(null);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
-                >
-                  <Copy size={14} className="text-slate-600" />
-                  {t({ it: 'Duplica', en: 'Duplicate' })}
-                </button>
-              ) : null}
-              {user?.isAdmin ? (
-                <button
-                  onClick={() => {
-                    const label = clients
-                      .flatMap((c) => c.sites.flatMap((s) => s.floorPlans))
-                      .find((p) => p.id === planMenu.planId)?.name;
-                    setConfirmDelete({ kind: 'plan', id: planMenu.planId, label: label || planMenu.planId });
-                    setPlanMenu(null);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-rose-700 hover:bg-rose-50"
-                >
-                  <Trash size={14} />
-                  {t({ it: 'Elimina planimetria', en: 'Delete floor plan' })}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
+          <SidebarPlanMenu {...{ planMenu, setPlanMenu, planMenuPhotoCount, planMenuSecurityVisible, defaultPlanId, clients, user, openCapacityDashboard, shouldPromptUnsavedPlanSwitch, requestSaveAndNavigate, setSelectedPlan, navigate, toggleSecurityCardVisibilityForPlan, updateMyProfile, updateFloorPlan, setClonePlan, setConfirmDelete, t }} />
 
           {clientMenu ? (
             <div
