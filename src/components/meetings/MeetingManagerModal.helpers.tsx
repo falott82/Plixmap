@@ -286,3 +286,58 @@ export const resolveRoomServices = (equipment: string[]) => {
 };
 
 export const requiredAsterisk = <span className="ml-0.5 text-rose-600">*</span>;
+
+// Build the room-preview floor-plan geometry (rooms + viewBox + image frame)
+// for the meeting manager preview. Pure given the preview target, site and
+// client. Extracted from MeetingManagerModal.
+export const computeMeetingRoomPreviewData = (roomPreview: any, selectedSite: any, selectedClient: any) => {
+  if (!roomPreview || !selectedSite) return null;
+  const plan = (selectedSite.floorPlans || []).find((entry: any) => String(entry.id) === String(roomPreview.floorPlanId));
+  if (!plan) return null;
+  const rooms = (plan.rooms || [])
+    .map((room: any) => {
+      const points = roomPolygon(room);
+      return {
+        id: String(room?.id || ''),
+        name: String(room?.name || ''),
+        meetingRoom: !!(room as any)?.meetingRoom,
+        points,
+        center: polygonCenter(points)
+      };
+    })
+    .filter((room: any) => room.id && room.points.length >= 3);
+  if (!rooms.length) return null;
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const room of rooms) {
+    for (const point of room.points) {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
+  }
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const pad = Math.max(20, Math.min(width, height) * 0.05);
+  return {
+    clientName: selectedClient?.shortName || selectedClient?.name || '',
+    siteName: selectedSite.name || '',
+    planName: plan.name || '',
+    planImageUrl: String((plan as any)?.imageUrl || ''),
+    planWidth: Number((plan as any)?.width || 0) > 0 ? Number((plan as any)?.width || 0) : width + pad * 2,
+    planHeight: Number((plan as any)?.height || 0) > 0 ? Number((plan as any)?.height || 0) : height + pad * 2,
+    planImageX: Number((plan as any)?.width || 0) > 0 ? 0 : minX - pad,
+    planImageY: Number((plan as any)?.height || 0) > 0 ? 0 : minY - pad,
+    roomId: roomPreview.roomId,
+    rooms,
+    viewBox: (() => {
+      const imgW = Number((plan as any)?.width || 0);
+      const imgH = Number((plan as any)?.height || 0);
+      if (imgW > 0 && imgH > 0) return `0 0 ${imgW} ${imgH}`;
+      return `${minX - pad} ${minY - pad} ${width + pad * 2} ${height + pad * 2}`;
+    })()
+  };
+};

@@ -51,8 +51,9 @@ import {
   ExternalParticipant, SelectedParticipant, NeedKey, KioskMeetingLanguage,
   NEED_CONFIG, KIOSK_LANG_OPTIONS, todayIso, defaultStartTime, addMinutesTime, formatIsoLocalDay,
   timeToMinutes, normalizeTypedTime, toLocalTsFromDayAndTime,
-  latestSiteScheduleEndTime, normalizeEq, roomPolygon, polygonCenter,
-  buildMeetingRoomSnapshotPng, resolveRoomServices, requiredAsterisk
+  latestSiteScheduleEndTime, normalizeEq,
+  buildMeetingRoomSnapshotPng, resolveRoomServices, requiredAsterisk,
+  computeMeetingRoomPreviewData
 } from './MeetingManagerModal.helpers';
 import { ParticipantsOverlay, EarliestSuggestionsOverlay, ApprovalOverlay, RoomPreviewOverlay } from './MeetingManagerModalOverlays';
 
@@ -276,57 +277,10 @@ const MeetingManagerModal = ({
     }
   }, [endTime, open, selectedSiteMaxEndTime, startTime]);
 
-  const previewData = useMemo(() => {
-    if (!roomPreview || !selectedSite) return null;
-    const plan = (selectedSite.floorPlans || []).find((entry) => String(entry.id) === String(roomPreview.floorPlanId));
-    if (!plan) return null;
-    const rooms = (plan.rooms || [])
-      .map((room) => {
-        const points = roomPolygon(room);
-        return {
-          id: String(room?.id || ''),
-          name: String(room?.name || ''),
-          meetingRoom: !!(room as any)?.meetingRoom,
-          points,
-          center: polygonCenter(points)
-        };
-      })
-      .filter((room) => room.id && room.points.length >= 3);
-    if (!rooms.length) return null;
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    for (const room of rooms) {
-      for (const point of room.points) {
-        minX = Math.min(minX, point.x);
-        minY = Math.min(minY, point.y);
-        maxX = Math.max(maxX, point.x);
-        maxY = Math.max(maxY, point.y);
-      }
-    }
-    const width = Math.max(1, maxX - minX);
-    const height = Math.max(1, maxY - minY);
-    const pad = Math.max(20, Math.min(width, height) * 0.05);
-    return {
-      clientName: selectedClient?.shortName || selectedClient?.name || '',
-      siteName: selectedSite.name || '',
-      planName: plan.name || '',
-      planImageUrl: String((plan as any)?.imageUrl || ''),
-      planWidth: Number((plan as any)?.width || 0) > 0 ? Number((plan as any)?.width || 0) : width + pad * 2,
-      planHeight: Number((plan as any)?.height || 0) > 0 ? Number((plan as any)?.height || 0) : height + pad * 2,
-      planImageX: Number((plan as any)?.width || 0) > 0 ? 0 : minX - pad,
-      planImageY: Number((plan as any)?.height || 0) > 0 ? 0 : minY - pad,
-      roomId: roomPreview.roomId,
-      rooms,
-      viewBox: (() => {
-        const imgW = Number((plan as any)?.width || 0);
-        const imgH = Number((plan as any)?.height || 0);
-        if (imgW > 0 && imgH > 0) return `0 0 ${imgW} ${imgH}`;
-        return `${minX - pad} ${minY - pad} ${width + pad * 2} ${height + pad * 2}`;
-      })()
-    };
-  }, [roomPreview, selectedClient?.name, selectedClient?.shortName, selectedSite]);
+  const previewData = useMemo(
+    () => computeMeetingRoomPreviewData(roomPreview, selectedSite, selectedClient),
+    [roomPreview, selectedClient?.name, selectedClient?.shortName, selectedSite]
+  );
 
   useEffect(() => {
     if (!open) return;
