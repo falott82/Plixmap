@@ -405,3 +405,25 @@ export const computeClientMeetingsTimelineMeta = (
     const showNowLine = selectedDay === nowDay && nowMinutes >= minMinutes && nowMinutes <= maxMinutes;
     return { minMinutes, maxMinutes, hours, nowMinutes, showNowLine };
 };
+
+export const buildClientMeetingsTimelineRows = (
+  responses: Array<{ site: any; rooms: any[] }>
+): any[] =>
+  responses
+    .flatMap(({ site, rooms }) =>
+      rooms
+        .filter((room) => room.isMeetingRoom)
+        .map((room) => ({
+          siteId: String(site.id),
+          siteName: String(site.name || ''),
+          roomId: String(room.roomId || ''),
+          roomName: String(room.roomName || ''),
+          capacity: Number(room.capacity || 0),
+          floorPlanName: String((room as any).floorPlanName || ''),
+          bookings: Array.isArray(room.bookings) ? room.bookings : []
+        }))
+    )
+    .sort((a, b) =>
+      a.siteName.localeCompare(b.siteName, undefined, { sensitivity: 'base' }) ||
+      a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' })
+    );

@@ -40,7 +40,8 @@ import {
   computeClientMeetingCheckInEntries,
   computeClientMeetingsPreviewData,
   resolveClientDuplicateSlot,
-  computeClientMeetingsTimelineMeta
+  computeClientMeetingsTimelineMeta,
+  buildClientMeetingsTimelineRows
 } from './SidebarTree.helpers';
 import { SidebarLockMenu } from './SidebarLockMenu';
 import { SidebarPlanMenu } from './SidebarPlanMenu';
@@ -838,24 +839,7 @@ const SidebarTree = () => {
           };
         })
       );
-      const rows: ClientMeetingsTimelineRow[] = responses
-        .flatMap(({ site, rooms }) =>
-          rooms
-            .filter((room) => room.isMeetingRoom)
-            .map((room) => ({
-              siteId: String(site.id),
-              siteName: String(site.name || ''),
-              roomId: String(room.roomId || ''),
-              roomName: String(room.roomName || ''),
-              capacity: Number(room.capacity || 0),
-              floorPlanName: String((room as any).floorPlanName || ''),
-              bookings: Array.isArray(room.bookings) ? room.bookings : []
-            }))
-        )
-        .sort((a, b) =>
-          a.siteName.localeCompare(b.siteName, undefined, { sensitivity: 'base' }) ||
-          a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' })
-        );
+      const rows: ClientMeetingsTimelineRow[] = buildClientMeetingsTimelineRows(responses);
       setClientMeetingsRows(rows);
       const mergedCheckins: MeetingCheckInMapByMeetingId = {};
       const mergedCheckInTimestamps: MeetingCheckInTimestampsByMeetingId = {};
