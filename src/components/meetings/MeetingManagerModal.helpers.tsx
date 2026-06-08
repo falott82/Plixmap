@@ -383,3 +383,53 @@ export const computeParticipantMeetingConflicts = (
   }
   return out;
 };
+
+// Earliest free start per equipment-compatible room from a base candidate ts.
+// Pure; the required-needs config is passed in. Extracted from MeetingManagerModal.
+export const buildRoomSuggestionsForRows = (
+  rows: any[],
+  baseCandidateTs: number,
+  requiredNeeds: Array<{ match: string[] }>
+): Array<{ roomId: string; roomName: string; floorPlanName: string; startAt: number }> => {
+  const compatibleRows = rows.filter((room) => {
+    const normalized = new Set((room.equipment || []).map((entry: any) => normalizeEq(entry)));
+    return requiredNeeds.every((need) => need.match.some((label) => normalized.has(normalizeEq(label))));
+  });
+  return compatibleRows
+    .map((room) => {
+      let roomCandidate = baseCandidateTs;
+      const sorted = [...(room.bookings || [])].sort(
+        (a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0)
+      );
+      for (const b of sorted) {
+        const bs = Number((b as any).effectiveStartAt ?? b.startAt ?? 0);
+        const be = Number((b as any).effectiveEndAt ?? b.endAt ?? 0);
+        if (roomCandidate < bs) break;
+        if (roomCandidate >= bs && roomCandidate < be) roomCandidate = be;
+      }
+      return {
+        roomId: String(room.roomId || ''),
+        roomName: String(room.roomName || '-'),
+        floorPlanName: String(room.floorPlanName || ''),
+        startAt: Number(roomCandidate)
+      };
+    })
+    .filter((row) => !!row.roomId)
+    .sort((a, b) => a.startAt - b.startAt || a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' }));
+};
+
+// Earliest free start for one room from a base candidate ts. Pure.
+export const findSingleRoomEarliestForRows = (rows: any[], roomId: string, baseCandidateTs: number): number => {
+  let roomCandidate = baseCandidateTs;
+  const sorted = [...rows]
+    .filter((r) => r.roomId === roomId)
+    .flatMap((r) => r.bookings || [])
+    .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0));
+  for (const b of sorted) {
+    const bs = Number((b as any).effectiveStartAt ?? b.startAt ?? 0);
+    const be = Number((b as any).effectiveEndAt ?? b.endAt ?? 0);
+    if (roomCandidate < bs) break;
+    if (roomCandidate >= bs && roomCandidate < be) roomCandidate = be;
+  }
+  return roomCandidate;
+};

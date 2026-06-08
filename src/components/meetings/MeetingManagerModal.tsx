@@ -53,7 +53,8 @@ import {
   timeToMinutes, normalizeTypedTime, toLocalTsFromDayAndTime,
   latestSiteScheduleEndTime, normalizeEq,
   buildMeetingRoomSnapshotPng, resolveRoomServices, requiredAsterisk,
-  computeMeetingRoomPreviewData, computeParticipantMeetingConflicts
+  computeMeetingRoomPreviewData, computeParticipantMeetingConflicts,
+  buildRoomSuggestionsForRows, findSingleRoomEarliestForRows
 } from './MeetingManagerModal.helpers';
 import { ParticipantsOverlay, EarliestSuggestionsOverlay, ApprovalOverlay, RoomPreviewOverlay } from './MeetingManagerModalOverlays';
 
@@ -732,49 +733,6 @@ const MeetingManagerModal = ({
   };
 
   const setEarliestPossibleTime = async () => {
-    const buildRoomSuggestionsForRows = (rows: typeof overviewRows, baseCandidateTs: number) => {
-      const compatibleRows = rows.filter((room) => {
-        const normalized = new Set((room.equipment || []).map((entry) => normalizeEq(entry)));
-        return requiredNeeds.every((need) => need.match.some((label) => normalized.has(normalizeEq(label))));
-      });
-      return compatibleRows
-        .map((room) => {
-          let roomCandidate = baseCandidateTs;
-          const sorted = [...(room.bookings || [])].sort(
-            (a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0)
-          );
-          for (const b of sorted) {
-            const bs = Number((b as any).effectiveStartAt ?? b.startAt ?? 0);
-            const be = Number((b as any).effectiveEndAt ?? b.endAt ?? 0);
-            if (roomCandidate < bs) break;
-            if (roomCandidate >= bs && roomCandidate < be) roomCandidate = be;
-          }
-          return {
-            roomId: String(room.roomId || ''),
-            roomName: String(room.roomName || '-'),
-            floorPlanName: String(room.floorPlanName || ''),
-            startAt: Number(roomCandidate)
-          };
-        })
-        .filter((row) => !!row.roomId)
-        .sort((a, b) => a.startAt - b.startAt || a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' }));
-    };
-
-    const findSingleRoomEarliestForRows = (rows: typeof overviewRows, roomId: string, baseCandidateTs: number) => {
-      let roomCandidate = baseCandidateTs;
-      const sorted = [...rows]
-        .filter((r) => r.roomId === roomId)
-        .flatMap((r) => r.bookings || [])
-        .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0));
-      for (const b of sorted) {
-        const bs = Number((b as any).effectiveStartAt ?? b.startAt ?? 0);
-        const be = Number((b as any).effectiveEndAt ?? b.endAt ?? 0);
-        if (roomCandidate < bs) break;
-        if (roomCandidate >= bs && roomCandidate < be) roomCandidate = be;
-      }
-      return roomCandidate;
-    };
-
     const now = new Date();
     const selectedDayTs = toLocalTsFromDayAndTime(day, '00:00');
     if (selectedDayTs === null) return;
@@ -806,7 +764,7 @@ const MeetingManagerModal = ({
         }
       }
 
-      const suggestions = buildRoomSuggestionsForRows(rowsForDay, baseCandidateTs);
+      const suggestions = buildRoomSuggestionsForRows(rowsForDay, baseCandidateTs, requiredNeeds);
       if (!suggestions.length) continue;
       if (step === 'browse') {
         const firstTs = suggestions[0]?.startAt;
