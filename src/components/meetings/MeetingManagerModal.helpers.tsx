@@ -433,3 +433,56 @@ export const findSingleRoomEarliestForRows = (rows: any[], roomId: string, baseC
   }
   return roomCandidate;
 };
+
+// Adjacent bookings + free/borrowable setup-buffer minutes around the selected
+// slot for a room. Pure. Extracted from MeetingManagerModal.
+export const computeSetupNeighbors = (
+  selectedRoom: any,
+  selectedRoomSortedBookings: any[],
+  selectedSlotStartTs: number | null,
+  selectedSlotEndTs: number | null,
+  selectedMeetingDurationMin: number
+): { prev: any; next: any; freeBefore: number; freeAfter: number; maxBefore: number; maxAfter: number } => {
+  if (!selectedRoom || selectedSlotStartTs === null || selectedSlotEndTs === null) {
+    return { prev: null, next: null, freeBefore: 60, freeAfter: 60, maxBefore: 60, maxAfter: 60 };
+  }
+  const prev = [...selectedRoomSortedBookings]
+    .filter((b) => Number((b as any).effectiveEndAt ?? b.endAt ?? 0) <= selectedSlotStartTs)
+    .sort((a, b) => Number((b as any).effectiveEndAt ?? b.endAt ?? 0) - Number((a as any).effectiveEndAt ?? a.endAt ?? 0))[0] || null;
+  const next =
+    selectedRoomSortedBookings
+      .filter((b) => Number((b as any).effectiveStartAt ?? b.startAt ?? 0) >= selectedSlotEndTs)
+      .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0))[0] || null;
+  const prevBoundary = prev ? Number((prev as any).effectiveEndAt ?? prev.endAt ?? 0) : null;
+  const nextBoundary = next ? Number((next as any).effectiveStartAt ?? next.startAt ?? 0) : null;
+  const freeBefore = prevBoundary === null ? 60 : Math.max(0, Math.min(60, Math.floor((selectedSlotStartTs - prevBoundary) / 60000)));
+  const freeAfter = nextBoundary === null ? 60 : Math.max(0, Math.min(60, Math.floor((nextBoundary - selectedSlotEndTs) / 60000)));
+  const borrowableFromMeeting = Math.max(0, (selectedMeetingDurationMin || 0) - 1);
+  const maxBefore = Math.max(0, Math.min(60, freeBefore + borrowableFromMeeting));
+  const maxAfter = Math.max(0, Math.min(60, freeAfter + borrowableFromMeeting));
+  return { prev, next, freeBefore, freeAfter, maxBefore, maxAfter };
+};
+
+// Pre/meeting/post buffer bar segments (minutes + percentages). Pure.
+export const computeTimingBarSegments = (
+  startTime: string,
+  endTime: string,
+  bufferBefore: number,
+  bufferAfter: number
+): { preMin: number; meetingMin: number; postMin: number; total: number; prePct: number; meetingPct: number; postPct: number } => {
+  const startMin = timeToMinutes(startTime);
+  const endMin = timeToMinutes(endTime);
+  const meetingMin = startMin !== null && endMin !== null ? Math.max(0, endMin - startMin) : 0;
+  const preMin = Math.max(0, Number(bufferBefore) || 0);
+  const postMin = Math.max(0, Number(bufferAfter) || 0);
+  const total = Math.max(1, preMin + meetingMin + postMin);
+  return {
+    preMin,
+    meetingMin,
+    postMin,
+    total,
+    prePct: (preMin / total) * 100,
+    meetingPct: (meetingMin / total) * 100,
+    postPct: (postMin / total) * 100
+  };
+};

@@ -54,7 +54,8 @@ import {
   latestSiteScheduleEndTime, normalizeEq,
   buildMeetingRoomSnapshotPng, resolveRoomServices, requiredAsterisk,
   computeMeetingRoomPreviewData, computeParticipantMeetingConflicts,
-  buildRoomSuggestionsForRows, findSingleRoomEarliestForRows
+  buildRoomSuggestionsForRows, findSingleRoomEarliestForRows,
+  computeSetupNeighbors, computeTimingBarSegments
 } from './MeetingManagerModal.helpers';
 import { ParticipantsOverlay, EarliestSuggestionsOverlay, ApprovalOverlay, RoomPreviewOverlay } from './MeetingManagerModalOverlays';
 
@@ -209,33 +210,10 @@ const MeetingManagerModal = ({
     () => [...(selectedRoom?.bookings || [])].sort((a, b) => Number(a.startAt) - Number(b.startAt)),
     [selectedRoom?.bookings]
   );
-  const setupNeighbors = useMemo(() => {
-    if (!selectedRoom || selectedSlotStartTs === null || selectedSlotEndTs === null) {
-      return {
-        prev: null as MeetingBooking | null,
-        next: null as MeetingBooking | null,
-        freeBefore: 60,
-        freeAfter: 60,
-        maxBefore: 60,
-        maxAfter: 60
-      };
-    }
-    const prev = [...selectedRoomSortedBookings]
-      .filter((b) => Number((b as any).effectiveEndAt ?? b.endAt ?? 0) <= selectedSlotStartTs)
-      .sort((a, b) => Number((b as any).effectiveEndAt ?? b.endAt ?? 0) - Number((a as any).effectiveEndAt ?? a.endAt ?? 0))[0] || null;
-    const next =
-      selectedRoomSortedBookings
-        .filter((b) => Number((b as any).effectiveStartAt ?? b.startAt ?? 0) >= selectedSlotEndTs)
-        .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0))[0] || null;
-    const prevBoundary = prev ? Number((prev as any).effectiveEndAt ?? prev.endAt ?? 0) : null;
-    const nextBoundary = next ? Number((next as any).effectiveStartAt ?? next.startAt ?? 0) : null;
-    const freeBefore = prevBoundary === null ? 60 : Math.max(0, Math.min(60, Math.floor((selectedSlotStartTs - prevBoundary) / 60000)));
-    const freeAfter = nextBoundary === null ? 60 : Math.max(0, Math.min(60, Math.floor((nextBoundary - selectedSlotEndTs) / 60000)));
-    const borrowableFromMeeting = Math.max(0, (selectedMeetingDurationMin || 0) - 1);
-    const maxBefore = Math.max(0, Math.min(60, freeBefore + borrowableFromMeeting));
-    const maxAfter = Math.max(0, Math.min(60, freeAfter + borrowableFromMeeting));
-    return { prev, next, freeBefore, freeAfter, maxBefore, maxAfter };
-  }, [selectedMeetingDurationMin, selectedRoom, selectedRoomSortedBookings, selectedSlotEndTs, selectedSlotStartTs]);
+  const setupNeighbors = useMemo(
+    () => computeSetupNeighbors(selectedRoom, selectedRoomSortedBookings, selectedSlotStartTs, selectedSlotEndTs, selectedMeetingDurationMin),
+    [selectedMeetingDurationMin, selectedRoom, selectedRoomSortedBookings, selectedSlotEndTs, selectedSlotStartTs]
+  );
   const nextMeetingSameDay = useMemo(() => {
     if (!selectedRoom || selectedSlotEndTs === null) return null;
     return (
@@ -244,23 +222,10 @@ const MeetingManagerModal = ({
         .sort((a, b) => Number(a.startAt) - Number(b.startAt))[0] || null
     );
   }, [selectedRoom, selectedRoomSortedBookings, selectedSlotEndTs]);
-  const timingBarSegments = useMemo(() => {
-    const startMin = timeToMinutes(startTime);
-    const endMin = timeToMinutes(endTime);
-    const meetingMin = startMin !== null && endMin !== null ? Math.max(0, endMin - startMin) : 0;
-    const preMin = Math.max(0, Number(bufferBefore) || 0);
-    const postMin = Math.max(0, Number(bufferAfter) || 0);
-    const total = Math.max(1, preMin + meetingMin + postMin);
-    return {
-      preMin,
-      meetingMin,
-      postMin,
-      total,
-      prePct: (preMin / total) * 100,
-      meetingPct: (meetingMin / total) * 100,
-      postPct: (postMin / total) * 100
-    };
-  }, [bufferAfter, bufferBefore, endTime, startTime]);
+  const timingBarSegments = useMemo(
+    () => computeTimingBarSegments(startTime, endTime, bufferBefore, bufferAfter),
+    [bufferAfter, bufferBefore, endTime, startTime]
+  );
 
   useEffect(() => {
     if (!open || !selectedSiteMaxEndTime) return;
