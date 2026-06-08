@@ -191,3 +191,48 @@ export const normalizeGoogleMapsCoordsInput = (value: string) => {
   return raw;
 };
 
+
+// Search-filter (optionally hiding expired) + sort the security documents.
+// Pure; the status classifier is passed in. Extracted from ObjectModal.
+export const sortFilterSecurityDocuments = (
+  securityDocuments: any[],
+  search: string,
+  hideExpired: boolean,
+  sort: { key: SecurityDocsSortKey; dir: 'asc' | 'desc' },
+  getDocumentStatus: (doc: { archived?: boolean; validUntil?: string }) => 'archived' | 'expired' | 'warning' | 'ok' | 'none'
+): any[] => {
+  const q = search.trim().toLowerCase();
+  const base = (securityDocuments || []).filter((doc) => {
+    if (hideExpired && getDocumentStatus(doc) === 'expired') return false;
+    if (!q) return true;
+    const hay = `${doc.name || ''} ${doc.fileName || ''} ${doc.notes || ''}`.toLowerCase();
+    return hay.includes(q);
+  });
+  const statusRank: Record<'archived' | 'expired' | 'warning' | 'ok' | 'none', number> = {
+    ok: 0,
+    warning: 1,
+    expired: 2,
+    none: 3,
+    archived: 4
+  };
+  const dateMs = (value?: string) => parseDateOnly(value)?.getTime() || 0;
+  return base.slice().sort((a, b) => {
+    let cmp = 0;
+    switch (sort.key) {
+      case 'name':
+        cmp = `${a.name || ''}`.localeCompare(`${b.name || ''}`);
+        break;
+      case 'uploadedAt':
+        cmp = (new Date(a.uploadedAt || 0).getTime() || 0) - (new Date(b.uploadedAt || 0).getTime() || 0);
+        break;
+      case 'validUntil':
+        cmp = dateMs(a.validUntil) - dateMs(b.validUntil);
+        break;
+      case 'status':
+        cmp = statusRank[getDocumentStatus(a)] - statusRank[getDocumentStatus(b)];
+        break;
+    }
+    if (cmp === 0) cmp = `${a.name || ''}`.localeCompare(`${b.name || ''}`);
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
+};

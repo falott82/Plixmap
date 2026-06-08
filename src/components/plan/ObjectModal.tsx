@@ -10,7 +10,7 @@ import { isSecurityTypeId } from '../../store/security';
 import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import { isDeskType } from './deskTypes';
 
-import { Props, normalizeRackName, SecurityDocsSortKey, parseDateOnly, normalizeGoogleMapsCoordsInput } from './ObjectModal.helpers';
+import { Props, normalizeRackName, SecurityDocsSortKey, parseDateOnly, normalizeGoogleMapsCoordsInput, sortFilterSecurityDocuments } from './ObjectModal.helpers';
 import { SecurityDocumentsModal, SecurityHistoryModal, WifiCatalogSearchModal } from './ObjectModalModals';
 const ObjectModal = ({
   open,
@@ -821,43 +821,10 @@ const ObjectModal = ({
       return { key, dir: defaultDir };
     });
   };
-  const securityDocumentsRows = useMemo(() => {
-    const q = securityDocsSearch.trim().toLowerCase();
-    const base = securityDocuments.filter((doc) => {
-      if (securityDocsHideExpired && getDocumentStatus(doc) === 'expired') return false;
-      if (!q) return true;
-      const hay = `${doc.name || ''} ${doc.fileName || ''} ${doc.notes || ''}`.toLowerCase();
-      return hay.includes(q);
-    });
-    const statusRank: Record<ReturnType<typeof getDocumentStatus>, number> = {
-      ok: 0,
-      warning: 1,
-      expired: 2,
-      none: 3,
-      archived: 4
-    };
-    const dateMs = (value?: string) => parseDateOnly(value)?.getTime() || 0;
-    const sorted = base.slice().sort((a, b) => {
-      let cmp = 0;
-      switch (securityDocsSort.key) {
-        case 'name':
-          cmp = `${a.name || ''}`.localeCompare(`${b.name || ''}`);
-          break;
-        case 'uploadedAt':
-          cmp = (new Date(a.uploadedAt || 0).getTime() || 0) - (new Date(b.uploadedAt || 0).getTime() || 0);
-          break;
-        case 'validUntil':
-          cmp = dateMs(a.validUntil) - dateMs(b.validUntil);
-          break;
-        case 'status':
-          cmp = statusRank[getDocumentStatus(a)] - statusRank[getDocumentStatus(b)];
-          break;
-      }
-      if (cmp === 0) cmp = `${a.name || ''}`.localeCompare(`${b.name || ''}`);
-      return securityDocsSort.dir === 'asc' ? cmp : -cmp;
-    });
-    return sorted;
-  }, [getDocumentStatus, securityDocsHideExpired, securityDocsSearch, securityDocsSort.dir, securityDocsSort.key, securityDocuments]);
+  const securityDocumentsRows = useMemo(
+    () => sortFilterSecurityDocuments(securityDocuments, securityDocsSearch, securityDocsHideExpired, securityDocsSort, getDocumentStatus),
+    [getDocumentStatus, securityDocsHideExpired, securityDocsSearch, securityDocsSort, securityDocuments]
+  );
 
   const createNewSecurityVerification = () => {
     if (readOnly) return;
