@@ -49,7 +49,7 @@ import { getWallTypeColor } from '../../utils/wallColors';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { isSecurityTypeId } from '../../store/security';
 
-import { Point, DoorRegistrySortKey, DoorRegistryRow, roomPolygon, polygonCentroid, getDoorAnchor, computeDoorMapPreviewData } from './ObjectTypesPanel.helpers';
+import { Point, DoorRegistrySortKey, DoorRegistryRow, roomPolygon, polygonCentroid, getDoorAnchor, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS } from './ObjectTypesPanel.helpers';
 import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal } from './ObjectTypesPanelModals';
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
@@ -433,84 +433,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   }, [doorRowsRaw, doorSort.dir, doorSort.key, lang, q]);
   const doorMapPreviewData = useMemo(() => computeDoorMapPreviewData(doorMapPreviewRow), [doorMapPreviewRow]);
 
-  const iconOptionsAll: IconName[] = [
-    'user',
-    'userCheck',
-    'printer',
-    'server',
-    'wifi',
-    'radio',
-    'tv',
-    'desktop',
-    'laptop',
-    'camera',
-    'intercom',
-    'videoIntercom',
-    'scanner',
-    'mic',
-    'router',
-    'switch',
-    'phone',
-    'tablet',
-    'shield',
-    'key',
-    'database',
-    'cctv',
-    'lightbulb',
-    'plug',
-    'plugZap',
-    'wrench',
-    'cpu',
-    'hardDrive',
-    'bell',
-    'lock',
-    'unlock',
-    'thermometer',
-    'fan',
-    'airVent',
-    'wind',
-    'snowflake',
-    'thermometerSnowflake',
-    'thermometerSun',
-    'droplets',
-    'flame',
-    'gauge',
-    'power',
-    'zap',
-    'battery',
-    'batteryCharging',
-    'batteryFull',
-    'batteryLow',
-    'network',
-    'wifiOff',
-    'cable',
-    'lockKeyhole',
-    'badgeCheck',
-    'shieldCheck',
-    'shieldAlert',
-    'bellRing',
-    'videoOff',
-    'micOff',
-    'volume2',
-    'headphones',
-    'users',
-    'usersRound',
-    'assemblyPoint',
-    'userSearch',
-    'car',
-    'truck',
-    'bike',
-    'bus',
-    'train',
-    'deskRound',
-    'deskSquare',
-    'deskRect',
-    'deskDouble',
-    'deskLong',
-    'deskTrapezoid',
-    'deskL',
-    'deskLReverse'
-  ];
+  const iconOptionsAll: IconName[] = OBJECT_TYPE_ICON_OPTIONS;
   const iconOptions = useMemo(() => {
     const builtinIcons = new Set(
       (objectTypes || [])
