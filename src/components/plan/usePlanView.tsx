@@ -138,6 +138,7 @@ import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
 import { usePlanWallTypeModalEffects } from './usePlanWallTypeModalEffects';
+import { useSyncedRef } from './useSyncedRef';
 import { usePlanPopoverEffects } from './usePlanPopoverEffects';
 import { usePlanHelpToastEffects } from './usePlanHelpToastEffects';
 import { usePlanDeeplinkEffects } from './usePlanDeeplinkEffects';
@@ -773,15 +774,9 @@ export const usePlanView = (planId: string) => {
   const scaleToastIdRef = useRef<string | number | null>(null);
   const wallToastIdRef = useRef<string | number | null>(null);
   const measureToastIdRef = useRef<string | number | null>(null);
-  useEffect(() => {
-    measurePointsRef.current = measurePoints;
-  }, [measurePoints]);
-  useEffect(() => {
-    measureClosedRef.current = measureClosed;
-  }, [measureClosed]);
-  useEffect(() => {
-    measureFinishedRef.current = measureFinished;
-  }, [measureFinished]);
+  useSyncedRef(measurePointsRef, measurePoints);
+  useSyncedRef(measureClosedRef, measureClosed);
+  useSyncedRef(measureFinishedRef, measureFinished);
   const toolMode: 'scale' | 'wall' | 'quote' | 'measure' | null = scaleMode ? 'scale' : wallDrawMode ? 'wall' : quoteMode ? 'quote' : measureMode ? 'measure' : null;
   const [newRoomMenuOpen, setNewRoomMenuOpen] = useState(false);
   const [highlightRoom, setHighlightRoom] = useState<{ roomId: string; until: number } | null>(null);
@@ -888,13 +883,9 @@ export const usePlanView = (planId: string) => {
     });
   }, []);
 
-  useEffect(() => {
-    zoomRef.current = zoom;
-  }, [zoom]);
+  useSyncedRef(zoomRef, zoom);
   const panRef = useRef(pan);
-  useEffect(() => {
-    panRef.current = pan;
-  }, [pan]);
+  useSyncedRef(panRef, pan);
   const handleMapMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
   }, []);
@@ -913,9 +904,7 @@ export const usePlanView = (planId: string) => {
     const p = panRef.current || { x: 0, y: 0 };
     return { x: (localX - p.x) / z, y: (localY - p.y) / z };
   }, []);
-  useEffect(() => {
-    wallDraftPointsRef.current = wallDraftPoints;
-  }, [wallDraftPoints]);
+  useSyncedRef(wallDraftPointsRef, wallDraftPoints);
 
   const plan = useDataStore(
     useCallback((s) => s.findFloorPlan(planId), [planId])
