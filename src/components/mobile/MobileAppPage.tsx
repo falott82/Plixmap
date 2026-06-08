@@ -20,7 +20,7 @@ import { useLang, useT } from '../../i18n/useT';
 import { getMeetingTemporalState, getMeetingTimePhaseBadgeLabel } from '../../utils/meetingTime';
 
 import {
-  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, canDeleteChatForAll, canEditChatMessage, filterRecentMobileChatMessages, getDmOtherUserId, getMobileChatCutoffTs, isOpaqueChatIdentity, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, normalizeChatText, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, resolveClientLogoUrl, safeDecodeUriPart, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
+  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, filterRecentMobileChatMessages, getDmOtherUserId, getMobileChatCutoffTs, isOpaqueChatIdentity, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, normalizeChatText, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, resolveClientLogoUrl, safeDecodeUriPart, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
 } from './MobileAppPage.helpers';
 import { MobileAppPageBody } from './MobileAppPageBody';
 const MobileAppPage = () => {
@@ -1029,49 +1029,6 @@ const MobileAppPage = () => {
     } finally {
       setChatBusy(false);
     }
-  };
-
-  const readFileAsDataUrl = (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(new Error('read'));
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.readAsDataURL(file);
-    });
-
-  const compressImageAttachment = async (file: File) => {
-    const mime = String(file.type || '').toLowerCase();
-    const isImage = mime.startsWith('image/');
-    const isGif = mime.includes('gif');
-    const isSvg = mime.includes('svg');
-    if (!isImage || isGif || isSvg) {
-      const dataUrl = await readFileAsDataUrl(file);
-      return { name: file.name, dataUrl, mime: file.type || undefined };
-    }
-    const source = await readFileAsDataUrl(file);
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const next = new Image();
-      next.onload = () => resolve(next);
-      next.onerror = () => reject(new Error('image_decode'));
-      next.src = source;
-    });
-    const maxW = 1280;
-    const maxH = 1280;
-    const scale = Math.min(1, maxW / Math.max(1, img.width), maxH / Math.max(1, img.height));
-    const targetW = Math.max(1, Math.round(img.width * scale));
-    const targetH = Math.max(1, Math.round(img.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = targetW;
-    canvas.height = targetH;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return { name: file.name, dataUrl: source, mime: file.type || undefined };
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, targetW, targetH);
-    const outputMime = 'image/jpeg';
-    const dataUrl = canvas.toDataURL(outputMime, 0.8);
-    const compactName = file.name.replace(/\.[a-z0-9]+$/i, '') + '.jpg';
-    return { name: compactName, dataUrl, mime: outputMime };
   };
 
   const handleChatFiles = async (files: FileList | null) => {

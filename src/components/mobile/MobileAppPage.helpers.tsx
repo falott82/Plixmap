@@ -467,3 +467,49 @@ export const canDeleteChatForAll = (msg: ChatMessage, myUserId: string) => {
   return ageMs <= 30 * 60 * 1000;
 };
 
+
+// Read a File as a data URL (Promise wrapper around FileReader). Pure utility.
+export const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  });
+
+// Downscale/recompress image attachments to <=1280px JPEG; pass through
+// GIF/SVG/non-image files unchanged. No component state.
+export const compressImageAttachment = async (file: File) => {
+  const mime = String(file.type || '').toLowerCase();
+  const isImage = mime.startsWith('image/');
+  const isGif = mime.includes('gif');
+  const isSvg = mime.includes('svg');
+  if (!isImage || isGif || isSvg) {
+    const dataUrl = await readFileAsDataUrl(file);
+    return { name: file.name, dataUrl, mime: file.type || undefined };
+  }
+  const source = await readFileAsDataUrl(file);
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const next = new Image();
+    next.onload = () => resolve(next);
+    next.onerror = () => reject(new Error('image_decode'));
+    next.src = source;
+  });
+  const maxW = 1280;
+  const maxH = 1280;
+  const scale = Math.min(1, maxW / Math.max(1, img.width), maxH / Math.max(1, img.height));
+  const targetW = Math.max(1, Math.round(img.width * scale));
+  const targetH = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return { name: file.name, dataUrl: source, mime: file.type || undefined };
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, targetW, targetH);
+  const outputMime = 'image/jpeg';
+  const dataUrl = canvas.toDataURL(outputMime, 0.8);
+  const compactName = file.name.replace(/\.[a-z0-9]+$/i, '') + '.jpg';
+  return { name: compactName, dataUrl, mime: outputMime };
+};
