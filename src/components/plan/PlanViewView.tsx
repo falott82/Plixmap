@@ -11,7 +11,7 @@ import { Dialog, Transition } from '@headlessui/react';
 
 import { getMeetingRoomActiveToneClass, getMeetingTimelineDayClasses, isApprovedMeetingInProgress } from '../../utils/meetingTime';
 import { currentLocalIsoDay } from '../../utils/localDate';
-import { ChevronLeft, ChevronRight, Eye, Trash, Copy, MoveDiagonal, Square, X, Pencil, Plus, DoorOpen, Cog, EyeOff, Search, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, Trash, Copy, MoveDiagonal, Square, X, Pencil, Plus, DoorOpen, Cog, Search, Loader2 } from 'lucide-react';
 
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { FloorPlan, Room } from '../../store/types';
@@ -69,6 +69,8 @@ import RoomModalContainer from './RoomModalContainer';
 import ContextMenuPanel from './ContextMenuPanel';
 import { PlanTypeMenu } from './PlanTypeMenu';
 import { PlanWallQuickMenu } from './PlanWallQuickMenu';
+import { PlanCorridorQuickMenu } from './PlanCorridorQuickMenu';
+import { PlanLayersQuickMenu } from './PlanLayersQuickMenu';
 
 type ViewProps = ReturnType<typeof usePlanView>;
 
@@ -878,81 +880,15 @@ const PlanViewView = (props: ViewProps) => {
       ) : null}
 
       {corridorQuickMenu ? (
-        <div
-          className="context-menu-panel fixed z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-slate-900/90 px-2 py-1.5 text-white shadow-card"
-          style={{ top: corridorQuickMenu.y - 52, left: corridorQuickMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            onClick={() => {
-              openEditCorridor(corridorQuickMenu.id);
-              setCorridorQuickMenu(null);
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20"
-            title={t({ it: 'Rinomina corridoio', en: 'Rename corridor' })}
-          >
-            <Pencil size={14} />
-          </button>
-          <button
-            onClick={() => {
-              if (corridorDoorDraft?.corridorId === corridorQuickMenu.id) {
-                setCorridorDoorDraft(null);
-                push(t({ it: 'Disegno porta corridoio annullato', en: 'Corridor door drawing cancelled' }), 'info');
-                return;
-              }
-              startCorridorDoorDraw(corridorQuickMenu.id);
-            }}
-            className={`flex h-8 w-8 items-center justify-center rounded-lg ${corridorDoorDraft?.corridorId === corridorQuickMenu.id ? 'bg-amber-500/80 text-white' : 'bg-white/10 hover:bg-white/20'}`}
-            title={
-              corridorDoorDraft?.corridorId === corridorQuickMenu.id
-                ? t({ it: 'Annulla inserimento porta', en: 'Cancel door insertion' })
-                : t({ it: 'Inserisci porta sul perimetro del corridoio', en: 'Insert door on corridor perimeter' })
-            }
-          >
-            <DoorOpen size={14} />
-          </button>
-          <button
-            onClick={() => {
-              setConfirmDeleteCorridorId(corridorQuickMenu.id);
-              setCorridorQuickMenu(null);
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20"
-            title={t({ it: 'Elimina corridoio', en: 'Delete corridor' })}
-          >
-            <Trash size={14} />
-          </button>
-        </div>
+        <PlanCorridorQuickMenu
+          {...{ corridorQuickMenu, corridorDoorDraft, openEditCorridor, setCorridorQuickMenu, setCorridorDoorDraft, startCorridorDoorDraw, setConfirmDeleteCorridorId, push, t }}
+        />
       ) : null}
 
       {layersQuickMenu ? (
-        <div
-          ref={layersQuickMenuRef}
-          className="context-menu-panel fixed z-50 w-56 rounded-xl border border-slate-200 bg-white p-2 text-xs shadow-card"
-          style={{ top: layersQuickMenu.y, left: layersQuickMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            onClick={() => {
-              setHideAllLayers(planId, false);
-              setVisibleLayerIds(planId, layerIds);
-              setLayersQuickMenu(null);
-            }}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left font-semibold text-slate-700 hover:bg-slate-50"
-            title={t({ it: 'Mostra tutti i livelli', en: 'Show all layers' })}
-          >
-            <Eye size={14} className="text-slate-500" /> {t({ it: 'Mostra tutti i livelli', en: 'Show all layers' })}
-          </button>
-          <button
-            onClick={() => {
-              setHideAllLayers(planId, true);
-              setLayersQuickMenu(null);
-            }}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left font-semibold text-slate-700 hover:bg-slate-50"
-            title={t({ it: 'Nascondi tutti i livelli', en: 'Hide all layers' })}
-          >
-            <EyeOff size={14} className="text-slate-500" /> {t({ it: 'Nascondi tutti i livelli', en: 'Hide all layers' })}
-          </button>
-        </div>
+        <PlanLayersQuickMenu
+          {...{ layersQuickMenu, layersQuickMenuRef, planId, layerIds, setHideAllLayers, setVisibleLayerIds, setLayersQuickMenu, t }}
+        />
       ) : null}
 
       {wallTypeMenu ? (
