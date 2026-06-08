@@ -35,9 +35,7 @@ import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementTo
 import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
 import {
   computeResolveWallPoint,
-  computeHandleWallPoint,
-  computeHandleMeasurePoint,
-  computeHandleToolMove
+  computeHandleWallPoint
 } from './planViewWallMeasureTools';
 import {
   computeGetClientSearchIndex,
@@ -147,6 +145,7 @@ import { usePlanViewHandlers } from './usePlanViewHandlers';
 import { usePlanCorridorConnectionHandlers } from './usePlanCorridorConnectionHandlers';
 import { usePlanWallTypeHandlers } from './usePlanWallTypeHandlers';
 import { usePlanTypeLayerHandlers } from './usePlanTypeLayerHandlers';
+import { usePlanToolPointHandlers } from './usePlanToolPointHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -3842,91 +3841,34 @@ export const usePlanView = (planId: string) => {
     zoom
   ]);
 
-  const handleMeasurePoint = useCallback(
-    (point: { x: number; y: number }, options?: { shiftKey?: boolean }) =>
-      computeHandleMeasurePoint(point, options, {
-        measureMode,
-        resolveAxisLockedPoint,
-        showMeasureToast,
-        zoom,
-        measurePointsRef,
-        measureClosedRef,
-        measureFinishedRef,
-        setMeasurePoints,
-        setMeasurePointer,
-        setMeasureClosed,
-        setMeasureFinished
-      }),
-    [measureMode, resolveAxisLockedPoint, showMeasureToast, zoom]
-  );
 
-  const handleToolPoint = useCallback(
-    (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
-      if (scaleMode) {
-        handleScalePoint(point, options);
-        return;
-      }
-      if (wallDrawMode) {
-        handleWallPoint(point, options);
-        return;
-      }
-      if (quoteMode) {
-        handleQuotePoint(point, options);
-        return;
-      }
-      if (measureMode) {
-        handleMeasurePoint(point, options);
-      }
-    },
-    [handleMeasurePoint, handleQuotePoint, handleScalePoint, handleWallPoint, measureMode, quoteMode, scaleMode, wallDrawMode]
-  );
-
-  const handleToolMove = useCallback(
-    (point: { x: number; y: number }, options?: { shiftKey?: boolean }) =>
-      computeHandleToolMove(point, options, {
-        isReadOnly,
-        measureMode,
-        quoteMode,
-        quotePoints,
-        resolveAxisLockedPoint,
-        resolveWallPoint,
-        scaleDraft,
-        scaleMode,
-        wallDrawMode,
-        zoom,
-        wallDraftPointsRef,
-        measurePointsRef,
-        measureFinishedRef,
-        setScaleDraftPointer,
-        setWallDraftPointer,
-        setQuotePointer,
-        setMeasurePointer
-      }),
-    [
-      isReadOnly,
-      measureMode,
-      quoteMode,
-      quotePoints,
-      resolveAxisLockedPoint,
-      resolveWallPoint,
-      scaleDraft,
-      scaleMode,
-      wallDrawMode,
-      zoom
-    ]
-  );
-
-  const handleToolDoubleClick = useCallback(() => {
-    if (measureMode) {
-      if (measureClosedRef.current) {
-        setMeasureFinished(true);
-        measureFinishedRef.current = true;
-        setMeasurePointer(null);
-        showMeasureToast(measurePointsRef.current, { closed: true, finished: true });
-      }
-      return;
-    }
-  }, [measureMode, showMeasureToast]);
+  const { handleToolPoint, handleToolMove, handleToolDoubleClick } = usePlanToolPointHandlers({
+    measureMode,
+    quoteMode,
+    scaleMode,
+    wallDrawMode,
+    isReadOnly,
+    zoom,
+    quotePoints,
+    scaleDraft,
+    resolveAxisLockedPoint,
+    resolveWallPoint,
+    showMeasureToast,
+    handleScalePoint,
+    handleWallPoint,
+    handleQuotePoint,
+    measurePointsRef,
+    measureClosedRef,
+    measureFinishedRef,
+    wallDraftPointsRef,
+    setMeasurePoints,
+    setMeasurePointer,
+    setMeasureClosed,
+    setMeasureFinished,
+    setScaleDraftPointer,
+    setWallDraftPointer,
+    setQuotePointer
+  });
 
   const handleWallDraftContextMenu = useCallback(() => {
     if (!wallDrawMode) return;
