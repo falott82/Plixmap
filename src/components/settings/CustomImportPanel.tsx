@@ -4,7 +4,6 @@ import { useT } from '../../i18n/useT';
 import { useDataStore } from '../../store/useDataStore';
 import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
-import { adminFetchUsers, type AdminUserRow } from '../../api/auth';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import {
   clearImport,
@@ -24,7 +23,6 @@ import {
   listExternalUsers,
   previewImport,
   previewLdapImport,
-  provisionPortalUserFromImported,
   saveImportConfig,
   saveLdapImportConfig,
   setExternalUserHidden,
@@ -39,7 +37,6 @@ import {
   normalizeSearchText,
   comparePeopleByName,
   matchesImportUserQuery,
-  suggestPortalUsername,
   toWebApiConfigPayload,
   normalizeUpperInput,
   normalizeImportEmailInput,
@@ -64,6 +61,7 @@ import { CustomImportPortalProvisionResultModal } from './CustomImportPortalProv
 import { CustomImportCsvLdapInfoModals } from './CustomImportCsvLdapInfoModals';
 import { CustomImportConfigModal } from './CustomImportConfigModal';
 import { CustomImportInfoModal } from './CustomImportInfoModal';
+import { useCustomImportPortalProvisioning } from './useCustomImportPortalProvisioning';
 
 const CustomImportPanel = (
   { initialClientId, lockClientSelection = false }: { initialClientId?: string | null; lockClientSelection?: boolean } = {}
@@ -81,6 +79,25 @@ const CustomImportPanel = (
   const [configOpen, setConfigOpen] = useState(false);
   const [usersOpen, setUsersOpen] = useState(false);
   const [activeClientId, setActiveClientId] = useState<string | null>(null);
+
+  const {
+    portalUsersLoading,
+    portalUserByImportedKey,
+    portalProvisionModalOpen,
+    setPortalProvisionModalOpen,
+    portalProvisionSaving,
+    portalProvisionSourceUser,
+    portalProvisionForm,
+    setPortalProvisionForm,
+    portalProvisionResult,
+    setPortalProvisionResult,
+    portalProvisionDialogFocusRef,
+    portalProvisionResultFocusRef,
+    loadPortalUsers,
+    openPortalProvisionModal,
+    copyPortalProvisionSecret,
+    submitPortalProvision
+  } = useCustomImportPortalProvisioning({ isSuperAdmin, authUser, activeClientId, push, t });
 
   const [configExpanded, setConfigExpanded] = useState(false);
   const [importMode, setImportMode] = useState<'webapi' | 'ldap' | 'csv' | 'manual'>('webapi');
@@ -161,8 +178,6 @@ const CustomImportPanel = (
 
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersRows, setUsersRows] = useState<ExternalUserRow[]>([]);
-  const [portalUsersLoading, setPortalUsersLoading] = useState(false);
-  const [portalUsersRows, setPortalUsersRows] = useState<AdminUserRow[]>([]);
   const [usersQuery, setUsersQuery] = useState('');
   const [includeMissing, setIncludeMissing] = useState(false);
   const [onlyMissing, setOnlyMissing] = useState(false);
@@ -197,34 +212,6 @@ const CustomImportPanel = (
   const [manualUserDeletingId, setManualUserDeletingId] = useState<string | null>(null);
   const [manualDeleteCandidate, setManualDeleteCandidate] = useState<ExternalUserRow | null>(null);
   const [duplicatesModalOpen, setDuplicatesModalOpen] = useState(false);
-  const [portalProvisionModalOpen, setPortalProvisionModalOpen] = useState(false);
-  const [portalProvisionSaving, setPortalProvisionSaving] = useState(false);
-  const [portalProvisionSourceUser, setPortalProvisionSourceUser] = useState<ExternalUserRow | null>(null);
-  const [portalProvisionForm, setPortalProvisionForm] = useState({
-    username: '',
-    firstName: '',
-    lastName: '',
-    phone: '',
-    email: '',
-    language: 'it' as 'it' | 'en',
-    access: 'ro' as 'ro' | 'rw',
-    chat: true,
-    canCreateMeetings: false,
-    sendEmail: false
-  });
-  const [portalProvisionResult, setPortalProvisionResult] = useState<null | {
-    userId: string;
-    username: string;
-    temporaryPassword: string;
-    importedDisplayName: string;
-    emailDelivery: {
-      attempted: boolean;
-      sent: boolean;
-      reason?: string | null;
-      messageId?: string | null;
-      smtpScope?: 'client' | 'global' | null;
-    };
-  }>(null);
   const [manualUserForm, setManualUserForm] = useState({
     externalId: '',
     firstName: '',
@@ -246,8 +233,6 @@ const CustomImportPanel = (
   const webApiPreviewContextMenuRef = useRef<HTMLDivElement | null>(null);
   const usersDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const manualUserDialogFocusRef = useRef<HTMLButtonElement | null>(null);
-  const portalProvisionDialogFocusRef = useRef<HTMLButtonElement | null>(null);
-  const portalProvisionResultFocusRef = useRef<HTMLButtonElement | null>(null);
   const csvConfirmDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const infoDialogFocusRef = useRef<HTMLButtonElement | null>(null);
   const ldapInfoDialogFocusRef = useRef<HTMLButtonElement | null>(null);
@@ -298,16 +283,6 @@ const CustomImportPanel = (
     () => (ldapPreviewResult?.importableRows || []).map((row) => mergeLdapImportDraft(row, ldapImportDraftsById[row.externalId])),
     [ldapImportDraftsById, ldapPreviewResult]
   );
-  const portalUserByImportedKey = useMemo(() => {
-    const map = new Map<string, AdminUserRow>();
-    for (const row of portalUsersRows || []) {
-      const clientId = String(row.linkedExternalClientId || '').trim();
-      const externalId = String(row.linkedExternalId || '').trim();
-      if (!clientId || !externalId) continue;
-      map.set(`${clientId}:${externalId}`, row);
-    }
-    return map;
-  }, [portalUsersRows]);
   const usersChildDialogOpen =
     manualUserModalOpen || !!manualDeleteCandidate || duplicatesModalOpen || portalProvisionModalOpen || !!portalProvisionResult;
   const infoCounts = useMemo(() => {
@@ -441,26 +416,6 @@ const CustomImportPanel = (
       setUsersLoading(false);
     }
   }, []);
-
-  const loadPortalUsers = useCallback(async () => {
-    if (!isSuperAdmin) {
-      setPortalUsersRows([]);
-      setPortalUsersLoading(false);
-      return [];
-    }
-    setPortalUsersLoading(true);
-    try {
-      const res = await adminFetchUsers();
-      const rows = Array.isArray(res.users) ? res.users : [];
-      setPortalUsersRows(rows);
-      return rows;
-    } catch {
-      setPortalUsersRows([]);
-      return [];
-    } finally {
-      setPortalUsersLoading(false);
-    }
-  }, [isSuperAdmin]);
 
   useEffect(() => {
     loadSummary();
@@ -613,102 +568,6 @@ const CustomImportPanel = (
     setManualUserModalOpen(true);
   }, []);
 
-  const openPortalProvisionModal = useCallback(
-    (row: ExternalUserRow) => {
-      setPortalProvisionSourceUser(row);
-      setPortalProvisionForm({
-        username: suggestPortalUsername(row),
-        firstName: String(row.firstName || ''),
-        lastName: String(row.lastName || ''),
-        phone: String(row.mobile || ''),
-        email: String(row.email || ''),
-        language: authUser?.language === 'en' ? 'en' : 'it',
-        access: 'ro',
-        chat: true,
-        canCreateMeetings: false,
-        sendEmail: !!String(row.email || '').trim()
-      });
-      setPortalProvisionModalOpen(true);
-    },
-    [authUser?.language]
-  );
-
-  const copyPortalProvisionSecret = useCallback(async (mode: 'credentials' | 'password') => {
-    if (!portalProvisionResult) return;
-    const text =
-      mode === 'password'
-        ? portalProvisionResult.temporaryPassword
-        : t({
-            it: `Username: ${portalProvisionResult.username}\nPassword temporanea: ${portalProvisionResult.temporaryPassword}`,
-            en: `Username: ${portalProvisionResult.username}\nTemporary password: ${portalProvisionResult.temporaryPassword}`
-          });
-    try {
-      await navigator.clipboard.writeText(text);
-      push(t({ it: 'Copiato negli appunti', en: 'Copied to clipboard' }), 'success');
-    } catch {
-      push(t({ it: 'Copia non riuscita', en: 'Copy failed' }), 'danger');
-    }
-  }, [portalProvisionResult, push, t]);
-
-  const submitPortalProvision = useCallback(async () => {
-    if (!portalProvisionSourceUser || !activeClientId) return;
-    const emailValue = String(portalProvisionForm.email || '').trim();
-    if (portalProvisionForm.sendEmail && !emailValue) {
-      push(t({ it: 'Inserisci un indirizzo email per inviare le credenziali.', en: 'Enter an email address to send credentials.' }), 'info');
-      return;
-    }
-    setPortalProvisionSaving(true);
-    try {
-      const res = await provisionPortalUserFromImported({
-        clientId: activeClientId,
-        externalId: String(portalProvisionSourceUser.externalId || ''),
-        username: portalProvisionForm.username,
-        firstName: portalProvisionForm.firstName,
-        lastName: portalProvisionForm.lastName,
-        phone: portalProvisionForm.phone,
-        email: emailValue,
-        language: portalProvisionForm.language,
-        access: portalProvisionForm.access,
-        chat: portalProvisionForm.chat,
-        canCreateMeetings: portalProvisionForm.canCreateMeetings,
-        sendEmail: portalProvisionForm.sendEmail
-      });
-      setPortalProvisionModalOpen(false);
-      setPortalProvisionResult({
-        userId: res.id,
-        username: res.username,
-        temporaryPassword: res.temporaryPassword,
-        importedDisplayName:
-          `${String(portalProvisionSourceUser.firstName || '').trim()} ${String(portalProvisionSourceUser.lastName || '').trim()}`.trim() ||
-          String(portalProvisionSourceUser.email || portalProvisionSourceUser.externalId || ''),
-        emailDelivery: res.emailDelivery
-      });
-      await loadPortalUsers();
-      push(t({ it: 'Utente portale creato', en: 'Portal user created' }), 'success');
-    } catch (err: any) {
-      if (err?.suggestedUsername) {
-        setPortalProvisionForm((prev) => ({ ...prev, username: String(err.suggestedUsername || '') }));
-      }
-      if (err?.existingUsername) {
-        push(
-          t({
-            it: `Questo utente importato e gia collegato all'utente portale ${String(err.existingUsername || '')}.`,
-            en: `This imported user is already linked to portal user ${String(err.existingUsername || '')}.`
-          }),
-          'info'
-        );
-        return;
-      }
-      push(
-        err?.message ||
-          t({ it: 'Creazione utente portale non riuscita', en: 'Failed to create portal user' }),
-        'danger'
-      );
-    } finally {
-      setPortalProvisionSaving(false);
-    }
-  }, [activeClientId, loadPortalUsers, portalProvisionForm, portalProvisionSourceUser, push, t]);
-
   const formatDate = (ts: number | null | undefined) => {
     if (!ts) return t({ it: 'Mai', en: 'Never' });
     try {
@@ -817,7 +676,7 @@ const CustomImportPanel = (
     } finally {
       setWebApiPreviewLoading(false);
     }
-  }, [cfg, loadUsers, password, setUsersRows, t]);
+  }, [cfg, password, setUsersRows, t]);
 
   const openWebApiPreview = useCallback(async () => {
     if (!activeClientId) return;
@@ -969,7 +828,7 @@ const CustomImportPanel = (
         });
       }
     },
-    [activeClientId, loadSummary, loadUsers, push, refreshWebApiPreview, t]
+    [activeClientId, loadSummary, push, refreshWebApiPreview, t]
   );
 
   const importManyWebApiUsers = useCallback(
@@ -1024,7 +883,7 @@ const CustomImportPanel = (
         });
       }
     },
-    [activeClientId, loadSummary, loadUsers, push, refreshWebApiPreview, t]
+    [activeClientId, loadSummary, push, refreshWebApiPreview, t]
   );
 
   const deleteManyWebApiUsers = useCallback(
