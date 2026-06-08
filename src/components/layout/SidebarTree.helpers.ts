@@ -641,3 +641,26 @@ export const partitionDuplicateMonthDays = (
     }
     return { prefilled, queue };
 };
+
+export const filterClientsTree = (orderedClients: any[], query: string): any[] => {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return orderedClients;
+    const matchesText = (s: string | undefined) => String(s || '').toLowerCase().includes(q);
+    return orderedClients
+      .map((client) => {
+        const clientMatch = matchesText(client.name) || matchesText(client.shortName);
+        if (clientMatch) return client;
+        const nextSites = (client.sites || [])
+          .map((site: any) => {
+            const siteMatch = matchesText(site.name);
+            if (siteMatch) return site;
+            const nextPlans = (site.floorPlans || []).filter((p: any) => matchesText(p.name));
+            if (!nextPlans.length) return null;
+            return { ...site, floorPlans: nextPlans };
+          })
+          .filter((s: any) => !!s);
+        if (!nextSites.length) return null;
+        return { ...client, sites: nextSites };
+      })
+      .filter((c: any) => !!c);
+};

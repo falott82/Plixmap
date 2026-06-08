@@ -45,7 +45,8 @@ import {
   findDuplicateSlot,
   buildDuplicateRoomOptions,
   enumerateMonthDays,
-  partitionDuplicateMonthDays
+  partitionDuplicateMonthDays,
+  filterClientsTree
 } from './SidebarTree.helpers';
 import { SidebarLockMenu } from './SidebarLockMenu';
 import { SidebarPlanMenu } from './SidebarPlanMenu';
@@ -605,28 +606,10 @@ const SidebarTree = () => {
     return out;
   }, [clientOrder, clients]);
 
-  const filteredClients = useMemo(() => {
-    const q = treeQuery.trim().toLowerCase();
-    if (!q) return orderedClients;
-    const matchesText = (s: string | undefined) => String(s || '').toLowerCase().includes(q);
-    return orderedClients
-      .map((client) => {
-        const clientMatch = matchesText(client.name) || matchesText(client.shortName);
-        if (clientMatch) return client;
-        const nextSites = client.sites
-          .map((site): TreeClient['sites'][number] | null => {
-            const siteMatch = matchesText(site.name);
-            if (siteMatch) return site;
-            const nextPlans = site.floorPlans.filter((p) => matchesText(p.name));
-            if (!nextPlans.length) return null;
-            return { ...site, floorPlans: nextPlans };
-          })
-          .filter((s): s is TreeClient['sites'][number] => !!s);
-        if (!nextSites.length) return null;
-        return { ...client, sites: nextSites };
-      })
-      .filter((c): c is TreeClient => !!c);
-  }, [orderedClients, treeQuery]);
+  const filteredClients = useMemo(
+    () => filterClientsTree(orderedClients, treeQuery),
+    [orderedClients, treeQuery]
+  );
 
   const searchActive = !!treeQuery.trim();
 
