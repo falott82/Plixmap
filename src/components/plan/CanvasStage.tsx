@@ -19,6 +19,7 @@ import { ObjectsLayer } from './canvas/ObjectsLayer';
 import { CanvasToolbar } from './canvas/CanvasToolbar';
 import { useCanvasPrintAreaDraft } from './canvas/useCanvasPrintAreaDraft';
 import { useCanvasTextDraft } from './canvas/useCanvasTextDraft';
+import { useCanvasCorridorPolyDraft } from './canvas/useCanvasCorridorPolyDraft';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
@@ -435,7 +436,6 @@ const CanvasStageImpl = (
   const panOrigin = useRef<{ x: number; y: number } | null>(null);
   const fitApplied = useRef<string | null>(null);
   const lastContextMenuAtRef = useRef(0);
-  const lastCorridorUndoAtRef = useRef(0);
   const lastBoxSelectAtRef = useRef(0);
   const [roomHighlightNow, setRoomHighlightNow] = useState(Date.now());
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -445,10 +445,6 @@ const CanvasStageImpl = (
   const [draftPolyPointer, setDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
   const draftPolyRaf = useRef<number | null>(null);
   const draftPolyPointsRef = useRef<{ x: number; y: number }[]>([]);
-  const [corridorDraftPolyPoints, setCorridorDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
-  const [corridorDraftPolyPointer, setCorridorDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
-  const corridorDraftPolyRaf = useRef<number | null>(null);
-  const corridorDraftPolyPointsRef = useRef<{ x: number; y: number }[]>([]);
   const [corridorDoorHover, setCorridorDoorHover] = useState<{ edgeIndex: number; t: number; x: number; y: number } | null>(null);
   const corridorDoorDraftActive = !!corridorDoorDraft?.corridorId;
   const panRaf = useRef<number | null>(null);
@@ -943,19 +939,6 @@ const CanvasStageImpl = (
   useEffect(() => {
     draftPolyPointsRef.current = draftPolyPoints;
   }, [draftPolyPoints]);
-  useEffect(() => {
-    if (corridorDrawMode) return;
-    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-    setCorridorDraftPolyPoints([]);
-    corridorDraftPolyPointsRef.current = [];
-    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-    setCorridorDraftPolyPointer(null);
-    if (corridorDraftPolyRaf.current) cancelAnimationFrame(corridorDraftPolyRaf.current);
-    corridorDraftPolyRaf.current = null;
-  }, [corridorDrawMode, perfEnabled]);
-  useEffect(() => {
-    corridorDraftPolyPointsRef.current = corridorDraftPolyPoints;
-  }, [corridorDraftPolyPoints]);
 
   useEffect(() => {
     if (!transformerRef.current) return;
@@ -1046,7 +1029,6 @@ const CanvasStageImpl = (
       if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
       if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
       if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
-      if (corridorDraftPolyRaf.current) cancelAnimationFrame(corridorDraftPolyRaf.current);
       if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
       if (textTransformRaf.current) cancelAnimationFrame(textTransformRaf.current);
       textTransformRaf.current = null;
@@ -1252,6 +1234,14 @@ const CanvasStageImpl = (
 
   const { textDraftRect, isTextDrafting, beginTextDraft, updateTextDraftRect, finalizeTextDraftRect } =
     useCanvasTextDraft({ pointerToWorld });
+
+  const {
+    corridorDraftPolyPoints,
+    previewCorridorDraftPolyLine,
+    undoCorridorDraftSegment,
+    addCorridorDraftPolyPoint,
+    updateCorridorDraftPointer
+  } = useCanvasCorridorPolyDraft({ corridorDrawMode, readOnly, perfEnabled, suspendKeyboardShortcuts, onCreateCorridor });
 
   const updateQuoteResizePreview = useCallback((shiftKey?: boolean) => {
     if (!quoteResizeRef.current) return;
@@ -1749,13 +1739,6 @@ const CanvasStageImpl = (
     if (draftPolyPointer) pts.push(draftPolyPointer);
     return pts.flatMap((p) => [p.x, p.y]);
   }, [draftPolyPointer, draftPolyPoints, roomDrawMode]);
-  const previewCorridorDraftPolyLine = useMemo(() => {
-    if (corridorDrawMode !== 'poly') return null;
-    if (!corridorDraftPolyPoints.length) return null;
-    const pts = [...corridorDraftPolyPoints];
-    if (corridorDraftPolyPointer) pts.push(corridorDraftPolyPointer);
-    return pts.flatMap((p) => [p.x, p.y]);
-  }, [corridorDraftPolyPointer, corridorDraftPolyPoints, corridorDrawMode]);
 
   const finalizeDraftPoly = useCallback(() => {
     if (roomDrawMode !== 'poly' || readOnly) return false;
@@ -1770,33 +1753,6 @@ const CanvasStageImpl = (
     onCreateRoom?.({ kind: 'poly', points: nextPoints });
     return true;
   }, [onCreateRoom, perfEnabled, readOnly, roomDrawMode]);
-  const finalizeCorridorDraftPoly = useCallback(() => {
-    if (corridorDrawMode !== 'poly' || readOnly) return false;
-    const points = corridorDraftPolyPointsRef.current;
-    if (points.length < 3) return true;
-    const nextPoints = points.slice();
-    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-    setCorridorDraftPolyPoints([]);
-    corridorDraftPolyPointsRef.current = [];
-    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-    setCorridorDraftPolyPointer(null);
-    onCreateCorridor?.({ kind: 'poly', points: nextPoints });
-    return true;
-  }, [corridorDrawMode, onCreateCorridor, perfEnabled, readOnly]);
-  const undoCorridorDraftSegment = useCallback(() => {
-    if (corridorDrawMode !== 'poly' || readOnly) return false;
-    const now = Date.now();
-    if (now - lastCorridorUndoAtRef.current < 60) return true;
-    lastCorridorUndoAtRef.current = now;
-    if (!corridorDraftPolyPointsRef.current.length) return true;
-    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-    setCorridorDraftPolyPoints((prev) => {
-      const next = prev.slice(0, -1);
-      corridorDraftPolyPointsRef.current = next;
-      return next;
-    });
-    return true;
-  }, [corridorDrawMode, perfEnabled, readOnly]);
 
   useEffect(() => {
     if (roomDrawMode !== 'poly') return;
@@ -1821,29 +1777,6 @@ const CanvasStageImpl = (
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [finalizeDraftPoly, perfEnabled, roomDrawMode, suspendKeyboardShortcuts]);
-  useEffect(() => {
-    if (corridorDrawMode !== 'poly') return;
-    const handler = (e: KeyboardEvent) => {
-      if (suspendKeyboardShortcuts) return;
-      if ((useUIStore.getState() as any)?.clientChatOpen) return;
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        finalizeCorridorDraftPoly();
-      }
-      if (e.key === 'Backspace') {
-        if (!corridorDraftPolyPointsRef.current.length) return;
-        e.preventDefault();
-        if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-        setCorridorDraftPolyPoints((prev) => {
-          const next = prev.slice(0, -1);
-          corridorDraftPolyPointsRef.current = next;
-          return next;
-        });
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [corridorDrawMode, finalizeCorridorDraftPoly, perfEnabled, suspendKeyboardShortcuts]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2322,23 +2255,7 @@ const CanvasStageImpl = (
             const pos = stage?.getPointerPosition();
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
-            const closeThreshold = 12 / Math.max(0.2, viewportRef.current.zoom || 1);
-            const currentPoints = corridorDraftPolyPointsRef.current;
-            if (currentPoints.length >= 3) {
-              const first = currentPoints[0];
-              const dx = world.x - first.x;
-              const dy = world.y - first.y;
-              if (Math.hypot(dx, dy) <= closeThreshold) {
-                finalizeCorridorDraftPoly();
-                return;
-              }
-            }
-            if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-            setCorridorDraftPolyPoints((prev) => {
-              const next = [...prev, { x: world.x, y: world.y }];
-              corridorDraftPolyPointsRef.current = next;
-              return next;
-            });
+            addCorridorDraftPolyPoint(world, viewportRef.current.zoom);
             return;
           }
           // Clear selection on left-click empty area (no pending placement)
@@ -2455,14 +2372,7 @@ const CanvasStageImpl = (
           if (corridorDrawMode === 'poly' && !readOnly) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
-            if (pos) {
-              const world = pointerToWorld(pos.x, pos.y);
-              if (corridorDraftPolyRaf.current) cancelAnimationFrame(corridorDraftPolyRaf.current);
-              corridorDraftPolyRaf.current = requestAnimationFrame(() => {
-                if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-                setCorridorDraftPolyPointer({ x: world.x, y: world.y });
-              });
-            }
+            if (pos) updateCorridorDraftPointer(pointerToWorld(pos.x, pos.y));
             return;
           }
           if (roomDrawMode === 'poly' && !readOnly) {
