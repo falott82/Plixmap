@@ -157,6 +157,7 @@ import { useRoomMeetingsTimeline, type MyMeetingsModalState } from './useRoomMee
 import { usePlanSafetyCard } from './usePlanSafetyCard';
 import { usePlanCapacity } from './usePlanCapacity';
 import { usePlanContextDerived } from './usePlanContextDerived';
+import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -2929,67 +2930,14 @@ export const usePlanView = (planId: string) => {
     }
   }, [myMeetingsModal?.returnToHub]);
 
-  const handleRoomContextMenu = useCallback(
-    ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
-      dismissSelectionHintToasts();
-      if (roomDoorDraft) {
-        if (createRoomDoorFromDraft(id, { x: worldX, y: worldY })) return;
-      }
-      setContextMenu({ kind: 'room', id, x: clientX, y: clientY, worldX, worldY });
-    },
-    [createRoomDoorFromDraft, dismissSelectionHintToasts, roomDoorDraft]
-  );
-
-  const handleCorridorContextMenu = useCallback(
-    ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
-      dismissSelectionHintToasts();
-      setContextMenu({ kind: 'corridor', id, x: clientX, y: clientY, worldX, worldY });
-    },
-    [dismissSelectionHintToasts]
-  );
-  const handleCorridorConnectionContextMenu = useCallback(
-    ({
-      corridorId,
-      connectionId,
-      clientX,
-      clientY,
-      worldX,
-      worldY
-    }: {
-      corridorId: string;
-      connectionId: string;
-      clientX: number;
-      clientY: number;
-      worldX: number;
-      worldY: number;
-    }) => {
-      dismissSelectionHintToasts();
-      setContextMenu({ kind: 'corridor_connection', corridorId, connectionId, x: clientX, y: clientY, worldX, worldY });
-    },
-    [dismissSelectionHintToasts]
-  );
-  const handleCorridorDoorContextMenu = useCallback(
-    ({ corridorId, doorId, clientX, clientY }: { corridorId: string; doorId: string; clientX: number; clientY: number }) => {
-      dismissSelectionHintToasts();
-      setContextMenu({ kind: 'corridor_door', corridorId, doorId, x: clientX, y: clientY });
-    },
-    [dismissSelectionHintToasts]
-  );
-  const handleRoomDoorContextMenu = useCallback(
-    ({ doorId, clientX, clientY }: { doorId: string; clientX: number; clientY: number }) => {
-      dismissSelectionHintToasts();
-      setContextMenu({ kind: 'room_door', doorId, x: clientX, y: clientY });
-    },
-    [dismissSelectionHintToasts]
-  );
-
-  const handleScaleContextMenu = useCallback(
-    ({ clientX, clientY }: { clientX: number; clientY: number }) => {
-      if (!planScale?.start || !planScale?.end) return;
-      setContextMenu({ kind: 'scale', x: clientX, y: clientY });
-    },
-    [planScale?.end, planScale?.start]
-  );
+  const {
+    handleRoomContextMenu,
+    handleCorridorContextMenu,
+    handleCorridorConnectionContextMenu,
+    handleCorridorDoorContextMenu,
+    handleRoomDoorContextMenu,
+    handleScaleContextMenu
+  } = usePlanContextMenuHandlers({ dismissSelectionHintToasts, setContextMenu, roomDoorDraft, createRoomDoorFromDraft, planScale });
 
   const handleScaleDoubleClick = useCallback(() => {
     if (!planScale?.start || !planScale?.end || isReadOnly) return;
