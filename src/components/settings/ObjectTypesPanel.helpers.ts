@@ -112,3 +112,54 @@ export const polygonPath = (points: Point[]) => {
   return `${points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} Z`;
 };
 
+
+// Build the door-registry map preview geometry (corridor/room shapes + door
+// anchors + viewBox) for a single plan. Pure given the preview row. Extracted
+// from ObjectTypesPanel.
+export const computeDoorMapPreviewData = (doorMapPreviewRow: any) => {
+  if (!doorMapPreviewRow) return null;
+  const plan = doorMapPreviewRow.plan;
+  const corridors = ((plan?.corridors || []) as Corridor[]).filter(Boolean);
+  const rooms = (plan?.rooms || []).filter(Boolean);
+  const corridorShapes = corridors.map((corridor) => ({ corridor, points: corridorPolygon(corridor) })).filter((entry) => entry.points.length >= 3);
+  const roomShapes = rooms.map((room: any) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) })).filter((entry: any) => entry.points.length >= 3);
+  const doorAnchors = corridorShapes.flatMap((entry) =>
+    (entry.corridor.doors || [])
+      .map((door) => ({ door, point: getDoorAnchor(entry.corridor, door), corridorId: entry.corridor.id }))
+      .filter((item): item is { door: any; point: Point; corridorId: string } => !!item.point)
+  );
+  const allPoints: Point[] = [
+    ...corridorShapes.flatMap((entry) => entry.points),
+    ...roomShapes.flatMap((entry: any) => entry.points),
+    ...doorAnchors.map((entry) => entry.point)
+  ];
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const p of allPoints) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    minX = 0;
+    minY = 0;
+    maxX = Number(plan?.width || 1200) || 1200;
+    maxY = Number(plan?.height || 800) || 800;
+  }
+  if (Number.isFinite(Number(plan?.width)) && Number.isFinite(Number(plan?.height)) && Number(plan?.width) > 0 && Number(plan?.height) > 0) {
+    minX = Math.min(minX, 0);
+    minY = Math.min(minY, 0);
+    maxX = Math.max(maxX, Number(plan?.width));
+    maxY = Math.max(maxY, Number(plan?.height));
+  }
+  const pad = 24;
+  return {
+    corridorShapes,
+    roomShapes,
+    doorAnchors,
+    viewBox: `${minX - pad} ${minY - pad} ${Math.max(100, maxX - minX + pad * 2)} ${Math.max(100, maxY - minY + pad * 2)}`
+  };
+};

@@ -49,7 +49,7 @@ import { getWallTypeColor } from '../../utils/wallColors';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { isSecurityTypeId } from '../../store/security';
 
-import { Point, DoorRegistrySortKey, DoorRegistryRow, roomPolygon, corridorPolygon, polygonCentroid, getDoorAnchor } from './ObjectTypesPanel.helpers';
+import { Point, DoorRegistrySortKey, DoorRegistryRow, roomPolygon, polygonCentroid, getDoorAnchor, computeDoorMapPreviewData } from './ObjectTypesPanel.helpers';
 import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal } from './ObjectTypesPanelModals';
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
@@ -431,53 +431,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     });
     return list;
   }, [doorRowsRaw, doorSort.dir, doorSort.key, lang, q]);
-  const doorMapPreviewData = useMemo(() => {
-    if (!doorMapPreviewRow) return null;
-    const plan = doorMapPreviewRow.plan;
-    const corridors = ((plan?.corridors || []) as Corridor[]).filter(Boolean);
-    const rooms = (plan?.rooms || []).filter(Boolean);
-    const corridorShapes = corridors.map((corridor) => ({ corridor, points: corridorPolygon(corridor) })).filter((entry) => entry.points.length >= 3);
-    const roomShapes = rooms.map((room) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) })).filter((entry) => entry.points.length >= 3);
-    const doorAnchors = corridorShapes.flatMap((entry) =>
-      (entry.corridor.doors || [])
-        .map((door) => ({ door, point: getDoorAnchor(entry.corridor, door), corridorId: entry.corridor.id }))
-        .filter((item): item is { door: any; point: Point; corridorId: string } => !!item.point)
-    );
-    const allPoints: Point[] = [
-      ...corridorShapes.flatMap((entry) => entry.points),
-      ...roomShapes.flatMap((entry) => entry.points),
-      ...doorAnchors.map((entry) => entry.point)
-    ];
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    for (const p of allPoints) {
-      if (p.x < minX) minX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y > maxY) maxY = p.y;
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
-      minX = 0;
-      minY = 0;
-      maxX = Number(plan?.width || 1200) || 1200;
-      maxY = Number(plan?.height || 800) || 800;
-    }
-    if (Number.isFinite(Number(plan?.width)) && Number.isFinite(Number(plan?.height)) && Number(plan?.width) > 0 && Number(plan?.height) > 0) {
-      minX = Math.min(minX, 0);
-      minY = Math.min(minY, 0);
-      maxX = Math.max(maxX, Number(plan?.width));
-      maxY = Math.max(maxY, Number(plan?.height));
-    }
-    const pad = 24;
-    return {
-      corridorShapes,
-      roomShapes,
-      doorAnchors,
-      viewBox: `${minX - pad} ${minY - pad} ${Math.max(100, maxX - minX + pad * 2)} ${Math.max(100, maxY - minY + pad * 2)}`
-    };
-  }, [doorMapPreviewRow]);
+  const doorMapPreviewData = useMemo(() => computeDoorMapPreviewData(doorMapPreviewRow), [doorMapPreviewRow]);
 
   const iconOptionsAll: IconName[] = [
     'user',
