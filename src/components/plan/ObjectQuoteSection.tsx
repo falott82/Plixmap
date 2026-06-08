@@ -12,7 +12,6 @@ export type ObjectQuoteSectionProps = {
   quoteLabelScale: number;
   quoteLengthLabel: any;
   quoteOrientation: any;
-  quotePreview: any;
   readOnly: boolean;
   scale: number;
   setQuoteColor: (v: any) => void;
@@ -43,7 +42,6 @@ export const ObjectQuoteSection = ({
   quoteLabelScale,
   quoteLengthLabel,
   quoteOrientation,
-  quotePreview,
   readOnly,
   scale,
   setQuoteColor,
@@ -56,7 +54,105 @@ export const ObjectQuoteSection = ({
   setQuoteLabelScale,
   setScale,
   t
-}: ObjectQuoteSectionProps) => (
+}: ObjectQuoteSectionProps) => {
+  const quotePreview = (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <div className="text-xs font-semibold text-slate-600">{t({ it: 'Anteprima', en: 'Preview' })}</div>
+      <div className="mt-2">
+        {quoteOrientation === 'vertical' ? (
+          <svg viewBox="0 0 220 240" className="h-40 w-full">
+            <line
+              x1="110"
+              y1="30"
+              x2="110"
+              y2="210"
+              stroke={quoteColor}
+              strokeWidth={2 * scale}
+              strokeDasharray={quoteDashed ? '6 5' : undefined}
+            />
+            {quoteEndpoint === 'dots' ? (
+              <>
+                <circle cx="110" cy="30" r="4" fill={quoteColor} />
+                <circle cx="110" cy="210" r="4" fill={quoteColor} />
+              </>
+            ) : null}
+            {quoteEndpoint === 'arrows' ? (
+              <>
+                <polygon points="110,18 100,34 120,34" fill={quoteColor} />
+                <polygon points="110,222 100,206 120,206" fill={quoteColor} />
+              </>
+            ) : null}
+            <text
+              x={
+                quoteLabelPosEffective === 'left'
+                  ? 110 - 30 * quoteLabelOffset
+                  : quoteLabelPosEffective === 'right'
+                    ? 110 + 30 * quoteLabelOffset
+                    : 110
+              }
+              y={120}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={10 * quoteLabelScale}
+              fontWeight="bold"
+              fill={quoteLabelColor}
+              transform={`rotate(-90 ${
+                quoteLabelPosEffective === 'left'
+                  ? 110 - 30 * quoteLabelOffset
+                  : quoteLabelPosEffective === 'right'
+                    ? 110 + 30 * quoteLabelOffset
+                    : 110
+              } 120)`}
+            >
+              {quoteLengthLabel || '0'}
+            </text>
+          </svg>
+        ) : (
+          <svg viewBox="0 0 320 160" className="h-32 w-full">
+            <line
+              x1="40"
+              y1="80"
+              x2="280"
+              y2="80"
+              stroke={quoteColor}
+              strokeWidth={2 * scale}
+              strokeDasharray={quoteDashed ? '6 5' : undefined}
+            />
+            {quoteEndpoint === 'dots' ? (
+              <>
+                <circle cx="40" cy="80" r="4" fill={quoteColor} />
+                <circle cx="280" cy="80" r="4" fill={quoteColor} />
+              </>
+            ) : null}
+            {quoteEndpoint === 'arrows' ? (
+              <>
+                <polygon points="34,80 48,70 48,90" fill={quoteColor} />
+                <polygon points="286,80 272,70 272,90" fill={quoteColor} />
+              </>
+            ) : null}
+            <text
+              x={160}
+              y={
+                quoteLabelPosEffective === 'above'
+                  ? 80 - 10 * quoteLabelOffset
+                  : quoteLabelPosEffective === 'below'
+                    ? 80 + 10 * quoteLabelOffset
+                    : 80
+              }
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={10 * quoteLabelScale}
+              fontWeight="bold"
+              fill={quoteLabelColor}
+            >
+              {quoteLengthLabel || '0'}
+            </text>
+          </svg>
+        )}
+      </div>
+    </div>
+  );
+  return (
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                       <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
                         <span>{t({ it: 'Opzioni quota', en: 'Quote options' })}</span>
@@ -200,4 +296,5 @@ export const ObjectQuoteSection = ({
                         {quoteOrientation === 'vertical' ? <div className="w-44">{quotePreview}</div> : quotePreview}
                           </div>
                         </div>
-);
+  );
+};

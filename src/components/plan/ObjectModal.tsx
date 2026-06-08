@@ -323,103 +323,6 @@ const ObjectModal = ({
     }
     return quoteLabelPos === 'above' || quoteLabelPos === 'below' || quoteLabelPos === 'center' ? quoteLabelPos : 'center';
   }, [isQuote, quoteLabelPos, quoteOrientation]);
-  const quotePreview = (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-      <div className="text-xs font-semibold text-slate-600">{t({ it: 'Anteprima', en: 'Preview' })}</div>
-      <div className="mt-2">
-        {quoteOrientation === 'vertical' ? (
-          <svg viewBox="0 0 220 240" className="h-40 w-full">
-            <line
-              x1="110"
-              y1="30"
-              x2="110"
-              y2="210"
-              stroke={quoteColor}
-              strokeWidth={2 * scale}
-              strokeDasharray={quoteDashed ? '6 5' : undefined}
-            />
-            {quoteEndpoint === 'dots' ? (
-              <>
-                <circle cx="110" cy="30" r="4" fill={quoteColor} />
-                <circle cx="110" cy="210" r="4" fill={quoteColor} />
-              </>
-            ) : null}
-            {quoteEndpoint === 'arrows' ? (
-              <>
-                <polygon points="110,18 100,34 120,34" fill={quoteColor} />
-                <polygon points="110,222 100,206 120,206" fill={quoteColor} />
-              </>
-            ) : null}
-            <text
-              x={
-                quoteLabelPosEffective === 'left'
-                  ? 110 - 30 * quoteLabelOffset
-                  : quoteLabelPosEffective === 'right'
-                    ? 110 + 30 * quoteLabelOffset
-                    : 110
-              }
-              y={120}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fontSize={10 * quoteLabelScale}
-              fontWeight="bold"
-              fill={quoteLabelColor}
-              transform={`rotate(-90 ${
-                quoteLabelPosEffective === 'left'
-                  ? 110 - 30 * quoteLabelOffset
-                  : quoteLabelPosEffective === 'right'
-                    ? 110 + 30 * quoteLabelOffset
-                    : 110
-              } 120)`}
-            >
-              {quoteLengthLabel || '0'}
-            </text>
-          </svg>
-        ) : (
-          <svg viewBox="0 0 320 160" className="h-32 w-full">
-            <line
-              x1="40"
-              y1="80"
-              x2="280"
-              y2="80"
-              stroke={quoteColor}
-              strokeWidth={2 * scale}
-              strokeDasharray={quoteDashed ? '6 5' : undefined}
-            />
-            {quoteEndpoint === 'dots' ? (
-              <>
-                <circle cx="40" cy="80" r="4" fill={quoteColor} />
-                <circle cx="280" cy="80" r="4" fill={quoteColor} />
-              </>
-            ) : null}
-            {quoteEndpoint === 'arrows' ? (
-              <>
-                <polygon points="34,80 48,70 48,90" fill={quoteColor} />
-                <polygon points="286,80 272,70 272,90" fill={quoteColor} />
-              </>
-            ) : null}
-            <text
-              x={160}
-              y={
-                quoteLabelPosEffective === 'above'
-                  ? 80 - 10 * quoteLabelOffset
-                  : quoteLabelPosEffective === 'below'
-                    ? 80 + 10 * quoteLabelOffset
-                    : 80
-              }
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fontSize={10 * quoteLabelScale}
-              fontWeight="bold"
-              fill={quoteLabelColor}
-            >
-              {quoteLengthLabel || '0'}
-            </text>
-          </svg>
-        )}
-      </div>
-    </div>
-  );
   const fitImageSize = (width: number, height: number) => {
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
       return { width: 160, height: 120 };
@@ -1468,7 +1371,7 @@ const ObjectModal = ({
                     </div>
                   ) : null}
                   {isQuote ? (
-                    <ObjectQuoteSection {...{ quoteColor, quoteDashed, quoteEndpoint, quoteLabelBg, quoteLabelColor, quoteLabelOffset, quoteLabelPosEffective, quoteLabelScale, quoteLengthLabel, quoteOrientation, quotePreview, readOnly, scale, setQuoteColor, setQuoteDashed, setQuoteEndpoint, setQuoteLabelBg, setQuoteLabelColor, setQuoteLabelOffset, setQuoteLabelPos, setQuoteLabelScale, setScale, t }} />
+                    <ObjectQuoteSection {...{ quoteColor, quoteDashed, quoteEndpoint, quoteLabelBg, quoteLabelColor, quoteLabelOffset, quoteLabelPosEffective, quoteLabelScale, quoteLengthLabel, quoteOrientation, readOnly, scale, setQuoteColor, setQuoteDashed, setQuoteEndpoint, setQuoteLabelBg, setQuoteLabelColor, setQuoteLabelOffset, setQuoteLabelPos, setQuoteLabelScale, setScale, t }} />
                   ) : null}
 
                   {!isText && !isImageLike && !isPostIt && customFields.length ? (
