@@ -317,3 +317,47 @@ export const buildDoorRegistryRowsRaw = (
   }
   return rows;
 };
+
+// Serialize the door-registry rows to a `;`-separated CSV string (with header
+// row, CSV-escaping). Pure. Extracted from ObjectTypesPanel.
+export const buildDoorRowsCsv = (rows: DoorRegistryRow[]): string => {
+  const headers = [
+    'Cliente',
+    'Sede',
+    'Planimetria',
+    'ID porta',
+    'Descrizione porta',
+    'Tipo porta',
+    'Porta emergenza',
+    'Ultima revisione (emergenza)',
+    'Ultima azienda revisionatrice',
+    'Nome corridoio',
+    'Ufficio piu vicino'
+  ];
+  const escapeCsv = (value: string) => {
+    const text = String(value ?? '');
+    if (!/[;"\n\r]/.test(text)) return text;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+  const lines = [
+    headers.join(';'),
+    ...rows.map((row) =>
+      [
+        row.clientName,
+        row.siteName,
+        row.planName,
+        row.doorId,
+        row.description,
+        row.doorType,
+        row.isEmergency ? 'SI' : 'NO',
+        row.isEmergency ? row.lastVerificationAt || '' : '',
+        row.isEmergency ? row.verifierCompany || '' : '',
+        row.corridorName,
+        row.nearestRoomName
+      ]
+        .map((item) => escapeCsv(String(item)))
+        .join(';')
+    )
+  ];
+  return lines.join('\n');
+};

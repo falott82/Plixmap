@@ -48,7 +48,7 @@ import { getWallTypeColor } from '../../utils/wallColors';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { isSecurityTypeId } from '../../store/security';
 
-import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw } from './ObjectTypesPanel.helpers';
+import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv } from './ObjectTypesPanel.helpers';
 import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal, DoorHistoryModal, PendingRequestsPromptModal } from './ObjectTypesPanelModals';
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
@@ -598,45 +598,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
       push(t({ it: 'Nessuna porta da esportare.', en: 'No doors to export.' }), 'info');
       return;
     }
-    const headers = [
-      'Cliente',
-      'Sede',
-      'Planimetria',
-      'ID porta',
-      'Descrizione porta',
-      'Tipo porta',
-      'Porta emergenza',
-      'Ultima revisione (emergenza)',
-      'Ultima azienda revisionatrice',
-      'Nome corridoio',
-      'Ufficio piu vicino'
-    ];
-    const escapeCsv = (value: string) => {
-      const text = String(value ?? '');
-      if (!/[;"\n\r]/.test(text)) return text;
-      return `"${text.replace(/"/g, '""')}"`;
-    };
-    const lines = [
-      headers.join(';'),
-      ...filteredDoorRows.map((row) =>
-        [
-          row.clientName,
-          row.siteName,
-          row.planName,
-          row.doorId,
-          row.description,
-          row.doorType,
-          row.isEmergency ? 'SI' : 'NO',
-          row.isEmergency ? row.lastVerificationAt || '' : '',
-          row.isEmergency ? row.verifierCompany || '' : '',
-          row.corridorName,
-          row.nearestRoomName
-        ]
-          .map((item) => escapeCsv(String(item)))
-          .join(';')
-      )
-    ];
-    const blob = new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([`\ufeff${buildDoorRowsCsv(filteredDoorRows)}`], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
