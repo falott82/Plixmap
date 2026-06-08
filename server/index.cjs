@@ -9,6 +9,7 @@ const { WebSocketServer } = require('ws');
 const { normalizeHttpUrl, serverConfig, validateServerConfig } = require('./config.cjs');
 const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret, listMigrationStatus } = require('./db.cjs');
 const { createDatabaseBackup, listBackups, resolveBackupDir, resolveBackupRetention } = require('./backup.cjs');
+const { evaluateCsrfRequest } = require('./csrf.cjs');
 const {
   parseCookies,
   verifyPassword,
@@ -303,7 +304,6 @@ app.use('/api', (_req, res, next) => {
 const CSRF_COOKIE = 'plixmap_csrf';
 const CSRF_HEADER = 'x-csrf-token';
 const CSRF_MAX_AGE = 60 * 60 * 24 * 30;
-const csrfExemptPaths = new Set(['/auth/login', '/auth/bootstrap-status']);
 
 const appendSetCookie = (res, value) => {
   if (typeof res.append === 'function') {
@@ -347,35 +347,20 @@ const ensureCsrfCookie = (req, res) => {
 };
 
 app.use('/api', (req, res, next) => {
-  const method = String(req.method || '').toUpperCase();
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
-  if (csrfExemptPaths.has(req.path)) return next();
-  if (
-    req.path.startsWith('/meeting-room/') &&
-    (req.path.endsWith('/checkin-toggle') || req.path.endsWith('/help-request'))
-  ) {
-    return next();
-  }
   const cookies = parseCookies(req.headers.cookie);
-  const cookieToken = cookies[CSRF_COOKIE];
-  const headerToken = req.headers[CSRF_HEADER];
-  if (!cookieToken || !headerToken || String(headerToken) !== String(cookieToken)) {
-    res.status(403).json({ error: 'CSRF validation failed' });
+  const result = evaluateCsrfRequest({
+    method: req.method,
+    path: req.path,
+    cookieToken: cookies[CSRF_COOKIE],
+    headerToken: req.headers[CSRF_HEADER],
+    origin: req.headers.origin,
+    referer: req.headers.referer,
+    host: req.headers.host,
+    protocol: req.protocol
+  });
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
     return;
-  }
-  const origin = req.headers.origin;
-  const referer = req.headers.referer;
-  const host = req.headers.host;
-  if (host) {
-    const expected = `${req.protocol}://${host}`;
-    if (origin && origin !== expected) {
-      res.status(403).json({ error: 'CSRF origin mismatch' });
-      return;
-    }
-    if (!origin && referer && !String(referer).startsWith(expected)) {
-      res.status(403).json({ error: 'CSRF referer mismatch' });
-      return;
-    }
   }
   next();
 });
