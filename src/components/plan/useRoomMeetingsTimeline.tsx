@@ -33,6 +33,7 @@ import {
   computeRoomMeetingEditParticipantCandidates,
   computeRoomMeetingCheckInEntries,
   buildRoomMeetingSearchMatches,
+  normalizeBookingParticipantsDraft,
   type SiteMeetingParticipantCandidate
 } from './useRoomMeetingsTimeline.helpers';
 import type { RoomMeetingDuplicateModalState } from './RoomMeetingDuplicateModal';
@@ -512,24 +513,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
         setMyMeetingsModal(null);
       }
       const meetingNotesState = options?.meetingNotesState || null;
-      const normalizedParticipants: Array<
-        MeetingParticipant & { key: string; fullName: string; kind: 'real_user' | 'manual' }
-      > = (Array.isArray(booking.participants) ? booking.participants : []).map((row, idx) => {
-        const kind: 'real_user' | 'manual' = row?.kind === 'manual' ? 'manual' : 'real_user';
-        const externalId = String(row?.externalId || '').trim() || null;
-        const fullName = String(row?.fullName || row?.externalId || '').trim() || (kind === 'manual' ? t({ it: 'Ospite', en: 'Guest' }) : 'User');
-        const key = kind === 'real_user' && externalId ? `real:${externalId}` : `manual:${idx}:${nanoid(4)}`;
-        return {
-          key,
-          kind,
-          externalId,
-          fullName,
-          email: row?.email ? String(row.email) : null,
-          optional: !!row?.optional,
-          remote: !!row?.remote,
-          company: row?.company ? String(row.company) : null
-        };
-      });
+      const normalizedParticipants = normalizeBookingParticipantsDraft(booking, t({ it: 'Ospite', en: 'Guest' }));
       setRoomMeetingsTimelineBookingDetail({
         booking,
         mode,
