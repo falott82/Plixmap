@@ -460,3 +460,30 @@ export const computeObjectTypePaletteDefs = (params: {
   const paletteDefs = [...enabledDefs, ...availableDefs.filter((d) => !enabledIds.has(d.id))];
   return { enabledDefs, availableDefs, paletteDefs };
 };
+
+// Sorted + search-filtered wifi antenna model lists for the client. Pure.
+export const computeWifiModelLists = (client: any, q: string): { wifiModels: any[]; filteredWifiModels: any[] } => {
+  const wifiModels = (client?.wifiAntennaModels || []).slice().sort((a: any, b: any) => `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`));
+  const term = q.trim().toLowerCase();
+  const filteredWifiModels = !term
+    ? wifiModels
+    : wifiModels.filter((m: any) => `${m.brand} ${m.model} ${m.modelCode} ${m.standard}`.toLowerCase().includes(term));
+  return { wifiModels, filteredWifiModels };
+};
+
+// Sorted + search-filtered wall object-type def lists. Pure; isWallType passed in.
+export const computeWallDefLists = (
+  objectTypes: any[],
+  isWallType: (id: string) => boolean,
+  lang: string,
+  q: string
+): { wallDefs: any[]; filteredWallDefs: any[] } => {
+  const wallDefs = (objectTypes || [])
+    .filter((d) => isWallType(d.id))
+    .sort((a: any, b: any) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
+  const term = q.trim().toLowerCase();
+  const filteredWallDefs = !term
+    ? wallDefs
+    : wallDefs.filter((d: any) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term));
+  return { wallDefs, filteredWallDefs };
+};

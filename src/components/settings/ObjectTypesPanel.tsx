@@ -46,7 +46,7 @@ import { WALL_TYPE_IDS, WIFI_DEFAULT_STANDARD, WIFI_STANDARD_OPTIONS } from '../
 import { getWallTypeColor } from '../../utils/wallColors';
 import ConfirmDialog from '../ui/ConfirmDialog';
 
-import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv, sortWifiModels, computeObjectTypePaletteDefs } from './ObjectTypesPanel.helpers';
+import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv, sortWifiModels, computeObjectTypePaletteDefs, computeWifiModelLists, computeWallDefLists } from './ObjectTypesPanel.helpers';
 import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal, DoorHistoryModal, PendingRequestsPromptModal } from './ObjectTypesPanelModals';
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
@@ -174,17 +174,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     }
     return map;
   }, [lang]);
-  const wifiModels = useMemo(() => {
-    const list = (client?.wifiAntennaModels || []).slice();
-    return list.sort((a, b) => `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`));
-  }, [client?.wifiAntennaModels]);
-  const filteredWifiModels = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    if (!term) return wifiModels;
-    return wifiModels.filter((m) =>
-      `${m.brand} ${m.model} ${m.modelCode} ${m.standard}`.toLowerCase().includes(term)
-    );
-  }, [q, wifiModels]);
+  const { wifiModels, filteredWifiModels } = useMemo(
+    () => computeWifiModelLists(client, q),
+    [client, q]
+  );
   const sortedWifiModels = useMemo(
     () => sortWifiModels(filteredWifiModels, wifiSort.key, wifiSort.dir, wifiStandardLabels),
     [filteredWifiModels, wifiSort.dir, wifiSort.key, wifiStandardLabels]
@@ -222,15 +215,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     [defById, enabled, isDesksSection, isDoorsSection, isSecuritySection, isWallType, isWallsSection, lang, objectTypes, q]
   );
 
-  const wallDefs = useMemo(() => {
-    const list = (objectTypes || []).filter((d) => isWallType(d.id));
-    return list.sort((a, b) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
-  }, [isWallType, lang, objectTypes]);
-  const filteredWallDefs = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    if (!term) return wallDefs;
-    return wallDefs.filter((d) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term));
-  }, [q, wallDefs]);
+  const { filteredWallDefs } = useMemo(
+    () => computeWallDefLists(objectTypes, isWallType, lang, q),
+    [isWallType, lang, objectTypes, q]
+  );
   const doorTypeById = useMemo(() => {
     const map = new Map<string, any>();
     for (const def of objectTypes || []) {
