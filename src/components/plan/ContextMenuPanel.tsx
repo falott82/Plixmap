@@ -1,4 +1,4 @@
-import { BookmarkPlus, CalendarClock, ChevronRight, CornerDownRight, Copy, Crop, DoorOpen, ExternalLink, Eye, EyeOff, Footprints, Home, Image as ImageIcon, Layers, LayoutGrid, Link2, MoveDiagonal, Pencil, PhoneCall, Plus, QrCode, Ruler, Trash, User, Users, X } from 'lucide-react';
+import { BookmarkPlus, CalendarClock, ChevronRight, CornerDownRight, Copy, Crop, DoorOpen, ExternalLink, Eye, EyeOff, Footprints, Home, Image as ImageIcon, Layers, LayoutGrid, Link2, MoveDiagonal, Pencil, Plus, QrCode, Ruler, Trash, User, Users, X } from 'lucide-react';
 
 import { Corridor } from '../../store/types';
 
@@ -7,6 +7,7 @@ import { ALL_ITEMS_LAYER_ID, DEFAULT_WALL_TYPES, WIFI_RANGE_SCALE_MAX } from '..
 
 import { usePlanView } from './usePlanView';
 import { ContextMenuMapSubmenus } from './ContextMenuMapSubmenus';
+import { ContextMenuSafetyCardSection } from './ContextMenuSafetyCardSection';
 
 type ContextMenuPanelProps = Pick<ReturnType<typeof usePlanView>, 'addLink' | 'alignMenuOpen' | 'alignSelection' | 'allItemsSelected' | 'basePlan' | 'beginCorridorPolyDraw' | 'canEditWallType' | 'client' | 'contextAssemblyMapsUrl' | 'contextIsAssemblyPoint' | 'contextIsCamera' | 'contextIsDesk' | 'contextIsMulti' | 'contextIsPhoto' | 'contextIsQuote' | 'contextIsRack' | 'contextIsText' | 'contextIsWall' | 'contextIsWifi' | 'contextLink' | 'contextMenu' | 'contextMenuRef' | 'contextObject' | 'contextObjectLinkCount' | 'contextObjectTypeLabel' | 'contextPhotoMulti' | 'contextQuoteLabelPos' | 'contextQuoteOrientation' | 'contextWallPolygon' | 'contextWifiBaseAreaSqm' | 'contextWifiBaseDiameterM' | 'contextWifiBaseRadiusM' | 'contextWifiEffectiveAreaSqm' | 'contextWifiEffectiveDiameterM' | 'contextWifiEffectiveRadiusM' | 'contextWifiRangeOn' | 'contextWifiRangeScale' | 'corridorById' | 'deleteLink' | 'deskCatalogDefs' | 'effectiveVisibleLayerIds' | 'getLayerLabel' | 'getSubmenuStyle' | 'goToDefaultView' | 'handleEdit' | 'hasDefaultView' | 'hideAllLayers' | 'isReadOnly' | 'lastQuoteColor' | 'layerIds' | 'layersContextMenu' | 'layersContextMenuRef' | 'mapSubmenu' | 'markTouched' | 'metersPerPixel' | 'normalizeLayerSelection' | 'openCorridorConnectionModalAt' | 'openCorridorDoorLinkModal' | 'openCorridorDoorModal' | 'openDuplicate' | 'openEditCorridorConnectionModal' | 'openEditRoom' | 'openEscapeRouteAt' | 'openMeetingManager' | 'openPhotoViewer' | 'openRoomDoorModal' | 'openRoomMeetingsTimeline' | 'openScaleEdit' | 'openWallGroupModal' | 'orderedPlanLayers' | 'plan' | 'planId' | 'planLayers' | 'planPhotoIds' | 'push' | 'renderPlan' | 'renderPlanObjectById' | 'requestClearScale' | 'roomDoors' | 'securityLayerVisible' | 'selectedObjectIds' | 'selectedRoomIds' | 'selectedWifiIds' | 'selectionHasDesk' | 'selectionHasPhoto' | 'selectionHasRack' | 'selectionPhotoIds' | 'setAlignMenuOpen' | 'setAllTypesDefaultTab' | 'setAllTypesOpen' | 'setBulkEditSelectionOpen' | 'setCableModal' | 'setConfirmClearObjects' | 'setConfirmDelete' | 'setConfirmDeleteRoomId' | 'setContextMenu' | 'setDeskCatalogOpen' | 'setEmergencyContactsOpen' | 'setExportModalOpen' | 'setHideAllLayers' | 'setLastObjectScale' | 'setLastQuoteColor' | 'setLastQuoteScale' | 'setLayersContextMenu' | 'setLinkCreateMode' | 'setLinkEditId' | 'setLinkFromId' | 'setLinksModalObjectId' | 'setMeasureMode' | 'setPaletteSection' | 'setPanToolActive' | 'setPendingType' | 'setPrintAreaMode' | 'setRealUserDetailsId' | 'setRoomCatalogOpen' | 'setRoomDrawMode' | 'setRoomKioskInfoModal' | 'setRoomLayoutExportModal' | 'setRoomMeasuresModal' | 'setScaleMode' | 'setSelectedCorridorDoor' | 'setSelectedLinkId' | 'setSelectedRoomDoorId' | 'setSelectedRoomId' | 'setSelectedRoomIds' | 'setSelection' | 'setViewModalOpen' | 'setVisibleLayerIds' | 'setWallCatalogOpen' | 'setWallDrawMode' | 'setWallTypeModal' | 'showPrintArea' | 'site' | 'startMeasure' | 'startQuote' | 'startRoomDoorDraft' | 'startScaleMode' | 't' | 'toggleMapSubmenu' | 'toggleSecurityCardVisibility' | 'toggleShowPrintArea' | 'totalLayerCount' | 'updateFloorPlan' | 'updateObject' | 'updateQuoteLabelPos' | 'visibleLayerCount' | 'wallTypeDefs'>;
 
@@ -85,7 +86,6 @@ const ContextMenuPanel = (props: ContextMenuPanelProps) => {
     renderPlanObjectById,
     requestClearScale,
     roomDoors,
-    securityLayerVisible,
     selectedObjectIds,
     selectedRoomIds,
     selectedWifiIds,
@@ -99,7 +99,6 @@ const ContextMenuPanel = (props: ContextMenuPanelProps) => {
     setConfirmDelete,
     setConfirmDeleteRoomId,
     setContextMenu,
-    setEmergencyContactsOpen,
     setHideAllLayers,
     setLastObjectScale,
     setLastQuoteColor,
@@ -125,7 +124,6 @@ const ContextMenuPanel = (props: ContextMenuPanelProps) => {
     startRoomDoorDraft,
     t,
     toggleMapSubmenu,
-    toggleSecurityCardVisibility,
     totalLayerCount,
     updateFloorPlan,
     updateObject,
@@ -1293,35 +1291,7 @@ const ContextMenuPanel = (props: ContextMenuPanelProps) => {
               ) : null}
             </>
             ) : contextMenu.kind === 'safety_card' ? (
-            <>
-              <button
-                onClick={() => {
-                  toggleSecurityCardVisibility();
-                  setContextMenu(null);
-                }}
-                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                title={t({
-                  it: securityLayerVisible ? 'Nascondi scheda sicurezza' : 'Mostra scheda sicurezza',
-                  en: securityLayerVisible ? 'Hide safety card' : 'Show safety card'
-                })}
-              >
-                {securityLayerVisible ? <EyeOff size={14} className="text-slate-500" /> : <Eye size={14} className="text-slate-500" />}
-                {t({
-                  it: securityLayerVisible ? 'Nascondi' : 'Mostra',
-                  en: securityLayerVisible ? 'Hide' : 'Show'
-                })}
-              </button>
-              <button
-                onClick={() => {
-                  setEmergencyContactsOpen(true);
-                  setContextMenu(null);
-                }}
-                className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-                title={t({ it: 'Apri rubrica emergenze', en: 'Open emergency directory' })}
-              >
-                <PhoneCall size={14} className="text-slate-500" /> {t({ it: 'Rubrica emergenze', en: 'Emergency directory' })}
-              </button>
-            </>
+            <ContextMenuSafetyCardSection {...props} />
             ) : contextMenu.kind === 'scale' ? (
             <>
               <button
