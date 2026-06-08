@@ -140,6 +140,7 @@ import { usePlanWallPointHandlers } from './usePlanWallPointHandlers';
 import { usePlanMeetingOpenHandlers } from './usePlanMeetingOpenHandlers';
 import { usePlanPaletteFavoriteHandlers } from './usePlanPaletteFavoriteHandlers';
 import { usePlanSearchHandlers } from './usePlanSearchHandlers';
+import { usePlanEditOpenHandlers } from './usePlanEditOpenHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -4516,37 +4517,19 @@ export const usePlanView = (planId: string) => {
     });
   };
 
-  const handleEdit = (objectId: string) => {
-    const obj = renderPlan?.objects.find((o) => o.id === objectId);
-    if (obj?.type === 'rack') {
-      setRackModal({ objectId });
-      return;
-    }
-    if (obj && isDeskType(obj.type)) return;
-    if (obj && isWallType(obj.type)) {
-      if (openWallGroupModal(obj.id)) return;
-      setWallTypeModal({ ids: [obj.id], typeId: obj.type });
-      return;
-    }
-    setModalState({ mode: 'edit', objectId });
-  };
-  const openEditFromSelectionList = (objectId: string) => {
-    returnToSelectionListRef.current = true;
-    setSelectedObjectsModalOpen(false);
-    const obj = renderPlanObjectById.get(objectId);
-    if (obj && isDeskType(obj.type)) return;
-    if (obj && isWallType(obj.type)) {
-      if (openWallGroupModal(obj.id)) return;
-      setWallTypeModal({ ids: [obj.id], typeId: obj.type });
-      return;
-    }
-    setModalState({ mode: 'edit', objectId });
-  };
-  const openLinkEditFromSelectionList = (linkId: string) => {
-    returnToSelectionListRef.current = true;
-    setSelectedObjectsModalOpen(false);
-    setLinkEditId(linkId);
-  };
+  const { handleEdit, openEditFromSelectionList, openLinkEditFromSelectionList } = usePlanEditOpenHandlers({
+    renderPlan,
+    renderPlanObjectById,
+    isDeskType,
+    isWallType,
+    openWallGroupModal,
+    returnToSelectionListRef,
+    setRackModal,
+    setWallTypeModal,
+    setModalState,
+    setSelectedObjectsModalOpen,
+    setLinkEditId
+  });
 
   const openMediaViewer = useCallback(
     (payload: {
