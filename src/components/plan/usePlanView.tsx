@@ -131,7 +131,8 @@ import type {
   UnlockGrantedPromptState,
   ForceUnlockConfigState,
   ForceUnlockActiveState,
-  ForceUnlockIncomingState
+  ForceUnlockIncomingState,
+  PlanLockState
 } from './planViewStateTypes';
 import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
 import { usePlanDoorModalHandlers } from './usePlanDoorModalHandlers';
@@ -1129,28 +1130,7 @@ export const usePlanView = (planId: string) => {
 	    locks?: { planId: string; clientName?: string; siteName?: string; planName?: string }[];
 	  };
 
-		  const [lockState, setLockState] = useState<{
-		    lockedBy: { userId: string; username: string; avatarUrl?: string } | null;
-		    mine: boolean;
-		    grant:
-		      | {
-		          userId: string;
-		          username: string;
-		          avatarUrl?: string;
-		          grantedAt?: number | null;
-		          expiresAt?: number | null;
-		          minutes?: number | null;
-		          grantedBy?: { userId: string; username: string } | null;
-		        }
-		      | null;
-		    meta:
-		      | {
-		          lastActionAt?: number | null;
-		          lastSavedAt?: number | null;
-		          lastSavedRev?: string | null;
-		        }
-		      | null;
-		  }>({ lockedBy: null, mine: false, grant: null, meta: null });
+		  const [lockState, setLockState] = useState<PlanLockState>({ lockedBy: null, mine: false, grant: null, meta: null });
   const {
     lockInfoOpen,
     setLockInfoOpen,

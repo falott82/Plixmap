@@ -52,6 +52,27 @@ export type ClientMeetingsPresetState = {
 
 type UserRef = { userId: string; username: string };
 
+export type PlanLockState = {
+  lockedBy: (UserRef & { avatarUrl?: string }) | null;
+  mine: boolean;
+  grant:
+    | (UserRef & {
+        avatarUrl?: string;
+        grantedAt?: number | null;
+        expiresAt?: number | null;
+        minutes?: number | null;
+        grantedBy?: UserRef | null;
+      })
+    | null;
+  meta:
+    | {
+        lastActionAt?: number | null;
+        lastSavedAt?: number | null;
+        lastSavedRev?: string | null;
+      }
+    | null;
+};
+
 export type UnlockPromptState = {
   requestId: string;
   planId: string;
