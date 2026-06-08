@@ -352,3 +352,25 @@ export const computeClientMeetingsPreviewData = (clientMeetingsRoomPreview: any,
       viewBox: imgW > 0 && imgH > 0 ? `0 0 ${imgW} ${imgH}` : `${minX - pad} ${minY - pad} ${width + pad * 2} ${height + pad * 2}`
     };
 };
+
+export const resolveClientDuplicateSlot = (
+  booking: MeetingBooking,
+  dayIso: string,
+  timeMode: 'same' | 'any_08_18' | 'custom' = 'same'
+): { startHm: string; endHm: string; startMin: number; endMin: number } | null => {
+    const startTs = Number(booking.startAt || 0);
+    const endTs = Number(booking.endAt || 0);
+    const sourceStartHm = timeHmFromTs(startTs);
+    const sourceStartMin = hmToMinutes(sourceStartHm);
+    const durationMinRaw = Math.round((endTs - startTs) / 60_000);
+    const durationMin = Math.max(1, Number.isFinite(durationMinRaw) ? durationMinRaw : 60);
+    let startMin = timeMode === 'same' ? sourceStartMin : 0;
+    if (dayIso === todayIso()) {
+      const now = new Date();
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      startMin = Math.max(startMin, nowMin);
+    }
+    const endMin = startMin + durationMin;
+    if (endMin > 23 * 60 + 59) return null;
+    return { startHm: minutesToHm(startMin), endHm: minutesToHm(endMin), startMin, endMin };
+};
