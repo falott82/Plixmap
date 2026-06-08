@@ -13,7 +13,6 @@ import {
   computeCreateRoomFromRect,
   computeCreateRoomFromPoly,
   computeSplitWallAtPoint,
-  computeCreateRoomWalls,
   computeRoomMeasuresData,
   computeRoomModalMetrics,
   computeBuildRoomWallSegments,
@@ -30,8 +29,7 @@ import {
   computeHandleWallMove,
   computeCorridorDoorLinkRoomEntries,
   computeCanvasPlan,
-  computeSaveRevisionReason,
-  computeApplyWallTypeToIds
+  computeSaveRevisionReason
 } from './planViewMiscTools';
 import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
 import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
@@ -147,6 +145,7 @@ import { usePlanRoomDoorDraftHandlers } from './usePlanRoomDoorDraftHandlers';
 import { usePlanScaleHandlers } from './usePlanScaleHandlers';
 import { usePlanViewHandlers } from './usePlanViewHandlers';
 import { usePlanCorridorConnectionHandlers } from './usePlanCorridorConnectionHandlers';
+import { usePlanWallTypeHandlers } from './usePlanWallTypeHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -3945,69 +3944,28 @@ export const usePlanView = (planId: string) => {
     [formatNumber, lang, metersPerPixel, push, t]
   );
 
-  const applyWallTypeToIds = useCallback(
-    (ids: string[], typeId: string) =>
-      computeApplyWallTypeToIds(ids, typeId, { getTypeLabel, isReadOnly, isWallType, markTouched, push, t, updateObject }),
-    [getTypeLabel, isReadOnly, isWallType, markTouched, push, t, updateObject]
-  );
-
-  const applyWallType = useCallback(() => {
-    if (!wallTypeModal || !wallTypeDraft) return;
-    applyWallTypeToIds(wallTypeModal.ids, wallTypeDraft);
-    setWallTypeModal(null);
-  }, [applyWallTypeToIds, wallTypeDraft, wallTypeModal]);
-
-  const setRoomWallTypeAt = useCallback((index: number, typeId: string) => {
-    setRoomWallTypeSelections((prev) => {
-      const next = prev.slice();
-      next[index] = typeId;
-      return next;
-    });
-  }, []);
-
-  const applyRoomWallTypeAll = useCallback(
-    (typeId: string) => {
-      if (!roomWallTypeModal) return;
-      setRoomWallTypeSelections(roomWallTypeModal.segments.map(() => typeId));
-    },
-    [roomWallTypeModal]
-  );
-
-  const createRoomWalls = useCallback(() => {
-    computeCreateRoomWalls({
-      addObject,
-      defaultWallTypeId,
-      ensureObjectLayerVisible,
-      getTypeLabel,
-      inferDefaultLayerIds,
-      isReadOnly,
-      layerIdSet,
-      markTouched,
-      push,
-      renderPlan,
-      roomWallTypeModal,
-      roomWallTypeSelections,
-      t,
-      updateObject,
-      setRoomWallTypeModal
-    });
-  }, [
+  const { applyWallTypeToIds, applyWallType, setRoomWallTypeAt, applyRoomWallTypeAll, createRoomWalls } = usePlanWallTypeHandlers({
+    getTypeLabel,
+    isReadOnly,
+    isWallType,
+    markTouched,
+    push,
+    t,
+    updateObject,
+    wallTypeModal,
+    wallTypeDraft,
+    setWallTypeModal,
+    setRoomWallTypeSelections,
+    roomWallTypeModal,
+    roomWallTypeSelections,
     addObject,
     defaultWallTypeId,
     ensureObjectLayerVisible,
-    getTypeLabel,
-    getWallTypeColor,
     inferDefaultLayerIds,
-    isReadOnly,
     layerIdSet,
-    markTouched,
-    push,
     renderPlan,
-    roomWallTypeModal,
-    roomWallTypeSelections,
-    t,
-    updateObject
-  ]);
+    setRoomWallTypeModal
+  });
 
   const {
     runDeleteShortcut,
