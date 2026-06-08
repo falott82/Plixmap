@@ -33,7 +33,7 @@ import {
   computeSaveRevisionReason,
   computeApplyWallTypeToIds
 } from './planViewMiscTools';
-import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeHandleScaleMove, computeUpdateScaleStyle } from './planViewQuoteScaleTools';
+import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeHandleScaleMove, computeUpdateScaleStyle, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
 import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
 import {
   computeResolveWallPoint,
@@ -3028,16 +3028,14 @@ export const usePlanView = (planId: string) => {
   }, [formatNumber, isReadOnly, planScale?.end, planScale?.meters, planScale?.start]);
 
   const updateQuoteLabelPos = useCallback(
-    (id: string, pos: 'center' | 'above' | 'below' | 'left' | 'right', orientation?: 'horizontal' | 'vertical') => {
-      if (!id) return;
-      updateObject(id, { quoteLabelPos: pos });
-      const resolved = orientation || getQuoteOrientation((renderPlan as any)?.objects?.find((o: any) => o.id === id)?.points);
-      if (resolved === 'vertical') {
-        if (pos === 'left' || pos === 'right' || pos === 'center') setLastQuoteLabelPosV(pos as any);
-      } else {
-        if (pos === 'above' || pos === 'below' || pos === 'center') setLastQuoteLabelPosH(pos as any);
-      }
-    },
+    (id: string, pos: 'center' | 'above' | 'below' | 'left' | 'right', orientation?: 'horizontal' | 'vertical') =>
+      computeUpdateQuoteLabelPos(id, pos, orientation, {
+        getQuoteOrientation,
+        renderPlan,
+        updateObject,
+        setLastQuoteLabelPosH,
+        setLastQuoteLabelPosV
+      }),
     [getQuoteOrientation, renderPlan, setLastQuoteLabelPosH, setLastQuoteLabelPosV, updateObject]
   );
 

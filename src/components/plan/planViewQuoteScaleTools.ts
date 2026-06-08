@@ -15,6 +15,32 @@ type ScaleModalState = { start: Pt; end: Pt; distance: number } | null;
 // referenced in the body (e.g. layerIdSet, t, inferDefaultLayerIds in handleQuotePoint), they are
 // not passed here — the wrapper retains them.
 
+export type UpdateQuoteLabelPosDeps = {
+  getQuoteOrientation: (points?: Pt[]) => QuoteOrientation;
+  renderPlan: FloorPlan | undefined;
+  updateObject: DataStoreState['updateObject'];
+  setLastQuoteLabelPosH: (pos: 'above' | 'below' | 'center') => void;
+  setLastQuoteLabelPosV: (pos: 'left' | 'right' | 'center') => void;
+};
+
+// Persist a quote's label position and remember it as the per-orientation default.
+export const computeUpdateQuoteLabelPos = (
+  id: string,
+  pos: 'center' | 'above' | 'below' | 'left' | 'right',
+  orientation: QuoteOrientation | undefined,
+  deps: UpdateQuoteLabelPosDeps
+) => {
+  const { getQuoteOrientation, renderPlan, updateObject, setLastQuoteLabelPosH, setLastQuoteLabelPosV } = deps;
+  if (!id) return;
+  updateObject(id, { quoteLabelPos: pos });
+  const resolved = orientation || getQuoteOrientation((renderPlan as any)?.objects?.find((o: any) => o.id === id)?.points);
+  if (resolved === 'vertical') {
+    if (pos === 'left' || pos === 'right' || pos === 'center') setLastQuoteLabelPosV(pos);
+  } else {
+    if (pos === 'above' || pos === 'below' || pos === 'center') setLastQuoteLabelPosH(pos);
+  }
+};
+
 export type ScaleEditDeps = {
   plan: FloorPlan | undefined;
   isReadOnly: boolean;
