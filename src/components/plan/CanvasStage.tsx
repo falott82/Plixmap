@@ -34,7 +34,6 @@ import {
   getDeskBounds,
   getViewportWorldBounds,
   isObjectPotentiallyVisible,
-  intersectRaySegment,
   polygonCentroid,
   getRoomBounds,
   getRoomPolygonPoints,
@@ -46,6 +45,8 @@ import {
   nearestWallSegment,
   getPolygonLabelBounds,
   computeObjectBounds as computeObjectBoundsImpl,
+  buildWifiRangeRings as buildWifiRangeRingsImpl,
+  buildCameraFovPolygon as buildCameraFovPolygonImpl,
 } from './CanvasStage.helpers';
 
 interface Props {
@@ -2239,66 +2240,13 @@ const CanvasStageImpl = (
     return list;
   }, []);
   const buildWifiRangeRings = useCallback(
-    (origin: { x: number; y: number }, baseRadiusPx: number) => {
-      const outer: number[] = [];
-      const mid: number[] = [];
-      const inner: number[] = [];
-      for (const angle of wifiRayAngles) {
-        const dir = { x: Math.cos(angle), y: Math.sin(angle) };
-        const hits: Array<{ t: number; attenuation: number }> = [];
-        if (wallSegments.length) {
-          for (const seg of wallSegments) {
-            const t = intersectRaySegment(origin, dir, seg.a, seg.b);
-            if (t !== null && t <= baseRadiusPx) {
-              hits.push({ t, attenuation: seg.attenuation });
-            }
-          }
-        }
-        hits.sort((a, b) => a.t - b.t);
-        let dist = baseRadiusPx;
-        for (const hit of hits) {
-          if (hit.t > dist) break;
-          const remaining = dist - hit.t;
-          if (remaining <= 0) {
-            dist = hit.t;
-            break;
-          }
-          const factor = Math.pow(10, hit.attenuation / 20);
-          dist = hit.t + remaining / factor;
-        }
-        dist = Math.max(0, dist);
-        outer.push(dir.x * dist, dir.y * dist);
-        mid.push(dir.x * dist * 0.7, dir.y * dist * 0.7);
-        inner.push(dir.x * dist * 0.4, dir.y * dist * 0.4);
-      }
-      return { outer, mid, inner };
-    },
+    (origin: { x: number; y: number }, baseRadiusPx: number) =>
+      buildWifiRangeRingsImpl(origin, baseRadiusPx, wallSegments, wifiRayAngles),
     [wallSegments, wifiRayAngles]
   );
   const buildCameraFovPolygon = useCallback(
-    (origin: { x: number; y: number }, rangePx: number, angleDeg: number, rotationDeg: number) => {
-      if (!Number.isFinite(rangePx) || rangePx <= 0) return null;
-      if (!Number.isFinite(angleDeg) || angleDeg <= 0) return null;
-      const clampedAngle = Math.min(360, Math.max(5, angleDeg));
-      const steps = Math.max(12, Math.ceil(clampedAngle / 5));
-      const startRad = ((rotationDeg - clampedAngle / 2) * Math.PI) / 180;
-      const endRad = ((rotationDeg + clampedAngle / 2) * Math.PI) / 180;
-      const points: number[] = [0, 0];
-      for (let i = 0; i <= steps; i += 1) {
-        const angle = startRad + ((endRad - startRad) * i) / steps;
-        const dir = { x: Math.cos(angle), y: Math.sin(angle) };
-        let dist = rangePx;
-        if (cameraWallSegments.length) {
-          for (const seg of cameraWallSegments) {
-            const t = intersectRaySegment(origin, dir, seg.a, seg.b);
-            if (t !== null && t < dist) dist = t;
-          }
-        }
-        dist = Math.max(0, dist);
-        points.push(dir.x * dist, dir.y * dist);
-      }
-      return points;
-    },
+    (origin: { x: number; y: number }, rangePx: number, angleDeg: number, rotationDeg: number) =>
+      buildCameraFovPolygonImpl(origin, rangePx, angleDeg, rotationDeg, cameraWallSegments),
     [cameraWallSegments]
   );
 
