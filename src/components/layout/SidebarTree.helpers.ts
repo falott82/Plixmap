@@ -301,3 +301,54 @@ export const computeClientMeetingCheckInEntries = (
       .filter((row) => row.checked)
       .sort((a, b) => Number(b.checkedAt || 0) - Number(a.checkedAt || 0));
 };
+
+export const computeClientMeetingsPreviewData = (clientMeetingsRoomPreview: any, selectedClient: any) => {
+    if (!clientMeetingsRoomPreview || !selectedClient) return null;
+    const site = (selectedClient.sites || []).find((s: any) => String(s.id) === String(clientMeetingsRoomPreview.siteId));
+    if (!site) return null;
+    const plan = (site.floorPlans || []).find((p: any) => String(p.id) === String(clientMeetingsRoomPreview.floorPlanId));
+    if (!plan) return null;
+    const rooms = (plan.rooms || [])
+      .map((room: any) => {
+        const points = roomPolygonPoints(room);
+        return {
+          id: String(room?.id || ''),
+          name: String(room?.name || ''),
+          meetingRoom: !!(room as any)?.meetingRoom,
+          points,
+          center: polygonCenter(points)
+        };
+      })
+      .filter((room: any) => room.id && room.points.length >= 3);
+    if (!rooms.length) return null;
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const room of rooms) {
+      for (const point of room.points) {
+        minX = Math.min(minX, point.x);
+        minY = Math.min(minY, point.y);
+        maxX = Math.max(maxX, point.x);
+        maxY = Math.max(maxY, point.y);
+      }
+    }
+    const width = Math.max(1, maxX - minX);
+    const height = Math.max(1, maxY - minY);
+    const pad = Math.max(20, Math.min(width, height) * 0.05);
+    const imgW = Number((plan as any)?.width || 0);
+    const imgH = Number((plan as any)?.height || 0);
+    return {
+      clientName: selectedClient.shortName || selectedClient.name || '',
+      siteName: String(site.name || ''),
+      planName: String(plan.name || ''),
+      roomId: String(clientMeetingsRoomPreview.roomId),
+      rooms,
+      planImageUrl: String((plan as any)?.imageUrl || ''),
+      planWidth: imgW > 0 ? imgW : width + pad * 2,
+      planHeight: imgH > 0 ? imgH : height + pad * 2,
+      planImageX: imgW > 0 ? 0 : minX - pad,
+      planImageY: imgH > 0 ? 0 : minY - pad,
+      viewBox: imgW > 0 && imgH > 0 ? `0 0 ${imgW} ${imgH}` : `${minX - pad} ${minY - pad} ${width + pad * 2} ${height + pad * 2}`
+    };
+};
