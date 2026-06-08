@@ -53,7 +53,9 @@ import {
   humanizeLdapImportField,
   formatLdapActionError,
   computeDuplicateGroups,
-  rowsHaveDuplicates
+  rowsHaveDuplicates,
+  filterImportUsers,
+  sortImportUsers
 } from './CustomImportPanel.helpers';
 
 const CustomImportPanel = (
@@ -511,35 +513,15 @@ const CustomImportPanel = (
     };
   }, [webApiPreviewContextMenu]);
 
-  const filteredUsers = useMemo(() => {
-    const query = normalizeSearchText(usersQuery);
-    let list = usersRows;
-    if (!includeMissing) list = list.filter((r) => r.present);
-    if (onlyMissing) list = list.filter((r) => !r.present);
-    if (!query) return list;
-    return list.filter((r) => matchesImportUserQuery(r, query));
-  }, [includeMissing, onlyMissing, usersQuery, usersRows]);
+  const filteredUsers = useMemo(
+    () => filterImportUsers(usersRows, usersQuery, includeMissing, onlyMissing),
+    [includeMissing, onlyMissing, usersQuery, usersRows]
+  );
 
-  const sortedUsers = useMemo(() => {
-    const list = [...filteredUsers];
-    list.sort((a, b) => {
-      const dir = usersSortState.dir === 'asc' ? 1 : -1;
-      const allocA = assignedCounts.get(`${a.clientId}:${a.externalId}`) || 0;
-      const allocB = assignedCounts.get(`${b.clientId}:${b.externalId}`) || 0;
-      const primary =
-        usersSortState.key === 'id'
-          ? String(a.externalId || '').localeCompare(String(b.externalId || ''), undefined, { sensitivity: 'base' })
-          : usersSortState.key === 'alloc'
-            ? allocA - allocB
-            : usersSortState.key === 'hidden'
-              ? Number(!!a.hidden) - Number(!!b.hidden)
-              : comparePeopleByName(a, b);
-      if (primary !== 0) return primary * dir;
-      if (!!a.hidden !== !!b.hidden) return Number(!!a.hidden) - Number(!!b.hidden);
-      return comparePeopleByName(a, b);
-    });
-    return list;
-  }, [assignedCounts, filteredUsers, usersSortState]);
+  const sortedUsers = useMemo(
+    () => sortImportUsers(filteredUsers, usersSortState, assignedCounts),
+    [assignedCounts, filteredUsers, usersSortState]
+  );
 
   const webApiPreviewExistingFiltered = useMemo(() => {
     const q = normalizeSearchText(webApiPreviewLeftQuery);

@@ -197,3 +197,45 @@ export const rowsHaveDuplicates = (rows: any[]): boolean => {
   }
   return false;
 };
+
+// Filter external-user rows by presence flags + search query. Pure.
+export const filterImportUsers = (
+  usersRows: any[],
+  usersQuery: string,
+  includeMissing: boolean,
+  onlyMissing: boolean
+): any[] => {
+  const query = normalizeSearchText(usersQuery);
+  let list = usersRows;
+  if (!includeMissing) list = list.filter((r: any) => r.present);
+  if (onlyMissing) list = list.filter((r: any) => !r.present);
+  if (!query) return list;
+  return list.filter((r: any) => matchesImportUserQuery(r, query));
+};
+
+// Sort external-user rows by the chosen column (id / alloc / hidden / name),
+// with hidden + name tiebreakers. Pure; allocation counts passed in.
+export const sortImportUsers = (
+  filteredUsers: any[],
+  usersSortState: { key: string; dir: 'asc' | 'desc' },
+  assignedCounts: Map<string, number>
+): any[] => {
+  const list = [...filteredUsers];
+  list.sort((a, b) => {
+    const dir = usersSortState.dir === 'asc' ? 1 : -1;
+    const allocA = assignedCounts.get(`${a.clientId}:${a.externalId}`) || 0;
+    const allocB = assignedCounts.get(`${b.clientId}:${b.externalId}`) || 0;
+    const primary =
+      usersSortState.key === 'id'
+        ? String(a.externalId || '').localeCompare(String(b.externalId || ''), undefined, { sensitivity: 'base' })
+        : usersSortState.key === 'alloc'
+          ? allocA - allocB
+          : usersSortState.key === 'hidden'
+            ? Number(!!a.hidden) - Number(!!b.hidden)
+            : comparePeopleByName(a, b);
+    if (primary !== 0) return primary * dir;
+    if (!!a.hidden !== !!b.hidden) return Number(!!a.hidden) - Number(!!b.hidden);
+    return comparePeopleByName(a, b);
+  });
+  return list;
+};
