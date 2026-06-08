@@ -46,7 +46,7 @@ import { WALL_TYPE_IDS, WIFI_DEFAULT_STANDARD, WIFI_STANDARD_OPTIONS } from '../
 import { getWallTypeColor } from '../../utils/wallColors';
 import ConfirmDialog from '../ui/ConfirmDialog';
 
-import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv, sortWifiModels, computeObjectTypePaletteDefs, computeWifiModelLists, computeWallDefLists } from './ObjectTypesPanel.helpers';
+import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv, sortWifiModels, computeObjectTypePaletteDefs, computeWifiModelLists, computeWallDefLists, filterSortDoorRegistryRows } from './ObjectTypesPanel.helpers';
 import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal, DoorHistoryModal, PendingRequestsPromptModal } from './ObjectTypesPanelModals';
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
@@ -243,59 +243,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     },
     [doorSort.dir, doorSort.key]
   );
-  const filteredDoorRows = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    const list = term
-      ? doorRowsRaw.filter((row) =>
-          `${row.clientName} ${row.siteName} ${row.planName} ${row.doorId} ${row.description} ${row.doorType} ${row.isEmergency ? 'emergency emergenza yes si' : 'no'} ${row.lastVerificationAt} ${row.verifierCompany} ${row.corridorName} ${row.nearestRoomName}`
-            .toLowerCase()
-            .includes(term)
-        )
-      : doorRowsRaw.slice();
-    const compareText = (a: string, b: string) => a.localeCompare(b, lang, { sensitivity: 'base' });
-    list.sort((a, b) => {
-      const dir = doorSort.dir === 'asc' ? 1 : -1;
-      let base = 0;
-      switch (doorSort.key) {
-        case 'isEmergency':
-          base = Number(a.isEmergency) - Number(b.isEmergency);
-          break;
-        case 'clientName':
-          base = compareText(a.clientName, b.clientName);
-          break;
-        case 'siteName':
-          base = compareText(a.siteName, b.siteName);
-          break;
-        case 'planName':
-          base = compareText(a.planName, b.planName);
-          break;
-        case 'doorId':
-          base = compareText(a.doorId, b.doorId);
-          break;
-        case 'description':
-          base = compareText(a.description, b.description);
-          break;
-        case 'doorType':
-          base = compareText(a.doorType, b.doorType);
-          break;
-        case 'lastVerificationAt':
-          base = compareText(a.lastVerificationAt, b.lastVerificationAt);
-          break;
-        case 'verifierCompany':
-          base = compareText(a.verifierCompany, b.verifierCompany);
-          break;
-        case 'corridorName':
-          base = compareText(a.corridorName, b.corridorName);
-          break;
-        case 'nearestRoomName':
-          base = compareText(a.nearestRoomName, b.nearestRoomName);
-          break;
-      }
-      if (base !== 0) return base * dir;
-      return compareText(a.rowId, b.rowId) * dir;
-    });
-    return list;
-  }, [doorRowsRaw, doorSort.dir, doorSort.key, lang, q]);
+  const filteredDoorRows = useMemo(
+    () => filterSortDoorRegistryRows(doorRowsRaw, doorSort.key, doorSort.dir, lang, q),
+    [doorRowsRaw, doorSort.dir, doorSort.key, lang, q]
+  );
   const doorMapPreviewData = useMemo(() => computeDoorMapPreviewData(doorMapPreviewRow), [doorMapPreviewRow]);
 
   const iconOptionsAll: IconName[] = OBJECT_TYPE_ICON_OPTIONS;

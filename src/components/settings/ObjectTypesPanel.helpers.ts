@@ -487,3 +487,65 @@ export const computeWallDefLists = (
     : wallDefs.filter((d: any) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term));
   return { wallDefs, filteredWallDefs };
 };
+
+// Search-filter + column-sort the door-registry rows (stable rowId tiebreaker).
+// Pure. Extracted from ObjectTypesPanel.
+export const filterSortDoorRegistryRows = (
+  doorRowsRaw: DoorRegistryRow[],
+  sortKey: DoorRegistrySortKey,
+  sortDir: 'asc' | 'desc',
+  lang: string,
+  q: string
+): DoorRegistryRow[] => {
+  const term = q.trim().toLowerCase();
+  const list = term
+    ? doorRowsRaw.filter((row) =>
+        `${row.clientName} ${row.siteName} ${row.planName} ${row.doorId} ${row.description} ${row.doorType} ${row.isEmergency ? 'emergency emergenza yes si' : 'no'} ${row.lastVerificationAt} ${row.verifierCompany} ${row.corridorName} ${row.nearestRoomName}`
+          .toLowerCase()
+          .includes(term)
+      )
+    : doorRowsRaw.slice();
+  const compareText = (a: string, b: string) => a.localeCompare(b, lang, { sensitivity: 'base' });
+  list.sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    let base = 0;
+    switch (sortKey) {
+      case 'isEmergency':
+        base = Number(a.isEmergency) - Number(b.isEmergency);
+        break;
+      case 'clientName':
+        base = compareText(a.clientName, b.clientName);
+        break;
+      case 'siteName':
+        base = compareText(a.siteName, b.siteName);
+        break;
+      case 'planName':
+        base = compareText(a.planName, b.planName);
+        break;
+      case 'doorId':
+        base = compareText(a.doorId, b.doorId);
+        break;
+      case 'description':
+        base = compareText(a.description, b.description);
+        break;
+      case 'doorType':
+        base = compareText(a.doorType, b.doorType);
+        break;
+      case 'lastVerificationAt':
+        base = compareText(a.lastVerificationAt, b.lastVerificationAt);
+        break;
+      case 'verifierCompany':
+        base = compareText(a.verifierCompany, b.verifierCompany);
+        break;
+      case 'corridorName':
+        base = compareText(a.corridorName, b.corridorName);
+        break;
+      case 'nearestRoomName':
+        base = compareText(a.nearestRoomName, b.nearestRoomName);
+        break;
+    }
+    if (base !== 0) return base * dir;
+    return compareText(a.rowId, b.rowId) * dir;
+  });
+  return list;
+};
