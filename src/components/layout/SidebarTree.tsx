@@ -42,7 +42,8 @@ import {
   mergeClientMeetingCheckIns,
   buildClientMeetingSearchResults,
   computeRoomBusyIntervals,
-  findDuplicateSlot
+  findDuplicateSlot,
+  buildDuplicateRoomOptions
 } from './SidebarTree.helpers';
 import { SidebarLockMenu } from './SidebarLockMenu';
 import { SidebarPlanMenu } from './SidebarPlanMenu';
@@ -993,36 +994,11 @@ const SidebarTree = () => {
     const preferredDayRaw = String(options?.preferredDay || '').trim();
     const preferredDay = /^\d{4}-\d{2}-\d{2}$/.test(preferredDayRaw) ? preferredDayRaw : '';
     const siteEntry = (selectedClientForMeetingsFull?.sites || []).find((entry: any) => String(entry?.id || '') === String(booking.siteId || ''));
-    const optionsById = new Map<string, ClientDuplicateRoomOption>();
-    for (const floorPlan of siteEntry?.floorPlans || []) {
-      const floorPlanId = String((floorPlan as any)?.id || '').trim();
-      const floorPlanName = String((floorPlan as any)?.name || '').trim();
-      for (const room of (floorPlan as any)?.rooms || []) {
-        const roomId = String((room as any)?.id || '').trim();
-        if (!roomId || !(room as any)?.meetingRoom) continue;
-        if (optionsById.has(roomId)) continue;
-        optionsById.set(roomId, {
-          roomId,
-          roomName: String((room as any)?.name || (booking as any)?.roomName || roomId).trim(),
-          floorPlanId,
-          floorPlanName
-        });
-      }
-    }
-    const sourceRoomId = String((booking as any)?.roomId || '').trim();
-    const sourceRoomName = String((booking as any)?.roomName || '').trim() || t({ it: 'Sala meeting', en: 'Meeting room' });
-    if (sourceRoomId && !optionsById.has(sourceRoomId)) {
-      optionsById.set(sourceRoomId, {
-        roomId: sourceRoomId,
-        roomName: sourceRoomName,
-        floorPlanId: String((booking as any)?.floorPlanId || '').trim(),
-        floorPlanName: ''
-      });
-    }
-    const roomOptions = Array.from(optionsById.values()).sort((a, b) => a.roomName.localeCompare(b.roomName));
-    const selectedRoomId = roomOptions.some((entry) => entry.roomId === sourceRoomId)
-      ? sourceRoomId
-      : String(roomOptions[0]?.roomId || sourceRoomId || '').trim();
+    const { roomOptions, selectedRoomId } = buildDuplicateRoomOptions(
+      siteEntry,
+      booking,
+      t({ it: 'Sala meeting', en: 'Meeting room' })
+    );
     setClientMeetingsDuplicateModal({
       booking,
       step: 'setup',
