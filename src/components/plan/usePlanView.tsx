@@ -78,6 +78,7 @@ import {
   computeLinkCreateHint,
   computeGetLayerLabel,
   computeGetObjectToastLabel,
+  computeSubmenuStyle,
   computeRecommendedObjectScale,
   computeClientBusinessPartnerNames,
   computeMeetingLocationLabels,
@@ -2567,19 +2568,7 @@ export const usePlanView = (planId: string) => {
   });
 
   const getSubmenuStyle = useCallback(
-    (submenuWidth: number) => {
-      if (!contextMenu) return { top: 0, left: 0 };
-      const gap = 8;
-      const menuWidth = contextMenuRef.current?.offsetWidth || 224;
-      let left = contextMenu.x + menuWidth + gap;
-      if (typeof window !== 'undefined') {
-        if (left + submenuWidth > window.innerWidth - 12) {
-          const alt = contextMenu.x - submenuWidth - gap;
-          if (alt >= 12) left = alt;
-        }
-      }
-      return { top: contextMenu.y, left };
-    },
+    (submenuWidth: number) => computeSubmenuStyle(submenuWidth, { contextMenu, contextMenuRef }),
     [contextMenu]
   );
 

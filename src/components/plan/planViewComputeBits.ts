@@ -5,6 +5,26 @@ import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 
 type PresenceLockEntry = { planId: string; clientName?: string; siteName?: string; planName?: string };
 
+// Position a context-menu submenu beside the menu, flipping to the left side
+// when it would overflow the viewport.
+export const computeSubmenuStyle = (
+  submenuWidth: number,
+  deps: { contextMenu: { x: number; y: number } | null; contextMenuRef: { current: HTMLElement | null } }
+): { top: number; left: number } => {
+  const { contextMenu, contextMenuRef } = deps;
+  if (!contextMenu) return { top: 0, left: 0 };
+  const gap = 8;
+  const menuWidth = contextMenuRef.current?.offsetWidth || 224;
+  let left = contextMenu.x + menuWidth + gap;
+  if (typeof window !== 'undefined') {
+    if (left + submenuWidth > window.innerWidth - 12) {
+      const alt = contextMenu.x - submenuWidth - gap;
+      if (alt >= 12) left = alt;
+    }
+  }
+  return { top: contextMenu.y, left };
+};
+
 // Resolve a layer id to its localized display label (falls back to the id).
 export const computeGetLayerLabel = (layerId: string, deps: { planLayers: any[]; lang: string }): string => {
   const { planLayers, lang } = deps;
