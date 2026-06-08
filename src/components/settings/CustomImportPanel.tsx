@@ -15,18 +15,14 @@ import {
   LdapImportSkippedRow,
   ExternalUserRow,
   fetchImportSummary,
-  getImportConfig,
   ImportSummaryRow,
   listExternalUsers,
   previewImport,
   previewLdapImport,
-  saveImportConfig,
   saveLdapImportConfig,
   setExternalUserHidden,
-  syncImport,
   syncLdapImport,
   testLdapImport,
-  testImport,
 } from '../../api/customImport';
 import { fetchState } from '../../api/state';
 import {
@@ -40,7 +36,6 @@ import {
   mergeLdapImportDraft,
   formatLdapActionError,
   computeDuplicateGroups,
-  rowsHaveDuplicates,
   filterImportUsers,
   sortImportUsers,
   buildWebApiVariationRows,
@@ -60,6 +55,7 @@ import { CustomImportInfoModal } from './CustomImportInfoModal';
 import { useCustomImportPortalProvisioning } from './useCustomImportPortalProvisioning';
 import { useCustomImportManualUsers } from './useCustomImportManualUsers';
 import { useCustomImportCsv } from './useCustomImportCsv';
+import { useCustomImportWebApiConfig } from './useCustomImportWebApiConfig';
 
 const CustomImportPanel = (
   { initialClientId, lockClientSelection = false }: { initialClientId?: string | null; lockClientSelection?: boolean } = {}
@@ -101,12 +97,6 @@ const CustomImportPanel = (
   const [importMode, setImportMode] = useState<'webapi' | 'ldap' | 'csv' | 'manual'>('webapi');
   const [cfg, setCfg] = useState<{ url: string; username: string; method: 'GET' | 'POST' | string; hasPassword: boolean; bodyJson: string; updatedAt?: number } | null>(null);
   const [password, setPassword] = useState('');
-  const [savingCfg, setSavingCfg] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [syncingClientId, setSyncingClientId] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<{ ok: boolean; status: number; count?: number; error?: string; contentType?: string; rawSnippet?: string } | null>(null);
-  const [webApiTestPassedByClient, setWebApiTestPassedByClient] = useState<Record<string, boolean>>({});
-  const [syncResult, setSyncResult] = useState<any | null>(null);
   const [ldapCfg, setLdapCfg] = useState<{
     server: string;
     port: number;
@@ -226,17 +216,11 @@ const CustomImportPanel = (
   const hasImportedOnce = !!activeSummary?.lastImportAt;
   const hasWebApiConfig = !!activeSummary?.hasConfig;
   const canRunWebApiTest = hasWebApiConfig;
-  const canOpenWebApiImportPreview = !!(
-    activeClientId &&
-    hasWebApiConfig &&
-    (webApiTestPassedByClient[activeClientId] || hasImportedOnce)
-  );
   const canClearWebApiImport = hasImportedOnce;
   const canSaveWebApiSettings = !hasWebApiConfig || hasImportedOnce;
   const infoClient = useMemo(() => (infoClientId ? clients.find((c) => c.id === infoClientId) || null : null), [clients, infoClientId]);
   const infoSummary = useMemo(() => (infoClientId ? summaryById.get(infoClientId) || null : null), [infoClientId, summaryById]);
   const duplicateGroups = useMemo(() => computeDuplicateGroups(usersRows), [usersRows]);
-  const hasDuplicatesInRows = useCallback((rows: ExternalUserRow[]) => rowsHaveDuplicates(rows), []);
   const duplicateUserKeys = useMemo(() => {
     const set = new Set<string>();
     for (const group of duplicateGroups) {
@@ -279,31 +263,6 @@ const CustomImportPanel = (
       setSummaryLoading(false);
     }
   }, [isSuperAdmin]);
-
-  const loadConfig = useCallback(async (clientId: string) => {
-    setCfg(null);
-    setPassword('');
-    setTestResult(null);
-    setSyncResult(null);
-    if (!clientId) return;
-    try {
-      const res = await getImportConfig(clientId);
-      setCfg(
-        res.config
-          ? {
-              url: res.config.url,
-              username: res.config.username,
-              hasPassword: res.config.hasPassword,
-              method: res.config.method || 'POST',
-              bodyJson: res.config.bodyJson || '',
-              updatedAt: res.config.updatedAt
-            }
-          : null
-      );
-    } catch {
-      setCfg(null);
-    }
-  }, []);
 
   const loadLdapConfig = useCallback(async (clientId: string) => {
     setLdapCfg(null);
@@ -643,6 +602,38 @@ const CustomImportPanel = (
     t
   });
 
+  const {
+    savingCfg,
+    testing,
+    syncingClientId,
+    testResult,
+    syncResult,
+    webApiTestPassedByClient,
+    loadConfig,
+    runSync,
+    saveConfig,
+    runTest
+  } = useCustomImportWebApiConfig({
+    activeClientId,
+    cfg,
+    password,
+    setCfg,
+    setPassword,
+    loadSummary,
+    loadUsers,
+    refreshWebApiPreview,
+    setUsersOpen,
+    setDuplicatesModalOpen,
+    push,
+    t
+  });
+
+  const canOpenWebApiImportPreview = !!(
+    activeClientId &&
+    hasWebApiConfig &&
+    (webApiTestPassedByClient[activeClientId] || hasImportedOnce)
+  );
+
   const configChildDialogOpen = csvConfirmOpen || clearConfirmOpen || ldapCompareOpen || ldapInfoOpen || ldapImportSelectOpen || !!ldapImportEditRowId;
 
   const openWebApiPreview = useCallback(async () => {
@@ -896,107 +887,6 @@ const CustomImportPanel = (
     if (updateRows.length) await importManyWebApiUsers(updateRows);
     if (deleteIds.length) await deleteManyWebApiUsers(deleteIds);
   }, [deleteManyWebApiUsers, importManyWebApiUsers, webApiPreviewSelectedVariationRows]);
-
-  const runSync = async (clientId: string) => {
-    setSyncingClientId(clientId);
-    setSyncResult(null);
-    try {
-      const res = await syncImport(clientId);
-      setSyncResult(res);
-      if (res.ok) {
-        push(t({ it: 'Import completato', en: 'Import completed' }), 'success');
-        if ((res as any)?.summary?.duplicateEmails > 0) {
-          push(
-            t({
-              it: `Import completato con ${(res as any).summary.duplicateEmails} email duplicate saltate. Apri la schermata importazione per gestire le variazioni.`,
-              en: `Import completed with ${(res as any).summary.duplicateEmails} duplicate-email records skipped. Open import preview to review changes.`
-            }),
-            'info'
-          );
-        }
-        await loadSummary();
-        const rows = await loadUsers(clientId);
-        await refreshWebApiPreview(clientId);
-        if (hasDuplicatesInRows(rows || [])) {
-          setUsersOpen(true);
-          setDuplicatesModalOpen(true);
-          push(
-            t({
-              it: 'Import WebAPI completato con possibili duplicati. Apri la lista e gestisci i record.',
-              en: 'WebAPI import completed with possible duplicates. Open the list and review records.'
-            }),
-            'info'
-          );
-        }
-      } else {
-        push(t({ it: 'Import fallito', en: 'Import failed' }), 'danger');
-      }
-    } catch {
-      push(t({ it: 'Import fallito', en: 'Import failed' }), 'danger');
-    } finally {
-      setSyncingClientId(null);
-    }
-  };
-
-  const saveConfig = async () => {
-    if (!activeClientId) return;
-    if (!cfg?.url?.trim() || !cfg?.username?.trim()) {
-      push(t({ it: 'Compila URL e username.', en: 'Please fill URL and username.' }), 'info');
-      return;
-    }
-    setSavingCfg(true);
-    try {
-      const res = await saveImportConfig({
-        clientId: activeClientId,
-        url: cfg.url.trim(),
-        username: cfg.username.trim(),
-        password: password || undefined,
-        method: cfg.method || 'POST',
-        bodyJson: cfg.bodyJson
-      });
-      setCfg(
-        res.config
-          ? {
-              url: res.config.url,
-              username: res.config.username,
-              hasPassword: res.config.hasPassword,
-              method: res.config.method || 'POST',
-              bodyJson: res.config.bodyJson || '',
-              updatedAt: res.config.updatedAt
-            }
-          : null
-      );
-      setPassword('');
-      if (activeClientId) {
-        setWebApiTestPassedByClient((prev) => ({ ...prev, [activeClientId]: false }));
-      }
-      push(t({ it: 'Configurazione salvata', en: 'Configuration saved' }), 'success');
-      await loadSummary();
-    } catch {
-      push(t({ it: 'Salvataggio fallito', en: 'Save failed' }), 'danger');
-    } finally {
-      setSavingCfg(false);
-    }
-  };
-
-  const runTest = async () => {
-    if (!activeClientId) return;
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const res = await testImport(activeClientId, toWebApiConfigPayload(cfg, password));
-      setTestResult({ ok: res.ok, status: res.status, count: res.count, error: res.error, contentType: res.contentType, rawSnippet: res.rawSnippet });
-      setWebApiTestPassedByClient((prev) => ({ ...prev, [activeClientId]: !!res.ok }));
-      if (res.ok) push(t({ it: 'Test riuscito', en: 'Test successful' }), 'success');
-      else push(t({ it: 'Test fallito', en: 'Test failed' }), 'danger');
-    } catch {
-      setTestResult({ ok: false, status: 0, error: 'Request failed' });
-      if (activeClientId) setWebApiTestPassedByClient((prev) => ({ ...prev, [activeClientId]: false }));
-      push(t({ it: 'Test fallito', en: 'Test failed' }), 'danger');
-    } finally {
-      setTesting(false);
-    }
-  };
 
   const saveLdapConfigHandler = async () => {
     if (!activeClientId || !ldapCfg) return;
