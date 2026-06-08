@@ -18,18 +18,17 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { useDataStore } from '../../store/useDataStore';
 import { useLang, useT } from '../../i18n/useT';
-import { Corridor, Room } from '../../store/types';
 import Icon from '../ui/Icon';
-import { isSecurityTypeId } from '../../store/security';
 import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import { useAuthStore } from '../../store/useAuthStore';
 
 import {
-  Point, SafetySortKey, DoorSortKey, SafetyRow, EmergencyDoorRow,
-  roomPolygon, corridorPolygon, polygonCentroid, pointInPolygon, getDoorAnchor,
+  SafetySortKey, DoorSortKey, SafetyRow, EmergencyDoorRow,
   compareText, parseDateForSort,
   computeSafetyMapData,
-  computeSafetyMultiMapData
+  computeSafetyMultiMapData,
+  buildSafetyRowsRaw,
+  buildEmergencyDoorRowsRaw
 } from './SafetyPanel.helpers';
 import { SingleMapPreviewModal, MultiMapPreviewModal } from './SafetyPanelMapModals';
 import {
@@ -94,136 +93,9 @@ const SafetyPanel = () => {
     return false;
   };
 
-  const safetyRowsRaw = useMemo<SafetyRow[]>(() => {
-    const rows: SafetyRow[] = [];
-    for (const client of clients || []) {
-      for (const site of client.sites || []) {
-        for (const plan of site.floorPlans || []) {
-          const roomShapes = (plan.rooms || []).map((room) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) }));
-          const corridorShapes = ((plan.corridors || []) as Corridor[]).map((corridor) => ({
-            corridor,
-            points: corridorPolygon(corridor),
-            center: polygonCentroid(corridorPolygon(corridor))
-          }));
-          for (const obj of plan.objects || []) {
-            if (!isSecurityTypeId(obj.type)) continue;
-            const typeDef = typeById.get(obj.type);
-            const locationPoint = { x: Number(obj.x || 0), y: Number(obj.y || 0) };
-            const containingRoom = roomShapes.find((entry) => pointInPolygon(locationPoint, entry.points));
-            const containingCorridor = corridorShapes.find((entry) => pointInPolygon(locationPoint, entry.points));
-            let nearestLabel = '';
-            if (containingRoom?.room?.name) nearestLabel = containingRoom.room.name;
-            else if (containingCorridor?.corridor?.name) nearestLabel = containingCorridor.corridor.name;
-            if (!nearestLabel) {
-              const candidates = [
-                ...roomShapes
-                  .filter((entry) => entry.center)
-                  .map((entry) => ({
-                    label: entry.room.name,
-                    dist: Math.hypot(locationPoint.x - (entry.center as Point).x, locationPoint.y - (entry.center as Point).y)
-                  })),
-                ...corridorShapes
-                  .filter((entry) => entry.center)
-                  .map((entry) => ({
-                    label: entry.corridor.name,
-                    dist: Math.hypot(locationPoint.x - (entry.center as Point).x, locationPoint.y - (entry.center as Point).y)
-                  }))
-              ].sort((a, b) => a.dist - b.dist);
-              nearestLabel = candidates[0]?.label || '';
-            }
-            rows.push({
-              rowId: `${client.id}:${site.id}:${plan.id}:${obj.id}`,
-              objectId: obj.id,
-              clientId: client.id,
-              clientName: client.shortName || client.name,
-              siteId: site.id,
-              siteName: site.name,
-              planId: plan.id,
-              planName: plan.name,
-              icon: String(typeDef?.icon || obj.type || 'shield'),
-              typeLabel: String(typeDef?.name?.[lang] || typeDef?.name?.it || typeDef?.name?.en || obj.type),
-              name: String(obj.name || ''),
-              description: String(obj.description || ''),
-              notes: String(obj.notes || ''),
-              lastVerificationAt: String(obj.lastVerificationAt || ''),
-              verifierCompany: String(obj.verifierCompany || ''),
-              gpsCoords: String(obj.gpsCoords || ''),
-              locationName: String(nearestLabel || ''),
-              point: locationPoint,
-              plan,
-              securityCheckHistory: Array.isArray(obj.securityCheckHistory) ? obj.securityCheckHistory : [],
-              securityDocuments: Array.isArray(obj.securityDocuments) ? obj.securityDocuments : []
-            });
-          }
-        }
-      }
-    }
-    return rows;
-  }, [clients, lang, typeById]);
+  const safetyRowsRaw = useMemo<SafetyRow[]>(() => buildSafetyRowsRaw(clients, lang, typeById), [clients, lang, typeById]);
 
-  const emergencyDoorRowsRaw = useMemo<EmergencyDoorRow[]>(() => {
-    const rows: EmergencyDoorRow[] = [];
-    for (const client of clients || []) {
-      for (const site of client.sites || []) {
-        for (const plan of site.floorPlans || []) {
-          const roomCenters = (plan.rooms || [])
-            .map((room) => ({ room, center: polygonCentroid(roomPolygon(room)) }))
-            .filter((entry): entry is { room: Room; center: Point } => !!entry.center);
-          for (const corridor of (plan.corridors || []) as Corridor[]) {
-            for (const door of corridor?.doors || []) {
-              if (!door?.isEmergency) continue;
-              const typeDef = door?.catalogTypeId ? typeById.get(door.catalogTypeId) : null;
-              const typeLabel = typeDef
-                ? String(typeDef?.name?.[lang] || typeDef?.name?.it || typeDef?.name?.en || typeDef.id)
-                : String(door?.catalogTypeId || '');
-              const anchor = getDoorAnchor(corridor, door);
-              const nearestRoomName = anchor
-                ? roomCenters
-                    .map((entry) => ({
-                      name: String(entry.room?.name || ''),
-                      dist: Math.hypot(anchor.x - entry.center.x, anchor.y - entry.center.y)
-                    }))
-                    .sort((a, b) => a.dist - b.dist)[0]?.name || ''
-                : '';
-              const verificationHistory = (Array.isArray((door as any)?.verificationHistory) ? (door as any).verificationHistory : [])
-                .map((entry: any) => ({
-                  id: String(entry?.id || nanoid()),
-                  date: typeof entry?.date === 'string' ? String(entry.date).trim() || undefined : undefined,
-                  company: String(entry?.company || '').trim(),
-                  notes: typeof entry?.notes === 'string' ? String(entry.notes).trim() || undefined : undefined,
-                  createdAt: Number.isFinite(Number(entry?.createdAt)) ? Number(entry.createdAt) : Date.now()
-                }))
-                .filter((entry: any) => !!entry.company || !!entry.date)
-                .sort((a: any, b: any) => b.createdAt - a.createdAt);
-              rows.push({
-                rowId: `${client.id}:${site.id}:${plan.id}:${corridor.id}:${door.id}`,
-                clientId: client.id,
-                siteId: site.id,
-                planId: plan.id,
-                clientName: client.shortName || client.name,
-                siteName: site.name,
-                planName: plan.name,
-                doorId: String(door?.id || ''),
-                description: String((door as any)?.description || ''),
-                doorType: typeLabel || '—',
-                corridorName: String(corridor.name || ''),
-                nearestRoomName,
-                lastVerificationAt: String((door as any)?.lastVerificationAt || ''),
-                verifierCompany: String((door as any)?.verifierCompany || ''),
-                openUrl: String((door as any)?.automationUrl || ''),
-                mode: String((door as any)?.mode || 'static'),
-                isFireDoor: !!(door as any)?.isFireDoor,
-                corridorId: corridor.id,
-                plan,
-                verificationHistory
-              });
-            }
-          }
-        }
-      }
-    }
-    return rows;
-  }, [clients, lang, typeById]);
+  const emergencyDoorRowsRaw = useMemo<EmergencyDoorRow[]>(() => buildEmergencyDoorRowsRaw(clients, lang, typeById), [clients, lang, typeById]);
 
   const clientOptions = useMemo(() => {
     const map = new Map<string, string>();

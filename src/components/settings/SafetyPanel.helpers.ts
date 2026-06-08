@@ -1,7 +1,9 @@
 // Pure types, geometry helpers and safety-card constants extracted verbatim from
 // SafetyPanel.tsx to keep that component under 2k lines.
+import { nanoid } from 'nanoid';
 import { Corridor, FloorPlan, Room, SecurityCheckEntry, SecurityDocumentEntry } from '../../store/types';
 import { TEXT_FONT_OPTIONS } from '../../store/data';
+import { isSecurityTypeId } from '../../store/security';
 
 export type Point = { x: number; y: number };
 
@@ -352,4 +354,141 @@ export const computeSafetyMultiMapData = (
     },
     viewBox: `${minX - pad} ${minY - pad} ${Math.max(100, maxX - minX + pad * 2)} ${Math.max(100, maxY - minY + pad * 2)}`
   };
+};
+
+// Build the raw safety-device rows across all clients/sites/plans (with nearest
+// room/corridor label resolution). Pure given the client tree, language and the
+// object-type index. Extracted from SafetyPanel.
+export const buildSafetyRowsRaw = (clients: any[], lang: string, typeById: Map<string, any>): SafetyRow[] => {
+  const rows: SafetyRow[] = [];
+  for (const client of clients || []) {
+    for (const site of client.sites || []) {
+      for (const plan of site.floorPlans || []) {
+        const roomShapes = (plan.rooms || []).map((room: any) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) }));
+        const corridorShapes = ((plan.corridors || []) as Corridor[]).map((corridor) => ({
+          corridor,
+          points: corridorPolygon(corridor),
+          center: polygonCentroid(corridorPolygon(corridor))
+        }));
+        for (const obj of plan.objects || []) {
+          if (!isSecurityTypeId(obj.type)) continue;
+          const typeDef = typeById.get(obj.type);
+          const locationPoint = { x: Number(obj.x || 0), y: Number(obj.y || 0) };
+          const containingRoom = roomShapes.find((entry: any) => pointInPolygon(locationPoint, entry.points));
+          const containingCorridor = corridorShapes.find((entry) => pointInPolygon(locationPoint, entry.points));
+          let nearestLabel = '';
+          if (containingRoom?.room?.name) nearestLabel = containingRoom.room.name;
+          else if (containingCorridor?.corridor?.name) nearestLabel = containingCorridor.corridor.name;
+          if (!nearestLabel) {
+            const candidates = [
+              ...roomShapes
+                .filter((entry: any) => entry.center)
+                .map((entry: any) => ({
+                  label: entry.room.name,
+                  dist: Math.hypot(locationPoint.x - (entry.center as Point).x, locationPoint.y - (entry.center as Point).y)
+                })),
+              ...corridorShapes
+                .filter((entry) => entry.center)
+                .map((entry) => ({
+                  label: entry.corridor.name,
+                  dist: Math.hypot(locationPoint.x - (entry.center as Point).x, locationPoint.y - (entry.center as Point).y)
+                }))
+            ].sort((a, b) => a.dist - b.dist);
+            nearestLabel = candidates[0]?.label || '';
+          }
+          rows.push({
+            rowId: `${client.id}:${site.id}:${plan.id}:${obj.id}`,
+            objectId: obj.id,
+            clientId: client.id,
+            clientName: client.shortName || client.name,
+            siteId: site.id,
+            siteName: site.name,
+            planId: plan.id,
+            planName: plan.name,
+            icon: String(typeDef?.icon || obj.type || 'shield'),
+            typeLabel: String(typeDef?.name?.[lang] || typeDef?.name?.it || typeDef?.name?.en || obj.type),
+            name: String(obj.name || ''),
+            description: String(obj.description || ''),
+            notes: String(obj.notes || ''),
+            lastVerificationAt: String(obj.lastVerificationAt || ''),
+            verifierCompany: String(obj.verifierCompany || ''),
+            gpsCoords: String(obj.gpsCoords || ''),
+            locationName: String(nearestLabel || ''),
+            point: locationPoint,
+            plan,
+            securityCheckHistory: Array.isArray(obj.securityCheckHistory) ? obj.securityCheckHistory : [],
+            securityDocuments: Array.isArray(obj.securityDocuments) ? obj.securityDocuments : []
+          });
+        }
+      }
+    }
+  }
+  return rows;
+};
+
+// Build the raw emergency-door rows across all clients/sites/plans (with nearest
+// room label + normalized verification history). Pure given the client tree,
+// language and the object-type index. Extracted from SafetyPanel.
+export const buildEmergencyDoorRowsRaw = (clients: any[], lang: string, typeById: Map<string, any>): EmergencyDoorRow[] => {
+  const rows: EmergencyDoorRow[] = [];
+  for (const client of clients || []) {
+    for (const site of client.sites || []) {
+      for (const plan of site.floorPlans || []) {
+        const roomCenters = (plan.rooms || [])
+          .map((room: any) => ({ room, center: polygonCentroid(roomPolygon(room)) }))
+          .filter((entry: any): entry is { room: Room; center: Point } => !!entry.center);
+        for (const corridor of (plan.corridors || []) as Corridor[]) {
+          for (const door of corridor?.doors || []) {
+            if (!door?.isEmergency) continue;
+            const typeDef = door?.catalogTypeId ? typeById.get(door.catalogTypeId) : null;
+            const typeLabel = typeDef
+              ? String(typeDef?.name?.[lang] || typeDef?.name?.it || typeDef?.name?.en || typeDef.id)
+              : String(door?.catalogTypeId || '');
+            const anchor = getDoorAnchor(corridor, door);
+            const nearestRoomName = anchor
+              ? roomCenters
+                  .map((entry: any) => ({
+                    name: String(entry.room?.name || ''),
+                    dist: Math.hypot(anchor.x - entry.center.x, anchor.y - entry.center.y)
+                  }))
+                  .sort((a: any, b: any) => a.dist - b.dist)[0]?.name || ''
+              : '';
+            const verificationHistory = (Array.isArray((door as any)?.verificationHistory) ? (door as any).verificationHistory : [])
+              .map((entry: any) => ({
+                id: String(entry?.id || nanoid()),
+                date: typeof entry?.date === 'string' ? String(entry.date).trim() || undefined : undefined,
+                company: String(entry?.company || '').trim(),
+                notes: typeof entry?.notes === 'string' ? String(entry.notes).trim() || undefined : undefined,
+                createdAt: Number.isFinite(Number(entry?.createdAt)) ? Number(entry.createdAt) : Date.now()
+              }))
+              .filter((entry: any) => !!entry.company || !!entry.date)
+              .sort((a: any, b: any) => b.createdAt - a.createdAt);
+            rows.push({
+              rowId: `${client.id}:${site.id}:${plan.id}:${corridor.id}:${door.id}`,
+              clientId: client.id,
+              siteId: site.id,
+              planId: plan.id,
+              clientName: client.shortName || client.name,
+              siteName: site.name,
+              planName: plan.name,
+              doorId: String(door?.id || ''),
+              description: String((door as any)?.description || ''),
+              doorType: typeLabel || '—',
+              corridorName: String(corridor.name || ''),
+              nearestRoomName,
+              lastVerificationAt: String((door as any)?.lastVerificationAt || ''),
+              verifierCompany: String((door as any)?.verifierCompany || ''),
+              openUrl: String((door as any)?.automationUrl || ''),
+              mode: String((door as any)?.mode || 'static'),
+              isFireDoor: !!(door as any)?.isFireDoor,
+              corridorId: corridor.id,
+              plan,
+              verificationHistory
+            });
+          }
+        }
+      }
+    }
+  }
+  return rows;
 };
