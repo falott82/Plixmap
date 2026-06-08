@@ -109,6 +109,60 @@ export const computeSnapRoomRectToAdjacentSide = (
   };
 };
 
+export type CreateRoomFromRectDeps = {
+  isReadOnly: boolean;
+  snapRoomRectToAdjacentSide: (rect: { x: number; y: number; width: number; height: number }) => { x: number; y: number; width: number; height: number };
+  hasRoomOverlap: (room: any, excludeId?: string) => boolean;
+  notifyRoomOverlap: () => void;
+  setRoomDrawMode: (value: null) => void;
+  setRoomModal: Dispatch<SetStateAction<RoomModalState>>;
+};
+
+export const computeCreateRoomFromRect = (
+  rect: { x: number; y: number; width: number; height: number },
+  deps: CreateRoomFromRectDeps
+) => {
+  const { isReadOnly, snapRoomRectToAdjacentSide, hasRoomOverlap, notifyRoomOverlap, setRoomDrawMode, setRoomModal } = deps;
+  if (isReadOnly) return;
+  const normalizedRect = {
+    x: Number(rect.x) || 0,
+    y: Number(rect.y) || 0,
+    width: Math.max(0, Number(rect.width) || 0),
+    height: Math.max(0, Number(rect.height) || 0)
+  };
+  const snappedRect = snapRoomRectToAdjacentSide(normalizedRect);
+  const candidates = [snappedRect, normalizedRect];
+  const accepted = candidates.find((candidate) => !hasRoomOverlap({ id: 'new-room', name: '', kind: 'rect', ...candidate }));
+  if (!accepted) {
+    notifyRoomOverlap();
+    setRoomDrawMode(null);
+    return;
+  }
+  setRoomDrawMode(null);
+  setRoomModal({ mode: 'create', kind: 'rect', rect: accepted });
+};
+
+export type CreateRoomFromPolyDeps = {
+  isReadOnly: boolean;
+  hasRoomOverlap: (room: any, excludeId?: string) => boolean;
+  notifyRoomOverlap: () => void;
+  setRoomDrawMode: (value: null) => void;
+  setRoomModal: Dispatch<SetStateAction<RoomModalState>>;
+};
+
+export const computeCreateRoomFromPoly = (points: { x: number; y: number }[], deps: CreateRoomFromPolyDeps) => {
+  const { isReadOnly, hasRoomOverlap, notifyRoomOverlap, setRoomDrawMode, setRoomModal } = deps;
+  if (isReadOnly) return;
+  const testRoom = { id: 'new-room', name: '', kind: 'poly', points };
+  if (hasRoomOverlap(testRoom)) {
+    notifyRoomOverlap();
+    setRoomDrawMode(null);
+    return;
+  }
+  setRoomDrawMode(null);
+  setRoomModal({ mode: 'create', kind: 'poly', points });
+};
+
 export type SplitWallAtPointDeps = {
   addWallSegment: (payload: {
     start: Pt;

@@ -10,6 +10,8 @@ import { computeModalInitials } from './planViewModalInitials';
 import { computeRackOverlayLinks, computeRoomLayoutExportRows } from './planViewExportData';
 import {
   computeSnapRoomRectToAdjacentSide,
+  computeCreateRoomFromRect,
+  computeCreateRoomFromPoly,
   computeSplitWallAtPoint,
   computeCreateRoomWalls,
   computeRoomMeasuresData,
@@ -5046,37 +5048,11 @@ export const usePlanView = (planId: string) => {
     [plan]
   );
 
-  const handleCreateRoomFromRect = (rect: { x: number; y: number; width: number; height: number }) => {
-    if (isReadOnly) return;
-    const normalizedRect = {
-      x: Number(rect.x) || 0,
-      y: Number(rect.y) || 0,
-      width: Math.max(0, Number(rect.width) || 0),
-      height: Math.max(0, Number(rect.height) || 0)
-    };
-    const snappedRect = snapRoomRectToAdjacentSide(normalizedRect);
-    const candidates = [snappedRect, normalizedRect];
-    const accepted = candidates.find((candidate) => !hasRoomOverlap({ id: 'new-room', name: '', kind: 'rect', ...candidate }));
-    if (!accepted) {
-      notifyRoomOverlap();
-      setRoomDrawMode(null);
-      return;
-    }
-    setRoomDrawMode(null);
-    setRoomModal({ mode: 'create', kind: 'rect', rect: accepted });
-  };
+  const handleCreateRoomFromRect = (rect: { x: number; y: number; width: number; height: number }) =>
+    computeCreateRoomFromRect(rect, { isReadOnly, snapRoomRectToAdjacentSide, hasRoomOverlap, notifyRoomOverlap, setRoomDrawMode, setRoomModal });
 
-  const handleCreateRoomFromPoly = (points: { x: number; y: number }[]) => {
-    if (isReadOnly) return;
-    const testRoom = { id: 'new-room', name: '', kind: 'poly', points };
-    if (hasRoomOverlap(testRoom)) {
-      notifyRoomOverlap();
-      setRoomDrawMode(null);
-      return;
-    }
-    setRoomDrawMode(null);
-    setRoomModal({ mode: 'create', kind: 'poly', points });
-  };
+  const handleCreateRoomFromPoly = (points: { x: number; y: number }[]) =>
+    computeCreateRoomFromPoly(points, { isReadOnly, hasRoomOverlap, notifyRoomOverlap, setRoomDrawMode, setRoomModal });
 
   const openEditCorridor = useCallback(
     (corridorId: string) =>
