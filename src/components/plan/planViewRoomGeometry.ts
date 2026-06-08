@@ -110,6 +110,47 @@ export const computeSnapRoomRectToAdjacentSide = (
   };
 };
 
+export type OpenEditRoomDeps = {
+  rooms: Room[];
+  isReadOnly: boolean;
+  setRoomModal: Dispatch<SetStateAction<RoomModalState>>;
+};
+
+// Populate the room-edit modal from an existing room's properties. Verbatim.
+export const computeOpenEditRoom = (
+  roomId: string,
+  options: { openDepartments?: boolean } | undefined,
+  deps: OpenEditRoomDeps
+) => {
+  const { rooms, isReadOnly, setRoomModal } = deps;
+  const room = rooms.find((r) => r.id === roomId);
+  if (!room || isReadOnly) return;
+  setRoomModal({
+    mode: 'edit',
+    roomId,
+    openDepartments: !!options?.openDepartments,
+    initialName: room.name,
+    initialNameEn: (room as any).nameEn,
+    initialCapacity: room.capacity,
+    initialShowName: room.showName,
+    initialSurfaceSqm: room.surfaceSqm,
+    initialNotes: room.notes,
+    initialLogical: room.logical,
+    initialMeetingRoom: !!(room as any).meetingRoom,
+    initialMeetingProjector: !!(room as any).meetingProjector,
+    initialMeetingTv: !!(room as any).meetingTv,
+    initialMeetingVideoConf: !!(room as any).meetingVideoConf,
+    initialMeetingCoffeeService: !!(room as any).meetingCoffeeService,
+    initialMeetingWhiteboard: !!(room as any).meetingWhiteboard,
+    initialNoWindows: !!(room as any).noWindows,
+    initialWifiAvailable: !!(room as any).wifiAvailable,
+    initialFridgeAvailable: !!(room as any).fridgeAvailable,
+    initialStorageRoom: !!(room as any).storageRoom,
+    initialBathroom: !!(room as any).bathroom,
+    initialTechnicalRoom: !!(room as any).technicalRoom
+  });
+};
+
 export type CreateRoomFromRectDeps = {
   isReadOnly: boolean;
   snapRoomRectToAdjacentSide: (rect: { x: number; y: number; width: number; height: number }) => { x: number; y: number; width: number; height: number };
