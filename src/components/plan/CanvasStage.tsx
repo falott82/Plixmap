@@ -47,6 +47,7 @@ import {
   computeObjectBounds as computeObjectBoundsImpl,
   buildWifiRangeRings as buildWifiRangeRingsImpl,
   buildCameraFovPolygon as buildCameraFovPolygonImpl,
+  dragRectFromCorners,
 } from './CanvasStage.helpers';
 
 interface Props {
@@ -1628,10 +1629,7 @@ const CanvasStageImpl = (
     const y1 = selectionOrigin.current.y;
     const x2 = world.x;
     const y2 = world.y;
-    const x = Math.min(x1, x2);
-    const y = Math.min(y1, y2);
-    const width = Math.abs(x2 - x1);
-    const height = Math.abs(y2 - y1);
+    const { x, y, width, height } = dragRectFromCorners(x1, y1, x2, y2);
     pendingSelectionBoxRef.current = { x, y, width, height };
     lastSelectionBoxRef.current = pendingSelectionBoxRef.current;
     if (selectionBoxRaf.current) return true;
@@ -1724,10 +1722,7 @@ const CanvasStageImpl = (
     const y1 = origin.y;
     const x2 = world.x;
     const y2 = world.y;
-    const x = Math.min(x1, x2);
-    const y = Math.min(y1, y2);
-    const width = Math.abs(x2 - x1);
-    const height = Math.abs(y2 - y1);
+    const { x, y, width, height } = dragRectFromCorners(x1, y1, x2, y2);
     pendingTextDraftRef.current = { x, y, width, height };
     if (textDraftRaf.current) return true;
     textDraftRaf.current = requestAnimationFrame(() => {
@@ -1783,10 +1778,7 @@ const CanvasStageImpl = (
     const y1 = origin.y;
     const x2 = world.x;
     const y2 = world.y;
-    const x = Math.min(x1, x2);
-    const y = Math.min(y1, y2);
-    const width = Math.abs(x2 - x1);
-    const height = Math.abs(y2 - y1);
+    const { x, y, width, height } = dragRectFromCorners(x1, y1, x2, y2);
     pendingDraftRectRef.current = { x, y, width, height };
     if (draftRectRaf.current) return true;
     draftRectRaf.current = requestAnimationFrame(() => {
@@ -1844,10 +1836,7 @@ const CanvasStageImpl = (
     const y1 = origin.y;
     const x2 = world.x;
     const y2 = world.y;
-    const x = Math.min(x1, x2);
-    const y = Math.min(y1, y2);
-    const width = Math.abs(x2 - x1);
-    const height = Math.abs(y2 - y1);
+    const { x, y, width, height } = dragRectFromCorners(x1, y1, x2, y2);
     pendingDraftPrintRectRef.current = { x, y, width, height };
     if (draftPrintRectRaf.current) return true;
     draftPrintRectRaf.current = requestAnimationFrame(() => {

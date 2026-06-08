@@ -19,7 +19,8 @@ import {
   findInteriorPointAtY,
   getPolygonBounds,
   getPolygonLabelBounds,
-  buildCameraFovPolygon
+  buildCameraFovPolygon,
+  dragRectFromCorners
 } from './CanvasStage.helpers';
 
 const square = [
@@ -159,6 +160,13 @@ describe('polygon label bounds', () => {
     expect(b.y).toBeGreaterThanOrEqual(0);
     expect(b.x + b.width).toBeLessThanOrEqual(10.0001);
     expect(b.y + b.height).toBeLessThanOrEqual(10.0001);
+  });
+});
+
+describe('dragRectFromCorners', () => {
+  it('normalizes two corners into an axis-aligned rect regardless of order', () => {
+    expect(dragRectFromCorners(2, 3, 8, 9)).toEqual({ x: 2, y: 3, width: 6, height: 6 });
+    expect(dragRectFromCorners(8, 9, 2, 3)).toEqual({ x: 2, y: 3, width: 6, height: 6 });
   });
 });
 
