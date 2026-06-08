@@ -50,7 +50,7 @@ import {
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
-import { computeHandleStageMove, computeHandleCreateTypeLayer, computeHandleMapContextMenu, computeHandleStageSelect } from './planViewStageHandlers';
+import { computeHandleStageMove, computeHandleMapContextMenu, computeHandleStageSelect } from './planViewStageHandlers';
 import { runPlanKeydownEffect } from './planViewKeydown';
 import {
   runDismissSelectionHintToasts
@@ -146,6 +146,7 @@ import { usePlanScaleHandlers } from './usePlanScaleHandlers';
 import { usePlanViewHandlers } from './usePlanViewHandlers';
 import { usePlanCorridorConnectionHandlers } from './usePlanCorridorConnectionHandlers';
 import { usePlanWallTypeHandlers } from './usePlanWallTypeHandlers';
+import { usePlanTypeLayerHandlers } from './usePlanTypeLayerHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -4236,65 +4237,15 @@ export const usePlanView = (planId: string) => {
     [getTypeLabel, objectTypeDefs, objectsByType]
   );
 
-  const handleSelectType = useCallback(
-    (typeId: string) => {
-      const ids = (objectsByType.get(typeId) || []).map((o) => o.id);
-      if (!ids.length) return;
-      setSelection(ids);
-      setCountsOpen(false);
-      setTypeMenu(null);
-    },
-    [objectsByType, setSelection]
-  );
-
-  const handleDeleteType = useCallback(
-    (typeId: string) => {
-      if (isReadOnly) return;
-      const ids = (objectsByType.get(typeId) || []).map((o) => o.id);
-      if (!ids.length) return;
-      setConfirmDelete(ids);
-      setCountsOpen(false);
-      setTypeMenu(null);
-    },
-    [isReadOnly, objectsByType]
-  );
-
   const canManageLayers = !!user?.isAdmin || isSuperAdmin;
 
-  const handleOpenTypeLayer = useCallback(
-    (typeId: string, label: string) => {
-      if (isReadOnly || !canManageLayers) return;
-      setTypeLayerModal({ typeId, label });
-      setTypeMenu(null);
-    },
-    [canManageLayers, isReadOnly]
-  );
-
-  const handleCreateTypeLayer = useCallback(() => {
-    computeHandleCreateTypeLayer({
-      canManageLayers,
-      client,
-      getTypeLayerIds,
-      inferDefaultLayerIds,
-      isReadOnly,
-      layerIdSet,
-      markTouched,
-      planLayers,
-      push,
-      setPlanDirty,
-      t,
-      typeLayerColor,
-      typeLayerModal,
-      typeLayerName,
-      updateClientLayers,
-      setTypeLayerModal
-    });
-  }, [
+  const { handleSelectType, handleDeleteType, handleOpenTypeLayer, handleCreateTypeLayer } = usePlanTypeLayerHandlers({
+    objectsByType,
+    isReadOnly,
     canManageLayers,
     client,
     getTypeLayerIds,
     inferDefaultLayerIds,
-    isReadOnly,
     layerIdSet,
     markTouched,
     planLayers,
@@ -4304,8 +4255,13 @@ export const usePlanView = (planId: string) => {
     typeLayerColor,
     typeLayerModal,
     typeLayerName,
-    updateClientLayers
-  ]);
+    updateClientLayers,
+    setSelection,
+    setCountsOpen,
+    setTypeMenu,
+    setConfirmDelete,
+    setTypeLayerModal
+  });
 
   const isUserObject = useCallback((type: string) => type === 'user' || type === 'real_user' || type === 'generic_user', []);
   const getUserObjectLabel = useCallback(
