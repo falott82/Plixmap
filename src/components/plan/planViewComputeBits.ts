@@ -47,6 +47,19 @@ export const computeInferDefaultLayerIds = (
       return layerIdSet ? ids.filter((id) => layerIdSet.has(id)) : ids;
 };
 
+// Pure derivation of a recommended default object scale from the plan's largest
+// dimension (1.0 below 3000px, ramping to 2.4 at/above 12000px).
+export const computeRecommendedObjectScale = (width: number, height: number): number => {
+  const maxDim = Math.max(Number(width || 0), Number(height || 0));
+  if (!Number.isFinite(maxDim) || maxDim <= 0) return 1;
+  const minDim = 3000;
+  const maxDimRef = 12000;
+  if (maxDim <= minDim) return 1;
+  if (maxDim >= maxDimRef) return 2.4;
+  const t = (maxDim - minDim) / (maxDimRef - minDim);
+  return Number((1 + t * (2.4 - 1)).toFixed(2));
+};
+
 // Pure derivation of the client's business-partner names (trimmed, deduped of
 // blanks, sorted case-insensitively).
 export const computeClientBusinessPartnerNames = (client: any): string[] =>

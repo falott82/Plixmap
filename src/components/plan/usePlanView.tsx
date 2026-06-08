@@ -69,6 +69,7 @@ import {
 import {
   computeInferDefaultLayerIds,
   computeLinksModalRows,
+  computeRecommendedObjectScale,
   computeClientBusinessPartnerNames,
   computeMeetingLocationLabels,
   computeSiteMeetingParticipantCandidates,
@@ -1640,18 +1641,10 @@ export const usePlanView = (planId: string) => {
     const unit = lang === 'it' ? 'ml' : 'm';
     return `${formatNumber(Number(planScale.meters))} ${unit}`;
   }, [formatNumber, lang, planScale?.meters]);
-  const recommendedObjectScale = useMemo(() => {
-    const w = Number(renderPlan?.width || 0);
-    const h = Number(renderPlan?.height || 0);
-    const maxDim = Math.max(w, h);
-    if (!Number.isFinite(maxDim) || maxDim <= 0) return 1;
-    const minDim = 3000;
-    const maxDimRef = 12000;
-    if (maxDim <= minDim) return 1;
-    if (maxDim >= maxDimRef) return 2.4;
-    const t = (maxDim - minDim) / (maxDimRef - minDim);
-    return Number((1 + t * (2.4 - 1)).toFixed(2));
-  }, [renderPlan?.height, renderPlan?.width]);
+  const recommendedObjectScale = useMemo(
+    () => computeRecommendedObjectScale(Number(renderPlan?.width || 0), Number(renderPlan?.height || 0)),
+    [renderPlan?.height, renderPlan?.width]
+  );
   const defaultObjectScale = useMemo(() => {
     if (lastObjectScale !== 1) return lastObjectScale;
     return Number.isFinite(recommendedObjectScale) ? recommendedObjectScale : 1;
