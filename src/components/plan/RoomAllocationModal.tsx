@@ -299,7 +299,7 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
   useEffect(() => {
     if (!shouldLoadRoutes || computeRouteFn) return;
     let active = true;
-    void import('./InternalMapModal')
+    void import('./internalMapRouting')
       .then((module) => {
         if (!active) return;
         setComputeRouteFn(() => module.computeMultiFloorRoute as any);

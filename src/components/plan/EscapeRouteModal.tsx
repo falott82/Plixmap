@@ -5,7 +5,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Corridor, FloorPlan, Room } from '../../store/types';
 import { useT } from '../../i18n/useT';
-import { computeMultiFloorRoute, MultiFloorRouteResult, Point, RoutePlanSegment, RouteResult } from './InternalMapModal';
+import { computeMultiFloorRoute, MultiFloorRouteResult, Point, RoutePlanSegment, RouteResult } from './internalMapRouting';
 import { polygonCentroid as polygonCentroidShared, pointInPolygon, distancePointToSegment } from './planViewUtils';
 import { waitForNodeImagesReady, inlineImagesForExport, rasterizeSvgsForExport, buildCaptureNode } from './EscapeRouteModal.helpers';
 
