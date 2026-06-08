@@ -18,15 +18,12 @@ import { WallsLinksLayer } from './canvas/WallsLinksLayer';
 import { ObjectsLayer } from './canvas/ObjectsLayer';
 import { CanvasToolbar } from './canvas/CanvasToolbar';
 import { useCanvasPrintAreaDraft } from './canvas/useCanvasPrintAreaDraft';
+import { useCanvasTextDraft } from './canvas/useCanvasTextDraft';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
   hexToRgba,
   formatMeasure,
-  TEXT_BOX_MIN_WIDTH,
-  TEXT_BOX_MIN_HEIGHT,
-  TEXT_BOX_DEFAULT_WIDTH,
-  TEXT_BOX_DEFAULT_HEIGHT,
   PHOTO_ICON_BASE_SIZE,
   SAFETY_CARD_HELP_TOAST_ID,
   SAFETY_CARD_COLOR_VARIANTS,
@@ -444,10 +441,6 @@ const CanvasStageImpl = (
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [roomRectSnapHint, setRoomRectSnapHint] = useState<{ x: number; y: number } | null>(null);
   const draftOrigin = useRef<{ x: number; y: number } | null>(null);
-  const [textDraftRect, setTextDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(
-    null
-  );
-  const textDraftOrigin = useRef<{ x: number; y: number } | null>(null);
   const [draftPolyPoints, setDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
   const [draftPolyPointer, setDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
   const draftPolyRaf = useRef<number | null>(null);
@@ -465,8 +458,6 @@ const CanvasStageImpl = (
   const lastSelectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const draftRectRaf = useRef<number | null>(null);
   const pendingDraftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
-  const textDraftRaf = useRef<number | null>(null);
-  const pendingTextDraftRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const textTransformRaf = useRef<number | null>(null);
   const pendingTextTransformRef = useRef<{ id: string; width: number; height: number } | null>(null);
   const [cameraRotateId, setCameraRotateId] = useState<string | null>(null);
@@ -1054,7 +1045,6 @@ const CanvasStageImpl = (
       if (panRaf.current) cancelAnimationFrame(panRaf.current);
       if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
       if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
-      if (textDraftRaf.current) cancelAnimationFrame(textDraftRaf.current);
       if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
       if (corridorDraftPolyRaf.current) cancelAnimationFrame(corridorDraftPolyRaf.current);
       if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
@@ -1259,6 +1249,9 @@ const CanvasStageImpl = (
     pointerToWorld,
     onSetPrintArea
   });
+
+  const { textDraftRect, isTextDrafting, beginTextDraft, updateTextDraftRect, finalizeTextDraftRect } =
+    useCanvasTextDraft({ pointerToWorld });
 
   const updateQuoteResizePreview = useCallback((shiftKey?: boolean) => {
     if (!quoteResizeRef.current) return;
@@ -1670,61 +1663,6 @@ const CanvasStageImpl = (
     if (!type) return;
     const { x, y } = toStageCoords(event.clientX, event.clientY);
     onPlaceNew(type, x, y);
-  };
-
-  const updateTextDraftRect = (event: any) => {
-    const origin = textDraftOrigin.current;
-    if (!origin) return false;
-    const stage = event.target.getStage();
-    const pos = stage?.getPointerPosition();
-    if (!pos) return true;
-    const world = pointerToWorld(pos.x, pos.y);
-    const x1 = origin.x;
-    const y1 = origin.y;
-    const x2 = world.x;
-    const y2 = world.y;
-    const { x, y, width, height } = dragRectFromCorners(x1, y1, x2, y2);
-    pendingTextDraftRef.current = { x, y, width, height };
-    if (textDraftRaf.current) return true;
-    textDraftRaf.current = requestAnimationFrame(() => {
-      textDraftRaf.current = null;
-      const next = pendingTextDraftRef.current;
-      pendingTextDraftRef.current = null;
-      if (!next) return;
-      setTextDraftRect(next);
-    });
-    return true;
-  };
-
-  const finalizeTextDraftRect = () => {
-    if (!textDraftOrigin.current) return null;
-    const origin = textDraftOrigin.current;
-    const rect = textDraftRect || { x: origin.x, y: origin.y, width: 0, height: 0 };
-    let { x, y, width, height } = rect;
-    const isClick = width < 3 && height < 3;
-    if (isClick) {
-      width = TEXT_BOX_DEFAULT_WIDTH;
-      height = TEXT_BOX_DEFAULT_HEIGHT;
-      x = origin.x - width / 2;
-      y = origin.y - height / 2;
-    } else {
-      const draggedLeft = rect.x < origin.x;
-      const draggedUp = rect.y < origin.y;
-      if (width < TEXT_BOX_MIN_WIDTH) {
-        width = TEXT_BOX_MIN_WIDTH;
-        x = draggedLeft ? origin.x - width : origin.x;
-      }
-      if (height < TEXT_BOX_MIN_HEIGHT) {
-        height = TEXT_BOX_MIN_HEIGHT;
-        y = draggedUp ? origin.y - height : origin.y;
-      }
-    }
-    textDraftOrigin.current = null;
-    if (textDraftRaf.current) cancelAnimationFrame(textDraftRaf.current);
-    textDraftRaf.current = null;
-    pendingTextDraftRef.current = null;
-    setTextDraftRect(null);
-    return { x, y, width, height };
   };
 
   const updateDraftRect = (event: any) => {
@@ -2306,9 +2244,7 @@ const CanvasStageImpl = (
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
             if (pendingType === 'text') {
-              textDraftOrigin.current = { x: world.x, y: world.y };
-              pendingTextDraftRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
-              setTextDraftRect(pendingTextDraftRef.current);
+              beginTextDraft(world);
               return;
             }
             onPlaceNew(pendingType, world.x, world.y);
@@ -2438,7 +2374,7 @@ const CanvasStageImpl = (
             updateQuoteResizePreview(!!e.evt.shiftKey);
             return;
           }
-          if (textDraftOrigin.current) {
+          if (isTextDrafting()) {
             updateTextDraftRect(e);
             return;
           }
@@ -2551,7 +2487,7 @@ const CanvasStageImpl = (
             commitQuoteResize();
             return;
           }
-          if (textDraftOrigin.current) {
+          if (isTextDrafting()) {
             const rect = finalizeTextDraftRect();
             if (rect && pendingType === 'text' && !readOnly) {
               const centerX = rect.x + rect.width / 2;
@@ -2572,7 +2508,7 @@ const CanvasStageImpl = (
             commitQuoteResize();
             return;
           }
-          if (textDraftOrigin.current) {
+          if (isTextDrafting()) {
             const rect = finalizeTextDraftRect();
             if (rect && pendingType === 'text' && !readOnly) {
               const centerX = rect.x + rect.width / 2;
