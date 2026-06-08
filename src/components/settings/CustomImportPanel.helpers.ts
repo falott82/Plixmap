@@ -264,3 +264,23 @@ export const buildWebApiVariationRows = (
     return comparePeopleByName(a, b);
   });
 };
+
+// Count how many placed objects reference each imported user (by client:user
+// key) for the active client. Pure.
+export const computeAssignedCounts = (activeClient: any): Map<string, number> => {
+  const map = new Map<string, number>();
+  if (!activeClient) return map;
+  for (const s of activeClient.sites || []) {
+    for (const p of s.floorPlans || []) {
+      for (const o of p.objects || []) {
+        const cid = (o as any).externalClientId;
+        const eid = (o as any).externalUserId;
+        if (!cid || !eid) continue;
+        if (cid !== activeClient.id) continue;
+        const key = `${cid}:${eid}`;
+        map.set(key, (map.get(key) || 0) + 1);
+      }
+    }
+  }
+  return map;
+};

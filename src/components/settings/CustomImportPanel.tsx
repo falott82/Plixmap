@@ -50,7 +50,8 @@ import {
   rowsHaveDuplicates,
   filterImportUsers,
   sortImportUsers,
-  buildWebApiVariationRows
+  buildWebApiVariationRows,
+  computeAssignedCounts
 } from './CustomImportPanel.helpers';
 import { CustomImportWebApiPreviewModal } from './CustomImportWebApiPreviewModal';
 import { CustomImportLdapCompareModal } from './CustomImportLdapCompareModal';
@@ -317,23 +318,7 @@ const CustomImportPanel = (
     return { sites, plans };
   }, [infoClient]);
 
-  const assignedCounts = useMemo(() => {
-    const map = new Map<string, number>();
-    if (!activeClient) return map;
-    for (const s of activeClient.sites || []) {
-      for (const p of s.floorPlans || []) {
-        for (const o of p.objects || []) {
-          const cid = (o as any).externalClientId;
-          const eid = (o as any).externalUserId;
-          if (!cid || !eid) continue;
-          if (cid !== activeClient.id) continue;
-          const key = `${cid}:${eid}`;
-          map.set(key, (map.get(key) || 0) + 1);
-        }
-      }
-    }
-    return map;
-  }, [activeClient]);
+  const assignedCounts = useMemo(() => computeAssignedCounts(activeClient), [activeClient]);
 
   const loadSummary = useCallback(async () => {
     if (!isSuperAdmin) {
