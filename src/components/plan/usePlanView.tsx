@@ -2697,29 +2697,6 @@ export const usePlanView = (planId: string) => {
 	  );
 
 
-  const handleWallQuickMenu = useCallback(
-    ({ id, clientX, clientY, world }: { id: string; clientX: number; clientY: number; world: { x: number; y: number } }) => {
-      if (isReadOnlyRef.current) return;
-      const selectedIds = selectedObjectIdsRef.current || [];
-      if (selectedIds.length > 1 && selectedIds.includes(id)) {
-        setWallQuickMenu(null);
-        setWallTypeMenu(null);
-        return;
-      }
-      setWallQuickMenu({ id, x: clientX, y: clientY, world });
-      setWallTypeMenu(null);
-    },
-    []
-  );
-
-  const handleCorridorQuickMenu = useCallback(
-    ({ id, clientX, clientY, worldX, worldY }: { id: string; clientX: number; clientY: number; worldX: number; worldY: number }) => {
-      if (isReadOnlyRef.current) return;
-      if (corridorDoorDraft && corridorDoorDraft.corridorId !== id) return;
-      setCorridorQuickMenu({ id, x: clientX, y: clientY, world: { x: worldX, y: worldY } });
-    },
-    [corridorDoorDraft]
-  );
 
   const handleCorridorDoorDraftPoint = useCallback(
     (payload: {
@@ -2906,6 +2883,8 @@ export const usePlanView = (planId: string) => {
   }, [myMeetingsModal?.returnToHub]);
 
   const {
+    handleWallQuickMenu,
+    handleCorridorQuickMenu,
     handleObjectContextMenu,
     handleLinkContextMenu,
     handleSafetyCardContextMenu,
@@ -2915,7 +2894,20 @@ export const usePlanView = (planId: string) => {
     handleCorridorDoorContextMenu,
     handleRoomDoorContextMenu,
     handleScaleContextMenu
-  } = usePlanContextMenuHandlers({ dismissSelectionHintToasts, setContextMenu, roomDoorDraft, createRoomDoorFromDraft, planScale, isRackLinkId });
+  } = usePlanContextMenuHandlers({
+    dismissSelectionHintToasts,
+    setContextMenu,
+    roomDoorDraft,
+    createRoomDoorFromDraft,
+    planScale,
+    isRackLinkId,
+    isReadOnlyRef,
+    selectedObjectIdsRef,
+    corridorDoorDraft,
+    setWallQuickMenu,
+    setWallTypeMenu,
+    setCorridorQuickMenu
+  });
 
   const handleScaleDoubleClick = useCallback(() => {
     if (!planScale?.start || !planScale?.end || isReadOnly) return;

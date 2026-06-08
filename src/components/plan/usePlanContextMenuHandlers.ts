@@ -15,8 +15,51 @@ export const usePlanContextMenuHandlers = (deps: {
   createRoomDoorFromDraft: (roomId: string, point: { x: number; y: number }) => boolean | void;
   planScale: { start?: unknown; end?: unknown } | null | undefined;
   isRackLinkId: (id: string) => boolean;
+  isReadOnlyRef: { current: boolean };
+  selectedObjectIdsRef: { current: string[] | null | undefined };
+  corridorDoorDraft: { corridorId: string } | null | undefined;
+  setWallQuickMenu: (value: any) => void;
+  setWallTypeMenu: (value: any) => void;
+  setCorridorQuickMenu: (value: any) => void;
 }) => {
-  const { dismissSelectionHintToasts, setContextMenu, roomDoorDraft, createRoomDoorFromDraft, planScale, isRackLinkId } = deps;
+  const {
+    dismissSelectionHintToasts,
+    setContextMenu,
+    roomDoorDraft,
+    createRoomDoorFromDraft,
+    planScale,
+    isRackLinkId,
+    isReadOnlyRef,
+    selectedObjectIdsRef,
+    corridorDoorDraft,
+    setWallQuickMenu,
+    setWallTypeMenu,
+    setCorridorQuickMenu
+  } = deps;
+
+  const handleWallQuickMenu = useCallback(
+    ({ id, clientX, clientY, world }: { id: string; world: { x: number; y: number } } & XY) => {
+      if (isReadOnlyRef.current) return;
+      const selectedIds = selectedObjectIdsRef.current || [];
+      if (selectedIds.length > 1 && selectedIds.includes(id)) {
+        setWallQuickMenu(null);
+        setWallTypeMenu(null);
+        return;
+      }
+      setWallQuickMenu({ id, x: clientX, y: clientY, world });
+      setWallTypeMenu(null);
+    },
+    [isReadOnlyRef, selectedObjectIdsRef, setWallQuickMenu, setWallTypeMenu]
+  );
+
+  const handleCorridorQuickMenu = useCallback(
+    ({ id, clientX, clientY, worldX, worldY }: { id: string } & WorldXY) => {
+      if (isReadOnlyRef.current) return;
+      if (corridorDoorDraft && corridorDoorDraft.corridorId !== id) return;
+      setCorridorQuickMenu({ id, x: clientX, y: clientY, world: { x: worldX, y: worldY } });
+    },
+    [corridorDoorDraft, isReadOnlyRef, setCorridorQuickMenu]
+  );
 
   const handleObjectContextMenu = useCallback(
     ({ id, clientX, clientY, wallSegmentLengthPx }: { id: string; wallSegmentLengthPx?: number } & XY) => {
@@ -102,6 +145,8 @@ export const usePlanContextMenuHandlers = (deps: {
   );
 
   return {
+    handleWallQuickMenu,
+    handleCorridorQuickMenu,
     handleObjectContextMenu,
     handleLinkContextMenu,
     handleSafetyCardContextMenu,
