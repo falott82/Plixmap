@@ -17,6 +17,7 @@ import { RoomsLayer } from './canvas/RoomsLayer';
 import { WallsLinksLayer } from './canvas/WallsLinksLayer';
 import { ObjectsLayer } from './canvas/ObjectsLayer';
 import { CanvasToolbar } from './canvas/CanvasToolbar';
+import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
   hexToRgba,
@@ -1501,37 +1502,12 @@ const CanvasStageImpl = (
     [computeObjectBounds]
   );
 
-  const getSpatialCellSize = useCallback(() => {
-    const minDim = Math.min(baseWidth || 0, baseHeight || 0);
-    return Math.max(140, Math.min(520, minDim ? minDim / 12 : 320));
-  }, [baseHeight, baseWidth]);
+  const getSpatialCellSize = useCallback(() => spatialCellSize(baseWidth, baseHeight), [baseHeight, baseWidth]);
 
   const buildSpatialIndex = useCallback(() => {
     const version = boundsVersionRef.current;
     const cellSize = getSpatialCellSize();
-    const cells = new Map<string, string[]>();
-    for (const obj of objects) {
-      const bounds = getObjectBounds(obj);
-      const x = Number(obj.x);
-      const y = Number(obj.y);
-      const minX = bounds?.minX ?? x;
-      const minY = bounds?.minY ?? y;
-      const maxX = bounds?.maxX ?? x;
-      const maxY = bounds?.maxY ?? y;
-      if (![minX, minY, maxX, maxY].every(Number.isFinite)) continue;
-      const minCellX = Math.floor(minX / cellSize);
-      const maxCellX = Math.floor(maxX / cellSize);
-      const minCellY = Math.floor(minY / cellSize);
-      const maxCellY = Math.floor(maxY / cellSize);
-      for (let cx = minCellX; cx <= maxCellX; cx += 1) {
-        for (let cy = minCellY; cy <= maxCellY; cy += 1) {
-          const key = `${cx},${cy}`;
-          const bucket = cells.get(key);
-          if (bucket) bucket.push(obj.id);
-          else cells.set(key, [obj.id]);
-        }
-      }
-    }
+    const cells = buildSpatialIndexCells(objects, getObjectBounds, cellSize);
     const next = { version, cellSize, cells };
     spatialIndexRef.current = next;
     return next;
@@ -1548,30 +1524,7 @@ const CanvasStageImpl = (
   const getSelectionCandidates = useCallback(
     (rect: { x: number; y: number; width: number; height: number }) => {
       if (objects.length < 250) return objects;
-      const index = getSpatialIndex();
-      const minX = rect.x;
-      const minY = rect.y;
-      const maxX = rect.x + rect.width;
-      const maxY = rect.y + rect.height;
-      const minCellX = Math.floor(minX / index.cellSize);
-      const maxCellX = Math.floor(maxX / index.cellSize);
-      const minCellY = Math.floor(minY / index.cellSize);
-      const maxCellY = Math.floor(maxY / index.cellSize);
-      const ids = new Set<string>();
-      for (let cx = minCellX; cx <= maxCellX; cx += 1) {
-        for (let cy = minCellY; cy <= maxCellY; cy += 1) {
-          const bucket = index.cells.get(`${cx},${cy}`);
-          if (!bucket) continue;
-          for (const id of bucket) ids.add(id);
-        }
-      }
-      if (!ids.size) return [];
-      const list: MapObject[] = [];
-      ids.forEach((id) => {
-        const obj = objectById.get(id);
-        if (obj) list.push(obj);
-      });
-      return list;
+      return selectionCandidatesFromIndex(rect, getSpatialIndex(), objectById);
     },
     [getSpatialIndex, objectById, objects]
   );
