@@ -11,7 +11,7 @@ import { Dialog, Transition } from '@headlessui/react';
 
 import { getMeetingRoomActiveToneClass, getMeetingTimelineDayClasses, isApprovedMeetingInProgress } from '../../utils/meetingTime';
 import { currentLocalIsoDay } from '../../utils/localDate';
-import { ChevronLeft, ChevronRight, Eye, LayoutGrid, Trash, Copy, MoveDiagonal, Square, X, Pencil, Plus, DoorOpen, Cog, EyeOff, User, Search, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, Trash, Copy, MoveDiagonal, Square, X, Pencil, Plus, DoorOpen, Cog, EyeOff, Search, Loader2 } from 'lucide-react';
 
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { FloorPlan, Room } from '../../store/types';
@@ -19,7 +19,6 @@ import { FloorPlan, Room } from '../../store/types';
 import { useUIStore } from '../../store/useUIStore';
 
 import ChooseDefaultViewModal from './ChooseDefaultViewModal';
-import Icon from '../ui/Icon';
 import { isDeskType } from './deskTypes';
 import RoomShapePreview from './RoomShapePreview';
 
@@ -68,6 +67,7 @@ import PlanHeaderBar from './PlanHeaderBar';
 import PlanCanvasRegion from './PlanCanvasRegion';
 import RoomModalContainer from './RoomModalContainer';
 import ContextMenuPanel from './ContextMenuPanel';
+import { PlanTypeMenu } from './PlanTypeMenu';
 
 type ViewProps = ReturnType<typeof usePlanView>;
 
@@ -865,53 +865,9 @@ const PlanViewView = (props: ViewProps) => {
 	      <PlanCanvasRegion {...{ allItemsLabel, allItemsSelected, allTypesOpen, annotationsOpen, autoFitEnabled, basePlan, canvasPlan, canvasStageRef, clearSelection, client, computeRoomReassignments, computeRoomSurfaceSqm, corridorDoorDraft, corridorDrawMode, createRoomDoorFromDraft, deskPaletteDefs, deskPaletteOrder, desksOpen, effectiveVisibleLayerIds, getCorridorPolygon, goToDefaultView, gridSize, gridSnapEnabled, handleCorridorConnectionContextMenu, handleCorridorContextMenu, handleCorridorDoorContextMenu, handleCorridorDoorDraftPoint, handleCorridorQuickMenu, handleCreateCorridorFromPoly, handleCreateRoomFromPoly, handleCreateRoomFromRect, handleEdit, handleLinkContextMenu, handleMapContextMenu, handleMapMouseDown, handleMapMouseMove, handleObjectContextMenu, handlePanChange, handlePlaceNew, handleRoomContextMenu, handleRoomDoorContextMenu, handleSafetyCardChange, handleSafetyCardContextMenu, handleScaleContextMenu, handleScaleDoubleClick, handleScaleMove, handleStageMove, handleStageMoveStart, handleStageSelect, handleTogglePresentation, handleToolDoubleClick, handleToolMove, handleToolPoint, handleWallDraftContextMenu, handleWallMove, handleWallQuickMenu, handleWallSegmentDblClick, handleZoomChange, hasDefaultView, hasNavigationEdits, hasRoomOverlap, hideAllLayers, highlight, highlightRoom, insertCorridorJunctionPoint, isReadOnly, isWallType, lang, layerIds, layersOpen, linkCreateHint, mapRef, markTouched, measureAreaLabel, measureClosed, measureLabel, measurePointer, measurePoints, meetingStatusByRoomId, metersPerPixel, navigate, normalizeLayerSelection, notifyRoomOverlap, objectTypeIcons, objectsOpen, openCorridorDoorModal, openEditRoom, openPhotoViewer, openRackLinkPorts, openRoomDoorModal, openRoomMeetingsTimeline, orderedPlanLayers, otherPaletteDefs, paletteHasCustom, paletteHasMore, paletteIsEmpty, paletteOrder, paletteSettingsSection, pan, panToolActive, pendingType, perfEnabled, plan, planId, planLayers, planScale, presentationMode, printAreaMode, push, quoteDraftLabel, quoteLabels, quotePointer, quotePoints, removeTypeFromPalette, renderPlan, requestSaveAndNavigate, roomDoorDraft, roomDrawMode, roomStatsById, safetyCardColorIndex, safetyCardFontIndex, safetyCardFontSize, safetyCardPos, safetyCardSize, safetyCardTextBgIndex, safetyNumbersInline, safetyPointsInline, scaleDraft, scaleDraftPointer, scaleLine, scalePromptDismissed, securityLayerVisible, securityOpen, securityPaletteDefs, selectedCorridorDoor, selectedCorridorId, selectedLinkId, selectedObjectId, selectedObjectIds, selectedRoomDoorId, selectedRoomId, selectedRoomIds, setAllTypesDefaultTab, setAllTypesOpen, setAnnotationsOpen, setContextMenu, setCorridorQuickMenu, setDesksOpen, setEmergencyContactsOpen, setHideAllLayers, setLayersOpen, setLinkEditId, setMeasureMode, setObjectRoomIds, setObjectsOpen, setPaletteSection, setPanToolActive, setPendingType, setPrintAreaMode, setRoomDrawMode, setScaleMode, setScalePromptDismissed, setSecurityOpen, setSelectedCorridorDoor, setSelectedCorridorId, setSelectedLinkId, setSelectedRoomDoorId, setSelectedRoomId, setSelectedRoomIds, setSelection, setViewsMenuOpen, setVisibleLayerIds, setWallDrawMode, showGrid, showPrintArea, site, startScaleMode, startWallDraw, t, toolMode, updateCorridorLabelScale, updateFloorPlan, updateObject, updateRoom, wallAttenuationByType, wallDraftPointer, wallDraftPoints, wallDrawMode, wallDrawType, wallTypeIdSet, zoom }} />
 
       {typeMenu ? (
-        <div
-          ref={typeMenuRef}
-          className="context-menu-panel fixed z-50 w-60 rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-card"
-          style={{ top: typeMenu.y, left: typeMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-primary">
-                <Icon name={typeMenu.icon} />
-              </span>
-              <span className="truncate">{typeMenu.label}</span>
-            </div>
-            <button
-              onClick={() => setTypeMenu(null)}
-              className="text-slate-400 hover:text-ink"
-              title={t({ it: 'Chiudi', en: 'Close' })}
-            >
-              <X size={14} />
-            </button>
-          </div>
-          <button
-            onClick={() => handleSelectType(typeMenu.typeId)}
-            className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
-            title={t({ it: 'Seleziona tutti gli oggetti di questo tipo', en: 'Select all objects of this type' })}
-          >
-            <User size={14} className="text-slate-500" /> {t({ it: 'Seleziona tutti', en: 'Select all' })}
-          </button>
-          {canManageLayers ? (
-            <button
-              onClick={() => handleOpenTypeLayer(typeMenu.typeId, typeMenu.label)}
-              disabled={isReadOnly}
-              className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              title={t({ it: 'Crea un layer per questo tipo', en: 'Create a layer for this type' })}
-            >
-              <LayoutGrid size={14} className="text-slate-500" /> {t({ it: 'Crea layer', en: 'Create layer' })}
-            </button>
-          ) : null}
-          <button
-            onClick={() => handleDeleteType(typeMenu.typeId)}
-            disabled={isReadOnly}
-            className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-            title={t({ it: 'Rimuovi tutti gli oggetti di questo tipo', en: 'Remove all objects of this type' })}
-          >
-            <Trash size={14} /> {t({ it: 'Rimuovi tutti', en: 'Remove all' })}
-          </button>
-        </div>
+        <PlanTypeMenu
+          {...{ typeMenu, typeMenuRef, setTypeMenu, canManageLayers, isReadOnly, handleSelectType, handleOpenTypeLayer, handleDeleteType, t }}
+        />
       ) : null}
 
       {wallQuickMenu ? (
