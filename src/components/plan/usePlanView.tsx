@@ -33,7 +33,7 @@ import {
   computeSaveRevisionReason,
   computeApplyWallTypeToIds
 } from './planViewMiscTools';
-import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes } from './planViewQuoteScaleTools';
+import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeHandleScaleMove, computeUpdateScaleStyle } from './planViewQuoteScaleTools';
 import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
 import {
   computeResolveWallPoint,
@@ -3004,40 +3004,14 @@ export const usePlanView = (planId: string) => {
   }, [isReadOnly, planScale?.end, planScale?.start]);
 
   const handleScaleMove = useCallback(
-    (payload: { start: { x: number; y: number }; end: { x: number; y: number } }) => {
-      if (!plan || isReadOnly) return;
-      if (!planScale?.meters || !planScale?.metersPerPixel) return;
-      markTouched();
-      updateFloorPlan(plan.id, {
-        scale: {
-          ...(planScale as any),
-          start: payload.start,
-          end: payload.end,
-          meters: planScale.meters,
-          metersPerPixel: planScale.metersPerPixel
-        }
-      });
-    },
+    (payload: { start: { x: number; y: number }; end: { x: number; y: number } }) =>
+      computeHandleScaleMove(payload, { plan, isReadOnly, planScale, markTouched, updateFloorPlan }),
     [isReadOnly, markTouched, plan, planScale?.meters, planScale?.metersPerPixel, updateFloorPlan]
   );
 
   const updateScaleStyle = useCallback(
-    (payload: { labelScale?: number; strokeWidth?: number }) => {
-      if (!plan || isReadOnly) return;
-      if (!planScale?.start || !planScale?.end || !planScale?.meters || !planScale?.metersPerPixel) return;
-      markTouched();
-      updateFloorPlan(plan.id, {
-        scale: {
-          start: planScale.start,
-          end: planScale.end,
-          meters: planScale.meters,
-          metersPerPixel: planScale.metersPerPixel,
-          labelScale: Number.isFinite(payload.labelScale as number) ? Number(payload.labelScale) : (planScale as any).labelScale,
-          strokeWidth: Number.isFinite(payload.strokeWidth as number) ? Number(payload.strokeWidth) : (planScale as any).strokeWidth,
-          opacity: Number.isFinite(Number(planScale.opacity)) ? Number(planScale.opacity) : 1
-        }
-      });
-    },
+    (payload: { labelScale?: number; strokeWidth?: number }) =>
+      computeUpdateScaleStyle(payload, { plan, isReadOnly, planScale, markTouched, updateFloorPlan }),
     [isReadOnly, markTouched, plan, planScale?.end, planScale?.meters, planScale?.metersPerPixel, planScale?.opacity, planScale?.start, updateFloorPlan]
   );
 

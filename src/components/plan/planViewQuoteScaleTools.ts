@@ -15,6 +15,50 @@ type ScaleModalState = { start: Pt; end: Pt; distance: number } | null;
 // referenced in the body (e.g. layerIdSet, t, inferDefaultLayerIds in handleQuotePoint), they are
 // not passed here — the wrapper retains them.
 
+export type ScaleEditDeps = {
+  plan: FloorPlan | undefined;
+  isReadOnly: boolean;
+  planScale: any;
+  markTouched: () => void;
+  updateFloorPlan: DataStoreState['updateFloorPlan'];
+};
+
+// Move the scale segment endpoints, preserving the calibrated meters/px ratio.
+export const computeHandleScaleMove = (payload: { start: Pt; end: Pt }, deps: ScaleEditDeps) => {
+  const { plan, isReadOnly, planScale, markTouched, updateFloorPlan } = deps;
+  if (!plan || isReadOnly) return;
+  if (!planScale?.meters || !planScale?.metersPerPixel) return;
+  markTouched();
+  updateFloorPlan(plan.id, {
+    scale: {
+      ...(planScale as any),
+      start: payload.start,
+      end: payload.end,
+      meters: planScale.meters,
+      metersPerPixel: planScale.metersPerPixel
+    }
+  });
+};
+
+// Update the scale label/stroke styling, preserving geometry + calibration.
+export const computeUpdateScaleStyle = (payload: { labelScale?: number; strokeWidth?: number }, deps: ScaleEditDeps) => {
+  const { plan, isReadOnly, planScale, markTouched, updateFloorPlan } = deps;
+  if (!plan || isReadOnly) return;
+  if (!planScale?.start || !planScale?.end || !planScale?.meters || !planScale?.metersPerPixel) return;
+  markTouched();
+  updateFloorPlan(plan.id, {
+    scale: {
+      start: planScale.start,
+      end: planScale.end,
+      meters: planScale.meters,
+      metersPerPixel: planScale.metersPerPixel,
+      labelScale: Number.isFinite(payload.labelScale as number) ? Number(payload.labelScale) : (planScale as any).labelScale,
+      strokeWidth: Number.isFinite(payload.strokeWidth as number) ? Number(payload.strokeWidth) : (planScale as any).strokeWidth,
+      opacity: Number.isFinite(Number(planScale.opacity)) ? Number(planScale.opacity) : 1
+    }
+  });
+};
+
 export type ApplyScaleDeps = {
   computeRoomSurfaceSqm: (
     room: { kind?: string; points?: Pt[]; x?: number; y?: number; width?: number; height?: number },
