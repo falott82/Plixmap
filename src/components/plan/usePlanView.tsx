@@ -73,6 +73,7 @@ import {
   computeUpdateRackPortField,
   computeFormatPresenceDate,
   computeFormatPresenceLock,
+  computeLinkCreateHint,
   computeRecommendedObjectScale,
   computeClientBusinessPartnerNames,
   computeMeetingLocationLabels,
@@ -1904,25 +1905,10 @@ export const usePlanView = (planId: string) => {
     [lang, linksModalObjectId, objectTypeDefs, renderPlan]
   );
 
-  const linkCreateHint = useMemo(() => {
-    if (!linkFromId || isReadOnly) return null;
-    const from = (renderPlan as any)?.objects?.find((o: any) => o.id === linkFromId);
-    const fromName = String(from?.name || '').trim();
-    const modeLabel =
-      linkCreateMode === 'cable'
-        ? t({ it: 'collegamento 90°', en: '90° link' })
-        : t({ it: 'collegamento', en: 'link' });
-    return {
-      title: t({
-        it: `Seleziona un secondo oggetto per creare un ${modeLabel}.`,
-        en: `Select a second object to create a ${modeLabel}.`
-      }),
-      subtitle: t({
-        it: `${fromName ? `Origine: ${fromName}. ` : ''}Premi Esc per annullare.`,
-        en: `${fromName ? `From: ${fromName}. ` : ''}Press Esc to cancel.`
-      })
-    };
-  }, [isReadOnly, linkCreateMode, linkFromId, renderPlan, t]);
+  const linkCreateHint = useMemo(
+    () => computeLinkCreateHint({ linkFromId, isReadOnly, renderPlan, linkCreateMode, t }),
+    [isReadOnly, linkCreateMode, linkFromId, renderPlan, t]
+  );
 
   const rackPortsLinkItem = useMemo(() => {
     if (!rackPortsLink || !renderPlan) return null;

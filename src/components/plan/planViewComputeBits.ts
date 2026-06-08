@@ -5,6 +5,35 @@ import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 
 type PresenceLockEntry = { planId: string; clientName?: string; siteName?: string; planName?: string };
 
+export type LinkCreateHintDeps = {
+  linkFromId: string | null | undefined;
+  isReadOnly: boolean;
+  renderPlan: FloorPlan | undefined;
+  linkCreateMode: string;
+  t: ReturnType<typeof useT>;
+};
+
+// Hint banner shown while creating an object-to-object link: title + origin
+// subtitle, or null when not in link-create mode / read-only.
+export const computeLinkCreateHint = (deps: LinkCreateHintDeps) => {
+  const { linkFromId, isReadOnly, renderPlan, linkCreateMode, t } = deps;
+  if (!linkFromId || isReadOnly) return null;
+  const from = (renderPlan as any)?.objects?.find((o: any) => o.id === linkFromId);
+  const fromName = String(from?.name || '').trim();
+  const modeLabel =
+    linkCreateMode === 'cable' ? t({ it: 'collegamento 90°', en: '90° link' }) : t({ it: 'collegamento', en: 'link' });
+  return {
+    title: t({
+      it: `Seleziona un secondo oggetto per creare un ${modeLabel}.`,
+      en: `Select a second object to create a ${modeLabel}.`
+    }),
+    subtitle: t({
+      it: `${fromName ? `Origine: ${fromName}. ` : ''}Premi Esc per annullare.`,
+      en: `${fromName ? `From: ${fromName}. ` : ''}Press Esc to cancel.`
+    })
+  };
+};
+
 // Pure presence-tooltip date formatter (locale string, em-dash fallback).
 export const computeFormatPresenceDate = (value?: number | null): string => {
   if (!value) return '—';
