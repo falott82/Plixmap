@@ -137,6 +137,7 @@ import { usePlanContextDerived } from './usePlanContextDerived';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
+import { usePlanWallTypeModalEffects } from './usePlanWallTypeModalEffects';
 import { usePlanPopoverEffects } from './usePlanPopoverEffects';
 import { usePlanHelpToastEffects } from './usePlanHelpToastEffects';
 import { usePlanDeeplinkEffects } from './usePlanDeeplinkEffects';
@@ -1100,23 +1101,13 @@ export const usePlanView = (planId: string) => {
     perfMetrics.planViewLastRenderMs = Math.round(performance.now() - renderStartRef.current);
   });
 
-  useEffect(() => {
-    if (!wallTypeModal) return;
-    setWallTypeDraft(wallTypeModal.typeId);
-  }, [wallTypeModal]);
-
-  useEffect(() => {
-    if (!roomWallTypeModal) {
-      setRoomWallTypeSelections([]);
-      return;
-    }
-    const nextDefault = defaultWallTypeId || DEFAULT_WALL_TYPES[0];
-    const desired =
-      roomWallTypeModal.wallTypes && roomWallTypeModal.wallTypes.length === roomWallTypeModal.segments.length
-        ? roomWallTypeModal.wallTypes
-        : roomWallTypeModal.segments.map(() => nextDefault);
-    setRoomWallTypeSelections(desired);
-  }, [defaultWallTypeId, roomWallTypeModal]);
+  usePlanWallTypeModalEffects({
+    wallTypeModal,
+    setWallTypeDraft,
+    roomWallTypeModal,
+    setRoomWallTypeSelections,
+    defaultWallTypeId
+  });
 
   useEffect(() => {
     // Always start from the "present" when entering the workspace for a plan.
