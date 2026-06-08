@@ -10,6 +10,25 @@ import type { CanvasStageHandle } from './CanvasStage';
 
 type Pan = { x: number; y: number };
 
+// Convert the last pointer-click (viewport coords) to plan coords for paste.
+export const computeGetPastePoint = (deps: {
+  lastPointerClickRef: { current: { x: number; y: number } | null };
+  mapRef: { current: HTMLElement | null };
+  zoomRef: { current: number };
+  panRef: { current: Pan };
+}): Pan | null => {
+  const { lastPointerClickRef, mapRef, zoomRef, panRef } = deps;
+  const last = lastPointerClickRef.current;
+  const el = mapRef.current;
+  if (!last || !el) return null;
+  const rect = el.getBoundingClientRect();
+  const localX = last.x - rect.left;
+  const localY = last.y - rect.top;
+  const z = zoomRef.current || 1;
+  const p = panRef.current || { x: 0, y: 0 };
+  return { x: (localX - p.x) / z, y: (localY - p.y) / z };
+};
+
 export type ViewportInitDeps = {
   renderPlan: FloorPlan | undefined;
   planId: string;

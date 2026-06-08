@@ -128,7 +128,8 @@ import { runHandleSearchEnter } from './planViewSearchEnter';
 import {
   runViewportInitEffect,
   runViewportAutoCenterEffect,
-  runViewportPresentationEffect
+  runViewportPresentationEffect,
+  computeGetPastePoint
 } from './planViewViewport';
 import {
   runOpenMediaViewer,
@@ -914,17 +915,10 @@ export const usePlanView = (planId: string) => {
     lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
     lastPointerClickRef.current = { x: event.clientX, y: event.clientY };
   }, []);
-  const getPastePoint = useCallback(() => {
-    const last = lastPointerClickRef.current;
-    const el = mapRef.current;
-    if (!last || !el) return null;
-    const rect = el.getBoundingClientRect();
-    const localX = last.x - rect.left;
-    const localY = last.y - rect.top;
-    const z = zoomRef.current || 1;
-    const p = panRef.current || { x: 0, y: 0 };
-    return { x: (localX - p.x) / z, y: (localY - p.y) / z };
-  }, []);
+  const getPastePoint = useCallback(
+    () => computeGetPastePoint({ lastPointerClickRef, mapRef, zoomRef, panRef }),
+    []
+  );
   useSyncedRef(wallDraftPointsRef, wallDraftPoints);
 
   const plan = useDataStore(
