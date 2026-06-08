@@ -119,7 +119,15 @@ import { useRoomMeetingsTimeline, type MyMeetingsModalState } from './useRoomMee
 import { usePlanSafetyCard } from './usePlanSafetyCard';
 import { usePlanCapacity } from './usePlanCapacity';
 import { usePlanContextDerived, type PlanContextMenuState } from './usePlanContextDerived';
-import type { PlanObjectModalState, RoomDepartmentConfirmState } from './planViewStateTypes';
+import type {
+  PlanObjectModalState,
+  RoomDepartmentConfirmState,
+  RackPortsLinkState,
+  EscapeRouteModalState,
+  LayerRevealPromptState,
+  MeetingManagerPresetState,
+  ClientMeetingsPresetState
+} from './planViewStateTypes';
 import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
 import { usePlanDoorModalHandlers } from './usePlanDoorModalHandlers';
 import { usePlanCorridorNameHandlers } from './usePlanCorridorNameHandlers';
@@ -570,11 +578,7 @@ export const usePlanView = (planId: string) => {
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewsMenuOpen, setViewsMenuOpen] = useState(false);
   const [rackModal, setRackModal] = useState<{ objectId: string } | null>(null);
-  const [rackPortsLink, setRackPortsLink] = useState<{
-    itemId: string;
-    kind?: RackPortKind;
-    openConnections?: boolean;
-  } | null>(null);
+  const [rackPortsLink, setRackPortsLink] = useState<RackPortsLinkState>(null);
   const [selectedViewId, setSelectedViewId] = useState<string>('__last__');
   const [searchResultsOpen, setSearchResultsOpen] = useState(false);
   const [searchResultsTerm, setSearchResultsTerm] = useState('');
@@ -584,22 +588,13 @@ export const usePlanView = (planId: string) => {
   const [crossPlanSearchTerm, setCrossPlanSearchTerm] = useState('');
   const [crossPlanResults, setCrossPlanResults] = useState<CrossPlanSearchResult[]>([]);
   const [internalMapOpen, setInternalMapOpen] = useState(false);
-  const [escapeRouteModal, setEscapeRouteModal] = useState<{
-    startPoint: { x: number; y: number };
-    startPlanId: string;
-    sourceKind: 'map' | 'room' | 'corridor';
-  } | null>(null);
+  const [escapeRouteModal, setEscapeRouteModal] = useState<EscapeRouteModalState>(null);
   const [emergencyContactsOpen, setEmergencyContactsOpen] = useState(false);
   const [countsOpen, setCountsOpen] = useState(false);
   const [presenceOpen, setPresenceOpen] = useState(false);
   const [layersPopoverOpen, setLayersPopoverOpen] = useState(false);
   const [layersQuickMenu, setLayersQuickMenu] = useState<{ x: number; y: number } | null>(null);
-  const [layerRevealPrompt, setLayerRevealPrompt] = useState<{
-    objectId: string;
-    objectName: string;
-    typeId: string;
-    missingLayerIds: string[];
-  } | null>(null);
+  const [layerRevealPrompt, setLayerRevealPrompt] = useState<LayerRevealPromptState>(null);
   const [expandedType, setExpandedType] = useState<string | null>(null);
   const [typeMenu, setTypeMenu] = useState<{ typeId: string; label: string; icon?: IconName; x: number; y: number } | null>(null);
   const typeMenuRef = useRef<HTMLDivElement | null>(null);
@@ -615,31 +610,13 @@ export const usePlanView = (planId: string) => {
   const [roomAllocationPreset, setRoomAllocationPreset] = useState<{ clientId?: string; siteId?: string } | null>(null);
   const [meetingManagerOpen, setMeetingManagerOpen] = useState(false);
   const [meetingHubModalOpen, setMeetingHubModalOpen] = useState(false);
-  const [meetingManagerPreset, setMeetingManagerPreset] = useState<{
-    clientId?: string;
-    siteId?: string;
-    floorPlanId?: string;
-    roomId?: string;
-    day?: string;
-  } | null>(null);
+  const [meetingManagerPreset, setMeetingManagerPreset] = useState<MeetingManagerPresetState>(null);
   const [myMeetingsModal, setMyMeetingsModal] = useState<MyMeetingsModalState | null>(null);
   const [myMeetingsSearch, setMyMeetingsSearch] = useState('');
   const [myMeetingsCheckInBusyId, setMyMeetingsCheckInBusyId] = useState<string | null>(null);
   const [myMeetingsCheckInDoneById, setMyMeetingsCheckInDoneById] = useState<Record<string, true>>({});
-  const [pendingMeetingManagerPreset, setPendingMeetingManagerPreset] = useState<{
-    clientId?: string;
-    siteId?: string;
-    floorPlanId?: string;
-    roomId?: string;
-    day?: string;
-  } | null>(null);
-  const [pendingClientMeetingsPreset, setPendingClientMeetingsPreset] = useState<{
-    clientId?: string;
-    siteId?: string;
-    siteLocked?: boolean;
-    day?: string;
-    returnTo?: 'hub' | 'myMeetings';
-  } | null>(null);
+  const [pendingMeetingManagerPreset, setPendingMeetingManagerPreset] = useState<MeetingManagerPresetState>(null);
+  const [pendingClientMeetingsPreset, setPendingClientMeetingsPreset] = useState<ClientMeetingsPresetState>(null);
   const [meetingStatusByRoomId, setMeetingStatusByRoomId] = useState<Record<string, { hasMeetingToday: boolean; inProgress: boolean; hasFutureToday: boolean }>>({});
   const meetingHubFocusRef = useRef<HTMLButtonElement | null>(null);
   const myMeetingsFocusRef = useRef<HTMLButtonElement | null>(null);
