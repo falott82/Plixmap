@@ -19,7 +19,8 @@ import {
   formatDistanceLabel,
   yesNoLabel,
   YesNoToggle,
-  buildPlanPreviewData
+  buildPlanPreviewData,
+  computeAllocationSummary
 } from './RoomAllocationModal.helpers';
 
 interface Props {
@@ -458,122 +459,29 @@ const RoomAllocationModal = ({ open, clients, departmentOptions, currentClientId
     return out;
   }, [alternativeCandidates, directCandidates, searchAlternatives]);
 
-  const allocationSummary = useMemo(() => {
-    if (!requestedCount) return null;
-    const roomKey = (room: RichRoomCandidate) => `${room.planId}:${room.roomId}`;
-    const toDistanceScore = (room: RichRoomCandidate) => {
-      const entry = distanceFromAnchor.get(roomKey(room));
-      if (entry?.meters !== null && Number.isFinite(entry?.meters)) return entry!.meters as number;
-      if (entry?.px !== null && Number.isFinite(entry?.px)) return (entry!.px as number) * 1000;
-      return Number.POSITIVE_INFINITY;
-    };
-
-    const primaryPool = departmentRooms
-      .filter((room) => room.freeSeats > 0)
-      .slice()
-      .sort((a, b) => {
-        if (a.freeSeats !== b.freeSeats) return b.freeSeats - a.freeSeats;
-        const aDist = toDistanceScore(a);
-        const bDist = toDistanceScore(b);
-        if (aDist !== bDist) return aDist - bDist;
-        if (a.planName !== b.planName) return a.planName.localeCompare(b.planName, undefined, { sensitivity: 'base' });
-        return a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' });
-      });
-
-    let fallbackPool: RichRoomCandidate[] = [];
-    if (searchAlternatives) {
-      if (includeEmptyOffices) {
-        fallbackPool = fallbackPool.concat(eligibleRoomCandidates.filter((room) => room.isEmptyRoom && room.freeSeats > 0));
-      }
-      if (includeOtherDepartments) {
-        fallbackPool = fallbackPool.concat(eligibleRoomCandidates.filter((room) => !room.matchesDepartment && room.freeSeats > 0));
-      }
-      if (includeMeetingRooms) {
-        fallbackPool = fallbackPool.concat(eligibleRoomCandidates.filter((room) => room.isMeetingRoom && room.freeSeats > 0));
-      }
-    }
-    fallbackPool = fallbackPool.filter(
-      (room, index, list) => list.findIndex((candidate) => candidate.planId === room.planId && candidate.roomId === room.roomId) === index
-    );
-
-    fallbackPool = fallbackPool
-      .slice()
-      .sort((a, b) => {
-        const aDist = toDistanceScore(a);
-        const bDist = toDistanceScore(b);
-        if (aDist !== bDist) return aDist - bDist;
-        if (a.freeSeats !== b.freeSeats) return b.freeSeats - a.freeSeats;
-        if (a.planName !== b.planName) return a.planName.localeCompare(b.planName, undefined, { sensitivity: 'base' });
-        return a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' });
-      });
-
-    const used = new Set<string>();
-    let remaining = requestedCount;
-    const allocations: Array<{ room: string; seats: number; roomId: string; planId: string }> = [];
-
-    for (const room of primaryPool) {
-      const seats = Math.min(remaining, Math.max(0, room.freeSeats));
-      if (seats <= 0) continue;
-      allocations.push({ room: room.roomName, seats, roomId: room.roomId, planId: room.planId });
-      used.add(roomKey(room));
-      remaining -= seats;
-      if (remaining <= 0) break;
-    }
-
-    if (remaining > 0 && fallbackPool.length) {
-      const fallbackCandidates = fallbackPool.filter((room) => !used.has(roomKey(room)));
-      const singleFit = fallbackCandidates
-        .filter((room) => room.freeSeats >= remaining)
-        .sort((a, b) => {
-          if (a.freeSeats !== b.freeSeats) return a.freeSeats - b.freeSeats;
-          const aDist = toDistanceScore(a);
-          const bDist = toDistanceScore(b);
-          if (aDist !== bDist) return aDist - bDist;
-          return a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' });
-        })[0];
-
-      if (singleFit) {
-        allocations.push({ room: singleFit.roomName, seats: remaining, roomId: singleFit.roomId, planId: singleFit.planId });
-        used.add(roomKey(singleFit));
-        remaining = 0;
-      } else {
-        const splitCandidates = fallbackCandidates
-          .slice()
-          .sort((a, b) => {
-            if (a.freeSeats !== b.freeSeats) return b.freeSeats - a.freeSeats;
-            const aDist = toDistanceScore(a);
-            const bDist = toDistanceScore(b);
-            if (aDist !== bDist) return aDist - bDist;
-            return a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' });
-          });
-        for (const room of splitCandidates) {
-          const seats = Math.min(remaining, Math.max(0, room.freeSeats));
-          if (seats <= 0) continue;
-          allocations.push({ room: room.roomName, seats, roomId: room.roomId, planId: room.planId });
-          used.add(roomKey(room));
-          remaining -= seats;
-          if (remaining <= 0) break;
-        }
-      }
-    }
-
-    if (!allocations.length) return null;
-    return {
-      requested: requestedCount,
-      placed: requestedCount - Math.max(remaining, 0),
-      remaining: Math.max(remaining, 0),
-      allocations
-    };
-  }, [
-    departmentRooms,
-    distanceFromAnchor,
-    eligibleRoomCandidates,
-    includeEmptyOffices,
-    includeMeetingRooms,
-    includeOtherDepartments,
-    requestedCount,
-    searchAlternatives
-  ]);
+  const allocationSummary = useMemo(
+    () =>
+      computeAllocationSummary({
+        departmentRooms,
+        distanceFromAnchor,
+        eligibleRoomCandidates,
+        includeEmptyOffices,
+        includeMeetingRooms,
+        includeOtherDepartments,
+        requestedCount,
+        searchAlternatives
+      }),
+    [
+      departmentRooms,
+      distanceFromAnchor,
+      eligibleRoomCandidates,
+      includeEmptyOffices,
+      includeMeetingRooms,
+      includeOtherDepartments,
+      requestedCount,
+      searchAlternatives
+    ]
+  );
 
   const hasEmptyOfficesAvailable = useMemo(
     () => eligibleRoomCandidates.some((room) => room.isEmptyRoom && room.freeSeats > 0),
