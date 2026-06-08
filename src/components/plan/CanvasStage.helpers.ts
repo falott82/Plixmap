@@ -663,3 +663,41 @@ export const findNearestRoomCorner = (
   if (!best) return null;
   return { x: best.x, y: best.y };
 };
+
+// Wall polyline → attenuating segments for wifi ray-casting. Pure.
+export const buildWallSegments = (
+  wallObjects: any[],
+  wallAttenuationMap: Map<string, number>
+): Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }> => {
+  const segments: Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }> = [];
+  for (const wall of wallObjects || []) {
+    const attenuation = Number(wallAttenuationMap.get(wall.type) ?? 0);
+    if (!Number.isFinite(attenuation) || attenuation <= 0) continue;
+    const pts = wall.points || [];
+    if (pts.length < 2) continue;
+    for (let i = 0; i < pts.length - 1; i += 1) segments.push({ a: pts[i], b: pts[i + 1], attenuation });
+  }
+  return segments;
+};
+
+// Wall polyline → opaque segments for camera FOV (glass/window walls are see-through). Pure.
+export const buildCameraWallSegments = (
+  wallObjects: any[]
+): Array<{ a: { x: number; y: number }; b: { x: number; y: number } }> => {
+  const segments: Array<{ a: { x: number; y: number }; b: { x: number; y: number } }> = [];
+  for (const wall of wallObjects || []) {
+    const typeId = String(wall.type || '');
+    if (typeId.includes('glass') || typeId.includes('window')) continue;
+    const pts = wall.points || [];
+    if (pts.length < 2) continue;
+    for (let i = 0; i < pts.length - 1; i += 1) segments.push({ a: pts[i], b: pts[i + 1] });
+  }
+  return segments;
+};
+
+// Evenly-spaced ray angles around a full circle (wifi range sampling). Pure.
+export const buildWifiRayAngles = (steps = 72): number[] => {
+  const list: number[] = [];
+  for (let i = 0; i < steps; i += 1) list.push((i / steps) * Math.PI * 2);
+  return list;
+};

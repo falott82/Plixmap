@@ -50,6 +50,9 @@ import {
   buildCameraFovPolygon as buildCameraFovPolygonImpl,
   dragRectFromCorners,
   findNearestRoomCorner,
+  buildWallSegments,
+  buildCameraWallSegments,
+  buildWifiRayAngles,
 } from './CanvasStage.helpers';
 
 interface Props {
@@ -2120,46 +2123,9 @@ const CanvasStageImpl = (
     () => regularObjects.filter((obj) => isObjectPotentiallyVisible(obj, viewportWorldBounds)),
     [regularObjects, viewportWorldBounds]
   );
-  const wallSegments = useMemo(() => {
-    if (!wallObjects.length) return [] as Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }>;
-    const segments: Array<{ a: { x: number; y: number }; b: { x: number; y: number }; attenuation: number }> = [];
-    for (const wall of wallObjects) {
-      const attenuation = Number(wallAttenuationMap.get(wall.type) ?? 0);
-      if (!Number.isFinite(attenuation) || attenuation <= 0) continue;
-      const pts = wall.points || [];
-      if (pts.length < 2) continue;
-      for (let i = 0; i < pts.length - 1; i += 1) {
-        const a = pts[i];
-        const b = pts[i + 1];
-        segments.push({ a, b, attenuation });
-      }
-    }
-    return segments;
-  }, [wallAttenuationMap, wallObjects]);
-  const cameraWallSegments = useMemo(() => {
-    if (!wallObjects.length) return [] as Array<{ a: { x: number; y: number }; b: { x: number; y: number } }>;
-    const segments: Array<{ a: { x: number; y: number }; b: { x: number; y: number } }> = [];
-    for (const wall of wallObjects) {
-      const typeId = String(wall.type || '');
-      if (typeId.includes('glass') || typeId.includes('window')) continue;
-      const pts = wall.points || [];
-      if (pts.length < 2) continue;
-      for (let i = 0; i < pts.length - 1; i += 1) {
-        const a = pts[i];
-        const b = pts[i + 1];
-        segments.push({ a, b });
-      }
-    }
-    return segments;
-  }, [wallObjects]);
-  const wifiRayAngles = useMemo(() => {
-    const steps = 72;
-    const list: number[] = [];
-    for (let i = 0; i < steps; i += 1) {
-      list.push((i / steps) * Math.PI * 2);
-    }
-    return list;
-  }, []);
+  const wallSegments = useMemo(() => buildWallSegments(wallObjects, wallAttenuationMap), [wallAttenuationMap, wallObjects]);
+  const cameraWallSegments = useMemo(() => buildCameraWallSegments(wallObjects), [wallObjects]);
+  const wifiRayAngles = useMemo(() => buildWifiRayAngles(), []);
   const buildWifiRangeRings = useCallback(
     (origin: { x: number; y: number }, baseRadiusPx: number) =>
       buildWifiRangeRingsImpl(origin, baseRadiusPx, wallSegments, wifiRayAngles),

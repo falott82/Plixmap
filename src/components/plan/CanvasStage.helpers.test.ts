@@ -21,7 +21,10 @@ import {
   getPolygonLabelBounds,
   buildCameraFovPolygon,
   dragRectFromCorners,
-  findNearestRoomCorner
+  findNearestRoomCorner,
+  buildWallSegments,
+  buildCameraWallSegments,
+  buildWifiRayAngles
 } from './CanvasStage.helpers';
 
 const square = [
@@ -161,6 +164,29 @@ describe('polygon label bounds', () => {
     expect(b.y).toBeGreaterThanOrEqual(0);
     expect(b.x + b.width).toBeLessThanOrEqual(10.0001);
     expect(b.y + b.height).toBeLessThanOrEqual(10.0001);
+  });
+});
+
+describe('wall segments + ray angles', () => {
+  const walls = [
+    { type: 'concrete', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }] },
+    { type: 'glass', points: [{ x: 0, y: 5 }, { x: 5, y: 5 }] }
+  ];
+  it('buildWallSegments emits attenuating segments, skipping zero-attenuation types', () => {
+    const map = new Map<string, number>([['concrete', 6]]); // glass absent -> 0
+    const segs = buildWallSegments(walls, map);
+    expect(segs).toHaveLength(2);
+    expect(segs[0]).toMatchObject({ attenuation: 6 });
+  });
+  it('buildCameraWallSegments drops glass/window walls', () => {
+    const segs = buildCameraWallSegments(walls);
+    expect(segs).toHaveLength(2); // only the 2 concrete segments; glass excluded
+  });
+  it('buildWifiRayAngles spans a full circle', () => {
+    const angles = buildWifiRayAngles(4);
+    expect(angles).toHaveLength(4);
+    expect(angles[0]).toBe(0);
+    expect(angles[1]).toBeCloseTo(Math.PI / 2, 5);
   });
 });
 
