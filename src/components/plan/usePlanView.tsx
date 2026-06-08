@@ -33,6 +33,7 @@ import {
   computeApplyWallTypeToIds
 } from './planViewMiscTools';
 import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes } from './planViewQuoteScaleTools';
+import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
 import {
   computeResolveWallPoint,
   computeHandleWallPoint,
@@ -162,7 +163,7 @@ import { type MeetingBooking } from '../../api/meetings';
 
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
-import { ALL_ITEMS_LAYER_ID, SYSTEM_LAYER_IDS, DEFAULT_WALL_TYPES, WALL_TYPE_IDS } from '../../store/data';
+import { ALL_ITEMS_LAYER_ID, DEFAULT_WALL_TYPES, WALL_TYPE_IDS } from '../../store/data';
 import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 import { getDefaultVisiblePlanLayerIds, normalizePlanLayerSelection } from '../../utils/layerVisibility';
 import { getWallTypeColor } from '../../utils/wallColors';
@@ -1751,43 +1752,14 @@ export const usePlanView = (planId: string) => {
     (ids: string[]) => normalizePlanLayerSelection(layerIds, ids, ALL_ITEMS_LAYER_ID),
     [layerIds]
   );
-  const getTypeLayerIds = useCallback(
-    (typeId: string) => {
-      const matched = planLayers
-        .filter((l: any) => !SYSTEM_LAYER_IDS.has(String(l.id)) && Array.isArray(l.typeIds) && l.typeIds.includes(typeId))
-        .map((l: any) => String(l.id));
-      return matched.length ? matched : null;
-    },
-    [planLayers]
-  );
+  const getTypeLayerIds = useCallback((typeId: string) => computeGetTypeLayerIds(typeId, planLayers), [planLayers]);
   const getLayerIdsForType = useCallback(
-    (typeId: string) => {
-      const mapped = getTypeLayerIds(typeId);
-      const fallback = inferDefaultLayerIds(typeId, layerIdSet);
-      const raw = (mapped?.length ? mapped : fallback).map((id) => String(id)).filter((id) => id !== ALL_ITEMS_LAYER_ID);
-      if (typeId === 'real_user') {
-        const preferred = raw.filter((id) => id !== 'users');
-        if (preferred.length) return Array.from(new Set(preferred));
-      }
-      return Array.from(new Set(raw));
-    },
-    [getTypeLayerIds, inferDefaultLayerIds, layerIdSet]
+    (typeId: string) => computeGetLayerIdsForType(typeId, { planLayers, inferDefaultLayerIds, layerIdSet }),
+    [planLayers, inferDefaultLayerIds, layerIdSet]
   );
   const getObjectLayerIdsForVisibility = useCallback(
-    (obj: MapObject) => {
-      const explicit = (Array.isArray(obj.layerIds) ? obj.layerIds : [])
-        .map((id) => String(id))
-        .filter((id) => id !== ALL_ITEMS_LAYER_ID);
-      const typeLayers = getLayerIdsForType(obj.type);
-      if (obj.type === 'real_user') {
-        const explicitPreferred = explicit.filter((id) => id !== 'users');
-        if (explicitPreferred.length) return Array.from(new Set(explicitPreferred));
-        if (typeLayers.length) return typeLayers;
-        return explicit;
-      }
-      return explicit.length ? Array.from(new Set(explicit)) : typeLayers;
-    },
-    [getLayerIdsForType]
+    (obj: MapObject) => computeGetObjectLayerIdsForVisibility(obj, { planLayers, inferDefaultLayerIds, layerIdSet }),
+    [planLayers, inferDefaultLayerIds, layerIdSet]
   );
   const prevLayerIdsByPlanRef = useRef<Record<string, string[]>>({});
   const visibleLayerIds = useMemo(() => {
