@@ -41,7 +41,7 @@ import CustomFieldsModal from './CustomFieldsModal';
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { createCustomFieldsBulk } from '../../api/customFields';
 import { useLang, useT } from '../../i18n/useT';
-import { Client, Corridor, DoorVerificationEntry, IconName, Room, WifiAntennaModel } from '../../store/types';
+import { Client, IconName, WifiAntennaModel } from '../../store/types';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { isDeskType } from '../plan/deskTypes';
 import { WALL_TYPE_IDS, WIFI_DEFAULT_STANDARD, WIFI_STANDARD_OPTIONS } from '../../store/data';
@@ -49,7 +49,7 @@ import { getWallTypeColor } from '../../utils/wallColors';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { isSecurityTypeId } from '../../store/security';
 
-import { Point, DoorRegistrySortKey, DoorRegistryRow, roomPolygon, polygonCentroid, getDoorAnchor, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS } from './ObjectTypesPanel.helpers';
+import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw } from './ObjectTypesPanel.helpers';
 import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal } from './ObjectTypesPanelModals';
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
@@ -301,70 +301,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     }
     return map;
   }, [objectTypes]);
-  const doorRowsRaw = useMemo<DoorRegistryRow[]>(() => {
-    const rows: DoorRegistryRow[] = [];
-    for (const currentClient of allClients || []) {
-      for (const site of currentClient?.sites || []) {
-        for (const plan of site?.floorPlans || []) {
-          const roomCenters = (plan.rooms || [])
-            .map((room) => ({ room, center: polygonCentroid(roomPolygon(room)) }))
-            .filter((entry): entry is { room: Room; center: Point } => !!entry.center);
-          for (const corridor of (plan.corridors || []) as Corridor[]) {
-            for (const door of corridor?.doors || []) {
-              const typeDef = door?.catalogTypeId ? doorTypeById.get(door.catalogTypeId) : null;
-              const typeLabel = typeDef
-                ? ((typeDef?.name?.[lang] as string) || (typeDef?.name?.it as string) || typeDef.id)
-                : door?.catalogTypeId || t({ it: 'Non definito', en: 'Undefined' });
-              const isEmergency =
-                typeof (door as any)?.isEmergency === 'boolean' ? !!(door as any).isEmergency : !!typeDef?.doorConfig?.isEmergency;
-              const anchor = getDoorAnchor(corridor, door);
-              const nearestRoomName = anchor
-                ? roomCenters
-                    .map((entry) => ({
-                      name: String(entry.room?.name || ''),
-                      dist: Math.hypot(anchor.x - entry.center.x, anchor.y - entry.center.y)
-                    }))
-                    .sort((a, b) => a.dist - b.dist)[0]?.name || ''
-                : '';
-              const verificationHistory = (Array.isArray((door as any)?.verificationHistory) ? (door as any).verificationHistory : [])
-                .map((entry: any) => ({
-                  id: String(entry?.id || nanoid()),
-                  date: typeof entry?.date === 'string' ? String(entry.date).trim() || undefined : undefined,
-                  company: String(entry?.company || '').trim(),
-                  notes: typeof entry?.notes === 'string' ? String(entry.notes).trim() || undefined : undefined,
-                  createdAt: Number.isFinite(Number(entry?.createdAt)) ? Number(entry.createdAt) : Date.now()
-                }))
-                .filter((entry: DoorVerificationEntry) => !!entry.company || !!entry.date)
-                .sort((a: DoorVerificationEntry, b: DoorVerificationEntry) => b.createdAt - a.createdAt);
-              rows.push({
-                rowId: `${currentClient.id}:${site.id}:${plan.id}:${corridor.id}:${door.id}`,
-                clientId: currentClient.id,
-                clientName: String(currentClient.name || ''),
-                siteId: site.id,
-                siteName: String(site.name || ''),
-                planId: plan.id,
-                planName: String(plan.name || ''),
-                corridorId: corridor.id,
-                corridorName: String(corridor.name || ''),
-                doorId: String(door?.id || ''),
-                description: String((door as any)?.description || '').trim(),
-                doorType: typeLabel,
-                isEmergency,
-                lastVerificationAt: String((door as any)?.lastVerificationAt || ''),
-                verifierCompany: String((door as any)?.verifierCompany || ''),
-                nearestRoomName,
-                openUrl: String((door as any)?.automationUrl || '').trim(),
-                mode: String((door as any)?.mode || 'static'),
-                verificationHistory,
-                plan
-              });
-            }
-          }
-        }
-      }
-    }
-    return rows;
-  }, [allClients, doorTypeById, lang, t]);
+  const doorRowsRaw = useMemo<DoorRegistryRow[]>(
+    () => buildDoorRegistryRowsRaw(allClients, doorTypeById, lang, t),
+    [allClients, doorTypeById, lang, t]
+  );
   const toggleDoorSort = useCallback((key: DoorRegistrySortKey) => {
     setDoorSort((prev) => {
       if (prev.key === key) return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };

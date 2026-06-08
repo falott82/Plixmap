@@ -1,4 +1,5 @@
 // Pure types + geometry helpers extracted verbatim from ObjectTypesPanel.tsx (<2k).
+import { nanoid } from 'nanoid';
 import type { Corridor, DoorVerificationEntry, FloorPlan, IconName, Room } from '../../store/types';
 
 export type Point = { x: number; y: number };
@@ -243,3 +244,76 @@ export const OBJECT_TYPE_ICON_OPTIONS: IconName[] = [
     'deskL',
     'deskLReverse'
 ];
+
+// Build the door-registry rows across all clients/sites/plans (type label,
+// emergency flag, nearest room, normalized verification history). Pure given the
+// client list, door-type index, language and translate fn. Extracted from ObjectTypesPanel.
+export const buildDoorRegistryRowsRaw = (
+  allClients: any[],
+  doorTypeById: Map<string, any>,
+  lang: string,
+  t: (msg: { it: string; en: string }) => string
+): DoorRegistryRow[] => {
+  const rows: DoorRegistryRow[] = [];
+  for (const currentClient of allClients || []) {
+    for (const site of currentClient?.sites || []) {
+      for (const plan of site?.floorPlans || []) {
+        const roomCenters = (plan.rooms || [])
+          .map((room: any) => ({ room, center: polygonCentroid(roomPolygon(room)) }))
+          .filter((entry: any): entry is { room: Room; center: Point } => !!entry.center);
+        for (const corridor of (plan.corridors || []) as Corridor[]) {
+          for (const door of corridor?.doors || []) {
+            const typeDef = door?.catalogTypeId ? doorTypeById.get(door.catalogTypeId) : null;
+            const typeLabel = typeDef
+              ? ((typeDef?.name?.[lang] as string) || (typeDef?.name?.it as string) || typeDef.id)
+              : door?.catalogTypeId || t({ it: 'Non definito', en: 'Undefined' });
+            const isEmergency =
+              typeof (door as any)?.isEmergency === 'boolean' ? !!(door as any).isEmergency : !!typeDef?.doorConfig?.isEmergency;
+            const anchor = getDoorAnchor(corridor, door);
+            const nearestRoomName = anchor
+              ? roomCenters
+                  .map((entry: any) => ({
+                    name: String(entry.room?.name || ''),
+                    dist: Math.hypot(anchor.x - entry.center.x, anchor.y - entry.center.y)
+                  }))
+                  .sort((a: any, b: any) => a.dist - b.dist)[0]?.name || ''
+              : '';
+            const verificationHistory = (Array.isArray((door as any)?.verificationHistory) ? (door as any).verificationHistory : [])
+              .map((entry: any) => ({
+                id: String(entry?.id || nanoid()),
+                date: typeof entry?.date === 'string' ? String(entry.date).trim() || undefined : undefined,
+                company: String(entry?.company || '').trim(),
+                notes: typeof entry?.notes === 'string' ? String(entry.notes).trim() || undefined : undefined,
+                createdAt: Number.isFinite(Number(entry?.createdAt)) ? Number(entry.createdAt) : Date.now()
+              }))
+              .filter((entry: DoorVerificationEntry) => !!entry.company || !!entry.date)
+              .sort((a: DoorVerificationEntry, b: DoorVerificationEntry) => b.createdAt - a.createdAt);
+            rows.push({
+              rowId: `${currentClient.id}:${site.id}:${plan.id}:${corridor.id}:${door.id}`,
+              clientId: currentClient.id,
+              clientName: String(currentClient.name || ''),
+              siteId: site.id,
+              siteName: String(site.name || ''),
+              planId: plan.id,
+              planName: String(plan.name || ''),
+              corridorId: corridor.id,
+              corridorName: String(corridor.name || ''),
+              doorId: String(door?.id || ''),
+              description: String((door as any)?.description || '').trim(),
+              doorType: typeLabel,
+              isEmergency,
+              lastVerificationAt: String((door as any)?.lastVerificationAt || ''),
+              verifierCompany: String((door as any)?.verifierCompany || ''),
+              nearestRoomName,
+              openUrl: String((door as any)?.automationUrl || '').trim(),
+              mode: String((door as any)?.mode || 'static'),
+              verificationHistory,
+              plan
+            });
+          }
+        }
+      }
+    }
+  }
+  return rows;
+};
