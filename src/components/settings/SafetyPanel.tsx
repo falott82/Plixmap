@@ -28,8 +28,8 @@ import {
   Point, SafetySortKey, DoorSortKey, SafetyRow, EmergencyDoorRow,
   roomPolygon, corridorPolygon, polygonCentroid, pointInPolygon, getDoorAnchor,
   compareText, parseDateForSort,
-  DEFAULT_SAFETY_CARD_LAYOUT,
-  computeSafetyMapData
+  computeSafetyMapData,
+  computeSafetyMultiMapData
 } from './SafetyPanel.helpers';
 import { SingleMapPreviewModal, MultiMapPreviewModal } from './SafetyPanelMapModals';
 import {
@@ -464,119 +464,10 @@ const SafetyPanel = () => {
 
   const mapData = useMemo(() => computeSafetyMapData(mapPreview), [mapPreview]);
 
-  const multiMapData = useMemo(() => {
-    if (!multiMapPreview) return null;
-    const items = multiMapPreview.keys
-      .map((key) => mapRowsByKey.get(key))
-      .filter((entry): entry is { kind: 'device'; row: SafetyRow } | { kind: 'door'; row: EmergencyDoorRow } => !!entry)
-      .filter((entry) => entry.row.planId === multiMapPreview.planId);
-    if (!items.length) return null;
-    const plan = items[0].row.plan;
-    const planWidth = Math.max(200, Number(plan?.width || 1200));
-    const planHeight = Math.max(200, Number(plan?.height || 800));
-    const corridors = ((plan?.corridors || []) as Corridor[])
-      .map((corridor) => {
-        const points = corridorPolygon(corridor);
-        return { corridor, points, center: polygonCentroid(points) };
-      })
-      .filter((entry) => entry.points.length >= 3);
-    const rooms = (plan?.rooms || []).map((room) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) })).filter((entry) => entry.points.length >= 3);
-    const doorAnchors = corridors.flatMap((entry) =>
-      (entry.corridor.doors || [])
-        .map((door) => ({ door, point: getDoorAnchor(entry.corridor, door), corridorId: entry.corridor.id }))
-        .filter((item): item is { door: any; point: Point; corridorId: string } => !!item.point)
-    );
-    const selectedDevices = items
-      .filter((entry): entry is { kind: 'device'; row: SafetyRow } => entry.kind === 'device')
-      .map((entry) => entry.row);
-    const selectedDoors = items
-      .filter((entry): entry is { kind: 'door'; row: EmergencyDoorRow } => entry.kind === 'door')
-      .map((entry) => entry.row);
-    const cardLayoutRaw = (plan as any)?.safetyCardLayout;
-    const safetyCardLayout = {
-      x: Number.isFinite(Number(cardLayoutRaw?.x)) ? Number(cardLayoutRaw.x) : DEFAULT_SAFETY_CARD_LAYOUT.x,
-      y: Number.isFinite(Number(cardLayoutRaw?.y)) ? Number(cardLayoutRaw.y) : DEFAULT_SAFETY_CARD_LAYOUT.y,
-      w: Number.isFinite(Number(cardLayoutRaw?.w)) ? Math.max(220, Number(cardLayoutRaw.w)) : DEFAULT_SAFETY_CARD_LAYOUT.w,
-      h: Number.isFinite(Number(cardLayoutRaw?.h)) ? Math.max(56, Number(cardLayoutRaw.h)) : DEFAULT_SAFETY_CARD_LAYOUT.h,
-      fontSize: Number.isFinite(Number(cardLayoutRaw?.fontSize))
-        ? Math.max(8, Math.min(22, Number(cardLayoutRaw.fontSize)))
-        : DEFAULT_SAFETY_CARD_LAYOUT.fontSize,
-      fontIndex: Number.isFinite(Number(cardLayoutRaw?.fontIndex))
-        ? Math.max(0, Math.floor(Number(cardLayoutRaw.fontIndex)))
-        : DEFAULT_SAFETY_CARD_LAYOUT.fontIndex,
-      colorIndex: Number.isFinite(Number(cardLayoutRaw?.colorIndex))
-        ? Math.max(0, Math.floor(Number(cardLayoutRaw.colorIndex)))
-        : DEFAULT_SAFETY_CARD_LAYOUT.colorIndex,
-      textBgIndex: Number.isFinite(Number(cardLayoutRaw?.textBgIndex))
-        ? Math.max(0, Math.floor(Number(cardLayoutRaw.textBgIndex)))
-        : DEFAULT_SAFETY_CARD_LAYOUT.textBgIndex
-    };
-    const points = [
-      ...corridors.flatMap((entry) => entry.points),
-      ...rooms.flatMap((entry) => entry.points),
-      ...doorAnchors.map((entry) => entry.point),
-      ...selectedDevices.map((entry) => entry.point),
-      { x: safetyCardLayout.x, y: safetyCardLayout.y },
-      { x: safetyCardLayout.x + safetyCardLayout.w, y: safetyCardLayout.y + safetyCardLayout.h },
-      { x: 0, y: 0 },
-      { x: planWidth, y: planHeight }
-    ];
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    for (const point of points) {
-      if (point.x < minX) minX = point.x;
-      if (point.y < minY) minY = point.y;
-      if (point.x > maxX) maxX = point.x;
-      if (point.y > maxY) maxY = point.y;
-    }
-    const firstRow = items[0]?.row as SafetyRow | EmergencyDoorRow | undefined;
-    const clientRef = firstRow?.clientId ? (clients || []).find((entry: any) => String(entry?.id || '') === String(firstRow.clientId)) : undefined;
-    const emergencyContacts = Array.isArray((clientRef as any)?.emergencyContacts) ? ((clientRef as any).emergencyContacts as any[]) : [];
-    const scopedContacts = emergencyContacts
-      .filter((entry) => {
-        const scope = String(entry?.scope || '');
-        const showOnPlanCard = entry?.showOnPlanCard !== false;
-        if (!showOnPlanCard) return false;
-        if (scope === 'global' || scope === 'client') return true;
-        if (scope === 'site') return String(entry?.siteId || '') === String(firstRow?.siteId || '');
-        if (scope === 'plan') return String(entry?.floorPlanId || '') === String(firstRow?.planId || '');
-        return false;
-      })
-      .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), lang, { sensitivity: 'base' }));
-    const meetingPoints = ((plan?.objects || []) as any[])
-      .filter((obj) => String(obj?.type || '') === 'safety_assembly_point')
-      .map((obj) => ({
-        name: String(obj?.name || obj?.type || '').trim(),
-        gps: String(obj?.gpsCoords || '').trim(),
-        coords: `${Math.round(Number(obj?.x || 0))}, ${Math.round(Number(obj?.y || 0))}`
-      }));
-    const pad = 24;
-    return {
-      plan,
-      items,
-      selectedDevices,
-      selectedDoors,
-      corridors,
-      rooms,
-      doorAnchors,
-      planWidth,
-      planHeight,
-      imageUrl: String(plan?.imageUrl || ''),
-      safetyCard: {
-        title: t({ it: 'Scheda sicurezza', en: 'Safety card' }),
-        numbersLabel: t({ it: 'Numeri utili', en: 'Emergency numbers' }),
-        pointsLabel: t({ it: 'Punti di ritrovo', en: 'Meeting points' }),
-        noNumbersText: t({ it: 'Nessun numero', en: 'No numbers' }),
-        noPointsText: t({ it: 'Nessun punto', en: 'No points' }),
-        numbersText: scopedContacts.map((entry) => `${entry?.name || '—'} ${entry?.phone || '—'}`).join(' | '),
-        pointsText: meetingPoints.map((entry) => `${entry.name || '—'} ${entry.gps || entry.coords}`).join(' | '),
-        layout: safetyCardLayout
-      },
-      viewBox: `${minX - pad} ${minY - pad} ${Math.max(100, maxX - minX + pad * 2)} ${Math.max(100, maxY - minY + pad * 2)}`
-    };
-  }, [clients, lang, mapRowsByKey, multiMapPreview, t]);
+  const multiMapData = useMemo(
+    () => computeSafetyMultiMapData(multiMapPreview, mapRowsByKey, clients, lang, t),
+    [clients, lang, mapRowsByKey, multiMapPreview, t]
+  );
 
   useEffect(() => {
     const onFullscreenChange = () => {
