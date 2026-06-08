@@ -447,3 +447,45 @@ export const mergeClientMeetingCheckIns = (
     }
     return { status, timestamps };
 };
+
+export const buildClientMeetingSearchResults = (
+  responses: Array<{ siteEntry: any; meetings: any[] }>,
+  term: string,
+  selectedClientId: string
+): any[] => {
+    const normalizedTerm = term.toLowerCase().replace(/^#/, '');
+    const matchRows: any[] = [];
+    for (const { siteEntry, meetings } of responses) {
+      for (const booking of meetings) {
+        if (String(booking.clientId || '') !== selectedClientId) continue;
+        const meetingNumber = Number((booking as any)?.meetingNumber || 0);
+        const subject = String(booking.subject || '').trim();
+        const roomName = String(booking.roomName || '').trim();
+        const floorPlanName = String(
+          (siteEntry.floorPlans || []).find((plan: any) => String(plan.id) === String(booking.floorPlanId || ''))?.name || ''
+        ).trim();
+        const searchBlob = [subject, roomName, floorPlanName, String(meetingNumber > 0 ? meetingNumber : ''), meetingNumber > 0 ? `#${meetingNumber}` : '']
+          .join(' ')
+          .toLowerCase();
+        if (!searchBlob.includes(normalizedTerm)) continue;
+        const participants = Array.isArray(booking.participants) ? booking.participants : [];
+        const participantsCount = participants.length;
+        const participantsLabel = participants
+          .slice(0, 3)
+          .map((participant: any) => String(participant?.fullName || participant?.externalId || '').trim())
+          .filter(Boolean)
+          .join(', ');
+        matchRows.push({
+          booking,
+          siteId: String(siteEntry.id || ''),
+          roomName: roomName || '-',
+          siteName: String(siteEntry.name || ''),
+          floorPlanName,
+          participantsCount,
+          participantsLabel: participantsLabel || '-'
+        });
+      }
+    }
+    matchRows.sort((a, b) => Number(b.booking.startAt || 0) - Number(a.booking.startAt || 0));
+    return matchRows;
+};
