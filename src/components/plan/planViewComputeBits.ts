@@ -1,5 +1,5 @@
 import type { MutableRefObject } from 'react';
-import type { FloorPlan } from '../../store/types';
+import type { FloorPlan, RackItem, RackPortKind } from '../../store/types';
 import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 
 // Body-extraction of several non-JSX usePlanView callbacks/memos/effects. Each body is moved
@@ -45,6 +45,43 @@ export const computeInferDefaultLayerIds = (
                       ? ['walls']
                       : ['devices'];
       return layerIdSet ? ids.filter((id) => layerIdSet.has(id)) : ids;
+};
+
+export type UpdateRackPortFieldDeps = {
+  isReadOnly: boolean;
+  planId: string;
+  renderPlan: FloorPlan | undefined;
+  updateRackItem: (floorPlanId: string, itemId: string, changes: Partial<RackItem>) => void;
+};
+
+// Shared body for the rack-port name/note rename handlers: write a single port's
+// name or note into the matching eth/fiber array on a rack item.
+export const computeUpdateRackPortField = (
+  itemId: string,
+  kind: RackPortKind,
+  index: number,
+  value: string,
+  field: 'names' | 'notes',
+  deps: UpdateRackPortFieldDeps
+) => {
+  const { isReadOnly, planId, renderPlan, updateRackItem } = deps;
+  if (isReadOnly || !renderPlan) return;
+  const item = ((renderPlan as any).rackItems || []).find((entry: RackItem) => entry.id === itemId);
+  if (!item) return;
+  const key =
+    field === 'names'
+      ? kind === 'ethernet'
+        ? 'ethPortNames'
+        : 'fiberPortNames'
+      : kind === 'ethernet'
+        ? 'ethPortNotes'
+        : 'fiberPortNotes';
+  const current = ((item as any)[key] as string[] | undefined) || [];
+  const next = [...current];
+  const normalized = value.trim();
+  while (next.length < index) next.push('');
+  next[index - 1] = normalized;
+  updateRackItem(planId, itemId, { [key]: next } as Partial<RackItem>);
 };
 
 // Pure derivation of an object's distinct external departments (trimmed, deduped

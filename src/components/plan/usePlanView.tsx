@@ -70,6 +70,7 @@ import {
   computeInferDefaultLayerIds,
   computeLinksModalRows,
   computeCollectUserDepartments,
+  computeUpdateRackPortField,
   computeRecommendedObjectScale,
   computeClientBusinessPartnerNames,
   computeMeetingLocationLabels,
@@ -1967,34 +1968,14 @@ export const usePlanView = (planId: string) => {
   );
 
   const handleRackPortsRename = useCallback(
-    (itemId: string, kind: RackPortKind, index: number, name: string) => {
-      if (isReadOnly || !renderPlan) return;
-      const item = ((renderPlan as any).rackItems || []).find((entry: RackItem) => entry.id === itemId);
-      if (!item) return;
-      const key = kind === 'ethernet' ? 'ethPortNames' : 'fiberPortNames';
-      const current = ((item as any)[key] as string[] | undefined) || [];
-      const next = [...current];
-      const normalized = name.trim();
-      while (next.length < index) next.push('');
-      next[index - 1] = normalized;
-      updateRackItem(planId, itemId, { [key]: next } as Partial<RackItem>);
-    },
+    (itemId: string, kind: RackPortKind, index: number, name: string) =>
+      computeUpdateRackPortField(itemId, kind, index, name, 'names', { isReadOnly, planId, renderPlan, updateRackItem }),
     [isReadOnly, planId, renderPlan, updateRackItem]
   );
 
   const handleRackPortsNote = useCallback(
-    (itemId: string, kind: RackPortKind, index: number, note: string) => {
-      if (isReadOnly || !renderPlan) return;
-      const item = ((renderPlan as any).rackItems || []).find((entry: RackItem) => entry.id === itemId);
-      if (!item) return;
-      const key = kind === 'ethernet' ? 'ethPortNotes' : 'fiberPortNotes';
-      const current = ((item as any)[key] as string[] | undefined) || [];
-      const next = [...current];
-      const normalized = note.trim();
-      while (next.length < index) next.push('');
-      next[index - 1] = normalized;
-      updateRackItem(planId, itemId, { [key]: next } as Partial<RackItem>);
-    },
+    (itemId: string, kind: RackPortKind, index: number, note: string) =>
+      computeUpdateRackPortField(itemId, kind, index, note, 'notes', { isReadOnly, planId, renderPlan, updateRackItem }),
     [isReadOnly, planId, renderPlan, updateRackItem]
   );
 
