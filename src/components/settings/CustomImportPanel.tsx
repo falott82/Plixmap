@@ -51,7 +51,9 @@ import {
   mergeLdapImportDraft,
   getLdapImportMissingFields,
   humanizeLdapImportField,
-  formatLdapActionError
+  formatLdapActionError,
+  computeDuplicateGroups,
+  rowsHaveDuplicates
 } from './CustomImportPanel.helpers';
 
 const CustomImportPanel = (
@@ -268,36 +270,8 @@ const CustomImportPanel = (
   const infoClient = useMemo(() => (infoClientId ? clients.find((c) => c.id === infoClientId) || null : null), [clients, infoClientId]);
   const infoSummary = useMemo(() => (infoClientId ? summaryById.get(infoClientId) || null : null), [infoClientId, summaryById]);
   const manualRowsCount = useMemo(() => usersRows.filter((r) => r.manual || String(r.externalId || '').toLowerCase().startsWith('manual:')).length, [usersRows]);
-  const duplicateGroups = useMemo(() => {
-    const byKey = new Map<string, ExternalUserRow[]>();
-    for (const row of usersRows || []) {
-      const email = String(row.email || '').trim().toLowerCase();
-      const first = String(row.firstName || '').trim().toLowerCase();
-      const last = String(row.lastName || '').trim().toLowerCase();
-      const key = email ? `email:${email}` : first || last ? `name:${first}|${last}` : '';
-      if (!key) continue;
-      const list = byKey.get(key) || [];
-      list.push(row);
-      byKey.set(key, list);
-    }
-    return Array.from(byKey.entries())
-      .filter(([, list]) => list.length > 1)
-      .map(([key, rows]) => ({ key, rows }))
-      .sort((a, b) => a.key.localeCompare(b.key));
-  }, [usersRows]);
-  const hasDuplicatesInRows = useCallback((rows: ExternalUserRow[]) => {
-    const seen = new Map<string, number>();
-    for (const row of rows || []) {
-      const email = String(row.email || '').trim().toLowerCase();
-      const first = String(row.firstName || '').trim().toLowerCase();
-      const last = String(row.lastName || '').trim().toLowerCase();
-      const key = email ? `email:${email}` : first || last ? `name:${first}|${last}` : '';
-      if (!key) continue;
-      seen.set(key, (seen.get(key) || 0) + 1);
-      if ((seen.get(key) || 0) > 1) return true;
-    }
-    return false;
-  }, []);
+  const duplicateGroups = useMemo(() => computeDuplicateGroups(usersRows), [usersRows]);
+  const hasDuplicatesInRows = useCallback((rows: ExternalUserRow[]) => rowsHaveDuplicates(rows), []);
   const duplicateUserKeys = useMemo(() => {
     const set = new Set<string>();
     for (const group of duplicateGroups) {

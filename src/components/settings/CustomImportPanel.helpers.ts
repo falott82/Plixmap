@@ -161,3 +161,39 @@ export const formatLdapActionError = (
   const normalized = String(detail || '').trim();
   return normalized ? `${fallback}: ${normalized}` : fallback;
 };
+
+// Dedup key for an external user row (email, else first|last name). Pure.
+const externalUserDedupKey = (row: any): string => {
+  const email = String(row.email || '').trim().toLowerCase();
+  const first = String(row.firstName || '').trim().toLowerCase();
+  const last = String(row.lastName || '').trim().toLowerCase();
+  return email ? `email:${email}` : first || last ? `name:${first}|${last}` : '';
+};
+
+// Group external user rows that collide on the dedup key (groups of >1). Pure.
+export const computeDuplicateGroups = (usersRows: any[]): Array<{ key: string; rows: any[] }> => {
+  const byKey = new Map<string, any[]>();
+  for (const row of usersRows || []) {
+    const key = externalUserDedupKey(row);
+    if (!key) continue;
+    const list = byKey.get(key) || [];
+    list.push(row);
+    byKey.set(key, list);
+  }
+  return Array.from(byKey.entries())
+    .filter(([, list]) => list.length > 1)
+    .map(([key, rows]) => ({ key, rows }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+};
+
+// Whether a row set contains any dedup-key collision. Pure.
+export const rowsHaveDuplicates = (rows: any[]): boolean => {
+  const seen = new Map<string, number>();
+  for (const row of rows || []) {
+    const key = externalUserDedupKey(row);
+    if (!key) continue;
+    seen.set(key, (seen.get(key) || 0) + 1);
+    if ((seen.get(key) || 0) > 1) return true;
+  }
+  return false;
+};
