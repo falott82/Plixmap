@@ -32,6 +32,7 @@ import {
   getRoomMeetingExtendMaxEndTs,
   computeRoomMeetingEditParticipantCandidates,
   computeRoomMeetingCheckInEntries,
+  buildRoomMeetingSearchMatches,
   type SiteMeetingParticipantCandidate
 } from './useRoomMeetingsTimeline.helpers';
 import type { RoomMeetingDuplicateModalState } from './RoomMeetingDuplicateModal';
@@ -368,42 +369,11 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
           toAt: now + 365 * 24 * 60 * 60 * 1000
         });
         if (cancelled) return;
-        const normalized = term.toLowerCase();
-        const normalizedDigits = normalized.replace(/\D+/g, '');
-        const matches = (response?.meetings || [])
-          .filter((booking) => {
-            const subject = String(booking.subject || '').toLowerCase();
-            const meetingNumber = Number((booking as any)?.meetingNumber || 0);
-            const meetingNumberText = meetingNumber > 0 ? String(meetingNumber) : '';
-            const matchById =
-              !!meetingNumberText && (meetingNumberText.includes(normalized) || (!!normalizedDigits && meetingNumberText.includes(normalizedDigits)));
-            return subject.includes(normalized) || matchById;
-          })
-          .sort((a, b) => Number(b.startAt || 0) - Number(a.startAt || 0))
-          .slice(0, 40)
-          .map((booking) => {
-            const participantNames = Array.from(
-              new Set(
-                [
-                  ...(Array.isArray(booking.participants)
-                    ? booking.participants.map((p: any) => String(p?.fullName || p?.externalId || '').trim()).filter(Boolean)
-                    : []),
-                  ...(Array.isArray((booking as any)?.externalGuestsDetails)
-                    ? (booking as any).externalGuestsDetails.map((g: any) => String(g?.name || '').trim()).filter(Boolean)
-                    : [])
-                ].filter(Boolean)
-              )
-            );
-            const participantsCount = participantNames.length;
-            const participantsLabel =
-              participantsCount === 0
-                ? t({ it: 'Nessun partecipante', en: 'No participants' })
-                : participantsCount <= 3
-                  ? participantNames.join(', ')
-                  : `${participantNames.slice(0, 3).join(', ')} +${participantsCount - 3}`;
-            const dayIso = String((booking as any)?.occurrenceDate || '').trim() || meetingIsoDayFromTs(Number(booking.startAt || 0));
-            return { booking, dayIso, participantsCount, participantsLabel };
-          });
+        const matches = buildRoomMeetingSearchMatches(
+          response?.meetings || [],
+          term,
+          t({ it: 'Nessun partecipante', en: 'No participants' })
+        );
         setRoomMeetingsTimelineSearchResults(matches);
         setRoomMeetingsTimelineSearchActiveIndex(matches.length ? 0 : -1);
       } catch {
