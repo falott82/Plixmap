@@ -2,7 +2,6 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo,
 import { Group, Image as KonvaImage, Layer, Line, Rect, Stage } from 'react-konva';
 import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
-import { Eye, Hand, MonitorPlay } from 'lucide-react';
 import { toast } from 'sonner';
 import { Corridor, FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
 import { isSecurityTypeId } from '../../store/security';
@@ -17,6 +16,7 @@ import { CorridorsLayer } from './canvas/CorridorsLayer';
 import { RoomsLayer } from './canvas/RoomsLayer';
 import { WallsLinksLayer } from './canvas/WallsLinksLayer';
 import { ObjectsLayer } from './canvas/ObjectsLayer';
+import { CanvasToolbar } from './canvas/CanvasToolbar';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
   hexToRgba,
@@ -2284,6 +2284,19 @@ const CanvasStageImpl = (
   }, [readOnly, roomDrawMode]);
   const allowTool = !!toolMode && (!readOnly || toolMode === 'measure');
 
+  const handleZoomIn = () => {
+    const nextZoom = clamp(viewportRef.current.zoom * 1.1, 0.2, 3);
+    viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
+    applyStageTransform(nextZoom, viewportRef.current.pan);
+    scheduleWheelCommit(nextZoom, viewportRef.current.pan);
+  };
+  const handleZoomOut = () => {
+    const nextZoom = clamp(viewportRef.current.zoom / 1.1, 0.2, 3);
+    viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
+    applyStageTransform(nextZoom, viewportRef.current.pan);
+    scheduleWheelCommit(nextZoom, viewportRef.current.pan);
+  };
+
   return (
     <div
       className={`relative h-full w-full rounded-2xl border border-slate-200 border-b-4 border-b-slate-200 bg-white shadow-card ${
@@ -2999,82 +3012,18 @@ const CanvasStageImpl = (
           }}
         />
       </Stage>
-      <div className="absolute right-4 top-4 flex flex-col gap-2 rounded-xl border border-slate-200/70 bg-white/95 p-2 shadow-card backdrop-blur">
-        <button
-          title={t({ it: 'Modalità pan', en: 'Pan tool' })}
-          aria-pressed={panToolActive}
-          onClick={() => onTogglePanTool?.()}
-          className={`flex h-8 w-8 items-center justify-center rounded-lg border text-ink hover:bg-slate-50 ${
-            panToolActive ? 'border-primary text-primary' : 'border-slate-200'
-          }`}
-        >
-          <Hand size={16} />
-        </button>
-	        <button
-	          title={t({ it: 'Aumenta zoom', en: 'Zoom in' })}
-	          onClick={() => {
-	            const nextZoom = clamp(viewportRef.current.zoom * 1.1, 0.2, 3);
-	            viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
-	            applyStageTransform(nextZoom, viewportRef.current.pan);
-	            scheduleWheelCommit(nextZoom, viewportRef.current.pan);
-	          }}
-	          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-lg font-semibold text-ink hover:bg-slate-50"
-	        >
-	          +
-	        </button>
-	        <button
-	          title={t({ it: 'Riduci zoom', en: 'Zoom out' })}
-	          onClick={() => {
-	            const nextZoom = clamp(viewportRef.current.zoom / 1.1, 0.2, 3);
-	            viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
-	            applyStageTransform(nextZoom, viewportRef.current.pan);
-	            scheduleWheelCommit(nextZoom, viewportRef.current.pan);
-	          }}
-	          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-lg font-semibold text-ink hover:bg-slate-50"
-	        >
-	          -
-	        </button>
-          {onToggleViewsMenu ? (
-            <button
-              title={t({ it: 'Viste salvate', en: 'Saved views' })}
-              onClick={() => onToggleViewsMenu?.()}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-ink hover:bg-slate-50"
-            >
-              <Eye size={16} />
-            </button>
-          ) : null}
-	        <button
-	          title={
-              hasDefaultView
-                ? t({ it: 'Vai alla vista predefinita', en: 'Go to default view' })
-                : t({ it: 'Imposta prima una vista di default', en: 'Set a default view first' })
-            }
-	          onClick={() => {
-              if (!hasDefaultView) return;
-              onGoDefaultView?.();
-            }}
-            disabled={!hasDefaultView}
-	          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-xs font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-	        >
-	          VD
-	        </button>
-	        {onTogglePresentation ? (
-	          <button
-	            title={
-	              presentationMode
-	                ? t({ it: 'Esci da presentazione (Esc)', en: 'Exit presentation (Esc)' })
-                : t({ it: 'Presentazione (P)', en: 'Presentation (P)' })
-            }
-            aria-pressed={presentationMode}
-            onClick={() => onTogglePresentation?.()}
-            className={`flex h-8 w-8 items-center justify-center rounded-lg border hover:bg-slate-50 ${
-              presentationMode ? 'border-primary text-primary' : 'border-slate-200 text-ink'
-            }`}
-	          >
-	            <MonitorPlay size={16} />
-	          </button>
-	        ) : null}
-      </div>
+      <CanvasToolbar
+        t={t}
+        panToolActive={panToolActive}
+        onTogglePanTool={onTogglePanTool}
+        handleZoomIn={handleZoomIn}
+        handleZoomOut={handleZoomOut}
+        onToggleViewsMenu={onToggleViewsMenu}
+        hasDefaultView={hasDefaultView}
+        onGoDefaultView={onGoDefaultView}
+        onTogglePresentation={onTogglePresentation}
+        presentationMode={presentationMode}
+      />
     </div>
   );
 };
