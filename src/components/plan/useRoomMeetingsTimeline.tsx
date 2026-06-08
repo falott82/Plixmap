@@ -29,7 +29,9 @@ import {
   meetingCheckInEntryKey,
   getMeetingCheckInStats,
   resolveRoomDuplicateSlot,
-  getRoomMeetingExtendMaxEndTs
+  getRoomMeetingExtendMaxEndTs,
+  computeRoomMeetingEditParticipantCandidates,
+  type SiteMeetingParticipantCandidate
 } from './useRoomMeetingsTimeline.helpers';
 import type { RoomMeetingDuplicateModalState } from './RoomMeetingDuplicateModal';
 import { nanoid } from 'nanoid';
@@ -43,13 +45,6 @@ export type MyMeetingsModalState = {
   returnToHub?: boolean;
 };
 
-type SiteMeetingParticipantCandidate = {
-  externalId: string;
-  fullName: string;
-  email: string | null;
-  department?: string | null;
-  phone?: string | null;
-};
 
 export type UseRoomMeetingsTimelineDeps = {
   t: ReturnType<typeof useT>;
@@ -177,31 +172,10 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
   const roomMeetingEditParticipantsNameInputRef = useRef<HTMLInputElement | null>(null);
   const roomMeetingsTimelineScrollRef = useRef<HTMLDivElement | null>(null);
 
-  const roomMeetingEditParticipantCandidates = useMemo(() => {
-    const byExternalId = new Map<
-      string,
-      {
-        externalId: string;
-        fullName: string;
-        email: string | null;
-        department?: string | null;
-        phone?: string | null;
-      }
-    >();
-    for (const row of siteMeetingParticipantCandidates) byExternalId.set(String(row.externalId), row);
-    for (const row of roomMeetingEditExternalCandidates) {
-      const id = String(row.externalId || '').trim();
-      if (!id) continue;
-        byExternalId.set(id, {
-          externalId: id,
-          fullName: String(row.fullName || '').trim() || id,
-          email: row.email ? String(row.email) : null,
-          department: row.department ? String(row.department) : null,
-          phone: row.phone ? String(row.phone) : null
-        });
-      }
-    return [...byExternalId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
-  }, [roomMeetingEditExternalCandidates, siteMeetingParticipantCandidates]);
+  const roomMeetingEditParticipantCandidates = useMemo(
+    () => computeRoomMeetingEditParticipantCandidates(siteMeetingParticipantCandidates, roomMeetingEditExternalCandidates),
+    [roomMeetingEditExternalCandidates, siteMeetingParticipantCandidates]
+  );
 
   useEffect(() => {
     let cancelled = false;

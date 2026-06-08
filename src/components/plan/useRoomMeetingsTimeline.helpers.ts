@@ -113,3 +113,33 @@ export const getRoomMeetingExtendMaxEndTs = (booking: MeetingBooking, bookings: 
   const nextStart = nextBoundary ? Number((nextBoundary as any).effectiveStartAt ?? nextBoundary.startAt ?? 0) : Number.POSITIVE_INFINITY;
   return Math.min(dayEnd, nextStart);
 };
+
+export type SiteMeetingParticipantCandidate = {
+  externalId: string;
+  fullName: string;
+  email: string | null;
+  department?: string | null;
+  phone?: string | null;
+};
+
+// Merge the site-wide participant candidates with the per-edit external roster,
+// de-duplicated by externalId and sorted by full name. Pure.
+export const computeRoomMeetingEditParticipantCandidates = (
+  siteMeetingParticipantCandidates: SiteMeetingParticipantCandidate[],
+  roomMeetingEditExternalCandidates: SiteMeetingParticipantCandidate[]
+): SiteMeetingParticipantCandidate[] => {
+  const byExternalId = new Map<string, SiteMeetingParticipantCandidate>();
+  for (const row of siteMeetingParticipantCandidates) byExternalId.set(String(row.externalId), row);
+  for (const row of roomMeetingEditExternalCandidates) {
+    const id = String(row.externalId || '').trim();
+    if (!id) continue;
+    byExternalId.set(id, {
+      externalId: id,
+      fullName: String(row.fullName || '').trim() || id,
+      email: row.email ? String(row.email) : null,
+      department: row.department ? String(row.department) : null,
+      phone: row.phone ? String(row.phone) : null
+    });
+  }
+  return [...byExternalId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
+};
