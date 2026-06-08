@@ -29,7 +29,8 @@ const createRuntime = (overrides = {}) => {
     verifySession: (_secret, token) => (token === 'valid-token' ? { userId: 'u1', tokenVersion: 3, sid: 'sid-1' } : null),
     clearSessionCookie: (res) => cleared.push(res),
     ensureCsrfCookie: (req, res) => ensured.push({ req, res }),
-    isStrictSuperAdmin: (user) => String(user?.username || '') === 'superadmin'
+    isStrictSuperAdmin: (user) => String(user?.username || '') === 'superadmin',
+    now: overrides.now
   });
   return { runtime, cleared, ensured };
 };
@@ -47,6 +48,43 @@ test('createAuthRuntime locks user after repeated failures and supports explicit
 
   runtime.clearUserLoginFailures('mario');
   assert.equal(runtime.getUserLock('mario'), 0);
+});
+
+test('createAuthRuntime blocks login attempts over the per-IP threshold', () => {
+  let clock = 1_000_000_000;
+  const { runtime } = createRuntime({ now: () => clock });
+
+  // First 20 attempts from the same IP are allowed within the 5-minute window.
+  for (let i = 0; i < 20; i += 1) {
+    assert.equal(runtime.allowLoginAttempt('203.0.113.7'), true, `attempt ${i + 1} should be allowed`);
+  }
+  // The 21st attempt is blocked.
+  assert.equal(runtime.allowLoginAttempt('203.0.113.7'), false);
+  // A different IP is unaffected by another IP's bucket.
+  assert.equal(runtime.allowLoginAttempt('203.0.113.8'), true);
+});
+
+test('createAuthRuntime evicts inactive rate-limit keys once their window expires', () => {
+  let clock = 1_000_000_000;
+  const { runtime } = createRuntime({ now: () => clock });
+
+  // Two IPs and one username become active.
+  runtime.allowLoginAttempt('198.51.100.1');
+  runtime.allowLoginAttempt('198.51.100.2');
+  for (let i = 0; i < 8; i += 1) runtime.registerUserLoginFailure('mallory'); // locks the account
+  assert.ok(runtime.getUserLock('mallory') > 0, 'account should be locked after 8 failures');
+  assert.deepEqual(runtime.getRateLimitStats(), { ipKeys: 2, userKeys: 1 });
+
+  // Advance past every window/lock (15 min) plus the 60s cleanup gate, then let a
+  // single fresh request from another key trigger the lazy cleanup pass.
+  clock += 15 * 60 * 1000 + 61_000;
+  runtime.allowLoginAttempt('198.51.100.9'); // triggers IP-bucket cleanup
+  runtime.registerUserLoginFailure('newcomer'); // triggers user-bucket cleanup
+
+  // The two stale IP keys are gone (only the fresh one remains) and the expired
+  // user lock is gone (only the fresh username remains): the maps stay bounded.
+  assert.deepEqual(runtime.getRateLimitStats(), { ipKeys: 1, userKeys: 1 });
+  assert.equal(runtime.getUserLock('mallory'), 0, 'expired lock should no longer apply');
 });
 
 test('createAuthRuntime requireAuth enforces first-run endpoint allowlist', () => {

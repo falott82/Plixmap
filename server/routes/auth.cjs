@@ -11,6 +11,16 @@ const createAuthRuntime = (deps) => {
     isStrictSuperAdmin
   } = deps;
 
+  // Clock indirection so the anti-bruteforce buckets can be exercised
+  // deterministically in tests; defaults to the wall clock in production.
+  const now = typeof deps.now === 'function' ? deps.now : () => Date.now();
+
+  // NOTE: these anti-bruteforce buckets live in this process's memory. The app
+  // is deployed single-worker (single `node server/index.cjs`, no cluster/PM2 —
+  // see docs/security/rate-limiting.md), so the counters are authoritative.
+  // Expired/inactive keys are evicted lazily (see the cleanup functions below)
+  // to keep the maps bounded; if the app is ever scaled to multiple workers the
+  // limits must move to a shared store (DB row with TTL or Redis).
   const loginAttemptBucket = new Map(); // ip -> { count, resetAt }
   let lastLoginAttemptCleanup = 0;
   const cleanupLoginAttemptBucket = (now) => {
@@ -22,11 +32,11 @@ const createAuthRuntime = (deps) => {
   };
   const allowLoginAttempt = (ip) => {
     const key = String(ip || '').trim() || 'unknown';
-    const now = Date.now();
-    cleanupLoginAttemptBucket(now);
+    const ts = now();
+    cleanupLoginAttemptBucket(ts);
     const row = loginAttemptBucket.get(key);
-    if (!row || now > row.resetAt) {
-      loginAttemptBucket.set(key, { count: 1, resetAt: now + 5 * 60 * 1000 });
+    if (!row || ts > row.resetAt) {
+      loginAttemptBucket.set(key, { count: 1, resetAt: ts + 5 * 60 * 1000 });
       return true;
     }
     row.count += 1;
@@ -49,25 +59,25 @@ const createAuthRuntime = (deps) => {
   const getUserLock = (username) => {
     const key = normalizeLoginKey(username);
     if (!key) return 0;
-    const now = Date.now();
-    cleanupUserLocks(now);
+    const ts = now();
+    cleanupUserLocks(ts);
     const entry = loginUserBucket.get(key);
     if (!entry) return 0;
-    return now < entry.lockedUntil ? entry.lockedUntil : 0;
+    return ts < entry.lockedUntil ? entry.lockedUntil : 0;
   };
   const registerUserLoginFailure = (username) => {
     const key = normalizeLoginKey(username);
     if (!key) return { lockedNow: false };
-    const now = Date.now();
-    cleanupUserLocks(now);
+    const ts = now();
+    cleanupUserLocks(ts);
     let entry = loginUserBucket.get(key);
-    if (!entry || now > entry.resetAt) {
-      entry = { count: 0, resetAt: now + LOGIN_USER_WINDOW_MS, lockedUntil: 0 };
+    if (!entry || ts > entry.resetAt) {
+      entry = { count: 0, resetAt: ts + LOGIN_USER_WINDOW_MS, lockedUntil: 0 };
       loginUserBucket.set(key, entry);
     }
     entry.count += 1;
     if (entry.count >= LOGIN_USER_MAX_ATTEMPTS) {
-      entry.lockedUntil = now + LOGIN_USER_LOCK_MS;
+      entry.lockedUntil = ts + LOGIN_USER_LOCK_MS;
       return { lockedNow: true, lockedUntil: entry.lockedUntil };
     }
     return { lockedNow: false };
@@ -147,12 +157,20 @@ const createAuthRuntime = (deps) => {
     };
   };
 
+  // Lightweight introspection of the in-memory anti-bruteforce maps, used by
+  // tests to assert that inactive keys are evicted and by ops for sanity checks.
+  const getRateLimitStats = () => ({
+    ipKeys: loginAttemptBucket.size,
+    userKeys: loginUserBucket.size
+  });
+
   return {
     allowLoginAttempt,
     normalizeLoginKey,
     getUserLock,
     registerUserLoginFailure,
     clearUserLoginFailures,
+    getRateLimitStats,
     requireAuth,
     getWsAuthContext
   };
