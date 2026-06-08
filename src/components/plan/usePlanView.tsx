@@ -65,6 +65,8 @@ import {
 import {
   computeInferDefaultLayerIds,
   computeLinksModalRows,
+  computeClientBusinessPartnerNames,
+  computeMeetingLocationLabels,
   computeSiteMeetingParticipantCandidates,
   runApplyHistorySnapshot,
   runUnlockRequestEffect,
@@ -936,16 +938,7 @@ export const usePlanView = (planId: string) => {
       cancelled = true;
     };
   }, [plan?.revisionsLoaded, planId, setFloorPlanRevisions]);
-  const clientBusinessPartnerNames = useMemo(
-    () =>
-      Array.isArray((client as any)?.businessPartners)
-        ? ((client as any).businessPartners as Array<{ name?: string }>)
-            .map((bp) => String(bp?.name || '').trim())
-            .filter(Boolean)
-            .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-        : [],
-    [client]
-  );
+  const clientBusinessPartnerNames = useMemo(() => computeClientBusinessPartnerNames(client), [client]);
   const siteMeetingParticipantCandidates = useMemo(
     () => computeSiteMeetingParticipantCandidates(siteFloorPlans),
     [siteFloorPlans]
@@ -1168,24 +1161,7 @@ export const usePlanView = (planId: string) => {
     [isMeetingAdminLike, user]
   );
 
-  const meetingLocationLabels = useMemo(() => {
-    const clientNameById = new Map<string, string>();
-    const siteNameById = new Map<string, string>();
-    const floorPlanNameById = new Map<string, string>();
-    for (const clientEntry of allClients || []) {
-      const clientLabel = String(clientEntry.shortName || clientEntry.name || '').trim();
-      if (clientLabel) clientNameById.set(String(clientEntry.id), clientLabel);
-      for (const siteEntry of clientEntry.sites || []) {
-        const siteLabel = String(siteEntry.name || '').trim();
-        if (siteLabel) siteNameById.set(String(siteEntry.id), siteLabel);
-        for (const floorEntry of siteEntry.floorPlans || []) {
-          const floorLabel = String(floorEntry.name || '').trim();
-          if (floorLabel) floorPlanNameById.set(String(floorEntry.id), floorLabel);
-        }
-      }
-    }
-    return { clientNameById, siteNameById, floorPlanNameById };
-  }, [allClients]);
+  const meetingLocationLabels = useMemo(() => computeMeetingLocationLabels(allClients), [allClients]);
 
   const myMeetingsFiltered = useMemo(
     () => computeMyMeetingsFiltered({ myMeetingsModal, myMeetingsSearch, meetingLocationLabels }),

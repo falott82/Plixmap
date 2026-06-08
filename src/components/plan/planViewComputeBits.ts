@@ -47,6 +47,37 @@ export const computeInferDefaultLayerIds = (
       return layerIdSet ? ids.filter((id) => layerIdSet.has(id)) : ids;
 };
 
+// Pure derivation of the client's business-partner names (trimmed, deduped of
+// blanks, sorted case-insensitively).
+export const computeClientBusinessPartnerNames = (client: any): string[] =>
+  Array.isArray((client as any)?.businessPartners)
+    ? ((client as any).businessPartners as Array<{ name?: string }>)
+        .map((bp) => String(bp?.name || '').trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    : [];
+
+// Pure derivation of id→label lookup maps for clients/sites/floor plans across
+// all clients (used to render meeting-location labels).
+export const computeMeetingLocationLabels = (allClients: any[] | undefined) => {
+  const clientNameById = new Map<string, string>();
+  const siteNameById = new Map<string, string>();
+  const floorPlanNameById = new Map<string, string>();
+  for (const clientEntry of allClients || []) {
+    const clientLabel = String(clientEntry.shortName || clientEntry.name || '').trim();
+    if (clientLabel) clientNameById.set(String(clientEntry.id), clientLabel);
+    for (const siteEntry of clientEntry.sites || []) {
+      const siteLabel = String(siteEntry.name || '').trim();
+      if (siteLabel) siteNameById.set(String(siteEntry.id), siteLabel);
+      for (const floorEntry of siteEntry.floorPlans || []) {
+        const floorLabel = String(floorEntry.name || '').trim();
+        if (floorLabel) floorPlanNameById.set(String(floorEntry.id), floorLabel);
+      }
+    }
+  }
+  return { clientNameById, siteNameById, floorPlanNameById };
+};
+
 // Pure derivation of the distinct real_user participant candidates across a
 // site's floor plans (deduped by externalId, sorted by full name).
 export const computeSiteMeetingParticipantCandidates = (siteFloorPlans: FloorPlan[]) => {
