@@ -31,7 +31,6 @@ import {
   parseIsoDay,
   toIsoDay,
   getDayOffsetFromToday,
-  buildCheckInKeyForParticipant,
   normalizeActionProgress,
   computeActionInsights,
   computeNormalizedManagerActions,
@@ -39,6 +38,8 @@ import {
   computeFindManagerActionMissingTitleIndex,
   computeInvitedParticipants,
   computeTimelineTaskEvents,
+  computeSelectedHistoryParticipants,
+  computeReportChainRows,
   NEW_NOTE_ID,
   toCompanyKey,
   TRANSLATE_LANGUAGE_OPTIONS
@@ -187,38 +188,10 @@ const MeetingNotesModal = ({
         : null,
     [followUpChain, timelineScheduleContextMenu]
   );
-  const selectedHistoryParticipants = useMemo(() => {
-    if (!selectedHistoryEntry) return [];
-    const meetingId = String(selectedHistoryEntry.meeting.id || '');
-    const checkInMap = followUpCheckInStatusByMeetingId[meetingId] || {};
-    const checkInTsMap = followUpCheckInTimestampsByMeetingId[meetingId] || {};
-    const items: Array<{ key: string; label: string; checkedIn: boolean; checkInAt: number | null }> = [];
-    for (const participant of Array.isArray(selectedHistoryEntry.meeting.participants) ? selectedHistoryEntry.meeting.participants : []) {
-      const isManual = String((participant as any)?.kind || 'real_user') === 'manual';
-      const label = String((participant as any)?.fullName || (participant as any)?.externalId || '').trim();
-      if (!label) continue;
-      const checkInKey = buildCheckInKeyForParticipant(participant);
-      const checkedIn = !isManual && !!checkInMap[checkInKey];
-      const checkInAt = checkedIn ? Number(checkInTsMap[checkInKey] || 0) || null : null;
-      items.push({
-        key: `participant-${checkInKey}`,
-        label,
-        checkedIn,
-        checkInAt
-      });
-    }
-    for (const guest of Array.isArray((selectedHistoryEntry.meeting as any)?.externalGuestsDetails) ? (selectedHistoryEntry.meeting as any).externalGuestsDetails : []) {
-      const label = String(guest?.name || '').trim();
-      if (!label) continue;
-      items.push({
-        key: `guest-${label.toLowerCase()}-${String(guest?.email || '').trim().toLowerCase()}`,
-        label,
-        checkedIn: false,
-        checkInAt: null
-      });
-    }
-    return items;
-  }, [followUpCheckInStatusByMeetingId, followUpCheckInTimestampsByMeetingId, selectedHistoryEntry]);
+  const selectedHistoryParticipants = useMemo(
+    () => computeSelectedHistoryParticipants(selectedHistoryEntry, followUpCheckInStatusByMeetingId, followUpCheckInTimestampsByMeetingId),
+    [followUpCheckInStatusByMeetingId, followUpCheckInTimestampsByMeetingId, selectedHistoryEntry]
+  );
 
   const businessPartnerByCompany = useMemo(() => {
     const map = new Map<string, { name: string; logoUrl?: string }>();
@@ -1284,25 +1257,7 @@ const MeetingNotesModal = ({
     };
   }, [invitedParticipants]);
 
-  const reportChainRows = useMemo(() => {
-    const now = Date.now();
-    return [...followUpChain]
-      .sort((a, b) => Number(a.meeting.startAt || 0) - Number(b.meeting.startAt || 0))
-      .map((entry, index) => {
-        const startAt = Number(entry.meeting.startAt || 0);
-        const endAt = Number(entry.meeting.endAt || 0);
-        const phase = getMeetingSchedulePhase(startAt, endAt, now);
-        return {
-          id: String(entry.meeting.id || `${index}`),
-          index,
-          entry,
-          phase,
-          phaseLabel: getMeetingSchedulePhaseLabel(phase, t, {
-            past: { it: 'Passato', en: 'Past' }
-          })
-        };
-      });
-  }, [followUpChain, t]);
+  const reportChainRows = useMemo(() => computeReportChainRows(followUpChain, t), [followUpChain, t]);
 
   const exportNotesPdf = async () =>
     exportMeetingNotesPdf({ meeting, managerFields, selectedNotesForPdf, invitedParticipants, followUpChain, reportActions, reportNextMeeting, actionInsights, selectedClient, selectedSite, selectedFloorPlan, pdfFileName, push, t, setPdfExporting, setPdfReviewModalOpen, setPdfSelectionModalOpen, setError });

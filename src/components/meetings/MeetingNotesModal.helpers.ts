@@ -1,6 +1,54 @@
 import jsPDF from 'jspdf';
 import type { useT } from '../../i18n/useT';
 import type { MeetingManagerAction } from '../../api/meetings';
+import { getMeetingSchedulePhase, getMeetingSchedulePhaseLabel } from '../../utils/meetingTime';
+
+// Build the selected history meeting's participants with check-in status. Pure.
+export const computeSelectedHistoryParticipants = (
+  selectedHistoryEntry: any,
+  followUpCheckInStatusByMeetingId: Record<string, any>,
+  followUpCheckInTimestampsByMeetingId: Record<string, any>
+) => {
+  if (!selectedHistoryEntry) return [];
+  const meetingId = String(selectedHistoryEntry.meeting.id || '');
+  const checkInMap = followUpCheckInStatusByMeetingId[meetingId] || {};
+  const checkInTsMap = followUpCheckInTimestampsByMeetingId[meetingId] || {};
+  const items: Array<{ key: string; label: string; checkedIn: boolean; checkInAt: number | null }> = [];
+  for (const participant of Array.isArray(selectedHistoryEntry.meeting.participants) ? selectedHistoryEntry.meeting.participants : []) {
+    const isManual = String((participant as any)?.kind || 'real_user') === 'manual';
+    const label = String((participant as any)?.fullName || (participant as any)?.externalId || '').trim();
+    if (!label) continue;
+    const checkInKey = buildCheckInKeyForParticipant(participant);
+    const checkedIn = !isManual && !!checkInMap[checkInKey];
+    const checkInAt = checkedIn ? Number(checkInTsMap[checkInKey] || 0) || null : null;
+    items.push({ key: `participant-${checkInKey}`, label, checkedIn, checkInAt });
+  }
+  for (const guest of Array.isArray((selectedHistoryEntry.meeting as any)?.externalGuestsDetails) ? (selectedHistoryEntry.meeting as any).externalGuestsDetails : []) {
+    const label = String(guest?.name || '').trim();
+    if (!label) continue;
+    items.push({ key: `guest-${label.toLowerCase()}-${String(guest?.email || '').trim().toLowerCase()}`, label, checkedIn: false, checkInAt: null });
+  }
+  return items;
+};
+
+// Build the follow-up chain rows for the PDF report (sorted, phase-labeled). Pure.
+export const computeReportChainRows = (followUpChain: any[], t: ReturnType<typeof useT>) => {
+  const now = Date.now();
+  return [...followUpChain]
+    .sort((a, b) => Number(a.meeting.startAt || 0) - Number(b.meeting.startAt || 0))
+    .map((entry, index) => {
+      const startAt = Number(entry.meeting.startAt || 0);
+      const endAt = Number(entry.meeting.endAt || 0);
+      const phase = getMeetingSchedulePhase(startAt, endAt, now);
+      return {
+        id: String(entry.meeting.id || `${index}`),
+        index,
+        entry,
+        phase,
+        phaseLabel: getMeetingSchedulePhaseLabel(phase, t, { past: { it: 'Passato', en: 'Past' } })
+      };
+    });
+};
 
 // Normalize raw manager actions for display (status/progress derivation). Pure.
 export const computeNormalizedManagerActions = (actions: any[]) =>
