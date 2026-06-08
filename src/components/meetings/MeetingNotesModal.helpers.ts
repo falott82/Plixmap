@@ -1,4 +1,46 @@
 import jsPDF from 'jspdf';
+import type { useT } from '../../i18n/useT';
+
+// Derive task statistics/insights from the normalized manager actions. Pure.
+export const computeActionInsights = (normalizedManagerActions: any[], t: ReturnType<typeof useT>) => {
+  const rows = normalizedManagerActions.filter((row) => row.action || row.assignedTo || row.openingDate || row.completionDate || Number(row.progressPct || 0) > 0);
+  const total = rows.length;
+  const done = rows.filter((row) => row.status === 'done' || Number(row.progressPct || 0) >= 100).length;
+  const notNeeded = rows.filter((row) => row.status === 'not_needed').length;
+  const inProgress = Math.max(0, total - done - notNeeded);
+  const todayIso = toIsoDay(Date.now());
+  const overdue = rows.filter((row) => row.completionDate && row.completionDate < todayIso && row.status !== 'done' && row.status !== 'not_needed').length;
+  const closedDurations = rows
+    .filter((row) => row.status === 'done')
+    .map((row) => {
+      const fromTs = parseIsoDay(row.openingDate || row.completionDate);
+      const toTs = parseIsoDay(row.completionDate || row.openingDate);
+      if (!Number.isFinite(Number(fromTs)) || !Number.isFinite(Number(toTs))) return null;
+      const delta = Math.max(0, Number(toTs) - Number(fromTs));
+      return Math.max(1, Math.round(delta / DAY_MS) + 1);
+    })
+    .filter((value): value is number => Number.isFinite(Number(value)));
+  const avgResolutionDays = closedDurations.length
+    ? Number((closedDurations.reduce((sum, value) => sum + value, 0) / closedDurations.length).toFixed(1))
+    : 0;
+  const completionRate = total ? Math.round((done / total) * 100) : 0;
+  const taskProgressBars = rows.map((row, index) => {
+    const progressPct = normalizeActionProgress(Number(row.progressPct || 0));
+    const tone = row.status === 'not_needed' ? 'bg-slate-400' : progressPct >= 100 ? 'bg-emerald-500' : 'bg-amber-500';
+    const openingLabel = formatIsoDayLabel(String(row.openingDate || ''));
+    const completionLabel = formatIsoDayLabel(String(row.completionDate || ''));
+    const completionTs = parseIsoDay(String(row.completionDate || ''));
+    const daysLeft = Number.isFinite(Number(completionTs)) ? Math.ceil((Number(completionTs) - Date.now()) / DAY_MS) : null;
+    const daysLeftLabel =
+      daysLeft === null
+        ? t({ it: 'n/d', en: 'n/a' })
+        : daysLeft >= 0
+          ? t({ it: `${daysLeft} giorni`, en: `${daysLeft} days left` })
+          : t({ it: `${Math.abs(daysLeft)} giorni in ritardo`, en: `${Math.abs(daysLeft)} days overdue` });
+    return { id: `task-progress-${index}`, row, index, progressPct, tone, openingLabel, completionLabel, daysLeftLabel };
+  });
+  return { rows, total, done, inProgress, notNeeded, overdue, avgResolutionDays, completionRate, taskProgressBars };
+};
 
 // Pure helpers extracted from MeetingNotesModal.tsx: HTML stripping, date/ISO-day
 // formatting, check-in key building, action-progress normalization, and the PDF
