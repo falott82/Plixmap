@@ -23,6 +23,27 @@ export const stripHtml = (value: string) =>
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
+export const TRANSLATE_LANGUAGE_OPTIONS: Array<{
+  code: string;
+  flag: string;
+  label: string;
+  native: string;
+  aiLabel: string;
+}> = [
+  { code: 'en', flag: '🇬🇧', label: 'English', native: 'English', aiLabel: 'English' },
+  { code: 'zh', flag: '🇨🇳', label: 'Chinese', native: '中文', aiLabel: 'Chinese (Mandarin)' },
+  { code: 'hi', flag: '🇮🇳', label: 'Hindi', native: 'हिन्दी', aiLabel: 'Hindi' },
+  { code: 'es', flag: '🇪🇸', label: 'Spanish', native: 'Español', aiLabel: 'Spanish' },
+  { code: 'fr', flag: '🇫🇷', label: 'French', native: 'Français', aiLabel: 'French' },
+  { code: 'ar', flag: '🇸🇦', label: 'Arabic', native: 'العربية', aiLabel: 'Arabic' },
+  { code: 'pt', flag: '🇵🇹', label: 'Portuguese', native: 'Português', aiLabel: 'Portuguese' },
+  { code: 'ru', flag: '🇷🇺', label: 'Russian', native: 'Русский', aiLabel: 'Russian' },
+  { code: 'de', flag: '🇩🇪', label: 'German', native: 'Deutsch', aiLabel: 'German' },
+  { code: 'ko', flag: '🇰🇷', label: 'Korean', native: '한국어', aiLabel: 'Korean' },
+  { code: 'sv', flag: '🇸🇪', label: 'Swedish', native: 'Svenska', aiLabel: 'Swedish' },
+  { code: 'it', flag: '🇮🇹', label: 'Italian', native: 'Italiano', aiLabel: 'Italian' }
+];
+
 export const formatStamp = (ts: number) => {
   if (!Number.isFinite(Number(ts || 0)) || Number(ts) <= 0) return '—';
   return new Date(Number(ts)).toLocaleString();
