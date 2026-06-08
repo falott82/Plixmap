@@ -891,3 +891,57 @@ export const DoorHistoryModal = (props: any) => {
       </Transition>
   );
 };
+
+export const PendingRequestsPromptModal = (props: any) => {
+  const { pendingPromptOpen, setPendingPromptOpen, setRequestsOpen, setRequestsTab, canManageRequests, requestsLoading, reloadRequests, t } = props;
+  return (
+      <Transition show={pendingPromptOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setPendingPromptOpen(false)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-8">
+              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <Dialog.Panel className="w-full max-w-md modal-panel">
+                  <div className="modal-header items-center">
+                    <Dialog.Title className="modal-title">{t({ it: 'Richieste in attesa', en: 'Pending requests' })}</Dialog.Title>
+                    <button onClick={() => setPendingPromptOpen(false)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="modal-description">
+                    {t({
+                      it: 'Sono presenti richieste oggetto in pending. Vuoi aprire la gestione?',
+                      en: 'There are pending object requests. Do you want to open the management view?'
+                    })}
+                  </div>
+                  <div className="modal-footer">
+                    <button
+                      onClick={() => setPendingPromptOpen(false)}
+                      className="btn-secondary"
+                      title={t({ it: 'Chiudi la finestra di avviso', en: 'Close the notice dialog' })}
+                    >
+                      {t({ it: 'Chiudi', en: 'Close' })}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setPendingPromptOpen(false);
+                        setRequestsOpen(true);
+                        setRequestsTab(canManageRequests ? 'manage' : 'mine');
+                        if (!requestsLoading) reloadRequests();
+                      }}
+                      className="btn-primary"
+                      title={t({ it: 'Apri la gestione delle richieste', en: 'Open requests management' })}
+                    >
+                      {t({ it: 'Apri gestione', en: 'Open management' })}
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+  );
+};
