@@ -609,3 +609,37 @@ export const sortFilterMobileChatClientOptions = (
     return a.name.localeCompare(b.name);
   });
 };
+
+// Two-letter initials for a chat display name. Pure.
+export const computeChatInitials = (name: string): string => {
+  const parts = String(name || '')
+    .split(/\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!parts.length) return 'CH';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+};
+
+// Resolve the display name for the selected chat (option name, else DM/opaque
+// fallbacks, else decoded id). Pure; localized labels are passed in.
+export const resolveSelectedChatClientName = (
+  selectedChatClientName: string | undefined | null,
+  chatClientId: string,
+  dmNameByUserId: Map<string, string>,
+  userId: string | number | undefined,
+  labels: { selectChat: string; directMessage: string }
+): string => {
+  const fromOption = String(selectedChatClientName || '').trim();
+  if (fromOption) return fromOption;
+  const cid = normalizeChatClientId(chatClientId || '');
+  if (!cid) return labels.selectChat;
+  if (cid.startsWith('dm:')) {
+    const otherUserId = getDmOtherUserId(cid, userId);
+    const knownDmName = otherUserId ? dmNameByUserId.get(otherUserId) : '';
+    if (knownDmName) return knownDmName;
+    return labels.directMessage;
+  }
+  if (isOpaqueChatIdentity(cid)) return labels.directMessage;
+  return safeDecodeUriPart(cid);
+};

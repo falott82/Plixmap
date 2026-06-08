@@ -20,7 +20,7 @@ import { useLang, useT } from '../../i18n/useT';
 import { getMeetingTemporalState, getMeetingTimePhaseBadgeLabel } from '../../utils/meetingTime';
 
 import {
-  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, buildMobileChatClientOptions, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, filterRecentMobileChatMessages, sortFilterMobileChatClientOptions, getDmOtherUserId, isOpaqueChatIdentity, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, resolveClientLogoUrl, safeDecodeUriPart, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
+  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, buildMobileChatClientOptions, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, computeChatInitials, filterRecentMobileChatMessages, resolveSelectedChatClientName, sortFilterMobileChatClientOptions, isOpaqueChatIdentity, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, resolveClientLogoUrl, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
 } from './MobileAppPage.helpers';
 import { MobileAppPageBody } from './MobileAppPageBody';
 const MobileAppPage = () => {
@@ -698,35 +698,21 @@ const MobileAppPage = () => {
     return map;
   }, [chatDmContacts]);
 
-  const selectedChatClientName = useMemo(() => {
-    const fromOption = String(selectedChatClient?.name || '').trim();
-    if (fromOption) return fromOption;
-    const cid = normalizeChatClientId(chatClientId || '');
-    if (!cid) return tr({ it: 'Seleziona una chat', en: 'Select a chat' });
-    if (cid.startsWith('dm:')) {
-      const otherUserId = getDmOtherUserId(cid, user?.id);
-      const knownDmName = otherUserId ? dmNameByUserId.get(otherUserId) : '';
-      if (knownDmName) return knownDmName;
-      return tr({ it: 'Messaggio diretto', en: 'Direct message' });
-    }
-    if (isOpaqueChatIdentity(cid)) return tr({ it: 'Messaggio diretto', en: 'Direct message' });
-    return safeDecodeUriPart(cid);
-  }, [selectedChatClient?.name, chatClientId, dmNameByUserId, tr, user?.id]);
+  const selectedChatClientName = useMemo(
+    () =>
+      resolveSelectedChatClientName(selectedChatClient?.name, chatClientId, dmNameByUserId, user?.id, {
+        selectChat: tr({ it: 'Seleziona una chat', en: 'Select a chat' }),
+        directMessage: tr({ it: 'Messaggio diretto', en: 'Direct message' })
+      }),
+    [selectedChatClient?.name, chatClientId, dmNameByUserId, tr, user?.id]
+  );
 
   const selectedChatClientLogoUrl =
     selectedChatClient && !chatClientLogoFailedById[String(selectedChatClient.id || '')] ? String((selectedChatClient as any).logoUrl || '') : '';
   const selectedChatClientAvatarUrl =
     selectedChatClient && !chatClientLogoFailedById[String(selectedChatClient.id || '')] ? String((selectedChatClient as any).avatarUrl || '') : '';
 
-  const selectedChatClientInitials = useMemo(() => {
-    const parts = selectedChatClientName
-      .split(/\s+/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (!parts.length) return 'CH';
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
-  }, [selectedChatClientName]);
+  const selectedChatClientInitials = useMemo(() => computeChatInitials(selectedChatClientName), [selectedChatClientName]);
 
   const chatMessagesById = useMemo(() => {
     const map = new Map<string, ChatMessage>();
