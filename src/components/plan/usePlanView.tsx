@@ -118,7 +118,7 @@ import type { CrossPlanSearchResult } from './CrossPlanSearchModal';
 import { useRoomMeetingsTimeline, type MyMeetingsModalState } from './useRoomMeetingsTimeline';
 import { usePlanSafetyCard } from './usePlanSafetyCard';
 import { usePlanCapacity } from './usePlanCapacity';
-import { usePlanContextDerived } from './usePlanContextDerived';
+import { usePlanContextDerived, type PlanContextMenuState } from './usePlanContextDerived';
 import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
 import { usePlanDoorModalHandlers } from './usePlanDoorModalHandlers';
 import { usePlanCorridorNameHandlers } from './usePlanCorridorNameHandlers';
@@ -570,19 +570,7 @@ export const usePlanView = (planId: string) => {
   const [roomCatalogOpen, setRoomCatalogOpen] = useState(false);
   const [wallCatalogOpen, setWallCatalogOpen] = useState(false);
   const [deskCatalogOpen, setDeskCatalogOpen] = useState(false);
-  const [contextMenu, setContextMenu] = useState<
-    | { kind: 'object'; id: string; x: number; y: number; wallSegmentLengthPx?: number }
-    | { kind: 'link'; id: string; x: number; y: number }
-    | { kind: 'room'; id: string; x: number; y: number; worldX: number; worldY: number }
-    | { kind: 'corridor'; id: string; x: number; y: number; worldX: number; worldY: number }
-    | { kind: 'corridor_door'; corridorId: string; doorId: string; x: number; y: number }
-    | { kind: 'room_door'; doorId: string; x: number; y: number }
-    | { kind: 'corridor_connection'; corridorId: string; connectionId: string; x: number; y: number; worldX: number; worldY: number }
-    | { kind: 'safety_card'; x: number; y: number; worldX: number; worldY: number }
-    | { kind: 'scale'; x: number; y: number }
-    | { kind: 'map'; x: number; y: number; worldX: number; worldY: number }
-    | null
-  >(null);
+  const [contextMenu, setContextMenu] = useState<PlanContextMenuState>(null);
   const [layersContextMenu, setLayersContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [alignMenuOpen, setAlignMenuOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
