@@ -15,6 +15,7 @@ const { createPlanRevisionStore } = require('./planRevisionStore.cjs');
 const { createAppSettingsStore } = require('./appSettingsStore.cjs');
 const { rateLimit, rateByUser } = require('./rateLimit.cjs');
 const { normalizeSemver, compareSemver } = require('./semver.cjs');
+const { serverLog } = require('./serverLog.cjs');
 const {
   parseCookies,
   verifyPassword,
@@ -139,23 +140,6 @@ const buildKioskPublicUploadUrl = (req, rawUrl) => buildPublicUploadUrl(req, raw
 const UPDATE_MANIFEST_URL = serverConfig.updateManifestUrl;
 const UPDATE_MANIFEST_FALLBACK_URL = serverConfig.updateManifestFallbackUrl;
 
-const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
-const SERVER_LOG_LEVEL = serverConfig.logLevel;
-
-const shouldLogLevel = (level) => LOG_LEVELS[level] >= LOG_LEVELS[SERVER_LOG_LEVEL];
-const serverLog = (level, event, context = {}) => {
-  if (!shouldLogLevel(level)) return;
-  const payload = {
-    at: new Date().toISOString(),
-    level,
-    event,
-    ...context
-  };
-  const json = JSON.stringify(payload);
-  if (level === 'error') console.error(json);
-  else if (level === 'warn') console.warn(json);
-  else console.log(json);
-};
 
 
 const CSP_HEADER_VALUE = buildCspHeader();
