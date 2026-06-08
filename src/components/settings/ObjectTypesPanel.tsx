@@ -50,7 +50,7 @@ import ConfirmDialog from '../ui/ConfirmDialog';
 import { isSecurityTypeId } from '../../store/security';
 
 import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw } from './ObjectTypesPanel.helpers';
-import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal } from './ObjectTypesPanelModals';
+import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal, DoorHistoryModal } from './ObjectTypesPanelModals';
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
   const lang = useLang();
@@ -1649,56 +1649,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
       />
       <DoorMapPreviewModal {...{ doorMapPreviewData, doorMapPreviewRow, setDoorMapPreviewRow, t }} />
 
-      <Transition show={!!doorHistoryRow} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={() => setDoorHistoryRow(null)}>
-          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
-            <div className="fixed inset-0 bg-black/35 backdrop-blur-sm" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-8">
-              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-3xl modal-panel">
-                  <div className="modal-header items-center">
-                    <Dialog.Title className="modal-title">
-                      {t({ it: 'Storico verifiche porta emergenza', en: 'Emergency door verification history' })}
-                    </Dialog.Title>
-                    <button onClick={() => setDoorHistoryRow(null)} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
-                      <X size={18} />
-                    </button>
-                  </div>
-                  {doorHistoryRow ? (
-                    <>
-                      <div className="mt-2 text-xs text-slate-600">
-                        {doorHistoryRow.clientName} · {doorHistoryRow.siteName} · {doorHistoryRow.planName} · {t({ it: 'Porta', en: 'Door' })}:{' '}
-                        <span className="font-mono">{doorHistoryRow.doorId}</span>
-                      </div>
-                      <div className="mt-4 max-h-[60vh] overflow-auto rounded-2xl border border-slate-200 bg-white">
-                        {(doorHistoryRow.verificationHistory || []).length ? (
-                          <div className="divide-y divide-slate-100">
-                            {doorHistoryRow.verificationHistory.map((entry) => (
-                              <div key={entry.id} className="px-4 py-3">
-                                <div className="text-sm font-semibold text-ink">{entry.company || '—'}</div>
-                                <div className="mt-1 text-xs text-slate-600">
-                                  {t({ it: 'Data verifica', en: 'Check date' })}: {entry.date || '—'}
-                                </div>
-                                {entry.notes ? <div className="mt-1 text-xs text-slate-600">{entry.notes}</div> : null}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="px-4 py-6 text-sm text-slate-500">
-                            {t({ it: 'Nessuna verifica registrata per questa porta.', en: 'No checks registered for this door.' })}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  ) : null}
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
+      <DoorHistoryModal {...{ doorHistoryRow, setDoorHistoryRow, t }} />
 
       <WifiModelModal {...{ lang, saveWifiModel, setWifiDraft, setWifiModal, t, wifiDraft, wifiDraftValid, wifiModal }} />
 
