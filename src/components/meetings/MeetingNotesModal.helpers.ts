@@ -2,6 +2,53 @@ import jsPDF from 'jspdf';
 import type { useT } from '../../i18n/useT';
 import type { MeetingManagerAction } from '../../api/meetings';
 
+// Normalize raw manager actions for display (status/progress derivation). Pure.
+export const computeNormalizedManagerActions = (actions: any[]) =>
+  (Array.isArray(actions) ? actions : []).map((row) => ({
+    action: String(row.action || ''),
+    assignedTo: String(row.assignedTo || ''),
+    openingDate: String(row.openingDate || '').trim(),
+    completionDate: String(row.completionDate || ''),
+    progressPct: normalizeActionProgress(Number(row.progressPct ?? (String(row.status || '') === 'done' ? 100 : 0))),
+    status:
+      String(row.status || '') === 'not_needed'
+        ? 'not_needed'
+        : normalizeActionProgress(Number(row.progressPct ?? (String(row.status || '') === 'done' ? 100 : 0))) >= 100
+          ? 'done'
+          : 'open'
+  }));
+
+// Sanitize/trim manager actions for persistence, dropping empty rows. Pure.
+export const computeSanitizeManagerActions = (actions: MeetingManagerAction[]): MeetingManagerAction[] =>
+  (Array.isArray(actions) ? actions : [])
+    .map((row) => {
+      const action = String(row.action || '').trim();
+      const assignedTo = String(row.assignedTo || '').trim();
+      const openingDate = String(row.openingDate || '').trim();
+      const completionDate = String(row.completionDate || '').trim();
+      const progressPct = normalizeActionProgress(Number(row.progressPct || 0));
+      const status = String(row.status || '').trim().toLowerCase() === 'not_needed' ? 'not_needed' : progressPct >= 100 ? 'done' : 'open';
+      return { action, assignedTo, openingDate, completionDate, progressPct, status } as MeetingManagerAction;
+    })
+    .filter((row) => row.action || row.assignedTo || row.openingDate || row.completionDate || Number(row.progressPct || 0) > 0 || row.status === 'not_needed');
+
+// Index of the first action that has payload but is missing a title, else -1. Pure.
+export const computeFindManagerActionMissingTitleIndex = (actions: MeetingManagerAction[]) => {
+  const rows = Array.isArray(actions) ? actions : [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const action = String(row.action || '').trim();
+    const assignedTo = String(row.assignedTo || '').trim();
+    const openingDate = String(row.openingDate || '').trim();
+    const completionDate = String(row.completionDate || '').trim();
+    const progressPct = normalizeActionProgress(Number(row.progressPct || 0));
+    const status = String(row.status || '').trim().toLowerCase();
+    const hasPayload = !!(action || assignedTo || openingDate || completionDate || progressPct > 0 || status === 'not_needed' || status === 'done');
+    if (hasPayload && !action) return index;
+  }
+  return -1;
+};
+
 // Build the deduped invited-participants list (internal users + external guests),
 // resolving department + logo. Pure.
 export const computeInvitedParticipants = (
