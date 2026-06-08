@@ -33,10 +33,7 @@ import {
 } from './planViewMiscTools';
 import { computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
 import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
-import {
-  computeResolveWallPoint,
-  computeHandleWallPoint
-} from './planViewWallMeasureTools';
+import { computeResolveWallPoint } from './planViewWallMeasureTools';
 import {
   computeGetClientSearchIndex,
   computeOpenSchedulingFromHub,
@@ -79,7 +76,6 @@ import {
   computeSafetyEmergencyContacts,
   runToggleRevisionImmutable,
   runOpenMeetingManager,
-  runHandleWallSegmentDblClick,
   runAddTypeToPalette,
   computeGetObjectBoundsForAlign,
   computeRoomStatsById,
@@ -147,6 +143,7 @@ import { usePlanToolPointHandlers } from './usePlanToolPointHandlers';
 import { usePlanMeasureQuoteToggles } from './usePlanMeasureQuoteToggles';
 import { usePlanScaleModeHandlers } from './usePlanScaleModeHandlers';
 import { usePlanWallDrawToggles } from './usePlanWallDrawToggles';
+import { usePlanWallPointHandlers } from './usePlanWallPointHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -3533,40 +3530,30 @@ export const usePlanView = (planId: string) => {
     ]
   );
 
-  const handleWallPoint = useCallback(
-    (point: { x: number; y: number }, options?: { shiftKey?: boolean }) =>
-      computeHandleWallPoint(point, options, {
-        addWallSegment,
-        finishWallDraw,
-        getTypeLabel,
-        isWallType,
-        markTouched,
-        renderPlan,
-        resolveWallPoint,
-        wallDrawMode,
-        wallDrawType,
-        wallTypeDefs,
-        zoom,
-        wallDraftPointsRef,
-        wallDraftSegmentIdsRef,
-        lastInsertedRef,
-        setWallDraftPoints,
-        setWallDraftPointer
-      }),
-    [
-      addWallSegment,
-      finishWallDraw,
-      getTypeLabel,
-      isWallType,
-      markTouched,
-      renderPlan,
-      resolveWallPoint,
-      wallDrawMode,
-      wallDrawType,
-      wallTypeDefs,
-      zoom
-    ]
-  );
+  const { handleWallPoint, handleWallDraftContextMenu, handleWallSegmentDblClick } = usePlanWallPointHandlers({
+    addWallSegment,
+    finishWallDraw,
+    resolveWallPoint,
+    getTypeLabel,
+    isWallType,
+    markTouched,
+    renderPlan,
+    wallDrawMode,
+    wallDrawType,
+    wallTypeDefs,
+    zoom,
+    lang,
+    metersPerPixel,
+    push,
+    t,
+    formatNumber,
+    wallDraftPointsRef,
+    wallDraftSegmentIdsRef,
+    lastInsertedRef,
+    setWallDraftPoints,
+    setWallDraftPointer,
+    setContextMenu
+  });
 
   const { startMeasure, stopMeasure, startQuote, stopQuote } = usePlanMeasureQuoteToggles({
     metersPerPixel,
@@ -3739,22 +3726,6 @@ export const usePlanView = (planId: string) => {
     setQuotePointer
   });
 
-  const handleWallDraftContextMenu = useCallback(() => {
-    if (!wallDrawMode) return;
-    setContextMenu(null);
-    if (wallDraftSegmentIdsRef.current.length || wallDraftPointsRef.current.length >= 2) {
-      finishWallDraw();
-    } else {
-      finishWallDraw({ cancel: true });
-    }
-  }, [finishWallDraw, wallDrawMode]);
-
-  const handleWallSegmentDblClick = useCallback(
-    (payload: { id: string; lengthPx: number }) => {
-      runHandleWallSegmentDblClick(payload, { metersPerPixel, lang, push, t, formatNumber });
-    },
-    [formatNumber, lang, metersPerPixel, push, t]
-  );
 
   const { applyWallTypeToIds, applyWallType, setRoomWallTypeAt, applyRoomWallTypeAll, createRoomWalls } = usePlanWallTypeHandlers({
     getTypeLabel,
