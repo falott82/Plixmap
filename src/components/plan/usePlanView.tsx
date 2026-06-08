@@ -49,11 +49,8 @@ import {
 } from './planViewSearchScheduleTools';
 import { computeHandleUnlockResponse, computeReloadMyMeetings } from './planViewLockMeetingTools';
 import {
-  computeHandleCorridorDoorDraftPoint,
-  computeCreateRoomDoorFromDraft,
   computeInsertCorridorJunctionPoint,
   computeSaveCorridorConnectionModal,
-  computeStartRoomDoorDraft,
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
@@ -151,6 +148,7 @@ import { usePlanContextDerived } from './usePlanContextDerived';
 import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
 import { usePlanDoorModalHandlers } from './usePlanDoorModalHandlers';
 import { usePlanCorridorNameHandlers } from './usePlanCorridorNameHandlers';
+import { usePlanRoomDoorDraftHandlers } from './usePlanRoomDoorDraftHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -176,7 +174,7 @@ import { getDefaultVisiblePlanLayerIds, normalizePlanLayerSelection } from '../.
 import { getWallTypeColor } from '../../utils/wallColors';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 
-import { getRoomPolygon, isRackLinkId, getSharedRoomSides, projectPointToSegment } from './planViewUtils';
+import { getRoomPolygon, isRackLinkId, getSharedRoomSides } from './planViewUtils';
 import { samePlanSnapshot as samePlanSnapshotUtil, type PlanSnapshotComparable } from './planSnapshotCompare';
 import { toPlanHistorySnapshot, toPlanSnapshot, type PlanHistorySnapshot, type PlanSnapshot } from './planSnapshots';
 import { getLatestRevision, getRevisionVersion, toRevisionSnapshot } from './planRevisions';
@@ -2691,63 +2689,26 @@ export const usePlanView = (planId: string) => {
 
 
 
-  const handleCorridorDoorDraftPoint = useCallback(
-    (payload: {
-      corridorId: string;
-      clientX: number;
-      clientY: number;
-      point: { edgeIndex: number; t: number; x: number; y: number };
-    }) =>
-      computeHandleCorridorDoorDraftPoint(payload, {
-        corridorDoorDraft,
-        defaultDoorCatalogId,
-        markTouched,
-        objectTypeById,
-        push,
-        t,
-        updateFloorPlan,
-        isReadOnlyRef,
-        planRef,
-        setSelectedCorridorDoor,
-        setCorridorDoorDraft,
-        setCorridorQuickMenu
-      }),
-    [corridorDoorDraft, defaultDoorCatalogId, markTouched, objectTypeById, push, t, updateFloorPlan]
-  );
-
-  const createRoomDoorFromDraft = useCallback(
-    (roomId: string, point: { x: number; y: number }) =>
-      computeCreateRoomDoorFromDraft(roomId, point, {
-        defaultDoorCatalogId,
-        markTouched,
-        objectTypeById,
-        push,
-        roomDoorDraft,
-        t,
-        updateFloorPlan,
-        isReadOnlyRef,
-        planRef,
-        setRoomDoorDraft,
-        setSelectedRoomDoorId,
-        setContextMenu
-      }),
-    [defaultDoorCatalogId, markTouched, objectTypeById, projectPointToSegment, push, roomDoorDraft, t, updateFloorPlan]
-  );
-
-  const startRoomDoorDraft = useCallback(
-    (roomAId: string, roomBId: string) =>
-      computeStartRoomDoorDraft(roomAId, roomBId, {
-        getSharedRoomSides,
-        push,
-        renderPlan,
-        t,
-        isReadOnlyRef,
-        setRoomDoorDraft,
-        setSelectedRoomDoorId,
-        setContextMenu
-      }),
-    [getSharedRoomSides, push, renderPlan, t]
-  );
+  const { handleCorridorDoorDraftPoint, createRoomDoorFromDraft, startRoomDoorDraft } = usePlanRoomDoorDraftHandlers({
+    corridorDoorDraft,
+    defaultDoorCatalogId,
+    markTouched,
+    objectTypeById,
+    push,
+    t,
+    updateFloorPlan,
+    isReadOnlyRef,
+    planRef,
+    setSelectedCorridorDoor,
+    setCorridorDoorDraft,
+    setCorridorQuickMenu,
+    roomDoorDraft,
+    setRoomDoorDraft,
+    setSelectedRoomDoorId,
+    setContextMenu,
+    getSharedRoomSides,
+    renderPlan
+  });
 
   const toggleMapSubmenu = useCallback((section: typeof mapSubmenu) => {
     setMapSubmenu((prev) => (prev === section ? null : section));
