@@ -513,3 +513,99 @@ export const compressImageAttachment = async (file: File) => {
   const compactName = file.name.replace(/\.[a-z0-9]+$/i, '') + '.jpg';
   return { name: compactName, dataUrl, mime: outputMime };
 };
+
+export type MobileChatClientOption = {
+  id: string;
+  name: string;
+  logoUrl: string;
+  avatarUrl?: string;
+  kind: 'client' | 'dm';
+  lastMessageAt?: number | null;
+};
+
+// Build the unified chat client/DM option list (channels + DMs + the current
+// selection fallback), de-duplicated by normalized id. Pure.
+export const buildMobileChatClientOptions = (
+  chatClientChannels: Array<{ id: string; name: string; logoUrl: string; lastMessageAt?: number | null }>,
+  chatClientId: string,
+  chatDmContacts: Array<{ id: string; threadId: string; name: string; avatarUrl?: string; lastMessageAt?: number | null }>,
+  directMessageLabel: string
+): MobileChatClientOption[] => {
+  const rows: MobileChatClientOption[] = [];
+  const seen = new Set<string>();
+  for (const row of chatClientChannels || []) {
+    const id = normalizeChatClientId(row.id || '');
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    rows.push({
+      id,
+      name: String(row.name || '').trim() || id,
+      logoUrl: resolveClientLogoUrl(row.logoUrl || ''),
+      kind: 'client',
+      lastMessageAt: row.lastMessageAt || null
+    });
+  }
+  for (const dm of chatDmContacts || []) {
+    const threadId = normalizeChatClientId(dm.threadId || '');
+    if (!threadId || seen.has(threadId)) continue;
+    seen.add(threadId);
+    rows.push({
+      id: threadId,
+      name: dm.name || directMessageLabel,
+      logoUrl: '',
+      avatarUrl: dm.avatarUrl || '',
+      kind: 'dm',
+      lastMessageAt: dm.lastMessageAt || null
+    });
+  }
+  const normalizedCurrentId = normalizeChatClientId(chatClientId);
+  if (normalizedCurrentId && !seen.has(normalizedCurrentId)) {
+    if (normalizedCurrentId.startsWith('dm:')) {
+      const fallbackDm = (chatDmContacts || []).find((row) => normalizeChatClientId(row.threadId || '') === normalizedCurrentId);
+      rows.push({
+        id: normalizedCurrentId,
+        name: String(fallbackDm?.name || directMessageLabel),
+        logoUrl: '',
+        avatarUrl: fallbackDm?.avatarUrl || '',
+        kind: 'dm',
+        lastMessageAt: fallbackDm?.lastMessageAt || null
+      });
+    } else {
+      rows.push({
+        id: normalizedCurrentId,
+        name: chatClientChannels.find((row) => normalizeChatClientId(row.id) === normalizedCurrentId)?.name || normalizedCurrentId,
+        logoUrl: resolveClientLogoUrl(
+          chatClientChannels.find((row) => normalizeChatClientId(row.id) === normalizedCurrentId)?.logoUrl || ''
+        ),
+        kind: 'client',
+        lastMessageAt: null
+      });
+    }
+  }
+  return rows;
+};
+
+// Filter the chat option list by search text and sort by most-recent message
+// (within the retention cutoff), then by name. Pure.
+export const sortFilterMobileChatClientOptions = (
+  chatClientOptions: MobileChatClientOption[],
+  chatSearch: string,
+  chatLastMessageByClientId: Record<string, { createdAt?: number } | null>
+): MobileChatClientOption[] => {
+  const q = normalizeChatText(chatSearch);
+  const filtered = !q ? chatClientOptions : chatClientOptions.filter((row) => normalizeChatText(row.name).includes(q));
+  const cutoffTs = getMobileChatCutoffTs();
+  const lastMessageTs = (row: any) => {
+    const normalizedId = normalizeChatClientId(row?.id || '');
+    const localLast = Number(chatLastMessageByClientId[normalizedId]?.createdAt || 0);
+    const remoteLast = Number((row as any)?.lastMessageAt || 0);
+    const ts = Math.max(localLast, remoteLast);
+    return ts >= cutoffTs ? ts : 0;
+  };
+  return filtered.slice().sort((a, b) => {
+    const aLast = lastMessageTs(a);
+    const bLast = lastMessageTs(b);
+    if (aLast !== bLast) return bLast - aLast;
+    return a.name.localeCompare(b.name);
+  });
+};

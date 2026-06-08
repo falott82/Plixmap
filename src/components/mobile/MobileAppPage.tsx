@@ -20,7 +20,7 @@ import { useLang, useT } from '../../i18n/useT';
 import { getMeetingTemporalState, getMeetingTimePhaseBadgeLabel } from '../../utils/meetingTime';
 
 import {
-  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, filterRecentMobileChatMessages, getDmOtherUserId, getMobileChatCutoffTs, isOpaqueChatIdentity, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, normalizeChatText, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, resolveClientLogoUrl, safeDecodeUriPart, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
+  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, buildMobileChatClientOptions, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, filterRecentMobileChatMessages, sortFilterMobileChatClientOptions, getDmOtherUserId, isOpaqueChatIdentity, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, resolveClientLogoUrl, safeDecodeUriPart, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
 } from './MobileAppPage.helpers';
 import { MobileAppPageBody } from './MobileAppPageBody';
 const MobileAppPage = () => {
@@ -672,79 +672,15 @@ const MobileAppPage = () => {
     () => Object.values(chatUnreadByClientId || {}).reduce((acc, n) => acc + Math.max(0, Number(n || 0)), 0),
     [chatUnreadByClientId]
   );
-  const chatClientOptions = useMemo(() => {
-    const rows: Array<{ id: string; name: string; logoUrl: string; avatarUrl?: string; kind: 'client' | 'dm'; lastMessageAt?: number | null }> = [];
-    const seen = new Set<string>();
-    for (const row of chatClientChannels || []) {
-      const id = normalizeChatClientId(row.id || '');
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      rows.push({
-        id,
-        name: String(row.name || '').trim() || id,
-        logoUrl: resolveClientLogoUrl(row.logoUrl || ''),
-        kind: 'client',
-        lastMessageAt: row.lastMessageAt || null
-      });
-    }
-    for (const dm of chatDmContacts || []) {
-      const threadId = normalizeChatClientId(dm.threadId || '');
-      if (!threadId || seen.has(threadId)) continue;
-      seen.add(threadId);
-      rows.push({
-        id: threadId,
-        name: dm.name || directMessageLabel,
-        logoUrl: '',
-        avatarUrl: dm.avatarUrl || '',
-        kind: 'dm',
-        lastMessageAt: dm.lastMessageAt || null
-      });
-    }
-    const normalizedCurrentId = normalizeChatClientId(chatClientId);
-    if (normalizedCurrentId && !seen.has(normalizedCurrentId)) {
-      if (normalizedCurrentId.startsWith('dm:')) {
-        const fallbackDm = (chatDmContacts || []).find((row) => normalizeChatClientId(row.threadId || '') === normalizedCurrentId);
-        rows.push({
-          id: normalizedCurrentId,
-          name: String(fallbackDm?.name || directMessageLabel),
-          logoUrl: '',
-          avatarUrl: fallbackDm?.avatarUrl || '',
-          kind: 'dm',
-          lastMessageAt: fallbackDm?.lastMessageAt || null
-        });
-      } else {
-        rows.push({
-          id: normalizedCurrentId,
-          name: chatClientChannels.find((row) => normalizeChatClientId(row.id) === normalizedCurrentId)?.name || normalizedCurrentId,
-          logoUrl: resolveClientLogoUrl(
-            chatClientChannels.find((row) => normalizeChatClientId(row.id) === normalizedCurrentId)?.logoUrl || ''
-          ),
-          kind: 'client',
-          lastMessageAt: null
-        });
-      }
-    }
-    return rows;
-  }, [chatClientChannels, chatClientId, chatDmContacts, directMessageLabel]);
+  const chatClientOptions = useMemo(
+    () => buildMobileChatClientOptions(chatClientChannels, chatClientId, chatDmContacts, directMessageLabel),
+    [chatClientChannels, chatClientId, chatDmContacts, directMessageLabel]
+  );
 
-  const filteredChatClientOptions = useMemo(() => {
-    const q = normalizeChatText(chatSearch);
-    const filtered = !q ? chatClientOptions : chatClientOptions.filter((row) => normalizeChatText(row.name).includes(q));
-    const cutoffTs = getMobileChatCutoffTs();
-    const lastMessageTs = (row: any) => {
-      const normalizedId = normalizeChatClientId(row?.id || '');
-      const localLast = Number(chatLastMessageByClientId[normalizedId]?.createdAt || 0);
-      const remoteLast = Number((row as any)?.lastMessageAt || 0);
-      const ts = Math.max(localLast, remoteLast);
-      return ts >= cutoffTs ? ts : 0;
-    };
-    return filtered.slice().sort((a, b) => {
-      const aLast = lastMessageTs(a);
-      const bLast = lastMessageTs(b);
-      if (aLast !== bLast) return bLast - aLast;
-      return a.name.localeCompare(b.name);
-    });
-  }, [chatClientOptions, chatSearch, chatLastMessageByClientId]);
+  const filteredChatClientOptions = useMemo(
+    () => sortFilterMobileChatClientOptions(chatClientOptions, chatSearch, chatLastMessageByClientId),
+    [chatClientOptions, chatSearch, chatLastMessageByClientId]
+  );
 
   const selectedChatClient = useMemo(() => {
     const normalizedId = normalizeChatClientId(chatClientId || '');
