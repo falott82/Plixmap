@@ -21,7 +21,8 @@ import {
   isPointInRoom,
   getRoomIdAt,
   isUserType,
-  polygonsOverlap
+  polygonsOverlap,
+  computeResolveRoomAssignmentForObject
 } from './planViewRoomGeometry';
 import {
   computeAlignSelection,
@@ -178,7 +179,6 @@ import { ALL_ITEMS_LAYER_ID, DEFAULT_WALL_TYPES, WALL_TYPE_IDS } from '../../sto
 import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 import { getDefaultVisiblePlanLayerIds, normalizePlanLayerSelection } from '../../utils/layerVisibility';
 import { getWallTypeColor } from '../../utils/wallColors';
-import { isNonPeopleRoom } from '../../utils/roomProperties';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 
 import { getRoomPolygon, inferCorridorDoorLinkedRoomIds, isRackLinkId, getSharedRoomSides, projectPointToSegment } from './planViewUtils';
@@ -3219,23 +3219,10 @@ export const usePlanView = (planId: string) => {
 
   useEffect(() => runSearchExportShortcutEffect({ searchInputRef, setExportModalOpen }), []);
 
-  const isRoomAssignableForUsers = useCallback(
-    (roomId: string | undefined | null, roomList?: Room[]) => {
-      if (!roomId) return true;
-      const source = Array.isArray(roomList) ? roomList : (renderPlan?.rooms || []);
-      const room = (source || []).find((entry) => entry.id === roomId);
-      if (!room) return true;
-      return !isNonPeopleRoom(room);
-    },
-    [renderPlan?.rooms]
-  );
-
   const resolveRoomAssignmentForObject = useCallback(
-    (roomId: string | undefined | null, objectType: unknown, roomList?: Room[]) => {
-      if (!isUserType(objectType)) return roomId || undefined;
-      return isRoomAssignableForUsers(roomId || undefined, roomList) ? roomId || undefined : undefined;
-    },
-    [isRoomAssignableForUsers]
+    (roomId: string | undefined | null, objectType: unknown, roomList?: Room[]) =>
+      computeResolveRoomAssignmentForObject(roomId, objectType, roomList, renderPlan?.rooms),
+    [renderPlan?.rooms]
   );
 
   function getCorridorIdAt(corridors: any[] | undefined, x: number, y: number) {

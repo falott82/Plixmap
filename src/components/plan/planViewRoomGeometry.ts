@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import { DEFAULT_WALL_TYPES } from '../../store/data';
 import { getRoomPolygon, projectPointToSegment } from './planViewUtils';
 import { getWallTypeColor } from '../../utils/wallColors';
+import { isNonPeopleRoom } from '../../utils/roomProperties';
 import type { FloorPlan, Room } from '../../store/types';
 import type { useDataStore } from '../../store/useDataStore';
 import type { ToastTone } from '../../store/useToast';
@@ -640,6 +641,31 @@ export function getRoomIdAt(rooms: any[] | undefined, x: number, y: number) {
 export const isUserType = (type: unknown) => {
   const value = String(type || '');
   return value === 'user' || value === 'real_user' || value === 'generic_user';
+};
+
+// A room can host users unless it is flagged non-people (storage/bathroom/etc).
+export const computeIsRoomAssignableForUsers = (
+  roomId: string | undefined | null,
+  roomList: Room[] | undefined,
+  renderPlanRooms: Room[] | undefined
+): boolean => {
+  if (!roomId) return true;
+  const source = Array.isArray(roomList) ? roomList : renderPlanRooms || [];
+  const room = (source || []).find((entry) => entry.id === roomId);
+  if (!room) return true;
+  return !isNonPeopleRoom(room);
+};
+
+// Resolve the effective room assignment for a dropped/moved object: non-user
+// objects keep their room; user objects only stay if the room is people-capable.
+export const computeResolveRoomAssignmentForObject = (
+  roomId: string | undefined | null,
+  objectType: unknown,
+  roomList: Room[] | undefined,
+  renderPlanRooms: Room[] | undefined
+): string | undefined => {
+  if (!isUserType(objectType)) return roomId || undefined;
+  return computeIsRoomAssignableForUsers(roomId || undefined, roomList, renderPlanRooms) ? roomId || undefined : undefined;
 };
 
 // Pure polygon-overlap helpers extracted verbatim from usePlanView. No React state closed over.
