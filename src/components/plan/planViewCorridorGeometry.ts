@@ -679,6 +679,81 @@ export const computeSaveCorridorModal = (deps: SaveCorridorModalDeps) => {
   setCorridorNameEnInput('');
 };
 
+export type OpenEditCorridorDeps = {
+  corridorById: Map<string, Corridor>;
+  isReadOnly: boolean;
+  setCorridorModal: Dispatch<SetStateAction<CorridorModalState>>;
+  setCorridorNameInput: Dispatch<SetStateAction<string>>;
+  setCorridorNameEnInput: Dispatch<SetStateAction<string>>;
+  setCorridorShowNameInput: Dispatch<SetStateAction<boolean>>;
+};
+
+export const computeOpenEditCorridor = (corridorId: string, deps: OpenEditCorridorDeps) => {
+  const { corridorById, isReadOnly, setCorridorModal, setCorridorNameInput, setCorridorNameEnInput, setCorridorShowNameInput } = deps;
+  const corridor = corridorById.get(corridorId);
+  if (!corridor || isReadOnly) return;
+  setCorridorModal({
+    mode: 'edit',
+    corridorId,
+    initialName: corridor.name || '',
+    initialNameEn: (corridor as any).nameEn || '',
+    initialShowName: corridor.showName !== false
+  });
+  setCorridorNameInput(corridor.name || '');
+  setCorridorNameEnInput((corridor as any).nameEn || '');
+  setCorridorShowNameInput(corridor.showName !== false);
+};
+
+export type CreateCorridorFromPolyDeps = {
+  isReadOnly: boolean;
+  plan: FloorPlan | undefined;
+  t: ReturnType<typeof useT>;
+  setCorridorDrawMode: (value: null) => void;
+  setCorridorModal: Dispatch<SetStateAction<CorridorModalState>>;
+  setCorridorNameInput: Dispatch<SetStateAction<string>>;
+  setCorridorNameEnInput: Dispatch<SetStateAction<string>>;
+  setCorridorShowNameInput: Dispatch<SetStateAction<boolean>>;
+};
+
+export const computeCreateCorridorFromPoly = (points: { x: number; y: number }[], deps: CreateCorridorFromPolyDeps) => {
+  const { isReadOnly, plan, t, setCorridorDrawMode, setCorridorModal, setCorridorNameInput, setCorridorNameEnInput, setCorridorShowNameInput } = deps;
+  if (isReadOnly || !plan) return;
+  setCorridorDrawMode(null);
+  const nextIndex = Math.max(1, (plan.corridors || []).length + 1);
+  setCorridorModal({
+    mode: 'create',
+    kind: 'poly',
+    points,
+    initialName: t({ it: `Corridoio ${nextIndex}`, en: `Corridor ${nextIndex}` }),
+    initialNameEn: `Corridor ${nextIndex}`,
+    initialShowName: true
+  });
+  setCorridorNameInput(t({ it: `Corridoio ${nextIndex}`, en: `Corridor ${nextIndex}` }));
+  setCorridorNameEnInput(`Corridor ${nextIndex}`);
+  setCorridorShowNameInput(true);
+};
+
+export type UpdateCorridorLabelScaleDeps = {
+  isReadOnly: boolean;
+  markTouched: () => void;
+  plan: FloorPlan | undefined;
+  updateFloorPlan: DataStoreState['updateFloorPlan'];
+};
+
+export const computeUpdateCorridorLabelScale = (corridorId: string, delta: number, deps: UpdateCorridorLabelScaleDeps) => {
+  const { isReadOnly, markTouched, plan, updateFloorPlan } = deps;
+  if (isReadOnly || !plan || !corridorId || !Number.isFinite(delta)) return;
+  const current = (plan.corridors || []) as Corridor[];
+  const next = current.map((corridor) => {
+    if (corridor.id !== corridorId) return corridor;
+    const currentScale = Number.isFinite(Number((corridor as any).labelScale)) ? Number((corridor as any).labelScale) : 1;
+    const nextScale = Math.max(0.6, Math.min(3, Number((currentScale + delta).toFixed(2))));
+    return { ...corridor, labelScale: nextScale };
+  });
+  markTouched();
+  updateFloorPlan(plan.id, { corridors: next } as any);
+};
+
 type CorridorConnectionModalState = {
   connectionId?: string | null;
   corridorId: string;

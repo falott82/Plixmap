@@ -52,7 +52,10 @@ import {
   computeSaveCorridorModal,
   computeSaveCorridorConnectionModal,
   computeSaveCorridorDoorLinkModal,
-  computeStartRoomDoorDraft
+  computeStartRoomDoorDraft,
+  computeOpenEditCorridor,
+  computeCreateCorridorFromPoly,
+  computeUpdateCorridorLabelScale
 } from './planViewCorridorGeometry';
 import { computeHandleStageMove, computeHandleCreateTypeLayer, computeHandleMapContextMenu, computeHandleStageSelect } from './planViewStageHandlers';
 import { runPlanKeydownEffect } from './planViewKeydown';
@@ -5115,41 +5118,31 @@ export const usePlanView = (planId: string) => {
   };
 
   const openEditCorridor = useCallback(
-    (corridorId: string) => {
-      const corridor = corridorById.get(corridorId);
-      if (!corridor || isReadOnly) return;
-      setCorridorModal({
-        mode: 'edit',
-        corridorId,
-        initialName: corridor.name || '',
-        initialNameEn: (corridor as any).nameEn || '',
-        initialShowName: corridor.showName !== false
-      });
-      setCorridorNameInput(corridor.name || '');
-      setCorridorNameEnInput((corridor as any).nameEn || '');
-      setCorridorShowNameInput(corridor.showName !== false);
-    },
-    [corridorById, isReadOnly]
+    (corridorId: string) =>
+      computeOpenEditCorridor(corridorId, {
+        corridorById,
+        isReadOnly,
+        setCorridorModal,
+        setCorridorNameInput,
+        setCorridorNameEnInput,
+        setCorridorShowNameInput
+      }),
+    [corridorById, isReadOnly, setCorridorModal, setCorridorNameInput, setCorridorNameEnInput, setCorridorShowNameInput]
   );
 
   const handleCreateCorridorFromPoly = useCallback(
-    (points: { x: number; y: number }[]) => {
-      if (isReadOnly || !plan) return;
-      setCorridorDrawMode(null);
-      const nextIndex = Math.max(1, (plan.corridors || []).length + 1);
-      setCorridorModal({
-        mode: 'create',
-        kind: 'poly',
-        points,
-        initialName: t({ it: `Corridoio ${nextIndex}`, en: `Corridor ${nextIndex}` }),
-        initialNameEn: `Corridor ${nextIndex}`,
-        initialShowName: true
-      });
-      setCorridorNameInput(t({ it: `Corridoio ${nextIndex}`, en: `Corridor ${nextIndex}` }));
-      setCorridorNameEnInput(`Corridor ${nextIndex}`);
-      setCorridorShowNameInput(true);
-    },
-    [isReadOnly, plan, t]
+    (points: { x: number; y: number }[]) =>
+      computeCreateCorridorFromPoly(points, {
+        isReadOnly,
+        plan,
+        t,
+        setCorridorDrawMode,
+        setCorridorModal,
+        setCorridorNameInput,
+        setCorridorNameEnInput,
+        setCorridorShowNameInput
+      }),
+    [isReadOnly, plan, t, setCorridorDrawMode, setCorridorModal, setCorridorNameInput, setCorridorNameEnInput, setCorridorShowNameInput]
   );
 
   const saveCorridorModal = useCallback(() => {
@@ -5239,18 +5232,8 @@ export const usePlanView = (planId: string) => {
   }, [corridorDoorLinkModal, isReadOnly, markTouched, plan, push, renderPlan?.rooms, t, updateFloorPlan]);
 
   const updateCorridorLabelScale = useCallback(
-    (corridorId: string, delta: number) => {
-      if (isReadOnly || !plan || !corridorId || !Number.isFinite(delta)) return;
-      const current = (plan.corridors || []) as Corridor[];
-      const next = current.map((corridor) => {
-        if (corridor.id !== corridorId) return corridor;
-        const currentScale = Number.isFinite(Number((corridor as any).labelScale)) ? Number((corridor as any).labelScale) : 1;
-        const nextScale = Math.max(0.6, Math.min(3, Number((currentScale + delta).toFixed(2))));
-        return { ...corridor, labelScale: nextScale };
-      });
-      markTouched();
-      updateFloorPlan(plan.id, { corridors: next } as any);
-    },
+    (corridorId: string, delta: number) =>
+      computeUpdateCorridorLabelScale(corridorId, delta, { isReadOnly, markTouched, plan, updateFloorPlan }),
     [isReadOnly, markTouched, plan, updateFloorPlan]
   );
 
