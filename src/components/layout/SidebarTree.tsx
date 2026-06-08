@@ -30,12 +30,9 @@ import {
   type MeetingRoomOverviewRow
 } from '../../api/meetings';
 import {
-  toEpochMs,
   todayIso,
   monthAnchorFromIso,
-  hmToMinutes,
   minutesToHm,
-  localTsFromIsoHm,
   getClientMeetingCheckInStats,
   computeClientMeetingCheckInEntries,
   computeClientMeetingsPreviewData,
@@ -43,7 +40,9 @@ import {
   computeClientMeetingsTimelineMeta,
   buildClientMeetingsTimelineRows,
   mergeClientMeetingCheckIns,
-  buildClientMeetingSearchResults
+  buildClientMeetingSearchResults,
+  computeRoomBusyIntervals,
+  findDuplicateSlot
 } from './SidebarTree.helpers';
 import { SidebarLockMenu } from './SidebarLockMenu';
 import { SidebarPlanMenu } from './SidebarPlanMenu';
@@ -1167,80 +1166,19 @@ const SidebarTree = () => {
           if (String(entry?.siteId || '') !== siteId) return false;
           return true;
         });
-        const toIntervals = (day: string, roomId: string): Array<{ start: number; end: number }> => {
-          const dayStartTs = localTsFromIsoHm(day, '00:00');
-          if (dayStartTs === null) return [];
-          const dayEndTs = dayStartTs + 24 * 60 * 60 * 1000;
-          const raw = scopedMeetings
-            .filter((entry: any) => String(entry?.roomId || '') === roomId && String(entry?.id || '') !== String(booking.id || ''))
-            .map((entry: any) => {
-              const startRaw = toEpochMs(entry?.startAt);
-              const endRaw = toEpochMs(entry?.endAt);
-              const preMin = Math.max(0, Number(entry?.setupBufferBeforeMin) || 0);
-              const postMin = Math.max(0, Number(entry?.setupBufferAfterMin) || 0);
-              const startAdj = startRaw - preMin * 60_000;
-              const endAdj = endRaw + postMin * 60_000;
-              return { startAdj, endAdj };
-            })
-            .filter((entry) => Number.isFinite(entry.startAdj) && Number.isFinite(entry.endAdj) && entry.startAdj < dayEndTs && entry.endAdj > dayStartTs)
-            .map((entry) => ({
-              start: Math.max(0, Math.floor((Math.max(entry.startAdj, dayStartTs) - dayStartTs) / 60_000)),
-              end: Math.min(24 * 60, Math.ceil((Math.min(entry.endAdj, dayEndTs) - dayStartTs) / 60_000))
-            }))
-            .filter((entry) => entry.end > entry.start)
-            .sort((a, b) => a.start - b.start);
-          const merged: Array<{ start: number; end: number }> = [];
-          for (const interval of raw) {
-            const last = merged[merged.length - 1];
-            if (!last || interval.start > last.end) {
-              merged.push({ ...interval });
-            } else {
-              last.end = Math.max(last.end, interval.end);
-            }
-          }
-          return merged;
-        };
-        const findSlot = (
-          day: string,
-          intervals: Array<{ start: number; end: number }>
-        ): { startMin: number; endMin: number } | null => {
-          const nowMin = (() => {
-            if (day !== today) return 0;
-            const now = new Date();
-            return now.getHours() * 60 + now.getMinutes();
-          })();
-          if (dup.timeMode === 'same') {
-            const startMin = Math.max(sourceStartMin, nowMin);
-            const endMin = startMin + durationMin;
-            if (endMin > 23 * 60 + 59) return null;
-            const overlap = intervals.some((entry) => entry.start < endMin && entry.end > startMin);
-            return overlap ? null : { startMin, endMin };
-          }
-          const windowStartRaw =
-            dup.timeMode === 'custom' ? hmToMinutes(String(dup.customFromHm || '')) : 8 * 60;
-          const windowEndRaw =
-            dup.timeMode === 'custom' ? hmToMinutes(String(dup.customToHm || '')) : 18 * 60;
-          if (!Number.isFinite(windowStartRaw) || !Number.isFinite(windowEndRaw)) return null;
-          const windowStart = Math.max(0, Math.min(23 * 60 + 59, Math.max(windowStartRaw, nowMin)));
-          const windowEnd = Math.max(0, Math.min(23 * 60 + 59, windowEndRaw));
-          if (windowEnd <= windowStart) return null;
-          let cursor = windowStart;
-          for (const interval of intervals) {
-            if (interval.end <= windowStart) continue;
-            if (interval.start >= windowEnd) break;
-            const blockedStart = Math.max(windowStart, interval.start);
-            if (cursor + durationMin <= blockedStart) return { startMin: cursor, endMin: cursor + durationMin };
-            cursor = Math.max(cursor, Math.min(windowEnd, interval.end));
-            if (cursor >= windowEnd) break;
-          }
-          if (cursor + durationMin <= windowEnd) return { startMin: cursor, endMin: cursor + durationMin };
-          return null;
-        };
         for (const day of queue) {
           let chosen: ClientDuplicateDayCandidate | null = null;
           for (const room of candidateRooms) {
-            const intervals = toIntervals(day, room.roomId);
-            const slot = findSlot(day, intervals);
+            const intervals = computeRoomBusyIntervals(scopedMeetings, day, room.roomId, String(booking.id || ''));
+            const slot = findDuplicateSlot(intervals, {
+              day,
+              today,
+              timeMode: dup.timeMode,
+              sourceStartMin,
+              durationMin,
+              customFromHm: dup.customFromHm,
+              customToHm: dup.customToHm
+            });
             if (!slot) continue;
             chosen = {
               roomId: room.roomId,

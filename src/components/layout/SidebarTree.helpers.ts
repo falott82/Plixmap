@@ -489,3 +489,86 @@ export const buildClientMeetingSearchResults = (
     matchRows.sort((a, b) => Number(b.booking.startAt || 0) - Number(a.booking.startAt || 0));
     return matchRows;
 };
+
+export const computeRoomBusyIntervals = (
+  scopedMeetings: any[],
+  day: string,
+  roomId: string,
+  excludeBookingId: string
+): Array<{ start: number; end: number }> => {
+    const dayStartTs = localTsFromIsoHm(day, '00:00');
+    if (dayStartTs === null) return [];
+    const dayEndTs = dayStartTs + 24 * 60 * 60 * 1000;
+    const raw = scopedMeetings
+      .filter((entry: any) => String(entry?.roomId || '') === roomId && String(entry?.id || '') !== String(excludeBookingId || ''))
+      .map((entry: any) => {
+        const startRaw = toEpochMs(entry?.startAt);
+        const endRaw = toEpochMs(entry?.endAt);
+        const preMin = Math.max(0, Number(entry?.setupBufferBeforeMin) || 0);
+        const postMin = Math.max(0, Number(entry?.setupBufferAfterMin) || 0);
+        const startAdj = startRaw - preMin * 60_000;
+        const endAdj = endRaw + postMin * 60_000;
+        return { startAdj, endAdj };
+      })
+      .filter((entry) => Number.isFinite(entry.startAdj) && Number.isFinite(entry.endAdj) && entry.startAdj < dayEndTs && entry.endAdj > dayStartTs)
+      .map((entry) => ({
+        start: Math.max(0, Math.floor((Math.max(entry.startAdj, dayStartTs) - dayStartTs) / 60_000)),
+        end: Math.min(24 * 60, Math.ceil((Math.min(entry.endAdj, dayEndTs) - dayStartTs) / 60_000))
+      }))
+      .filter((entry) => entry.end > entry.start)
+      .sort((a, b) => a.start - b.start);
+    const merged: Array<{ start: number; end: number }> = [];
+    for (const interval of raw) {
+      const last = merged[merged.length - 1];
+      if (!last || interval.start > last.end) {
+        merged.push({ ...interval });
+      } else {
+        last.end = Math.max(last.end, interval.end);
+      }
+    }
+    return merged;
+};
+
+export const findDuplicateSlot = (
+  intervals: Array<{ start: number; end: number }>,
+  params: {
+    day: string;
+    today: string;
+    timeMode: 'same' | 'any_08_18' | 'custom' | string;
+    sourceStartMin: number;
+    durationMin: number;
+    customFromHm?: string;
+    customToHm?: string;
+  }
+): { startMin: number; endMin: number } | null => {
+    const { day, today, timeMode, sourceStartMin, durationMin, customFromHm, customToHm } = params;
+    const nowMin = (() => {
+      if (day !== today) return 0;
+      const now = new Date();
+      return now.getHours() * 60 + now.getMinutes();
+    })();
+    if (timeMode === 'same') {
+      const startMin = Math.max(sourceStartMin, nowMin);
+      const endMin = startMin + durationMin;
+      if (endMin > 23 * 60 + 59) return null;
+      const overlap = intervals.some((entry) => entry.start < endMin && entry.end > startMin);
+      return overlap ? null : { startMin, endMin };
+    }
+    const windowStartRaw = timeMode === 'custom' ? hmToMinutes(String(customFromHm || '')) : 8 * 60;
+    const windowEndRaw = timeMode === 'custom' ? hmToMinutes(String(customToHm || '')) : 18 * 60;
+    if (!Number.isFinite(windowStartRaw) || !Number.isFinite(windowEndRaw)) return null;
+    const windowStart = Math.max(0, Math.min(23 * 60 + 59, Math.max(windowStartRaw, nowMin)));
+    const windowEnd = Math.max(0, Math.min(23 * 60 + 59, windowEndRaw));
+    if (windowEnd <= windowStart) return null;
+    let cursor = windowStart;
+    for (const interval of intervals) {
+      if (interval.end <= windowStart) continue;
+      if (interval.start >= windowEnd) break;
+      const blockedStart = Math.max(windowStart, interval.start);
+      if (cursor + durationMin <= blockedStart) return { startMin: cursor, endMin: cursor + durationMin };
+      cursor = Math.max(cursor, Math.min(windowEnd, interval.end));
+      if (cursor >= windowEnd) break;
+    }
+    if (cursor + durationMin <= windowEnd) return { startMin: cursor, endMin: cursor + durationMin };
+    return null;
+};
