@@ -23,7 +23,7 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "lint:eslint": "eslint \"src/**/*.{ts,tsx}\"",
-    "lint:eslint:ci": "eslint \"src/**/*.{ts,tsx}\" --max-warnings 413",
+    "lint:eslint:ci": "eslint \"src/**/*.{ts,tsx}\" --max-warnings 412",
     "test": "node --test scripts/*.test.cjs",
     "test:unit": "vitest run",
     "test:e2e:smoke": "node scripts/e2e-smoke.cjs",

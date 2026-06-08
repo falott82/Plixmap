@@ -1,8 +1,36 @@
 import type { FloorPlan, MapObject, Room } from '../../store/types';
 import type { useDataStore } from '../../store/useDataStore';
+import type { ToastTone } from '../../store/useToast';
+import type { useT } from '../../i18n/useT';
+import { getWallTypeColor } from '../../utils/wallColors';
 
 type DataStoreState = ReturnType<typeof useDataStore.getState>;
 type Pt = { x: number; y: number };
+
+export type ApplyWallTypeToIdsDeps = {
+  getTypeLabel: (typeId: string) => string;
+  isReadOnly: boolean;
+  isWallType: (typeId: string) => boolean;
+  markTouched: () => void;
+  push: (message: string, tone?: ToastTone) => void;
+  t: ReturnType<typeof useT>;
+  updateObject: DataStoreState['updateObject'];
+};
+
+export const computeApplyWallTypeToIds = (ids: string[], typeId: string, deps: ApplyWallTypeToIdsDeps) => {
+  const { getTypeLabel, isReadOnly, isWallType, markTouched, push, t, updateObject } = deps;
+  if (!ids.length || !typeId || !isWallType(typeId) || isReadOnly) return;
+  const nextLabel = getTypeLabel(typeId);
+  const nextColor = getWallTypeColor(typeId);
+  markTouched();
+  for (const id of ids) {
+    updateObject(id, { type: typeId, name: nextLabel, strokeColor: nextColor });
+  }
+  push(
+    ids.length > 1 ? t({ it: 'Muri aggiornati', en: 'Walls updated' }) : t({ it: 'Muro aggiornato', en: 'Wall updated' }),
+    'success'
+  );
+};
 
 // Pure computations extracted from usePlanView. Bodies are verbatim; closed-over values (including
 // stable refs) are passed in via `deps`, mirroring each hook's original dependency array. The hook

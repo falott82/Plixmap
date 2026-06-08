@@ -29,7 +29,8 @@ import {
   computeHandleWallMove,
   computeCorridorDoorLinkRoomEntries,
   computeCanvasPlan,
-  computeSaveRevisionReason
+  computeSaveRevisionReason,
+  computeApplyWallTypeToIds
 } from './planViewMiscTools';
 import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes } from './planViewQuoteScaleTools';
 import {
@@ -4291,22 +4292,9 @@ export const usePlanView = (planId: string) => {
   );
 
   const applyWallTypeToIds = useCallback(
-    (ids: string[], typeId: string) => {
-      if (!ids.length || !typeId || !isWallType(typeId) || isReadOnly) return;
-      const nextLabel = getTypeLabel(typeId);
-      const nextColor = getWallTypeColor(typeId);
-      markTouched();
-      for (const id of ids) {
-        updateObject(id, { type: typeId, name: nextLabel, strokeColor: nextColor });
-      }
-      push(
-        ids.length > 1
-          ? t({ it: 'Muri aggiornati', en: 'Walls updated' })
-          : t({ it: 'Muro aggiornato', en: 'Wall updated' }),
-        'success'
-      );
-    },
-    [getTypeLabel, getWallTypeColor, isReadOnly, isWallType, markTouched, push, t, updateObject]
+    (ids: string[], typeId: string) =>
+      computeApplyWallTypeToIds(ids, typeId, { getTypeLabel, isReadOnly, isWallType, markTouched, push, t, updateObject }),
+    [getTypeLabel, isReadOnly, isWallType, markTouched, push, t, updateObject]
   );
 
   const applyWallType = useCallback(() => {
