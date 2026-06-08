@@ -747,3 +747,13 @@ export const resolveChatMessageAuthorName = (
   if (!isOpaqueChatIdentity(msg.username)) return String(msg.username || '').trim();
   return labels.user;
 };
+
+// Per-day meeting counts for the currently displayed month (empty when the
+// loaded month doesn't match). Pure.
+export const selectAgendaMonthDays = (
+  agendaMonthPayload: MobileAgendaMonthPayload | null,
+  displayMonth: string
+): Record<string, number> => {
+  if (String(agendaMonthPayload?.month || '') !== displayMonth) return {};
+  return (agendaMonthPayload?.days || {}) as Record<string, number>;
+};
