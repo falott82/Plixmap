@@ -679,6 +679,43 @@ export const computeSaveCorridorModal = (deps: SaveCorridorModalDeps) => {
   setCorridorNameEnInput('');
 };
 
+// Closest polygon edge of a corridor to a point (edge index + projection).
+export const computeGetClosestCorridorEdge = (
+  corridor: Corridor,
+  point: Pt,
+  getCorridorPolygon: (corridor: any) => Pt[]
+): { edgeIndex: number; t: number; x: number; y: number; distSq: number } | null => {
+  const pts = getCorridorPolygon(corridor);
+  if (pts.length < 2) return null;
+  let best: { edgeIndex: number; t: number; x: number; y: number; distSq: number } | null = null;
+  for (let i = 0; i < pts.length; i += 1) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const proj = projectPointToSegment(a, b, point);
+    if (!best || proj.distSq < best.distSq) {
+      best = { edgeIndex: i, t: proj.t, x: proj.x, y: proj.y, distSq: proj.distSq };
+    }
+  }
+  return best;
+};
+
+// Point on a corridor edge at parametric position t along edgeIndex.
+export const computeGetCorridorEdgePoint = (
+  corridor: Corridor,
+  edgeIndex: number,
+  t: number,
+  getCorridorPolygon: (corridor: any) => Pt[]
+): Pt | null => {
+  const pts = getCorridorPolygon(corridor);
+  if (pts.length < 2) return null;
+  const idx = ((Math.floor(edgeIndex) % pts.length) + pts.length) % pts.length;
+  const a = pts[idx];
+  const b = pts[(idx + 1) % pts.length];
+  if (!a || !b) return null;
+  const ratio = Math.max(0, Math.min(1, Number(t) || 0));
+  return { x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio };
+};
+
 export type OpenEditCorridorDeps = {
   corridorById: Map<string, Corridor>;
   isReadOnly: boolean;
