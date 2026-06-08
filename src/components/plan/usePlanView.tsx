@@ -34,7 +34,6 @@ import { computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpda
 import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
 import { computeResolveWallPoint } from './planViewWallMeasureTools';
 import {
-  computeGetClientSearchIndex,
   computeOpenEscapeRouteAt,
   computeEnsureObjectLayerVisible
 } from './planViewSearchScheduleTools';
@@ -93,7 +92,6 @@ import {
   runLayerVisibilitySyncEffect
 } from './planViewEffects';
 import { runHandleCreate, runHandleUpdate, runHandlePlaceNew, runOpenDuplicate, type HandleCreatePayload } from './planViewCreateObject';
-import { runHandleSearchEnter } from './planViewSearchEnter';
 import {
   runViewportInitEffect,
   runViewportAutoCenterEffect,
@@ -141,6 +139,7 @@ import { usePlanWallDrawToggles } from './usePlanWallDrawToggles';
 import { usePlanWallPointHandlers } from './usePlanWallPointHandlers';
 import { usePlanMeetingOpenHandlers } from './usePlanMeetingOpenHandlers';
 import { usePlanPaletteFavoriteHandlers } from './usePlanPaletteFavoriteHandlers';
+import { usePlanSearchHandlers } from './usePlanSearchHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -4686,44 +4685,35 @@ export const usePlanView = (planId: string) => {
     key: string;
     value: { planId: string; search: string; result: CrossPlanSearchResult }[];
   }>({ key: '', value: [] });
-  const getClientSearchIndex = useCallback(() => {
-    return computeGetClientSearchIndex({
-      client,
-      dataVersion,
-      clientSearchIndexRef
-    });
-  }, [client, dataVersion]);
-
-  const handleSearchEnter = (term: string) => {
-    runHandleSearchEnter(term, {
-      renderPlan,
-      setSearchResultsOpen,
-      setSearchResultsTerm,
-      setSearchResultsObjects,
-      setSearchResultsRooms,
-      setCrossPlanSearchOpen,
-      setCrossPlanSearchTerm,
-      clearSelection,
-      setSelectedRoomId,
-      setSelectedRoomIds,
-      setHighlightRoom,
-      isDeskType,
-      searchDebugEnabled,
-      plan,
-      client,
-      getClientSearchIndex,
-      renderPlanObjectById,
-      basePlanObjectById,
-      renderPlanRoomById,
-      basePlanRoomById,
-      push,
-      t,
-      setCrossPlanResults,
-      promptRevealForObject,
-      setSelectedObject,
-      triggerHighlight
-    });
-  };
+  const { handleSearchEnter } = usePlanSearchHandlers({
+    client,
+    dataVersion,
+    clientSearchIndexRef,
+    renderPlan,
+    plan,
+    isDeskType,
+    searchDebugEnabled,
+    renderPlanObjectById,
+    basePlanObjectById,
+    renderPlanRoomById,
+    basePlanRoomById,
+    push,
+    t,
+    clearSelection,
+    promptRevealForObject,
+    triggerHighlight,
+    setSearchResultsOpen,
+    setSearchResultsTerm,
+    setSearchResultsObjects,
+    setSearchResultsRooms,
+    setCrossPlanSearchOpen,
+    setCrossPlanSearchTerm,
+    setSelectedRoomId,
+    setSelectedRoomIds,
+    setHighlightRoom,
+    setCrossPlanResults,
+    setSelectedObject
+  });
 
   const modalInitials = useMemo(
     () =>
