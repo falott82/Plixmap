@@ -17,6 +17,7 @@ import { RoomsLayer } from './canvas/RoomsLayer';
 import { WallsLinksLayer } from './canvas/WallsLinksLayer';
 import { ObjectsLayer } from './canvas/ObjectsLayer';
 import { CanvasToolbar } from './canvas/CanvasToolbar';
+import { useCanvasPrintAreaDraft } from './canvas/useCanvasPrintAreaDraft';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
@@ -447,8 +448,6 @@ const CanvasStageImpl = (
     null
   );
   const textDraftOrigin = useRef<{ x: number; y: number } | null>(null);
-  const [draftPrintRect, setDraftPrintRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const printOrigin = useRef<{ x: number; y: number } | null>(null);
   const [draftPolyPoints, setDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
   const [draftPolyPointer, setDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
   const draftPolyRaf = useRef<number | null>(null);
@@ -468,8 +467,6 @@ const CanvasStageImpl = (
   const pendingDraftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const textDraftRaf = useRef<number | null>(null);
   const pendingTextDraftRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
-  const draftPrintRectRaf = useRef<number | null>(null);
-  const pendingDraftPrintRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const textTransformRaf = useRef<number | null>(null);
   const pendingTextTransformRef = useRef<{ id: string; width: number; height: number } | null>(null);
   const [cameraRotateId, setCameraRotateId] = useState<string | null>(null);
@@ -1058,7 +1055,6 @@ const CanvasStageImpl = (
       if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
       if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
       if (textDraftRaf.current) cancelAnimationFrame(textDraftRaf.current);
-      if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
       if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
       if (corridorDraftPolyRaf.current) cancelAnimationFrame(corridorDraftPolyRaf.current);
       if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
@@ -1254,6 +1250,14 @@ const CanvasStageImpl = (
   const pointerToWorld = (localX: number, localY: number) => ({
     x: (localX - viewportRef.current.pan.x) / viewportRef.current.zoom,
     y: (localY - viewportRef.current.pan.y) / viewportRef.current.zoom
+  });
+
+  const { draftPrintRect, beginPrintDraft, updateDraftPrintRect, finalizeDraftPrintRect } = useCanvasPrintAreaDraft({
+    printAreaMode,
+    readOnly,
+    perfEnabled,
+    pointerToWorld,
+    onSetPrintArea
   });
 
   const updateQuoteResizePreview = useCallback((shiftKey?: boolean) => {
@@ -1759,32 +1763,6 @@ const CanvasStageImpl = (
     [getNearestRoomCorner]
   );
 
-  const updateDraftPrintRect = (event: any) => {
-    if (!printAreaMode || readOnly) return false;
-    const origin = printOrigin.current;
-    if (!origin) return false;
-    const stage = event.target.getStage();
-    const pos = stage?.getPointerPosition();
-    if (!pos) return true;
-    const world = pointerToWorld(pos.x, pos.y);
-    const x1 = origin.x;
-    const y1 = origin.y;
-    const x2 = world.x;
-    const y2 = world.y;
-    const { x, y, width, height } = dragRectFromCorners(x1, y1, x2, y2);
-    pendingDraftPrintRectRef.current = { x, y, width, height };
-    if (draftPrintRectRaf.current) return true;
-    draftPrintRectRaf.current = requestAnimationFrame(() => {
-      draftPrintRectRaf.current = null;
-      const next = pendingDraftPrintRectRef.current;
-      pendingDraftPrintRectRef.current = null;
-      if (!next) return;
-      if (perfEnabled) perfMetrics.draftPrintRectUpdates += 1;
-      setDraftPrintRect(next);
-    });
-    return true;
-  };
-
   const finalizeDraftRect = () => {
     if (roomDrawMode !== 'rect' || readOnly) return false;
     if (!draftOrigin.current || !draftRect) return false;
@@ -1805,25 +1783,6 @@ const CanvasStageImpl = (
     return true;
   };
 
-  const finalizeDraftPrintRect = () => {
-    if (!printAreaMode || readOnly) return false;
-    if (!printOrigin.current || !draftPrintRect) return false;
-    const rect = {
-      x: draftPrintRect.x,
-      y: draftPrintRect.y,
-      width: Math.max(0, draftPrintRect.width),
-      height: Math.max(0, draftPrintRect.height)
-    };
-    printOrigin.current = null;
-    if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
-    draftPrintRectRaf.current = null;
-    pendingDraftPrintRectRef.current = null;
-    if (perfEnabled) perfMetrics.draftPrintRectUpdates += 1;
-    setDraftPrintRect(null);
-    if (rect.width < 20 || rect.height < 20) return true;
-    onSetPrintArea?.(rect);
-    return true;
-  };
   const constrainRoomPolyPoint = useCallback(
     (world: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
       const last = draftPolyPointsRef.current[draftPolyPointsRef.current.length - 1];
@@ -2084,16 +2043,6 @@ const CanvasStageImpl = (
     }
     showSafetyCardHelpToast();
   }, [safetyCard?.visible, safetyCardSelected, showSafetyCardHelpToast]);
-
-  useEffect(() => {
-    if (printAreaMode) return;
-    printOrigin.current = null;
-    if (perfEnabled) perfMetrics.draftPrintRectUpdates += 1;
-    setDraftPrintRect(null);
-    if (draftPrintRectRaf.current) cancelAnimationFrame(draftPrintRectRaf.current);
-    draftPrintRectRaf.current = null;
-    pendingDraftPrintRectRef.current = null;
-  }, [perfEnabled, printAreaMode]);
 
   if (lastObjectsRef.current !== objects || lastWallTypeIdSetRef.current !== wallTypeIdSet) {
     boundsVersionRef.current += 1;
@@ -2392,10 +2341,7 @@ const CanvasStageImpl = (
             const pos = stage?.getPointerPosition();
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
-            printOrigin.current = { x: world.x, y: world.y };
-            pendingDraftPrintRectRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
-            if (perfEnabled) perfMetrics.draftPrintRectUpdates += 1;
-            setDraftPrintRect(pendingDraftPrintRectRef.current);
+            beginPrintDraft(world);
             return;
           }
           if (roomDrawMode === 'rect' && !readOnly && e.evt.button === 0) {
