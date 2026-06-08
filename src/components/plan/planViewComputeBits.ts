@@ -1,6 +1,35 @@
 import type { MutableRefObject } from 'react';
 import type { FloorPlan, RackItem, RackPortKind } from '../../store/types';
+import type { useT } from '../../i18n/useT';
 import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
+
+type PresenceLockEntry = { planId: string; clientName?: string; siteName?: string; planName?: string };
+
+// Pure presence-tooltip date formatter (locale string, em-dash fallback).
+export const computeFormatPresenceDate = (value?: number | null): string => {
+  if (!value) return '—';
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return '—';
+  }
+};
+
+// Presence-tooltip lock summary: a single lock's client/site/plan path, a count
+// when there are several, or a "no lock" label.
+export const computeFormatPresenceLock = (
+  lock: PresenceLockEntry | null | undefined,
+  locks: PresenceLockEntry[] | undefined,
+  t: ReturnType<typeof useT>
+): string => {
+  const list = Array.isArray(locks) && locks.length ? locks : lock ? [lock] : [];
+  if (!list.length) return t({ it: 'Nessun lock', en: 'No lock' });
+  if (list.length > 1) return t({ it: `Lock attivi: ${list.length}`, en: `Active locks: ${list.length}` });
+  const entry = list[0];
+  const parts = [entry.clientName, entry.siteName, entry.planName].filter((v) => v && String(v).trim().length);
+  if (parts.length) return parts.join(' / ');
+  return entry.planId || t({ it: 'Lock attivo', en: 'Lock active' });
+};
 
 // Body-extraction of several non-JSX usePlanView callbacks/memos/effects. Each body is moved
 // verbatim; closed-over values are passed in via `deps`, mirroring each hook's existing dependency

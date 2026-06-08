@@ -71,6 +71,8 @@ import {
   computeLinksModalRows,
   computeCollectUserDepartments,
   computeUpdateRackPortField,
+  computeFormatPresenceDate,
+  computeFormatPresenceLock,
   computeRecommendedObjectScale,
   computeClientBusinessPartnerNames,
   computeMeetingLocationLabels,
@@ -1295,33 +1297,13 @@ export const usePlanView = (planId: string) => {
 		  useEffect(() => {
 		    forceUnlockIncomingRef.current = forceUnlockIncoming;
 		  }, [forceUnlockIncoming]);
-  const formatPresenceDate = useCallback(
-    (value?: number | null) => {
-      if (!value) return '—';
-      try {
-        return new Date(value).toLocaleString();
-      } catch {
-        return '—';
-      }
-    },
-    []
-  );
+  const formatPresenceDate = useCallback((value?: number | null) => computeFormatPresenceDate(value), []);
 
   const formatPresenceLock = useCallback(
     (
       lock?: { planId: string; clientName?: string; siteName?: string; planName?: string } | null,
       locks?: { planId: string; clientName?: string; siteName?: string; planName?: string }[]
-    ) => {
-      const list = Array.isArray(locks) && locks.length ? locks : lock ? [lock] : [];
-      if (!list.length) return t({ it: 'Nessun lock', en: 'No lock' });
-      if (list.length > 1) {
-        return t({ it: `Lock attivi: ${list.length}`, en: `Active locks: ${list.length}` });
-      }
-      const entry = list[0];
-      const parts = [entry.clientName, entry.siteName, entry.planName].filter((v) => v && String(v).trim().length);
-      if (parts.length) return parts.join(' / ');
-      return entry.planId || t({ it: 'Lock attivo', en: 'Lock active' });
-    },
+    ) => computeFormatPresenceLock(lock, locks, t),
     [t]
   );
 
