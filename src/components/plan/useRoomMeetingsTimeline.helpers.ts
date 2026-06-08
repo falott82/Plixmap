@@ -1,4 +1,6 @@
 import { type MeetingBooking } from '../../api/meetings';
+import { meetingClockFromTs, hmToMinutes, minutesToHm } from './planViewTime';
+import { currentLocalIsoDay } from '../../utils/localDate';
 
 // Pure check-in helpers extracted from useRoomMeetingsTimeline. They derive a
 // stable participant key and on-site/remote check-in stats purely from a
@@ -68,4 +70,46 @@ export const getMeetingCheckInStats = (booking: MeetingBooking, checkMap?: Recor
     internalOnSite: internalOnSite.length,
     externalOnSite: manualOnSiteFromParticipants.length + externalOnSiteLegacy.length
   };
+};
+
+// Compute the target slot when duplicating a booking onto another day, honoring
+// the original time (or any/custom), clamped to "now" for today and the day end.
+export const resolveRoomDuplicateSlot = (
+  booking: MeetingBooking,
+  dayIso: string,
+  timeMode: 'same' | 'any_08_18' | 'custom' = 'same'
+): { startHm: string; endHm: string; startMin: number; endMin: number } | null => {
+  const startTs = Number(booking.startAt || 0);
+  const endTs = Number(booking.endAt || 0);
+  const sourceStartHm = meetingClockFromTs(startTs);
+  const parsedSourceStartMin = hmToMinutes(sourceStartHm);
+  if (!Number.isFinite(parsedSourceStartMin)) return null;
+  const sourceStartMin = Number(parsedSourceStartMin);
+  const durationMinRaw = Math.round((endTs - startTs) / 60_000);
+  const durationMin = Math.max(1, Number.isFinite(durationMinRaw) ? durationMinRaw : 60);
+  let startMin = timeMode === 'same' ? sourceStartMin : 0;
+  const today = currentLocalIsoDay();
+  if (dayIso === today) {
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    startMin = Math.max(startMin, nowMin);
+  }
+  const endMin = startMin + durationMin;
+  if (endMin > 23 * 60 + 59) return null;
+  return { startHm: minutesToHm(startMin), endHm: minutesToHm(endMin), startMin, endMin };
+};
+
+// Latest timestamp a booking may be extended to: min(end of day, next booking start).
+export const getRoomMeetingExtendMaxEndTs = (booking: MeetingBooking, bookings: MeetingBooking[]) => {
+  const currentEnd = Number(booking.endAt || 0);
+  const dayEnd = (() => {
+    const d = new Date(Number(booking.startAt || 0));
+    d.setHours(23, 59, 0, 0);
+    return d.getTime();
+  })();
+  const nextBoundary = (bookings || [])
+    .filter((b) => String(b.id) !== String(booking.id) && Number((b as any).effectiveStartAt ?? b.startAt ?? 0) >= currentEnd)
+    .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0))[0];
+  const nextStart = nextBoundary ? Number((nextBoundary as any).effectiveStartAt ?? nextBoundary.startAt ?? 0) : Number.POSITIVE_INFINITY;
+  return Math.min(dayEnd, nextStart);
 };

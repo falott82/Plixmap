@@ -25,7 +25,12 @@ import {
   type MeetingCheckInMapByMeetingId,
   type MeetingCheckInTimestampsByMeetingId
 } from '../../api/meetings';
-import { meetingCheckInEntryKey, getMeetingCheckInStats } from './useRoomMeetingsTimeline.helpers';
+import {
+  meetingCheckInEntryKey,
+  getMeetingCheckInStats,
+  resolveRoomDuplicateSlot,
+  getRoomMeetingExtendMaxEndTs
+} from './useRoomMeetingsTimeline.helpers';
 import type { RoomMeetingDuplicateModalState } from './RoomMeetingDuplicateModal';
 import { nanoid } from 'nanoid';
 
@@ -835,47 +840,6 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
   }, [t]);
 
 
-  const resolveRoomDuplicateSlot = useCallback(
-    (
-      booking: MeetingBooking,
-      dayIso: string,
-      timeMode: 'same' | 'any_08_18' | 'custom' = 'same'
-    ): { startHm: string; endHm: string; startMin: number; endMin: number } | null => {
-      const startTs = Number(booking.startAt || 0);
-      const endTs = Number(booking.endAt || 0);
-      const sourceStartHm = meetingClockFromTs(startTs);
-      const parsedSourceStartMin = hmToMinutes(sourceStartHm);
-      if (!Number.isFinite(parsedSourceStartMin)) return null;
-      const sourceStartMin = Number(parsedSourceStartMin);
-      const durationMinRaw = Math.round((endTs - startTs) / 60_000);
-      const durationMin = Math.max(1, Number.isFinite(durationMinRaw) ? durationMinRaw : 60);
-      let startMin = timeMode === 'same' ? sourceStartMin : 0;
-      const today = currentLocalIsoDay();
-      if (dayIso === today) {
-        const now = new Date();
-        const nowMin = now.getHours() * 60 + now.getMinutes();
-        startMin = Math.max(startMin, nowMin);
-      }
-      const endMin = startMin + durationMin;
-      if (endMin > 23 * 60 + 59) return null;
-      return { startHm: minutesToHm(startMin), endHm: minutesToHm(endMin), startMin, endMin };
-    },
-    [hmToMinutes, meetingClockFromTs, minutesToHm]
-  );
-
-  const getRoomMeetingExtendMaxEndTs = useCallback((booking: MeetingBooking, bookings: MeetingBooking[]) => {
-    const currentEnd = Number(booking.endAt || 0);
-    const dayEnd = (() => {
-      const d = new Date(Number(booking.startAt || 0));
-      d.setHours(23, 59, 0, 0);
-      return d.getTime();
-    })();
-    const nextBoundary = (bookings || [])
-      .filter((b) => String(b.id) !== String(booking.id) && Number((b as any).effectiveStartAt ?? b.startAt ?? 0) >= currentEnd)
-      .sort((a, b) => Number((a as any).effectiveStartAt ?? a.startAt ?? 0) - Number((b as any).effectiveStartAt ?? b.startAt ?? 0))[0];
-    const nextStart = nextBoundary ? Number((nextBoundary as any).effectiveStartAt ?? nextBoundary.startAt ?? 0) : Number.POSITIVE_INFINITY;
-    return Math.min(dayEnd, nextStart);
-  }, []);
 
   const extendRoomMeetingBooking = useCallback(
     async (booking: MeetingBooking, mode: '10m' | '30m' | '1h' | '1.5h' | '2h' | 'max') => {
