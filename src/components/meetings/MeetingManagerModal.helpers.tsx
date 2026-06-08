@@ -341,3 +341,45 @@ export const computeMeetingRoomPreviewData = (roomPreview: any, selectedSite: an
     })()
   };
 };
+
+// Map external participant id -> overlapping meetings for the selected slot
+// (dedup + sorted). Pure. Extracted from MeetingManagerModal.
+export const computeParticipantMeetingConflicts = (
+  overviewRows: any[],
+  selectedSlotStartTs: number | null,
+  selectedSlotEndTs: number | null
+): Map<string, Array<{ meetingId: string; subject: string; roomName: string; startAt: number; endAt: number; status: string }>> => {
+  const out = new Map<
+    string,
+    Array<{ meetingId: string; subject: string; roomName: string; startAt: number; endAt: number; status: string }>
+  >();
+  if (selectedSlotStartTs === null || selectedSlotEndTs === null || selectedSlotEndTs <= selectedSlotStartTs) return out;
+  for (const room of overviewRows) {
+    for (const booking of room.bookings || []) {
+      if (booking.status === 'cancelled' || booking.status === 'rejected') continue;
+      const bs = Number(booking.startAt || 0);
+      const be = Number(booking.endAt || 0);
+      if (!(bs < selectedSlotEndTs && be > selectedSlotStartTs)) continue;
+      for (const participant of Array.isArray(booking.participants) ? booking.participants : []) {
+        if (participant?.kind !== 'real_user' || !participant.externalId) continue;
+        const key = String(participant.externalId);
+        const current = out.get(key) || [];
+        current.push({
+          meetingId: String(booking.id || ''),
+          subject: String(booking.subject || 'Meeting'),
+          roomName: String(booking.roomName || room.roomName || '-'),
+          startAt: bs,
+          endAt: be,
+          status: String(booking.status || '')
+        });
+        out.set(key, current);
+      }
+    }
+  }
+  for (const [key, rows] of out.entries()) {
+    rows.sort((a, b) => a.startAt - b.startAt);
+    const dedup = rows.filter((row, idx) => idx === 0 || !(row.meetingId && row.meetingId === rows[idx - 1].meetingId));
+    out.set(key, dedup);
+  }
+  return out;
+};
