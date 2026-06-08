@@ -175,3 +175,58 @@ export const parseDateForSort = (value: string) => {
   return Number.isFinite(ts) ? ts : 0;
 };
 
+
+// Build the single-plan map geometry (corridors/rooms/door anchors + viewBox)
+// for the safety map preview. Pure given the preview row. Extracted from SafetyPanel.
+export const computeSafetyMapData = (mapPreview: any) => {
+  if (!mapPreview) return null;
+  const plan = mapPreview.row.plan;
+  const planWidth = Math.max(200, Number(plan?.width || 1200));
+  const planHeight = Math.max(200, Number(plan?.height || 800));
+  const corridors = ((plan?.corridors || []) as Corridor[])
+    .map((corridor) => {
+      const points = corridorPolygon(corridor);
+      return { corridor, points, center: polygonCentroid(points) };
+    })
+    .filter((entry) => entry.points.length >= 3);
+  const rooms = (plan?.rooms || []).map((room: any) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) })).filter((entry: any) => entry.points.length >= 3);
+  const doorAnchors = corridors.flatMap((entry) =>
+    (entry.corridor.doors || [])
+      .map((door) => ({ door, point: getDoorAnchor(entry.corridor, door), corridorId: entry.corridor.id }))
+      .filter((item): item is { door: any; point: Point; corridorId: string } => !!item.point)
+  );
+  const points = [
+    ...corridors.flatMap((entry) => entry.points),
+    ...rooms.flatMap((entry: any) => entry.points),
+    ...doorAnchors.map((entry) => entry.point),
+    { x: 0, y: 0 },
+    { x: planWidth, y: planHeight },
+    ...(mapPreview.kind === 'device' ? [mapPreview.row.point] : [])
+  ];
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    minX = 0;
+    minY = 0;
+    maxX = Number(plan?.width || 1200);
+    maxY = Number(plan?.height || 800);
+  }
+  const pad = 24;
+  return {
+    corridors,
+    rooms,
+    doorAnchors,
+    planWidth,
+    planHeight,
+    imageUrl: String(plan?.imageUrl || ''),
+    viewBox: `${minX - pad} ${minY - pad} ${Math.max(100, maxX - minX + pad * 2)} ${Math.max(100, maxY - minY + pad * 2)}`
+  };
+};
