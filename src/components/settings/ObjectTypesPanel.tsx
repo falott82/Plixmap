@@ -48,7 +48,7 @@ import { getWallTypeColor } from '../../utils/wallColors';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { isSecurityTypeId } from '../../store/security';
 
-import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv } from './ObjectTypesPanel.helpers';
+import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv, sortWifiModels } from './ObjectTypesPanel.helpers';
 import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal, DoorHistoryModal, PendingRequestsPromptModal } from './ObjectTypesPanelModals';
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
@@ -187,45 +187,10 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
       `${m.brand} ${m.model} ${m.modelCode} ${m.standard}`.toLowerCase().includes(term)
     );
   }, [q, wifiModels]);
-  const sortedWifiModels = useMemo(() => {
-    const list = filteredWifiModels.slice();
-    const getValue = (model: WifiAntennaModel): string | number => {
-      switch (wifiSort.key) {
-        case 'brand':
-          return model.brand || '';
-        case 'model':
-          return model.model || '';
-        case 'modelCode':
-          return model.modelCode || '';
-        case 'standard':
-          return wifiStandardLabels.get(model.standard) || model.standard || '';
-        case 'band24':
-          return model.band24 ? 1 : 0;
-        case 'band5':
-          return model.band5 ? 1 : 0;
-        case 'band6':
-          return model.band6 ? 1 : 0;
-        case 'coverageSqm':
-          return Number(model.coverageSqm) || 0;
-        default:
-          return '';
-      }
-    };
-    const compareValues = (a: string | number, b: string | number) => {
-      if (typeof a === 'number' && typeof b === 'number') return a - b;
-      return `${a}`.localeCompare(`${b}`);
-    };
-    list.sort((a, b) => {
-      const base = compareValues(getValue(a), getValue(b));
-      if (base !== 0) return wifiSort.dir === 'asc' ? base : -base;
-      const brand = (a.brand || '').localeCompare(b.brand || '');
-      if (brand !== 0) return brand;
-      const model = (a.model || '').localeCompare(b.model || '');
-      if (model !== 0) return model;
-      return (a.modelCode || '').localeCompare(b.modelCode || '');
-    });
-    return list;
-  }, [filteredWifiModels, wifiSort.dir, wifiSort.key, wifiStandardLabels]);
+  const sortedWifiModels = useMemo(
+    () => sortWifiModels(filteredWifiModels, wifiSort.key, wifiSort.dir, wifiStandardLabels),
+    [filteredWifiModels, wifiSort.dir, wifiSort.key, wifiStandardLabels]
+  );
   const toggleWifiSort = useCallback((key: WifiSortKey) => {
     setWifiSort((prev) => {
       if (prev.key === key) {

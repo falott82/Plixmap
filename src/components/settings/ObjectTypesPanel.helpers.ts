@@ -361,3 +361,50 @@ export const buildDoorRowsCsv = (rows: DoorRegistryRow[]): string => {
   ];
   return lines.join('\n');
 };
+
+// Sort wifi antenna models by the chosen column/direction, with stable
+// brand/model/code tiebreakers. Pure. Extracted from ObjectTypesPanel.
+export const sortWifiModels = (
+  models: any[],
+  sortKey: string,
+  sortDir: 'asc' | 'desc',
+  wifiStandardLabels: Map<string, string>
+): any[] => {
+  const list = models.slice();
+  const getValue = (model: any): string | number => {
+    switch (sortKey) {
+      case 'brand':
+        return model.brand || '';
+      case 'model':
+        return model.model || '';
+      case 'modelCode':
+        return model.modelCode || '';
+      case 'standard':
+        return wifiStandardLabels.get(model.standard) || model.standard || '';
+      case 'band24':
+        return model.band24 ? 1 : 0;
+      case 'band5':
+        return model.band5 ? 1 : 0;
+      case 'band6':
+        return model.band6 ? 1 : 0;
+      case 'coverageSqm':
+        return Number(model.coverageSqm) || 0;
+      default:
+        return '';
+    }
+  };
+  const compareValues = (a: string | number, b: string | number) => {
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    return `${a}`.localeCompare(`${b}`);
+  };
+  list.sort((a, b) => {
+    const base = compareValues(getValue(a), getValue(b));
+    if (base !== 0) return sortDir === 'asc' ? base : -base;
+    const brand = (a.brand || '').localeCompare(b.brand || '');
+    if (brand !== 0) return brand;
+    const model = (a.model || '').localeCompare(b.model || '');
+    if (model !== 0) return model;
+    return (a.modelCode || '').localeCompare(b.modelCode || '');
+  });
+  return list;
+};
