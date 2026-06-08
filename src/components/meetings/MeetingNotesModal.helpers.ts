@@ -1,5 +1,66 @@
 import jsPDF from 'jspdf';
 import type { useT } from '../../i18n/useT';
+import type { MeetingManagerAction } from '../../api/meetings';
+
+// Build the task activity-log events across a follow-up timeline chain. Pure.
+export const computeTimelineTaskEvents = (
+  timelineChain: any[],
+  t: ReturnType<typeof useT>,
+  sanitizeManagerActionsForPersist: (actions: any[]) => MeetingManagerAction[]
+) => {
+  const events: Array<{ id: string; ts: number; taskLabel: string; meetingLabel: string; actionLabel: string; tone: string }> = [];
+  let previousByKey = new Map<string, MeetingManagerAction>();
+  for (const row of timelineChain) {
+    const meeting = row.entry.meeting;
+    const meetingTs = Number(meeting.startAt || 0) || Date.now();
+    const meetingLabel = `${new Date(meetingTs).toLocaleDateString()} • ${meeting.roomName || '-'}`;
+    const currentActions = sanitizeManagerActionsForPersist(Array.isArray(row.entry.managerFields.actions) ? row.entry.managerFields.actions : []);
+    const currentByKey = new Map<string, MeetingManagerAction>();
+    currentActions.forEach((actionRow, actionIndex) => {
+      const keyBase = `${String(actionRow.action || '').trim().toLowerCase()}|${String(actionRow.assignedTo || '').trim().toLowerCase()}`;
+      const key = keyBase || `${String(meeting.id || '')}::${actionIndex}`;
+      currentByKey.set(key, actionRow);
+      const prev = previousByKey.get(key);
+      const taskLabel = String(actionRow.action || '').trim() || `${t({ it: 'Task', en: 'Task' })} ${actionIndex + 1}`;
+      const actionTs = meetingTs + actionIndex;
+      if (!prev) {
+        events.push({ id: `${key}-created-${actionTs}`, ts: actionTs, taskLabel, meetingLabel, actionLabel: t({ it: 'Task creata', en: 'Task created' }), tone: 'border-sky-200 bg-sky-50 text-sky-800' });
+        return;
+      }
+      const prevDueTs = parseIsoDay(String(prev.completionDate || ''));
+      const nextDueTs = parseIsoDay(String(actionRow.completionDate || ''));
+      if (String(prev.completionDate || '') !== String(actionRow.completionDate || '')) {
+        const label =
+          Number.isFinite(Number(prevDueTs)) && Number.isFinite(Number(nextDueTs))
+            ? Number(nextDueTs) > Number(prevDueTs)
+              ? t({ it: 'Scadenza prolungata', en: 'Deadline extended' })
+              : t({ it: 'Scadenza anticipata', en: 'Deadline moved earlier' })
+            : t({ it: 'Scadenza aggiornata', en: 'Deadline updated' });
+        events.push({ id: `${key}-due-${actionTs}`, ts: actionTs + 100, taskLabel, meetingLabel, actionLabel: label, tone: 'border-violet-200 bg-violet-50 text-violet-800' });
+      }
+      const prevProgress = normalizeActionProgress(Number(prev.progressPct || 0));
+      const nextProgress = normalizeActionProgress(Number(actionRow.progressPct || 0));
+      if (prevProgress !== nextProgress) {
+        events.push({ id: `${key}-progress-${actionTs}`, ts: actionTs + 200, taskLabel, meetingLabel, actionLabel: t({ it: `Avanzamento ${nextProgress}%`, en: `Progress ${nextProgress}%` }), tone: 'border-amber-200 bg-amber-50 text-amber-800' });
+      }
+      if (String(prev.status || 'open') !== String(actionRow.status || 'open')) {
+        const statusLabel =
+          String(actionRow.status || '') === 'done'
+            ? t({ it: 'Task chiusa', en: 'Task closed' })
+            : String(actionRow.status || '') === 'not_needed'
+              ? t({ it: 'Task non necessaria', en: 'Task marked not needed' })
+              : t({ it: 'Task riaperta', en: 'Task reopened' });
+        events.push({ id: `${key}-status-${actionTs}`, ts: actionTs + 300, taskLabel, meetingLabel, actionLabel: statusLabel, tone: 'border-emerald-200 bg-emerald-50 text-emerald-800' });
+      }
+    });
+    for (const [key, oldAction] of previousByKey.entries()) {
+      if (currentByKey.has(key)) continue;
+      events.push({ id: `${key}-removed-${meetingTs}`, ts: meetingTs - 1, taskLabel: String(oldAction.action || '').trim() || t({ it: 'Task', en: 'Task' }), meetingLabel, actionLabel: t({ it: 'Task eliminata', en: 'Task deleted' }), tone: 'border-rose-200 bg-rose-50 text-rose-800' });
+    }
+    previousByKey = currentByKey;
+  }
+  return events.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+};
 
 // Derive task statistics/insights from the normalized manager actions. Pure.
 export const computeActionInsights = (normalizedManagerActions: any[], t: ReturnType<typeof useT>) => {
