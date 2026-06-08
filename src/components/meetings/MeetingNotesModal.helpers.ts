@@ -2,6 +2,70 @@ import jsPDF from 'jspdf';
 import type { useT } from '../../i18n/useT';
 import type { MeetingManagerAction } from '../../api/meetings';
 
+// Build the deduped invited-participants list (internal users + external guests),
+// resolving department + logo. Pure.
+export const computeInvitedParticipants = (
+  participants: any[],
+  meeting: any,
+  selectedClient: any,
+  businessPartnerByCompany: Map<string, any>
+) => {
+  const participantDepartmentByEmail = new Map(
+    (participants || [])
+      .filter((row) => String(row.email || '').trim() && String(row.department || '').trim())
+      .map((row) => [String(row.email || '').trim().toLowerCase(), String(row.department || '').trim()])
+  );
+  const participantDepartmentByName = new Map(
+    (participants || [])
+      .filter((row) => String(row.label || '').trim() && String(row.department || '').trim())
+      .map((row) => [String(row.label || '').trim().toLowerCase(), String(row.department || '').trim()])
+  );
+  const list: Array<{
+    key: string;
+    name: string;
+    email?: string | null;
+    department?: string | null;
+    company?: string | null;
+    kind: 'internal' | 'external';
+    remote: boolean;
+    logoUrl?: string | null;
+  }> = [];
+  const seen = new Set<string>();
+  const clientLogo = String((selectedClient as any)?.logoUrl || '').trim() || null;
+
+  for (const participant of Array.isArray(meeting?.participants) ? meeting!.participants : []) {
+    const isManual = String((participant as any)?.kind || 'real_user') === 'manual';
+    const name = String((participant as any)?.fullName || '').trim();
+    if (!name) continue;
+    const email = String((participant as any)?.email || '').trim() || null;
+    const company = String((participant as any)?.company || '').trim() || null;
+    const department =
+      String((participant as any)?.department || '').trim() ||
+      String(participantDepartmentByEmail.get(String(email || '').toLowerCase()) || '').trim() ||
+      String(participantDepartmentByName.get(String(name || '').toLowerCase()) || '').trim() ||
+      null;
+    const remote = !!(participant as any)?.remote;
+    const key = `${String(isManual ? 'external' : 'internal')}|${name.toLowerCase()}|${String(email || '').toLowerCase()}|${toCompanyKey(company || '')}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const partnerLogo = company ? businessPartnerByCompany.get(toCompanyKey(company || ''))?.logoUrl || null : null;
+    list.push({ key, name, email, department, company, kind: isManual ? 'external' : 'internal', remote, logoUrl: isManual ? partnerLogo : clientLogo });
+  }
+
+  for (const guest of Array.isArray((meeting as any)?.externalGuestsDetails) ? ((meeting as any).externalGuestsDetails as any[]) : []) {
+    const name = String(guest?.name || '').trim();
+    if (!name) continue;
+    const email = String(guest?.email || '').trim() || null;
+    const company = String(guest?.company || '').trim() || null;
+    const remote = !!guest?.remote;
+    const key = `external|${name.toLowerCase()}|${String(email || '').toLowerCase()}|${toCompanyKey(company || '')}|guest-details`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    list.push({ key, name, email, department: null, company, kind: 'external', remote, logoUrl: company ? businessPartnerByCompany.get(toCompanyKey(company || ''))?.logoUrl || null : null });
+  }
+  return list;
+};
+
 // Build the task activity-log events across a follow-up timeline chain. Pure.
 export const computeTimelineTaskEvents = (
   timelineChain: any[],
