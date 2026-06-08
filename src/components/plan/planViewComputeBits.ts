@@ -5,6 +5,30 @@ import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
 
 type PresenceLockEntry = { planId: string; clientName?: string; siteName?: string; planName?: string };
 
+// Resolve a layer id to its localized display label (falls back to the id).
+export const computeGetLayerLabel = (layerId: string, deps: { planLayers: any[]; lang: string }): string => {
+  const { planLayers, lang } = deps;
+  const layer = planLayers.find((l: any) => String(l.id) === layerId);
+  if (!layer) return layerId;
+  const name = (layer as any)?.name;
+  if (typeof name === 'string') return name;
+  return String(name?.[lang] || name?.it || name?.en || layerId);
+};
+
+// Build a toast-friendly object label (trimmed/collapsed, type-label fallback,
+// truncated past 60 chars).
+export const computeGetObjectToastLabel = (
+  name: string | undefined,
+  typeId: string,
+  getTypeLabel: (typeId: string) => string
+): string => {
+  const trimmed = String(name || '').trim().replace(/\s+/g, ' ');
+  const fallback = getTypeLabel(typeId);
+  const value = trimmed || fallback || typeId;
+  if (value.length > 60) return `${value.slice(0, 57)}...`;
+  return value;
+};
+
 export type LinkCreateHintDeps = {
   linkFromId: string | null | undefined;
   isReadOnly: boolean;

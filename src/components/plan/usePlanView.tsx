@@ -74,6 +74,8 @@ import {
   computeFormatPresenceDate,
   computeFormatPresenceLock,
   computeLinkCreateHint,
+  computeGetLayerLabel,
+  computeGetObjectToastLabel,
   computeRecommendedObjectScale,
   computeClientBusinessPartnerNames,
   computeMeetingLocationLabels,
@@ -1760,23 +1762,11 @@ export const usePlanView = (planId: string) => {
   }, [effectiveVisibleLayerIds]);
 
   const getLayerLabel = useCallback(
-    (layerId: string) => {
-      const layer = planLayers.find((l: any) => String(l.id) === layerId);
-      if (!layer) return layerId;
-      const name = layer?.name;
-      if (typeof name === 'string') return name;
-      return String(name?.[lang] || name?.it || name?.en || layerId);
-    },
+    (layerId: string) => computeGetLayerLabel(layerId, { planLayers, lang }),
     [lang, planLayers]
   );
   const getObjectToastLabel = useCallback(
-    (name: string | undefined, typeId: string) => {
-      const trimmed = String(name || '').trim().replace(/\s+/g, ' ');
-      const fallback = getTypeLabel(typeId);
-      const value = trimmed || fallback || typeId;
-      if (value.length > 60) return `${value.slice(0, 57)}...`;
-      return value;
-    },
+    (name: string | undefined, typeId: string) => computeGetObjectToastLabel(name, typeId, getTypeLabel),
     [getTypeLabel]
   );
   const promptRevealForObject = useCallback(
