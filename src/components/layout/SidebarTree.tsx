@@ -41,7 +41,8 @@ import {
   computeClientMeetingsPreviewData,
   resolveClientDuplicateSlot,
   computeClientMeetingsTimelineMeta,
-  buildClientMeetingsTimelineRows
+  buildClientMeetingsTimelineRows,
+  mergeClientMeetingCheckIns
 } from './SidebarTree.helpers';
 import { SidebarLockMenu } from './SidebarLockMenu';
 import { SidebarPlanMenu } from './SidebarPlanMenu';
@@ -841,19 +842,7 @@ const SidebarTree = () => {
       );
       const rows: ClientMeetingsTimelineRow[] = buildClientMeetingsTimelineRows(responses);
       setClientMeetingsRows(rows);
-      const mergedCheckins: MeetingCheckInMapByMeetingId = {};
-      const mergedCheckInTimestamps: MeetingCheckInTimestampsByMeetingId = {};
-      for (const res of responses) {
-        for (const [meetingId, statusMap] of Object.entries(res.checkInStatusByMeetingId || {})) {
-          mergedCheckins[String(meetingId)] = { ...(mergedCheckins[String(meetingId)] || {}), ...(statusMap || {}) };
-        }
-        for (const [meetingId, tsMap] of Object.entries((res as any).checkInTimestampsByMeetingId || {})) {
-          mergedCheckInTimestamps[String(meetingId)] = {
-            ...(mergedCheckInTimestamps[String(meetingId)] || {}),
-            ...(tsMap || {})
-          };
-        }
-      }
+      const { status: mergedCheckins, timestamps: mergedCheckInTimestamps } = mergeClientMeetingCheckIns(responses);
       setClientMeetingsCheckInStatusByMeetingId(mergedCheckins);
       setClientMeetingsCheckInTimestampsByMeetingId(mergedCheckInTimestamps);
     } catch {

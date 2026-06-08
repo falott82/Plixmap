@@ -1,4 +1,8 @@
-import { type MeetingBooking } from '../../api/meetings';
+import {
+  type MeetingBooking,
+  type MeetingCheckInMapByMeetingId,
+  type MeetingCheckInTimestampsByMeetingId
+} from '../../api/meetings';
 // Pure date/time/geometry/coordinate helpers extracted from SidebarTree.tsx.
 
 export const parseCoords = (value: string | undefined): { lat: number; lng: number } | null => {
@@ -427,3 +431,19 @@ export const buildClientMeetingsTimelineRows = (
       a.siteName.localeCompare(b.siteName, undefined, { sensitivity: 'base' }) ||
       a.roomName.localeCompare(b.roomName, undefined, { sensitivity: 'base' })
     );
+
+export const mergeClientMeetingCheckIns = (
+  responses: Array<{ checkInStatusByMeetingId?: any; checkInTimestampsByMeetingId?: any }>
+): { status: MeetingCheckInMapByMeetingId; timestamps: MeetingCheckInTimestampsByMeetingId } => {
+    const status: MeetingCheckInMapByMeetingId = {};
+    const timestamps: MeetingCheckInTimestampsByMeetingId = {};
+    for (const res of responses) {
+      for (const [meetingId, statusMap] of Object.entries(res.checkInStatusByMeetingId || {})) {
+        status[String(meetingId)] = { ...(status[String(meetingId)] || {}), ...((statusMap as any) || {}) };
+      }
+      for (const [meetingId, tsMap] of Object.entries((res as any).checkInTimestampsByMeetingId || {})) {
+        timestamps[String(meetingId)] = { ...(timestamps[String(meetingId)] || {}), ...((tsMap as any) || {}) };
+      }
+    }
+    return { status, timestamps };
+};
