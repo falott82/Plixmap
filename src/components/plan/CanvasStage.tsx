@@ -34,7 +34,14 @@ import {
   getRotatedRectBounds,
   getViewportWorldBounds,
   isObjectPotentiallyVisible,
-  intersectRaySegment
+  intersectRaySegment,
+  polygonCentroid,
+  getRoomBounds,
+  getRoomPolygonPoints,
+  getCorridorPolygonPoints,
+  getCorridorEdgePoint,
+  getClosestCorridorEdgePoint,
+  getRoomEdgePoint,
 } from './CanvasStage.helpers';
 
 interface Props {
@@ -772,163 +779,6 @@ const CanvasStageImpl = (
     return inside;
   };
 
-const polygonCentroid = (points: { x: number; y: number }[]) => {
-  let area = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < points.length; i += 1) {
-    const p0 = points[i];
-    const p1 = points[(i + 1) % points.length];
-    const cross = p0.x * p1.y - p1.x * p0.y;
-    area += cross;
-    cx += (p0.x + p1.x) * cross;
-    cy += (p0.y + p1.y) * cross;
-  }
-  area *= 0.5;
-  if (!Number.isFinite(area) || Math.abs(area) < 0.00001) {
-    const avg = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
-    const count = points.length || 1;
-    return { x: avg.x / count, y: avg.y / count };
-  }
-  return { x: cx / (6 * area), y: cy / (6 * area) };
-};
-
-const getRoomBounds = (room: any) => {
-  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as
-    | 'rect'
-    | 'poly';
-  if (kind === 'poly') {
-    const pts = Array.isArray(room?.points) ? room.points : [];
-    if (pts.length < 3) return null;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const p of pts) {
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x);
-      maxY = Math.max(maxY, p.y);
-    }
-    return { minX, minY, maxX, maxY };
-  }
-  const rx = Number(room?.x || 0);
-  const ry = Number(room?.y || 0);
-  const rw = Number(room?.width || 0);
-  const rh = Number(room?.height || 0);
-  if (!Number.isFinite(rx) || !Number.isFinite(ry) || !Number.isFinite(rw) || !Number.isFinite(rh)) return null;
-  return { minX: rx, minY: ry, maxX: rx + rw, maxY: ry + rh };
-};
-
-const getRoomPolygonPoints = (room: any): { x: number; y: number }[] => {
-  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-  if (kind === 'poly') {
-    const pts = Array.isArray(room?.points) ? room.points : [];
-    if (pts.length >= 3) return pts;
-    const x = Number(room?.x || 0);
-    const y = Number(room?.y || 0);
-    const w = Number(room?.width || 0);
-    const h = Number(room?.height || 0);
-    if (w > 0 && h > 0) {
-      return [
-        { x, y },
-        { x: x + w, y },
-        { x: x + w, y: y + h },
-        { x, y: y + h }
-      ];
-    }
-    return [];
-  }
-  const x = Number(room?.x || 0);
-  const y = Number(room?.y || 0);
-  const w = Number(room?.width || 0);
-  const h = Number(room?.height || 0);
-  if (!(w > 0 && h > 0)) return [];
-  return [
-    { x, y },
-    { x: x + w, y },
-    { x: x + w, y: y + h },
-    { x, y: y + h }
-  ];
-};
-
-const getCorridorPolygonPoints = (corridor: Corridor | any): { x: number; y: number }[] => {
-  const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as
-    | 'rect'
-    | 'poly';
-  if (kind === 'poly') {
-    const pts = Array.isArray(corridor?.points) ? corridor.points : [];
-    if (pts.length >= 3) return pts;
-    const x = Number(corridor?.x || 0);
-    const y = Number(corridor?.y || 0);
-    const w = Number(corridor?.width || 0);
-    const h = Number(corridor?.height || 0);
-    if (w > 0 && h > 0) {
-      return [
-        { x, y },
-        { x: x + w, y },
-        { x: x + w, y: y + h },
-        { x, y: y + h }
-      ];
-    }
-    return [];
-  }
-  const x = Number(corridor?.x || 0);
-  const y = Number(corridor?.y || 0);
-  const w = Number(corridor?.width || 0);
-  const h = Number(corridor?.height || 0);
-  if (!(w > 0 && h > 0)) return [];
-  return [
-    { x, y },
-    { x: x + w, y },
-    { x: x + w, y: y + h },
-    { x, y: y + h }
-  ];
-};
-
-const getCorridorEdgePoint = (points: { x: number; y: number }[], edgeIndex: number, t: number) => {
-  if (!Array.isArray(points) || points.length < 2) return null;
-  const idx = Number.isFinite(edgeIndex) ? Math.floor(edgeIndex) : 0;
-  const a = points[((idx % points.length) + points.length) % points.length];
-  const b = points[(idx + 1 + points.length) % points.length];
-  if (!a || !b) return null;
-  const ratio = Math.max(0, Math.min(1, Number(t) || 0));
-  return {
-    x: a.x + (b.x - a.x) * ratio,
-    y: a.y + (b.y - a.y) * ratio
-  };
-};
-
-const getClosestCorridorEdgePoint = (points: { x: number; y: number }[], point: { x: number; y: number }) => {
-  if (!Array.isArray(points) || points.length < 2) return null;
-  let best: { edgeIndex: number; t: number; x: number; y: number; distSq: number } | null = null;
-  for (let i = 0; i < points.length; i += 1) {
-    const a = points[i];
-    const b = points[(i + 1) % points.length];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const lenSq = dx * dx + dy * dy;
-    const t = lenSq > 0.0000001 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq)) : 0;
-    const x = a.x + dx * t;
-    const y = a.y + dy * t;
-    const distSq = (point.x - x) * (point.x - x) + (point.y - y) * (point.y - y);
-    if (!best || distSq < best.distSq) best = { edgeIndex: i, t, x, y, distSq };
-  }
-  return best;
-};
-
-const getRoomEdgePoint = (points: { x: number; y: number }[], edgeIndex: number, t: number) => {
-  if (!Array.isArray(points) || points.length < 2) return null;
-  const idx = Number.isFinite(edgeIndex) ? Math.floor(edgeIndex) : 0;
-  const a = points[((idx % points.length) + points.length) % points.length];
-  const b = points[(idx + 1 + points.length) % points.length];
-  if (!a || !b) return null;
-  const ratio = Math.max(0, Math.min(1, Number(t) || 0));
-  return {
-    x: a.x + (b.x - a.x) * ratio,
-    y: a.y + (b.y - a.y) * ratio
-  };
-};
 
   const distancePointToSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
     const dx = b.x - a.x;
