@@ -33,7 +33,7 @@ import {
   computeSaveRevisionReason,
   computeApplyWallTypeToIds
 } from './planViewMiscTools';
-import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeHandleScaleMove, computeUpdateScaleStyle, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
+import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
 import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
 import {
   computeResolveWallPoint,
@@ -149,6 +149,7 @@ import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
 import { usePlanDoorModalHandlers } from './usePlanDoorModalHandlers';
 import { usePlanCorridorNameHandlers } from './usePlanCorridorNameHandlers';
 import { usePlanRoomDoorDraftHandlers } from './usePlanRoomDoorDraftHandlers';
+import { usePlanScaleHandlers } from './usePlanScaleHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -2863,35 +2864,21 @@ export const usePlanView = (planId: string) => {
     setCorridorQuickMenu
   });
 
-  const handleScaleDoubleClick = useCallback(() => {
-    if (!planScale?.start || !planScale?.end || isReadOnly) return;
-    setContextMenu(null);
-    setScaleActionsOpen(true);
-  }, [isReadOnly, planScale?.end, planScale?.start]);
-
-  const handleScaleMove = useCallback(
-    (payload: { start: { x: number; y: number }; end: { x: number; y: number } }) =>
-      computeHandleScaleMove(payload, { plan, isReadOnly, planScale, markTouched, updateFloorPlan }),
-    [isReadOnly, markTouched, plan, planScale?.meters, planScale?.metersPerPixel, updateFloorPlan]
-  );
-
-  const updateScaleStyle = useCallback(
-    (payload: { labelScale?: number; strokeWidth?: number }) =>
-      computeUpdateScaleStyle(payload, { plan, isReadOnly, planScale, markTouched, updateFloorPlan }),
-    [isReadOnly, markTouched, plan, planScale?.end, planScale?.meters, planScale?.metersPerPixel, planScale?.opacity, planScale?.start, updateFloorPlan]
-  );
-
-  const openScaleEdit = useCallback(() => {
-    if (!planScale?.start || !planScale?.end || isReadOnly) return;
-    const distance = Math.hypot(planScale.end.x - planScale.start.x, planScale.end.y - planScale.start.y);
-    if (!Number.isFinite(distance) || distance <= 0) return;
-    setScaleMode(false);
-    setScaleDraft(null);
-    setScaleDraftPointer(null);
-    setScaleModal({ start: planScale.start, end: planScale.end, distance });
-    const meters = Number(planScale.meters);
-    setScaleMetersInput(Number.isFinite(meters) ? formatNumber(meters) : '');
-  }, [formatNumber, isReadOnly, planScale?.end, planScale?.meters, planScale?.start]);
+  const { handleScaleDoubleClick, handleScaleMove, updateScaleStyle, openScaleEdit } = usePlanScaleHandlers({
+    plan,
+    isReadOnly,
+    planScale,
+    markTouched,
+    updateFloorPlan,
+    setContextMenu,
+    setScaleActionsOpen,
+    setScaleMode,
+    setScaleDraft,
+    setScaleDraftPointer,
+    setScaleModal,
+    setScaleMetersInput,
+    formatNumber
+  });
 
   const updateQuoteLabelPos = useCallback(
     (id: string, pos: 'center' | 'above' | 'below' | 'left' | 'right', orientation?: 'horizontal' | 'vertical') =>
