@@ -48,6 +48,7 @@ import {
   buildWifiRangeRings as buildWifiRangeRingsImpl,
   buildCameraFovPolygon as buildCameraFovPolygonImpl,
   dragRectFromCorners,
+  findNearestRoomCorner,
 } from './CanvasStage.helpers';
 
 interface Props {
@@ -1793,29 +1794,7 @@ const CanvasStageImpl = (
   };
 
   const getNearestRoomCorner = useCallback(
-    (point: { x: number; y: number }) => {
-      const rooms = ((plan.rooms || []) as any[]).filter(Boolean);
-      if (!rooms.length) return null;
-      const zoomValue = Math.max(0.2, viewportRef.current.zoom || 1);
-      const snapThreshold = 14 / zoomValue;
-      const snapThresholdSq = snapThreshold * snapThreshold;
-      let best: { x: number; y: number; distSq: number } | null = null;
-      for (const room of rooms) {
-        const points = getRoomPolygonPoints(room);
-        if (!points.length) continue;
-        for (const vertex of points) {
-          const dx = vertex.x - point.x;
-          const dy = vertex.y - point.y;
-          const distSq = dx * dx + dy * dy;
-          if (distSq > snapThresholdSq) continue;
-          if (!best || distSq < best.distSq) {
-            best = { x: vertex.x, y: vertex.y, distSq };
-          }
-        }
-      }
-      if (!best) return null;
-      return { x: best.x, y: best.y };
-    },
+    (point: { x: number; y: number }) => findNearestRoomCorner((plan.rooms || []) as any[], point, viewportRef.current.zoom),
     [plan.rooms]
   );
 

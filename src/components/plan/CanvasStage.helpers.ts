@@ -636,3 +636,30 @@ export const dragRectFromCorners = (x1: number, y1: number, x2: number, y2: numb
   width: Math.abs(x2 - x1),
   height: Math.abs(y2 - y1)
 });
+
+// Nearest room-polygon vertex within a zoom-scaled snap threshold (room-rect drawing). Pure.
+export const findNearestRoomCorner = (
+  rooms: any[],
+  point: { x: number; y: number },
+  zoom: number
+): { x: number; y: number } | null => {
+  const list = (rooms || []).filter(Boolean);
+  if (!list.length) return null;
+  const zoomValue = Math.max(0.2, zoom || 1);
+  const snapThreshold = 14 / zoomValue;
+  const snapThresholdSq = snapThreshold * snapThreshold;
+  let best: { x: number; y: number; distSq: number } | null = null;
+  for (const room of list) {
+    const points = getRoomPolygonPoints(room);
+    if (!points.length) continue;
+    for (const vertex of points) {
+      const dx = vertex.x - point.x;
+      const dy = vertex.y - point.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq > snapThresholdSq) continue;
+      if (!best || distSq < best.distSq) best = { x: vertex.x, y: vertex.y, distSq };
+    }
+  }
+  if (!best) return null;
+  return { x: best.x, y: best.y };
+};

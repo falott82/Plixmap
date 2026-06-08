@@ -20,7 +20,8 @@ import {
   getPolygonBounds,
   getPolygonLabelBounds,
   buildCameraFovPolygon,
-  dragRectFromCorners
+  dragRectFromCorners,
+  findNearestRoomCorner
 } from './CanvasStage.helpers';
 
 const square = [
@@ -167,6 +168,17 @@ describe('dragRectFromCorners', () => {
   it('normalizes two corners into an axis-aligned rect regardless of order', () => {
     expect(dragRectFromCorners(2, 3, 8, 9)).toEqual({ x: 2, y: 3, width: 6, height: 6 });
     expect(dragRectFromCorners(8, 9, 2, 3)).toEqual({ x: 2, y: 3, width: 6, height: 6 });
+  });
+});
+
+describe('findNearestRoomCorner', () => {
+  const rooms = [{ kind: 'rect', x: 0, y: 0, width: 10, height: 10 }];
+  it('snaps to a nearby corner within the zoom-scaled threshold', () => {
+    expect(findNearestRoomCorner(rooms, { x: 1, y: 1 }, 1)).toEqual({ x: 0, y: 0 });
+  });
+  it('returns null when no corner is within threshold', () => {
+    expect(findNearestRoomCorner(rooms, { x: 100, y: 100 }, 1)).toBeNull();
+    expect(findNearestRoomCorner([], { x: 0, y: 0 }, 1)).toBeNull();
   });
 });
 
