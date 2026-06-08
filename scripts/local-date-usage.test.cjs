@@ -10,10 +10,15 @@ test('plan meeting flows do not use UTC day slicing for current-day logic', () =
   const planView = read('src/components/plan/usePlanView.tsx');
   const duplicateModal = read('src/components/plan/RoomMeetingDuplicateModal.tsx');
   const meetingManager = read('src/components/meetings/MeetingManagerModal.tsx');
+  // The day-slicing logic moved into the helpers module when MeetingManagerModal
+  // was decomposed under 2k lines, so the guard follows it there.
+  const meetingManagerHelpers = read('src/components/meetings/MeetingManagerModal.helpers.tsx');
 
   assert.doesNotMatch(planView, /new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/);
   assert.doesNotMatch(duplicateModal, /new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/);
-  assert.match(meetingManager, /currentLocalIsoDay/);
+  assert.doesNotMatch(meetingManager, /new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/);
+  assert.doesNotMatch(meetingManagerHelpers, /new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/);
+  assert.match(meetingManager + meetingManagerHelpers, /currentLocalIsoDay/);
 });
 
 test('localDate utility derives day values from local date parts', () => {
