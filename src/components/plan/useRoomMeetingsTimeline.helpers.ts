@@ -143,3 +143,90 @@ export const computeRoomMeetingEditParticipantCandidates = (
   }
   return [...byExternalId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
 };
+
+export const computeRoomMeetingCheckInEntries = (
+  booking: MeetingBooking,
+  checkMap: Record<string, true> | null | undefined,
+  tsMap: Record<string, number> | null | undefined,
+  client: any
+): Array<any> => {
+    const checked = checkMap || {};
+    const timestamps = tsMap || {};
+    const clientLogo = String((client as any)?.logoUrl || '').trim() || null;
+    const businessPartners = Array.isArray((client as any)?.businessPartners) ? ((client as any).businessPartners as any[]) : [];
+    const businessPartnerByName = new Map<string, any>();
+    for (const bp of businessPartners) {
+      const key = String(bp?.name || '').trim().toLowerCase();
+      if (!key) continue;
+      businessPartnerByName.set(key, bp);
+    }
+    const participants = Array.isArray(booking?.participants) ? booking.participants : [];
+
+    const internal = participants
+      .filter((p: any) => (p?.kind || 'real_user') !== 'manual' && !p?.remote)
+      .map((p: any) => {
+        const label = String(p?.fullName || p?.externalId || '-').trim() || '-';
+        const email = p?.email ? String(p.email).trim() : '';
+        const entryKey = meetingCheckInEntryKey({ tag: p?.optional ? 'OPT' : 'INT', label, email });
+        return {
+          key: entryKey,
+          checked: !!checked[entryKey],
+          checkedAt: Number(timestamps[entryKey] || 0) || null,
+          label,
+          company: client?.shortName || client?.name || null,
+          email: email || null,
+          logoUrl: clientLogo,
+          kind: 'internal' as const
+        };
+      });
+
+    const manualSeen = new Set<string>();
+    const externalsFromParticipants = participants
+      .filter((p: any) => p?.kind === 'manual' && !p?.remote)
+      .map((p: any) => {
+        const label = String(p?.fullName || p?.externalId || '-').trim() || '-';
+        const email = p?.email ? String(p.email).trim() : '';
+        const company = String(p?.company || '').trim();
+        const identity = `${label.toLowerCase()}::${email.toLowerCase()}`;
+        manualSeen.add(identity);
+        const entryKey = meetingCheckInEntryKey({ tag: 'EXT', label, email });
+        const bp = businessPartnerByName.get(company.toLowerCase());
+        return {
+          key: entryKey,
+          checked: !!checked[entryKey],
+          checkedAt: Number(timestamps[entryKey] || 0) || null,
+          label,
+          company: company || null,
+          email: email || null,
+          logoUrl: String(bp?.logoUrl || '').trim() || null,
+          kind: 'external' as const
+        };
+      });
+
+    const externalsLegacy = (Array.isArray((booking as any)?.externalGuestsDetails) ? (booking as any).externalGuestsDetails : [])
+      .filter((g: any) => !g?.remote)
+      .map((g: any) => {
+        const label = String(g?.name || '-').trim() || '-';
+        const email = g?.email ? String(g.email).trim() : '';
+        const company = String((g as any)?.company || '').trim();
+        const identity = `${label.toLowerCase()}::${email.toLowerCase()}`;
+        if (manualSeen.has(identity)) return null;
+        const entryKey = meetingCheckInEntryKey({ tag: 'EXT', label, email });
+        const bp = businessPartnerByName.get(company.toLowerCase());
+        return {
+          key: entryKey,
+          checked: !!checked[entryKey],
+          checkedAt: Number(timestamps[entryKey] || 0) || null,
+          label,
+          company: company || null,
+          email: email || null,
+          logoUrl: String(bp?.logoUrl || '').trim() || null,
+          kind: 'external' as const
+        };
+      })
+      .filter(Boolean) as Array<any>;
+
+    return [...internal, ...externalsFromParticipants, ...externalsLegacy]
+      .filter((row) => row.checked)
+      .sort((a, b) => Number(b.checkedAt || 0) - Number(a.checkedAt || 0));
+};
