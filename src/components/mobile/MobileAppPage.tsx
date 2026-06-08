@@ -20,7 +20,7 @@ import { useLang, useT } from '../../i18n/useT';
 import { getMeetingTemporalState, getMeetingTimePhaseBadgeLabel } from '../../utils/meetingTime';
 
 import {
-  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, buildDmNameByUserId, buildMobileChatClientOptions, computeSyncBadge, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, computeChatInitials, filterMeetingsForRoom, filterRecentMobileChatMessages, parseMobileChatOverview, resolveChatMessageAuthorName, resolveSelectedChatClientName, selectAgendaMeetings, selectAgendaMonthDays, sortFilterMobileChatClientOptions, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
+  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, buildDmNameByUserId, buildMobileChatClientOptions, computeSyncBadge, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, computeChatInitials, filterMeetingsForRoom, filterRecentMobileChatMessages, parseMobileChatOverview, resolveChatMessageAuthorName, resolveSelectedChatClientName, selectAgendaMeetings, selectAgendaMonthDays, sortFilterMobileChatClientOptions, sumChatUnread, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
 } from './MobileAppPage.helpers';
 import { MobileAppPageBody } from './MobileAppPageBody';
 const MobileAppPage = () => {
@@ -627,10 +627,7 @@ const MobileAppPage = () => {
     });
   }, [displayMonth, day, meetings.length]);
 
-  const totalChatUnread = useMemo(
-    () => Object.values(chatUnreadByClientId || {}).reduce((acc, n) => acc + Math.max(0, Number(n || 0)), 0),
-    [chatUnreadByClientId]
-  );
+  const totalChatUnread = useMemo(() => sumChatUnread(chatUnreadByClientId), [chatUnreadByClientId]);
   const chatClientOptions = useMemo(
     () => buildMobileChatClientOptions(chatClientChannels, chatClientId, chatDmContacts, directMessageLabel),
     [chatClientChannels, chatClientId, chatDmContacts, directMessageLabel]

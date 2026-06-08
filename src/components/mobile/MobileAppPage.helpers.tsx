@@ -757,3 +757,7 @@ export const selectAgendaMonthDays = (
   if (String(agendaMonthPayload?.month || '') !== displayMonth) return {};
   return (agendaMonthPayload?.days || {}) as Record<string, number>;
 };
+
+// Total unread chat count across all clients/DMs. Pure.
+export const sumChatUnread = (chatUnreadByClientId: Record<string, number> | null | undefined): number =>
+  Object.values(chatUnreadByClientId || {}).reduce((acc, n) => acc + Math.max(0, Number(n || 0)), 0);
