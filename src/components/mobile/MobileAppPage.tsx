@@ -20,7 +20,7 @@ import { useLang, useT } from '../../i18n/useT';
 import { getMeetingTemporalState, getMeetingTimePhaseBadgeLabel } from '../../utils/meetingTime';
 
 import {
-  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, buildDmNameByUserId, buildMobileChatClientOptions, computeSyncBadge, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, computeChatInitials, filterRecentMobileChatMessages, parseMobileChatOverview, resolveSelectedChatClientName, sortFilterMobileChatClientOptions, isOpaqueChatIdentity, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
+  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, buildDmNameByUserId, buildMobileChatClientOptions, computeSyncBadge, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, computeChatInitials, filterMeetingsForRoom, filterRecentMobileChatMessages, parseMobileChatOverview, resolveChatMessageAuthorName, resolveSelectedChatClientName, selectAgendaMeetings, sortFilterMobileChatClientOptions, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
 } from './MobileAppPage.helpers';
 import { MobileAppPageBody } from './MobileAppPageBody';
 const MobileAppPage = () => {
@@ -593,20 +593,13 @@ const MobileAppPage = () => {
     return true;
   }, [user?.id]);
 
-  const meetings = useMemo(() => {
-    const rows = Array.isArray(agendaPayload?.meetings) ? agendaPayload!.meetings : [];
-    return rows.slice().sort((a, b) => Number(a.startAt) - Number(b.startAt));
-  }, [agendaPayload]);
+  const meetings = useMemo(() => selectAgendaMeetings(agendaPayload), [agendaPayload]);
   const agendaMonthDaysWithMeetings = useMemo(() => {
     if (String(agendaMonthPayload?.month || '') !== displayMonth) return {} as Record<string, number>;
     return (agendaMonthPayload?.days || {}) as Record<string, number>;
   }, [agendaMonthPayload, displayMonth]);
 
-  const meetingsForSelectedRoom = useMemo(() => {
-    const roomId = String(selectedRoomId || '').trim();
-    if (!roomId) return meetings;
-    return meetings.filter((m) => String(m.roomId || '') === roomId);
-  }, [meetings, selectedRoomId]);
+  const meetingsForSelectedRoom = useMemo(() => filterMeetingsForRoom(meetings, selectedRoomId), [meetings, selectedRoomId]);
 
   const now = Date.now();
   const hasInProgressMeeting = useMemo(
@@ -687,15 +680,12 @@ const MobileAppPage = () => {
   );
 
   const getChatMessageAuthorName = useCallback(
-    (msg: ChatMessage) => {
-      const mine = String(msg.userId || '') === String(user?.id || '');
-      if (mine) return `${String(user?.firstName || '').trim()} ${String(user?.lastName || '').trim()}`.trim() || String(user?.username || tr({ it: 'Io', en: 'Me' }));
-      const dmKnown = dmNameByUserId.get(String(msg.userId || '').trim());
-      if (dmKnown) return dmKnown;
-      if (!isOpaqueChatIdentity(msg.username)) return String(msg.username || '').trim();
-      return tr({ it: 'Utente', en: 'User' });
-    },
-    [dmNameByUserId, tr, user?.firstName, user?.id, user?.lastName, user?.username]
+    (msg: ChatMessage) =>
+      resolveChatMessageAuthorName(msg, user, dmNameByUserId, {
+        me: tr({ it: 'Io', en: 'Me' }),
+        user: tr({ it: 'Utente', en: 'User' })
+      }),
+    [dmNameByUserId, tr, user]
   );
 
   useEffect(() => {

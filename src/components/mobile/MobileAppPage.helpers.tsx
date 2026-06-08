@@ -719,3 +719,31 @@ export const buildDmNameByUserId = (
   }
   return map;
 };
+
+// Sorted agenda meetings (ascending by start). Pure.
+export const selectAgendaMeetings = (agendaPayload: MobileAgendaPayload | null): any[] => {
+  const rows = Array.isArray(agendaPayload?.meetings) ? agendaPayload!.meetings : [];
+  return rows.slice().sort((a, b) => Number(a.startAt) - Number(b.startAt));
+};
+
+// Filter meetings to a selected room (or all when none selected). Pure.
+export const filterMeetingsForRoom = (meetings: any[], selectedRoomId: string): any[] => {
+  const roomId = String(selectedRoomId || '').trim();
+  if (!roomId) return meetings;
+  return meetings.filter((m) => String(m.roomId || '') === roomId);
+};
+
+// Display name for a chat message author. Pure; user fields + labels passed in.
+export const resolveChatMessageAuthorName = (
+  msg: { userId?: string | number; username?: string },
+  user: { id?: string | number; firstName?: string; lastName?: string; username?: string } | null | undefined,
+  dmNameByUserId: Map<string, string>,
+  labels: { me: string; user: string }
+): string => {
+  const mine = String(msg.userId || '') === String(user?.id || '');
+  if (mine) return `${String(user?.firstName || '').trim()} ${String(user?.lastName || '').trim()}`.trim() || String(user?.username || labels.me);
+  const dmKnown = dmNameByUserId.get(String(msg.userId || '').trim());
+  if (dmKnown) return dmKnown;
+  if (!isOpaqueChatIdentity(msg.username)) return String(msg.username || '').trim();
+  return labels.user;
+};
