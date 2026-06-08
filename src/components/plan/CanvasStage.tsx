@@ -32,7 +32,6 @@ import {
   SAFETY_CARD_FONT_VALUES,
   sameSafetyCardDraftLayout,
   getDeskBounds,
-  getRotatedRectBounds,
   getViewportWorldBounds,
   isObjectPotentiallyVisible,
   intersectRaySegment,
@@ -46,6 +45,7 @@ import {
   pointInPolygon,
   nearestWallSegment,
   getPolygonLabelBounds,
+  computeObjectBounds as computeObjectBoundsImpl,
 } from './CanvasStage.helpers';
 
 interface Props {
@@ -1482,104 +1482,7 @@ const CanvasStageImpl = (
   }, []);
 
   const computeObjectBounds = useCallback(
-    (obj: MapObject) => {
-    const type = obj.type;
-    if (wallTypeIdSet.has(type) || type === 'quote') {
-      const pts = obj.points || [];
-      if (pts.length < 2) return null;
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const p of pts) {
-        minX = Math.min(minX, p.x);
-        minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x);
-        maxY = Math.max(maxY, p.y);
-      }
-      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
-      return { minX, minY, maxX, maxY };
-    }
-    const x = Number(obj.x);
-    const y = Number(obj.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-
-    if (type === 'text') {
-      const nodeBounds = getNodeBounds(obj);
-      if (nodeBounds) return nodeBounds;
-      const textSize = clamp(Number((obj as any).textSize ?? 18) || 18, 6, 160);
-      const textValue = String(obj.name || '');
-      const textLines = textValue ? textValue.split('\n') : [''];
-      const textLineHeight = 1.2;
-      const textNaturalWidth = Math.max(40, ...textLines.map((line) => estimateTextWidth(line || ' ', textSize)));
-      const textNaturalHeight = Math.max(textSize, textLines.length * textSize * textLineHeight);
-      const textPadding = Math.max(4, Math.round(textSize * 0.35));
-      const baseTextBoxWidth = Number((obj as any).textBoxWidth || 0);
-      const baseTextBoxHeight = Number((obj as any).textBoxHeight || 0);
-      const fallbackTextBoxWidth = Math.max(TEXT_BOX_DEFAULT_WIDTH, textNaturalWidth + textPadding * 2);
-      const fallbackTextBoxHeight = Math.max(TEXT_BOX_DEFAULT_HEIGHT, textNaturalHeight + textPadding * 2);
-      const rawTextBoxWidth =
-        Number.isFinite(baseTextBoxWidth) && baseTextBoxWidth > 0 ? baseTextBoxWidth : fallbackTextBoxWidth;
-      const rawTextBoxHeight =
-        Number.isFinite(baseTextBoxHeight) && baseTextBoxHeight > 0 ? baseTextBoxHeight : fallbackTextBoxHeight;
-      const freeScaleX = clamp(Number((obj as any).scaleX ?? 1) || 1, 0.2, 6);
-      const freeScaleY = clamp(Number((obj as any).scaleY ?? 1) || 1, 0.2, 6);
-      const width = Math.max(TEXT_BOX_MIN_WIDTH, rawTextBoxWidth * freeScaleX);
-      const height = Math.max(TEXT_BOX_MIN_HEIGHT, rawTextBoxHeight * freeScaleY);
-      const rotation = Number((obj as any).rotation || 0);
-      return getRotatedRectBounds(x, y, width, height, rotation);
-    }
-
-    if (type === 'image') {
-      const baseW = Math.max(40, Number((obj as any).imageWidth ?? 160) || 160);
-      const baseH = Math.max(30, Number((obj as any).imageHeight ?? 120) || 120);
-      const scaleX = clamp(Number((obj as any).scaleX ?? 1) || 1, 0.2, 6);
-      const scaleY = clamp(Number((obj as any).scaleY ?? 1) || 1, 0.2, 6);
-      const rotation = Number((obj as any).rotation || 0);
-      return getRotatedRectBounds(x, y, baseW * scaleX, baseH * scaleY, rotation);
-    }
-
-    const baseScale = clamp(Number(obj.scale ?? 1) || 1, 0.2, 6);
-
-    if (type === 'postit') {
-      const postItCompact = !!(obj as any).postitCompact;
-      const size = (postItCompact ? 26 : 36) * baseScale;
-      return getRotatedRectBounds(x, y, size, size, 0);
-    }
-
-    if (isDeskType(type)) {
-      const deskScaleX = clamp(Number(obj.scaleX ?? 1) || 1, 0.4, 4);
-      const deskScaleY = clamp(Number(obj.scaleY ?? 1) || 1, 0.4, 4);
-      const deskSize = 38 * baseScale;
-      const deskRectW = deskSize * 1.45;
-      const deskRectH = deskSize * 0.75;
-      const deskLongW = deskSize * 1.85;
-      const deskLongH = deskSize * 0.6;
-      const deskDoubleW = deskSize * 0.7;
-      const deskDoubleH = deskSize * 0.95;
-      const deskDoubleGap = 4 * baseScale;
-      const deskTrapBottom = deskSize * 1.15;
-      const deskTrapHeight = deskSize * 0.75;
-      const bounds = getDeskBounds(type, {
-        deskSize,
-        deskRectW,
-        deskRectH,
-        deskLongW,
-        deskLongH,
-        deskDoubleW,
-        deskDoubleH,
-        deskDoubleGap,
-        deskTrapBottom,
-        deskTrapHeight
-      });
-      const rotation = Number(obj.rotation || 0);
-      return getRotatedRectBounds(x, y, bounds.width * deskScaleX, bounds.height * deskScaleY, rotation);
-    }
-
-    const size = 36 * baseScale;
-    const rotation = type === 'camera' ? Number(obj.rotation || 0) : 0;
-    return getRotatedRectBounds(x, y, size, size, rotation);
-    },
+    (obj: MapObject) => computeObjectBoundsImpl(obj, { wallTypeIdSet, getNodeBounds, estimateTextWidth }),
     [estimateTextWidth, getNodeBounds, wallTypeIdSet]
   );
 
