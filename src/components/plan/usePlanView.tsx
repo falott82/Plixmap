@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { toast } from 'sonner';
-import { currentLocalIsoDay } from '../../utils/localDate';
 import { meetingIsoDayFromTs, meetingClockFromTs, shiftIsoDay, monthAnchorFromIso, shiftMonthAnchor, hmToMinutes } from './planViewTime';
 import { computeWallPolygonData } from './planViewWallGeometry';
 import { runRealtimeWsEffect } from './planViewRealtime';
@@ -36,7 +35,6 @@ import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLaye
 import { computeResolveWallPoint } from './planViewWallMeasureTools';
 import {
   computeGetClientSearchIndex,
-  computeOpenSchedulingFromHub,
   computeOpenEscapeRouteAt,
   computeEnsureObjectLayerVisible
 } from './planViewSearchScheduleTools';
@@ -75,7 +73,6 @@ import {
   computeMyMeetingsFiltered,
   computeSafetyEmergencyContacts,
   runToggleRevisionImmutable,
-  runOpenMeetingManager,
   runAddTypeToPalette,
   computeGetObjectBoundsForAlign,
   computeRoomStatsById,
@@ -144,6 +141,7 @@ import { usePlanMeasureQuoteToggles } from './usePlanMeasureQuoteToggles';
 import { usePlanScaleModeHandlers } from './usePlanScaleModeHandlers';
 import { usePlanWallDrawToggles } from './usePlanWallDrawToggles';
 import { usePlanWallPointHandlers } from './usePlanWallPointHandlers';
+import { usePlanMeetingOpenHandlers } from './usePlanMeetingOpenHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -179,7 +177,6 @@ import { usePlanDrawingState } from './usePlanDrawingState';
 import { usePlanLock } from './usePlanLock';
 export const UNLOCK_REQUEST_EVENT = 'plixmap_unlock_request';
 export const FORCE_UNLOCK_EVENT = 'plixmap_force_unlock';
-const OPEN_CLIENT_MEETINGS_EVENT = 'plixmap_open_client_meetings';
 const OPEN_MEETING_CENTER_EVENT = 'plixmap_open_meeting_center';
 const OPEN_MY_MEETINGS_EVENT = 'plixmap_open_my_meetings';
 const OPEN_MEETING_MANAGER_EVENT = 'plixmap_open_meeting_manager';
@@ -2710,25 +2707,22 @@ export const usePlanView = (planId: string) => {
   }, []);
 
 
-  const openMeetingManager = useCallback(
-    (preset?: { roomId?: string; floorPlanId?: string; siteId?: string; clientId?: string; day?: string }) => {
-      runOpenMeetingManager(preset, {
-        client,
-        site,
-        planId,
-        hasNavigationEdits,
-        isReadOnly,
-        setPendingMeetingManagerPreset,
-        setSaveRevisionModalPreset,
-        setSaveRevisionOpen,
-        push,
-        t,
-        setMeetingManagerPreset,
-        setMeetingManagerOpen
-      });
-    },
-    [client?.id, hasNavigationEdits, isReadOnly, planId, push, site?.id, t]
-  );
+  const { openMeetingManager, dispatchOpenClientMeetingsTimeline, openSchedulingFromHub } = usePlanMeetingOpenHandlers({
+    client,
+    site,
+    planId,
+    hasNavigationEdits,
+    isReadOnly,
+    canManageMeetingScheduling,
+    push,
+    t,
+    setPendingMeetingManagerPreset,
+    setSaveRevisionModalPreset,
+    setSaveRevisionOpen,
+    setMeetingManagerPreset,
+    setMeetingManagerOpen,
+    setPendingClientMeetingsPreset
+  });
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -2744,52 +2738,6 @@ export const usePlanView = (planId: string) => {
     window.addEventListener(OPEN_MEETING_MANAGER_EVENT, handler as EventListener);
     return () => window.removeEventListener(OPEN_MEETING_MANAGER_EVENT, handler as EventListener);
   }, [openMeetingManager]);
-
-  const dispatchOpenClientMeetingsTimeline = useCallback(
-    (preset?: { clientId?: string; siteId?: string; siteLocked?: boolean; day?: string; returnTo?: 'hub' | 'myMeetings' }) => {
-      const clientId = String(preset?.clientId || client?.id || '').trim();
-      if (!clientId) return;
-      window.dispatchEvent(
-        new CustomEvent(OPEN_CLIENT_MEETINGS_EVENT, {
-          detail: {
-            clientId,
-            siteId: String(preset?.siteId || site?.id || '').trim() || 'all',
-            siteLocked: !!preset?.siteLocked,
-            day: String(preset?.day || currentLocalIsoDay()),
-            returnTo: preset?.returnTo || null
-          }
-        })
-      );
-    },
-    [client?.id, site?.id]
-  );
-
-  const openSchedulingFromHub = useCallback(
-    (preset?: { clientId?: string; siteId?: string; siteLocked?: boolean; day?: string; returnTo?: 'hub' | 'myMeetings' }) =>
-      computeOpenSchedulingFromHub(preset, {
-        canManageMeetingScheduling,
-        client,
-        dispatchOpenClientMeetingsTimeline,
-        hasNavigationEdits,
-        isReadOnly,
-        push,
-        site,
-        t,
-        setPendingClientMeetingsPreset,
-        setSaveRevisionModalPreset,
-        setSaveRevisionOpen
-      }),
-    [
-      canManageMeetingScheduling,
-      client?.id,
-      dispatchOpenClientMeetingsTimeline,
-      hasNavigationEdits,
-      isReadOnly,
-      push,
-      site?.id,
-      t
-    ]
-  );
 
   const reloadMyMeetings = useCallback(async () => {
     await computeReloadMyMeetings({ t, setMyMeetingsModal });
