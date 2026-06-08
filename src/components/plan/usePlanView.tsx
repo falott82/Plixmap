@@ -119,6 +119,7 @@ import { useRoomMeetingsTimeline, type MyMeetingsModalState } from './useRoomMee
 import { usePlanSafetyCard } from './usePlanSafetyCard';
 import { usePlanCapacity } from './usePlanCapacity';
 import { usePlanContextDerived, type PlanContextMenuState } from './usePlanContextDerived';
+import type { PlanObjectModalState, RoomDepartmentConfirmState } from './planViewStateTypes';
 import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
 import { usePlanDoorModalHandlers } from './usePlanDoorModalHandlers';
 import { usePlanCorridorNameHandlers } from './usePlanCorridorNameHandlers';
@@ -522,12 +523,7 @@ export const usePlanView = (planId: string) => {
   const dataVersion = useDataStore((s) => s.version);
   const [pendingType, setPendingType] = useState<MapObjectType | null>(null);
   const [linkCreateMode, setLinkCreateMode] = useState<'arrow' | 'cable'>('arrow');
-  const [modalState, setModalState] = useState<
-    | { mode: 'create'; type: MapObjectType; coords: { x: number; y: number }; textBoxWidth?: number; textBoxHeight?: number }
-    | { mode: 'edit'; objectId: string }
-    | { mode: 'duplicate'; objectId: string; coords: { x: number; y: number } }
-    | null
-  >(null);
+  const [modalState, setModalState] = useState<PlanObjectModalState>(null);
   const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null);
   const [pendingRoomDeletes, setPendingRoomDeletes] = useState<string[]>([]);
   const [confirmDeleteViewId, setConfirmDeleteViewId] = useState<string | null>(null);
@@ -549,15 +545,7 @@ export const usePlanView = (planId: string) => {
   });
   const [realUserPicker, setRealUserPicker] = useState<{ x: number; y: number } | null>(null);
   const [realUserImportMissing, setRealUserImportMissing] = useState(false);
-  const [roomDepartmentConfirm, setRoomDepartmentConfirm] = useState<{
-    objectId: string;
-    userName: string;
-    x: number;
-    y: number;
-    roomId: string;
-    roomName: string;
-    departmentToAdd: string;
-  } | null>(null);
+  const [roomDepartmentConfirm, setRoomDepartmentConfirm] = useState<RoomDepartmentConfirmState>(null);
   const [undoConfirm, setUndoConfirm] = useState<{ id: string; name: string } | null>(null);
   const [overlapNotice, setOverlapNotice] = useState<string | null>(null);
   const roomOverlapNoticeRef = useRef(0);
