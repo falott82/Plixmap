@@ -42,13 +42,11 @@ import { createCustomFieldsBulk } from '../../api/customFields';
 import { useLang, useT } from '../../i18n/useT';
 import { Client, IconName, WifiAntennaModel } from '../../store/types';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { isDeskType } from '../plan/deskTypes';
 import { WALL_TYPE_IDS, WIFI_DEFAULT_STANDARD, WIFI_STANDARD_OPTIONS } from '../../store/data';
 import { getWallTypeColor } from '../../utils/wallColors';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { isSecurityTypeId } from '../../store/security';
 
-import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv, sortWifiModels } from './ObjectTypesPanel.helpers';
+import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv, sortWifiModels, computeObjectTypePaletteDefs } from './ObjectTypesPanel.helpers';
 import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal, DoorHistoryModal, PendingRequestsPromptModal } from './ObjectTypesPanelModals';
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
@@ -207,47 +205,22 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     [wifiSort.dir, wifiSort.key]
   );
 
-  const enabledDefs = useMemo(() => {
-    if (isWallsSection || isDoorsSection) return [];
-    const term = q.trim().toLowerCase();
-    const out: any[] = [];
-    for (const id of enabled) {
-      const d = defById.get(id);
-      if (!d) continue;
-      if (isWallType(d.id)) continue;
-      if ((d as any)?.category === 'door') continue;
-      if (isSecuritySection ? !isSecurityTypeId(d.id) : isSecurityTypeId(d.id)) continue;
-      if (isDesksSection ? !isDeskType(d.id) : isDeskType(d.id)) continue;
-      if (
-        term &&
-        !`${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term)
-      )
-        continue;
-      out.push(d);
-    }
-    return out;
-  }, [defById, enabled, isDesksSection, isDoorsSection, isSecuritySection, isWallType, isWallsSection, q]);
-
-  const availableDefs = useMemo(() => {
-    if (isWallsSection || isDoorsSection) return [];
-    const used = new Set(enabled);
-    const list = (objectTypes || []).filter((d) => {
-      if (used.has(d.id)) return false;
-      if (isWallType(d.id)) return false;
-      if ((d as any)?.category === 'door') return false;
-      if (isSecuritySection ? !isSecurityTypeId(d.id) : isSecurityTypeId(d.id)) return false;
-      return isDesksSection ? isDeskType(d.id) : !isDeskType(d.id);
-    });
-    const term = q.trim().toLowerCase();
-    const sorted = list.slice().sort((a, b) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
-    if (!term) return sorted;
-    return sorted.filter((d) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term));
-  }, [enabled, isDesksSection, isDoorsSection, isSecuritySection, isWallType, isWallsSection, lang, objectTypes, q]);
-
-  const paletteDefs = useMemo(() => {
-    const enabledIds = new Set(enabled);
-    return [...enabledDefs, ...availableDefs.filter((d) => !enabledIds.has(d.id))];
-  }, [availableDefs, enabled, enabledDefs]);
+  const { paletteDefs } = useMemo(
+    () =>
+      computeObjectTypePaletteDefs({
+        defById,
+        enabled,
+        objectTypes,
+        isWallsSection,
+        isDoorsSection,
+        isSecuritySection,
+        isDesksSection,
+        isWallType,
+        lang,
+        q
+      }),
+    [defById, enabled, isDesksSection, isDoorsSection, isSecuritySection, isWallType, isWallsSection, lang, objectTypes, q]
+  );
 
   const wallDefs = useMemo(() => {
     const list = (objectTypes || []).filter((d) => isWallType(d.id));

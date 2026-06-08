@@ -1,5 +1,7 @@
 // Pure types + geometry helpers extracted verbatim from ObjectTypesPanel.tsx (<2k).
 import { nanoid } from 'nanoid';
+import { isDeskType } from '../plan/deskTypes';
+import { isSecurityTypeId } from '../../store/security';
 import type { Corridor, DoorVerificationEntry, FloorPlan, IconName, Room } from '../../store/types';
 
 export type Point = { x: number; y: number };
@@ -407,4 +409,54 @@ export const sortWifiModels = (
     return (a.modelCode || '').localeCompare(b.modelCode || '');
   });
   return list;
+};
+
+// Compute the enabled / available / merged palette object-type defs for the
+// current section + search term. Pure; isWallType is passed in (it closes over
+// the wall-type id set). Extracted from ObjectTypesPanel.
+export const computeObjectTypePaletteDefs = (params: {
+  defById: Map<string, any>;
+  enabled: string[];
+  objectTypes: any[];
+  isWallsSection: boolean;
+  isDoorsSection: boolean;
+  isSecuritySection: boolean;
+  isDesksSection: boolean;
+  isWallType: (id: string) => boolean;
+  lang: string;
+  q: string;
+}): { enabledDefs: any[]; availableDefs: any[]; paletteDefs: any[] } => {
+  const { defById, enabled, objectTypes, isWallsSection, isDoorsSection, isSecuritySection, isDesksSection, isWallType, lang, q } = params;
+  const term = q.trim().toLowerCase();
+  const enabledDefs: any[] = [];
+  if (!(isWallsSection || isDoorsSection)) {
+    for (const id of enabled) {
+      const d = defById.get(id);
+      if (!d) continue;
+      if (isWallType(d.id)) continue;
+      if ((d as any)?.category === 'door') continue;
+      if (isSecuritySection ? !isSecurityTypeId(d.id) : isSecurityTypeId(d.id)) continue;
+      if (isDesksSection ? !isDeskType(d.id) : isDeskType(d.id)) continue;
+      if (term && !`${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term)) continue;
+      enabledDefs.push(d);
+    }
+  }
+  let availableDefs: any[] = [];
+  if (!(isWallsSection || isDoorsSection)) {
+    const used = new Set(enabled);
+    const list = (objectTypes || []).filter((d) => {
+      if (used.has(d.id)) return false;
+      if (isWallType(d.id)) return false;
+      if ((d as any)?.category === 'door') return false;
+      if (isSecuritySection ? !isSecurityTypeId(d.id) : isSecurityTypeId(d.id)) return false;
+      return isDesksSection ? isDeskType(d.id) : !isDeskType(d.id);
+    });
+    const sorted = list.slice().sort((a, b) => (a.name?.[lang] || a.id).localeCompare(b.name?.[lang] || b.id));
+    availableDefs = term
+      ? sorted.filter((d) => `${d.id} ${d.name?.it || ''} ${d.name?.en || ''}`.toLowerCase().includes(term))
+      : sorted;
+  }
+  const enabledIds = new Set(enabled);
+  const paletteDefs = [...enabledDefs, ...availableDefs.filter((d) => !enabledIds.has(d.id))];
+  return { enabledDefs, availableDefs, paletteDefs };
 };
