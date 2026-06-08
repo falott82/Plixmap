@@ -69,6 +69,7 @@ import {
 import {
   computeInferDefaultLayerIds,
   computeLinksModalRows,
+  computeCollectUserDepartments,
   computeRecommendedObjectScale,
   computeClientBusinessPartnerNames,
   computeMeetingLocationLabels,
@@ -4671,20 +4672,7 @@ export const usePlanView = (planId: string) => {
     },
     [t]
   );
-  const collectUserDepartments = useCallback((obj: MapObject) => {
-    const source = [(obj as any).externalDept1, (obj as any).externalDept2, (obj as any).externalDept3];
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const raw of source) {
-      const normalized = String(raw || '').trim();
-      if (!normalized) continue;
-      const folded = normalized.toLocaleLowerCase();
-      if (seen.has(folded)) continue;
-      seen.add(folded);
-      out.push(normalized);
-    }
-    return out;
-  }, []);
+  const collectUserDepartments = useCallback((obj: MapObject) => computeCollectUserDepartments(obj), []);
 
   const rooms = useMemo(() => renderPlan?.rooms || [], [renderPlan?.rooms]);
   const corridors = useMemo(() => (renderPlan?.corridors || []) as Corridor[], [renderPlan?.corridors]);

@@ -47,6 +47,23 @@ export const computeInferDefaultLayerIds = (
       return layerIdSet ? ids.filter((id) => layerIdSet.has(id)) : ids;
 };
 
+// Pure derivation of an object's distinct external departments (trimmed, deduped
+// case-insensitively, original order preserved).
+export const computeCollectUserDepartments = (obj: any): string[] => {
+  const source = [(obj as any).externalDept1, (obj as any).externalDept2, (obj as any).externalDept3];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of source) {
+    const normalized = String(raw || '').trim();
+    if (!normalized) continue;
+    const folded = normalized.toLocaleLowerCase();
+    if (seen.has(folded)) continue;
+    seen.add(folded);
+    out.push(normalized);
+  }
+  return out;
+};
+
 // Pure derivation of a recommended default object scale from the plan's largest
 // dimension (1.0 below 3000px, ramping to 2.4 at/above 12000px).
 export const computeRecommendedObjectScale = (width: number, height: number): number => {
