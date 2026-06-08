@@ -42,6 +42,9 @@ import {
   getCorridorEdgePoint,
   getClosestCorridorEdgePoint,
   getRoomEdgePoint,
+  pointInPolygon,
+  nearestWallSegment,
+  getPolygonLabelBounds,
 } from './CanvasStage.helpers';
 
 interface Props {
@@ -766,133 +769,6 @@ const CanvasStageImpl = (
 
   const estimateTextWidth = useCallback((text: string, fontSize: number) => text.length * fontSize * 0.6, []);
 
-  const pointInPolygon = (x: number, y: number, points: { x: number; y: number }[]) => {
-    let inside = false;
-    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
-      const xi = points[i].x;
-      const yi = points[i].y;
-      const xj = points[j].x;
-      const yj = points[j].y;
-      const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 0.000001) + xi;
-      if (intersects) inside = !inside;
-    }
-    return inside;
-  };
-
-
-  const distancePointToSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    if (!dx && !dy) return Math.hypot(p.x - a.x, p.y - a.y);
-    const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy);
-    const clamped = Math.max(0, Math.min(1, t));
-    const proj = { x: a.x + clamped * dx, y: a.y + clamped * dy };
-    return Math.hypot(p.x - proj.x, p.y - proj.y);
-  };
-
-  const nearestWallSegment = (points: { x: number; y: number }[], target: { x: number; y: number }) => {
-    if (points.length < 2) return null;
-    let best: { index: number; length: number; distance: number } | null = null;
-    for (let i = 0; i < points.length - 1; i += 1) {
-      const a = points[i];
-      const b = points[i + 1];
-      const length = Math.hypot(b.x - a.x, b.y - a.y);
-      const distance = distancePointToSegment(target, a, b);
-      if (!best || distance < best.distance) {
-        best = { index: i, length, distance };
-      }
-    }
-    return best;
-  };
-
-  const findInteriorPointAtY = (y: number, points: { x: number; y: number }[]) => {
-    const xs: number[] = [];
-    for (let i = 0; i < points.length; i++) {
-      const p1 = points[i];
-      const p2 = points[(i + 1) % points.length];
-      const y1 = p1.y;
-      const y2 = p2.y;
-      if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
-        const x = p1.x + ((y - y1) * (p2.x - p1.x)) / (y2 - y1);
-        xs.push(x);
-      }
-    }
-    if (xs.length < 2) return null;
-    xs.sort((a, b) => a - b);
-    let best: { x: number; y: number } | null = null;
-    let bestLen = -1;
-    for (let i = 0; i < xs.length - 1; i += 2) {
-      const x1 = xs[i];
-      const x2 = xs[i + 1];
-      if (x2 <= x1) continue;
-      const len = x2 - x1;
-      if (len > bestLen) {
-        bestLen = len;
-        best = { x: (x1 + x2) / 2, y };
-      }
-    }
-    return best;
-  };
-
-  const getPolygonBounds = (points: { x: number; y: number }[]) => {
-    if (!points.length) return { x: 0, y: 0, width: 0, height: 0 };
-    let minX = points[0].x;
-    let minY = points[0].y;
-    let maxX = points[0].x;
-    let maxY = points[0].y;
-    for (const p of points) {
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x);
-      maxY = Math.max(maxY, p.y);
-    }
-    return { x: minX, y: minY, width: Math.max(0, maxX - minX), height: Math.max(0, maxY - minY) };
-  };
-
-  const getPolygonLabelBounds = (points: { x: number; y: number }[]) => {
-    const bounds = getPolygonBounds(points);
-    if (!points.length || !bounds.width || !bounds.height) return bounds;
-    const minDim = Math.min(bounds.width, bounds.height);
-    const step = Math.max(4, minDim / 12);
-    for (let shrink = 0; shrink <= minDim / 2; shrink += step) {
-      const inner = {
-        x: bounds.x + shrink,
-        y: bounds.y + shrink,
-        width: bounds.width - shrink * 2,
-        height: bounds.height - shrink * 2
-      };
-      if (inner.width < 24 || inner.height < 18) break;
-      const corners = [
-        { x: inner.x, y: inner.y },
-        { x: inner.x + inner.width, y: inner.y },
-        { x: inner.x + inner.width, y: inner.y + inner.height },
-        { x: inner.x, y: inner.y + inner.height }
-      ];
-      if (corners.every((p) => pointInPolygon(p.x, p.y, points))) return inner;
-    }
-    const centroid = polygonCentroid(points);
-    const centerY = bounds.y + bounds.height / 2;
-    const candidateYs = [
-      centerY,
-      centroid.y,
-      bounds.y + bounds.height * 0.35,
-      bounds.y + bounds.height * 0.65
-    ].filter((y) => Number.isFinite(y));
-    for (const y of candidateYs) {
-      const p = findInteriorPointAtY(y, points);
-      if (p) {
-        const width = Math.min(bounds.width, 160);
-        const height = Math.min(bounds.height, 48);
-        return {
-          x: clamp(p.x - width / 2, bounds.x, bounds.x + bounds.width - width),
-          y: clamp(p.y - height / 2, bounds.y, bounds.y + bounds.height - height),
-          width,
-          height
-        };
-      }
-    }
-    return bounds;
-  };
 
   const renderRoomLabels = (options: {
     bounds: { x: number; y: number; width: number; height: number };
