@@ -34,6 +34,7 @@ import {
   computeRoomMeetingCheckInEntries,
   buildRoomMeetingSearchMatches,
   normalizeBookingParticipantsDraft,
+  computeTimelineScrollTargetPx,
   type SiteMeetingParticipantCandidate
 } from './useRoomMeetingsTimeline.helpers';
 import type { RoomMeetingDuplicateModalState } from './RoomMeetingDuplicateModal';
@@ -430,42 +431,12 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
     const modal = roomMeetingsTimelineModal;
     const scroller = roomMeetingsTimelineScrollRef.current;
     if (!modal || !scroller || modal.loading) return;
-    const bookings = modal.bookings || [];
-    let minMinutes = 7 * 60;
-    let maxMinutes = 20 * 60;
-    for (const booking of bookings) {
-      const s = new Date(Number(booking.startAt || 0));
-      const e = new Date(Number(booking.endAt || 0));
-      if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) continue;
-      minMinutes = Math.min(minMinutes, s.getHours() * 60 + s.getMinutes());
-      maxMinutes = Math.max(maxMinutes, e.getHours() * 60 + e.getMinutes());
-    }
-    minMinutes = Math.max(0, Math.floor((minMinutes - 30) / 60) * 60);
-    maxMinutes = Math.min(24 * 60, Math.ceil((maxMinutes + 30) / 60) * 60);
-    if (maxMinutes - minMinutes < 6 * 60) maxMinutes = Math.min(24 * 60, minMinutes + 6 * 60);
-    const total = Math.max(1, maxMinutes - minMinutes);
-    const timelineWidthPx = Math.max(980, Math.max(6, Math.ceil((maxMinutes - minMinutes) / 60)) * 120);
-    const labelColPx = 240;
-    const highlightedBooking = roomMeetingsTimelineHighlightBookingId
-      ? bookings.find((booking) => String(booking.id || '') === String(roomMeetingsTimelineHighlightBookingId))
-      : null;
-    let target: number | null = null;
-    if (highlightedBooking) {
-      const start = new Date(Number(highlightedBooking.startAt || 0));
-      const end = new Date(Number(highlightedBooking.endAt || 0));
-      const startMinutes = start.getHours() * 60 + start.getMinutes();
-      const endMinutes = end.getHours() * 60 + end.getMinutes();
-      const midMinutes = (startMinutes + endMinutes) / 2;
-      const x = labelColPx + ((midMinutes - minMinutes) / total) * timelineWidthPx;
-      target = Math.max(0, x - scroller.clientWidth / 2);
-    } else {
-      const nowDate = new Date();
-      const todayIsoLocal = currentLocalIsoDay();
-      if (String(modal.day || '') !== todayIsoLocal) return;
-      const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
-      const nowX = labelColPx + ((nowMinutes - minMinutes) / total) * timelineWidthPx;
-      target = Math.max(0, nowX - scroller.clientWidth / 2);
-    }
+    const target = computeTimelineScrollTargetPx(
+      modal.bookings || [],
+      roomMeetingsTimelineHighlightBookingId,
+      String(modal.day || ''),
+      scroller.clientWidth
+    );
     if (target == null) return;
     const raf = window.requestAnimationFrame(() => {
       scroller.scrollLeft = target as number;

@@ -295,3 +295,43 @@ export const normalizeBookingParticipantsDraft = (
       company: row?.company ? String(row.company) : null
     };
   });
+
+export const computeTimelineScrollTargetPx = (
+  bookings: any[],
+  highlightBookingId: string | null | undefined,
+  modalDay: string,
+  scrollerClientWidth: number
+): number | null => {
+    let minMinutes = 7 * 60;
+    let maxMinutes = 20 * 60;
+    for (const booking of bookings || []) {
+      const s = new Date(Number(booking.startAt || 0));
+      const e = new Date(Number(booking.endAt || 0));
+      if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) continue;
+      minMinutes = Math.min(minMinutes, s.getHours() * 60 + s.getMinutes());
+      maxMinutes = Math.max(maxMinutes, e.getHours() * 60 + e.getMinutes());
+    }
+    minMinutes = Math.max(0, Math.floor((minMinutes - 30) / 60) * 60);
+    maxMinutes = Math.min(24 * 60, Math.ceil((maxMinutes + 30) / 60) * 60);
+    if (maxMinutes - minMinutes < 6 * 60) maxMinutes = Math.min(24 * 60, minMinutes + 6 * 60);
+    const total = Math.max(1, maxMinutes - minMinutes);
+    const timelineWidthPx = Math.max(980, Math.max(6, Math.ceil((maxMinutes - minMinutes) / 60)) * 120);
+    const labelColPx = 240;
+    const highlightedBooking = highlightBookingId
+      ? (bookings || []).find((booking) => String(booking.id || '') === String(highlightBookingId))
+      : null;
+    if (highlightedBooking) {
+      const start = new Date(Number(highlightedBooking.startAt || 0));
+      const end = new Date(Number(highlightedBooking.endAt || 0));
+      const startMinutes = start.getHours() * 60 + start.getMinutes();
+      const endMinutes = end.getHours() * 60 + end.getMinutes();
+      const midMinutes = (startMinutes + endMinutes) / 2;
+      const x = labelColPx + ((midMinutes - minMinutes) / total) * timelineWidthPx;
+      return Math.max(0, x - scrollerClientWidth / 2);
+    }
+    const nowDate = new Date();
+    if (String(modalDay || '') !== currentLocalIsoDay()) return null;
+    const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
+    const nowX = labelColPx + ((nowMinutes - minMinutes) / total) * timelineWidthPx;
+    return Math.max(0, nowX - scrollerClientWidth / 2);
+};
