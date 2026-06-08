@@ -47,6 +47,29 @@ export const computeInferDefaultLayerIds = (
       return layerIdSet ? ids.filter((id) => layerIdSet.has(id)) : ids;
 };
 
+// Pure derivation of the distinct real_user participant candidates across a
+// site's floor plans (deduped by externalId, sorted by full name).
+export const computeSiteMeetingParticipantCandidates = (siteFloorPlans: FloorPlan[]) => {
+  const byExternalId = new Map<
+    string,
+    { externalId: string; fullName: string; email: string | null; department?: string | null; phone?: string | null }
+  >();
+  for (const fp of siteFloorPlans) {
+    for (const obj of (((fp as any)?.objects || []) as any[])) {
+      if (String((obj as any)?.type || '') !== 'real_user') continue;
+      const externalId = String((obj as any)?.externalUserId || '').trim();
+      if (!externalId) continue;
+      if (byExternalId.has(externalId)) continue;
+      const first = String((obj as any)?.firstName || '').trim();
+      const last = String((obj as any)?.lastName || '').trim();
+      const fullName = `${first} ${last}`.trim() || String((obj as any).name || '').trim() || externalId;
+      const email = String((obj as any)?.externalEmail || '').trim() || null;
+      byExternalId.set(externalId, { externalId, fullName, email });
+    }
+  }
+  return [...byExternalId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
+};
+
 export type LinksModalRowsDeps = {
   linksModalObjectId: string | null | undefined;
   renderPlan: FloorPlan | undefined;

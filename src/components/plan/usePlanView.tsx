@@ -65,6 +65,7 @@ import {
 import {
   computeInferDefaultLayerIds,
   computeLinksModalRows,
+  computeSiteMeetingParticipantCandidates,
   runApplyHistorySnapshot,
   runUnlockRequestEffect,
   runRevertUnsavedChanges,
@@ -945,26 +946,10 @@ export const usePlanView = (planId: string) => {
         : [],
     [client]
   );
-  const siteMeetingParticipantCandidates = useMemo(() => {
-    const byExternalId = new Map<
-      string,
-      { externalId: string; fullName: string; email: string | null; department?: string | null; phone?: string | null }
-    >();
-    for (const fp of siteFloorPlans) {
-      for (const obj of (((fp as any)?.objects || []) as MapObject[])) {
-        if (String((obj as any)?.type || '') !== 'real_user') continue;
-        const externalId = String((obj as any)?.externalUserId || '').trim();
-        if (!externalId) continue;
-        if (byExternalId.has(externalId)) continue;
-        const first = String((obj as any)?.firstName || '').trim();
-        const last = String((obj as any)?.lastName || '').trim();
-        const fullName = `${first} ${last}`.trim() || String(obj.name || '').trim() || externalId;
-        const email = String((obj as any)?.externalEmail || '').trim() || null;
-        byExternalId.set(externalId, { externalId, fullName, email });
-      }
-    }
-    return [...byExternalId.values()].sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }));
-  }, [siteFloorPlans]);
+  const siteMeetingParticipantCandidates = useMemo(
+    () => computeSiteMeetingParticipantCandidates(siteFloorPlans),
+    [siteFloorPlans]
+  );
   useEffect(() => runMeetingOverviewEffect({
     client,
     site,
