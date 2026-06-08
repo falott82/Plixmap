@@ -14,8 +14,34 @@ export const usePlanContextMenuHandlers = (deps: {
   roomDoorDraft: unknown;
   createRoomDoorFromDraft: (roomId: string, point: { x: number; y: number }) => boolean | void;
   planScale: { start?: unknown; end?: unknown } | null | undefined;
+  isRackLinkId: (id: string) => boolean;
 }) => {
-  const { dismissSelectionHintToasts, setContextMenu, roomDoorDraft, createRoomDoorFromDraft, planScale } = deps;
+  const { dismissSelectionHintToasts, setContextMenu, roomDoorDraft, createRoomDoorFromDraft, planScale, isRackLinkId } = deps;
+
+  const handleObjectContextMenu = useCallback(
+    ({ id, clientX, clientY, wallSegmentLengthPx }: { id: string; wallSegmentLengthPx?: number } & XY) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'object', id, x: clientX, y: clientY, wallSegmentLengthPx });
+    },
+    [dismissSelectionHintToasts, setContextMenu]
+  );
+
+  const handleLinkContextMenu = useCallback(
+    ({ id, clientX, clientY }: { id: string } & XY) => {
+      if (isRackLinkId(id)) return;
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'link', id, x: clientX, y: clientY });
+    },
+    [dismissSelectionHintToasts, isRackLinkId, setContextMenu]
+  );
+
+  const handleSafetyCardContextMenu = useCallback(
+    ({ clientX, clientY, worldX, worldY }: WorldXY) => {
+      dismissSelectionHintToasts();
+      setContextMenu({ kind: 'safety_card', x: clientX, y: clientY, worldX, worldY });
+    },
+    [dismissSelectionHintToasts, setContextMenu]
+  );
 
   const handleRoomContextMenu = useCallback(
     ({ id, clientX, clientY, worldX, worldY }: { id: string } & WorldXY) => {
@@ -76,6 +102,9 @@ export const usePlanContextMenuHandlers = (deps: {
   );
 
   return {
+    handleObjectContextMenu,
+    handleLinkContextMenu,
+    handleSafetyCardContextMenu,
     handleRoomContextMenu,
     handleCorridorContextMenu,
     handleCorridorConnectionContextMenu,

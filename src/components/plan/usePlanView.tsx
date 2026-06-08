@@ -2696,23 +2696,6 @@ export const usePlanView = (planId: string) => {
 	    ]
 	  );
 
-  const handleObjectContextMenu = useCallback(
-    ({
-      id,
-      clientX,
-      clientY,
-      wallSegmentLengthPx
-    }: {
-      id: string;
-      clientX: number;
-      clientY: number;
-      wallSegmentLengthPx?: number;
-    }) => {
-      dismissSelectionHintToasts();
-      setContextMenu({ kind: 'object', id, x: clientX, y: clientY, wallSegmentLengthPx });
-    },
-    [dismissSelectionHintToasts]
-  );
 
   const handleWallQuickMenu = useCallback(
     ({ id, clientX, clientY, world }: { id: string; clientX: number; clientY: number; world: { x: number; y: number } }) => {
@@ -2800,14 +2783,6 @@ export const usePlanView = (planId: string) => {
     setMapSubmenu((prev) => (prev === section ? null : section));
   }, []);
 
-  const handleLinkContextMenu = useCallback(
-    ({ id, clientX, clientY }: { id: string; clientX: number; clientY: number }) => {
-      if (isRackLinkId(id)) return;
-      dismissSelectionHintToasts();
-      setContextMenu({ kind: 'link', id, x: clientX, y: clientY });
-    },
-    [dismissSelectionHintToasts]
-  );
 
   const openMeetingManager = useCallback(
     (preset?: { roomId?: string; floorPlanId?: string; siteId?: string; clientId?: string; day?: string }) => {
@@ -2931,13 +2906,16 @@ export const usePlanView = (planId: string) => {
   }, [myMeetingsModal?.returnToHub]);
 
   const {
+    handleObjectContextMenu,
+    handleLinkContextMenu,
+    handleSafetyCardContextMenu,
     handleRoomContextMenu,
     handleCorridorContextMenu,
     handleCorridorConnectionContextMenu,
     handleCorridorDoorContextMenu,
     handleRoomDoorContextMenu,
     handleScaleContextMenu
-  } = usePlanContextMenuHandlers({ dismissSelectionHintToasts, setContextMenu, roomDoorDraft, createRoomDoorFromDraft, planScale });
+  } = usePlanContextMenuHandlers({ dismissSelectionHintToasts, setContextMenu, roomDoorDraft, createRoomDoorFromDraft, planScale, isRackLinkId });
 
   const handleScaleDoubleClick = useCallback(() => {
     if (!planScale?.start || !planScale?.end || isReadOnly) return;
@@ -3025,13 +3003,6 @@ export const usePlanView = (planId: string) => {
     ]
   );
 
-  const handleSafetyCardContextMenu = useCallback(
-    ({ clientX, clientY, worldX, worldY }: { clientX: number; clientY: number; worldX: number; worldY: number }) => {
-      dismissSelectionHintToasts();
-      setContextMenu({ kind: 'safety_card', x: clientX, y: clientY, worldX, worldY });
-    },
-    [dismissSelectionHintToasts]
-  );
 
   const openEscapeRouteAt = useCallback(
     (point: { x: number; y: number }, sourceKind: 'map' | 'room' | 'corridor') =>
