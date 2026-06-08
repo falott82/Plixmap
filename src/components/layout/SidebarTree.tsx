@@ -43,7 +43,9 @@ import {
   buildClientMeetingSearchResults,
   computeRoomBusyIntervals,
   findDuplicateSlot,
-  buildDuplicateRoomOptions
+  buildDuplicateRoomOptions,
+  enumerateMonthDays,
+  partitionDuplicateMonthDays
 } from './SidebarTree.helpers';
 import { SidebarLockMenu } from './SidebarLockMenu';
 import { SidebarPlanMenu } from './SidebarPlanMenu';
@@ -1059,11 +1061,7 @@ const SidebarTree = () => {
     const today = todayIso();
     const y = monthDate.getFullYear();
     const m = monthDate.getMonth();
-    const daysInMonth = new Date(y, m + 1, 0).getDate();
-    const monthDays = Array.from({ length: daysInMonth }, (_, idx) => {
-      const d = new Date(y, m, idx + 1);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    });
+    const monthDays = enumerateMonthDays(y, m);
     const unknownDays = monthDays.filter((iso) => !dup.availabilityByDay?.[iso]);
     if (!unknownDays.length) return;
     const sourceSlot = resolveClientDuplicateSlot(booking, baseDay, 'same');
@@ -1081,22 +1079,13 @@ const SidebarTree = () => {
       return;
     }
 
-    const prefilled: Record<string, any> = {};
-    const queue: string[] = [];
-    for (const day of unknownDays) {
-      if (day <= baseDay) {
-        prefilled[day] = {
-          state: 'blocked',
-          reason: day < today ? t({ it: 'Giorno passato', en: 'Past day' }) : t({ it: 'Giorno di origine', en: 'Source day' })
-        };
-        continue;
-      }
-      if (day < today) {
-        prefilled[day] = { state: 'blocked', reason: t({ it: 'Giorno passato', en: 'Past day' }) };
-        continue;
-      }
-      queue.push(day);
-    }
+    const { prefilled, queue } = partitionDuplicateMonthDays(
+      unknownDays,
+      baseDay,
+      today,
+      t({ it: 'Giorno passato', en: 'Past day' }),
+      t({ it: 'Giorno di origine', en: 'Source day' })
+    );
     if (!Object.keys(prefilled).length && !queue.length) return;
 
     setClientMeetingsDuplicateModal((prev) => {

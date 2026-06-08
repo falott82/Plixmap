@@ -610,3 +610,34 @@ export const buildDuplicateRoomOptions = (
       : String(roomOptions[0]?.roomId || sourceRoomId || '').trim();
     return { roomOptions, selectedRoomId };
 };
+
+export const enumerateMonthDays = (year: number, monthIndex: number): string[] => {
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    return Array.from({ length: daysInMonth }, (_, idx) => {
+      const d = new Date(year, monthIndex, idx + 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    });
+};
+
+export const partitionDuplicateMonthDays = (
+  unknownDays: string[],
+  baseDay: string,
+  today: string,
+  pastLabel: string,
+  sourceLabel: string
+): { prefilled: Record<string, any>; queue: string[] } => {
+    const prefilled: Record<string, any> = {};
+    const queue: string[] = [];
+    for (const day of unknownDays) {
+      if (day <= baseDay) {
+        prefilled[day] = { state: 'blocked', reason: day < today ? pastLabel : sourceLabel };
+        continue;
+      }
+      if (day < today) {
+        prefilled[day] = { state: 'blocked', reason: pastLabel };
+        continue;
+      }
+      queue.push(day);
+    }
+    return { prefilled, queue };
+};
