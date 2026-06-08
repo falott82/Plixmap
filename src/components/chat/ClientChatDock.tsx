@@ -56,7 +56,12 @@ import {
   seededBars,
   downloadBlob,
   canEditMessage,
-  canDeleteForAll
+  canDeleteForAll,
+  computeCanChatClientIds,
+  computeFilteredDmContacts,
+  computeMembersSorted,
+  computeStarredMessages,
+  computeSearchHits
 } from './ClientChatDock.helpers';
 
 
@@ -295,34 +300,10 @@ const ClientChatDock = () => {
     };
   }, [clientChatDividerLeftWidth, clientChatDockPreferredHeight, clientChatDockWidth, leftCompact, leftGroupsCollapsed, leftUsersCollapsed, user?.id]);
 
-  const canChatClientIds = useMemo(() => {
-    const out = new Set<string>();
-    if (user?.isAdmin || user?.isSuperAdmin) {
-      for (const c of clientTree || []) out.add(c.id);
-      return out;
-    }
-    const siteToClient = new Map<string, string>();
-    const planToClient = new Map<string, string>();
-    for (const c of clientTree || []) {
-      for (const s of c.sites || []) {
-        siteToClient.set(s.id, c.id);
-        for (const p of s.floorPlans || []) planToClient.set(p.id, c.id);
-      }
-    }
-    for (const p of permissions || []) {
-      if (!(p as any)?.chat) continue;
-      if (p.scopeType === 'client') out.add(p.scopeId);
-      if (p.scopeType === 'site') {
-        const clientId = siteToClient.get(p.scopeId);
-        if (clientId) out.add(clientId);
-      }
-      if (p.scopeType === 'plan') {
-        const clientId = planToClient.get(p.scopeId);
-        if (clientId) out.add(clientId);
-      }
-    }
-    return out;
-  }, [clientTree, permissions, user?.isAdmin, user?.isSuperAdmin]);
+  const canChatClientIds = useMemo(
+    () => computeCanChatClientIds(clientTree as any[], permissions as any[], user),
+    [clientTree, permissions, user]
+  );
 
   const chatClients = useMemo(() => {
     return (clientTree || [])
@@ -401,42 +382,15 @@ const ClientChatDock = () => {
     if (!leftQuery) return chatClients;
     return (chatClients || []).filter((c) => String(c.name || '').toLowerCase().includes(leftQuery));
   }, [chatClients, leftQuery]);
-  const filteredDmContacts = useMemo(() => {
-    const base = leftQuery
-      ? (dmContacts || []).filter((u) => {
-      const name = `${u.firstName || ''} ${u.lastName || ''}`.trim();
-      const hay = `${u.username || ''} ${name}`.toLowerCase();
-      return hay.includes(leftQuery);
-        })
-      : dmContacts || [];
-    const meId = String(user?.id || '');
-    const list = base.slice();
-    list.sort((a, b) => {
-      const ta = meId ? dmThreadIdForUsers(meId, a.id) : null;
-      const tb = meId ? dmThreadIdForUsers(meId, b.id) : null;
-      const la = ta ? Number((lastActivityByClientId as any)?.[ta] || 0) || 0 : 0;
-      const lb = tb ? Number((lastActivityByClientId as any)?.[tb] || 0) || 0 : 0;
-      const sa = la || (Number((a as any)?.lastMessageAt || 0) || 0);
-      const sb = lb || (Number((b as any)?.lastMessageAt || 0) || 0);
-      if (sa !== sb) return sb - sa;
-      const an = (`${a.firstName || ''} ${a.lastName || ''}`.trim() || a.username || '').toLowerCase();
-      const bn = (`${b.firstName || ''} ${b.lastName || ''}`.trim() || b.username || '').toLowerCase();
-      return an.localeCompare(bn);
-    });
-    return list;
-  }, [dmContacts, lastActivityByClientId, leftQuery, user?.id]);
+  const filteredDmContacts = useMemo(
+    () => computeFilteredDmContacts(dmContacts as any[], lastActivityByClientId, leftQuery, user),
+    [dmContacts, lastActivityByClientId, leftQuery, user]
+  );
 
-  const membersSorted = useMemo(() => {
-    const list = Array.isArray(members) ? members.slice() : [];
-    const onlineOf = (m: any) => !!(onlineUserIds as any)?.[m?.id] || !!m?.online;
-    list.sort((a, b) => {
-      const ao = onlineOf(a) ? 1 : 0;
-      const bo = onlineOf(b) ? 1 : 0;
-      if (ao !== bo) return bo - ao;
-      return String(a.username || '').localeCompare(String(b.username || ''));
-    });
-    return list;
-  }, [members, onlineUserIds]);
+  const membersSorted = useMemo(
+    () => computeMembersSorted(members as any[], onlineUserIds),
+    [members, onlineUserIds]
+  );
 
   const membersById = useMemo(() => {
     const m = new Map<string, (typeof members)[number]>();
@@ -480,27 +434,9 @@ const ClientChatDock = () => {
     ];
   }, [t]);
 
-  const starredMessages = useMemo(() => {
-    const myId = String(user?.id || '');
-    if (!myId) return [];
-    return (messages || []).filter((m) => {
-      if (!m || m.deleted) return false;
-      const list = Array.isArray((m as any).starredBy) ? ((m as any).starredBy as string[]) : [];
-      return list.some((id) => String(id) === myId);
-    });
-  }, [messages, user?.id]);
+  const starredMessages = useMemo(() => computeStarredMessages(messages, user), [messages, user]);
 
-  const searchHits = useMemo(() => {
-    const q = String(searchQ || '').trim().toLowerCase();
-    if (!q) return [];
-    const out: string[] = [];
-    for (const m of messages || []) {
-      if (!m?.id || m.deleted) continue;
-      const hay = `${String(m.username || '')} ${String(m.text || '')}`.toLowerCase();
-      if (hay.includes(q)) out.push(String(m.id));
-    }
-    return out;
-  }, [messages, searchQ]);
+  const searchHits = useMemo(() => computeSearchHits(messages, searchQ), [messages, searchQ]);
 
   useEffect(() => {
     setSearchHitIdx(0);
@@ -1890,7 +1826,7 @@ const ClientChatDock = () => {
                                 const status = u.lastOnlineAt ? 'offline' : 'never';
                                 const online = !!(onlineUserIds as any)?.[u.id] || !!u.online;
                                 const dot = u.readOnly ? 'bg-slate-500' : online ? 'bg-emerald-500' : u.lastOnlineAt ? 'bg-rose-500' : 'bg-slate-500';
-                                const common = (u.commonClients || []).slice(0, 3).map((c) => c.name).join(', ');
+                                const common = (u.commonClients || []).slice(0, 3).map((c: any) => c.name).join(', ');
                                 return (
                                   <button
                                     key={u.id}

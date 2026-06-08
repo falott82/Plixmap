@@ -210,3 +210,101 @@ export const canDeleteForAll = (msg: ChatMessage, myUserId: string) => {
   const age = Date.now() - (Number(msg.createdAt) || 0);
   return age <= 30 * 60 * 1000;
 };
+
+// Set of client ids the user may chat in (admins see all; others by chat-scoped permissions). Pure.
+export const computeCanChatClientIds = (clientTree: any[], permissions: any[], user: any): Set<string> => {
+  const out = new Set<string>();
+  if (user?.isAdmin || user?.isSuperAdmin) {
+    for (const c of clientTree || []) out.add(c.id);
+    return out;
+  }
+  const siteToClient = new Map<string, string>();
+  const planToClient = new Map<string, string>();
+  for (const c of clientTree || []) {
+    for (const s of c.sites || []) {
+      siteToClient.set(s.id, c.id);
+      for (const p of s.floorPlans || []) planToClient.set(p.id, c.id);
+    }
+  }
+  for (const p of permissions || []) {
+    if (!(p as any)?.chat) continue;
+    if (p.scopeType === 'client') out.add(p.scopeId);
+    if (p.scopeType === 'site') {
+      const clientId = siteToClient.get(p.scopeId);
+      if (clientId) out.add(clientId);
+    }
+    if (p.scopeType === 'plan') {
+      const clientId = planToClient.get(p.scopeId);
+      if (clientId) out.add(clientId);
+    }
+  }
+  return out;
+};
+
+// Filter + sort DM contacts by recent activity then name. Pure.
+export const computeFilteredDmContacts = (
+  dmContacts: any[],
+  lastActivityByClientId: any,
+  leftQuery: string,
+  user: any
+): any[] => {
+  const base = leftQuery
+    ? (dmContacts || []).filter((u) => {
+        const name = `${u.firstName || ''} ${u.lastName || ''}`.trim();
+        const hay = `${u.username || ''} ${name}`.toLowerCase();
+        return hay.includes(leftQuery);
+      })
+    : dmContacts || [];
+  const meId = String(user?.id || '');
+  const list = base.slice();
+  list.sort((a, b) => {
+    const ta = meId ? dmThreadIdForUsers(meId, a.id) : null;
+    const tb = meId ? dmThreadIdForUsers(meId, b.id) : null;
+    const la = ta ? Number((lastActivityByClientId as any)?.[ta] || 0) || 0 : 0;
+    const lb = tb ? Number((lastActivityByClientId as any)?.[tb] || 0) || 0 : 0;
+    const sa = la || (Number((a as any)?.lastMessageAt || 0) || 0);
+    const sb = lb || (Number((b as any)?.lastMessageAt || 0) || 0);
+    if (sa !== sb) return sb - sa;
+    const an = (`${a.firstName || ''} ${a.lastName || ''}`.trim() || a.username || '').toLowerCase();
+    const bn = (`${b.firstName || ''} ${b.lastName || ''}`.trim() || b.username || '').toLowerCase();
+    return an.localeCompare(bn);
+  });
+  return list;
+};
+
+// Sort members online-first then by username. Pure.
+export const computeMembersSorted = (members: any[], onlineUserIds: any): any[] => {
+  const list = Array.isArray(members) ? members.slice() : [];
+  const onlineOf = (m: any) => !!(onlineUserIds as any)?.[m?.id] || !!m?.online;
+  list.sort((a, b) => {
+    const ao = onlineOf(a) ? 1 : 0;
+    const bo = onlineOf(b) ? 1 : 0;
+    if (ao !== bo) return bo - ao;
+    return String(a.username || '').localeCompare(String(b.username || ''));
+  });
+  return list;
+};
+
+// Messages starred by the current user. Pure.
+export const computeStarredMessages = (messages: ChatMessage[], user: any): ChatMessage[] => {
+  const myId = String(user?.id || '');
+  if (!myId) return [];
+  return (messages || []).filter((m) => {
+    if (!m || m.deleted) return false;
+    const list = Array.isArray((m as any).starredBy) ? ((m as any).starredBy as string[]) : [];
+    return list.some((id) => String(id) === myId);
+  });
+};
+
+// Ids of messages whose author/text match the search query. Pure.
+export const computeSearchHits = (messages: ChatMessage[], searchQ: string): string[] => {
+  const q = String(searchQ || '').trim().toLowerCase();
+  if (!q) return [];
+  const out: string[] = [];
+  for (const m of messages || []) {
+    if (!m?.id || m.deleted) continue;
+    const hay = `${String(m.username || '')} ${String(m.text || '')}`.toLowerCase();
+    if (hay.includes(q)) out.push(String(m.id));
+  }
+  return out;
+};
