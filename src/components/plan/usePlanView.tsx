@@ -51,12 +51,9 @@ import { computeHandleUnlockResponse, computeReloadMyMeetings } from './planView
 import {
   computeHandleCorridorDoorDraftPoint,
   computeCreateRoomDoorFromDraft,
-  computeOpenCorridorDoorLinkModal,
-  computeSaveCorridorDoorModal,
   computeInsertCorridorJunctionPoint,
   computeSaveCorridorModal,
   computeSaveCorridorConnectionModal,
-  computeSaveCorridorDoorLinkModal,
   computeStartRoomDoorDraft,
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint,
@@ -110,8 +107,6 @@ import {
   runOpenMyMeetingsModal
 } from './planViewComputeBits2';
 import {
-  runOpenCorridorDoorModal,
-  runOpenRoomDoorModal,
   runOpenEditCorridorConnectionModal
 } from './planViewDoorModals';
 import {
@@ -158,6 +153,7 @@ import { usePlanSafetyCard } from './usePlanSafetyCard';
 import { usePlanCapacity } from './usePlanCapacity';
 import { usePlanContextDerived } from './usePlanContextDerived';
 import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
+import { usePlanDoorModalHandlers } from './usePlanDoorModalHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -183,7 +179,7 @@ import { getDefaultVisiblePlanLayerIds, normalizePlanLayerSelection } from '../.
 import { getWallTypeColor } from '../../utils/wallColors';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 
-import { getRoomPolygon, inferCorridorDoorLinkedRoomIds, isRackLinkId, getSharedRoomSides, projectPointToSegment } from './planViewUtils';
+import { getRoomPolygon, isRackLinkId, getSharedRoomSides, projectPointToSegment } from './planViewUtils';
 import { samePlanSnapshot as samePlanSnapshotUtil, type PlanSnapshotComparable } from './planSnapshotCompare';
 import { toPlanHistorySnapshot, toPlanSnapshot, type PlanHistorySnapshot, type PlanSnapshot } from './planSnapshots';
 import { getLatestRevision, getRevisionVersion, toRevisionSnapshot } from './planRevisions';
@@ -4814,72 +4810,37 @@ export const usePlanView = (planId: string) => {
     });
   }, [corridorModal, corridorNameEnInput, corridorNameInput, corridorShowNameInput, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
 
-  const openCorridorDoorModal = useCallback(
-    (corridorId: string, doorId: string) => {
-      runOpenCorridorDoorModal(corridorId, doorId, { corridorById, defaultDoorCatalogId, doorTypeIdSet, objectTypeById, setCorridorDoorModal });
-    },
-    [corridorById, defaultDoorCatalogId, doorTypeIdSet, objectTypeById]
-  );
-  const openRoomDoorModal = useCallback(
-    (doorId: string) => {
-      runOpenRoomDoorModal(doorId, { roomDoors, defaultDoorCatalogId, doorTypeIdSet, objectTypeById, setCorridorDoorModal });
-    },
-    [defaultDoorCatalogId, doorTypeIdSet, objectTypeById, roomDoors]
-  );
-  const openCorridorDoorLinkModal = useCallback(
-    (corridorId: string, doorId: string) =>
-      computeOpenCorridorDoorLinkModal(corridorId, doorId, {
-        corridorById,
-        getCorridorEdgePoint,
-        normalizeLayerSelection,
-        planId,
-        renderPlan,
-        setHideAllLayers,
-        setVisibleLayerIds,
-        visibleLayerIds,
-        setCorridorDoorLinkModal,
-        setCorridorDoorLinkQuery
-      }),
-    [
-      corridorById,
-      getCorridorEdgePoint,
-      getRoomPolygon,
-      normalizeLayerSelection,
-      planId,
-      projectPointToSegment,
-      renderPlan?.rooms,
-      inferCorridorDoorLinkedRoomIds,
-      setHideAllLayers,
-      setVisibleLayerIds,
-      visibleLayerIds
-    ]
-  );
-
-  const saveCorridorDoorModal = useCallback(() => {
-    computeSaveCorridorDoorModal({
-      corridorDoorModal,
-      isReadOnly,
-      markTouched,
-      plan,
-      push,
-      t,
-      updateFloorPlan,
-      setCorridorDoorModal
-    });
-  }, [corridorDoorModal, isReadOnly, markTouched, plan, push, t, updateFloorPlan]);
-  const saveCorridorDoorLinkModal = useCallback(() => {
-    computeSaveCorridorDoorLinkModal({
-      corridorDoorLinkModal,
-      isReadOnly,
-      markTouched,
-      plan,
-      push,
-      renderPlan,
-      t,
-      updateFloorPlan,
-      setCorridorDoorLinkModal
-    });
-  }, [corridorDoorLinkModal, isReadOnly, markTouched, plan, push, renderPlan?.rooms, t, updateFloorPlan]);
+  const {
+    openCorridorDoorModal,
+    openRoomDoorModal,
+    openCorridorDoorLinkModal,
+    saveCorridorDoorModal,
+    saveCorridorDoorLinkModal
+  } = usePlanDoorModalHandlers({
+    corridorById,
+    defaultDoorCatalogId,
+    doorTypeIdSet,
+    objectTypeById,
+    setCorridorDoorModal,
+    roomDoors,
+    getCorridorEdgePoint,
+    normalizeLayerSelection,
+    planId,
+    renderPlan,
+    setHideAllLayers,
+    setVisibleLayerIds,
+    visibleLayerIds,
+    setCorridorDoorLinkModal,
+    setCorridorDoorLinkQuery,
+    corridorDoorModal,
+    corridorDoorLinkModal,
+    isReadOnly,
+    markTouched,
+    plan,
+    push,
+    t,
+    updateFloorPlan
+  });
 
   const updateCorridorLabelScale = useCallback(
     (corridorId: string, delta: number) =>
