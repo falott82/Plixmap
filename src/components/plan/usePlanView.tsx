@@ -34,10 +34,7 @@ import {
 import { computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
 import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
 import { computeResolveWallPoint } from './planViewWallMeasureTools';
-import {
-  computeOpenEscapeRouteAt,
-  computeEnsureObjectLayerVisible
-} from './planViewSearchScheduleTools';
+import { computeEnsureObjectLayerVisible } from './planViewSearchScheduleTools';
 import { computeHandleUnlockResponse, computeReloadMyMeetings } from './planViewLockMeetingTools';
 import {
   computeGetClosestCorridorEdge,
@@ -78,7 +75,6 @@ import {
   computeLinksInSelection,
   computeGetPlanUnsavedChanges,
   computeScaleLine,
-  runToggleSecurityCardVisibility,
   runPerformPendingPostSaveAction,
   computeBuildRoomPreview,
   runOpenMyMeetingsModal
@@ -142,6 +138,7 @@ import { usePlanPaletteFavoriteHandlers } from './usePlanPaletteFavoriteHandlers
 import { usePlanSearchHandlers } from './usePlanSearchHandlers';
 import { usePlanEditOpenHandlers } from './usePlanEditOpenHandlers';
 import { usePlanMediaViewerHandlers } from './usePlanMediaViewerHandlers';
+import { usePlanSecurityHandlers } from './usePlanSecurityHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -2879,42 +2876,24 @@ export const usePlanView = (planId: string) => {
   );
 
 
-  const openEscapeRouteAt = useCallback(
-    (point: { x: number; y: number }, sourceKind: 'map' | 'room' | 'corridor') =>
-      computeOpenEscapeRouteAt(point, sourceKind, {
-        contextMenu,
-        plan,
-        planId,
-        push,
-        renderPlan,
-        siteFloorPlansLength: siteFloorPlans.length,
-        t,
-        setEscapeRouteModal,
-        setContextMenu
-      }),
-    [contextMenu, plan, planId, push, renderPlan, siteFloorPlans.length, t]
-  );
-  const toggleSecurityCardVisibility = useCallback(() => {
-    runToggleSecurityCardVisibility({
-      hideAllLayers,
-      allItemsSelected,
-      nonAllLayerIds,
-      visibleLayerIds,
-      setHideAllLayers,
-      setVisibleLayerIds,
-      planId,
-      normalizeLayerSelection
-    });
-  }, [
-    allItemsSelected,
-    hideAllLayers,
-    nonAllLayerIds,
-    normalizeLayerSelection,
+  const { openEscapeRouteAt, toggleSecurityCardVisibility } = usePlanSecurityHandlers({
+    contextMenu,
+    plan,
     planId,
+    push,
+    renderPlan,
+    siteFloorPlansLength: siteFloorPlans.length,
+    t,
+    hideAllLayers,
+    allItemsSelected,
+    nonAllLayerIds,
+    visibleLayerIds,
+    normalizeLayerSelection,
+    setEscapeRouteModal,
+    setContextMenu,
     setHideAllLayers,
-    setVisibleLayerIds,
-    visibleLayerIds
-  ]);
+    setVisibleLayerIds
+  });
 
   const { applyView, handleSaveView, handleOverwriteView, goToDefaultView } = usePlanViewHandlers({
     renderPlan,
