@@ -20,7 +20,7 @@ import { useLang, useT } from '../../i18n/useT';
 import { getMeetingTemporalState, getMeetingTimePhaseBadgeLabel } from '../../utils/meetingTime';
 
 import {
-  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, buildMobileChatClientOptions, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, computeChatInitials, filterRecentMobileChatMessages, resolveSelectedChatClientName, sortFilterMobileChatClientOptions, isOpaqueChatIdentity, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, resolveClientLogoUrl, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
+  buildCalendarMonthCells, buildCheckInKeyForParticipantMatch, buildDmNameByUserId, buildMobileChatClientOptions, computeSyncBadge, canDeleteChatForAll, canEditChatMessage, compressImageAttachment, computeChatInitials, filterRecentMobileChatMessages, parseMobileChatOverview, resolveSelectedChatClientName, sortFilterMobileChatClientOptions, isOpaqueChatIdentity, MOBILE_AGENDA_CACHE_MAX_ENTRIES, MOBILE_AGENDA_CACHE_TTL_MS, MOBILE_AGENDA_MONTH_CACHE_TTL_MS, MOBILE_LOGIN_STORAGE_KEY, MOBILE_THEME_STORAGE_KEY, mobileAgendaMemoryCache, mobileAgendaMonthMemoryCache, MobileAgendaMonthPayload, MobileAgendaPayload, MobileChatOverviewPayload, MobileChatViewMode, MobileConfirmState, MobileTab, normalizeChatClientId, nowDay, parseRoomIdFromQrPayload, readAgendaPayloadFromSessionCache, readMobileChatOverviewFromSessionCache, readMobileChatThreadFromSessionCache, scheduleWhenIdle, writeAgendaPayloadToSessionCache, writeMobileChatOverviewToSessionCache, writeMobileChatThreadToSessionCache
 } from './MobileAppPage.helpers';
 import { MobileAppPageBody } from './MobileAppPageBody';
 const MobileAppPage = () => {
@@ -546,56 +546,23 @@ const MobileAppPage = () => {
   const getChatOverviewCacheKey = useCallback(() => String(user?.id || '').trim(), [user?.id]);
 
   const applyChatOverviewPayload = useCallback((next: MobileChatOverviewPayload) => {
-      const clientRows = Array.isArray(next?.clients) ? next.clients : [];
-      const dmRows = Array.isArray(next?.dms) ? next.dms : [];
-      setChatClientChannels(
-        clientRows.map((row) => ({
-          id: normalizeChatClientId(row.id || ''),
-          name: String(row.name || '').trim() || String(row.id || ''),
-          logoUrl: resolveClientLogoUrl(row.logoUrl || ''),
-          lastMessageAt: Number(row.lastMessageAt || row.lastMessage?.createdAt || 0) || null
-        }))
-      );
-      setChatDmContacts(
-        dmRows
-          .map((row) => ({
-            id: String(row.id || '').trim(),
-            threadId: normalizeChatClientId(row.threadId || ''),
-            name: String(row.name || '').trim() || directMessageLabel,
-            avatarUrl: resolveClientLogoUrl(row.avatarUrl || ''),
-            lastMessageAt: Number(row.lastMessageAt || row.lastMessage?.createdAt || 0) || null
-          }))
-          .filter((row) => row.id && row.threadId)
-      );
-      const unreadMap: Record<string, number> = {};
-      const lastMessageMap: Record<string, ChatMessage | null> = {};
-      for (const row of clientRows) {
-        const id = normalizeChatClientId(row.id || '');
-        if (!id) continue;
-        unreadMap[id] = Math.max(0, Number(row.unreadCount || 0));
-        lastMessageMap[id] = row.lastMessage || null;
-      }
-      for (const row of dmRows) {
-        const id = normalizeChatClientId(row.threadId || '');
-        if (!id) continue;
-        unreadMap[id] = Math.max(0, Number(row.unreadCount || 0));
-        lastMessageMap[id] = row.lastMessage || null;
-      }
+      const { channels, dmContacts, unreadMap, lastMessageMap, firstId } = parseMobileChatOverview(next, directMessageLabel);
+      setChatClientChannels(channels);
+      setChatDmContacts(dmContacts);
       setChatUnreadByClientId(unreadMap);
       setChatLastMessageByClientId((prev) => {
         const merged = { ...(prev || {}) } as Record<string, ChatMessage | null>;
         let changed = false;
         for (const [id, nextMessage] of Object.entries(lastMessageMap)) {
           const prevMessage = merged[id] || null;
-          const sameId = String(prevMessage?.id || '') === String(nextMessage?.id || '');
-          const sameTs = Number(prevMessage?.createdAt || 0) === Number(nextMessage?.createdAt || 0);
+          const sameId = String(prevMessage?.id || '') === String((nextMessage as any)?.id || '');
+          const sameTs = Number(prevMessage?.createdAt || 0) === Number((nextMessage as any)?.createdAt || 0);
           if (sameId && sameTs) continue;
-          merged[id] = nextMessage;
+          merged[id] = nextMessage as ChatMessage | null;
           changed = true;
         }
         return changed ? merged : prev;
       });
-      const firstId = normalizeChatClientId(String(clientRows[0]?.id || dmRows[0]?.threadId || ''));
       if (firstId) {
         setChatClientId((prev) => {
           const normalizedPrev = normalizeChatClientId(prev || '');
@@ -646,13 +613,15 @@ const MobileAppPage = () => {
     () => meetings.some((m) => Number(m.startAt) <= now && now < Number(m.endAt)),
     [meetings, now]
   );
-  const syncBadge = useMemo(() => {
-    if (agendaLoading && !lastAgendaSyncAt) return { label: tr({ it: 'Sincronizzazione…', en: 'Syncing…' }), tone: 'loading' as const };
-    if (!lastAgendaSyncAt) return { label: tr({ it: 'Connessione lenta', en: 'Slow connection' }), tone: 'slow' as const };
-    const staleMs = Date.now() - lastAgendaSyncAt;
-    if (agendaSyncDegraded || staleMs > 20_000) return { label: tr({ it: 'Connessione lenta', en: 'Slow connection' }), tone: 'slow' as const };
-    return { label: tr({ it: 'Sincronizzato', en: 'Synced' }), tone: 'ok' as const };
-  }, [agendaLoading, lastAgendaSyncAt, agendaSyncDegraded, tr]);
+  const syncBadge = useMemo(
+    () =>
+      computeSyncBadge(agendaLoading, lastAgendaSyncAt, agendaSyncDegraded, Date.now(), {
+        syncing: tr({ it: 'Sincronizzazione…', en: 'Syncing…' }),
+        slow: tr({ it: 'Connessione lenta', en: 'Slow connection' }),
+        synced: tr({ it: 'Sincronizzato', en: 'Synced' })
+      }),
+    [agendaLoading, lastAgendaSyncAt, agendaSyncDegraded, tr]
+  );
 
   useEffect(() => {
     if (!displayMonth || !day.startsWith(displayMonth)) return;
@@ -688,15 +657,7 @@ const MobileAppPage = () => {
     return chatClientOptions.find((c) => normalizeChatClientId(c.id) === normalizedId) || null;
   }, [chatClientId, chatClientOptions]);
 
-  const dmNameByUserId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const row of chatDmContacts || []) {
-      const id = String(row.id || '').trim();
-      const name = String(row.name || '').trim();
-      if (id && name) map.set(id, name);
-    }
-    return map;
-  }, [chatDmContacts]);
+  const dmNameByUserId = useMemo(() => buildDmNameByUserId(chatDmContacts), [chatDmContacts]);
 
   const selectedChatClientName = useMemo(
     () =>

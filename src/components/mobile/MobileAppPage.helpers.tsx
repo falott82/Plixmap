@@ -643,3 +643,79 @@ export const resolveSelectedChatClientName = (
   if (isOpaqueChatIdentity(cid)) return labels.directMessage;
   return safeDecodeUriPart(cid);
 };
+
+// Parse a chat-overview payload into the derived channel list, DM contacts,
+// unread counts, last-message map and the default-selected id. Pure (state
+// writes and the last-message merge stay in the caller).
+export const parseMobileChatOverview = (
+  next: MobileChatOverviewPayload,
+  directMessageLabel: string
+): {
+  channels: Array<{ id: string; name: string; logoUrl: string; lastMessageAt: number | null }>;
+  dmContacts: Array<{ id: string; threadId: string; name: string; avatarUrl: string; lastMessageAt: number | null }>;
+  unreadMap: Record<string, number>;
+  lastMessageMap: Record<string, any>;
+  firstId: string;
+} => {
+  const clientRows = Array.isArray(next?.clients) ? next.clients : [];
+  const dmRows = Array.isArray(next?.dms) ? next.dms : [];
+  const channels = clientRows.map((row) => ({
+    id: normalizeChatClientId(row.id || ''),
+    name: String(row.name || '').trim() || String(row.id || ''),
+    logoUrl: resolveClientLogoUrl(row.logoUrl || ''),
+    lastMessageAt: Number(row.lastMessageAt || row.lastMessage?.createdAt || 0) || null
+  }));
+  const dmContacts = dmRows
+    .map((row) => ({
+      id: String(row.id || '').trim(),
+      threadId: normalizeChatClientId(row.threadId || ''),
+      name: String(row.name || '').trim() || directMessageLabel,
+      avatarUrl: resolveClientLogoUrl(row.avatarUrl || ''),
+      lastMessageAt: Number(row.lastMessageAt || row.lastMessage?.createdAt || 0) || null
+    }))
+    .filter((row) => row.id && row.threadId);
+  const unreadMap: Record<string, number> = {};
+  const lastMessageMap: Record<string, any> = {};
+  for (const row of clientRows) {
+    const id = normalizeChatClientId(row.id || '');
+    if (!id) continue;
+    unreadMap[id] = Math.max(0, Number(row.unreadCount || 0));
+    lastMessageMap[id] = row.lastMessage || null;
+  }
+  for (const row of dmRows) {
+    const id = normalizeChatClientId(row.threadId || '');
+    if (!id) continue;
+    unreadMap[id] = Math.max(0, Number(row.unreadCount || 0));
+    lastMessageMap[id] = row.lastMessage || null;
+  }
+  const firstId = normalizeChatClientId(String(clientRows[0]?.id || dmRows[0]?.threadId || ''));
+  return { channels, dmContacts, unreadMap, lastMessageMap, firstId };
+};
+
+// Sync status badge for the agenda header. Pure; labels + clock passed in.
+export const computeSyncBadge = (
+  agendaLoading: boolean,
+  lastAgendaSyncAt: number | null,
+  agendaSyncDegraded: boolean,
+  nowMs: number,
+  labels: { syncing: string; slow: string; synced: string }
+): { label: string; tone: 'loading' | 'slow' | 'ok' } => {
+  if (agendaLoading && !lastAgendaSyncAt) return { label: labels.syncing, tone: 'loading' };
+  if (!lastAgendaSyncAt) return { label: labels.slow, tone: 'slow' };
+  const staleMs = nowMs - lastAgendaSyncAt;
+  if (agendaSyncDegraded || staleMs > 20_000) return { label: labels.slow, tone: 'slow' };
+  return { label: labels.synced, tone: 'ok' };
+};
+
+// Map DM user id -> display name from the DM contact list. Pure.
+export const buildDmNameByUserId = (
+  chatDmContacts: Array<{ id: string; name: string }>
+): Map<string, string> => {
+  const map = new Map<string, string>();
+  for (const row of chatDmContacts || []) {
+    const id = String(row.id || '').trim();
+    const name = String(row.name || '').trim();
+    if (id && name) map.set(id, name);
+  }
+  return map;
+};
