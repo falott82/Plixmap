@@ -374,3 +374,34 @@ export const resolveClientDuplicateSlot = (
     if (endMin > 23 * 60 + 59) return null;
     return { startHm: minutesToHm(startMin), endHm: minutesToHm(endMin), startMin, endMin };
 };
+
+export const computeClientMeetingsTimelineMeta = (
+  rows: Array<{ bookings?: Array<{ startAt?: unknown; endAt?: unknown }> }> | null | undefined,
+  selectedDay: string,
+  nowTs: number
+): { minMinutes: number; maxMinutes: number; hours: number[]; nowMinutes: number; showNowLine: boolean } => {
+    const safeRows = rows || [];
+    let minMinutes = 8 * 60;
+    let maxMinutes = 19 * 60;
+    for (const row of safeRows) {
+      for (const booking of row.bookings || []) {
+        const start = new Date(Number(booking.startAt || 0));
+        const end = new Date(Number(booking.endAt || 0));
+        if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) continue;
+        const s = start.getHours() * 60 + start.getMinutes();
+        const e = end.getHours() * 60 + end.getMinutes();
+        minMinutes = Math.min(minMinutes, s);
+        maxMinutes = Math.max(maxMinutes, e);
+      }
+    }
+    minMinutes = Math.max(0, Math.floor((minMinutes - 30) / 60) * 60);
+    maxMinutes = Math.min(24 * 60, Math.ceil((maxMinutes + 30) / 60) * 60);
+    if (maxMinutes - minMinutes < 6 * 60) maxMinutes = Math.min(24 * 60, minMinutes + 6 * 60);
+    const hours: number[] = [];
+    for (let m = minMinutes; m <= maxMinutes; m += 60) hours.push(m);
+    const now = new Date(nowTs);
+    const nowDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const showNowLine = selectedDay === nowDay && nowMinutes >= minMinutes && nowMinutes <= maxMinutes;
+    return { minMinutes, maxMinutes, hours, nowMinutes, showNowLine };
+};
