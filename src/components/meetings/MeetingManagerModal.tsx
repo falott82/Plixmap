@@ -55,7 +55,8 @@ import {
   buildMeetingRoomSnapshotPng, resolveRoomServices, requiredAsterisk,
   computeMeetingRoomPreviewData, computeParticipantMeetingConflicts,
   buildRoomSuggestionsForRows, findSingleRoomEarliestForRows,
-  computeSetupNeighbors, computeTimingBarSegments
+  computeSetupNeighbors, computeTimingBarSegments,
+  computeMeetingAdminLists, orderFilteredParticipants
 } from './MeetingManagerModal.helpers';
 import { ParticipantsOverlay, EarliestSuggestionsOverlay, ApprovalOverlay, RoomPreviewOverlay } from './MeetingManagerModalOverlays';
 
@@ -454,34 +455,9 @@ const MeetingManagerModal = ({
   }, [selectedParticipants]);
 
   const currentUserId = String((user as any)?.id || '').trim();
-  const meetingAdminDirectoryById = useMemo(
-    () => new Map(meetingAdminsDirectory.map((row) => [String(row.id), row])),
-    [meetingAdminsDirectory]
-  );
-  const selectedMeetingAdmins = useMemo(
-    () =>
-      meetingAdminIds
-        .map((id) => {
-          const key = String(id);
-          const known = meetingAdminDirectoryById.get(key);
-          if (known) return known;
-          if (key && key === currentUserId) {
-            return {
-              id: key,
-              username: String((user as any)?.username || ''),
-              firstName: String((user as any)?.firstName || ''),
-              lastName: String((user as any)?.lastName || '')
-            } as UserDirectoryRow;
-          }
-          return null;
-        })
-        .filter((row): row is UserDirectoryRow => !!row),
-    [currentUserId, meetingAdminDirectoryById, meetingAdminIds, user]
-  );
-  const availableMeetingAdminCandidates = useMemo(
-    () =>
-      meetingAdminsDirectory.filter((row) => !meetingAdminIds.includes(String(row.id || ''))),
-    [meetingAdminIds, meetingAdminsDirectory]
+  const { selected: selectedMeetingAdmins, available: availableMeetingAdminCandidates } = useMemo(
+    () => computeMeetingAdminLists(meetingAdminsDirectory, meetingAdminIds, currentUserId, user),
+    [currentUserId, meetingAdminIds, meetingAdminsDirectory, user]
   );
 
   const selectedParticipantsByExternalId = useMemo(() => {
@@ -493,15 +469,10 @@ const MeetingManagerModal = ({
     return out;
   }, [selectedParticipants]);
 
-  const orderedFilteredParticipants = useMemo(() => {
-    const selectedRows: ExternalParticipant[] = [];
-    const availableRows: ExternalParticipant[] = [];
-    for (const row of filteredParticipants) {
-      if (selectedExternalIds.has(row.externalId)) selectedRows.push(row);
-      else availableRows.push(row);
-    }
-    return { selectedRows, availableRows, allRows: [...selectedRows, ...availableRows] };
-  }, [filteredParticipants, selectedExternalIds]);
+  const orderedFilteredParticipants = useMemo(
+    () => orderFilteredParticipants(filteredParticipants, selectedExternalIds),
+    [filteredParticipants, selectedExternalIds]
+  );
 
   const participantMeetingConflictsByExternalId = useMemo(
     () => computeParticipantMeetingConflicts(overviewRows, selectedSlotStartTs, selectedSlotEndTs),

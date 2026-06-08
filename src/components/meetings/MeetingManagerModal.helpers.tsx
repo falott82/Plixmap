@@ -486,3 +486,47 @@ export const computeTimingBarSegments = (
     postPct: (postMin / total) * 100
   };
 };
+
+// Resolve the selected + available meeting-admin lists from the directory and
+// the chosen ids (falling back to the current user). Pure. Extracted from
+// MeetingManagerModal.
+export const computeMeetingAdminLists = (
+  meetingAdminsDirectory: any[],
+  meetingAdminIds: string[],
+  currentUserId: string,
+  user: any
+): { directoryById: Map<string, any>; selected: any[]; available: any[] } => {
+  const directoryById = new Map(meetingAdminsDirectory.map((row) => [String(row.id), row]));
+  const selected = meetingAdminIds
+    .map((id) => {
+      const key = String(id);
+      const known = directoryById.get(key);
+      if (known) return known;
+      if (key && key === currentUserId) {
+        return {
+          id: key,
+          username: String((user as any)?.username || ''),
+          firstName: String((user as any)?.firstName || ''),
+          lastName: String((user as any)?.lastName || '')
+        };
+      }
+      return null;
+    })
+    .filter((row): row is any => !!row);
+  const available = meetingAdminsDirectory.filter((row) => !meetingAdminIds.includes(String(row.id || '')));
+  return { directoryById, selected, available };
+};
+
+// Partition the (filtered) participants into selected-first ordering. Pure.
+export const orderFilteredParticipants = (
+  filteredParticipants: any[],
+  selectedExternalIds: Set<string>
+): { selectedRows: any[]; availableRows: any[]; allRows: any[] } => {
+  const selectedRows: any[] = [];
+  const availableRows: any[] = [];
+  for (const row of filteredParticipants) {
+    if (selectedExternalIds.has(row.externalId)) selectedRows.push(row);
+    else availableRows.push(row);
+  }
+  return { selectedRows, availableRows, allRows: [...selectedRows, ...availableRows] };
+};
