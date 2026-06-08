@@ -73,7 +73,6 @@ import {
   computeMyMeetingsFiltered,
   computeSafetyEmergencyContacts,
   runToggleRevisionImmutable,
-  runAddTypeToPalette,
   computeGetObjectBoundsForAlign,
   computeRoomStatsById,
   computeLinksInSelection,
@@ -114,7 +113,6 @@ import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
-import { updateMyProfile } from '../../api/auth';
 import { fetchPlanRevisions, savePlanState } from '../../api/state';
 
 import type { UnlockRequestLock } from './UnlockRequestComposeModal';
@@ -142,6 +140,7 @@ import { usePlanScaleModeHandlers } from './usePlanScaleModeHandlers';
 import { usePlanWallDrawToggles } from './usePlanWallDrawToggles';
 import { usePlanWallPointHandlers } from './usePlanWallPointHandlers';
 import { usePlanMeetingOpenHandlers } from './usePlanMeetingOpenHandlers';
+import { usePlanPaletteFavoriteHandlers } from './usePlanPaletteFavoriteHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -4049,31 +4048,7 @@ export const usePlanView = (planId: string) => {
   });
   const paletteSettingsSection: 'desks' | 'security' | 'objects' = paletteSection === 'desks' ? 'desks' : paletteSection === 'security' ? 'security' : 'objects';
 
-  const addTypeToPalette = useCallback(
-    async (typeId: string) => {
-      await runAddTypeToPalette(typeId, { isDoorType, push, t });
-    },
-    [isDoorType, push, t]
-  );
-
-  const removeTypeFromPalette = useCallback(
-    async (typeId: string) => {
-      const user = useAuthStore.getState().user as any;
-      const enabled = Array.isArray(user?.paletteFavorites) ? (user.paletteFavorites as string[]) : [];
-      if (!enabled.includes(typeId)) return;
-      const next = enabled.filter((x) => x !== typeId);
-      try {
-        await updateMyProfile({ paletteFavorites: next });
-        useAuthStore.setState((s) =>
-          s.user ? ({ user: { ...s.user, paletteFavorites: next } as any, permissions: s.permissions, hydrated: s.hydrated } as any) : s
-        );
-        push(t({ it: 'Oggetto rimosso dalla palette', en: 'Object removed from palette' }), 'info');
-      } catch {
-        push(t({ it: 'Salvataggio non riuscito', en: 'Save failed' }), 'danger');
-      }
-    },
-    [push, t]
-  );
+  const { addTypeToPalette, removeTypeFromPalette } = usePlanPaletteFavoriteHandlers({ isDoorType, push, t });
 
   useEffect(() => {
     if (!gridMenuOpen) return;
