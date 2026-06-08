@@ -136,6 +136,7 @@ import { usePlanCapacity } from './usePlanCapacity';
 import { usePlanContextDerived } from './usePlanContextDerived';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
+import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
 import { usePlanPopoverEffects } from './usePlanPopoverEffects';
 import { usePlanHelpToastEffects } from './usePlanHelpToastEffects';
 import { usePlanDeeplinkEffects } from './usePlanDeeplinkEffects';
@@ -824,31 +825,16 @@ export const usePlanView = (planId: string) => {
     roomWallPrompt,
     setRoomWallPrompt
   } = usePlanModalState();
-  useEffect(() => {
-    if (!corridorModal) return;
-    setCorridorNameInput(corridorModal.initialName || '');
-    setCorridorNameEnInput(corridorModal.initialNameEn || '');
-    setCorridorShowNameInput(corridorModal.initialShowName !== false);
-  }, [corridorModal]);
-  useEffect(() => {
-    if (!corridorModal) return;
-    const timer = window.setTimeout(() => {
-      const el = corridorNameInputRef.current;
-      if (!el) return;
-      const len = el.value.length;
-      el.focus();
-      try {
-        el.setSelectionRange(len, len);
-      } catch {
-        // ignore unsupported inputs
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [corridorModal]);
-  useEffect(() => {
-    if (corridorDoorLinkModal) return;
-    if (corridorDoorLinkQuery) setCorridorDoorLinkQuery('');
-  }, [corridorDoorLinkModal, corridorDoorLinkQuery]);
+  usePlanCorridorModalEffects({
+    corridorModal,
+    setCorridorNameInput,
+    setCorridorNameEnInput,
+    setCorridorShowNameInput,
+    corridorNameInputRef,
+    corridorDoorLinkModal,
+    corridorDoorLinkQuery,
+    setCorridorDoorLinkQuery
+  });
   const planRef = useRef<FloorPlan | undefined>(undefined);
   const selectedObjectIdRef = useRef<string | undefined>(selectedObjectId);
   const selectedObjectIdsRef = useRef<string[]>(selectedObjectIds);
