@@ -25,6 +25,7 @@ import {
   type MeetingCheckInMapByMeetingId,
   type MeetingCheckInTimestampsByMeetingId
 } from '../../api/meetings';
+import { meetingCheckInEntryKey, getMeetingCheckInStats } from './useRoomMeetingsTimeline.helpers';
 import type { RoomMeetingDuplicateModalState } from './RoomMeetingDuplicateModal';
 import { nanoid } from 'nanoid';
 
@@ -467,74 +468,6 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
     [meetingIsoDayFromTs, reloadRoomMeetingsTimeline, roomMeetingsTimelineModal?.roomId]
   );
 
-  const meetingCheckInEntryKey = useCallback((entry: { tag?: string | null; label?: string | null; email?: string | null }) => {
-    const tag = String(entry.tag || 'INT');
-    const label = String(entry.label || '-').trim().toLowerCase();
-    const email = String(entry.email || '').trim().toLowerCase();
-    return `${tag}::${label}::${email}`;
-  }, []);
-
-  const getMeetingCheckInStats = useCallback(
-    (booking: MeetingBooking, checkMap?: Record<string, true> | null) => {
-      const participants = Array.isArray(booking?.participants) ? booking.participants : [];
-      const internalOnSite = participants
-        .filter((p: any) => (p?.kind || 'real_user') !== 'manual' && !p?.remote)
-        .map((p: any) => ({
-          tag: p?.optional ? 'OPT' : 'INT',
-          label: String(p?.fullName || p?.externalId || '-'),
-          email: p?.email ? String(p.email) : null
-        }));
-      const manualOnSiteFromParticipants = participants
-        .filter((p: any) => p?.kind === 'manual' && !p?.remote)
-        .map((p: any) => ({
-          tag: 'EXT',
-          label: String(p?.fullName || p?.externalId || '-'),
-          email: p?.email ? String(p.email) : null
-        }));
-      const manualSeen = new Set(
-        manualOnSiteFromParticipants.map((g) => `${String(g.label || '').trim().toLowerCase()}::${String(g.email || '').trim().toLowerCase()}`)
-      );
-      const externalOnSiteLegacy = (Array.isArray((booking as any)?.externalGuestsDetails) ? (booking as any).externalGuestsDetails : [])
-        .filter((g: any) => !g?.remote)
-        .filter(
-          (g: any) =>
-            !manualSeen.has(`${String(g?.name || '').trim().toLowerCase()}::${String(g?.email || '').trim().toLowerCase()}`)
-        )
-        .map((g: any) => ({
-          tag: 'EXT',
-          label: String(g?.name || '-'),
-          email: g?.email ? String(g.email) : null
-        }));
-      const entries = [...internalOnSite, ...manualOnSiteFromParticipants, ...externalOnSiteLegacy];
-      const map = checkMap || {};
-      const checked = entries.filter((e) => !!map[meetingCheckInEntryKey(e)]).length;
-      const total = entries.length;
-      const remoteInternal = participants.filter((p: any) => (p?.kind || 'real_user') !== 'manual' && !!p?.remote).length;
-      const manualRemoteKeys = new Set(
-        participants
-          .filter((p: any) => p?.kind === 'manual' && !!p?.remote)
-          .map(
-            (p: any) =>
-              `${String(p?.fullName || p?.externalId || '-').trim().toLowerCase()}::${String(p?.email || '').trim().toLowerCase()}`
-          )
-      );
-      const remoteExternalLegacy = (Array.isArray((booking as any)?.externalGuestsDetails) ? (booking as any).externalGuestsDetails : [])
-        .filter((g: any) => !!g?.remote)
-        .filter(
-          (g: any) =>
-            !manualRemoteKeys.has(`${String(g?.name || '').trim().toLowerCase()}::${String(g?.email || '').trim().toLowerCase()}`)
-        ).length;
-      return {
-        checked,
-        total,
-        percent: total > 0 ? Math.round((checked / total) * 100) : 0,
-        remoteParticipants: remoteInternal + remoteExternalLegacy,
-        internalOnSite: internalOnSite.length,
-        externalOnSite: manualOnSiteFromParticipants.length + externalOnSiteLegacy.length
-      };
-    },
-    [meetingCheckInEntryKey]
-  );
 
   const getRoomMeetingCheckInEntries = useCallback(
     (booking: MeetingBooking, checkMap?: Record<string, true> | null, tsMap?: Record<string, number> | null) => {
@@ -618,7 +551,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
         .filter((row) => row.checked)
         .sort((a, b) => Number(b.checkedAt || 0) - Number(a.checkedAt || 0));
     },
-    [client, meetingCheckInEntryKey]
+    [client]
   );
 
   useEffect(() => {
