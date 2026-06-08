@@ -239,3 +239,28 @@ export const sortImportUsers = (
   });
   return list;
 };
+
+// Build the WebAPI preview "variation" rows (add/update/remove), filtered by
+// type + search and sorted by variation rank then name. Pure.
+export const buildWebApiVariationRows = (
+  webApiPreviewRemoteRows: any[],
+  webApiMissingExistingRows: any[],
+  webApiPreviewFilter: string,
+  webApiPreviewRightQuery: string
+): any[] => {
+  const q = normalizeSearchText(webApiPreviewRightQuery);
+  const rows: any[] = [];
+  for (const r of webApiPreviewRemoteRows) {
+    if (r.importStatus === 'new') rows.push({ ...r, variationType: 'add' });
+    else if (r.importStatus === 'update') rows.push({ ...r, variationType: 'update' });
+  }
+  for (const r of webApiMissingExistingRows) rows.push({ ...r, variationType: 'remove' });
+  const filteredByType =
+    webApiPreviewFilter === 'all' ? rows : rows.filter((r) => String(r.variationType || '') === webApiPreviewFilter);
+  const filtered = !q ? filteredByType : filteredByType.filter((r) => matchesImportUserQuery(r, q));
+  return filtered.sort((a, b) => {
+    const d = importPreviewVariationRank(a.variationType) - importPreviewVariationRank(b.variationType);
+    if (d) return d;
+    return comparePeopleByName(a, b);
+  });
+};

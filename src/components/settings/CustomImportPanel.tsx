@@ -40,7 +40,6 @@ import {
   normalizeSearchText,
   comparePeopleByName,
   matchesImportUserQuery,
-  importPreviewVariationRank,
   suggestPortalUsername,
   humanizeProvisionMailReason,
   humanizeLdapSkipReason,
@@ -55,7 +54,8 @@ import {
   computeDuplicateGroups,
   rowsHaveDuplicates,
   filterImportUsers,
-  sortImportUsers
+  sortImportUsers,
+  buildWebApiVariationRows
 } from './CustomImportPanel.helpers';
 
 const CustomImportPanel = (
@@ -551,23 +551,10 @@ const CustomImportPanel = (
     [webApiMissingExistingRows.length, webApiPreviewRemoteRows]
   );
 
-  const webApiVariationRows = useMemo(() => {
-    const q = normalizeSearchText(webApiPreviewRightQuery);
-    const rows: any[] = [];
-    for (const r of webApiPreviewRemoteRows) {
-      if (r.importStatus === 'new') rows.push({ ...r, variationType: 'add' });
-      else if (r.importStatus === 'update') rows.push({ ...r, variationType: 'update' });
-    }
-    for (const r of webApiMissingExistingRows) rows.push({ ...r, variationType: 'remove' });
-    const filteredByType =
-      webApiPreviewFilter === 'all' ? rows : rows.filter((r) => String(r.variationType || '') === webApiPreviewFilter);
-    const filtered = !q ? filteredByType : filteredByType.filter((r) => matchesImportUserQuery(r, q));
-    return filtered.sort((a, b) => {
-      const d = importPreviewVariationRank(a.variationType) - importPreviewVariationRank(b.variationType);
-      if (d) return d;
-      return comparePeopleByName(a, b);
-    });
-  }, [webApiMissingExistingRows, webApiPreviewFilter, webApiPreviewRightQuery, webApiPreviewRemoteRows]);
+  const webApiVariationRows = useMemo(
+    () => buildWebApiVariationRows(webApiPreviewRemoteRows, webApiMissingExistingRows, webApiPreviewFilter, webApiPreviewRightQuery),
+    [webApiMissingExistingRows, webApiPreviewFilter, webApiPreviewRightQuery, webApiPreviewRemoteRows]
+  );
 
   const webApiPreviewSelectedLeftIdSet = useMemo(() => new Set(webApiPreviewSelectedLeftIds), [webApiPreviewSelectedLeftIds]);
   const webApiPreviewSelectedRightIdSet = useMemo(() => new Set(webApiPreviewSelectedRightIds), [webApiPreviewSelectedRightIds]);
