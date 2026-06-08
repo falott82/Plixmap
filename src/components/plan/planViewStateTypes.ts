@@ -49,3 +49,60 @@ export type ClientMeetingsPresetState = {
   day?: string;
   returnTo?: 'hub' | 'myMeetings';
 } | null;
+
+type UserRef = { userId: string; username: string };
+
+export type UnlockPromptState = {
+  requestId: string;
+  planId: string;
+  planName: string;
+  clientName?: string;
+  siteName?: string;
+  requestedBy: UserRef;
+  message?: string;
+} | null;
+
+export type UnlockGrantedPromptState = {
+  planId: string;
+  clientName?: string;
+  siteName?: string;
+  planName?: string;
+  grantedBy?: (UserRef & { avatarUrl?: string }) | null;
+  grantedAt?: number | null;
+  expiresAt?: number | null;
+  minutes?: number | null;
+} | null;
+
+export type ForceUnlockConfigState = {
+  planId: string;
+  planName: string;
+  clientName: string;
+  siteName: string;
+  userId: string;
+  username: string;
+  avatarUrl?: string;
+} | null;
+
+export type ForceUnlockActiveState = {
+  requestId: string;
+  planId: string;
+  targetUserId: string;
+  targetUsername: string;
+  graceEndsAt: number;
+  decisionEndsAt: number;
+  graceMinutes: number;
+  hasUnsavedChanges?: boolean | null;
+} | null;
+
+export type ForceUnlockIncomingState = {
+  requestId: string;
+  planId: string;
+  clientName?: string;
+  siteName?: string;
+  planName?: string;
+  requestedBy?: UserRef | null;
+  graceEndsAt: number;
+  decisionEndsAt: number;
+  graceMinutes: number;
+  hasUnsavedChanges?: boolean | null;
+} | null;

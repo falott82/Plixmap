@@ -126,7 +126,12 @@ import type {
   EscapeRouteModalState,
   LayerRevealPromptState,
   MeetingManagerPresetState,
-  ClientMeetingsPresetState
+  ClientMeetingsPresetState,
+  UnlockPromptState,
+  UnlockGrantedPromptState,
+  ForceUnlockConfigState,
+  ForceUnlockActiveState,
+  ForceUnlockIncomingState
 } from './planViewStateTypes';
 import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
 import { usePlanDoorModalHandlers } from './usePlanDoorModalHandlers';
@@ -1161,60 +1166,15 @@ export const usePlanView = (planId: string) => {
   const realtimeDisabledRef = useRef(false);
 		  const wsRef = useRef<WebSocket | null>(null);
 		  const lockRequestAtRef = useRef(0);
-		  const [unlockPrompt, setUnlockPrompt] = useState<{
-		    requestId: string;
-		    planId: string;
-	    planName: string;
-	    clientName?: string;
-	    siteName?: string;
-	    requestedBy: { userId: string; username: string };
-	    message?: string;
-		  } | null>(null);
+		  const [unlockPrompt, setUnlockPrompt] = useState<UnlockPromptState>(null);
 		  const [unlockBusy, setUnlockBusy] = useState(false);
 		  const [unlockCompose, setUnlockCompose] = useState<{ target: PresenceUser; locks: UnlockRequestLock[] } | null>(null);
-		  const [unlockGrantedPrompt, setUnlockGrantedPrompt] = useState<{
-		    planId: string;
-		    clientName?: string;
-		    siteName?: string;
-		    planName?: string;
-		    grantedBy?: { userId: string; username: string; avatarUrl?: string } | null;
-		    grantedAt?: number | null;
-		    expiresAt?: number | null;
-		    minutes?: number | null;
-		  } | null>(null);
-		  const [forceUnlockConfig, setForceUnlockConfig] = useState<{
-		    planId: string;
-		    planName: string;
-		    clientName: string;
-		    siteName: string;
-		    userId: string;
-		    username: string;
-		    avatarUrl?: string;
-		  } | null>(null);
+		  const [unlockGrantedPrompt, setUnlockGrantedPrompt] = useState<UnlockGrantedPromptState>(null);
+		  const [forceUnlockConfig, setForceUnlockConfig] = useState<ForceUnlockConfigState>(null);
 		  const [forceUnlockGraceMinutes, setForceUnlockGraceMinutes] = useState(5);
 		  const [forceUnlockStarting, setForceUnlockStarting] = useState(false);
-			  const [forceUnlockActive, setForceUnlockActive] = useState<{
-			    requestId: string;
-			    planId: string;
-			    targetUserId: string;
-			    targetUsername: string;
-			    graceEndsAt: number;
-			    decisionEndsAt: number;
-			    graceMinutes: number;
-			    hasUnsavedChanges?: boolean | null;
-			  } | null>(null);
-			  const [forceUnlockIncoming, setForceUnlockIncoming] = useState<{
-			    requestId: string;
-			    planId: string;
-			    clientName?: string;
-			    siteName?: string;
-			    planName?: string;
-			    requestedBy?: { userId: string; username: string } | null;
-			    graceEndsAt: number;
-			    decisionEndsAt: number;
-			    graceMinutes: number;
-			    hasUnsavedChanges?: boolean | null;
-			  } | null>(null);
+			  const [forceUnlockActive, setForceUnlockActive] = useState<ForceUnlockActiveState>(null);
+			  const [forceUnlockIncoming, setForceUnlockIncoming] = useState<ForceUnlockIncomingState>(null);
   const [forceUnlockExecuteCommand, setForceUnlockExecuteCommand] = useState<{ requestId: string; action: 'save' | 'discard' } | null>(null);
   const [forceUnlockTick, setForceUnlockTick] = useState(0);
   const forceUnlockActiveFocusRef = useRef<HTMLButtonElement | null>(null);
