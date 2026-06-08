@@ -31,7 +31,7 @@ import {
   computeCanvasPlan,
   computeSaveRevisionReason
 } from './planViewMiscTools';
-import { computeApplyScale, computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
+import { computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
 import { computeGetTypeLayerIds, computeGetLayerIdsForType, computeGetObjectLayerIdsForVisibility } from './planViewLayerResolution';
 import {
   computeResolveWallPoint,
@@ -79,7 +79,6 @@ import {
   computeSafetyEmergencyContacts,
   runToggleRevisionImmutable,
   runOpenMeetingManager,
-  runStartScaleMode,
   runHandleWallSegmentDblClick,
   runAddTypeToPalette,
   computeGetObjectBoundsForAlign,
@@ -146,6 +145,7 @@ import { usePlanWallTypeHandlers } from './usePlanWallTypeHandlers';
 import { usePlanTypeLayerHandlers } from './usePlanTypeLayerHandlers';
 import { usePlanToolPointHandlers } from './usePlanToolPointHandlers';
 import { usePlanMeasureQuoteToggles } from './usePlanMeasureQuoteToggles';
+import { usePlanScaleModeHandlers } from './usePlanScaleModeHandlers';
 import { usePlanSelectionMenuEffects } from './usePlanSelectionMenuEffects';
 import { usePlanModalState } from './usePlanModalState';
 import { usePlanCorridorModalEffects } from './usePlanCorridorModalEffects';
@@ -3364,95 +3364,38 @@ export const usePlanView = (planId: string) => {
     []
   );
 
-  const startScaleMode = useCallback(() => {
-    runStartScaleMode({
-      isReadOnly,
-      dismissScaleToast,
-      resetToolClickHistory,
-      setScaleMode,
-      setScaleDraft,
-      setScaleDraftPointer,
-      setScaleModal,
-      setScaleMetersInput,
-      setRoomDrawMode,
-      setMeasureMode,
-      setWallDrawMode,
-      setQuoteMode,
-      setQuotePoints,
-      setQuotePointer,
-      setPendingType,
-      scaleToastIdRef,
-      t
-    });
-  }, [dismissScaleToast, isReadOnly, resetToolClickHistory, t]);
-
-  const cancelScaleMode = useCallback(() => {
-    if (!scaleMode) return;
-    setScaleMode(false);
-    setScaleDraft(null);
-    setScaleDraftPointer(null);
-    setScaleMetersInput('');
-    dismissScaleToast();
-    resetToolClickHistory();
-    push(t({ it: 'Impostazione scala annullata', en: 'Scale setup cancelled' }), 'info');
-  }, [dismissScaleToast, push, resetToolClickHistory, scaleMode, t]);
-
-  const handleScalePoint = useCallback(
-    (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
-      if (!scaleMode) return;
-      if (!scaleDraft?.start) {
-        setScaleDraft({ start: point });
-        setScaleDraftPointer(null);
-        return;
-      }
-      const start = scaleDraft.start;
-      const resolved = resolveAxisLockedPoint(point, start, options);
-      const distance = Math.hypot(resolved.x - start.x, resolved.y - start.y);
-      if (!Number.isFinite(distance) || distance <= 0.0001) return;
-      setScaleDraft({ start, end: resolved });
-      setScaleDraftPointer(null);
-      setScaleMode(false);
-      setScaleMetersInput('');
-      setScaleModal({ start, end: resolved, distance });
-    },
-    [resolveAxisLockedPoint, scaleDraft, scaleMode]
-  );
-
-  const applyScale = useCallback(() => {
-    computeApplyScale({
-      computeRoomSurfaceSqm,
-      dismissScaleToast,
-      isReadOnly,
-      markTouched,
-      plan,
-      planScale,
-      push,
-      scaleMetersInput,
-      scaleModal,
-      t,
-      updateFloorPlan,
-      updateRoom,
-      setScaleDraft,
-      setScaleDraftPointer,
-      setShowScaleLine,
-      setScaleModal
-    });
-  }, [
-    computeRoomSurfaceSqm,
-    dismissScaleToast,
+  const { startScaleMode, cancelScaleMode, handleScalePoint, applyScale } = usePlanScaleModeHandlers({
     isReadOnly,
-    markTouched,
+    scaleMode,
+    scaleDraft,
     plan,
-    planScale?.labelScale,
-    planScale?.opacity,
-    planScale?.strokeWidth,
-    push,
+    planScale,
     scaleMetersInput,
     scaleModal,
+    push,
     t,
+    markTouched,
     updateFloorPlan,
-    updateRoom
-  ]);
+    updateRoom,
+    dismissScaleToast,
+    resetToolClickHistory,
+    resolveAxisLockedPoint,
+    computeRoomSurfaceSqm,
+    scaleToastIdRef,
+    setScaleMode,
+    setScaleDraft,
+    setScaleDraftPointer,
+    setScaleModal,
+    setScaleMetersInput,
+    setRoomDrawMode,
+    setMeasureMode,
+    setWallDrawMode,
+    setQuoteMode,
+    setQuotePoints,
+    setQuotePointer,
+    setPendingType,
+    setShowScaleLine
+  });
 
   const clearScaleNow = useCallback(() => {
     if (!plan || isReadOnly) return;
