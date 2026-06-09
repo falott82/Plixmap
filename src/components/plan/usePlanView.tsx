@@ -22,7 +22,6 @@ import {
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
-import { computeHandleStageSelect } from './planViewStageHandlers';
 import { runPlanKeydownEffect } from './planViewKeydown';
 import {
   runDismissSelectionHintToasts
@@ -109,6 +108,7 @@ import { usePlanRealUserPlacement } from './usePlanRealUserPlacement';
 import { usePlanWallSegments } from './usePlanWallSegments';
 import { usePlanMapContextMenuHandler } from './usePlanMapContextMenuHandler';
 import { usePlanMoveHandlers } from './usePlanMoveHandlers';
+import { usePlanStageSelectHandler } from './usePlanStageSelectHandler';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -1965,57 +1965,13 @@ export const usePlanView = (planId: string) => {
     };
   }, [plan, zoom, pan, saveViewport]);
 
-	  const handleStageSelect = useCallback(
-	    (id?: string, options?: { keepContext?: boolean; multi?: boolean }) =>
-	      computeHandleStageSelect(id, options, {
-	        addLink,
-	        clearSelection,
-	        linkCreateMode,
-	        linkFromId,
-	        markTouched,
-	        panToolActive,
-	        push,
-	        corridorDrawMode,
-	        roomDrawMode,
-	        setPanToolActive,
-	        setSelectedObject,
-	        t,
-	        toggleSelectedObject,
-	        isReadOnlyRef,
-	        planRef,
-	        selectedObjectIdsRef,
-	        selectedObjectIdRef,
-	        setRoomDrawMode,
-	        setNewRoomMenuOpen,
-	        setCorridorDrawMode,
-	        setLinkFromId,
-	        setCableModal,
-	        setSelectedRoomId,
-	        setSelectedRoomIds,
-	        setSelectedCorridorId,
-	        setSelectedCorridorDoor,
-	        setSelectedRoomDoorId,
-	        setCorridorQuickMenu,
-	        setSelectedLinkId,
-	        setContextMenu
-	      }),
-	    [
-	      addLink,
-	      clearSelection,
-	      linkCreateMode,
-	      linkFromId,
-	      markTouched,
-	      panToolActive,
-	      push,
-        corridorDrawMode,
-	      roomDrawMode,
-	      setPanToolActive,
-        setSelectedCorridorId,
-	      setSelectedObject,
-	      t,
-	      toggleSelectedObject
-	    ]
-	  );
+  const handleStageSelect = usePlanStageSelectHandler({
+    addLink, clearSelection, linkCreateMode, linkFromId, markTouched, panToolActive, push, corridorDrawMode,
+    roomDrawMode, setPanToolActive, setSelectedObject, t, toggleSelectedObject, isReadOnlyRef, planRef,
+    selectedObjectIdsRef, selectedObjectIdRef, setRoomDrawMode, setNewRoomMenuOpen, setCorridorDrawMode,
+    setLinkFromId, setCableModal, setSelectedRoomId, setSelectedRoomIds, setSelectedCorridorId,
+    setSelectedCorridorDoor, setSelectedRoomDoorId, setCorridorQuickMenu, setSelectedLinkId, setContextMenu
+  });
 
 
 
