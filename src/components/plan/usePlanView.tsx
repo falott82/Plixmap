@@ -14,7 +14,6 @@ import {
 import {
   computeAlignSelection,
   computeGetCorridorPolygon,
-  computeHandleWallMove,
   computeSaveRevisionReason
 } from './planViewMiscTools';
 import { computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
@@ -23,7 +22,7 @@ import {
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
-import { computeHandleStageMove, computeHandleStageSelect } from './planViewStageHandlers';
+import { computeHandleStageSelect } from './planViewStageHandlers';
 import { runPlanKeydownEffect } from './planViewKeydown';
 import {
   runDismissSelectionHintToasts
@@ -109,6 +108,7 @@ import { usePlanWallGroupHandlers } from './usePlanWallGroupHandlers';
 import { usePlanRealUserPlacement } from './usePlanRealUserPlacement';
 import { usePlanWallSegments } from './usePlanWallSegments';
 import { usePlanMapContextMenuHandler } from './usePlanMapContextMenuHandler';
+import { usePlanMoveHandlers } from './usePlanMoveHandlers';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -2941,53 +2941,11 @@ export const usePlanView = (planId: string) => {
     dragStartRef.current.set(id, { x, y, roomId });
   }, []);
 
-  const handleStageMove = useCallback(
-    (id: string, x: number, y: number) =>
-      computeHandleStageMove(id, x, y, {
-        collectUserDepartments,
-        getUserObjectLabel,
-        markTouched,
-        moveObject,
-        notifyNonPeopleRoomBlocked,
-        resolveRoomAssignmentForObject,
-        roomStatsById,
-        t,
-        updateObject,
-        isReadOnlyRef,
-        planRef,
-        dragStartRef,
-        getRoomIdAt,
-        isUserType,
-        setCapacityConfirm,
-        setRoomDepartmentConfirm
-      }),
-    [
-      collectUserDepartments,
-      getUserObjectLabel,
-      markTouched,
-      moveObject,
-      notifyNonPeopleRoomBlocked,
-      resolveRoomAssignmentForObject,
-      roomStatsById,
-      t,
-      updateObject
-    ]
-  );
-
-  const handleWallMove = useCallback(
-    (id: string, dx: number, dy: number, batchId?: string, movedRoomIds?: string[]) =>
-      computeHandleWallMove(id, dx, dy, batchId, movedRoomIds, {
-        markTouched,
-        updateObject,
-        wallMoveBatchRef,
-        planRef,
-        isReadOnlyRef
-      }),
-    [
-      markTouched,
-      updateObject
-    ]
-  );
+  const { handleStageMove, handleWallMove } = usePlanMoveHandlers({
+    collectUserDepartments, getUserObjectLabel, markTouched, moveObject, notifyNonPeopleRoomBlocked,
+    resolveRoomAssignmentForObject, roomStatsById, t, updateObject, isReadOnlyRef, planRef, dragStartRef,
+    getRoomIdAt, isUserType, setCapacityConfirm, setRoomDepartmentConfirm, wallMoveBatchRef
+  });
 
   const objectListMatches = useMemo(() => {
     const q = objectListQuery.trim().toLowerCase();
