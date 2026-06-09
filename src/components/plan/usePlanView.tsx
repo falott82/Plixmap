@@ -42,10 +42,7 @@ import {
   computeMeetingLocationLabels,
   computeSiteMeetingParticipantCandidates,
   runApplyHistorySnapshot,
-  runUnlockRequestEffect,
-  runRevertUnsavedChanges,
-  runForceSaveNow,
-  runSaveRevisionForUnlock
+  runUnlockRequestEffect
 } from './planViewComputeBits';
 import {
   computeMyMeetingsFiltered,
@@ -81,7 +78,7 @@ import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
-import { fetchPlanRevisions, savePlanState } from '../../api/state';
+import { fetchPlanRevisions } from '../../api/state';
 
 import type { UnlockRequestLock } from './UnlockRequestComposeModal';
 
@@ -112,6 +109,7 @@ import { usePlanMeasureToast } from './usePlanMeasureToast';
 import { usePlanWallToolHandlers } from './usePlanWallToolHandlers';
 import { usePlanQuoteToolHandlers } from './usePlanQuoteToolHandlers';
 import { usePlanPresentation } from './usePlanPresentation';
+import { usePlanSaveRevisionHandlers } from './usePlanSaveRevisionHandlers';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -1611,31 +1609,11 @@ export const usePlanView = (planId: string) => {
 		    return () => window.removeEventListener('keydown', onKey);
 		  }, [printAreaMode, push, t]);
 
-  const revertUnsavedChanges = useCallback(() => {
-    runRevertUnsavedChanges({ plan, getLatestRevisionCached, restoreRevision, baselineSnapshotRef, setFloorPlanContent });
-  }, [getLatestRevisionCached, plan, restoreRevision, setFloorPlanContent]);
-
-  const forceSaveNow = useCallback(async () => {
-    return runForceSaveNow({ plan, planId, useDataStoreGetState: useDataStore.getState, savePlanState });
-  }, [plan?.id, planId]);
-
-  const saveRevisionForUnlock = useCallback(async () => {
-    return runSaveRevisionForUnlock({
-      plan,
-      hasNavigationEdits,
-      hasAnyRevision,
-      latestRev,
-      addRevision,
-      push,
-      t,
-      postAuditEvent,
-      resetTouched,
-      entrySnapshotRef,
-      getPlanSnapshot,
-      planRef,
-      forceSaveNow
-    });
-  }, [addRevision, forceSaveNow, hasAnyRevision, hasNavigationEdits, latestRev.major, latestRev.minor, plan, postAuditEvent, push, resetTouched, t, getPlanSnapshot]);
+  const { revertUnsavedChanges, saveRevisionForUnlock } = usePlanSaveRevisionHandlers({
+    plan, getLatestRevisionCached, restoreRevision, baselineSnapshotRef, setFloorPlanContent, planId,
+    hasNavigationEdits, hasAnyRevision, latestRev, addRevision, push, t, postAuditEvent, resetTouched,
+    entrySnapshotRef, getPlanSnapshot, planRef
+  });
 
 	  const handleUnlockResponse = useCallback(
 	    async (action: 'grant' | 'grant_save' | 'grant_discard' | 'deny') =>
