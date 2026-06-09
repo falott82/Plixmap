@@ -33,7 +33,6 @@ import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLab
 import {
   hexToRgba,
   formatMeasure,
-  PHOTO_ICON_BASE_SIZE,
   SAFETY_CARD_HELP_TOAST_ID,
   sameSafetyCardDraftLayout,
   getDeskBounds,
@@ -56,6 +55,7 @@ import {
   buildCameraWallSegments,
   buildWifiRayAngles,
   clampPanToBounds,
+  findPhotoAt,
 } from './CanvasStage.helpers';
 
 interface Props {
@@ -606,22 +606,7 @@ const CanvasStageImpl = (
   }, []);
   const wallTypeIdSet = useMemo(() => wallTypeIds || new Set<string>(), [wallTypeIds]);
   const wallAttenuationMap = useMemo(() => wallAttenuationByType || new Map<string, number>(), [wallAttenuationByType]);
-  const findPhotoAtPoint = useCallback(
-    (x: number, y: number) => {
-      for (let i = objects.length - 1; i >= 0; i -= 1) {
-        const obj = objects[i];
-        if (!obj || obj.type !== 'photo') continue;
-        const scale = Number(obj.scale ?? 1) || 1;
-        const size = PHOTO_ICON_BASE_SIZE * scale;
-        const half = size / 2;
-        if (x >= obj.x - half && x <= obj.x + half && y >= obj.y - half && y <= obj.y + half) {
-          return obj;
-        }
-      }
-      return null;
-    },
-    [objects]
-  );
+  const findPhotoAtPoint = useCallback((x: number, y: number) => findPhotoAt(objects, x, y), [objects]);
 
   const applyStageTransform = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
     const stage = stageRef.current;

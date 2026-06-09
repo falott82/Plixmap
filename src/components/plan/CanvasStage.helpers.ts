@@ -724,3 +724,15 @@ export const clampPanToBounds = (
     y: clamp(nextPan.y, Math.min(minY, maxY), Math.max(minY, maxY))
   };
 };
+
+// Topmost photo object whose icon box contains (x,y). Pure (uses PHOTO_ICON_BASE_SIZE). 
+export const findPhotoAt = (objects: any[], x: number, y: number): any | null => {
+  for (let i = (objects?.length || 0) - 1; i >= 0; i -= 1) {
+    const obj = objects[i];
+    if (!obj || obj.type !== 'photo') continue;
+    const scale = Number(obj.scale ?? 1) || 1;
+    const half = (PHOTO_ICON_BASE_SIZE * scale) / 2;
+    if (x >= obj.x - half && x <= obj.x + half && y >= obj.y - half && y <= obj.y + half) return obj;
+  }
+  return null;
+};

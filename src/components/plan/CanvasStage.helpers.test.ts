@@ -25,7 +25,8 @@ import {
   buildWallSegments,
   buildCameraWallSegments,
   buildWifiRayAngles,
-  clampPanToBounds
+  clampPanToBounds,
+  findPhotoAt
 } from './CanvasStage.helpers';
 
 const square = [
@@ -206,6 +207,22 @@ describe('findNearestRoomCorner', () => {
   it('returns null when no corner is within threshold', () => {
     expect(findNearestRoomCorner(rooms, { x: 100, y: 100 }, 1)).toBeNull();
     expect(findNearestRoomCorner([], { x: 0, y: 0 }, 1)).toBeNull();
+  });
+});
+
+describe('findPhotoAt', () => {
+  const objects = [
+    { id: 'p1', type: 'photo', x: 0, y: 0, scale: 1 },
+    { id: 'r1', type: 'rack', x: 0, y: 0 },
+    { id: 'p2', type: 'photo', x: 100, y: 100, scale: 2 }
+  ];
+  it('returns the topmost photo whose icon box contains the point', () => {
+    expect(findPhotoAt(objects, 0, 0)?.id).toBe('p1');
+    expect(findPhotoAt(objects, 100, 100)?.id).toBe('p2');
+  });
+  it('ignores non-photo objects and returns null when none match', () => {
+    expect(findPhotoAt(objects, 500, 500)).toBeNull();
+    expect(findPhotoAt([{ id: 'r', type: 'rack', x: 0, y: 0 }], 0, 0)).toBeNull();
   });
 });
 
