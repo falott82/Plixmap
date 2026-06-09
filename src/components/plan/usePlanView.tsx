@@ -110,6 +110,7 @@ import { usePlanRenderDerived } from './usePlanRenderDerived';
 import { usePlanLinkRackModals } from './usePlanLinkRackModals';
 import { usePlanPaletteDefs } from './usePlanPaletteDefs';
 import { usePlanAccessPermissions } from './usePlanAccessPermissions';
+import { usePlanObjectIndex } from './usePlanObjectIndex';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -1207,55 +1208,15 @@ export const usePlanView = (planId: string) => {
     updateFloorPlan
   });
   const basePlan = plan as FloorPlan;
-  const renderPlanObjectById = useMemo(() => {
-    const map = new Map<string, MapObject>();
-    const objects = (renderPlan?.objects || []) as MapObject[];
-    for (const obj of objects) {
-      map.set(obj.id, obj);
-    }
-    return map;
-  }, [renderPlan?.objects]);
-  const basePlanObjectById = useMemo(() => {
-    const map = new Map<string, MapObject>();
-    const objects = (basePlan?.objects || []) as MapObject[];
-    for (const obj of objects) {
-      map.set(obj.id, obj);
-    }
-    return map;
-  }, [basePlan?.objects]);
-  const renderPlanRoomById = useMemo(() => {
-    const map = new Map<string, Room>();
-    const rooms = (renderPlan?.rooms || []) as Room[];
-    for (const room of rooms) {
-      map.set(room.id, room);
-    }
-    return map;
-  }, [renderPlan?.rooms]);
-  const basePlanRoomById = useMemo(() => {
-    const map = new Map<string, Room>();
-    const rooms = (basePlan?.rooms || []) as Room[];
-    for (const room of rooms) {
-      map.set(room.id, room);
-    }
-    return map;
-  }, [basePlan?.rooms]);
-  const roomModalBaseRoom = useMemo(() => {
-    if (!roomModal || roomModal.mode !== 'edit') return undefined;
-    return basePlanRoomById.get(roomModal.roomId);
-  }, [basePlanRoomById, roomModal]);
-  const selectedObjects = useMemo(() => {
-    if (!selectedObjectIds.length) return [] as MapObject[];
-    const out: MapObject[] = [];
-    for (const id of selectedObjectIds) {
-      const obj = renderPlanObjectById.get(id);
-      if (obj) out.push(obj);
-    }
-    return out;
-  }, [renderPlanObjectById, selectedObjectIds]);
-  const selectedSingleObject = useMemo(() => {
-    if (selectedObjectIds.length !== 1) return undefined;
-    return renderPlanObjectById.get(selectedObjectIds[0]);
-  }, [renderPlanObjectById, selectedObjectIds]);
+  const {
+    renderPlanObjectById,
+    basePlanObjectById,
+    renderPlanRoomById,
+    basePlanRoomById,
+    roomModalBaseRoom,
+    selectedObjects,
+    selectedSingleObject,
+  } = usePlanObjectIndex({ renderPlan, basePlan, roomModal, selectedObjectIds });
   const planScale = renderPlan?.scale;
   const metersPerPixel = useMemo(() => {
     const value = Number(planScale?.metersPerPixel);
