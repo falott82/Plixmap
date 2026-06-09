@@ -13,7 +13,6 @@ import {
   computeCreateRoomFromPoly,
   computeSplitWallAtPoint,
   computeRoomMeasuresData,
-  computeRoomModalMetrics,
   computeAddWallSegment,
   isPointInRoom,
   getRoomIdAt,
@@ -117,6 +116,7 @@ import { usePlanCapacity } from './usePlanCapacity';
 import { usePlanContextDerived, type PlanContextMenuState } from './usePlanContextDerived';
 import { usePlanTypeCatalog } from './usePlanTypeCatalog';
 import { usePlanRoomGeometry } from './usePlanRoomGeometry';
+import { usePlanRoomModalDerived } from './usePlanRoomModalDerived';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -2820,62 +2820,10 @@ export const usePlanView = (planId: string) => {
     );
   }, []);
 
-  const roomModalMetrics = useMemo(() => {
-    return computeRoomModalMetrics({
-      computePolygonArea,
-      computePolylineLength,
-      formatCornerLabel,
-      formatNumber,
-      lang,
-      metersPerPixel,
-      renderPlan,
-      roomModal,
-      renderPlanRoomById
-    });
-  }, [
-    computePolygonArea,
-    computePolylineLength,
-    formatCornerLabel,
-    formatNumber,
-    getRoomPolygon,
-    lang,
-    metersPerPixel,
-    renderPlan,
-    roomModal,
-    renderPlanRoomById
-  ]);
-  const roomModalPreview = useMemo(() => {
-    if (!roomModal) return null;
-    let points: { x: number; y: number }[] = [];
-    if (roomModal.mode === 'create') {
-      if (roomModal.kind === 'rect' && roomModal.rect) {
-        const { x, y, width, height } = roomModal.rect;
-        points = [
-          { x, y },
-          { x: x + width, y },
-          { x: x + width, y: y + height },
-          { x, y: y + height }
-        ];
-      } else if (roomModal.kind === 'poly') {
-        points = roomModal.points || [];
-      }
-    } else if (roomModal.mode === 'edit' && renderPlan) {
-      const room = renderPlanRoomById.get(roomModal.roomId);
-      if (room) points = getRoomPolygon(room);
-    }
-    return buildRoomPreview(points);
-  }, [buildRoomPreview, getRoomPolygon, renderPlan, renderPlanRoomById, roomModal]);
-  const roomHasWalls = useMemo(() => {
-    if (!roomModal || roomModal.mode !== 'edit' || !renderPlan) return false;
-    return (renderPlan.objects || []).some(
-      (obj) => isWallType(obj.type) && (obj as any).wallGroupId === roomModal.roomId
-    );
-  }, [isWallType, renderPlan, roomModal]);
-  const roomWallPreview = useMemo(() => {
-    if (!roomWallTypeModal) return null;
-    const points = (roomWallTypeModal.segments || []).map((segment) => segment.start);
-    return buildRoomPreview(points);
-  }, [buildRoomPreview, roomWallTypeModal]);
+  const { roomModalMetrics, roomModalPreview, roomHasWalls, roomWallPreview } = usePlanRoomModalDerived({
+    computePolygonArea, computePolylineLength, formatCornerLabel, formatNumber, lang, metersPerPixel,
+    renderPlan, roomModal, renderPlanRoomById, getRoomPolygon, buildRoomPreview, isWallType, roomWallTypeModal
+  });
 
   const hasRoomOverlap = useCallback(
     (nextRoom: any, excludeId?: string) => {
