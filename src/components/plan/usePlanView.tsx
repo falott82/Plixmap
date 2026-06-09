@@ -107,6 +107,7 @@ import { usePlanRoomLayoutExportHandlers } from './usePlanRoomLayoutExportHandle
 import { usePlanModalInitials } from './usePlanModalInitials';
 import { usePlanRoomDrawHandlers } from './usePlanRoomDrawHandlers';
 import { usePlanWallGroupHandlers } from './usePlanWallGroupHandlers';
+import { usePlanRealUserPlacement } from './usePlanRealUserPlacement';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -156,7 +157,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useLang, useT } from '../../i18n/useT';
 import { useShallow } from 'zustand/react/shallow';
 import { postAuditEvent } from '../../api/audit';
-import { hasExternalUsers } from '../../api/customImport';
 
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
@@ -3199,39 +3199,9 @@ export const usePlanView = (planId: string) => {
     buildRoomWallSegments, setRoomWallTypeModal, getWallPolygonData, roomModal, renderPlan, renderPlanRoomById, t, setRoomModal
   });
 
-  const openRealUserPickerAt = useCallback(
-    async (x: number, y: number) => {
-      if (isReadOnly) return;
-      setPendingType(null);
-      if (!client?.id) {
-        setRealUserImportMissing(true);
-        return;
-      }
-      try {
-        const hasUsers = await hasExternalUsers(client.id);
-        if (!hasUsers) {
-          setRealUserImportMissing(true);
-          return;
-        }
-        setRealUserPicker({ x, y });
-      } catch {
-        setRealUserImportMissing(true);
-      }
-    },
-    [client?.id, isReadOnly]
-  );
-
-  const proceedPlaceUser = useCallback(
-    (type: MapObjectType, x: number, y: number) => {
-      if (type === 'real_user') {
-        void openRealUserPickerAt(x, y);
-        return;
-      }
-      setModalState({ mode: 'create', type, coords: { x, y } });
-      setPendingType(null);
-    },
-    [openRealUserPickerAt]
-  );
+  const { proceedPlaceUser } = usePlanRealUserPlacement({
+    isReadOnly, setPendingType, client, setRealUserImportMissing, setRealUserPicker, setModalState
+  });
 
   const { handlePlaceNew, handleCreate, handleUpdate } = usePlanObjectCreateHandlers({
     isReadOnly, panToolActive, setPanToolActive, shouldConfirmCapacity, proceedPlaceUser, isDeskType,
