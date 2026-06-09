@@ -23,7 +23,6 @@ import {
   computeAlignSelection,
   computeGetCorridorPolygon,
   computeHandleWallMove,
-  computeCorridorDoorLinkRoomEntries,
   computeSaveRevisionReason
 } from './planViewMiscTools';
 import { computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
@@ -54,7 +53,6 @@ import {
 import {
   computeMyMeetingsFiltered,
   runToggleRevisionImmutable,
-  computeRoomStatsById,
   computeGetPlanUnsavedChanges,
   runPerformPendingPostSaveAction,
   runOpenMyMeetingsModal
@@ -112,6 +110,7 @@ import { usePlanCollections } from './usePlanCollections';
 import { usePlanRoomExportDerived } from './usePlanRoomExportDerived';
 import { usePlanObjectCreateHandlers } from './usePlanObjectCreateHandlers';
 import { usePlanMiscDerived } from './usePlanMiscDerived';
+import { usePlanRoomStats } from './usePlanRoomStats';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -3303,25 +3302,9 @@ export const usePlanView = (planId: string) => {
     return () => window.removeEventListener('mousedown', onDown);
   }, [gridMenuOpen]);
 
-  const roomStatsCacheRef = useRef<{
-    key: string;
-    value: Map<string, { items: MapObject[]; userCount: number; otherCount: number; totalCount: number }>;
-  }>({ key: '', value: new Map() });
-  const roomStatsById = useMemo(
-    () => computeRoomStatsById({ renderPlan, isUserObject, roomStatsCacheRef }),
-    [isUserObject, renderPlan?.objects]
-  );
-  const corridorDoorLinkRoomEntries = useMemo(() => {
-    return computeCorridorDoorLinkRoomEntries({
-      corridorDoorLinkModal,
-      corridorDoorLinkQuery,
-      getUserObjectLabel,
-      isUserObject,
-      lang,
-      renderPlan,
-      roomStatsById
-    });
-  }, [corridorDoorLinkModal?.magneticRoomIds, corridorDoorLinkModal?.nearestRoomId, corridorDoorLinkQuery, getUserObjectLabel, isUserObject, lang, renderPlan?.rooms, roomStatsById]);
+  const { roomStatsById, corridorDoorLinkRoomEntries } = usePlanRoomStats({
+    renderPlan, isUserObject, corridorDoorLinkModal, corridorDoorLinkQuery, getUserObjectLabel, lang
+  });
 
   const {
     capacityConfirm,
