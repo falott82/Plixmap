@@ -93,7 +93,7 @@ import { fetchPlanRevisions, savePlanState } from '../../api/state';
 
 import type { UnlockRequestLock } from './UnlockRequestComposeModal';
 
-import { DESK_TYPE_IDS, isDeskType } from './deskTypes';
+import { isDeskType } from './deskTypes';
 
 import type { RoomLayoutExportModalSortKey } from './RoomLayoutExportModal';
 import type { CrossPlanSearchResult } from './CrossPlanSearchModal';
@@ -108,6 +108,7 @@ import { usePlanLayerResolution } from './usePlanLayerResolution';
 import { usePlanMeasureScale } from './usePlanMeasureScale';
 import { usePlanRenderDerived } from './usePlanRenderDerived';
 import { usePlanLinkRackModals } from './usePlanLinkRackModals';
+import { usePlanPaletteDefs } from './usePlanPaletteDefs';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -162,7 +163,6 @@ import { type MeetingBooking } from '../../api/meetings';
 
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
-import { isSecurityTypeId } from '../../store/security';
 import { getWallTypeColor } from '../../utils/wallColors';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 
@@ -3403,37 +3403,16 @@ export const usePlanView = (planId: string) => {
   });
 
   const paletteFavorites = useAuthStore((s) => (s.user as any)?.paletteFavorites) as string[] | undefined;
-  const paletteOrder = useMemo(() => {
-    const fav = Array.isArray(paletteFavorites) ? paletteFavorites : [];
-    return fav.filter((id) => !isWallType(id) && !isDoorType(id) && !isSecurityTypeId(id));
-  }, [isDoorType, isWallType, paletteFavorites]);
-  // User-configured palette: list can be empty (meaning no objects enabled).
-  const paletteHasCustom = paletteOrder.length > 0;
-  const paletteIsEmpty = Array.isArray(paletteFavorites) && paletteOrder.length === 0;
-  const paletteHasMore = useMemo(() => {
-    const all = (objectTypeDefs || [])
-      .map((d) => d.id)
-      .filter((id) => !isDeskType(id) && !isWallType(id) && !isDoorType(id) && !isSecurityTypeId(id));
-    const fav = new Set(paletteOrder);
-    return all.some((id) => !fav.has(id));
-  }, [isDoorType, isWallType, objectTypeDefs, paletteOrder]);
-  const deskTypeSet = useMemo(() => new Set(DESK_TYPE_IDS as readonly string[]), []);
-  const deskPaletteDefs = useMemo(() => {
-    const defs = objectTypeDefs || [];
-    return defs.filter((d) => deskTypeSet.has(d.id));
-  }, [deskTypeSet, objectTypeDefs]);
-  const deskPaletteOrder = useMemo(() => {
-    const filtered = paletteOrder.filter((id) => deskTypeSet.has(id));
-    return filtered.length ? filtered : undefined;
-  }, [deskTypeSet, paletteOrder]);
-  const securityPaletteDefs = useMemo(() => {
-    const defs = objectTypeDefs || [];
-    return defs.filter((d) => isSecurityTypeId(d.id));
-  }, [objectTypeDefs]);
-  const otherPaletteDefs = useMemo(() => {
-    const defs = objectTypeDefs || [];
-    return defs.filter((d) => !deskTypeSet.has(d.id) && !isWallType(d.id) && !isDoorType(d.id) && !isSecurityTypeId(d.id));
-  }, [deskTypeSet, isDoorType, isWallType, objectTypeDefs]);
+  const {
+    paletteOrder,
+    paletteHasCustom,
+    paletteIsEmpty,
+    paletteHasMore,
+    deskPaletteDefs,
+    deskPaletteOrder,
+    securityPaletteDefs,
+    otherPaletteDefs,
+  } = usePlanPaletteDefs({ paletteFavorites, objectTypeDefs, isWallType, isDoorType });
   const [paletteSection, setPaletteSection] = useState<'desks' | 'objects' | 'security'>('objects');
   const [annotationsOpen, setAnnotationsOpen] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
