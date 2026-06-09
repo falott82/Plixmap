@@ -17,7 +17,7 @@ import {
   computeSaveRevisionReason
 } from './planViewMiscTools';
 import { computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
-import { computeHandleUnlockResponse, computeReloadMyMeetings } from './planViewLockMeetingTools';
+import { computeHandleUnlockResponse } from './planViewLockMeetingTools';
 import {
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint
@@ -39,8 +39,7 @@ import {
   computeMyMeetingsFiltered,
   runToggleRevisionImmutable,
   computeGetPlanUnsavedChanges,
-  runPerformPendingPostSaveAction,
-  runOpenMyMeetingsModal
+  runPerformPendingPostSaveAction
 } from './planViewComputeBits2';
 import {
   runCorridorShortcutEffect,
@@ -108,6 +107,7 @@ import { usePlanWallSegments } from './usePlanWallSegments';
 import { usePlanMapContextMenuHandler } from './usePlanMapContextMenuHandler';
 import { usePlanMoveHandlers } from './usePlanMoveHandlers';
 import { usePlanStageSelectHandler } from './usePlanStageSelectHandler';
+import { usePlanMyMeetingsModal } from './usePlanMyMeetingsModal';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState,
@@ -174,8 +174,6 @@ import { usePlanDrawingState } from './usePlanDrawingState';
 import { usePlanLock } from './usePlanLock';
 export const UNLOCK_REQUEST_EVENT = 'plixmap_unlock_request';
 export const FORCE_UNLOCK_EVENT = 'plixmap_force_unlock';
-const OPEN_MEETING_CENTER_EVENT = 'plixmap_open_meeting_center';
-const OPEN_MY_MEETINGS_EVENT = 'plixmap_open_my_meetings';
 const OPEN_MEETING_MANAGER_EVENT = 'plixmap_open_meeting_manager';
 
 type RoomKioskInfoModalState = {
@@ -2021,45 +2019,9 @@ export const usePlanView = (planId: string) => {
     return () => window.removeEventListener(OPEN_MEETING_MANAGER_EVENT, handler as EventListener);
   }, [openMeetingManager]);
 
-  const reloadMyMeetings = useCallback(async () => {
-    await computeReloadMyMeetings({ t, setMyMeetingsModal });
-  }, [t]);
-  reloadMyMeetingsRef.current = reloadMyMeetings;
-
-  const openMyMeetingsModal = useCallback((opts?: { returnToHub?: boolean; restore?: MyMeetingsModalState | null }) => {
-    runOpenMyMeetingsModal(opts, { setMyMeetingsSearch, setMyMeetingsModal, reloadMyMeetings });
-  }, [reloadMyMeetings]);
-
-  const openMyMeetingsFromHub = useCallback(() => {
-    openMyMeetingsModal({ returnToHub: true });
-  }, [openMyMeetingsModal]);
-
-  useEffect(() => {
-    const onOpenMeetingCenter = () => {
-      setMyMeetingsModal(null);
-      setMeetingHubModalOpen(true);
-    };
-    window.addEventListener(OPEN_MEETING_CENTER_EVENT, onOpenMeetingCenter as EventListener);
-    return () => window.removeEventListener(OPEN_MEETING_CENTER_EVENT, onOpenMeetingCenter as EventListener);
-  }, []);
-
-  useEffect(() => {
-    const onOpenMyMeetings = () => {
-      const restore = myMeetingsRestoreRef.current;
-      myMeetingsRestoreRef.current = null;
-      openMyMeetingsModal({ returnToHub: false, restore });
-    };
-    window.addEventListener(OPEN_MY_MEETINGS_EVENT, onOpenMyMeetings as EventListener);
-    return () => window.removeEventListener(OPEN_MY_MEETINGS_EVENT, onOpenMyMeetings as EventListener);
-  }, [openMyMeetingsModal]);
-
-  const closeMyMeetingsModal = useCallback(() => {
-    const shouldReturnToHub = !!myMeetingsModal?.returnToHub;
-    setMyMeetingsModal(null);
-    if (shouldReturnToHub) {
-      setMeetingHubModalOpen(true);
-    }
-  }, [myMeetingsModal?.returnToHub]);
+  const { reloadMyMeetings, openMyMeetingsFromHub, closeMyMeetingsModal } = usePlanMyMeetingsModal({
+    t, setMyMeetingsModal, setMyMeetingsSearch, reloadMyMeetingsRef, myMeetingsRestoreRef, setMeetingHubModalOpen, myMeetingsModal
+  });
 
   const {
     handleWallQuickMenu,
