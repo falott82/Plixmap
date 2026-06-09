@@ -1042,7 +1042,7 @@ export const usePlanView = (planId: string) => {
     formatNumber
   });
 
-  const { openDuplicate, resolveRoomAssignmentForObject, getCorridorIdAt, updateQuoteLabelPos } = usePlanObjectMiscHandlers({
+  const { openDuplicate, resolveRoomAssignmentForObject, getCorridorIdAt, updateQuoteLabelPos, computeRoomReassignments } = usePlanObjectMiscHandlers({
     renderPlan, isReadOnly, isDeskType, markTouched, getTypeLabel, inferDefaultLayerIds, layerIdSet,
     addObject, ensureObjectLayerVisible, lastInsertedRef, getRoomIdAt, updateObject, push, t, postAuditEvent,
     setModalState, getQuoteOrientation, setLastQuoteLabelPosH, setLastQuoteLabelPosV
@@ -1152,19 +1152,6 @@ export const usePlanView = (planId: string) => {
   const { dismissScaleToast, dismissMeasureToast, showMeasureToast } = usePlanMeasureToast({
     scaleToastIdRef, measureToastIdRef, metersPerPixel, lang, formatNumber, computePolylineLength
   });
-
-  const computeRoomReassignments = (rooms: any[] | undefined, objects: any[]) => {
-    const updates: Record<string, string | undefined> = {};
-    for (const obj of objects) {
-      const rawRoomId = getRoomIdAt(rooms, obj.x, obj.y);
-      const nextRoomId = resolveRoomAssignmentForObject(rawRoomId, obj.type, (rooms || []) as Room[]);
-      const current = obj.roomId ?? undefined;
-      if (current !== nextRoomId) {
-        updates[obj.id] = nextRoomId;
-      }
-    }
-    return updates;
-  };
 
   const { startScaleMode, cancelScaleMode, handleScalePoint, applyScale, clearScaleNow, requestClearScale, closeScaleModal } = usePlanScaleModeHandlers({
     isReadOnly, scaleMode, scaleDraft, plan, planScale, scaleMetersInput,

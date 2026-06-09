@@ -60,5 +60,18 @@ export const usePlanObjectMiscHandlers = (deps: any) => {
     return undefined;
   }, []);
 
-  return { openDuplicate, resolveRoomAssignmentForObject, getCorridorIdAt, updateQuoteLabelPos };
+  const computeRoomReassignments = (rooms: any[] | undefined, objects: any[]) => {
+    const updates: Record<string, string | undefined> = {};
+    for (const obj of objects) {
+      const rawRoomId = getRoomIdAt(rooms, obj.x, obj.y);
+      const nextRoomId = resolveRoomAssignmentForObject(rawRoomId, obj.type, (rooms || []) as Room[]);
+      const current = obj.roomId ?? undefined;
+      if (current !== nextRoomId) {
+        updates[obj.id] = nextRoomId;
+      }
+    }
+    return updates;
+  };
+
+  return { openDuplicate, resolveRoomAssignmentForObject, getCorridorIdAt, updateQuoteLabelPos, computeRoomReassignments };
 };
