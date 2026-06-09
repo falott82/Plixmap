@@ -1530,7 +1530,7 @@ export const usePlanView = (planId: string) => {
 
   const pendingNavigateRef = useRef<string | null>(null);
 
-  const { handleTogglePresentation } = usePlanPresentation({
+  const presentationHandlers = usePlanPresentation({
     presentationMode, togglePresentationMode, presentationEnterRequested, clearPresentationEnterRequest
   });
 
@@ -1993,7 +1993,7 @@ export const usePlanView = (planId: string) => {
     return () => window.removeEventListener(OPEN_MEETING_MANAGER_EVENT, handler as EventListener);
   }, [openMeetingManager]);
 
-  const { reloadMyMeetings, openMyMeetingsFromHub, closeMyMeetingsModal } = usePlanMyMeetingsModal({
+  const myMeetingsModalHandlers = usePlanMyMeetingsModal({
     t, setMyMeetingsModal, setMyMeetingsSearch, reloadMyMeetingsRef, myMeetingsRestoreRef, setMeetingHubModalOpen, myMeetingsModal
   });
 
@@ -2148,15 +2148,7 @@ export const usePlanView = (planId: string) => {
     renderPlan, renderPlanRoomById, roomMeasuresModal, getRoomPolygon, allClients, roomLayoutExportModal
   });
 
-  const {
-    applyRoomLayoutExportToSelection,
-    closeRoomLayoutExportModal,
-    selectAllRoomLayoutExportRows,
-    clearRoomLayoutExportSelection,
-    toggleAllRoomLayoutExportRows,
-    toggleRoomLayoutExportRow,
-    sortRoomLayoutExportRows,
-  } = usePlanRoomLayoutExportHandlers({
+  const roomLayoutExportHandlers = usePlanRoomLayoutExportHandlers({
     roomLayoutExportModal, roomLayoutExportSource, roomLayoutExportRows, push, t, updateRoom, planId,
     markTouched, setPlanDirty, setRoomLayoutExportModal
   });
@@ -2644,7 +2636,7 @@ export const usePlanView = (planId: string) => {
     dragStartRef.current.set(id, { x, y, roomId });
   }, []);
 
-  const { handleStageMove, handleWallMove } = usePlanMoveHandlers({
+  const moveHandlers = usePlanMoveHandlers({
     collectUserDepartments, getUserObjectLabel, markTouched, moveObject, notifyNonPeopleRoomBlocked,
     resolveRoomAssignmentForObject, roomStatsById, t, updateObject, isReadOnlyRef, planRef, dragStartRef,
     getRoomIdAt, isUserType, setCapacityConfirm, setRoomDepartmentConfirm, wallMoveBatchRef
@@ -2795,7 +2787,7 @@ export const usePlanView = (planId: string) => {
     isReadOnly, setPendingType, client, setRealUserImportMissing, setRealUserPicker, setModalState
   });
 
-  const { handlePlaceNew, handleCreate, handleUpdate } = usePlanObjectCreateHandlers({
+  const objectCreateHandlers = usePlanObjectCreateHandlers({
     isReadOnly, panToolActive, setPanToolActive, shouldConfirmCapacity, proceedPlaceUser, isDeskType,
     plan, markTouched, getTypeLabel, addObject, defaultObjectScale, ensureObjectLayerVisible,
     lastInsertedRef, getRoomIdAt, updateObject, push, t, postAuditEvent, setModalState, setPendingType,
@@ -2957,6 +2949,11 @@ export const usePlanView = (planId: string) => {
   });
 
   return {
+    ...myMeetingsModalHandlers,
+    ...objectCreateHandlers,
+    ...moveHandlers,
+    ...presentationHandlers,
+    ...roomLayoutExportHandlers,
     LOCK_TOAST_MS,
     activeRevision,
     addLink,
@@ -2976,7 +2973,6 @@ export const usePlanView = (planId: string) => {
     allTypesDefaultTab,
     allTypesOpen,
     annotationsOpen,
-    applyRoomLayoutExportToSelection,
     applyRoomWallTypeAll,
     applyScale,
     applyView,
@@ -3011,15 +3007,12 @@ export const usePlanView = (planId: string) => {
     clearPendingPostSaveAction,
     clearPendingSaveNavigate,
     clearRevisions,
-    clearRoomLayoutExportSelection,
     clearScaleConfirmOpen,
     clearScaleNow,
     clearSelection,
     client,
     clientBusinessPartnerNames,
-    closeMyMeetingsModal,
     closeReturnToSelectionList,
-    closeRoomLayoutExportModal,
     closeRoomMeetingBookingDetail,
     closeRoomMeetingEditParticipantsModal,
     closeRoomMeetingsTimelineModal,
@@ -3149,7 +3142,6 @@ export const usePlanView = (planId: string) => {
     handleCorridorDoorContextMenu,
     handleCorridorDoorDraftPoint,
     handleCorridorQuickMenu,
-    handleCreate,
     handleCreateCorridorFromPoly,
     handleCreateRoomFromPoly,
     handleCreateRoomFromRect,
@@ -3165,7 +3157,6 @@ export const usePlanView = (planId: string) => {
     handleOpenTypeLayer,
     handleOverwriteView,
     handlePanChange,
-    handlePlaceNew,
     handleRackPortsNote,
     handleRackPortsRename,
     handleRoomContextMenu,
@@ -3179,17 +3170,13 @@ export const usePlanView = (planId: string) => {
     handleSearch,
     handleSearchEnter,
     handleSelectType,
-    handleStageMove,
     handleStageMoveStart,
     handleStageSelect,
-    handleTogglePresentation,
     handleToolDoubleClick,
     handleToolMove,
     handleToolPoint,
     handleUnlockResponse,
-    handleUpdate,
     handleWallDraftContextMenu,
-    handleWallMove,
     handleWallQuickMenu,
     handleWallSegmentDblClick,
     handleZoomChange,
@@ -3290,7 +3277,6 @@ export const usePlanView = (planId: string) => {
     openImageViewer,
     openLinkEditFromSelectionList,
     openMeetingManager,
-    openMyMeetingsFromHub,
     openPhotoViewer,
     openRackLinkPorts,
     openRoomDoorModal,
@@ -3358,7 +3344,6 @@ export const usePlanView = (planId: string) => {
     realUserDetailsName,
     realUserImportMissing,
     realUserPicker,
-    reloadMyMeetings,
     reloadRoomMeetingsTimeline,
     removeTimelineMeetingParticipant,
     removeTypeFromPalette,
@@ -3469,7 +3454,6 @@ export const usePlanView = (planId: string) => {
     securityLayerVisible,
     securityOpen,
     securityPaletteDefs,
-    selectAllRoomLayoutExportRows,
     selectedCorridorDoor,
     selectedCorridorId,
     selectedLinkId,
@@ -3660,7 +3644,6 @@ export const usePlanView = (planId: string) => {
     site,
     siteFloorPlans,
     skipRoomWallTypesRef,
-    sortRoomLayoutExportRows,
     splitWallAtPoint,
     startCorridorDoorDraw,
     startMeasure,
@@ -3669,10 +3652,8 @@ export const usePlanView = (planId: string) => {
     startScaleMode,
     startWallDraw,
     t,
-    toggleAllRoomLayoutExportRows,
     toggleMapSubmenu,
     toggleRevisionImmutable,
-    toggleRoomLayoutExportRow,
     toggleSecurityCardVisibility,
     toggleShowPrintArea,
     toggleTimelineMeetingParticipantFlag,
