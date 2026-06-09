@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
 import { meetingIsoDayFromTs, meetingClockFromTs, shiftIsoDay, monthAnchorFromIso, shiftMonthAnchor, hmToMinutes } from './planViewTime';
 import { runRealtimeWsEffect } from './planViewRealtime';
 import { runRoomDepartmentOptionsEffect, runMeetingOverviewEffect } from './planViewDepartmentOptions';
@@ -21,9 +20,6 @@ import {
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
-import {
-  runDismissSelectionHintToasts
-} from './planViewSelectionToasts';
 import {
   computeFormatPresenceDate,
   computeFormatPresenceLock,
@@ -51,8 +47,7 @@ import {
 import {
   runViewportInitEffect,
   runViewportAutoCenterEffect,
-  runViewportPresentationEffect,
-  computeGetPastePoint
+  runViewportPresentationEffect
 } from './planViewViewport';
 import {
   runUpdateLockedPlans
@@ -107,6 +102,7 @@ import { usePlanMoveHandlers } from './usePlanMoveHandlers';
 import { usePlanStageSelectHandler } from './usePlanStageSelectHandler';
 import { usePlanMyMeetingsModal } from './usePlanMyMeetingsModal';
 import { usePlanObjectMiscHandlers } from './usePlanObjectMiscHandlers';
+import { usePlanPointerHelpers } from './usePlanPointerHelpers';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState,
@@ -720,36 +716,15 @@ export const usePlanView = (planId: string) => {
   const layerVisibilitySyncRef = useRef<string>('');
   renderStartRef.current = performance.now();
 
-  const dismissSelectionHintToasts = useCallback(() => {
-    runDismissSelectionHintToasts({
-      selectionHintToastIds,
-      selectionToastKeyRef,
-      selectionToastIdRef,
-      deskToastKeyRef,
-      deskToastIdRef,
-      multiToastKeyRef,
-      multiToastIdRef,
-      quoteToastKeyRef,
-      quoteToastIdRef,
-      mediaToastKeyRef,
-      mediaToastIdRef
-    });
-  }, []);
 
   useSyncedRef(zoomRef, zoom);
   const panRef = useRef(pan);
   useSyncedRef(panRef, pan);
-  const handleMapMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
-  }, []);
-  const handleMapMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    lastPointerClientRef.current = { x: event.clientX, y: event.clientY };
-    lastPointerClickRef.current = { x: event.clientX, y: event.clientY };
-  }, []);
-  const getPastePoint = useCallback(
-    () => computeGetPastePoint({ lastPointerClickRef, mapRef, zoomRef, panRef }),
-    []
-  );
+  const { dismissSelectionHintToasts, handleMapMouseMove, handleMapMouseDown, getPastePoint } = usePlanPointerHelpers({
+    lastPointerClientRef, lastPointerClickRef, mapRef, zoomRef, panRef, selectionHintToastIds,
+    selectionToastKeyRef, selectionToastIdRef, deskToastKeyRef, deskToastIdRef, multiToastKeyRef,
+    multiToastIdRef, quoteToastKeyRef, quoteToastIdRef, mediaToastKeyRef, mediaToastIdRef
+  });
   useSyncedRef(wallDraftPointsRef, wallDraftPoints);
 
   const plan = useDataStore(
