@@ -90,6 +90,7 @@ import { usePlanMyMeetingsModal } from './usePlanMyMeetingsModal';
 import { usePlanObjectMiscHandlers } from './usePlanObjectMiscHandlers';
 import { usePlanPointerHelpers } from './usePlanPointerHelpers';
 import { usePlanHistory } from './usePlanHistory';
+import { renderKeybindToastContent } from './planViewKeybindToast';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState, RoomDepartmentConfirmState, RackPortsLinkState, EscapeRouteModalState, LayerRevealPromptState, MeetingManagerPresetState,
@@ -160,18 +161,8 @@ export const usePlanView = (planId: string) => {
   const t = useT();
   const lang = useLang();
   const renderKeybindToast = useCallback(
-    (title: { it: string; en: string }, items: Array<{ cmd: string; it: string; en: string }>) => (
-      <div className="text-left text-slate-900">
-        <div className="text-sm font-semibold text-slate-900">{t(title)}</div>
-        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-slate-900">
-          {items.map((item, index) => (
-            <li key={`${item.cmd}-${index}`}>
-              <strong className="font-semibold">{item.cmd}</strong> {t({ it: item.it, en: item.en })}
-            </li>
-          ))}
-        </ul>
-      </div>
-    ),
+    (title: { it: string; en: string }, items: Array<{ cmd: string; it: string; en: string }>) =>
+      renderKeybindToastContent(title, items, t),
     [t]
   );
   const [autoFitEnabled, setAutoFitEnabled] = useState(true);
