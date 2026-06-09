@@ -1015,15 +1015,9 @@ export const usePlanView = (planId: string) => {
   const forceUnlockConfigRef = useRef(forceUnlockConfig);
   const forceUnlockActiveRef = useRef(forceUnlockActive);
   const forceUnlockIncomingRef = useRef(forceUnlockIncoming);
-		  useEffect(() => {
-		    forceUnlockConfigRef.current = forceUnlockConfig;
-		  }, [forceUnlockConfig]);
-		  useEffect(() => {
-		    forceUnlockActiveRef.current = forceUnlockActive;
-		  }, [forceUnlockActive]);
-		  useEffect(() => {
-		    forceUnlockIncomingRef.current = forceUnlockIncoming;
-		  }, [forceUnlockIncoming]);
+		  useSyncedRef(forceUnlockConfigRef, forceUnlockConfig);
+		  useSyncedRef(forceUnlockActiveRef, forceUnlockActive);
+		  useSyncedRef(forceUnlockIncomingRef, forceUnlockIncoming);
   const formatPresenceDate = useCallback((value?: number | null) => computeFormatPresenceDate(value), []);
 
   const formatPresenceLock = useCallback(
@@ -1100,15 +1094,9 @@ export const usePlanView = (planId: string) => {
 	  const lastPlanActionSentAtRef = useRef(0);
 	  const lastPlanDirtySentAtRef = useRef(0);
 	  const lastPlanDirtyValueRef = useRef<boolean | null>(null);
-	  useEffect(() => {
-	    isReadOnlyRef.current = isReadOnly;
-	  }, [isReadOnly]);
-	  useEffect(() => {
-	    lockMineRef.current = lockState.mine;
-	  }, [lockState.mine]);
-	  useEffect(() => {
-	    planIdRefForWs.current = planId;
-	  }, [planId]);
+	  useSyncedRef(isReadOnlyRef, isReadOnly);
+	  useSyncedRef(lockMineRef, lockState.mine);
+	  useSyncedRef(planIdRefForWs, planId);
 
 	  const requestPlanLock = useCallback(() => {
 	    if (!lockRequired) return;
