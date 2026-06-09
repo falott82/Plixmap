@@ -68,7 +68,7 @@ import {
   runResetToolsOnPlanChangeEffect,
   runLayerVisibilitySyncEffect
 } from './planViewEffects';
-import { runHandleCreate, runHandleUpdate, runHandlePlaceNew, runOpenDuplicate, type HandleCreatePayload } from './planViewCreateObject';
+import { runOpenDuplicate } from './planViewCreateObject';
 import {
   runViewportInitEffect,
   runViewportAutoCenterEffect,
@@ -111,6 +111,7 @@ import { usePlanAccessPermissions } from './usePlanAccessPermissions';
 import { usePlanObjectIndex } from './usePlanObjectIndex';
 import { usePlanCollections } from './usePlanCollections';
 import { usePlanRoomExportDerived } from './usePlanRoomExportDerived';
+import { usePlanObjectCreateHandlers } from './usePlanObjectCreateHandlers';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -3648,90 +3649,17 @@ export const usePlanView = (planId: string) => {
     [openRealUserPickerAt]
   );
 
-  const handlePlaceNew = (
-    type: MapObjectType,
-    x: number,
-    y: number,
-    options?: { textBoxWidth?: number; textBoxHeight?: number }
-  ) => {
-    runHandlePlaceNew(type, x, y, options, {
-      isReadOnly,
-      panToolActive,
-      setPanToolActive,
-      shouldConfirmCapacity,
-      proceedPlaceUser,
-      isDeskType,
-      plan,
-      markTouched,
-      getTypeLabel,
-      addObject,
-      defaultObjectScale,
-      ensureObjectLayerVisible,
-      lastInsertedRef,
-      getRoomIdAt,
-      updateObject,
-      push,
-      t,
-      postAuditEvent,
-      setModalState,
-      setPendingType
-    });
-  };
-
-  const getCameraDefaults = useCallback(
-    () => ({
-      rotation: 0,
-      cctvRange: 160,
-      cctvAngle: 70,
-      cctvOpacity: 0.6
-    }),
-    []
-  );
-
-  const handleCreate = (payload: HandleCreatePayload) => {
-    runHandleCreate(payload, {
-      plan,
-      modalState,
-      isReadOnly,
-      markTouched,
-      defaultObjectScale,
-      lastQuoteLabelPosH,
-      lastQuoteLabelBg,
-      isCameraType,
-      getCameraDefaults,
-      lastQuoteColor,
-      lastQuoteLabelScale,
-      lastQuoteLabelColor,
-      lastQuoteDashed,
-      lastQuoteEndpoint,
-      getTypeLayerIds,
-      inferDefaultLayerIds,
-      layerIdSet,
-      addObject,
-      ensureObjectLayerVisible,
-      setLastQuoteScale,
-      setLastQuoteColor,
-      setLastQuoteLabelScale,
-      setLastQuoteLabelBg,
-      setLastQuoteLabelColor,
-      setLastQuoteLabelPosH,
-      setLastQuoteLabelPosV,
-      setLastQuoteDashed,
-      setLastQuoteEndpoint,
-      setLastObjectScale,
-      lastInsertedRef,
-      getRoomIdAt,
-      resolveRoomAssignmentForObject,
-      isUserType,
-      notifyNonPeopleRoomBlocked,
-      updateObject,
-      saveCustomValues,
-      push,
-      t,
-      postAuditEvent,
-      getQuoteOrientation
-    });
-  };
+  const { handlePlaceNew, handleCreate, handleUpdate } = usePlanObjectCreateHandlers({
+    isReadOnly, panToolActive, setPanToolActive, shouldConfirmCapacity, proceedPlaceUser, isDeskType,
+    plan, markTouched, getTypeLabel, addObject, defaultObjectScale, ensureObjectLayerVisible,
+    lastInsertedRef, getRoomIdAt, updateObject, push, t, postAuditEvent, setModalState, setPendingType,
+    modalState, lastQuoteLabelPosH, lastQuoteLabelBg, isCameraType, lastQuoteColor, lastQuoteLabelScale,
+    lastQuoteLabelColor, lastQuoteDashed, lastQuoteEndpoint, getTypeLayerIds, inferDefaultLayerIds,
+    layerIdSet, setLastQuoteScale, setLastQuoteColor, setLastQuoteLabelScale, setLastQuoteLabelBg,
+    setLastQuoteLabelColor, setLastQuoteLabelPosH, setLastQuoteLabelPosV, setLastQuoteDashed,
+    setLastQuoteEndpoint, setLastObjectScale, resolveRoomAssignmentForObject, isUserType,
+    notifyNonPeopleRoomBlocked, saveCustomValues, getQuoteOrientation, planId
+  });
 
   const { handleEdit, openEditFromSelectionList, openLinkEditFromSelectionList } = usePlanEditOpenHandlers({
     renderPlan,
@@ -3779,31 +3707,6 @@ export const usePlanView = (planId: string) => {
     setSelectedObjectsModalOpen(true);
   };
 
-  const handleUpdate = (payload: HandleCreatePayload) => {
-    runHandleUpdate(payload, {
-      modalState,
-      isReadOnly,
-      markTouched,
-      plan,
-      updateObject,
-      setLastQuoteScale,
-      setLastQuoteLabelScale,
-      setLastQuoteLabelBg,
-      setLastQuoteLabelColor,
-      getQuoteOrientation,
-      setLastQuoteLabelPosV,
-      setLastQuoteLabelPosH,
-      setLastQuoteColor,
-      setLastQuoteDashed,
-      setLastQuoteEndpoint,
-      setLastObjectScale,
-      saveCustomValues,
-      push,
-      t,
-      postAuditEvent,
-      planId
-    });
-  };
 
   const handleSearch = (term: string) => {
     // Run search only on Enter. Typing hides any previous results.
