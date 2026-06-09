@@ -25,7 +25,6 @@ import {
   computeGetCorridorPolygon,
   computeHandleWallMove,
   computeCorridorDoorLinkRoomEntries,
-  computeCanvasPlan,
   computeSaveRevisionReason
 } from './planViewMiscTools';
 import { computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
@@ -59,7 +58,6 @@ import {
 } from './planViewComputeBits';
 import {
   computeMyMeetingsFiltered,
-  computeSafetyEmergencyContacts,
   runToggleRevisionImmutable,
   computeRoomStatsById,
   computeLinksInSelection,
@@ -111,6 +109,7 @@ import { usePlanRoomGeometry } from './usePlanRoomGeometry';
 import { usePlanRoomModalDerived } from './usePlanRoomModalDerived';
 import { usePlanLayerResolution } from './usePlanLayerResolution';
 import { usePlanMeasureScale } from './usePlanMeasureScale';
+import { usePlanRenderDerived } from './usePlanRenderDerived';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -165,7 +164,7 @@ import { type MeetingBooking } from '../../api/meetings';
 
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
-import { isSecurityTypeId, SECURITY_LAYER_ID } from '../../store/security';
+import { isSecurityTypeId } from '../../store/security';
 import { getWallTypeColor } from '../../utils/wallColors';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 
@@ -1369,63 +1368,18 @@ export const usePlanView = (planId: string) => {
     setHideAllLayers, push, setLayerRevealPrompt, canvasStageRef, inferDefaultLayerIds, getTypeLabel
   });
 
-  const canvasPlan = useMemo(() => {
-    return computeCanvasPlan({
-      allItemsSelected,
-      effectiveVisibleLayerIds,
-      getObjectLayerIdsForVisibility,
-      hideAllLayers,
-      rackOverlayLinks,
-      renderPlan
-    });
-  }, [allItemsSelected, effectiveVisibleLayerIds, getObjectLayerIdsForVisibility, hideAllLayers, rackOverlayLinks, renderPlan]);
-  const securityLayerVisible = useMemo(
-    () => !hideAllLayers && (allItemsSelected || effectiveVisibleLayerIds.includes(SECURITY_LAYER_ID)),
-    [allItemsSelected, effectiveVisibleLayerIds, hideAllLayers]
-  );
-  const safetyEmergencyContacts = useMemo(
-    () => computeSafetyEmergencyContacts({ client, planId, site }),
-    [client, planId, site?.id]
-  );
-  const safetyEmergencyPoints = useMemo(() => {
-    const objects = (((renderPlan as any)?.objects || []) as any[]).filter((obj) => String(obj?.type || '') === 'safety_assembly_point');
-    return objects.map((obj) => ({
-      id: String(obj?.id || ''),
-      name: String(obj?.name || obj?.type || ''),
-      gps: String((obj as any)?.gpsCoords || ''),
-      coords: `${Math.round(Number(obj?.x || 0))}, ${Math.round(Number(obj?.y || 0))}`
-    }));
-  }, [renderPlan]);
-  const safetyNumbersInline = useMemo(
-    () => safetyEmergencyContacts.map((entry: any) => `| ${entry.name || '—'} ${entry.phone || '—'}`).join(' '),
-    [safetyEmergencyContacts]
-  );
-  const safetyPointsInline = useMemo(
-    () => safetyEmergencyPoints.map((point) => `| ${point.name || '—'}`).join(' '),
-    [safetyEmergencyPoints]
-  );
-  const quoteLabels = useMemo(() => {
-    const map: Record<string, string> = {};
-    const objects = ((canvasPlan || renderPlan) as any)?.objects || [];
-    for (const obj of objects) {
-      if (!obj || obj.type !== 'quote') continue;
-      const pts = obj.points || [];
-      const label = formatQuoteLabel(pts);
-      const name = String(obj.name || '').trim();
-      const combined = name && label ? `${name} · ${label}` : name || label;
-      if (combined) map[obj.id] = combined;
-    }
-    return map;
-  }, [canvasPlan, formatQuoteLabel, renderPlan]);
-
-  const getQuoteOrientation = useCallback((points?: { x: number; y: number }[]) => {
-    if (!points || points.length < 2) return 'horizontal' as const;
-    const start = points[0];
-    const end = points[points.length - 1];
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    return Math.abs(dy) > Math.abs(dx) ? ('vertical' as const) : ('horizontal' as const);
-  }, []);
+  const {
+    canvasPlan,
+    securityLayerVisible,
+    safetyEmergencyContacts,
+    safetyNumbersInline,
+    safetyPointsInline,
+    quoteLabels,
+    getQuoteOrientation,
+  } = usePlanRenderDerived({
+    allItemsSelected, effectiveVisibleLayerIds, getObjectLayerIdsForVisibility, hideAllLayers,
+    rackOverlayLinks, renderPlan, client, planId, site, formatQuoteLabel
+  });
 
   const linksModalObjectName = useMemo(() => {
     if (!linksModalObjectId) return '';
