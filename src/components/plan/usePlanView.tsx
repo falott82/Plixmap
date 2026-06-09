@@ -2686,14 +2686,7 @@ export const usePlanView = (planId: string) => {
   useEffect(() => runLayerVisibilitySyncEffect({ user, normalizeVisibleLayerIdsByPlan, visibleLayerIdsByPlan, layerVisibilitySyncRef }),
     [normalizeVisibleLayerIdsByPlan, user, visibleLayerIdsByPlan]);
 
-  const {
-    beginRoomDraw,
-    beginRoomPolyDraw,
-    beginCorridorPolyDraw,
-    openEditRoom,
-    handleCreateRoomFromRect,
-    handleCreateRoomFromPoly,
-  } = usePlanRoomDrawHandlers({
+  const roomDrawHandlers = usePlanRoomDrawHandlers({
     isReadOnly, setPendingType, setRoomDrawMode, setRoomsOpen, setContextMenu, push, t, setCorridorDoorDraft,
     setCorridorQuickMenu, setCorridorDrawMode, rooms, setRoomModal, plan, hasRoomOverlap, notifyRoomOverlap
   });
@@ -2779,7 +2772,7 @@ export const usePlanView = (planId: string) => {
     setCorridorConnectionModal
   });
 
-  const { openRoomWallTypes, openWallGroupModal, handleCreateWallsForRoom } = usePlanWallGroupHandlers({
+  const wallGroupHandlers = usePlanWallGroupHandlers({
     buildRoomWallSegments, setRoomWallTypeModal, getWallPolygonData, roomModal, renderPlan, renderPlanRoomById, t, setRoomModal
   });
 
@@ -2804,7 +2797,7 @@ export const usePlanView = (planId: string) => {
     renderPlanObjectById,
     isDeskType,
     isWallType,
-    openWallGroupModal,
+    openWallGroupModal: wallGroupHandlers.openWallGroupModal,
     returnToSelectionListRef,
     setRackModal,
     setWallTypeModal,
@@ -2933,7 +2926,7 @@ export const usePlanView = (planId: string) => {
     corridorDoorLinkModal, roomDrawMode, corridorDrawMode, corridorDoorDraft, roomDoorDraft, linkFromId,
     roomCatalogOpen, scaleMode, wallDrawMode, measureMode, quoteMode, saveRevisionOpen,
     photoViewer, selectedRoomId, selectedRoomIds, selectedCorridorId, selectedCorridorDoor, selectedRoomDoorId,
-    copySelection, requestPaste, handleEdit, openEditRoom, getRoomIdAt, resolveRoomAssignmentForObject,
+    copySelection, requestPaste, handleEdit, openEditRoom: roomDrawHandlers.openEditRoom, getRoomIdAt, resolveRoomAssignmentForObject,
     isDeskType, isRackLinkId, isUserType, isWallType, push, t,
     setLinkEditId, setContextMenu, setPendingType, setRoomDrawMode, setRoomsOpen, setNewRoomMenuOpen,
     setRoomCatalogOpen, setCorridorDrawMode, setAllTypesDefaultTab, setAllTypesOpen, runBlockingUiShortcut, runDrawingShortcut,
@@ -2949,6 +2942,8 @@ export const usePlanView = (planId: string) => {
   });
 
   return {
+    ...wallGroupHandlers,
+    ...roomDrawHandlers,
     ...myMeetingsModalHandlers,
     ...objectCreateHandlers,
     ...moveHandlers,
@@ -2981,9 +2976,6 @@ export const usePlanView = (planId: string) => {
     assignedCounts,
     autoFitEnabled,
     basePlan,
-    beginCorridorPolyDraw,
-    beginRoomDraw,
-    beginRoomPolyDraw,
     bulkEditOpen,
     bulkEditSelectionOpen,
     cableModal,
@@ -3143,10 +3135,7 @@ export const usePlanView = (planId: string) => {
     handleCorridorDoorDraftPoint,
     handleCorridorQuickMenu,
     handleCreateCorridorFromPoly,
-    handleCreateRoomFromPoly,
-    handleCreateRoomFromRect,
     handleCreateTypeLayer,
-    handleCreateWallsForRoom,
     handleDeleteType,
     handleEdit,
     handleLinkContextMenu,
@@ -3272,7 +3261,6 @@ export const usePlanView = (planId: string) => {
     openEditCorridor,
     openEditCorridorConnectionModal,
     openEditFromSelectionList,
-    openEditRoom,
     openEscapeRouteAt,
     openImageViewer,
     openLinkEditFromSelectionList,
@@ -3284,11 +3272,9 @@ export const usePlanView = (planId: string) => {
     openRoomMeetingDuplicateModal,
     openRoomMeetingEditParticipantsModal,
     openRoomMeetingsTimeline,
-    openRoomWallTypes,
     openScaleEdit,
     openSchedulingFromHub,
     openUnlockCompose,
-    openWallGroupModal,
     orderedPlanLayers,
     orderedViews,
     otherPaletteDefs,
