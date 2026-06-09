@@ -3,8 +3,7 @@ import { meetingIsoDayFromTs, meetingClockFromTs, shiftIsoDay, monthAnchorFromIs
 import { runRoomDepartmentOptionsEffect, runMeetingOverviewEffect } from './planViewDepartmentOptions';
 import { computeRackOverlayLinks } from './planViewExportData';
 import {
-  isPointInRoom, getRoomIdAt, isUserType,
-  polygonsOverlap
+  isPointInRoom, getRoomIdAt, isUserType
 } from './planViewRoomGeometry';
 import {
   computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates
@@ -79,6 +78,7 @@ import { usePlanLockActions } from './usePlanLockActions';
 import { usePlanLockEffects } from './usePlanLockEffects';
 import { usePlanMiscCallbacks } from './usePlanMiscCallbacks';
 import { usePlanCorridorGeometry } from './usePlanCorridorGeometry';
+import { usePlanRoomNotices } from './usePlanRoomNotices';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState, RoomDepartmentConfirmState, RackPortsLinkState, EscapeRouteModalState, LayerRevealPromptState, MeetingManagerPresetState,
@@ -1006,45 +1006,9 @@ export const usePlanView = (planId: string) => {
     renderPlan, roomModal, renderPlanRoomById, getRoomPolygon, buildRoomPreview, isWallType, roomWallTypeModal
   });
 
-  const hasRoomOverlap = useCallback(
-    (nextRoom: any, excludeId?: string) => {
-      const nextPoly = getRoomPolygon(nextRoom);
-      if (!nextPoly.length) return false;
-      const list = ((plan as FloorPlan)?.rooms || []).filter((r) => r.id !== excludeId);
-      for (const other of list) {
-        const otherPoly = getRoomPolygon(other);
-        if (!otherPoly.length) continue;
-        if (polygonsOverlap(nextPoly, otherPoly)) return true;
-      }
-      return false;
-    },
-    [plan]
-  );
-
-  const notifyRoomOverlap = useCallback(() => {
-    const now = Date.now();
-    if (now - roomOverlapNoticeRef.current < 1200) return;
-    roomOverlapNoticeRef.current = now;
-    const message = t({ it: 'Attenzione: non è possibile sovrapporre due stanze.', en: 'Warning: rooms cannot overlap.' });
-    setOverlapNotice(message);
-  }, [t]);
-
-  const notifyNonPeopleRoomBlocked = useCallback(() => {
-    const now = Date.now();
-    if (now - nonPeopleRoomNoticeRef.current < 1200) return;
-    nonPeopleRoomNoticeRef.current = now;
-    push(
-      t({
-        it: 'Questa stanza non è occupabile (ripostiglio/bagno/locale tecnico): spostamento utente non consentito.',
-        en: 'This room is non-occupiable (storage/bathroom/technical): user placement is not allowed.'
-      }),
-      'info'
-    );
-  }, [push, t]);
-
-  const resetToolClickHistory = useCallback(() => {
-    toolClickHistoryRef.current = [];
-  }, []);
+  const { hasRoomOverlap, notifyRoomOverlap, notifyNonPeopleRoomBlocked, resetToolClickHistory } = usePlanRoomNotices({
+    getRoomPolygon, plan, t, push, roomOverlapNoticeRef, setOverlapNotice, nonPeopleRoomNoticeRef, toolClickHistoryRef
+  });
 
   const { dismissScaleToast, dismissMeasureToast, showMeasureToast } = usePlanMeasureToast({
     scaleToastIdRef, measureToastIdRef, metersPerPixel, lang, formatNumber, computePolylineLength
