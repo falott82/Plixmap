@@ -4,9 +4,7 @@ import { runRealtimeWsEffect } from './planViewRealtime';
 import { runRoomDepartmentOptionsEffect, runMeetingOverviewEffect } from './planViewDepartmentOptions';
 import { computeRackOverlayLinks } from './planViewExportData';
 import {
-  isPointInRoom,
-  getRoomIdAt,
-  isUserType,
+  isPointInRoom, getRoomIdAt, isUserType,
   polygonsOverlap
 } from './planViewRoomGeometry';
 import {
@@ -26,17 +24,11 @@ import {
   runUnlockRequestEffect
 } from './planViewComputeBits';
 import {
-  computeMyMeetingsFiltered,
-  runToggleRevisionImmutable,
-  computeGetPlanUnsavedChanges,
+  computeMyMeetingsFiltered, runToggleRevisionImmutable, computeGetPlanUnsavedChanges,
   runPerformPendingPostSaveAction
 } from './planViewComputeBits2';
 import {
-  runCorridorShortcutEffect,
-  runHistoryTrackEffect,
-  runForceUnlockEventEffect,
-  runSearchExportShortcutEffect,
-  runResetToolsOnPlanChangeEffect,
+  runCorridorShortcutEffect, runHistoryTrackEffect, runForceUnlockEventEffect, runSearchExportShortcutEffect, runResetToolsOnPlanChangeEffect,
   runLayerVisibilitySyncEffect
 } from './planViewEffects';
 import {
@@ -489,9 +481,7 @@ export const usePlanView = (planId: string) => {
     [siteFloorPlans]
   );
   useEffect(() => runMeetingOverviewEffect({
-    client,
-    site,
-    planId,
+    client, site, planId,
     setMeetingStatusByRoomId
   }), [client?.id, planId, site?.id]);
 
@@ -555,10 +545,7 @@ export const usePlanView = (planId: string) => {
   });
 
   usePlanWallTypeModalEffects({
-    wallTypeModal,
-    setWallTypeDraft,
-    roomWallTypeModal,
-    setRoomWallTypeSelections,
+    wallTypeModal, setWallTypeDraft, roomWallTypeModal, setRoomWallTypeSelections,
     defaultWallTypeId
   });
 
@@ -793,9 +780,7 @@ export const usePlanView = (planId: string) => {
     safetyCardPos, safetyCardSize, safetyCardFontSize, safetyCardFontIndex, safetyCardColorIndex, safetyCardTextBgIndex,
     handleSafetyCardChange
   } = usePlanSafetyCard({
-    planRef,
-    isReadOnlyRef,
-    renderPlan,
+    planRef, isReadOnlyRef, renderPlan,
     updateFloorPlan
   });
   const basePlan = plan as FloorPlan;
@@ -1057,11 +1042,7 @@ export const usePlanView = (planId: string) => {
   const getPlanUnsavedChanges = useCallback(
     (targetPlan?: FloorPlan | null) =>
       computeGetPlanUnsavedChanges(targetPlan, {
-        getPlanSnapshot,
-        baselineSnapshotRef,
-        getLatestRevisionCached,
-        getRevisionSnapshotCached,
-        unsavedAgainstLatestCacheRef,
+        getPlanSnapshot, baselineSnapshotRef, getLatestRevisionCached, getRevisionSnapshotCached, unsavedAgainstLatestCacheRef,
         samePlanSnapshot
       }),
     [getLatestRevisionCached, getPlanSnapshot, getRevisionSnapshotCached, samePlanSnapshot]
@@ -1271,9 +1252,7 @@ export const usePlanView = (planId: string) => {
 
   const saveRevisionReason = useMemo(() => {
     return computeSaveRevisionReason({
-      pendingClientMeetingsPreset,
-      pendingMeetingManagerPreset,
-      pendingPostSaveAction,
+      pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction,
       pendingNavigateRef
     });
   }, [pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction]);
@@ -1454,10 +1433,7 @@ export const usePlanView = (planId: string) => {
   const updateQuoteLabelPos = useCallback(
     (id: string, pos: 'center' | 'above' | 'below' | 'left' | 'right', orientation?: 'horizontal' | 'vertical') =>
       computeUpdateQuoteLabelPos(id, pos, orientation, {
-        getQuoteOrientation,
-        renderPlan,
-        updateObject,
-        setLastQuoteLabelPosH,
+        getQuoteOrientation, renderPlan, updateObject, setLastQuoteLabelPosH,
         setLastQuoteLabelPosV
       }),
     [getQuoteOrientation, renderPlan, setLastQuoteLabelPosH, setLastQuoteLabelPosV, updateObject]
@@ -1478,11 +1454,7 @@ export const usePlanView = (planId: string) => {
 
 
   const { openEscapeRouteAt, toggleSecurityCardVisibility } = usePlanSecurityHandlers({
-    contextMenu,
-    plan,
-    planId,
-    push,
-    renderPlan,
+    contextMenu, plan, planId, push, renderPlan,
     siteFloorPlansLength: siteFloorPlans.length,
     t, hideAllLayers, allItemsSelected, nonAllLayerIds, visibleLayerIds, normalizeLayerSelection,
     setEscapeRouteModal, setContextMenu, setHideAllLayers,
@@ -1818,10 +1790,7 @@ export const usePlanView = (planId: string) => {
   });
 
   const {
-    openCorridorDoorModal,
-    openRoomDoorModal,
-    openCorridorDoorLinkModal,
-    saveCorridorDoorModal,
+    openCorridorDoorModal, openRoomDoorModal, openCorridorDoorLinkModal, saveCorridorDoorModal,
     saveCorridorDoorLinkModal
   } = usePlanDoorModalHandlers({
     corridorById, defaultDoorCatalogId, doorTypeIdSet, objectTypeById, setCorridorDoorModal, roomDoors,
@@ -1836,10 +1805,7 @@ export const usePlanView = (planId: string) => {
     [isReadOnly, openEditCorridor, selectedCorridorId, updateCorridorLabelScale]);
 
   const {
-    startCorridorDoorDraw,
-    insertCorridorJunctionPoint,
-    openCorridorConnectionModalAt,
-    openEditCorridorConnectionModal,
+    startCorridorDoorDraw, insertCorridorJunctionPoint, openCorridorConnectionModalAt, openEditCorridorConnectionModal,
     saveCorridorConnectionModal
   } = usePlanCorridorConnectionHandlers({
     isReadOnly, push, t, markTouched, plan, updateFloorPlan,
@@ -1869,16 +1835,9 @@ export const usePlanView = (planId: string) => {
   });
 
   const { handleEdit, openEditFromSelectionList, openLinkEditFromSelectionList } = usePlanEditOpenHandlers({
-    renderPlan,
-    renderPlanObjectById,
-    isDeskType,
-    isWallType,
+    renderPlan, renderPlanObjectById, isDeskType, isWallType,
     openWallGroupModal: wallGroupHandlers.openWallGroupModal,
-    returnToSelectionListRef,
-    setRackModal,
-    setWallTypeModal,
-    setModalState,
-    setSelectedObjectsModalOpen,
+    returnToSelectionListRef, setRackModal, setWallTypeModal, setModalState, setSelectedObjectsModalOpen,
     setLinkEditId
   });
 
