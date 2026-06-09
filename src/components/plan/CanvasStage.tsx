@@ -25,6 +25,7 @@ import { useCanvasRoomRectDraft } from './canvas/useCanvasRoomRectDraft';
 import { useCanvasSelectionBox } from './canvas/useCanvasSelectionBox';
 import { useCanvasPointerHandlers } from './canvas/useCanvasPointerHandlers';
 import { useCanvasCameraRotation } from './canvas/useCanvasCameraRotation';
+import { useCanvasObjectTransforms } from './canvas/useCanvasObjectTransforms';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
@@ -445,12 +446,6 @@ const CanvasStageImpl = (
   const corridorDoorDraftActive = !!corridorDoorDraft?.corridorId;
   const panRaf = useRef<number | null>(null);
   const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
-  const textTransformRaf = useRef<number | null>(null);
-  const pendingTextTransformRef = useRef<{ id: string; width: number; height: number } | null>(null);
-  const quoteResizeRef = useRef<{ id: string; index: number; points: { x: number; y: number }[]; node?: any } | null>(null);
-  const [quoteResizePreview, setQuoteResizePreview] = useState<{ id: string; points: { x: number; y: number }[] } | null>(
-    null
-  );
 
   useEffect(() => {
     if (!perfEnabled) return;
@@ -1011,9 +1006,6 @@ const CanvasStageImpl = (
       if (wheelCommitTimer.current) window.clearTimeout(wheelCommitTimer.current);
       if (panRaf.current) cancelAnimationFrame(panRaf.current);
       if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
-      if (textTransformRaf.current) cancelAnimationFrame(textTransformRaf.current);
-      textTransformRaf.current = null;
-      pendingTextTransformRef.current = null;
     };
   }, []);
 
@@ -1224,63 +1216,12 @@ const CanvasStageImpl = (
     updateCorridorDraftPointer
   } = useCanvasCorridorPolyDraft({ corridorDrawMode, readOnly, perfEnabled, suspendKeyboardShortcuts, onCreateCorridor });
 
-  const updateQuoteResizePreview = useCallback((shiftKey?: boolean) => {
-    if (!quoteResizeRef.current) return;
-    const stage = stageRef.current;
-    const pos = stage?.getPointerPosition?.();
-    if (!pos) return;
-    const world = pointerToWorld(pos.x, pos.y);
-    const { id, index, points } = quoteResizeRef.current;
-    let nextX = world.x;
-    let nextY = world.y;
-    if (shiftKey) {
-      const fixed = points[index === 0 ? points.length - 1 : 0];
-      const dx = nextX - fixed.x;
-      const dy = nextY - fixed.y;
-      if (Math.abs(dx) >= Math.abs(dy)) {
-        nextY = fixed.y;
-      } else {
-        nextX = fixed.x;
-      }
-    }
-    const next = points.map((p, i) => (i === index ? { x: nextX, y: nextY } : p));
-    setQuoteResizePreview({ id, points: next });
-  }, []);
-
-  const commitQuoteResize = useCallback(() => {
-    const ref = quoteResizeRef.current;
-    if (!ref || !onUpdateQuotePoints) return;
-    const preview = quoteResizePreview && quoteResizePreview.id === ref.id ? quoteResizePreview.points : ref.points;
-    onUpdateQuotePoints(ref.id, preview);
-    ref.node?.draggable?.(true);
-    quoteResizeRef.current = null;
-    setQuoteResizePreview(null);
-  }, [onUpdateQuotePoints, quoteResizePreview]);
-
   const { cameraRotateId, setCameraRotateId, cameraRotateRef, scheduleCameraRotation, stopCameraRotation } =
     useCanvasCameraRotation({ onUpdateObject, readOnly });
 
+  const { quoteResizeRef, quoteResizePreview, setQuoteResizePreview, updateQuoteResizePreview, commitQuoteResize, scheduleTextTransform } =
+    useCanvasObjectTransforms({ stageRef, pointerToWorld, onUpdateObject, onUpdateQuotePoints });
 
-  const scheduleTextTransform = useCallback(
-    (payload: { id: string; width: number; height: number }) => {
-      if (!onUpdateObject) return;
-      pendingTextTransformRef.current = payload;
-      if (textTransformRaf.current) return;
-      textTransformRaf.current = requestAnimationFrame(() => {
-        textTransformRaf.current = null;
-        const next = pendingTextTransformRef.current;
-        pendingTextTransformRef.current = null;
-        if (!next) return;
-        onUpdateObject(next.id, {
-          textBoxWidth: next.width,
-          textBoxHeight: next.height,
-          scaleX: 1,
-          scaleY: 1
-        });
-      });
-    },
-    [onUpdateObject]
-  );
 
 
   useEffect(() => {
