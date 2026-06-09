@@ -24,6 +24,7 @@ import { useCanvasRoomPolyDraft } from './canvas/useCanvasRoomPolyDraft';
 import { useCanvasRoomRectDraft } from './canvas/useCanvasRoomRectDraft';
 import { useCanvasSelectionBox } from './canvas/useCanvasSelectionBox';
 import { useCanvasPointerHandlers } from './canvas/useCanvasPointerHandlers';
+import { useCanvasCameraRotation } from './canvas/useCanvasCameraRotation';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
@@ -446,11 +447,6 @@ const CanvasStageImpl = (
   const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
   const textTransformRaf = useRef<number | null>(null);
   const pendingTextTransformRef = useRef<{ id: string; width: number; height: number } | null>(null);
-  const [cameraRotateId, setCameraRotateId] = useState<string | null>(null);
-  const cameraRotateRef = useRef<{ id: string; origin: { x: number; y: number } } | null>(null);
-  const cameraRotateRaf = useRef<number | null>(null);
-  const cameraRotatePendingRef = useRef<{ x: number; y: number } | null>(null);
-  const cameraRotateSnapRef = useRef<boolean>(false);
   const quoteResizeRef = useRef<{ id: string; index: number; points: { x: number; y: number }[]; node?: any } | null>(null);
   const [quoteResizePreview, setQuoteResizePreview] = useState<{ id: string; points: { x: number; y: number }[] } | null>(
     null
@@ -1261,47 +1257,9 @@ const CanvasStageImpl = (
     setQuoteResizePreview(null);
   }, [onUpdateQuotePoints, quoteResizePreview]);
 
-  const commitCameraRotation = useCallback(() => {
-    const active = cameraRotateRef.current;
-    const pending = cameraRotatePendingRef.current;
-    if (!active || !pending || !onUpdateObject || readOnly) return;
-    const dx = pending.x - active.origin.x;
-    const dy = pending.y - active.origin.y;
-    if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return;
-    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
-    if (!Number.isFinite(angle)) return;
-    let normalized = angle < 0 ? angle + 360 : angle;
-    if (cameraRotateSnapRef.current) {
-      normalized = Math.round(normalized / 90) * 90;
-    }
-    onUpdateObject(active.id, { rotation: normalized });
-  }, [onUpdateObject, readOnly]);
+  const { cameraRotateId, setCameraRotateId, cameraRotateRef, scheduleCameraRotation, stopCameraRotation } =
+    useCanvasCameraRotation({ onUpdateObject, readOnly });
 
-  const scheduleCameraRotation = useCallback(
-    (world: { x: number; y: number }, shiftKey?: boolean) => {
-      cameraRotateSnapRef.current = !!shiftKey;
-      cameraRotatePendingRef.current = world;
-      if (cameraRotateRaf.current) return;
-      cameraRotateRaf.current = requestAnimationFrame(() => {
-        cameraRotateRaf.current = null;
-        commitCameraRotation();
-      });
-    },
-    [commitCameraRotation]
-  );
-
-  const stopCameraRotation = useCallback(() => {
-    if (!cameraRotateRef.current) return false;
-    cameraRotateRef.current = null;
-    cameraRotatePendingRef.current = null;
-    if (cameraRotateRaf.current) {
-      cancelAnimationFrame(cameraRotateRaf.current);
-      cameraRotateRaf.current = null;
-    }
-    cameraRotateSnapRef.current = false;
-    setCameraRotateId(null);
-    return true;
-  }, []);
 
   const scheduleTextTransform = useCallback(
     (payload: { id: string; width: number; height: number }) => {
