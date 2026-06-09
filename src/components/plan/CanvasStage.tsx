@@ -57,6 +57,7 @@ import {
   buildWallSegments,
   buildCameraWallSegments,
   buildWifiRayAngles,
+  clampPanToBounds,
 } from './CanvasStage.helpers';
 
 interface Props {
@@ -1096,26 +1097,8 @@ const CanvasStageImpl = (
   );
 
   const clampPan = useCallback(
-    (nextZoom: number, nextPan: { x: number; y: number }) => {
-      const margin = 220;
-      if (!Number.isFinite(nextZoom) || !Number.isFinite(nextPan.x) || !Number.isFinite(nextPan.y)) return { x: 0, y: 0 };
-      if (!Number.isFinite(baseWidth) || !Number.isFinite(baseHeight) || baseWidth <= 0 || baseHeight <= 0) return nextPan;
-      const contentW = baseWidth * nextZoom;
-      const contentH = baseHeight * nextZoom;
-
-      // If content is smaller than viewport, allow free movement inside viewport (+ margin),
-      // otherwise clamp so it can't drift into infinity (still elastic with margin).
-      const minX = contentW < dimensions.width ? -margin : dimensions.width - contentW - margin;
-      const maxX = contentW < dimensions.width ? dimensions.width - contentW + margin : margin;
-      const minY = contentH < dimensions.height ? -margin : dimensions.height - contentH - margin;
-      const maxY = contentH < dimensions.height ? dimensions.height - contentH + margin : margin;
-
-      return {
-        x: clamp(nextPan.x, Math.min(minX, maxX), Math.max(minX, maxX)),
-        y: clamp(nextPan.y, Math.min(minY, maxY), Math.max(minY, maxY))
-      };
-    },
-    [baseHeight, baseWidth, dimensions.height, dimensions.width]
+    (nextZoom: number, nextPan: { x: number; y: number }) => clampPanToBounds(nextZoom, nextPan, baseWidth, baseHeight, dimensions),
+    [baseHeight, baseWidth, dimensions]
   );
 
   const fitView = useCallback(() => {

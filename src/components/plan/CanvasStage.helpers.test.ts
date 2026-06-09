@@ -24,7 +24,8 @@ import {
   findNearestRoomCorner,
   buildWallSegments,
   buildCameraWallSegments,
-  buildWifiRayAngles
+  buildWifiRayAngles,
+  clampPanToBounds
 } from './CanvasStage.helpers';
 
 const square = [
@@ -205,6 +206,22 @@ describe('findNearestRoomCorner', () => {
   it('returns null when no corner is within threshold', () => {
     expect(findNearestRoomCorner(rooms, { x: 100, y: 100 }, 1)).toBeNull();
     expect(findNearestRoomCorner([], { x: 0, y: 0 }, 1)).toBeNull();
+  });
+});
+
+describe('clampPanToBounds', () => {
+  const dims = { width: 800, height: 600 };
+  it('returns {0,0} for non-finite input', () => {
+    expect(clampPanToBounds(Number.NaN, { x: 1, y: 1 }, 1000, 1000, dims)).toEqual({ x: 0, y: 0 });
+  });
+  it('passes the pan through for a degenerate plan size', () => {
+    expect(clampPanToBounds(1, { x: 5, y: 7 }, 0, 0, dims)).toEqual({ x: 5, y: 7 });
+  });
+  it('clamps a far-off pan within the elastic margin for large content', () => {
+    const r = clampPanToBounds(2, { x: 100000, y: 100000 }, 1000, 1000, dims);
+    expect(r.x).toBeLessThanOrEqual(220);
+    expect(r.y).toBeLessThanOrEqual(220);
+    expect(Number.isFinite(r.x)).toBe(true);
   });
 });
 

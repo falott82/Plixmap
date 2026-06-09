@@ -701,3 +701,26 @@ export const buildWifiRayAngles = (steps = 72): number[] => {
   for (let i = 0; i < steps; i += 1) list.push((i / steps) * Math.PI * 2);
   return list;
 };
+
+// Clamp a pan offset so content stays reachable (elastic margin); pure given plan + viewport size.
+export const clampPanToBounds = (
+  nextZoom: number,
+  nextPan: { x: number; y: number },
+  baseWidth: number,
+  baseHeight: number,
+  dimensions: { width: number; height: number }
+): { x: number; y: number } => {
+  const margin = 220;
+  if (!Number.isFinite(nextZoom) || !Number.isFinite(nextPan.x) || !Number.isFinite(nextPan.y)) return { x: 0, y: 0 };
+  if (!Number.isFinite(baseWidth) || !Number.isFinite(baseHeight) || baseWidth <= 0 || baseHeight <= 0) return nextPan;
+  const contentW = baseWidth * nextZoom;
+  const contentH = baseHeight * nextZoom;
+  const minX = contentW < dimensions.width ? -margin : dimensions.width - contentW - margin;
+  const maxX = contentW < dimensions.width ? dimensions.width - contentW + margin : margin;
+  const minY = contentH < dimensions.height ? -margin : dimensions.height - contentH - margin;
+  const maxY = contentH < dimensions.height ? dimensions.height - contentH + margin : margin;
+  return {
+    x: clamp(nextPan.x, Math.min(minX, maxX), Math.max(minX, maxX)),
+    y: clamp(nextPan.y, Math.min(minY, maxY), Math.max(minY, maxY))
+  };
+};
