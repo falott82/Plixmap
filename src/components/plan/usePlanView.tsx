@@ -8,8 +8,7 @@ import {
   isPointInRoom,
   getRoomIdAt,
   isUserType,
-  polygonsOverlap,
-  computeResolveRoomAssignmentForObject
+  polygonsOverlap
 } from './planViewRoomGeometry';
 import {
   computeAlignSelection,
@@ -49,7 +48,6 @@ import {
   runResetToolsOnPlanChangeEffect,
   runLayerVisibilitySyncEffect
 } from './planViewEffects';
-import { runOpenDuplicate } from './planViewCreateObject';
 import {
   runViewportInitEffect,
   runViewportAutoCenterEffect,
@@ -108,6 +106,7 @@ import { usePlanMapContextMenuHandler } from './usePlanMapContextMenuHandler';
 import { usePlanMoveHandlers } from './usePlanMoveHandlers';
 import { usePlanStageSelectHandler } from './usePlanStageSelectHandler';
 import { usePlanMyMeetingsModal } from './usePlanMyMeetingsModal';
+import { usePlanObjectMiscHandlers } from './usePlanObjectMiscHandlers';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState,
@@ -2078,6 +2077,12 @@ export const usePlanView = (planId: string) => {
     [getQuoteOrientation, renderPlan, setLastQuoteLabelPosH, setLastQuoteLabelPosV, updateObject]
   );
 
+  const { openDuplicate, resolveRoomAssignmentForObject, getCorridorIdAt } = usePlanObjectMiscHandlers({
+    renderPlan, isReadOnly, isDeskType, markTouched, getTypeLabel, inferDefaultLayerIds, layerIdSet,
+    addObject, ensureObjectLayerVisible, lastInsertedRef, getRoomIdAt, updateObject, push, t, postAuditEvent,
+    setModalState
+  });
+
   const handleMapContextMenu = usePlanMapContextMenuHandler({
     clearSelection, createRoomDoorFromDraft, dismissSelectionHintToasts, effectiveVisibleLayerIds, push,
     renderPlan, roomDoorDraft, t, toolMode, zoom, getCorridorIdAt, getRoomIdAt, roomLayerNoticeRef,
@@ -2123,43 +2128,9 @@ export const usePlanView = (planId: string) => {
     setViewsMenuOpen
   });
 
-  const openDuplicate = (objectId: string) => {
-    runOpenDuplicate(objectId, {
-      renderPlan,
-      isReadOnly,
-      isDeskType,
-      markTouched,
-      getTypeLabel,
-      inferDefaultLayerIds,
-      layerIdSet,
-      addObject,
-      ensureObjectLayerVisible,
-      lastInsertedRef,
-      getRoomIdAt,
-      updateObject,
-      push,
-      t,
-      postAuditEvent,
-      setModalState
-    });
-  };
-
   useEffect(() => runSearchExportShortcutEffect({ searchInputRef, setExportModalOpen }), []);
 
-  const resolveRoomAssignmentForObject = useCallback(
-    (roomId: string | undefined | null, objectType: unknown, roomList?: Room[]) =>
-      computeResolveRoomAssignmentForObject(roomId, objectType, roomList, renderPlan?.rooms),
-    [renderPlan?.rooms]
-  );
 
-  function getCorridorIdAt(corridors: any[] | undefined, x: number, y: number) {
-    const list = corridors || [];
-    for (let i = list.length - 1; i >= 0; i--) {
-      const corridor = list[i];
-      if (isPointInRoom(corridor, x, y)) return corridor.id as string;
-    }
-    return undefined;
-  }
 
   const { copySelection, requestPaste, pasteConfirm, confirmPaste, cancelPaste } = useClipboard({
     t,
