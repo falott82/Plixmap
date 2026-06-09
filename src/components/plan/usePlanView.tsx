@@ -749,26 +749,11 @@ export const usePlanView = (planId: string) => {
   );
 
   const {
-    getPlanSnapshot, getLatestRevisionCached, samePlanSnapshotIgnoringDims, performUndo,
-    performRedo, getPlanUnsavedChanges, canUndo, canRedo
+    getPlanSnapshot, getLatestRevisionCached, performUndo,
+    performRedo, getPlanUnsavedChanges, canUndo, canRedo, hasNavigationEdits, hasUnsavedUi
   } = usePlanHistory({
-    plan, planId, markTouched, setFloorPlanContent, baselineSnapshotRef, entrySnapshotRef, touchedRef, setTouchedTick
+    plan, planId, markTouched, setFloorPlanContent, baselineSnapshotRef, entrySnapshotRef, touchedRef, setTouchedTick, touchedTick
   });
-
-  const hasLocalEdits = useMemo(() => {
-    if (!plan) return false;
-    const entry = entrySnapshotRef.current;
-    if (!entry) return false;
-    return !samePlanSnapshotIgnoringDims(entry, getPlanSnapshot(plan));
-  }, [plan, samePlanSnapshotIgnoringDims, getPlanSnapshot]);
-
-  const hasNavigationEdits = useMemo(
-    () => touchedRef.current && hasLocalEdits,
-    // touchedRef is a ref; touchedTick is used to re-evaluate when touched changes.
-    [hasLocalEdits, touchedTick]
-  );
-  // UI "Unsaved" badge should reflect user edits only, not legacy normalization differences in old revisions.
-  const hasUnsavedUi = hasNavigationEdits;
 
   const pendingNavigateRef = useRef<string | null>(null);
 

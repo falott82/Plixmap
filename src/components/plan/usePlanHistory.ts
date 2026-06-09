@@ -13,7 +13,7 @@ import { computeGetPlanUnsavedChanges } from './planViewComputeBits2';
 // history-track / entry-track effects. The baseline/entry/touched refs are HOST-owned (shared with
 // save + markTouched) and passed in. Bodies + dep arrays moved verbatim.
 export const usePlanHistory = (deps: any) => {
-  const { plan, planId, markTouched, setFloorPlanContent, baselineSnapshotRef, entrySnapshotRef, touchedRef, setTouchedTick } = deps;
+  const { plan, planId, markTouched, setFloorPlanContent, baselineSnapshotRef, entrySnapshotRef, touchedRef, setTouchedTick, touchedTick } = deps;
 
   const snapshotCacheRef = useRef<WeakMap<object, PlanSnapshot>>(new WeakMap());
   const latestRevisionCacheRef = useRef<WeakMap<object, any>>(new WeakMap());
@@ -183,9 +183,24 @@ export const usePlanHistory = (deps: any) => {
     [historyTick]
   );
 
+  const hasLocalEdits = useMemo(() => {
+    if (!plan) return false;
+    const entry = entrySnapshotRef.current;
+    if (!entry) return false;
+    return !samePlanSnapshotIgnoringDims(entry, getPlanSnapshot(plan));
+  }, [plan, samePlanSnapshotIgnoringDims, getPlanSnapshot]);
+
+  const hasNavigationEdits = useMemo(
+    () => touchedRef.current && hasLocalEdits,
+    // touchedRef is a ref; touchedTick is used to re-evaluate when touched changes.
+    [hasLocalEdits, touchedTick]
+  );
+  // UI "Unsaved" badge should reflect user edits only, not legacy normalization differences in old revisions.
+  const hasUnsavedUi = hasNavigationEdits;
+
   return {
     getPlanSnapshot, getLatestRevisionCached, getRevisionSnapshotCached, toHistorySnapshot, resetHistory,
     samePlanSnapshot, samePlanSnapshotIgnoringDims, applyHistorySnapshot, performUndo, performRedo,
-    getPlanUnsavedChanges, canUndo, canRedo
+    getPlanUnsavedChanges, canUndo, canRedo, hasLocalEdits, hasNavigationEdits, hasUnsavedUi
   };
 };
