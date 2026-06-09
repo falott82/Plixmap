@@ -7,16 +7,14 @@ import {
   polygonsOverlap
 } from './planViewRoomGeometry';
 import {
-  computeAlignSelection,
-  computeGetCorridorPolygon,
-  computeSaveRevisionReason
+  computeGetCorridorPolygon
 } from './planViewMiscTools';
 import {
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
 import {
-  computeSubmenuStyle, computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates
+  computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates
 } from './planViewComputeBits';
 import {
   runToggleRevisionImmutable,
@@ -86,6 +84,7 @@ import { renderKeybindToastContent } from './planViewKeybindToast';
 import { usePlanLockState } from './usePlanLockState';
 import { usePlanLockActions } from './usePlanLockActions';
 import { usePlanLockEffects } from './usePlanLockEffects';
+import { usePlanMiscCallbacks } from './usePlanMiscCallbacks';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState, RoomDepartmentConfirmState, RackPortsLinkState, EscapeRouteModalState, LayerRevealPromptState, MeetingManagerPresetState,
@@ -701,16 +700,6 @@ export const usePlanView = (planId: string) => {
     touchedRef.current = false;
     setTouchedTick((x) => x + 1);
   }, []);
-  const alignSelection = useCallback(
-    (mode: 'horizontal' | 'vertical', referenceId?: string) =>
-      computeAlignSelection(mode, referenceId, {
-        getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan,
-        selectedObjects,
-        updateObject
-      }),
-    [getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan, selectedObjects, updateObject]
-  );
-
   const {
     getPlanSnapshot, getLatestRevisionCached, performUndo,
     performRedo, getPlanUnsavedChanges, canUndo, canRedo, hasNavigationEdits, hasUnsavedUi, latestRev, hasAnyRevision, baselineSnapshotRef, entrySnapshotRef
@@ -719,6 +708,12 @@ export const usePlanView = (planId: string) => {
   });
 
   const pendingNavigateRef = useRef<string | null>(null);
+
+  const { alignSelection, saveRevisionReason, getSubmenuStyle, toggleMapSubmenu } = usePlanMiscCallbacks({
+    getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan, selectedObjects,
+    updateObject, pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction,
+    pendingNavigateRef, contextMenu, contextMenuRef, setMapSubmenu
+  });
 
   const presentationHandlers = usePlanPresentation({
     presentationMode, togglePresentationMode, presentationEnterRequested, clearPresentationEnterRequest
@@ -809,12 +804,6 @@ export const usePlanView = (planId: string) => {
     }
   }, [clearPendingPostSaveAction, hasNavigationEdits, isReadOnly, pendingPostSaveAction, performPendingPostSaveAction, saveRevisionOpen]);
 
-  const saveRevisionReason = useMemo(() => {
-    return computeSaveRevisionReason({
-      pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction,
-      pendingNavigateRef
-    });
-  }, [pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction]);
   const {
     contextObject, contextObjectTypeLabel, realUserDetails, realUserDetailsName, contextLink,
     contextObjectLinkCount, hasDefaultView, contextIsMulti, contextIsRack, contextIsDesk,
@@ -842,11 +831,6 @@ export const usePlanView = (planId: string) => {
     setCorridorQuickMenu, setAlignMenuOpen, setLayersContextMenu, setMapSubmenu,
     toolMode
   });
-
-  const getSubmenuStyle = useCallback(
-    (submenuWidth: number) => computeSubmenuStyle(submenuWidth, { contextMenu, contextMenuRef }),
-    [contextMenu]
-  );
 
   useLayoutEffect(() => {
     if (!contextMenu) return;
@@ -941,10 +925,6 @@ export const usePlanView = (planId: string) => {
     roomDoorDraft, setRoomDoorDraft, setSelectedRoomDoorId, setContextMenu, getSharedRoomSides,
     renderPlan
   });
-
-  const toggleMapSubmenu = useCallback((section: typeof mapSubmenu) => {
-    setMapSubmenu((prev) => (prev === section ? null : section));
-  }, []);
 
 
   const { openMeetingManager, dispatchOpenClientMeetingsTimeline, openSchedulingFromHub } = usePlanMeetingOpenHandlers({
