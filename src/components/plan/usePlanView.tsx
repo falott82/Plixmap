@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { meetingIsoDayFromTs, meetingClockFromTs, shiftIsoDay, monthAnchorFromIso, shiftMonthAnchor, hmToMinutes } from './planViewTime';
-import { runRealtimeWsEffect } from './planViewRealtime';
 import { runRoomDepartmentOptionsEffect, runMeetingOverviewEffect } from './planViewDepartmentOptions';
 import { computeRackOverlayLinks } from './planViewExportData';
 import {
@@ -18,7 +17,7 @@ import {
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
 import {
-  computeFormatPresenceDate, computeFormatPresenceLock, computeSubmenuStyle, computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates,
+  computeSubmenuStyle, computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates,
   runUnlockRequestEffect
 } from './planViewComputeBits';
 import {
@@ -34,9 +33,6 @@ import {
   runViewportAutoCenterEffect,
   runViewportPresentationEffect
 } from './planViewViewport';
-import {
-  runUpdateLockedPlans
-} from './planViewMiscCallbacks';
 
 import { CanvasStageHandle } from './CanvasStage';
 
@@ -90,11 +86,11 @@ import { usePlanObjectMiscHandlers } from './usePlanObjectMiscHandlers';
 import { usePlanPointerHelpers } from './usePlanPointerHelpers';
 import { usePlanHistory } from './usePlanHistory';
 import { renderKeybindToastContent } from './planViewKeybindToast';
+import { usePlanLockState, type PresenceUser } from './usePlanLockState';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState, RoomDepartmentConfirmState, RackPortsLinkState, EscapeRouteModalState, LayerRevealPromptState, MeetingManagerPresetState,
-  ClientMeetingsPresetState, UnlockPromptState, UnlockGrantedPromptState, ForceUnlockConfigState, ForceUnlockActiveState, ForceUnlockIncomingState,
-  PlanLockState
+  ClientMeetingsPresetState
 } from './planViewStateTypes';
 import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
 import { usePlanDoorModalHandlers } from './usePlanDoorModalHandlers';
@@ -141,7 +137,6 @@ import { getLatestRevision, getRevisionVersion } from './planRevisions';
 import { usePlanShortcuts } from './usePlanShortcuts';
 import { usePlanSelectionState } from './usePlanSelectionState';
 import { usePlanDrawingState } from './usePlanDrawingState';
-import { usePlanLock } from './usePlanLock';
 export const UNLOCK_REQUEST_EVENT = 'plixmap_unlock_request';
 export const FORCE_UNLOCK_EVENT = 'plixmap_force_unlock';
 const OPEN_MEETING_MANAGER_EVENT = 'plixmap_open_meeting_manager';
@@ -585,164 +580,24 @@ export const usePlanView = (planId: string) => {
     [meetingLocationLabels, myMeetingsModal?.meetings, myMeetingsSearch]
   );
 
-  const LOCK_REQUEST_THROTTLE_MS = 5_000;
   const LOCK_TOAST_MS = 5_000;
 
-	  type PresenceUser = {
-	    userId: string;
-	    username: string;
-	    avatarUrl?: string;
-	    connectedAt?: number | null;
-	    ip?: string;
-	    lock?: { planId: string; clientName?: string; siteName?: string; planName?: string } | null;
-	    locks?: { planId: string; clientName?: string; siteName?: string; planName?: string }[];
-	  };
-
-		  const [lockState, setLockState] = useState<PlanLockState>({ lockedBy: null, mine: false, grant: null, meta: null });
   const {
-    lockInfoOpen, setLockInfoOpen, lockInfoRef, lockActiveTitle, lockedByTitle, formatMinutes,
-    grantRemainingMinutes
-  } = usePlanLock({ t, lockState });
-  const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
-  const [globalPresenceUsers, setGlobalPresenceUsers] = useState<PresenceUser[]>([]);
-  const [realtimeDisabled, setRealtimeDisabled] = useState(false);
-  const realtimeDisabledRef = useRef(false);
-		  const wsRef = useRef<WebSocket | null>(null);
-		  const lockRequestAtRef = useRef(0);
-		  const [unlockPrompt, setUnlockPrompt] = useState<UnlockPromptState>(null);
-		  const [unlockBusy, setUnlockBusy] = useState(false);
-		  const [unlockCompose, setUnlockCompose] = useState<{ target: PresenceUser; locks: UnlockRequestLock[] } | null>(null);
-		  const [unlockGrantedPrompt, setUnlockGrantedPrompt] = useState<UnlockGrantedPromptState>(null);
-		  const [forceUnlockConfig, setForceUnlockConfig] = useState<ForceUnlockConfigState>(null);
-		  const [forceUnlockGraceMinutes, setForceUnlockGraceMinutes] = useState(5);
-		  const [forceUnlockStarting, setForceUnlockStarting] = useState(false);
-			  const [forceUnlockActive, setForceUnlockActive] = useState<ForceUnlockActiveState>(null);
-			  const [forceUnlockIncoming, setForceUnlockIncoming] = useState<ForceUnlockIncomingState>(null);
-  const [forceUnlockExecuteCommand, setForceUnlockExecuteCommand] = useState<{ requestId: string; action: 'save' | 'discard' } | null>(null);
-  const [forceUnlockTick, setForceUnlockTick] = useState(0);
-  const forceUnlockActiveFocusRef = useRef<HTMLButtonElement | null>(null);
-  const forceUnlockIncomingFocusRef = useRef<HTMLButtonElement | null>(null);
-  const forceUnlockConfigRef = useRef(forceUnlockConfig);
-  const forceUnlockActiveRef = useRef(forceUnlockActive);
-  const forceUnlockIncomingRef = useRef(forceUnlockIncoming);
-		  useSyncedRef(forceUnlockConfigRef, forceUnlockConfig);
-		  useSyncedRef(forceUnlockActiveRef, forceUnlockActive);
-		  useSyncedRef(forceUnlockIncomingRef, forceUnlockIncoming);
-  const formatPresenceDate = useCallback((value?: number | null) => computeFormatPresenceDate(value), []);
-
-  const formatPresenceLock = useCallback(
-    (
-      lock?: { planId: string; clientName?: string; siteName?: string; planName?: string } | null,
-      locks?: { planId: string; clientName?: string; siteName?: string; planName?: string }[]
-    ) => computeFormatPresenceLock(lock, locks, t),
-    [t]
-  );
-
-  // Prefer the global presence list (includes "locks" array). Fallback to plan presence if global is not available yet.
-  const globalPresenceFallback = globalPresenceUsers.length ? globalPresenceUsers : presenceUsers;
-  const presenceEntries = globalPresenceFallback;
-  const presenceCount = presenceEntries.length;
-
-	  const sendWs = useCallback((payload: any) => {
-	    const ws = wsRef.current;
-	    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-	    try {
-	      ws.send(JSON.stringify(payload));
-	    } catch {
-	      // ignore
-	    }
-	  }, []);
-
-	  useEffect(() => {
-	    if (!forceUnlockActive && !forceUnlockIncoming) return;
-	    const id = window.setInterval(() => setForceUnlockTick((x) => x + 1), 1000);
-	    return () => window.clearInterval(id);
-	  }, [forceUnlockActive?.requestId, forceUnlockIncoming?.requestId]);
-
-  useEffect(() => runRealtimeWsEffect({
-    user, realtimeDisabled, realtimeDisabledRef, activeRevision, planAccess, planId,
-    perfEnabled, LOCK_TOAST_MS, wsRef, isReadOnlyRef, lockMineRef, planRef,
-    forceUnlockConfigRef, forceUnlockActiveRef, forceUnlockIncomingRef, setLockState, updateLockedPlans, setPresenceUsers,
-    setGlobalPresenceUsers, setLockedPlans, setUnlockPrompt, setUnlockGrantedPrompt, setForceUnlockStarting, setForceUnlockActive,
-    setForceUnlockConfig, setForceUnlockIncoming, setForceUnlockExecuteCommand, setRealtimeDisabled, pushStack,
-    t
-  }), [activeRevision, planAccess, planId, realtimeDisabled, user?.id]);
-
-	  const lockRequired = !realtimeDisabled && planAccess === 'rw' && !activeRevision;
-	  const grantBlocks = lockRequired && !!lockState.grant && !!lockState.grant.userId && lockState.grant.userId !== user?.id;
-	  const lockedByOther = lockRequired && ((!!lockState.lockedBy && !lockState.mine) || grantBlocks);
-	  const lockAvailable =
-	    lockRequired && !lockState.lockedBy && (!lockState.grant || !lockState.grant.userId || lockState.grant.userId === user?.id);
-	  const isReadOnly = !!activeRevision || planAccess !== 'rw' || (lockRequired && !lockState.mine);
-	  const isReadOnlyRef = useRef(isReadOnly);
-	  const lockMineRef = useRef(lockState.mine);
-	  const planIdRefForWs = useRef(planId);
-	  const lastPlanActionSentAtRef = useRef(0);
-	  const lastPlanDirtySentAtRef = useRef(0);
-	  const lastPlanDirtyValueRef = useRef<boolean | null>(null);
-	  useSyncedRef(isReadOnlyRef, isReadOnly);
-	  useSyncedRef(lockMineRef, lockState.mine);
-	  useSyncedRef(planIdRefForWs, planId);
-
-	  const requestPlanLock = useCallback(() => {
-	    if (!lockRequired) return;
-	    if (lockState.mine) return;
-	    if (lockState.lockedBy) return;
-	    if (lockState.grant?.userId && lockState.grant.userId !== user?.id) return;
-	    const now = Date.now();
-	    if (now - lockRequestAtRef.current < LOCK_REQUEST_THROTTLE_MS) return;
-	    lockRequestAtRef.current = now;
-	    sendWs({ type: 'request_lock', planId });
-	  }, [LOCK_REQUEST_THROTTLE_MS, lockRequired, lockState.grant?.userId, lockState.lockedBy, lockState.mine, planId, sendWs, user?.id]);
-
-	  const updateLockedPlans = useCallback(
-	    (
-	      lockedBy: { userId: string; username: string; avatarUrl?: string } | null,
-	      grant:
-	        | {
-	            userId: string;
-	            username: string;
-	            avatarUrl?: string;
-	            grantedAt?: number | null;
-	            expiresAt?: number | null;
-	            minutes?: number | null;
-	            grantedBy?: { userId: string; username: string } | null;
-	          }
-	        | null,
-	      meta:
-	        | {
-	            lastActionAt?: number | null;
-	            lastSavedAt?: number | null;
-	            lastSavedRev?: string | null;
-	          }
-	        | null,
-	      targetPlanId: string
-	    ) => {
-	      runUpdateLockedPlans(lockedBy, grant, meta, targetPlanId, { setLockedPlans });
-	    },
-	    [setLockedPlans]
-	  );
-
-	  useEffect(() => {
-	    if (!lockAvailable) return;
-	    if (lockState.mine) return;
-	    requestPlanLock();
-	  }, [lockAvailable, lockState.mine, requestPlanLock]);
-
-  const prevMineRef = useRef(false);
-  useEffect(() => {
-	    if (prevMineRef.current && !lockState.mine && lockRequired) {
-	      pushStack(
-	        t({
-	          it: 'Lock perso: la planimetria è ora in sola lettura.',
-	          en: 'Lock lost: the floor plan is now read-only.'
-	        }),
-	        'info',
-	        { duration: LOCK_TOAST_MS }
-	      );
-	    }
-    prevMineRef.current = lockState.mine;
-  }, [LOCK_TOAST_MS, lockRequired, lockState.mine, pushStack, t]);
+    lockState,
+    unlockPrompt, setUnlockPrompt, unlockBusy, setUnlockBusy, unlockCompose, setUnlockCompose,
+    unlockGrantedPrompt, setUnlockGrantedPrompt,
+    forceUnlockConfig, setForceUnlockConfig, forceUnlockGraceMinutes, setForceUnlockGraceMinutes,
+    forceUnlockStarting, setForceUnlockStarting, forceUnlockActive, setForceUnlockActive,
+    forceUnlockIncoming, setForceUnlockIncoming, forceUnlockExecuteCommand, setForceUnlockExecuteCommand,
+    forceUnlockTick, forceUnlockActiveFocusRef, forceUnlockIncomingFocusRef,
+    formatPresenceDate, formatPresenceLock, presenceEntries, presenceCount,
+    sendWs, requestPlanLock,
+    lockRequired, lockedByOther, lockAvailable, isReadOnly,
+    isReadOnlyRef, lockMineRef, planIdRefForWs, lastPlanActionSentAtRef, lastPlanDirtySentAtRef, lastPlanDirtyValueRef,
+    lockInfoOpen, setLockInfoOpen, lockInfoRef, lockActiveTitle, lockedByTitle, formatMinutes, grantRemainingMinutes
+  } = usePlanLockState({
+    t, user, planAccess, activeRevision, planId, perfEnabled, pushStack, setLockedPlans, planRef, LOCK_TOAST_MS
+  });
   const renderPlan = useMemo<FloorPlan | undefined>(() => {
     if (!plan) return undefined;
     if (!activeRevision) return plan;
@@ -879,7 +734,7 @@ export const usePlanView = (planId: string) => {
 	    if (touchedRef.current) return;
 	    touchedRef.current = true;
 	    setTouchedTick((x) => x + 1);
-	  }, []);
+	  }, [lockMineRef, lastPlanActionSentAtRef, planIdRefForWs, sendWs]);
   const resetTouched = useCallback(() => {
     if (!touchedRef.current) return;
     touchedRef.current = false;
@@ -980,7 +835,7 @@ export const usePlanView = (planId: string) => {
     [
       LOCK_TOAST_MS, hasNavigationEdits, plan, push, pushStack, resetTouched,
       revertUnsavedChanges, saveRevisionForUnlock, sendWs, t, getPlanSnapshot, unlockBusy,
-      unlockPrompt
+      unlockPrompt, setUnlockBusy, setUnlockPrompt
     ]
   );
 
@@ -1004,7 +859,7 @@ export const usePlanView = (planId: string) => {
 	      if (!lockList.length) return;
 	      setUnlockCompose({ target: userEntry, locks: lockList });
 	    },
-	    [user?.id]
+	    [user?.id, setUnlockCompose]
 	  );
 
 		  const executeForceUnlock = useCallback(
@@ -1025,7 +880,7 @@ export const usePlanView = (planId: string) => {
 	      setForceUnlockIncoming(null);
 	      return ok;
 	    },
-	    [hasNavigationEdits, plan, planId, resetTouched, revertUnsavedChanges, saveRevisionForUnlock, sendWs, getPlanSnapshot]
+	    [hasNavigationEdits, plan, planId, resetTouched, revertUnsavedChanges, saveRevisionForUnlock, sendWs, getPlanSnapshot, setForceUnlockIncoming]
 	  );
 
 	  useEffect(() => {
@@ -1033,12 +888,12 @@ export const usePlanView = (planId: string) => {
 	    const cmd = forceUnlockExecuteCommand;
 	    setForceUnlockExecuteCommand(null);
 	    void executeForceUnlock(cmd.requestId, cmd.action);
-	  }, [executeForceUnlock, forceUnlockExecuteCommand]);
+	  }, [executeForceUnlock, forceUnlockExecuteCommand, setForceUnlockExecuteCommand]);
 
-	  useEffect(() => runUnlockRequestEffect({ user, setUnlockCompose }), [user?.id]);
+	  useEffect(() => runUnlockRequestEffect({ user, setUnlockCompose }), [user?.id, user, setUnlockCompose]);
 
 	  useEffect(() => runForceUnlockEventEffect({ isSuperAdmin, setForceUnlockGraceMinutes, setForceUnlockStarting, setForceUnlockConfig }),
-	    [isSuperAdmin]);
+	    [isSuperAdmin, setForceUnlockGraceMinutes, setForceUnlockStarting, setForceUnlockConfig]);
 
 	  useEffect(() => {
 	    setPlanDirty?.(planId, !!hasNavigationEdits);
@@ -1057,7 +912,7 @@ export const usePlanView = (planId: string) => {
 	    lastPlanDirtyValueRef.current = dirty;
 	    lastPlanDirtySentAtRef.current = now;
 	    sendWs({ type: 'plan_dirty', planId, dirty });
-	  }, [hasNavigationEdits, lockRequired, lockState.mine, planId, sendWs]);
+	  }, [hasNavigationEdits, lockRequired, lockState.mine, planId, sendWs, lastPlanDirtySentAtRef, lastPlanDirtyValueRef]);
 
   useEffect(() => {
     if (!pendingSaveNavigateTo) return;
