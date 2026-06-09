@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FloorPlan } from '../../store/types';
 import { samePlanSnapshot as samePlanSnapshotUtil, type PlanSnapshotComparable } from './planSnapshotCompare';
 import { toPlanHistorySnapshot, toPlanSnapshot, type PlanHistorySnapshot, type PlanSnapshot } from './planSnapshots';
-import { getLatestRevision, toRevisionSnapshot } from './planRevisions';
+import { getLatestRevision, getRevisionVersion, toRevisionSnapshot } from './planRevisions';
 import { runApplyHistorySnapshot } from './planViewComputeBits';
 import { runHistoryTrackEffect } from './planViewEffects';
 import { computeGetPlanUnsavedChanges } from './planViewComputeBits2';
@@ -198,9 +198,16 @@ export const usePlanHistory = (deps: any) => {
   // UI "Unsaved" badge should reflect user edits only, not legacy normalization differences in old revisions.
   const hasUnsavedUi = hasNavigationEdits;
 
+  const latestRev = useMemo(() => {
+    const latest = getLatestRevision(plan?.revisions as any[] | undefined);
+    return getRevisionVersion(latest as any);
+  }, [plan?.revisions]);
+  const hasAnyRevision = !!(plan?.revisions || []).length;
+
   return {
     getPlanSnapshot, getLatestRevisionCached, getRevisionSnapshotCached, toHistorySnapshot, resetHistory,
     samePlanSnapshot, samePlanSnapshotIgnoringDims, applyHistorySnapshot, performUndo, performRedo,
-    getPlanUnsavedChanges, canUndo, canRedo, hasLocalEdits, hasNavigationEdits, hasUnsavedUi
+    getPlanUnsavedChanges, canUndo, canRedo, hasLocalEdits, hasNavigationEdits, hasUnsavedUi,
+    latestRev, hasAnyRevision
   };
 };

@@ -132,7 +132,7 @@ import { getWallTypeColor } from '../../utils/wallColors';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 
 import { getRoomPolygon, isRackLinkId, getSharedRoomSides, resolveAxisLockedPoint } from './planViewUtils';
-import { getLatestRevision, getRevisionVersion } from './planRevisions';
+import { getRevisionVersion } from './planRevisions';
 import { usePlanShortcuts } from './usePlanShortcuts';
 import { usePlanSelectionState } from './usePlanSelectionState';
 import { usePlanDrawingState } from './usePlanDrawingState';
@@ -686,12 +686,6 @@ export const usePlanView = (planId: string) => {
     rackPortsLink, setRackPortsLink, rackOverlayById, planId, updateRackItem
   });
 
-  const latestRev = useMemo(() => {
-    const latest = getLatestRevision(plan?.revisions as any[] | undefined);
-    return getRevisionVersion(latest as any);
-  }, [plan?.revisions]);
-
-  const hasAnyRevision = !!(plan?.revisions || []).length;
   const baselineSnapshotRef = useRef<{
     imageUrl: string;
     width?: number;
@@ -750,7 +744,7 @@ export const usePlanView = (planId: string) => {
 
   const {
     getPlanSnapshot, getLatestRevisionCached, performUndo,
-    performRedo, getPlanUnsavedChanges, canUndo, canRedo, hasNavigationEdits, hasUnsavedUi
+    performRedo, getPlanUnsavedChanges, canUndo, canRedo, hasNavigationEdits, hasUnsavedUi, latestRev, hasAnyRevision
   } = usePlanHistory({
     plan, planId, markTouched, setFloorPlanContent, baselineSnapshotRef, entrySnapshotRef, touchedRef, setTouchedTick, touchedTick
   });
