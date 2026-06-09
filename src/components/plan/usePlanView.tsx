@@ -10,7 +10,6 @@ import {
   computeOpenEditRoom,
   computeCreateRoomFromRect,
   computeCreateRoomFromPoly,
-  computeSplitWallAtPoint,
   computeAddWallSegment,
   isPointInRoom,
   getRoomIdAt,
@@ -25,7 +24,6 @@ import {
   computeSaveRevisionReason
 } from './planViewMiscTools';
 import { computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
-import { computeResolveWallPoint } from './planViewWallMeasureTools';
 import { computeHandleUnlockResponse, computeReloadMyMeetings } from './planViewLockMeetingTools';
 import {
   computeGetClosestCorridorEdge,
@@ -111,6 +109,7 @@ import { usePlanObjectCreateHandlers } from './usePlanObjectCreateHandlers';
 import { usePlanMiscDerived } from './usePlanMiscDerived';
 import { usePlanRoomStats } from './usePlanRoomStats';
 import { usePlanMeasureToast } from './usePlanMeasureToast';
+import { usePlanWallToolHandlers } from './usePlanWallToolHandlers';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -2633,49 +2632,11 @@ export const usePlanView = (planId: string) => {
     return out;
   }, [isWallType, renderPlan]);
 
-  const resolveWallPoint = useCallback(
-    (point: { x: number; y: number }, options?: { shiftKey?: boolean; avoidPoint?: { x: number; y: number } | null; avoidDistance?: number }) =>
-      computeResolveWallPoint(point, options, {
-        wallSnapPoints,
-        zoom,
-        wallDraftPointsRef
-      }),
-    [wallSnapPoints, zoom]
-  );
-
-  const splitWallAtPoint = useCallback(
-    (payload: { id: string; point?: { x: number; y: number } }) =>
-      computeSplitWallAtPoint(payload, {
-        addWallSegment,
-        deleteObject,
-        getTypeLabel,
-        inferDefaultLayerIds,
-        isReadOnly,
-        isWallType,
-        layerIdSet,
-        markTouched,
-        projectPointOnSegment,
-        renderPlan,
-        setSelectedObject,
-        zoom,
-        lastInsertedRef
-      }),
-    [
-      addWallSegment,
-      deleteObject,
-      getTypeLabel,
-      getWallTypeColor,
-      inferDefaultLayerIds,
-      isReadOnly,
-      isWallType,
-      layerIdSet,
-      markTouched,
-      projectPointOnSegment,
-      renderPlan,
-      setSelectedObject,
-      zoom
-    ]
-  );
+  const { resolveWallPoint, splitWallAtPoint } = usePlanWallToolHandlers({
+    wallSnapPoints, zoom, wallDraftPointsRef, addWallSegment, deleteObject, getTypeLabel, getWallTypeColor,
+    inferDefaultLayerIds, isReadOnly, isWallType, layerIdSet, markTouched, projectPointOnSegment, renderPlan,
+    setSelectedObject, lastInsertedRef
+  });
 
   const { handleWallPoint, handleWallDraftContextMenu, handleWallSegmentDblClick } = usePlanWallPointHandlers({
     addWallSegment,
