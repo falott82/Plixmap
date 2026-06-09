@@ -7,13 +7,6 @@ import {
   polygonsOverlap
 } from './planViewRoomGeometry';
 import {
-  computeGetCorridorPolygon
-} from './planViewMiscTools';
-import {
-  computeGetClosestCorridorEdge,
-  computeGetCorridorEdgePoint
-} from './planViewCorridorGeometry';
-import {
   computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates
 } from './planViewComputeBits';
 import {
@@ -32,7 +25,7 @@ import {
 
 import { CanvasStageHandle } from './CanvasStage';
 
-import { Corridor, FloorPlan, FloorPlanView, IconName, MapObject, MapObjectType, Room } from '../../store/types';
+import { FloorPlan, FloorPlanView, IconName, MapObject, MapObjectType, Room } from '../../store/types';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useToastStore } from '../../store/useToast';
@@ -85,6 +78,7 @@ import { usePlanLockState } from './usePlanLockState';
 import { usePlanLockActions } from './usePlanLockActions';
 import { usePlanLockEffects } from './usePlanLockEffects';
 import { usePlanMiscCallbacks } from './usePlanMiscCallbacks';
+import { usePlanCorridorGeometry } from './usePlanCorridorGeometry';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState, RoomDepartmentConfirmState, RackPortsLinkState, EscapeRouteModalState, LayerRevealPromptState, MeetingManagerPresetState,
@@ -995,16 +989,7 @@ export const usePlanView = (planId: string) => {
     getPastePoint
   });
 
-  const getCorridorPolygon = useCallback((corridor: any) => computeGetCorridorPolygon(corridor), []);
-
-  const getClosestCorridorEdge = useCallback(
-    (corridor: Corridor, point: { x: number; y: number }) => computeGetClosestCorridorEdge(corridor, point, getCorridorPolygon),
-    [getCorridorPolygon]
-  );
-  const getCorridorEdgePoint = useCallback(
-    (corridor: Corridor, edgeIndex: number, t: number) => computeGetCorridorEdgePoint(corridor, edgeIndex, t, getCorridorPolygon),
-    [getCorridorPolygon]
-  );
+  const { getCorridorPolygon, getClosestCorridorEdge, getCorridorEdgePoint } = usePlanCorridorGeometry();
 
   const { roomMeasuresData, roomLayoutExportRows, roomLayoutExportSource } = usePlanRoomExportDerived({
     computePolygonArea, computePolylineLength, formatCornerLabel, formatNumber, lang, metersPerPixel,
