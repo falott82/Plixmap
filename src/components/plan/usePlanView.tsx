@@ -5,10 +5,6 @@ import { runRealtimeWsEffect } from './planViewRealtime';
 import { runRoomDepartmentOptionsEffect, runMeetingOverviewEffect } from './planViewDepartmentOptions';
 import { computeRackOverlayLinks } from './planViewExportData';
 import {
-  computeSnapRoomRectToAdjacentSide,
-  computeOpenEditRoom,
-  computeCreateRoomFromRect,
-  computeCreateRoomFromPoly,
   computeAddWallSegment,
   isPointInRoom,
   getRoomIdAt,
@@ -109,6 +105,7 @@ import { usePlanPresentation } from './usePlanPresentation';
 import { usePlanSaveRevisionHandlers } from './usePlanSaveRevisionHandlers';
 import { usePlanRoomLayoutExportHandlers } from './usePlanRoomLayoutExportHandlers';
 import { usePlanModalInitials } from './usePlanModalInitials';
+import { usePlanRoomDrawHandlers } from './usePlanRoomDrawHandlers';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -3104,55 +3101,17 @@ export const usePlanView = (planId: string) => {
   useEffect(() => runLayerVisibilitySyncEffect({ user, normalizeVisibleLayerIdsByPlan, visibleLayerIdsByPlan, layerVisibilitySyncRef }),
     [normalizeVisibleLayerIdsByPlan, user, visibleLayerIdsByPlan]);
 
-  const beginRoomDraw = () => {
-    if (isReadOnly) return;
-    setPendingType(null);
-    setRoomDrawMode('rect');
-    setRoomsOpen(false);
-    setContextMenu(null);
-    push(t({ it: 'Disegna un rettangolo sulla mappa per creare una stanza', en: 'Draw a rectangle on the map to create a room' }), 'info');
-  };
-
-  const beginRoomPolyDraw = () => {
-    if (isReadOnly) return;
-    setPendingType(null);
-    setRoomDrawMode('poly');
-    setRoomsOpen(false);
-    setContextMenu(null);
-    push(
-      t({
-        it: 'Clicca più punti per disegnare un poligono. Clicca sul primo punto (o premi Invio) per chiudere.',
-        en: 'Click multiple points to draw a polygon. Click the first point (or press Enter) to close.'
-      }),
-      'info'
-    );
-  };
-
-  const beginCorridorPolyDraw = () => {
-    if (isReadOnly) return;
-    setPendingType(null);
-    setRoomDrawMode(null);
-    setCorridorDoorDraft(null);
-    setCorridorQuickMenu(null);
-    setCorridorDrawMode('poly');
-    setRoomsOpen(false);
-    setContextMenu(null);
-  };
-
-  const openEditRoom = (roomId: string, options?: { openDepartments?: boolean }) =>
-    computeOpenEditRoom(roomId, options, { rooms, isReadOnly, setRoomModal });
-
-  const snapRoomRectToAdjacentSide = useCallback(
-    (inputRect: { x: number; y: number; width: number; height: number }) =>
-      computeSnapRoomRectToAdjacentSide(inputRect, { plan }),
-    [plan]
-  );
-
-  const handleCreateRoomFromRect = (rect: { x: number; y: number; width: number; height: number }) =>
-    computeCreateRoomFromRect(rect, { isReadOnly, snapRoomRectToAdjacentSide, hasRoomOverlap, notifyRoomOverlap, setRoomDrawMode, setRoomModal });
-
-  const handleCreateRoomFromPoly = (points: { x: number; y: number }[]) =>
-    computeCreateRoomFromPoly(points, { isReadOnly, hasRoomOverlap, notifyRoomOverlap, setRoomDrawMode, setRoomModal });
+  const {
+    beginRoomDraw,
+    beginRoomPolyDraw,
+    beginCorridorPolyDraw,
+    openEditRoom,
+    handleCreateRoomFromRect,
+    handleCreateRoomFromPoly,
+  } = usePlanRoomDrawHandlers({
+    isReadOnly, setPendingType, setRoomDrawMode, setRoomsOpen, setContextMenu, push, t, setCorridorDoorDraft,
+    setCorridorQuickMenu, setCorridorDrawMode, rooms, setRoomModal, plan, hasRoomOverlap, notifyRoomOverlap
+  });
 
   const { openEditCorridor, handleCreateCorridorFromPoly, saveCorridorModal, updateCorridorLabelScale } = usePlanCorridorNameHandlers({
     corridorById,
