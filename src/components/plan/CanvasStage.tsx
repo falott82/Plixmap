@@ -31,6 +31,8 @@ import { useCanvasSafetyCardHelpToast } from './canvas/useCanvasSafetyCardHelpTo
 import { useCanvasObjectBounds } from './canvas/useCanvasObjectBounds';
 import { useCanvasKeyboardShortcuts } from './canvas/useCanvasKeyboardShortcuts';
 import { useCanvasViewport } from './canvas/useCanvasViewport';
+import { useCanvasResize } from './canvas/useCanvasResize';
+import { useCanvasDerivedObjects } from './canvas/useCanvasDerivedObjects';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
   hexToRgba,
@@ -38,8 +40,6 @@ import {
   SAFETY_CARD_HELP_TOAST_ID,
   sameSafetyCardDraftLayout,
   getDeskBounds,
-  getViewportWorldBounds,
-  isObjectPotentiallyVisible,
   polygonCentroid,
   getRoomBounds,
   getRoomPolygonPoints,
@@ -50,11 +50,6 @@ import {
   pointInPolygon,
   nearestWallSegment,
   getPolygonLabelBounds,
-  buildWifiRangeRings as buildWifiRangeRingsImpl,
-  buildCameraFovPolygon as buildCameraFovPolygonImpl,
-  buildWallSegments,
-  buildCameraWallSegments,
-  buildWifiRayAngles,
   findPhotoAt,
 } from './CanvasStage.helpers';
 
@@ -432,9 +427,9 @@ const CanvasStageImpl = (
   const baseHeight = plan.height || bgImage?.height || dimensions.height;
 
   const {
-    viewportRef, isPanning, applyStageTransform, commitViewport, scheduleWheelCommit, clampPan,
+    viewportRef, isPanning, applyStageTransform, commitViewport, clampPan,
     fitViewRef, wheelCommitTimer, panRaf, fitApplied, handleWheel, startPan, movePan, endPan,
-    isPanGesture, isBoxSelectGesture
+    isPanGesture, isBoxSelectGesture, handleZoomIn, handleZoomOut
   } = useCanvasViewport({
     zoom, pan, stageRef, dimensions, baseWidth, baseHeight, onZoomChange, onPanChange, containerRef,
     presentationMode, plan, autoFit, bgImage, focusTarget, panToolActive, pendingType, roomDrawMode,
@@ -652,81 +647,7 @@ const CanvasStageImpl = (
 
   const renderRoomLabels = (options: any) => renderRoomLabelsImpl(options, estimateTextWidth);
 
-  const refreshStage = useCallback(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    stage.getLayers()?.forEach((layer: { batchDraw: () => void }) => layer.batchDraw());
-  }, []);
-
-  useEffect(() => {
-    const last = { width: -1, height: -1 };
-    let raf = 0;
-    const lastCommitAt = { value: 0 };
-    const commit = (width: number, height: number) => {
-      setDimensions((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
-    };
-    const applySize = (width: number, height: number) => {
-      const roundedWidth = Math.round(width);
-      const roundedHeight = Math.round(height);
-      // Avoid committing zero sizes during transient layout states (e.g. modal/panel animations),
-      // which can cause the Stage to "disappear" and become unresponsive until the next resize.
-      if (roundedWidth <= 0 || roundedHeight <= 0) return;
-      if (roundedWidth === last.width && roundedHeight === last.height) return;
-      const dw = Math.abs(roundedWidth - last.width);
-      const dh = Math.abs(roundedHeight - last.height);
-      perfMetrics.resizeLastWidth = roundedWidth;
-      perfMetrics.resizeLastHeight = roundedHeight;
-      if (!perfMetrics.resizeMinWidth || roundedWidth < perfMetrics.resizeMinWidth) perfMetrics.resizeMinWidth = roundedWidth;
-      if (!perfMetrics.resizeMaxWidth || roundedWidth > perfMetrics.resizeMaxWidth) perfMetrics.resizeMaxWidth = roundedWidth;
-      if (!perfMetrics.resizeMinHeight || roundedHeight < perfMetrics.resizeMinHeight) perfMetrics.resizeMinHeight = roundedHeight;
-      if (!perfMetrics.resizeMaxHeight || roundedHeight > perfMetrics.resizeMaxHeight) perfMetrics.resizeMaxHeight = roundedHeight;
-      perfMetrics.resizeDeltaMax = Math.max(perfMetrics.resizeDeltaMax, dw, dh);
-      if (dw <= 1 && dh <= 1) perfMetrics.resizeSmallJitter += 1;
-      if (dw >= 4 || dh >= 4) perfMetrics.resizeLargeJitter += 1;
-      const now = performance.now();
-      if (now - lastCommitAt.value < 250 && dw < 3 && dh < 3) return;
-      lastCommitAt.value = now;
-      last.width = roundedWidth;
-      last.height = roundedHeight;
-      if (perfEnabled) perfMetrics.resizeObserverCommits += 1;
-      if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => commit(roundedWidth, roundedHeight));
-    };
-    const handleResize = () => {
-      if (perfEnabled) perfMetrics.resizeObserverTicks += 1;
-      const el = containerRef.current;
-      if (!el) return;
-      applySize(el.clientWidth, el.clientHeight);
-    };
-    handleResize();
-    const obs = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.target !== containerRef.current) continue;
-        if (perfEnabled) perfMetrics.resizeObserverTicks += 1;
-        const rect = entry.contentRect;
-        applySize(rect.width, rect.height);
-      }
-    });
-    if (containerRef.current) obs.observe(containerRef.current);
-    const onVis = () => {
-      if (document.visibilityState === 'visible') {
-        handleResize();
-        refreshStage();
-      }
-    };
-    const onFocus = () => {
-      handleResize();
-      refreshStage();
-    };
-    document.addEventListener('visibilitychange', onVis);
-    window.addEventListener('focus', onFocus);
-    return () => {
-      obs.disconnect();
-      if (raf) cancelAnimationFrame(raf);
-      document.removeEventListener('visibilitychange', onVis);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [containerRef, perfEnabled, refreshStage]);
+  useCanvasResize({ containerRef, stageRef, perfEnabled, setDimensions });
 
   useEffect(() => {
     fitApplied.current = null;
@@ -1051,7 +972,7 @@ const CanvasStageImpl = (
 
   const isContextClick = (evt: any) => evt?.button === 2 || (evt?.button === 0 && !!evt?.ctrlKey);
 
-  const { getObjectBounds, getSelectionCandidates } = useCanvasObjectBounds({ objects, wallTypeIdSet, objectById, estimateTextWidth, objectNodeRefs, stageRef, baseWidth, baseHeight });
+  const { getObjectBounds, getSelectionCandidates, selectedBounds } = useCanvasObjectBounds({ objects, wallTypeIdSet, objectById, estimateTextWidth, objectNodeRefs, stageRef, baseWidth, baseHeight, selectedId, selectedIds });
 
   const { selectionBox, isBoxSelecting, beginSelectionBox, updateSelectionBox, finalizeSelectionBox } = useCanvasSelectionBox({
     pointerToWorld,
@@ -1099,61 +1020,13 @@ const CanvasStageImpl = (
   });
   const { showSafetyCardHelpToast } = useCanvasSafetyCardHelpToast({ t, readOnly, safetyCard, safetyCardSelected });
 
-  const [wallObjects, quoteObjects, regularObjects] = useMemo(() => {
-    if (!wallTypeIdSet.size) {
-      const quotes = objects.filter((obj) => obj.type === 'quote');
-      const others = objects.filter((obj) => obj.type !== 'quote');
-      return [[], quotes, others];
-    }
-    const walls: MapObject[] = [];
-    const quotes: MapObject[] = [];
-    const others: MapObject[] = [];
-    for (const obj of objects) {
-      if (wallTypeIdSet.has(obj.type)) walls.push(obj);
-      else if (obj.type === 'quote') quotes.push(obj);
-      else others.push(obj);
-    }
-    return [walls, quotes, others];
-  }, [objects, wallTypeIdSet]);
-  const viewportWorldBounds = useMemo(() => getViewportWorldBounds(dimensions, pan, zoom), [dimensions, pan, zoom]);
-  const visibleRegularObjects = useMemo(
-    () => regularObjects.filter((obj) => isObjectPotentiallyVisible(obj, viewportWorldBounds)),
-    [regularObjects, viewportWorldBounds]
-  );
-  const wallSegments = useMemo(() => buildWallSegments(wallObjects, wallAttenuationMap), [wallAttenuationMap, wallObjects]);
-  const cameraWallSegments = useMemo(() => buildCameraWallSegments(wallObjects), [wallObjects]);
-  const wifiRayAngles = useMemo(() => buildWifiRayAngles(), []);
-  const buildWifiRangeRings = useCallback(
-    (origin: { x: number; y: number }, baseRadiusPx: number) =>
-      buildWifiRangeRingsImpl(origin, baseRadiusPx, wallSegments, wifiRayAngles),
-    [wallSegments, wifiRayAngles]
-  );
-  const buildCameraFovPolygon = useCallback(
-    (origin: { x: number; y: number }, rangePx: number, angleDeg: number, rotationDeg: number) =>
-      buildCameraFovPolygonImpl(origin, rangePx, angleDeg, rotationDeg, cameraWallSegments),
-    [cameraWallSegments]
-  );
-
-  const selectedBounds = useMemo(() => {
-    const idsArr = selectedIds || (selectedId ? [selectedId] : []);
-    if (!idsArr.length) return null;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const id of idsArr) {
-      const obj = objectById.get(id);
-      if (!obj) continue;
-      const bounds = getObjectBounds(obj);
-      if (!bounds) continue;
-      minX = Math.min(minX, bounds.minX);
-      minY = Math.min(minY, bounds.minY);
-      maxX = Math.max(maxX, bounds.maxX);
-      maxY = Math.max(maxY, bounds.maxY);
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
-    return { minX, minY, maxX, maxY };
-  }, [getObjectBounds, objectById, selectedId, selectedIds]);
+  const {
+    wallObjects,
+    quoteObjects,
+    visibleRegularObjects,
+    buildWifiRangeRings,
+    buildCameraFovPolygon,
+  } = useCanvasDerivedObjects({ objects, wallTypeIdSet, dimensions, pan, zoom, wallAttenuationMap });
 
   useEffect(() => {
     if (boxSelectionActiveRef.current) {
@@ -1167,19 +1040,6 @@ const CanvasStageImpl = (
     clearRoomRectSnapHint();
   }, [clearRoomRectSnapHint, readOnly, roomDrawMode]);
   const allowTool = !!toolMode && (!readOnly || toolMode === 'measure');
-
-  const handleZoomIn = () => {
-    const nextZoom = clamp(viewportRef.current.zoom * 1.1, 0.2, 3);
-    viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
-    applyStageTransform(nextZoom, viewportRef.current.pan);
-    scheduleWheelCommit(nextZoom, viewportRef.current.pan);
-  };
-  const handleZoomOut = () => {
-    const nextZoom = clamp(viewportRef.current.zoom / 1.1, 0.2, 3);
-    viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
-    applyStageTransform(nextZoom, viewportRef.current.pan);
-    scheduleWheelCommit(nextZoom, viewportRef.current.pan);
-  };
 
   const pointerHandlerDeps = {
     corridorDrawMode,

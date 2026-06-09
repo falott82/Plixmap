@@ -188,6 +188,19 @@ export const useCanvasViewport = (deps: any) => {
   // Box select: left-drag on empty area (desktop-like).
   const isBoxSelectGesture = (evt: any) => evt?.button === 0;
 
+  const handleZoomIn = () => {
+    const nextZoom = clamp(viewportRef.current.zoom * 1.1, 0.2, 3);
+    viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
+    applyStageTransform(nextZoom, viewportRef.current.pan);
+    scheduleWheelCommit(nextZoom, viewportRef.current.pan);
+  };
+  const handleZoomOut = () => {
+    const nextZoom = clamp(viewportRef.current.zoom / 1.1, 0.2, 3);
+    viewportRef.current = { zoom: nextZoom, pan: viewportRef.current.pan };
+    applyStageTransform(nextZoom, viewportRef.current.pan);
+    scheduleWheelCommit(nextZoom, viewportRef.current.pan);
+  };
+
   const applyFocus = (target: { x: number; y: number; zoom?: number; nonce: number }) => {
     if (dimensions.width <= 0 || dimensions.height <= 0) return false;
     if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) return false;
@@ -224,5 +237,5 @@ export const useCanvasViewport = (deps: any) => {
     applyFocus(pendingFocusRef.current);
   }, [dimensions.width, dimensions.height]);
 
-  return { viewportRef, isPanning, applyStageTransform, commitViewport, scheduleWheelCommit, clampPan, fitView, fitViewRef, wheelCommitTimer, panRaf, fitApplied, handleWheel, startPan, movePan, endPan, isPanGesture, isBoxSelectGesture };
+  return { viewportRef, isPanning, applyStageTransform, commitViewport, scheduleWheelCommit, clampPan, fitView, fitViewRef, wheelCommitTimer, panRaf, fitApplied, handleWheel, startPan, movePan, endPan, isPanGesture, isBoxSelectGesture, handleZoomIn, handleZoomOut };
 };

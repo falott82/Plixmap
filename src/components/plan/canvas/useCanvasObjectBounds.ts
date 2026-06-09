@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { MapObject } from '../../../store/types';
 import { computeObjectBounds as computeObjectBoundsImpl } from '../CanvasStage.helpers';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvasSpatialIndex';
@@ -9,7 +9,7 @@ type Bounds = { minX: number; minY: number; maxX: number; maxY: number } | null;
 // Object-bounds caching + spatial index for marquee selection, extracted from CanvasStage.
 // Owns the cache/version/index refs; invalidates (version bump) when objects/wall types change.
 export const useCanvasObjectBounds = (deps: any) => {
-  const { objects, wallTypeIdSet, objectById, estimateTextWidth, objectNodeRefs, stageRef, baseWidth, baseHeight } = deps;
+  const { objects, wallTypeIdSet, objectById, estimateTextWidth, objectNodeRefs, stageRef, baseWidth, baseHeight, selectedId, selectedIds } = deps;
   const boundsVersionRef = useRef(0);
   const boundsCacheRef = useRef<Map<string, { version: number; bounds: Bounds }>>(new Map());
   const spatialIndexRef = useRef<{ version: number; cellSize: number; cells: Map<string, string[]> } | null>(null);
@@ -90,5 +90,26 @@ export const useCanvasObjectBounds = (deps: any) => {
     [getSpatialIndex, objectById, objects]
   );
 
-  return { getNodeBounds, getObjectBounds, getSelectionCandidates };
+  const selectedBounds = useMemo(() => {
+    const idsArr = selectedIds || (selectedId ? [selectedId] : []);
+    if (!idsArr.length) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const id of idsArr) {
+      const obj = objectById.get(id);
+      if (!obj) continue;
+      const bounds = getObjectBounds(obj);
+      if (!bounds) continue;
+      minX = Math.min(minX, bounds.minX);
+      minY = Math.min(minY, bounds.minY);
+      maxX = Math.max(maxX, bounds.maxX);
+      maxY = Math.max(maxY, bounds.maxY);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+    return { minX, minY, maxX, maxY };
+  }, [getObjectBounds, objectById, selectedId, selectedIds]);
+
+  return { getNodeBounds, getObjectBounds, getSelectionCandidates, selectedBounds };
 };
