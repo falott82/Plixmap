@@ -12,7 +12,6 @@ import {
   computeGetCorridorPolygon,
   computeSaveRevisionReason
 } from './planViewMiscTools';
-import { computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
 import { computeHandleUnlockResponse } from './planViewLockMeetingTools';
 import {
   computeGetClosestCorridorEdge,
@@ -1277,19 +1276,10 @@ export const usePlanView = (planId: string) => {
     formatNumber
   });
 
-  const updateQuoteLabelPos = useCallback(
-    (id: string, pos: 'center' | 'above' | 'below' | 'left' | 'right', orientation?: 'horizontal' | 'vertical') =>
-      computeUpdateQuoteLabelPos(id, pos, orientation, {
-        getQuoteOrientation, renderPlan, updateObject, setLastQuoteLabelPosH,
-        setLastQuoteLabelPosV
-      }),
-    [getQuoteOrientation, renderPlan, setLastQuoteLabelPosH, setLastQuoteLabelPosV, updateObject]
-  );
-
-  const { openDuplicate, resolveRoomAssignmentForObject, getCorridorIdAt } = usePlanObjectMiscHandlers({
+  const { openDuplicate, resolveRoomAssignmentForObject, getCorridorIdAt, updateQuoteLabelPos } = usePlanObjectMiscHandlers({
     renderPlan, isReadOnly, isDeskType, markTouched, getTypeLabel, inferDefaultLayerIds, layerIdSet,
     addObject, ensureObjectLayerVisible, lastInsertedRef, getRoomIdAt, updateObject, push, t, postAuditEvent,
-    setModalState
+    setModalState, getQuoteOrientation, setLastQuoteLabelPosH, setLastQuoteLabelPosV
   });
 
   const handleMapContextMenu = usePlanMapContextMenuHandler({

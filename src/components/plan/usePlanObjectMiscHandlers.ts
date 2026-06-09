@@ -3,15 +3,26 @@ import { useCallback } from 'react';
 import type { Room } from '../../store/types';
 import { runOpenDuplicate } from './planViewCreateObject';
 import { computeResolveRoomAssignmentForObject, isPointInRoom } from './planViewRoomGeometry';
+import { computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
 
-// Misc object handlers (duplicate an object, resolve a room assignment, corridor hit-test) extracted
-// from usePlanView. Bodies moved verbatim; consumed by the downstream move/create/context hooks.
+// Misc object handlers (duplicate an object, resolve a room assignment, corridor hit-test, update
+// quote label position) extracted from usePlanView. Bodies moved verbatim; consumed by the
+// downstream move/create/context hooks.
 export const usePlanObjectMiscHandlers = (deps: any) => {
   const {
     renderPlan, isReadOnly, isDeskType, markTouched, getTypeLabel, inferDefaultLayerIds, layerIdSet,
     addObject, ensureObjectLayerVisible, lastInsertedRef, getRoomIdAt, updateObject, push, t, postAuditEvent,
-    setModalState
+    setModalState, getQuoteOrientation, setLastQuoteLabelPosH, setLastQuoteLabelPosV
   } = deps;
+
+  const updateQuoteLabelPos = useCallback(
+    (id: string, pos: 'center' | 'above' | 'below' | 'left' | 'right', orientation?: 'horizontal' | 'vertical') =>
+      computeUpdateQuoteLabelPos(id, pos, orientation, {
+        getQuoteOrientation, renderPlan, updateObject, setLastQuoteLabelPosH,
+        setLastQuoteLabelPosV
+      }),
+    [getQuoteOrientation, renderPlan, setLastQuoteLabelPosH, setLastQuoteLabelPosV, updateObject]
+  );
 
   const openDuplicate = (objectId: string) => {
     runOpenDuplicate(objectId, {
@@ -49,5 +60,5 @@ export const usePlanObjectMiscHandlers = (deps: any) => {
     return undefined;
   }, []);
 
-  return { openDuplicate, resolveRoomAssignmentForObject, getCorridorIdAt };
+  return { openDuplicate, resolveRoomAssignmentForObject, getCorridorIdAt, updateQuoteLabelPos };
 };
