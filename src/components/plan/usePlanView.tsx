@@ -11,7 +11,6 @@ import {
   computeGetCorridorPolygon,
   computeSaveRevisionReason
 } from './planViewMiscTools';
-import { computeHandleUnlockResponse } from './planViewLockMeetingTools';
 import {
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint
@@ -43,7 +42,6 @@ import { useToastStore } from '../../store/useToast';
 import { useAuthStore } from '../../store/useAuthStore';
 import { fetchPlanRevisions } from '../../api/state';
 
-import type { UnlockRequestLock } from './UnlockRequestComposeModal';
 
 import { isDeskType } from './deskTypes';
 
@@ -86,7 +84,8 @@ import { usePlanObjectMiscHandlers } from './usePlanObjectMiscHandlers';
 import { usePlanPointerHelpers } from './usePlanPointerHelpers';
 import { usePlanHistory } from './usePlanHistory';
 import { renderKeybindToastContent } from './planViewKeybindToast';
-import { usePlanLockState, type PresenceUser } from './usePlanLockState';
+import { usePlanLockState } from './usePlanLockState';
+import { usePlanLockActions } from './usePlanLockActions';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState, RoomDepartmentConfirmState, RackPortsLinkState, EscapeRouteModalState, LayerRevealPromptState, MeetingManagerPresetState,
@@ -824,20 +823,11 @@ export const usePlanView = (planId: string) => {
     entrySnapshotRef, getPlanSnapshot, planRef
   });
 
-	  const handleUnlockResponse = useCallback(
-	    async (action: 'grant' | 'grant_save' | 'grant_discard' | 'deny') =>
-	      computeHandleUnlockResponse(action, {
-	        LOCK_TOAST_MS, hasNavigationEdits, plan, push, pushStack, resetTouched,
-	        revertUnsavedChanges, saveRevisionForUnlock, sendWs, t, getPlanSnapshot, unlockBusy,
-	        unlockPrompt, entrySnapshotRef, planRef, setUnlockBusy,
-	        setUnlockPrompt
-	      }),
-    [
-      LOCK_TOAST_MS, hasNavigationEdits, plan, push, pushStack, resetTouched,
-      revertUnsavedChanges, saveRevisionForUnlock, sendWs, t, getPlanSnapshot, unlockBusy,
-      unlockPrompt, setUnlockBusy, setUnlockPrompt
-    ]
-  );
+  const { handleUnlockResponse, openUnlockCompose, executeForceUnlock } = usePlanLockActions({
+    LOCK_TOAST_MS, hasNavigationEdits, plan, planId, push, pushStack, resetTouched, revertUnsavedChanges,
+    saveRevisionForUnlock, sendWs, t, getPlanSnapshot, unlockBusy, unlockPrompt, entrySnapshotRef, planRef,
+    setUnlockBusy, setUnlockPrompt, user, setUnlockCompose, setForceUnlockIncoming
+  });
 
   const toggleRevisionImmutable = useCallback(
     (revisionId: string, nextValue: boolean) => {
@@ -846,42 +836,7 @@ export const usePlanView = (planId: string) => {
     [isSuperAdmin, planId, postAuditEvent, push, t, updateRevision, user?.id, user?.username]
   );
 
-	  const openUnlockCompose = useCallback(
-	    (userEntry: PresenceUser) => {
-	      if (!userEntry?.userId) return;
-	      if (userEntry.userId === user?.id) return;
-	      const lockList: UnlockRequestLock[] =
-	        Array.isArray((userEntry as any).locks) && (userEntry as any).locks.length
-	          ? (userEntry as any).locks
-	          : (userEntry as any).lock
-	            ? [(userEntry as any).lock]
-	            : [];
-	      if (!lockList.length) return;
-	      setUnlockCompose({ target: userEntry, locks: lockList });
-	    },
-	    [user?.id, setUnlockCompose]
-	  );
 
-		  const executeForceUnlock = useCallback(
-		    async (requestId: string, action: 'save' | 'discard') => {
-		      let ok = true;
-	      if (action === 'save') {
-	        ok = await saveRevisionForUnlock();
-	      } else if (action === 'discard') {
-	        if (hasNavigationEdits) {
-	          revertUnsavedChanges();
-	          resetTouched();
-	          entrySnapshotRef.current = getPlanSnapshot(planRef.current || plan);
-	        }
-	      }
-	      // Release lock (best-effort); the server will also enforce the deadline.
-	      sendWs({ type: 'release_lock', planId });
-	      sendWs({ type: 'force_unlock_done', requestId, action, ok });
-	      setForceUnlockIncoming(null);
-	      return ok;
-	    },
-	    [hasNavigationEdits, plan, planId, resetTouched, revertUnsavedChanges, saveRevisionForUnlock, sendWs, getPlanSnapshot, setForceUnlockIncoming]
-	  );
 
 	  useEffect(() => {
 	    if (!forceUnlockExecuteCommand) return;
