@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { computeReloadMyMeetings } from './planViewLockMeetingTools';
-import { runOpenMyMeetingsModal } from './planViewComputeBits2';
+import { runOpenMyMeetingsModal, computeMyMeetingsFiltered } from './planViewComputeBits2';
 
 const OPEN_MEETING_CENTER_EVENT = 'plixmap_open_meeting_center';
 const OPEN_MY_MEETINGS_EVENT = 'plixmap_open_my_meetings';
@@ -10,7 +10,12 @@ const OPEN_MY_MEETINGS_EVENT = 'plixmap_open_my_meetings';
 // extracted from usePlanView. Bodies moved verbatim; keeps reloadMyMeetingsRef in sync for the
 // room-meetings timeline hook.
 export const usePlanMyMeetingsModal = (deps: any) => {
-  const { t, setMyMeetingsModal, setMyMeetingsSearch, reloadMyMeetingsRef, myMeetingsRestoreRef, setMeetingHubModalOpen, myMeetingsModal } = deps;
+  const { t, setMyMeetingsModal, setMyMeetingsSearch, reloadMyMeetingsRef, myMeetingsRestoreRef, setMeetingHubModalOpen, myMeetingsModal, myMeetingsSearch, meetingLocationLabels } = deps;
+
+  const myMeetingsFiltered = useMemo(
+    () => computeMyMeetingsFiltered({ myMeetingsModal, myMeetingsSearch, meetingLocationLabels }),
+    [meetingLocationLabels, myMeetingsModal?.meetings, myMeetingsSearch]
+  );
 
   const reloadMyMeetings = useCallback(async () => {
     await computeReloadMyMeetings({ t, setMyMeetingsModal });
@@ -52,5 +57,5 @@ export const usePlanMyMeetingsModal = (deps: any) => {
     }
   }, [myMeetingsModal?.returnToHub, setMyMeetingsModal, setMeetingHubModalOpen]);
 
-  return { reloadMyMeetings, openMyMeetingsModal, openMyMeetingsFromHub, closeMyMeetingsModal };
+  return { reloadMyMeetings, openMyMeetingsModal, openMyMeetingsFromHub, closeMyMeetingsModal, myMeetingsFiltered };
 };

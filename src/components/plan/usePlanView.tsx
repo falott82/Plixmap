@@ -19,7 +19,7 @@ import {
   computeSubmenuStyle, computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates
 } from './planViewComputeBits';
 import {
-  computeMyMeetingsFiltered, runToggleRevisionImmutable,
+  runToggleRevisionImmutable,
   runPerformPendingPostSaveAction
 } from './planViewComputeBits2';
 import {
@@ -573,11 +573,6 @@ export const usePlanView = (planId: string) => {
 
   const meetingLocationLabels = useMemo(() => computeMeetingLocationLabels(allClients), [allClients]);
 
-  const myMeetingsFiltered = useMemo(
-    () => computeMyMeetingsFiltered({ myMeetingsModal, myMeetingsSearch, meetingLocationLabels }),
-    [meetingLocationLabels, myMeetingsModal?.meetings, myMeetingsSearch]
-  );
-
   const LOCK_TOAST_MS = 5_000;
 
   const {
@@ -986,7 +981,7 @@ export const usePlanView = (planId: string) => {
   });
 
   const myMeetingsModalHandlers = usePlanMyMeetingsModal({
-    t, setMyMeetingsModal, setMyMeetingsSearch, reloadMyMeetingsRef, myMeetingsRestoreRef, setMeetingHubModalOpen, myMeetingsModal
+    t, setMyMeetingsModal, setMyMeetingsSearch, reloadMyMeetingsRef, myMeetingsRestoreRef, setMeetingHubModalOpen, myMeetingsModal, myMeetingsSearch, meetingLocationLabels
   });
 
   const {
@@ -1517,7 +1512,7 @@ export const usePlanView = (planId: string) => {
     lockAvailable, lockInfoOpen, lockInfoRef, lockRequired, lockState, lockedByOther, lockedByTitle, mapRef,
     mapSubmenu, markTouched, measureAreaLabel, measureClosed, measureLabel, measurePointer, measurePoints, meetingCheckInEntryKey,
     meetingClockFromTs, meetingHubFocusRef, meetingHubModalOpen, meetingIsoDayFromTs, meetingLocationLabels, meetingManagerOpen, meetingManagerPreset, meetingStatusByRoomId,
-    metersPerPixel, modalInitials, modalState, monthAnchorFromIso, moveObject, myMeetingsCheckInBusyId, myMeetingsCheckInDoneById, myMeetingsFiltered,
+    metersPerPixel, modalInitials, modalState, monthAnchorFromIso, moveObject, myMeetingsCheckInBusyId, myMeetingsCheckInDoneById,
     myMeetingsFocusRef, myMeetingsModal, myMeetingsRestoreRef, myMeetingsSearch, navigate, newRoomMenuOpen, normalizeLayerSelection, notifyNonPeopleRoomBlocked,
     notifyRoomOverlap, objectListMatches, objectListQuery, objectTypeDefs, objectTypeIcons, objectTypeLabels, objectsByType, objectsOpen,
     openCorridorConnectionModalAt, openCorridorDoorLinkModal, openCorridorDoorModal, openDuplicate, openEditCorridor, openEditCorridorConnectionModal, openEditFromSelectionList, openEscapeRouteAt,
