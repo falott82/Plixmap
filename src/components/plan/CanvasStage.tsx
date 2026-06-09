@@ -21,6 +21,7 @@ import { useCanvasPrintAreaDraft } from './canvas/useCanvasPrintAreaDraft';
 import { useCanvasTextDraft } from './canvas/useCanvasTextDraft';
 import { useCanvasCorridorPolyDraft } from './canvas/useCanvasCorridorPolyDraft';
 import { useCanvasRoomPolyDraft } from './canvas/useCanvasRoomPolyDraft';
+import { useCanvasRoomRectDraft } from './canvas/useCanvasRoomRectDraft';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
@@ -49,7 +50,6 @@ import {
   buildWifiRangeRings as buildWifiRangeRingsImpl,
   buildCameraFovPolygon as buildCameraFovPolygonImpl,
   dragRectFromCorners,
-  findNearestRoomCorner,
   buildWallSegments,
   buildCameraWallSegments,
   buildWifiRayAngles,
@@ -439,9 +439,6 @@ const CanvasStageImpl = (
   const lastContextMenuAtRef = useRef(0);
   const lastBoxSelectAtRef = useRef(0);
   const [roomHighlightNow, setRoomHighlightNow] = useState(Date.now());
-  const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [roomRectSnapHint, setRoomRectSnapHint] = useState<{ x: number; y: number } | null>(null);
-  const draftOrigin = useRef<{ x: number; y: number } | null>(null);
   const [corridorDoorHover, setCorridorDoorHover] = useState<{ edgeIndex: number; t: number; x: number; y: number } | null>(null);
   const corridorDoorDraftActive = !!corridorDoorDraft?.corridorId;
   const panRaf = useRef<number | null>(null);
@@ -449,8 +446,6 @@ const CanvasStageImpl = (
   const selectionBoxRaf = useRef<number | null>(null);
   const pendingSelectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const lastSelectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
-  const draftRectRaf = useRef<number | null>(null);
-  const pendingDraftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const textTransformRaf = useRef<number | null>(null);
   const pendingTextTransformRef = useRef<{ id: string; width: number; height: number } | null>(null);
   const [cameraRotateId, setCameraRotateId] = useState<string | null>(null);
@@ -920,16 +915,24 @@ const CanvasStageImpl = (
   const { draftPolyPoints, previewDraftPolyLine, resetDraftPoly, addDraftPolyPoint, updateDraftPolyPointer } =
     useCanvasRoomPolyDraft({ roomDrawMode, readOnly, perfEnabled, suspendKeyboardShortcuts, onCreateRoom });
 
+  const getRoomRectZoom = useCallback(() => viewportRef.current.zoom, []);
+  const {
+    draftRect,
+    roomRectSnapHint,
+    isRectDrafting,
+    resetDraftRect,
+    clearRoomRectSnapHint,
+    beginRectDraft,
+    updateDraftRect,
+    finalizeDraftRect,
+    updateRectSnapPreview
+  } = useCanvasRoomRectDraft({ roomDrawMode, readOnly, perfEnabled, rooms: (plan.rooms || []) as any[], getZoom: getRoomRectZoom, onCreateRoom });
+
   useEffect(() => {
     if (roomDrawMode) return;
-    draftOrigin.current = null;
-    if (perfEnabled) perfMetrics.draftRectUpdates += 1;
-    setDraftRect(null);
-    if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
-    draftRectRaf.current = null;
-    pendingDraftRectRef.current = null;
+    resetDraftRect();
     resetDraftPoly();
-  }, [perfEnabled, roomDrawMode, resetDraftPoly]);
+  }, [resetDraftRect, resetDraftPoly, roomDrawMode]);
 
   useEffect(() => {
     if (!transformerRef.current) return;
@@ -1018,7 +1021,6 @@ const CanvasStageImpl = (
       if (wheelCommitTimer.current) window.clearTimeout(wheelCommitTimer.current);
       if (panRaf.current) cancelAnimationFrame(panRaf.current);
       if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
-      if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
       if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
       if (textTransformRaf.current) cancelAnimationFrame(textTransformRaf.current);
       textTransformRaf.current = null;
@@ -1645,62 +1647,6 @@ const CanvasStageImpl = (
     onPlaceNew(type, x, y);
   };
 
-  const updateDraftRect = (event: any) => {
-    if (roomDrawMode !== 'rect' || readOnly) return false;
-    const origin = draftOrigin.current;
-    if (!origin) return false;
-    const stage = event.target.getStage();
-    const pos = stage?.getPointerPosition();
-    if (!pos) return true;
-    const world = pointerToWorld(pos.x, pos.y);
-    const x1 = origin.x;
-    const y1 = origin.y;
-    const x2 = world.x;
-    const y2 = world.y;
-    const { x, y, width, height } = dragRectFromCorners(x1, y1, x2, y2);
-    pendingDraftRectRef.current = { x, y, width, height };
-    if (draftRectRaf.current) return true;
-    draftRectRaf.current = requestAnimationFrame(() => {
-      draftRectRaf.current = null;
-      const next = pendingDraftRectRef.current;
-      pendingDraftRectRef.current = null;
-      if (!next) return;
-      if (perfEnabled) perfMetrics.draftRectUpdates += 1;
-      setDraftRect(next);
-    });
-    return true;
-  };
-
-  const getNearestRoomCorner = useCallback(
-    (point: { x: number; y: number }) => findNearestRoomCorner((plan.rooms || []) as any[], point, viewportRef.current.zoom),
-    [plan.rooms]
-  );
-
-  const snapRoomRectStartToCorner = useCallback(
-    (point: { x: number; y: number }) => getNearestRoomCorner(point) || point,
-    [getNearestRoomCorner]
-  );
-
-  const finalizeDraftRect = () => {
-    if (roomDrawMode !== 'rect' || readOnly) return false;
-    if (!draftOrigin.current || !draftRect) return false;
-    const rect = {
-      x: draftRect.x,
-      y: draftRect.y,
-      width: Math.max(0, draftRect.width),
-      height: Math.max(0, draftRect.height)
-    };
-    draftOrigin.current = null;
-    if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
-    draftRectRaf.current = null;
-    pendingDraftRectRef.current = null;
-    setRoomRectSnapHint(null);
-    setDraftRect(null);
-    if (rect.width < 20 || rect.height < 20) return true;
-    onCreateRoom?.({ kind: 'rect', rect });
-    return true;
-  };
-
   const backPlate = useMemo(() => {
     return (
       <Group>
@@ -1921,8 +1867,8 @@ const CanvasStageImpl = (
   }, [selectedRoomIds]);
   useEffect(() => {
     if (roomDrawMode === 'rect' && !readOnly) return;
-    setRoomRectSnapHint(null);
-  }, [readOnly, roomDrawMode]);
+    clearRoomRectSnapHint();
+  }, [clearRoomRectSnapHint, readOnly, roomDrawMode]);
   const allowTool = !!toolMode && (!readOnly || toolMode === 'measure');
 
   const handleZoomIn = () => {
@@ -2151,12 +2097,7 @@ const CanvasStageImpl = (
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
             if (!pos) return;
-            const world = snapRoomRectStartToCorner(pointerToWorld(pos.x, pos.y));
-            setRoomRectSnapHint(null);
-            draftOrigin.current = { x: world.x, y: world.y };
-            pendingDraftRectRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
-            if (perfEnabled) perfMetrics.draftRectUpdates += 1;
-            setDraftRect(pendingDraftRectRef.current);
+            beginRectDraft(pointerToWorld(pos.x, pos.y));
             return;
           }
           if (roomDrawMode === 'poly' && !readOnly && e.evt.button === 0) {
@@ -2266,26 +2207,17 @@ const CanvasStageImpl = (
           } else if (corridorDoorHover) {
             setCorridorDoorHover(null);
           }
-          if (roomDrawMode === 'rect' && !readOnly && !draftOrigin.current) {
-            const stage = e.target.getStage();
-            const pos = stage?.getPointerPosition();
-            if (pos) {
-              const world = pointerToWorld(pos.x, pos.y);
-              const nearestCorner = getNearestRoomCorner(world);
-              setRoomRectSnapHint((prev) => {
-                if (!nearestCorner) return prev ? null : prev;
-                if (prev && Math.hypot(prev.x - nearestCorner.x, prev.y - nearestCorner.y) < 0.001) return prev;
-                return nearestCorner;
-              });
-            } else {
-              setRoomRectSnapHint(null);
-            }
-          } else if (roomRectSnapHint) {
-            setRoomRectSnapHint(null);
+          {
+            const pos = e.target.getStage()?.getPointerPosition();
+            updateRectSnapPreview(pos ? pointerToWorld(pos.x, pos.y) : null);
           }
           if (updateSelectionBox(e)) return;
           if (updateDraftPrintRect(e)) return;
-          if (updateDraftRect(e)) return;
+          if (roomDrawMode === 'rect' && !readOnly && isRectDrafting()) {
+            const pos = e.target.getStage()?.getPointerPosition();
+            if (pos) updateDraftRect(pointerToWorld(pos.x, pos.y));
+            return;
+          }
           if (corridorDrawMode === 'poly' && !readOnly) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
@@ -2348,7 +2280,7 @@ const CanvasStageImpl = (
             setPendingPreview(null);
           }
           setCorridorDoorHover(null);
-          setRoomRectSnapHint(null);
+          clearRoomRectSnapHint();
           setDoorHoverCard(null);
         }}
       >
