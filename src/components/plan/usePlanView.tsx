@@ -21,12 +21,7 @@ import {
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
 import {
-  computeFormatPresenceDate,
-  computeFormatPresenceLock,
-  computeSubmenuStyle,
-  computeClientBusinessPartnerNames,
-  computeMeetingLocationLabels,
-  computeSiteMeetingParticipantCandidates,
+  computeFormatPresenceDate, computeFormatPresenceLock, computeSubmenuStyle, computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates,
   runApplyHistorySnapshot,
   runUnlockRequestEffect
 } from './planViewComputeBits';
@@ -105,18 +100,8 @@ import { usePlanObjectMiscHandlers } from './usePlanObjectMiscHandlers';
 import { usePlanPointerHelpers } from './usePlanPointerHelpers';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
-  PlanObjectModalState,
-  RoomDepartmentConfirmState,
-  RackPortsLinkState,
-  EscapeRouteModalState,
-  LayerRevealPromptState,
-  MeetingManagerPresetState,
-  ClientMeetingsPresetState,
-  UnlockPromptState,
-  UnlockGrantedPromptState,
-  ForceUnlockConfigState,
-  ForceUnlockActiveState,
-  ForceUnlockIncomingState,
+  PlanObjectModalState, RoomDepartmentConfirmState, RackPortsLinkState, EscapeRouteModalState, LayerRevealPromptState, MeetingManagerPresetState,
+  ClientMeetingsPresetState, UnlockPromptState, UnlockGrantedPromptState, ForceUnlockConfigState, ForceUnlockActiveState, ForceUnlockIncomingState,
   PlanLockState
 } from './planViewStateTypes';
 import { usePlanContextMenuHandlers } from './usePlanContextMenuHandlers';
@@ -222,24 +207,9 @@ export const usePlanView = (planId: string) => {
 
   const objectTypeDefs = useDataStore((s) => s.objectTypes);
   const {
-    objectTypeById,
-    wallTypeIdSet,
-    wallTypeDefs,
-    doorTypeIdSet,
-    defaultDoorCatalogId,
-    deskCatalogDefs,
-    wallAttenuationByType,
-    defaultWallTypeId,
-    getTypeLabel,
-    getTypeIcon,
-    isWallType,
-    isDoorType,
-    formatNumber,
-    getLayerNote,
-    objectTypeIcons,
-    objectTypeLabels,
-    isCameraType,
-    inferDefaultLayerIds,
+    objectTypeById, wallTypeIdSet, wallTypeDefs, doorTypeIdSet, defaultDoorCatalogId, deskCatalogDefs,
+    wallAttenuationByType, defaultWallTypeId, getTypeLabel, getTypeIcon, isWallType, isDoorType,
+    formatNumber, getLayerNote, objectTypeIcons, objectTypeLabels, isCameraType, inferDefaultLayerIds,
     normalizeVisibleLayerIdsByPlan,
   } = usePlanTypeCatalog(objectTypeDefs, lang);
 
@@ -436,12 +406,7 @@ export const usePlanView = (planId: string) => {
     roomWallTypeSelections, setRoomWallTypeSelections, roomWallPrompt, setRoomWallPrompt,
   } = usePlanModalState();
   usePlanCorridorModalEffects({
-    corridorModal,
-    setCorridorNameInput,
-    setCorridorNameEnInput,
-    setCorridorShowNameInput,
-    corridorNameInputRef,
-    corridorDoorLinkModal,
+    corridorModal, setCorridorNameInput, setCorridorNameEnInput, setCorridorShowNameInput, corridorNameInputRef, corridorDoorLinkModal,
     corridorDoorLinkQuery,
     setCorridorDoorLinkQuery
   });
@@ -546,16 +511,8 @@ export const usePlanView = (planId: string) => {
     setRoomMeetingTimelineContextMenu, setRoomMeetingsTimelineBookingDetail, setRoomMeetingsTimelineModal, setRoomMeetingsTimelineSearchActiveIndex, setRoomMeetingsTimelineSearchError,
     setRoomMeetingsTimelineSearchResults, setRoomMeetingsTimelineSearchTerm, toggleTimelineMeetingParticipantFlag,
   } = useRoomMeetingsTimeline({
-    t,
-    push,
-    plan,
-    client,
-    site,
-    planId,
-    siteMeetingParticipantCandidates,
-    myMeetingsModal,
-    setMyMeetingsModal,
-    myMeetingsRestoreRef,
+    t, push, plan, client, site, planId,
+    siteMeetingParticipantCandidates, myMeetingsModal, setMyMeetingsModal, myMeetingsRestoreRef,
     reloadMyMeetingsRef
   });
 
@@ -668,12 +625,7 @@ export const usePlanView = (planId: string) => {
 
 		  const [lockState, setLockState] = useState<PlanLockState>({ lockedBy: null, mine: false, grant: null, meta: null });
   const {
-    lockInfoOpen,
-    setLockInfoOpen,
-    lockInfoRef,
-    lockActiveTitle,
-    lockedByTitle,
-    formatMinutes,
+    lockInfoOpen, setLockInfoOpen, lockInfoRef, lockActiveTitle, lockedByTitle, formatMinutes,
     grantRemainingMinutes
   } = usePlanLock({ t, lockState });
   const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
@@ -733,35 +685,11 @@ export const usePlanView = (planId: string) => {
 	  }, [forceUnlockActive?.requestId, forceUnlockIncoming?.requestId]);
 
   useEffect(() => runRealtimeWsEffect({
-    user,
-    realtimeDisabled,
-    realtimeDisabledRef,
-    activeRevision,
-    planAccess,
-    planId,
-    perfEnabled,
-    LOCK_TOAST_MS,
-    wsRef,
-    isReadOnlyRef,
-    lockMineRef,
-    planRef,
-    forceUnlockConfigRef,
-    forceUnlockActiveRef,
-    forceUnlockIncomingRef,
-    setLockState,
-    updateLockedPlans,
-    setPresenceUsers,
-    setGlobalPresenceUsers,
-    setLockedPlans,
-    setUnlockPrompt,
-    setUnlockGrantedPrompt,
-    setForceUnlockStarting,
-    setForceUnlockActive,
-    setForceUnlockConfig,
-    setForceUnlockIncoming,
-    setForceUnlockExecuteCommand,
-    setRealtimeDisabled,
-    pushStack,
+    user, realtimeDisabled, realtimeDisabledRef, activeRevision, planAccess, planId,
+    perfEnabled, LOCK_TOAST_MS, wsRef, isReadOnlyRef, lockMineRef, planRef,
+    forceUnlockConfigRef, forceUnlockActiveRef, forceUnlockIncomingRef, setLockState, updateLockedPlans, setPresenceUsers,
+    setGlobalPresenceUsers, setLockedPlans, setUnlockPrompt, setUnlockGrantedPrompt, setForceUnlockStarting, setForceUnlockActive,
+    setForceUnlockConfig, setForceUnlockIncoming, setForceUnlockExecuteCommand, setRealtimeDisabled, pushStack,
     t
   }), [activeRevision, planAccess, planId, realtimeDisabled, user?.id]);
 
@@ -862,12 +790,7 @@ export const usePlanView = (planId: string) => {
     } as FloorPlan;
   }, [activeRevision, plan]);
   const {
-    safetyCardPos,
-    safetyCardSize,
-    safetyCardFontSize,
-    safetyCardFontIndex,
-    safetyCardColorIndex,
-    safetyCardTextBgIndex,
+    safetyCardPos, safetyCardSize, safetyCardFontSize, safetyCardFontIndex, safetyCardColorIndex, safetyCardTextBgIndex,
     handleSafetyCardChange
   } = usePlanSafetyCard({
     planRef,
@@ -877,12 +800,7 @@ export const usePlanView = (planId: string) => {
   });
   const basePlan = plan as FloorPlan;
   const {
-    renderPlanObjectById,
-    basePlanObjectById,
-    renderPlanRoomById,
-    basePlanRoomById,
-    roomModalBaseRoom,
-    selectedObjects,
+    renderPlanObjectById, basePlanObjectById, renderPlanRoomById, basePlanRoomById, roomModalBaseRoom, selectedObjects,
     selectedSingleObject,
   } = usePlanObjectIndex({ renderPlan, basePlan, roomModal, selectedObjectIds });
   const planScale = renderPlan?.scale;
@@ -891,14 +809,8 @@ export const usePlanView = (planId: string) => {
     return Number.isFinite(value) && value > 0 ? value : null;
   }, [planScale?.metersPerPixel]);
   const {
-    computePolylineLength,
-    computePolygonArea,
-    computeRoomSurfaceSqm,
-    formatCornerLabel,
-    buildRoomPreview,
-    projectPointOnSegment,
-    buildRoomWallSegments,
-    getWallPolygonData,
+    computePolylineLength, computePolygonArea, computeRoomSurfaceSqm, formatCornerLabel, buildRoomPreview, projectPointOnSegment,
+    buildRoomWallSegments, getWallPolygonData,
   } = usePlanRoomGeometry({ metersPerPixel, lang, formatNumber, renderPlan, renderPlanObjectById, renderPlanRoomById, isWallType, defaultWallTypeId, t });
   useEffect(() => runResetToolsOnPlanChangeEffect({
     setWallDrawMode, setWallDrawType, setWallDraftPoints, wallDraftPointsRef, wallDraftSegmentIdsRef, setWallDraftPointer,
@@ -907,12 +819,7 @@ export const usePlanView = (planId: string) => {
     setQuotePointer, setScalePromptDismissed
   }), [planId, planScale]);
   const {
-    scaleLabel,
-    defaultObjectScale,
-    scaleLine,
-    measureLabel,
-    measureAreaLabel,
-    formatQuoteLabel,
+    scaleLabel, defaultObjectScale, scaleLine, measureLabel, measureAreaLabel, formatQuoteLabel,
     quoteDraftLabel,
   } = usePlanMeasureScale({
     planScale, lang, formatNumber, renderPlan, lastObjectScale, showScaleLine, measurePoints,
@@ -928,39 +835,17 @@ export const usePlanView = (planId: string) => {
   );
 
   const {
-    planLayers,
-    orderedPlanLayers,
-    allItemsLabel,
-    layerIds,
-    nonAllLayerIds,
-    layerIdSet,
-    normalizeLayerSelection,
-    getTypeLayerIds,
-    getLayerIdsForType,
-    getObjectLayerIdsForVisibility,
-    visibleLayerIds,
-    hideAllLayers,
-    allItemsSelected,
-    effectiveVisibleLayerIds,
-    visibleLayerCount,
-    totalLayerCount,
-    getLayerLabel,
-    getObjectToastLabel,
-    promptRevealForObject,
-    getObjectBoundsForAlign,
-    ensureObjectLayerVisible,
+    planLayers, orderedPlanLayers, allItemsLabel, layerIds, nonAllLayerIds, layerIdSet,
+    normalizeLayerSelection, getTypeLayerIds, getLayerIdsForType, getObjectLayerIdsForVisibility, visibleLayerIds, hideAllLayers,
+    allItemsSelected, effectiveVisibleLayerIds, visibleLayerCount, totalLayerCount, getLayerLabel, getObjectToastLabel,
+    promptRevealForObject, getObjectBoundsForAlign, ensureObjectLayerVisible,
   } = usePlanLayerResolution({
     client, t, lang, planId, visibleLayerIdsByPlan, hiddenLayersByPlan, setVisibleLayerIds,
     setHideAllLayers, push, setLayerRevealPrompt, canvasStageRef, inferDefaultLayerIds, getTypeLabel
   });
 
   const {
-    canvasPlan,
-    securityLayerVisible,
-    safetyEmergencyContacts,
-    safetyNumbersInline,
-    safetyPointsInline,
-    quoteLabels,
+    canvasPlan, securityLayerVisible, safetyEmergencyContacts, safetyNumbersInline, safetyPointsInline, quoteLabels,
     getQuoteOrientation,
   } = usePlanRenderDerived({
     allItemsSelected, effectiveVisibleLayerIds, getObjectLayerIdsForVisibility, hideAllLayers,
@@ -968,12 +853,7 @@ export const usePlanView = (planId: string) => {
   });
 
   const {
-    linksModalObjectName,
-    linksModalRows,
-    linkCreateHint,
-    rackPortsLinkItem,
-    openRackLinkPorts,
-    handleRackPortsRename,
+    linksModalObjectName, linksModalRows, linkCreateHint, rackPortsLinkItem, openRackLinkPorts, handleRackPortsRename,
     handleRackPortsNote,
   } = usePlanLinkRackModals({
     linksModalObjectId, renderPlan, objectTypeDefs, lang, linkFromId, isReadOnly, linkCreateMode, t,
@@ -1035,12 +915,7 @@ export const usePlanView = (planId: string) => {
   const alignSelection = useCallback(
     (mode: 'horizontal' | 'vertical', referenceId?: string) =>
       computeAlignSelection(mode, referenceId, {
-        getObjectBoundsForAlign,
-        isReadOnly,
-        isWallType,
-        markTouched,
-        moveObject,
-        renderPlan,
+        getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan,
         selectedObjects,
         updateObject
       }),
@@ -1143,12 +1018,7 @@ export const usePlanView = (planId: string) => {
   const applyHistorySnapshot = useCallback(
     (entry: HistoryEntry) => {
       runApplyHistorySnapshot(entry, {
-        planId,
-        historyLockRef,
-        historySnapshotRef,
-        historyKeyRef,
-        setFloorPlanContent,
-        markTouched,
+        planId, historyLockRef, historySnapshotRef, historyKeyRef, setFloorPlanContent, markTouched,
         setHistoryTick
       });
     },
@@ -1246,21 +1116,9 @@ export const usePlanView = (planId: string) => {
   });
 
   usePlanDeeplinkEffects({
-    location,
-    navigate,
-    planId,
-    isReadOnly,
-    push,
-    t,
-    setSelectedObject,
-    triggerHighlight,
-    clearSelection,
-    setSelectedRoomId,
-    setSelectedRoomIds,
-    setHighlightRoom,
-    setRevisionsOpen,
-    setPrintAreaMode,
-    setRoomAllocationPreset,
+    location, navigate, planId, isReadOnly, push, t,
+    setSelectedObject, triggerHighlight, clearSelection, setSelectedRoomId, setSelectedRoomIds, setHighlightRoom,
+    setRevisionsOpen, setPrintAreaMode, setRoomAllocationPreset,
     setRoomAllocationOpen
   });
 
@@ -1287,37 +1145,14 @@ export const usePlanView = (planId: string) => {
 	  const handleUnlockResponse = useCallback(
 	    async (action: 'grant' | 'grant_save' | 'grant_discard' | 'deny') =>
 	      computeHandleUnlockResponse(action, {
-	        LOCK_TOAST_MS,
-	        hasNavigationEdits,
-	        plan,
-	        push,
-	        pushStack,
-	        resetTouched,
-	        revertUnsavedChanges,
-	        saveRevisionForUnlock,
-	        sendWs,
-	        t,
-	        getPlanSnapshot,
-	        unlockBusy,
-	        unlockPrompt,
-	        entrySnapshotRef,
-	        planRef,
-	        setUnlockBusy,
+	        LOCK_TOAST_MS, hasNavigationEdits, plan, push, pushStack, resetTouched,
+	        revertUnsavedChanges, saveRevisionForUnlock, sendWs, t, getPlanSnapshot, unlockBusy,
+	        unlockPrompt, entrySnapshotRef, planRef, setUnlockBusy,
 	        setUnlockPrompt
 	      }),
     [
-      LOCK_TOAST_MS,
-      hasNavigationEdits,
-      plan,
-      push,
-      pushStack,
-      resetTouched,
-      revertUnsavedChanges,
-      saveRevisionForUnlock,
-      sendWs,
-      t,
-      getPlanSnapshot,
-      unlockBusy,
+      LOCK_TOAST_MS, hasNavigationEdits, plan, push, pushStack, resetTouched,
+      revertUnsavedChanges, saveRevisionForUnlock, sendWs, t, getPlanSnapshot, unlockBusy,
       unlockPrompt
     ]
   );
@@ -1452,73 +1287,21 @@ export const usePlanView = (planId: string) => {
     contextQuoteLabelPos, roomModalInitialSurfaceSqm, roomWallTypeAllValue, canEditWallType, selectionHasRack,
     selectionHasDesk, selectionHasPhoto, selectionPhotoIds, selectedWifiIds, selectionAllRealUsers,
   } = usePlanContextDerived({
-    renderPlan,
-    contextMenu,
-    renderPlanObjectById,
-    objectTypeLabels,
-    realUserDetailsId,
-    selectedObjectIds,
-    selectedObjects,
-    isDeskType,
-    isWallType,
-    getWallPolygonData,
-    getQuoteOrientation,
-    lastQuoteLabelPosV,
-    lastQuoteLabelPosH,
-    roomModal,
-    computeRoomSurfaceSqm,
-    metersPerPixel,
-    roomWallTypeSelections,
+    renderPlan, contextMenu, renderPlanObjectById, objectTypeLabels, realUserDetailsId, selectedObjectIds,
+    selectedObjects, isDeskType, isWallType, getWallPolygonData, getQuoteOrientation, lastQuoteLabelPosV,
+    lastQuoteLabelPosH, roomModal, computeRoomSurfaceSqm, metersPerPixel, roomWallTypeSelections,
     defaultWallTypeId
   });
 
   usePlanSelectionMenuEffects({
-    planRef,
-    renderPlan,
-    selectedObjectIdRef,
-    selectedObjectId,
-    selectedObjectIdsRef,
-    selectedObjectIds,
-    contextMenu,
-    renderKeybindToast,
-    selectionHintToastIds,
-    multiToastKeyRef,
-    multiToastIdRef,
-    selectedSingleObject,
-    isDeskType,
-    deskToastKeyRef,
-    deskToastIdRef,
-    quoteToastKeyRef,
-    quoteToastIdRef,
-    mediaToastKeyRef,
-    mediaToastIdRef,
-    getTypeLabel,
-    t,
-    selectionToastKeyRef,
-    selectionToastIdRef,
-    selectedLinkIdRef,
-    selectedLinkId,
-    internalMapOpen,
-    dismissSelectionHintToasts,
-    selectedRoomIdRef,
-    selectedRoomId,
-    selectedCorridorDoor,
-    selectedCorridorId,
-    setSelectedCorridorDoor,
-    selectedRoomDoorId,
-    setSelectedRoomDoorId,
-    confirmDeleteRef,
-    confirmDelete,
-    pendingRoomDeletesRef,
-    pendingRoomDeletes,
-    wallQuickMenu,
-    setWallQuickMenu,
-    setWallTypeMenu,
-    corridorQuickMenu,
-    setCorridorQuickMenu,
-    setAlignMenuOpen,
-    setLayersContextMenu,
-    setMapSubmenu,
+    planRef, renderPlan, selectedObjectIdRef, selectedObjectId, selectedObjectIdsRef, selectedObjectIds,
+    contextMenu, renderKeybindToast, selectionHintToastIds, multiToastKeyRef, multiToastIdRef, selectedSingleObject,
+    isDeskType, deskToastKeyRef, deskToastIdRef, quoteToastKeyRef, quoteToastIdRef, mediaToastKeyRef,
+    mediaToastIdRef, getTypeLabel, t, selectionToastKeyRef, selectionToastIdRef, selectedLinkIdRef,
+    selectedLinkId, internalMapOpen, dismissSelectionHintToasts, selectedRoomIdRef, selectedRoomId, selectedCorridorDoor,
+    selectedCorridorId, setSelectedCorridorDoor, selectedRoomDoorId, setSelectedRoomDoorId, confirmDeleteRef, confirmDelete,
+    pendingRoomDeletesRef, pendingRoomDeletes, wallQuickMenu, setWallQuickMenu, setWallTypeMenu, corridorQuickMenu,
+    setCorridorQuickMenu, setAlignMenuOpen, setLayersContextMenu, setMapSubmenu,
     toolMode
   });
 
@@ -1615,23 +1398,9 @@ export const usePlanView = (planId: string) => {
 
 
   const { handleCorridorDoorDraftPoint, createRoomDoorFromDraft, startRoomDoorDraft } = usePlanRoomDoorDraftHandlers({
-    corridorDoorDraft,
-    defaultDoorCatalogId,
-    markTouched,
-    objectTypeById,
-    push,
-    t,
-    updateFloorPlan,
-    isReadOnlyRef,
-    planRef,
-    setSelectedCorridorDoor,
-    setCorridorDoorDraft,
-    setCorridorQuickMenu,
-    roomDoorDraft,
-    setRoomDoorDraft,
-    setSelectedRoomDoorId,
-    setContextMenu,
-    getSharedRoomSides,
+    corridorDoorDraft, defaultDoorCatalogId, markTouched, objectTypeById, push, t,
+    updateFloorPlan, isReadOnlyRef, planRef, setSelectedCorridorDoor, setCorridorDoorDraft, setCorridorQuickMenu,
+    roomDoorDraft, setRoomDoorDraft, setSelectedRoomDoorId, setContextMenu, getSharedRoomSides,
     renderPlan
   });
 
@@ -1641,18 +1410,8 @@ export const usePlanView = (planId: string) => {
 
 
   const { openMeetingManager, dispatchOpenClientMeetingsTimeline, openSchedulingFromHub } = usePlanMeetingOpenHandlers({
-    client,
-    site,
-    planId,
-    hasNavigationEdits,
-    isReadOnly,
-    canManageMeetingScheduling,
-    push,
-    t,
-    setPendingMeetingManagerPreset,
-    setSaveRevisionModalPreset,
-    setSaveRevisionOpen,
-    setMeetingManagerPreset,
+    client, site, planId, hasNavigationEdits, isReadOnly, canManageMeetingScheduling,
+    push, t, setPendingMeetingManagerPreset, setSaveRevisionModalPreset, setSaveRevisionOpen, setMeetingManagerPreset,
     setMeetingManagerOpen,
     setPendingClientMeetingsPreset
   });
@@ -1677,45 +1436,18 @@ export const usePlanView = (planId: string) => {
   });
 
   const {
-    handleWallQuickMenu,
-    handleCorridorQuickMenu,
-    handleObjectContextMenu,
-    handleLinkContextMenu,
-    handleSafetyCardContextMenu,
-    handleRoomContextMenu,
-    handleCorridorContextMenu,
-    handleCorridorConnectionContextMenu,
-    handleCorridorDoorContextMenu,
-    handleRoomDoorContextMenu,
+    handleWallQuickMenu, handleCorridorQuickMenu, handleObjectContextMenu, handleLinkContextMenu, handleSafetyCardContextMenu, handleRoomContextMenu,
+    handleCorridorContextMenu, handleCorridorConnectionContextMenu, handleCorridorDoorContextMenu, handleRoomDoorContextMenu,
     handleScaleContextMenu
   } = usePlanContextMenuHandlers({
-    dismissSelectionHintToasts,
-    setContextMenu,
-    roomDoorDraft,
-    createRoomDoorFromDraft,
-    planScale,
-    isRackLinkId,
-    isReadOnlyRef,
-    selectedObjectIdsRef,
-    corridorDoorDraft,
-    setWallQuickMenu,
-    setWallTypeMenu,
+    dismissSelectionHintToasts, setContextMenu, roomDoorDraft, createRoomDoorFromDraft, planScale, isRackLinkId,
+    isReadOnlyRef, selectedObjectIdsRef, corridorDoorDraft, setWallQuickMenu, setWallTypeMenu,
     setCorridorQuickMenu
   });
 
   const { handleScaleDoubleClick, handleScaleMove, updateScaleStyle, openScaleEdit } = usePlanScaleHandlers({
-    plan,
-    isReadOnly,
-    planScale,
-    markTouched,
-    updateFloorPlan,
-    setContextMenu,
-    setScaleActionsOpen,
-    setScaleMode,
-    setScaleDraft,
-    setScaleDraftPointer,
-    setScaleModal,
-    setScaleMetersInput,
+    plan, isReadOnly, planScale, markTouched, updateFloorPlan, setContextMenu,
+    setScaleActionsOpen, setScaleMode, setScaleDraft, setScaleDraftPointer, setScaleModal, setScaleMetersInput,
     formatNumber
   });
 
@@ -1752,33 +1484,15 @@ export const usePlanView = (planId: string) => {
     push,
     renderPlan,
     siteFloorPlansLength: siteFloorPlans.length,
-    t,
-    hideAllLayers,
-    allItemsSelected,
-    nonAllLayerIds,
-    visibleLayerIds,
-    normalizeLayerSelection,
-    setEscapeRouteModal,
-    setContextMenu,
-    setHideAllLayers,
+    t, hideAllLayers, allItemsSelected, nonAllLayerIds, visibleLayerIds, normalizeLayerSelection,
+    setEscapeRouteModal, setContextMenu, setHideAllLayers,
     setVisibleLayerIds
   });
 
   const { applyView, handleSaveView, handleOverwriteView, goToDefaultView } = usePlanViewHandlers({
-    renderPlan,
-    plan,
-    isReadOnly,
-    zoom,
-    pan,
-    saveViewport,
-    addView,
-    updateView,
-    push,
-    t,
-    setAutoFitEnabled,
-    setZoom,
-    setPan,
-    setSelectedViewId,
+    renderPlan, plan, isReadOnly, zoom, pan, saveViewport,
+    addView, updateView, push, t, setAutoFitEnabled, setZoom,
+    setPan, setSelectedViewId,
     setViewsMenuOpen
   });
 
@@ -1787,27 +1501,10 @@ export const usePlanView = (planId: string) => {
 
 
   const { copySelection, requestPaste, pasteConfirm, confirmPaste, cancelPaste } = useClipboard({
-    t,
-    client,
-    planId,
-    planRef,
-    isReadOnlyRef,
-    inferDefaultLayerIds,
-    layerIdSet,
-    addObject,
-    updateObject,
-    ensureObjectLayerVisible,
-    getRoomIdAt,
-    saveCustomValues,
-    loadCustomValues,
-    markTouched,
-    push,
-    pushStack,
-    getTypeLabel,
-    setSelection,
-    setContextMenu,
-    lastInsertedRef,
-    triggerHighlight,
+    t, client, planId, planRef, isReadOnlyRef, inferDefaultLayerIds,
+    layerIdSet, addObject, updateObject, ensureObjectLayerVisible, getRoomIdAt, saveCustomValues,
+    loadCustomValues, markTouched, push, pushStack, getTypeLabel, setSelection,
+    setContextMenu, lastInsertedRef, triggerHighlight,
     getPastePoint
   });
 
@@ -1909,63 +1606,19 @@ export const usePlanView = (planId: string) => {
   );
 
   const { startScaleMode, cancelScaleMode, handleScalePoint, applyScale, clearScaleNow, requestClearScale, closeScaleModal } = usePlanScaleModeHandlers({
-    isReadOnly,
-    scaleMode,
-    scaleDraft,
-    plan,
-    planScale,
-    scaleMetersInput,
-    scaleModal,
-    push,
-    t,
-    markTouched,
-    updateFloorPlan,
-    updateRoom,
-    dismissScaleToast,
-    resetToolClickHistory,
-    resolveAxisLockedPoint,
-    computeRoomSurfaceSqm,
-    scaleToastIdRef,
-    setScaleMode,
-    setScaleDraft,
-    setScaleDraftPointer,
-    setScaleModal,
-    setScaleMetersInput,
-    setRoomDrawMode,
-    setMeasureMode,
-    setWallDrawMode,
-    setQuoteMode,
-    setQuotePoints,
-    setQuotePointer,
-    setPendingType,
-    setShowScaleLine,
+    isReadOnly, scaleMode, scaleDraft, plan, planScale, scaleMetersInput,
+    scaleModal, push, t, markTouched, updateFloorPlan, updateRoom,
+    dismissScaleToast, resetToolClickHistory, resolveAxisLockedPoint, computeRoomSurfaceSqm, scaleToastIdRef, setScaleMode,
+    setScaleDraft, setScaleDraftPointer, setScaleModal, setScaleMetersInput, setRoomDrawMode, setMeasureMode,
+    setWallDrawMode, setQuoteMode, setQuotePoints, setQuotePointer, setPendingType, setShowScaleLine,
     setClearScaleConfirmOpen
   });
 
   const { startWallDraw, finishWallDraw } = usePlanWallDrawToggles({
-    isReadOnly,
-    wallDrawMode,
-    wallDrawType,
-    wallTypeDefs,
-    lang,
-    push,
-    t,
-    dismissScaleToast,
-    resetToolClickHistory,
-    isWallType,
-    wallDraftPointsRef,
-    wallDraftSegmentIdsRef,
-    wallToastIdRef,
-    setWallDrawType,
-    setWallDrawMode,
-    setWallDraftPoints,
-    setWallDraftPointer,
-    setRoomDrawMode,
-    setScaleMode,
-    setMeasureMode,
-    setQuoteMode,
-    setQuotePoints,
-    setQuotePointer,
+    isReadOnly, wallDrawMode, wallDrawType, wallTypeDefs, lang, push,
+    t, dismissScaleToast, resetToolClickHistory, isWallType, wallDraftPointsRef, wallDraftSegmentIdsRef,
+    wallToastIdRef, setWallDrawType, setWallDrawMode, setWallDraftPoints, setWallDraftPointer, setRoomDrawMode,
+    setScaleMode, setMeasureMode, setQuoteMode, setQuotePoints, setQuotePointer,
     setPendingType
   });
 
@@ -1980,53 +1633,18 @@ export const usePlanView = (planId: string) => {
   });
 
   const { handleWallPoint, handleWallDraftContextMenu, handleWallSegmentDblClick } = usePlanWallPointHandlers({
-    addWallSegment,
-    finishWallDraw,
-    resolveWallPoint,
-    getTypeLabel,
-    isWallType,
-    markTouched,
-    renderPlan,
-    wallDrawMode,
-    wallDrawType,
-    wallTypeDefs,
-    zoom,
-    lang,
-    metersPerPixel,
-    push,
-    t,
-    formatNumber,
-    wallDraftPointsRef,
-    wallDraftSegmentIdsRef,
-    lastInsertedRef,
-    setWallDraftPoints,
-    setWallDraftPointer,
+    addWallSegment, finishWallDraw, resolveWallPoint, getTypeLabel, isWallType, markTouched,
+    renderPlan, wallDrawMode, wallDrawType, wallTypeDefs, zoom, lang,
+    metersPerPixel, push, t, formatNumber, wallDraftPointsRef, wallDraftSegmentIdsRef,
+    lastInsertedRef, setWallDraftPoints, setWallDraftPointer,
     setContextMenu
   });
 
   const { startMeasure, stopMeasure, startQuote, stopQuote } = usePlanMeasureQuoteToggles({
-    metersPerPixel,
-    isReadOnly,
-    measureMode,
-    quoteMode,
-    push,
-    t,
-    showMeasureToast,
-    dismissMeasureToast,
-    measurePointsRef,
-    measureClosedRef,
-    measureFinishedRef,
-    setMeasureMode,
-    setMeasurePoints,
-    setMeasurePointer,
-    setMeasureClosed,
-    setMeasureFinished,
-    setQuoteMode,
-    setQuotePoints,
-    setQuotePointer,
-    setRoomDrawMode,
-    setScaleMode,
-    setWallDrawMode,
+    metersPerPixel, isReadOnly, measureMode, quoteMode, push, t,
+    showMeasureToast, dismissMeasureToast, measurePointsRef, measureClosedRef, measureFinishedRef, setMeasureMode,
+    setMeasurePoints, setMeasurePointer, setMeasureClosed, setMeasureFinished, setQuoteMode, setQuotePoints,
+    setQuotePointer, setRoomDrawMode, setScaleMode, setWallDrawMode,
     setPendingType
   });
 
@@ -2045,212 +1663,70 @@ export const usePlanView = (planId: string) => {
 
 
   const { handleToolPoint, handleToolMove, handleToolDoubleClick } = usePlanToolPointHandlers({
-    measureMode,
-    quoteMode,
-    scaleMode,
-    wallDrawMode,
-    isReadOnly,
-    zoom,
-    quotePoints,
-    scaleDraft,
-    resolveAxisLockedPoint,
-    resolveWallPoint,
-    showMeasureToast,
-    handleScalePoint,
-    handleWallPoint,
-    handleQuotePoint,
-    measurePointsRef,
-    measureClosedRef,
-    measureFinishedRef,
-    wallDraftPointsRef,
-    setMeasurePoints,
-    setMeasurePointer,
-    setMeasureClosed,
-    setMeasureFinished,
-    setScaleDraftPointer,
-    setWallDraftPointer,
+    measureMode, quoteMode, scaleMode, wallDrawMode, isReadOnly, zoom,
+    quotePoints, scaleDraft, resolveAxisLockedPoint, resolveWallPoint, showMeasureToast, handleScalePoint,
+    handleWallPoint, handleQuotePoint, measurePointsRef, measureClosedRef, measureFinishedRef, wallDraftPointsRef,
+    setMeasurePoints, setMeasurePointer, setMeasureClosed, setMeasureFinished, setScaleDraftPointer, setWallDraftPointer,
     setQuotePointer
   });
 
 
   const { applyWallTypeToIds, applyWallType, setRoomWallTypeAt, applyRoomWallTypeAll, createRoomWalls } = usePlanWallTypeHandlers({
-    getTypeLabel,
-    isReadOnly,
-    isWallType,
-    markTouched,
-    push,
-    t,
-    updateObject,
-    wallTypeModal,
-    wallTypeDraft,
-    setWallTypeModal,
-    setRoomWallTypeSelections,
-    roomWallTypeModal,
-    roomWallTypeSelections,
-    addObject,
-    defaultWallTypeId,
-    ensureObjectLayerVisible,
-    inferDefaultLayerIds,
-    layerIdSet,
+    getTypeLabel, isReadOnly, isWallType, markTouched, push, t,
+    updateObject, wallTypeModal, wallTypeDraft, setWallTypeModal, setRoomWallTypeSelections, roomWallTypeModal,
+    roomWallTypeSelections, addObject, defaultWallTypeId, ensureObjectLayerVisible, inferDefaultLayerIds, layerIdSet,
     renderPlan,
     setRoomWallTypeModal
   });
 
   const {
-    runDeleteShortcut,
-    runTextShortcut,
-    runConfirmDeleteShortcut,
-    runScaleShortcut,
-    runArrowShortcut,
-    runCtrlArrowQuoteShortcut,
-    runRotateShortcut,
-    runSaveShortcut,
-    runUndoRedoShortcut,
-    runSelectAllShortcut,
-    runEscapeSelectionShortcut,
-    runBlockingUiShortcut,
+    runDeleteShortcut, runTextShortcut, runConfirmDeleteShortcut, runScaleShortcut, runArrowShortcut, runCtrlArrowQuoteShortcut,
+    runRotateShortcut, runSaveShortcut, runUndoRedoShortcut, runSelectAllShortcut, runEscapeSelectionShortcut, runBlockingUiShortcut,
     runDraftCancelShortcut,
     runDrawingShortcut
   } = usePlanShortcuts({
-      addRevision,
-      cancelScaleMode,
-      clearSelection,
-      convertMeasurementToQuotes,
-      deleteLink,
-      deleteObject,
-      entrySnapshotRef,
-      finishWallDraw,
-      getLatestRevisionCached,
-      getPlanSnapshot,
-      getPlanUnsavedChanges,
-      getQuoteOrientation,
-      getRevisionVersion,
-      isCameraType,
-      isDeskType,
-      isRackLinkId,
-      lastInsertedRef,
-      markTouched,
-      measureClosedRef,
-      measureFinishedRef,
-      measurePointsRef,
-      moveObject,
-      notifyNonPeopleRoomBlocked,
-      performRedo,
-      performUndo,
-      planRef,
-      postAuditEvent,
-      push,
-      resetTouched,
-      setConfirmDelete,
-      setConfirmDeleteCorridorId,
-      setConfirmDeleteRoomId,
-      setConfirmDeleteRoomIds,
-      setContextMenu,
-      setCorridorConnectionModal,
-      setCorridorDoorDraft,
-      setCorridorDoorLinkModal,
-      setCorridorDoorModal,
-      setCorridorDrawMode,
-      setCorridorModal,
-      setLastObjectScale,
-      setLastQuoteScale,
-      setLinkFromId,
-      setMeasureClosed,
-      setMeasureFinished,
-      setMeasurePointer,
-      setMeasurePoints,
-      setPendingRoomDeletes,
-      setQuotePointer,
-      setQuotePoints,
-      setRoomDoorDraft,
-      setRoomDrawMode,
-      setSaveRevisionModalPreset,
-      setSaveRevisionOpen,
-      setSelectedCorridorDoor,
-      setSelectedCorridorId,
-      setSelectedLinkId,
-      setSelectedRoomDoorId,
-      setSelectedRoomId,
-      setSelectedRoomIds,
-      setSelection,
-      setUndoConfirm,
-      setWallDraftPointer,
-      setWallDraftPoints,
-      showMeasureToast,
-      startMeasure,
-      startQuote,
-      startWallDraw,
-      stopMeasure,
-      stopQuote,
-      t,
-      updateFloorPlan,
-      updateObject,
-      updateQuoteLabelPos,
-      updateRoom,
-      wallDraftPointsRef,
+      addRevision, cancelScaleMode, clearSelection, convertMeasurementToQuotes, deleteLink, deleteObject,
+      entrySnapshotRef, finishWallDraw, getLatestRevisionCached, getPlanSnapshot, getPlanUnsavedChanges, getQuoteOrientation,
+      getRevisionVersion, isCameraType, isDeskType, isRackLinkId, lastInsertedRef, markTouched,
+      measureClosedRef, measureFinishedRef, measurePointsRef, moveObject, notifyNonPeopleRoomBlocked, performRedo,
+      performUndo, planRef, postAuditEvent, push, resetTouched, setConfirmDelete,
+      setConfirmDeleteCorridorId, setConfirmDeleteRoomId, setConfirmDeleteRoomIds, setContextMenu, setCorridorConnectionModal, setCorridorDoorDraft,
+      setCorridorDoorLinkModal, setCorridorDoorModal, setCorridorDrawMode, setCorridorModal, setLastObjectScale, setLastQuoteScale,
+      setLinkFromId, setMeasureClosed, setMeasureFinished, setMeasurePointer, setMeasurePoints, setPendingRoomDeletes,
+      setQuotePointer, setQuotePoints, setRoomDoorDraft, setRoomDrawMode, setSaveRevisionModalPreset, setSaveRevisionOpen,
+      setSelectedCorridorDoor, setSelectedCorridorId, setSelectedLinkId, setSelectedRoomDoorId, setSelectedRoomId, setSelectedRoomIds,
+      setSelection, setUndoConfirm, setWallDraftPointer, setWallDraftPoints, showMeasureToast, startMeasure,
+      startQuote, startWallDraw, stopMeasure, stopQuote, t, updateFloorPlan,
+      updateObject, updateQuoteLabelPos, updateRoom, wallDraftPointsRef,
       wallDraftSegmentIdsRef
   });
 
 
   const {
-    objectsByType,
-    counts,
-    isUserObject,
-    getUserObjectLabel,
-    collectUserDepartments,
-    rooms,
-    corridors,
-    corridorById,
-    roomDoors,
+    objectsByType, counts, isUserObject, getUserObjectLabel, collectUserDepartments, rooms,
+    corridors, corridorById, roomDoors,
   } = usePlanCollections({ renderPlan, objectTypeDefs, getTypeLabel, t });
 
   const canManageLayers = !!user?.isAdmin || isSuperAdmin;
 
   const { handleSelectType, handleDeleteType, handleOpenTypeLayer, handleCreateTypeLayer } = usePlanTypeLayerHandlers({
-    objectsByType,
-    isReadOnly,
-    canManageLayers,
-    client,
-    getTypeLayerIds,
-    inferDefaultLayerIds,
-    layerIdSet,
-    markTouched,
-    planLayers,
-    push,
-    setPlanDirty,
-    t,
-    typeLayerColor,
-    typeLayerModal,
-    typeLayerName,
-    updateClientLayers,
-    setSelection,
-    setCountsOpen,
-    setTypeMenu,
-    setConfirmDelete,
+    objectsByType, isReadOnly, canManageLayers, client, getTypeLayerIds, inferDefaultLayerIds,
+    layerIdSet, markTouched, planLayers, push, setPlanDirty, t,
+    typeLayerColor, typeLayerModal, typeLayerName, updateClientLayers, setSelection, setCountsOpen,
+    setTypeMenu, setConfirmDelete,
     setTypeLayerModal
   });
 
 
   usePlanHelpToastEffects({
-    t,
-    isReadOnly,
-    selectedCorridorId,
-    corridorById,
-    corridorDrawMode,
-    roomDrawMode,
+    t, isReadOnly, selectedCorridorId, corridorById, corridorDrawMode, roomDrawMode,
     selectedRoomId
   });
 
   const paletteFavorites = useAuthStore((s) => (s.user as any)?.paletteFavorites) as string[] | undefined;
   const {
-    paletteOrder,
-    paletteHasCustom,
-    paletteIsEmpty,
-    paletteHasMore,
-    deskPaletteDefs,
-    deskPaletteOrder,
-    securityPaletteDefs,
-    otherPaletteDefs,
+    paletteOrder, paletteHasCustom, paletteIsEmpty, paletteHasMore, deskPaletteDefs, deskPaletteOrder,
+    securityPaletteDefs, otherPaletteDefs,
   } = usePlanPaletteDefs({ paletteFavorites, objectTypeDefs, isWallType, isDoorType });
   const [paletteSection, setPaletteSection] = useState<'desks' | 'objects' | 'security'>('objects');
   const [annotationsOpen, setAnnotationsOpen] = useState(true);
@@ -2260,12 +1736,7 @@ export const usePlanView = (planId: string) => {
   const [securityOpen, setSecurityOpen] = useState(false);
 
   usePlanPaletteSectionEffects({
-    paletteSection,
-    setPaletteSection,
-    deskPaletteDefs,
-    otherPaletteDefs,
-    securityPaletteDefs,
-    setDesksOpen,
+    paletteSection, setPaletteSection, deskPaletteDefs, otherPaletteDefs, securityPaletteDefs, setDesksOpen,
     setObjectsOpen,
     setSecurityOpen
   });
@@ -2288,26 +1759,12 @@ export const usePlanView = (planId: string) => {
   });
 
   const {
-    capacityConfirm,
-    setCapacityConfirm,
-    capacityConfirmRef,
-    capacityDashboardOpen,
-    setCapacityDashboardOpen,
-    capacityDashboardPreset,
+    capacityConfirm, setCapacityConfirm, capacityConfirmRef, capacityDashboardOpen, setCapacityDashboardOpen, capacityDashboardPreset,
     setCapacityDashboardPreset,
     shouldConfirmCapacity
   } = usePlanCapacity({
-    t,
-    push,
-    planId,
-    plan,
-    location,
-    navigate,
-    rooms,
-    roomStatsById,
-    roomCapacityStateByPlan,
-    setRoomCapacityState,
-    getRoomIdAt,
+    t, push, planId, plan, location, navigate,
+    rooms, roomStatsById, roomCapacityStateByPlan, setRoomCapacityState, getRoomIdAt,
     notifyNonPeopleRoomBlocked
   });
 
@@ -2332,27 +1789,10 @@ export const usePlanView = (planId: string) => {
   }, [objectListQuery, renderPlan?.objects]);
 
   usePlanPopoverEffects({
-    countsOpen,
-    setObjectListQuery,
-    setExpandedType,
-    setTypeMenu,
-    typeMenu,
-    typeMenuRef,
-    typeLayerModal,
-    setTypeLayerName,
-    setTypeLayerColor,
-    typeLayerNameRef,
-    presenceOpen,
-    presenceRef,
-    setPresenceOpen,
-    layersPopoverOpen,
-    layersPopoverRef,
-    setLayersPopoverOpen,
-    layersQuickMenu,
-    layersQuickMenuRef,
-    setLayersQuickMenu,
-    roomsOpen,
-    setExpandedRoomId,
+    countsOpen, setObjectListQuery, setExpandedType, setTypeMenu, typeMenu, typeMenuRef,
+    typeLayerModal, setTypeLayerName, setTypeLayerColor, typeLayerNameRef, presenceOpen, presenceRef,
+    setPresenceOpen, layersPopoverOpen, layersPopoverRef, setLayersPopoverOpen, layersQuickMenu, layersQuickMenuRef,
+    setLayersQuickMenu, roomsOpen, setExpandedRoomId,
     setNewRoomMenuOpen
   });
 
@@ -2371,22 +1811,9 @@ export const usePlanView = (planId: string) => {
   });
 
   const { openEditCorridor, handleCreateCorridorFromPoly, saveCorridorModal, updateCorridorLabelScale } = usePlanCorridorNameHandlers({
-    corridorById,
-    isReadOnly,
-    plan,
-    t,
-    setCorridorDrawMode,
-    corridorModal,
-    corridorNameInput,
-    corridorNameEnInput,
-    corridorShowNameInput,
-    markTouched,
-    push,
-    updateFloorPlan,
-    setSelectedCorridorId,
-    setCorridorModal,
-    setCorridorNameInput,
-    setCorridorNameEnInput,
+    corridorById, isReadOnly, plan, t, setCorridorDrawMode, corridorModal,
+    corridorNameInput, corridorNameEnInput, corridorShowNameInput, markTouched, push, updateFloorPlan,
+    setSelectedCorridorId, setCorridorModal, setCorridorNameInput, setCorridorNameEnInput,
     setCorridorShowNameInput
   });
 
@@ -2397,28 +1824,10 @@ export const usePlanView = (planId: string) => {
     saveCorridorDoorModal,
     saveCorridorDoorLinkModal
   } = usePlanDoorModalHandlers({
-    corridorById,
-    defaultDoorCatalogId,
-    doorTypeIdSet,
-    objectTypeById,
-    setCorridorDoorModal,
-    roomDoors,
-    getCorridorEdgePoint,
-    normalizeLayerSelection,
-    planId,
-    renderPlan,
-    setHideAllLayers,
-    setVisibleLayerIds,
-    visibleLayerIds,
-    setCorridorDoorLinkModal,
-    setCorridorDoorLinkQuery,
-    corridorDoorModal,
-    corridorDoorLinkModal,
-    isReadOnly,
-    markTouched,
-    plan,
-    push,
-    t,
+    corridorById, defaultDoorCatalogId, doorTypeIdSet, objectTypeById, setCorridorDoorModal, roomDoors,
+    getCorridorEdgePoint, normalizeLayerSelection, planId, renderPlan, setHideAllLayers, setVisibleLayerIds,
+    visibleLayerIds, setCorridorDoorLinkModal, setCorridorDoorLinkQuery, corridorDoorModal, corridorDoorLinkModal, isReadOnly,
+    markTouched, plan, push, t,
     updateFloorPlan
   });
 
@@ -2433,21 +1842,9 @@ export const usePlanView = (planId: string) => {
     openEditCorridorConnectionModal,
     saveCorridorConnectionModal
   } = usePlanCorridorConnectionHandlers({
-    isReadOnly,
-    push,
-    t,
-    markTouched,
-    plan,
-    updateFloorPlan,
-    corridorById,
-    corridorConnectionModal,
-    getClosestCorridorEdge,
-    getCorridorPolygon,
-    getCorridorEdgePoint,
-    setCorridorDoorDraft,
-    setCorridorQuickMenu,
-    setSelectedCorridorDoor,
-    setSelectedCorridorId,
+    isReadOnly, push, t, markTouched, plan, updateFloorPlan,
+    corridorById, corridorConnectionModal, getClosestCorridorEdge, getCorridorPolygon, getCorridorEdgePoint, setCorridorDoorDraft,
+    setCorridorQuickMenu, setSelectedCorridorDoor, setSelectedCorridorId,
     setCorridorConnectionModal
   });
 
@@ -2486,17 +1883,8 @@ export const usePlanView = (planId: string) => {
   });
 
   const { openPhotoViewer, openImageViewer, focusPhotoFromGallery } = usePlanMediaViewerHandlers({
-    renderPlan,
-    renderPlanObjectById,
-    push,
-    t,
-    setPhotoViewer,
-    returnToBulkEditRef,
-    triggerHighlight,
-    setSelection,
-    setSelectedObject,
-    setSelectedRoomId,
-    setSelectedRoomIds,
+    renderPlan, renderPlanObjectById, push, t, setPhotoViewer, returnToBulkEditRef,
+    triggerHighlight, setSelection, setSelectedObject, setSelectedRoomId, setSelectedRoomIds,
     setSelectedLinkId
   });
 
@@ -2551,32 +1939,11 @@ export const usePlanView = (planId: string) => {
     value: { planId: string; search: string; result: CrossPlanSearchResult }[];
   }>({ key: '', value: [] });
   const { handleSearchEnter } = usePlanSearchHandlers({
-    client,
-    dataVersion,
-    clientSearchIndexRef,
-    renderPlan,
-    plan,
-    isDeskType,
-    searchDebugEnabled,
-    renderPlanObjectById,
-    basePlanObjectById,
-    renderPlanRoomById,
-    basePlanRoomById,
-    push,
-    t,
-    clearSelection,
-    promptRevealForObject,
-    triggerHighlight,
-    setSearchResultsOpen,
-    setSearchResultsTerm,
-    setSearchResultsObjects,
-    setSearchResultsRooms,
-    setCrossPlanSearchOpen,
-    setCrossPlanSearchTerm,
-    setSelectedRoomId,
-    setSelectedRoomIds,
-    setHighlightRoom,
-    setCrossPlanResults,
+    client, dataVersion, clientSearchIndexRef, renderPlan, plan, isDeskType,
+    searchDebugEnabled, renderPlanObjectById, basePlanObjectById, renderPlanRoomById, basePlanRoomById, push,
+    t, clearSelection, promptRevealForObject, triggerHighlight, setSearchResultsOpen, setSearchResultsTerm,
+    setSearchResultsObjects, setSearchResultsRooms, setCrossPlanSearchOpen, setCrossPlanSearchTerm, setSelectedRoomId, setSelectedRoomIds,
+    setHighlightRoom, setCrossPlanResults,
     setSelectedObject
   });
 
@@ -2587,12 +1954,7 @@ export const usePlanView = (planId: string) => {
   });
 
   const {
-    assignedCounts,
-    canOpenBusinessPartnersDirectory,
-    orderedViews,
-    showPrintArea,
-    corridorConnectionTargetPlans,
-    linksInSelection,
+    assignedCounts, canOpenBusinessPartnersDirectory, orderedViews, showPrintArea, corridorConnectionTargetPlans, linksInSelection,
     getObjectNameById,
   } = usePlanMiscDerived({
     client, isSuperAdmin, user, basePlan, showPrintAreaByPlan, site, planId, selectedObjectIds,
