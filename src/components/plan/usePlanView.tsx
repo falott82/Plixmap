@@ -136,7 +136,7 @@ import { perfMetrics } from '../../utils/perfMetrics';
 import { getWallTypeColor } from '../../utils/wallColors';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 
-import { getRoomPolygon, isRackLinkId, getSharedRoomSides } from './planViewUtils';
+import { getRoomPolygon, isRackLinkId, getSharedRoomSides, resolveAxisLockedPoint } from './planViewUtils';
 import { getLatestRevision, getRevisionVersion } from './planRevisions';
 import { usePlanShortcuts } from './usePlanShortcuts';
 import { usePlanSelectionState } from './usePlanSelectionState';
@@ -1418,20 +1418,6 @@ export const usePlanView = (planId: string) => {
     }
     return updates;
   };
-
-  const resolveAxisLockedPoint = useCallback(
-    (point: { x: number; y: number }, anchor: { x: number; y: number } | null, options?: { shiftKey?: boolean }) => {
-      if (!anchor) return point;
-      if (options?.shiftKey) return point;
-      const dx = point.x - anchor.x;
-      const dy = point.y - anchor.y;
-      if (Math.abs(dx) >= Math.abs(dy)) {
-        return { x: point.x, y: anchor.y };
-      }
-      return { x: anchor.x, y: point.y };
-    },
-    []
-  );
 
   const { startScaleMode, cancelScaleMode, handleScalePoint, applyScale, clearScaleNow, requestClearScale, closeScaleModal } = usePlanScaleModeHandlers({
     isReadOnly, scaleMode, scaleDraft, plan, planScale, scaleMetersInput,

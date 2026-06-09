@@ -329,3 +329,20 @@ export const normalizeRoomConnectionDoorInput = (door: any): RoomConnectionDoor 
     verificationHistory: normalizeDoorVerificationHistory(door?.verificationHistory)
   };
 };
+
+// Axis-lock a point to its anchor (horizontal/vertical) unless Shift is held. Pure; extracted
+// from usePlanView (used by the scale/quote/tool point handlers).
+export const resolveAxisLockedPoint = (
+  point: { x: number; y: number },
+  anchor: { x: number; y: number } | null,
+  options?: { shiftKey?: boolean }
+): { x: number; y: number } => {
+  if (!anchor) return point;
+  if (options?.shiftKey) return point;
+  const dx = point.x - anchor.x;
+  const dy = point.y - anchor.y;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return { x: point.x, y: anchor.y };
+  }
+  return { x: anchor.x, y: point.y };
+};
