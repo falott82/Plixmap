@@ -20,6 +20,7 @@ import { CanvasToolbar } from './canvas/CanvasToolbar';
 import { useCanvasPrintAreaDraft } from './canvas/useCanvasPrintAreaDraft';
 import { useCanvasTextDraft } from './canvas/useCanvasTextDraft';
 import { useCanvasCorridorPolyDraft } from './canvas/useCanvasCorridorPolyDraft';
+import { useCanvasRoomPolyDraft } from './canvas/useCanvasRoomPolyDraft';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
@@ -441,10 +442,6 @@ const CanvasStageImpl = (
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [roomRectSnapHint, setRoomRectSnapHint] = useState<{ x: number; y: number } | null>(null);
   const draftOrigin = useRef<{ x: number; y: number } | null>(null);
-  const [draftPolyPoints, setDraftPolyPoints] = useState<{ x: number; y: number }[]>([]);
-  const [draftPolyPointer, setDraftPolyPointer] = useState<{ x: number; y: number } | null>(null);
-  const draftPolyRaf = useRef<number | null>(null);
-  const draftPolyPointsRef = useRef<{ x: number; y: number }[]>([]);
   const [corridorDoorHover, setCorridorDoorHover] = useState<{ edgeIndex: number; t: number; x: number; y: number } | null>(null);
   const corridorDoorDraftActive = !!corridorDoorDraft?.corridorId;
   const panRaf = useRef<number | null>(null);
@@ -920,6 +917,9 @@ const CanvasStageImpl = (
     };
   }, [highlightRoomId, highlightRoomUntil, perfEnabled]);
 
+  const { draftPolyPoints, previewDraftPolyLine, resetDraftPoly, addDraftPolyPoint, updateDraftPolyPointer } =
+    useCanvasRoomPolyDraft({ roomDrawMode, readOnly, perfEnabled, suspendKeyboardShortcuts, onCreateRoom });
+
   useEffect(() => {
     if (roomDrawMode) return;
     draftOrigin.current = null;
@@ -928,17 +928,8 @@ const CanvasStageImpl = (
     if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
     draftRectRaf.current = null;
     pendingDraftRectRef.current = null;
-    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-    setDraftPolyPoints([]);
-    draftPolyPointsRef.current = [];
-    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-    setDraftPolyPointer(null);
-    if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
-    draftPolyRaf.current = null;
-  }, [perfEnabled, roomDrawMode]);
-  useEffect(() => {
-    draftPolyPointsRef.current = draftPolyPoints;
-  }, [draftPolyPoints]);
+    resetDraftPoly();
+  }, [perfEnabled, roomDrawMode, resetDraftPoly]);
 
   useEffect(() => {
     if (!transformerRef.current) return;
@@ -1028,7 +1019,6 @@ const CanvasStageImpl = (
       if (panRaf.current) cancelAnimationFrame(panRaf.current);
       if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
       if (draftRectRaf.current) cancelAnimationFrame(draftRectRaf.current);
-      if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
       if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
       if (textTransformRaf.current) cancelAnimationFrame(textTransformRaf.current);
       textTransformRaf.current = null;
@@ -1711,18 +1701,6 @@ const CanvasStageImpl = (
     return true;
   };
 
-  const constrainRoomPolyPoint = useCallback(
-    (world: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
-      const last = draftPolyPointsRef.current[draftPolyPointsRef.current.length - 1];
-      if (!last || options?.shiftKey) return world;
-      const dx = world.x - last.x;
-      const dy = world.y - last.y;
-      if (Math.abs(dx) >= Math.abs(dy)) return { x: world.x, y: last.y };
-      return { x: last.x, y: world.y };
-    },
-    []
-  );
-
   const backPlate = useMemo(() => {
     return (
       <Group>
@@ -1732,51 +1710,7 @@ const CanvasStageImpl = (
     );
   }, [bgImage, baseWidth, baseHeight]);
 
-  const previewDraftPolyLine = useMemo(() => {
-    if (roomDrawMode !== 'poly') return null;
-    if (!draftPolyPoints.length) return null;
-    const pts = [...draftPolyPoints];
-    if (draftPolyPointer) pts.push(draftPolyPointer);
-    return pts.flatMap((p) => [p.x, p.y]);
-  }, [draftPolyPointer, draftPolyPoints, roomDrawMode]);
 
-  const finalizeDraftPoly = useCallback(() => {
-    if (roomDrawMode !== 'poly' || readOnly) return false;
-    const points = draftPolyPointsRef.current;
-    if (points.length < 3) return true;
-    const nextPoints = points.slice();
-    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-    setDraftPolyPoints([]);
-    draftPolyPointsRef.current = [];
-    if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-    setDraftPolyPointer(null);
-    onCreateRoom?.({ kind: 'poly', points: nextPoints });
-    return true;
-  }, [onCreateRoom, perfEnabled, readOnly, roomDrawMode]);
-
-  useEffect(() => {
-    if (roomDrawMode !== 'poly') return;
-    const handler = (e: KeyboardEvent) => {
-      if (suspendKeyboardShortcuts) return;
-      if ((useUIStore.getState() as any)?.clientChatOpen) return;
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        finalizeDraftPoly();
-      }
-	      if (e.key === 'Backspace') {
-        if (!draftPolyPointsRef.current.length) return;
-        e.preventDefault();
-        if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-        setDraftPolyPoints((prev) => {
-          const next = prev.slice(0, -1);
-          draftPolyPointsRef.current = next;
-          return next;
-        });
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [finalizeDraftPoly, perfEnabled, roomDrawMode, suspendKeyboardShortcuts]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2230,24 +2164,7 @@ const CanvasStageImpl = (
             const pos = stage?.getPointerPosition();
             if (!pos) return;
             const world = pointerToWorld(pos.x, pos.y);
-            const constrained = constrainRoomPolyPoint(world, { shiftKey: !!e.evt.shiftKey });
-            const closeThreshold = 12 / Math.max(0.2, viewportRef.current.zoom || 1);
-            const currentPoints = draftPolyPointsRef.current;
-            if (currentPoints.length >= 3) {
-              const first = currentPoints[0];
-              const dx = constrained.x - first.x;
-              const dy = constrained.y - first.y;
-              if (Math.hypot(dx, dy) <= closeThreshold) {
-                finalizeDraftPoly();
-                return;
-              }
-            }
-            if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-            setDraftPolyPoints((prev) => {
-              const next = [...prev, { x: constrained.x, y: constrained.y }];
-              draftPolyPointsRef.current = next;
-              return next;
-            });
+            addDraftPolyPoint(world, viewportRef.current.zoom, !!e.evt.shiftKey);
             return;
           }
           if (corridorDrawMode === 'poly' && !readOnly && e.evt.button === 0) {
@@ -2378,15 +2295,7 @@ const CanvasStageImpl = (
           if (roomDrawMode === 'poly' && !readOnly) {
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
-            if (pos) {
-              const world = pointerToWorld(pos.x, pos.y);
-              const constrained = constrainRoomPolyPoint(world, { shiftKey: !!e.evt.shiftKey });
-              if (draftPolyRaf.current) cancelAnimationFrame(draftPolyRaf.current);
-              draftPolyRaf.current = requestAnimationFrame(() => {
-                if (perfEnabled) perfMetrics.draftPolyUpdates += 1;
-                setDraftPolyPointer({ x: constrained.x, y: constrained.y });
-              });
-            }
+            if (pos) updateDraftPolyPointer(pointerToWorld(pos.x, pos.y), !!e.evt.shiftKey);
             return;
           }
           movePan(e);
