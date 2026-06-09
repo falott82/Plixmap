@@ -67,8 +67,7 @@ import {
   computeGetPastePoint
 } from './planViewViewport';
 import {
-  runUpdateLockedPlans,
-  runApplyRoomLayoutExportToSelection
+  runUpdateLockedPlans
 } from './planViewMiscCallbacks';
 
 import { CanvasStageHandle } from './CanvasStage';
@@ -84,7 +83,6 @@ import type { UnlockRequestLock } from './UnlockRequestComposeModal';
 
 import { isDeskType } from './deskTypes';
 
-import type { RoomLayoutExportModalSortKey } from './RoomLayoutExportModal';
 import type { CrossPlanSearchResult } from './CrossPlanSearchModal';
 import { useRoomMeetingsTimeline, type MyMeetingsModalState } from './useRoomMeetingsTimeline';
 import { usePlanSafetyCard } from './usePlanSafetyCard';
@@ -110,6 +108,7 @@ import { usePlanWallToolHandlers } from './usePlanWallToolHandlers';
 import { usePlanQuoteToolHandlers } from './usePlanQuoteToolHandlers';
 import { usePlanPresentation } from './usePlanPresentation';
 import { usePlanSaveRevisionHandlers } from './usePlanSaveRevisionHandlers';
+import { usePlanRoomLayoutExportHandlers } from './usePlanRoomLayoutExportHandlers';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -2335,75 +2334,18 @@ export const usePlanView = (planId: string) => {
     renderPlan, renderPlanRoomById, roomMeasuresModal, getRoomPolygon, allClients, roomLayoutExportModal
   });
 
-  const applyRoomLayoutExportToSelection = useCallback(() => {
-    runApplyRoomLayoutExportToSelection({
-      roomLayoutExportModal,
-      roomLayoutExportSource,
-      roomLayoutExportRows,
-      push,
-      t,
-      updateRoom,
-      planId,
-      markTouched,
-      setPlanDirty,
-      setRoomLayoutExportModal
-    });
-  }, [markTouched, planId, push, roomLayoutExportModal, roomLayoutExportRows, roomLayoutExportSource, setPlanDirty, t, updateRoom]);
-
-  const closeRoomLayoutExportModal = useCallback(() => {
-    setRoomLayoutExportModal(null);
-  }, []);
-
-  const selectAllRoomLayoutExportRows = useCallback(() => {
-    setRoomLayoutExportModal((prev) =>
-      !prev
-        ? prev
-        : {
-            ...prev,
-            selectedKeys: roomLayoutExportRows.filter((row) => !row.isSource).map((row) => row.key)
-          }
-    );
-  }, [roomLayoutExportRows]);
-
-  const clearRoomLayoutExportSelection = useCallback(() => {
-    setRoomLayoutExportModal((prev) => (prev ? { ...prev, selectedKeys: [] } : prev));
-  }, []);
-
-  const toggleAllRoomLayoutExportRows = useCallback(
-    (checked: boolean) => {
-      setRoomLayoutExportModal((prev) =>
-        !prev
-          ? prev
-          : {
-              ...prev,
-              selectedKeys: checked ? roomLayoutExportRows.filter((row) => !row.isSource).map((row) => row.key) : []
-            }
-      );
-    },
-    [roomLayoutExportRows]
-  );
-
-  const toggleRoomLayoutExportRow = useCallback((key: string, checked: boolean) => {
-    setRoomLayoutExportModal((prev) => {
-      if (!prev) return prev;
-      const selected = new Set(prev.selectedKeys || []);
-      if (checked) selected.add(key);
-      else selected.delete(key);
-      return { ...prev, selectedKeys: Array.from(selected) };
-    });
-  }, []);
-
-  const sortRoomLayoutExportRows = useCallback((key: RoomLayoutExportModalSortKey) => {
-    setRoomLayoutExportModal((prev) =>
-      !prev
-        ? prev
-        : {
-            ...prev,
-            sortKey: key,
-            sortDir: prev.sortKey === key && prev.sortDir === 'asc' ? 'desc' : 'asc'
-          }
-    );
-  }, []);
+  const {
+    applyRoomLayoutExportToSelection,
+    closeRoomLayoutExportModal,
+    selectAllRoomLayoutExportRows,
+    clearRoomLayoutExportSelection,
+    toggleAllRoomLayoutExportRows,
+    toggleRoomLayoutExportRow,
+    sortRoomLayoutExportRows,
+  } = usePlanRoomLayoutExportHandlers({
+    roomLayoutExportModal, roomLayoutExportSource, roomLayoutExportRows, push, t, updateRoom, planId,
+    markTouched, setPlanDirty, setRoomLayoutExportModal
+  });
 
   const { roomModalMetrics, roomModalPreview, roomHasWalls, roomWallPreview } = usePlanRoomModalDerived({
     computePolygonArea, computePolylineLength, formatCornerLabel, formatNumber, lang, metersPerPixel,
