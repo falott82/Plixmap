@@ -20,15 +20,14 @@ import {
 } from './planViewCorridorGeometry';
 import {
   computeFormatPresenceDate, computeFormatPresenceLock, computeSubmenuStyle, computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates,
-  runApplyHistorySnapshot,
   runUnlockRequestEffect
 } from './planViewComputeBits';
 import {
-  computeMyMeetingsFiltered, runToggleRevisionImmutable, computeGetPlanUnsavedChanges,
+  computeMyMeetingsFiltered, runToggleRevisionImmutable,
   runPerformPendingPostSaveAction
 } from './planViewComputeBits2';
 import {
-  runCorridorShortcutEffect, runHistoryTrackEffect, runForceUnlockEventEffect, runSearchExportShortcutEffect, runResetToolsOnPlanChangeEffect,
+  runCorridorShortcutEffect, runForceUnlockEventEffect, runSearchExportShortcutEffect, runResetToolsOnPlanChangeEffect,
   runLayerVisibilitySyncEffect
 } from './planViewEffects';
 import {
@@ -90,6 +89,7 @@ import { usePlanStageSelectHandler } from './usePlanStageSelectHandler';
 import { usePlanMyMeetingsModal } from './usePlanMyMeetingsModal';
 import { usePlanObjectMiscHandlers } from './usePlanObjectMiscHandlers';
 import { usePlanPointerHelpers } from './usePlanPointerHelpers';
+import { usePlanHistory } from './usePlanHistory';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState, RoomDepartmentConfirmState, RackPortsLinkState, EscapeRouteModalState, LayerRevealPromptState, MeetingManagerPresetState,
@@ -137,9 +137,7 @@ import { getWallTypeColor } from '../../utils/wallColors';
 import { useMeetingRoomKioskInfo } from '../meetings/useMeetingRoomKioskInfo';
 
 import { getRoomPolygon, isRackLinkId, getSharedRoomSides } from './planViewUtils';
-import { samePlanSnapshot as samePlanSnapshotUtil, type PlanSnapshotComparable } from './planSnapshotCompare';
-import { toPlanHistorySnapshot, toPlanSnapshot, type PlanHistorySnapshot, type PlanSnapshot } from './planSnapshots';
-import { getLatestRevision, getRevisionVersion, toRevisionSnapshot } from './planRevisions';
+import { getLatestRevision, getRevisionVersion } from './planRevisions';
 import { usePlanShortcuts } from './usePlanShortcuts';
 import { usePlanSelectionState } from './usePlanSelectionState';
 import { usePlanDrawingState } from './usePlanDrawingState';
@@ -907,154 +905,12 @@ export const usePlanView = (planId: string) => {
     [getObjectBoundsForAlign, isReadOnly, isWallType, markTouched, moveObject, renderPlan, selectedObjects, updateObject]
   );
 
-  const snapshotCacheRef = useRef<WeakMap<object, PlanSnapshot>>(new WeakMap());
-  const latestRevisionCacheRef = useRef<WeakMap<object, any>>(new WeakMap());
-  const revisionSnapshotCacheRef = useRef<WeakMap<object, PlanSnapshotComparable>>(new WeakMap());
-  const unsavedAgainstLatestCacheRef = useRef<WeakMap<object, WeakMap<object, boolean>>>(new WeakMap());
-  const getPlanSnapshot = useCallback((p: any): PlanSnapshot => {
-    if (p && typeof p === 'object') {
-      const cached = snapshotCacheRef.current.get(p as object);
-      if (cached) return cached;
-      const snap = toPlanSnapshot(p);
-      snapshotCacheRef.current.set(p as object, snap);
-      return snap;
-    }
-    return toPlanSnapshot(p);
-  }, []);
-  const getLatestRevisionCached = useCallback((revisions: any[] | undefined | null) => {
-    if (!Array.isArray(revisions)) return null;
-    const key = revisions as unknown as object;
-    const cached = latestRevisionCacheRef.current.get(key);
-    if (cached !== undefined) return cached;
-    const latest = getLatestRevision(revisions as any[]);
-    latestRevisionCacheRef.current.set(key, latest || null);
-    return latest;
-  }, []);
-  const getRevisionSnapshotCached = useCallback((revision: any): PlanSnapshotComparable => {
-    if (revision && typeof revision === 'object') {
-      const key = revision as object;
-      const cached = revisionSnapshotCacheRef.current.get(key);
-      if (cached) return cached;
-      const snap = toRevisionSnapshot(revision);
-      revisionSnapshotCacheRef.current.set(key, snap);
-      return snap;
-    }
-    return toRevisionSnapshot(revision);
-  }, []);
-
-  type HistorySnapshot = PlanHistorySnapshot;
-  type HistoryEntry = { snap: HistorySnapshot; key: string };
-
-  const [historyTick, setHistoryTick] = useState(0);
-  const historySnapshotRef = useRef<HistorySnapshot | null>(null);
-  const historyKeyRef = useRef('');
-  const undoStackRef = useRef<HistoryEntry[]>([]);
-  const redoStackRef = useRef<HistoryEntry[]>([]);
-  const historyLockRef = useRef(false);
-
-  const toHistorySnapshot = useCallback(
-    (p: any): HistorySnapshot => toPlanHistorySnapshot(p, getPlanSnapshot(p)),
-    [getPlanSnapshot]
-  );
-
-  const resetHistory = useCallback(() => {
-    historySnapshotRef.current = null;
-    historyKeyRef.current = '';
-    undoStackRef.current = [];
-    redoStackRef.current = [];
-    setHistoryTick((x) => x + 1);
-  }, []);
-
-  useEffect(() => {
-    snapshotCacheRef.current = new WeakMap();
-    latestRevisionCacheRef.current = new WeakMap();
-    revisionSnapshotCacheRef.current = new WeakMap();
-    unsavedAgainstLatestCacheRef.current = new WeakMap();
-    baselineSnapshotRef.current = null;
-    entrySnapshotRef.current = null;
-    touchedRef.current = false;
-    setTouchedTick((x) => x + 1);
-    resetHistory();
-  }, [planId]);
-
-  useEffect(() => {
-    if (!plan) return;
-    const revisions = plan.revisions || [];
-    if (revisions.length) {
-      baselineSnapshotRef.current = null;
-      return;
-    }
-    const snap = getPlanSnapshot(plan);
-    // Keep baseline aligned with background normalizations until the user edits.
-    if (!baselineSnapshotRef.current || !touchedRef.current) baselineSnapshotRef.current = snap;
-  }, [plan, getPlanSnapshot]);
-
-  const samePlanSnapshot = useCallback(
-    (current: PlanSnapshotComparable, latest: PlanSnapshotComparable, options?: { ignoreDims?: boolean }) =>
-      samePlanSnapshotUtil(current, latest, options),
-    []
-  );
-
-  const samePlanSnapshotIgnoringDims = useCallback(
-    (a: PlanSnapshotComparable, b: PlanSnapshotComparable) => samePlanSnapshot(a, b, { ignoreDims: true }),
-    [samePlanSnapshot]
-  );
-
-  const applyHistorySnapshot = useCallback(
-    (entry: HistoryEntry) => {
-      runApplyHistorySnapshot(entry, {
-        planId, historyLockRef, historySnapshotRef, historyKeyRef, setFloorPlanContent, markTouched,
-        setHistoryTick
-      });
-    },
-    [markTouched, planId, setFloorPlanContent]
-  );
-
-  const performUndo = useCallback(() => {
-    const current = historySnapshotRef.current;
-    const prev = undoStackRef.current.pop();
-    if (!prev || !current) return false;
-    redoStackRef.current.push({ snap: current, key: historyKeyRef.current });
-    applyHistorySnapshot(prev);
-    return true;
-  }, [applyHistorySnapshot]);
-
-  const performRedo = useCallback(() => {
-    const current = historySnapshotRef.current;
-    const next = redoStackRef.current.pop();
-    if (!next || !current) return false;
-    undoStackRef.current.push({ snap: current, key: historyKeyRef.current });
-    applyHistorySnapshot(next);
-    return true;
-  }, [applyHistorySnapshot]);
-
-  useEffect(() => runHistoryTrackEffect({
-    plan, toHistorySnapshot, historyKeyRef, historySnapshotRef, historyLockRef, undoStackRef, redoStackRef, setHistoryTick
-  }), [plan, toHistorySnapshot]);
-
-  // Track plan state when the user enters it. Used for the navigation prompt.
-  useEffect(() => {
-    if (!plan) return;
-    const snap = getPlanSnapshot(plan);
-    if (!entrySnapshotRef.current || !touchedRef.current) entrySnapshotRef.current = snap;
-  }, [plan, getPlanSnapshot]);
-
-  const getPlanUnsavedChanges = useCallback(
-    (targetPlan?: FloorPlan | null) =>
-      computeGetPlanUnsavedChanges(targetPlan, {
-        getPlanSnapshot, baselineSnapshotRef, getLatestRevisionCached, getRevisionSnapshotCached, unsavedAgainstLatestCacheRef,
-        samePlanSnapshot
-      }),
-    [getLatestRevisionCached, getPlanSnapshot, getRevisionSnapshotCached, samePlanSnapshot]
-  );
-
-  const { canUndo, canRedo } = useMemo(
-    () => ({
-      canUndo: undoStackRef.current.length > 0,
-      canRedo: redoStackRef.current.length > 0
-    }),
-    [historyTick]
-  );
+  const {
+    getPlanSnapshot, getLatestRevisionCached, samePlanSnapshot, samePlanSnapshotIgnoringDims, performUndo,
+    performRedo, getPlanUnsavedChanges, canUndo, canRedo
+  } = usePlanHistory({
+    plan, planId, markTouched, setFloorPlanContent, baselineSnapshotRef, entrySnapshotRef, touchedRef, setTouchedTick
+  });
 
   const hasLocalEdits = useMemo(() => {
     if (!plan) return false;
