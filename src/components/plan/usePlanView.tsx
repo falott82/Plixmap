@@ -111,6 +111,7 @@ import { usePlanRoomStats } from './usePlanRoomStats';
 import { usePlanMeasureToast } from './usePlanMeasureToast';
 import { usePlanWallToolHandlers } from './usePlanWallToolHandlers';
 import { usePlanQuoteToolHandlers } from './usePlanQuoteToolHandlers';
+import { usePlanPresentation } from './usePlanPresentation';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -1573,42 +1574,9 @@ export const usePlanView = (planId: string) => {
 
   const pendingNavigateRef = useRef<string | null>(null);
 
-  const enterFullscreenFromGesture = useCallback(() => {
-    try {
-      const doc: any = document as any;
-      const root: any = document.documentElement as any;
-      if (!!doc.fullscreenElement) return;
-      const p = root?.requestFullscreen?.();
-      if (p && typeof p.then === 'function') {
-        p.catch(() => {
-          // ignore: fullscreen may be blocked or already active
-        });
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const requestEnterPresentation = useCallback(() => {
-    if (presentationMode) return;
-    enterFullscreenFromGesture();
-    togglePresentationMode?.();
-  }, [enterFullscreenFromGesture, presentationMode, togglePresentationMode]);
-
-  const handleTogglePresentation = useCallback(() => {
-    if (presentationMode) {
-      togglePresentationMode?.();
-      return;
-    }
-    requestEnterPresentation();
-  }, [presentationMode, requestEnterPresentation, togglePresentationMode]);
-
-  useEffect(() => {
-    if (!presentationEnterRequested) return;
-    clearPresentationEnterRequest?.();
-    if (presentationMode) return;
-    requestEnterPresentation();
-  }, [clearPresentationEnterRequest, presentationEnterRequested, presentationMode, requestEnterPresentation]);
+  const { handleTogglePresentation } = usePlanPresentation({
+    presentationMode, togglePresentationMode, presentationEnterRequested, clearPresentationEnterRequest
+  });
 
   usePlanDeeplinkEffects({
     location,
