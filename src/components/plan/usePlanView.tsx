@@ -23,7 +23,7 @@ import {
   computeGetClosestCorridorEdge,
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
-import { computeHandleStageMove, computeHandleMapContextMenu, computeHandleStageSelect } from './planViewStageHandlers';
+import { computeHandleStageMove, computeHandleStageSelect } from './planViewStageHandlers';
 import { runPlanKeydownEffect } from './planViewKeydown';
 import {
   runDismissSelectionHintToasts
@@ -108,6 +108,7 @@ import { usePlanRoomDrawHandlers } from './usePlanRoomDrawHandlers';
 import { usePlanWallGroupHandlers } from './usePlanWallGroupHandlers';
 import { usePlanRealUserPlacement } from './usePlanRealUserPlacement';
 import { usePlanWallSegments } from './usePlanWallSegments';
+import { usePlanMapContextMenuHandler } from './usePlanMapContextMenuHandler';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -2171,49 +2172,12 @@ export const usePlanView = (planId: string) => {
     [getQuoteOrientation, renderPlan, setLastQuoteLabelPosH, setLastQuoteLabelPosV, updateObject]
   );
 
-  const handleMapContextMenu = useCallback(
-    (payload: { clientX: number; clientY: number; worldX: number; worldY: number }) =>
-      computeHandleMapContextMenu(payload, {
-        clearSelection,
-        createRoomDoorFromDraft,
-        dismissSelectionHintToasts,
-        effectiveVisibleLayerIds,
-        push,
-        renderPlan,
-        roomDoorDraft,
-        t,
-        toolMode,
-        zoom,
-        getCorridorIdAt,
-        getRoomIdAt,
-        roomLayerNoticeRef,
-        setSelectedRoomDoorId,
-        setSelectedCorridorDoor,
-        setSelectedCorridorId,
-        setSelectedLinkId,
-        setSelectedRoomId,
-        setSelectedRoomIds,
-        setContextMenu
-      }),
-    [
-      clearSelection,
-      createRoomDoorFromDraft,
-      dismissSelectionHintToasts,
-      effectiveVisibleLayerIds,
-      push,
-      renderPlan,
-      roomDoorDraft,
-      setSelectedRoomDoorId,
-      setSelectedCorridorDoor,
-      setSelectedCorridorId,
-      setSelectedLinkId,
-      setSelectedRoomId,
-      setSelectedRoomIds,
-      t,
-      toolMode,
-      zoom
-    ]
-  );
+  const handleMapContextMenu = usePlanMapContextMenuHandler({
+    clearSelection, createRoomDoorFromDraft, dismissSelectionHintToasts, effectiveVisibleLayerIds, push,
+    renderPlan, roomDoorDraft, t, toolMode, zoom, getCorridorIdAt, getRoomIdAt, roomLayerNoticeRef,
+    setSelectedRoomDoorId, setSelectedCorridorDoor, setSelectedCorridorId, setSelectedLinkId,
+    setSelectedRoomId, setSelectedRoomIds, setContextMenu
+  });
 
 
   const { openEscapeRouteAt, toggleSecurityCardVisibility } = usePlanSecurityHandlers({
