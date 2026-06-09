@@ -681,32 +681,6 @@ export const usePlanView = (planId: string) => {
     rackPortsLink, setRackPortsLink, rackOverlayById, planId, updateRackItem
   });
 
-  const baselineSnapshotRef = useRef<{
-    imageUrl: string;
-    width?: number;
-    height?: number;
-    scale?: any;
-    objects: any[];
-    views?: any[];
-    rooms?: any[];
-    corridors?: any[];
-    racks?: any[];
-    rackItems?: any[];
-    rackLinks?: any[];
-  } | null>(null);
-  const entrySnapshotRef = useRef<{
-    imageUrl: string;
-    width?: number;
-    height?: number;
-    scale?: any;
-    objects: any[];
-    views?: any[];
-    rooms?: any[];
-    corridors?: any[];
-    racks?: any[];
-    rackItems?: any[];
-    rackLinks?: any[];
-  } | null>(null);
 	  const touchedRef = useRef(false);
 	  const [touchedTick, setTouchedTick] = useState(0);
 	  const markTouched = useCallback(() => {
@@ -739,9 +713,9 @@ export const usePlanView = (planId: string) => {
 
   const {
     getPlanSnapshot, getLatestRevisionCached, performUndo,
-    performRedo, getPlanUnsavedChanges, canUndo, canRedo, hasNavigationEdits, hasUnsavedUi, latestRev, hasAnyRevision
+    performRedo, getPlanUnsavedChanges, canUndo, canRedo, hasNavigationEdits, hasUnsavedUi, latestRev, hasAnyRevision, baselineSnapshotRef, entrySnapshotRef
   } = usePlanHistory({
-    plan, planId, markTouched, setFloorPlanContent, baselineSnapshotRef, entrySnapshotRef, touchedRef, setTouchedTick, touchedTick
+    plan, planId, markTouched, setFloorPlanContent, touchedRef, setTouchedTick, touchedTick
   });
 
   const pendingNavigateRef = useRef<string | null>(null);

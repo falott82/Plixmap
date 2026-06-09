@@ -13,7 +13,23 @@ import { computeGetPlanUnsavedChanges } from './planViewComputeBits2';
 // history-track / entry-track effects. The baseline/entry/touched refs are HOST-owned (shared with
 // save + markTouched) and passed in. Bodies + dep arrays moved verbatim.
 export const usePlanHistory = (deps: any) => {
-  const { plan, planId, markTouched, setFloorPlanContent, baselineSnapshotRef, entrySnapshotRef, touchedRef, setTouchedTick, touchedTick } = deps;
+  const { plan, planId, markTouched, setFloorPlanContent, touchedRef, setTouchedTick, touchedTick } = deps;
+
+  type PlanBaselineSnapshot = {
+    imageUrl: string;
+    width?: number;
+    height?: number;
+    scale?: any;
+    objects: any[];
+    views?: any[];
+    rooms?: any[];
+    corridors?: any[];
+    racks?: any[];
+    rackItems?: any[];
+    rackLinks?: any[];
+  } | null;
+  const baselineSnapshotRef = useRef<PlanBaselineSnapshot>(null);
+  const entrySnapshotRef = useRef<PlanBaselineSnapshot>(null);
 
   const snapshotCacheRef = useRef<WeakMap<object, PlanSnapshot>>(new WeakMap());
   const latestRevisionCacheRef = useRef<WeakMap<object, any>>(new WeakMap());
@@ -208,6 +224,6 @@ export const usePlanHistory = (deps: any) => {
     getPlanSnapshot, getLatestRevisionCached, getRevisionSnapshotCached, toHistorySnapshot, resetHistory,
     samePlanSnapshot, samePlanSnapshotIgnoringDims, applyHistorySnapshot, performUndo, performRedo,
     getPlanUnsavedChanges, canUndo, canRedo, hasLocalEdits, hasNavigationEdits, hasUnsavedUi,
-    latestRev, hasAnyRevision
+    latestRev, hasAnyRevision, baselineSnapshotRef, entrySnapshotRef
   };
 };
