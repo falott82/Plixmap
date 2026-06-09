@@ -22,6 +22,7 @@ import { useCanvasTextDraft } from './canvas/useCanvasTextDraft';
 import { useCanvasCorridorPolyDraft } from './canvas/useCanvasCorridorPolyDraft';
 import { useCanvasRoomPolyDraft } from './canvas/useCanvasRoomPolyDraft';
 import { useCanvasRoomRectDraft } from './canvas/useCanvasRoomRectDraft';
+import { useCanvasSelectionBox } from './canvas/useCanvasSelectionBox';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
@@ -49,7 +50,6 @@ import {
   computeObjectBounds as computeObjectBoundsImpl,
   buildWifiRangeRings as buildWifiRangeRingsImpl,
   buildCameraFovPolygon as buildCameraFovPolygonImpl,
-  dragRectFromCorners,
   buildWallSegments,
   buildCameraWallSegments,
   buildWifiRayAngles,
@@ -443,9 +443,6 @@ const CanvasStageImpl = (
   const corridorDoorDraftActive = !!corridorDoorDraft?.corridorId;
   const panRaf = useRef<number | null>(null);
   const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
-  const selectionBoxRaf = useRef<number | null>(null);
-  const pendingSelectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
-  const lastSelectionBoxRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const textTransformRaf = useRef<number | null>(null);
   const pendingTextTransformRef = useRef<{ id: string; width: number; height: number } | null>(null);
   const [cameraRotateId, setCameraRotateId] = useState<string | null>(null);
@@ -528,9 +525,6 @@ const CanvasStageImpl = (
   const corridorDoorPointerRef = useRef<{ corridorId: string; doorId: string; allowDrag: boolean } | null>(null);
   const [iconImages, setIconImages] = useState<Record<string, HTMLImageElement | null>>({});
   const [imageObjects, setImageObjects] = useState<Record<string, HTMLImageElement | null>>({});
-  const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(
-    null
-  );
   const [pendingPreview, setPendingPreview] = useState<{ x: number; y: number } | null>(null);
   const pendingPreviewRef = useRef<{ x: number; y: number } | null>(null);
   const pendingPreviewRaf = useRef<number | null>(null);
@@ -650,7 +644,6 @@ const CanvasStageImpl = (
     setSafetyCardDraft(nextLayout);
     onSafetyCardChange(nextLayout, { commit: true });
   }, [onSafetyCardChange, safetyCardDraft]);
-  const selectionOrigin = useRef<{ x: number; y: number } | null>(null);
   const boundsVersionRef = useRef(0);
   const boundsCacheRef = useRef<Map<string, { version: number; bounds: { minX: number; minY: number; maxX: number; maxY: number } | null }>>(
     new Map()
@@ -1020,7 +1013,6 @@ const CanvasStageImpl = (
     return () => {
       if (wheelCommitTimer.current) window.clearTimeout(wheelCommitTimer.current);
       if (panRaf.current) cancelAnimationFrame(panRaf.current);
-      if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
       if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
       if (textTransformRaf.current) cancelAnimationFrame(textTransformRaf.current);
       textTransformRaf.current = null;
@@ -1331,7 +1323,6 @@ const CanvasStageImpl = (
     [onUpdateObject]
   );
 
-  const isBoxSelecting = () => !!selectionOrigin.current;
 
   useEffect(() => {
     if (!pendingType) {
@@ -1511,6 +1502,22 @@ const CanvasStageImpl = (
     [getSpatialIndex, objectById, objects]
   );
 
+  const { selectionBox, isBoxSelecting, beginSelectionBox, updateSelectionBox, finalizeSelectionBox } = useCanvasSelectionBox({
+    pointerToWorld,
+    perfEnabled,
+    getSelectionCandidates,
+    getObjectBounds,
+    getRoomBounds,
+    rooms: (plan.rooms || []) as any[],
+    getZoom: getRoomRectZoom,
+    onSelect,
+    onSelectMany,
+    onSelectRooms,
+    selectedRoomIdsRef,
+    boxSelectionActiveRef,
+    lastBoxSelectAtRef
+  });
+
   useImperativeHandle(
     ref,
     () => ({
@@ -1554,88 +1561,6 @@ const CanvasStageImpl = (
     }),
     [dimensions.height, dimensions.width, getObjectBounds, objectById]
   );
-
-  const updateSelectionBox = (event: any) => {
-    if (!selectionOrigin.current) return false;
-    const stage = event.target.getStage();
-    const pos = stage?.getPointerPosition();
-    if (!pos) return true;
-    const world = pointerToWorld(pos.x, pos.y);
-    const x1 = selectionOrigin.current.x;
-    const y1 = selectionOrigin.current.y;
-    const x2 = world.x;
-    const y2 = world.y;
-    const { x, y, width, height } = dragRectFromCorners(x1, y1, x2, y2);
-    pendingSelectionBoxRef.current = { x, y, width, height };
-    lastSelectionBoxRef.current = pendingSelectionBoxRef.current;
-    if (selectionBoxRaf.current) return true;
-    selectionBoxRaf.current = requestAnimationFrame(() => {
-      selectionBoxRaf.current = null;
-      const next = pendingSelectionBoxRef.current;
-      pendingSelectionBoxRef.current = null;
-      if (!next) return;
-      if (perfEnabled) perfMetrics.selectionBoxUpdates += 1;
-      setSelectionBox(next);
-    });
-    return true;
-  };
-
-  const finalizeSelectionBox = () => {
-    if (!selectionOrigin.current) return false;
-    const rect = lastSelectionBoxRef.current || pendingSelectionBoxRef.current || selectionBox;
-    selectionOrigin.current = null;
-    if (selectionBoxRaf.current) cancelAnimationFrame(selectionBoxRaf.current);
-    selectionBoxRaf.current = null;
-    pendingSelectionBoxRef.current = null;
-    lastSelectionBoxRef.current = null;
-    if (perfEnabled) perfMetrics.selectionBoxUpdates += 1;
-    setSelectionBox(null);
-    if (!rect) return true;
-    const wPx = rect.width * Math.max(0.001, viewportRef.current.zoom || 1);
-    const hPx = rect.height * Math.max(0.001, viewportRef.current.zoom || 1);
-    if (wPx < 8 || hPx < 8) {
-      // Desktop behavior: click on empty area clears selection.
-      onSelect(undefined);
-      selectedRoomIdsRef.current = [];
-      return true;
-    }
-    const minX = rect.x;
-    const maxX = rect.x + rect.width;
-    const minY = rect.y;
-    const maxY = rect.y + rect.height;
-    const candidates = getSelectionCandidates(rect);
-    const ids = candidates
-      .filter((o) => {
-        const bounds = getObjectBounds(o);
-        const x = Number(o.x);
-        const y = Number(o.y);
-        const pointInside =
-          Number.isFinite(x) && Number.isFinite(y) && x >= minX && x <= maxX && y >= minY && y <= maxY;
-        if (bounds) {
-          const boundsHit = bounds.maxX >= minX && bounds.minX <= maxX && bounds.maxY >= minY && bounds.minY <= maxY;
-          return boundsHit || pointInside;
-        }
-        return pointInside;
-      })
-      .map((o) => o.id);
-    const roomIds = (plan.rooms || [])
-      .filter((room) => {
-        const bounds = getRoomBounds(room);
-        if (!bounds) return false;
-        return bounds.maxX >= minX && bounds.minX <= maxX && bounds.maxY >= minY && bounds.minY <= maxY;
-      })
-      .map((room) => room.id);
-    selectedRoomIdsRef.current = roomIds;
-    if (onSelectRooms) onSelectRooms(roomIds);
-    boxSelectionActiveRef.current = true;
-    if (onSelectMany) onSelectMany(ids);
-    else {
-      onSelect(undefined);
-      for (const id of ids) onSelect(id, { multi: true });
-    }
-    lastBoxSelectAtRef.current = Date.now();
-    return true;
-  };
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -2076,12 +2001,7 @@ const CanvasStageImpl = (
             const stage = e.target.getStage();
             const pos = stage?.getPointerPosition();
             if (!pos) return;
-            const world = pointerToWorld(pos.x, pos.y);
-            selectionOrigin.current = { x: world.x, y: world.y };
-            pendingSelectionBoxRef.current = { x: world.x, y: world.y, width: 0, height: 0 };
-            lastSelectionBoxRef.current = pendingSelectionBoxRef.current;
-            setSelectionBox(pendingSelectionBoxRef.current);
-            lastBoxSelectAtRef.current = Date.now();
+            beginSelectionBox(pointerToWorld(pos.x, pos.y));
             return;
           }
           if (isContextClick(e.evt)) return;
