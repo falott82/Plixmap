@@ -750,7 +750,7 @@ export const usePlanView = (planId: string) => {
   );
 
   const {
-    getPlanSnapshot, getLatestRevisionCached, samePlanSnapshot, samePlanSnapshotIgnoringDims, performUndo,
+    getPlanSnapshot, getLatestRevisionCached, samePlanSnapshotIgnoringDims, performUndo,
     performRedo, getPlanUnsavedChanges, canUndo, canRedo
   } = usePlanHistory({
     plan, planId, markTouched, setFloorPlanContent, baselineSnapshotRef, entrySnapshotRef, touchedRef, setTouchedTick
@@ -770,25 +770,6 @@ export const usePlanView = (planId: string) => {
   );
   // UI "Unsaved" badge should reflect user edits only, not legacy normalization differences in old revisions.
   const hasUnsavedUi = hasNavigationEdits;
-
-  useEffect(() => {
-    // If the only change is an automatic width/height fill (e.g. measured from image), do not treat it as
-    // a "revision-worthy" unsaved change when the plan has no revision history yet.
-    if (!plan) return;
-    const revisions = plan.revisions || [];
-    if (revisions.length) return;
-    const base = baselineSnapshotRef.current;
-    if (!base) return;
-    const current = getPlanSnapshot(plan);
-    if (samePlanSnapshot(current, base)) return;
-
-    const baseDimsMissing = (base.width ?? null) === null && (base.height ?? null) === null;
-    const currentHasDims = typeof current.width === 'number' || typeof current.height === 'number';
-    if (!baseDimsMissing || !currentHasDims) return;
-    if (!samePlanSnapshotIgnoringDims(base, current)) return;
-
-    baselineSnapshotRef.current = current;
-  }, [plan, samePlanSnapshotIgnoringDims, getPlanSnapshot]);
 
   const pendingNavigateRef = useRef<string | null>(null);
 
