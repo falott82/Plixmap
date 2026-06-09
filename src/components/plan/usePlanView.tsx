@@ -16,15 +16,14 @@ import {
   computeGetCorridorEdgePoint
 } from './planViewCorridorGeometry';
 import {
-  computeSubmenuStyle, computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates,
-  runUnlockRequestEffect
+  computeSubmenuStyle, computeClientBusinessPartnerNames, computeMeetingLocationLabels, computeSiteMeetingParticipantCandidates
 } from './planViewComputeBits';
 import {
   computeMyMeetingsFiltered, runToggleRevisionImmutable,
   runPerformPendingPostSaveAction
 } from './planViewComputeBits2';
 import {
-  runCorridorShortcutEffect, runForceUnlockEventEffect, runSearchExportShortcutEffect, runResetToolsOnPlanChangeEffect,
+  runCorridorShortcutEffect, runSearchExportShortcutEffect, runResetToolsOnPlanChangeEffect,
   runLayerVisibilitySyncEffect
 } from './planViewEffects';
 import {
@@ -86,6 +85,7 @@ import { usePlanHistory } from './usePlanHistory';
 import { renderKeybindToastContent } from './planViewKeybindToast';
 import { usePlanLockState } from './usePlanLockState';
 import { usePlanLockActions } from './usePlanLockActions';
+import { usePlanLockEffects } from './usePlanLockEffects';
 import { usePlanKeydownEffect } from './usePlanKeydownEffect';
 import type {
   PlanObjectModalState, RoomDepartmentConfirmState, RackPortsLinkState, EscapeRouteModalState, LayerRevealPromptState, MeetingManagerPresetState,
@@ -838,36 +838,11 @@ export const usePlanView = (planId: string) => {
 
 
 
-	  useEffect(() => {
-	    if (!forceUnlockExecuteCommand) return;
-	    const cmd = forceUnlockExecuteCommand;
-	    setForceUnlockExecuteCommand(null);
-	    void executeForceUnlock(cmd.requestId, cmd.action);
-	  }, [executeForceUnlock, forceUnlockExecuteCommand, setForceUnlockExecuteCommand]);
-
-	  useEffect(() => runUnlockRequestEffect({ user, setUnlockCompose }), [user?.id, user, setUnlockCompose]);
-
-	  useEffect(() => runForceUnlockEventEffect({ isSuperAdmin, setForceUnlockGraceMinutes, setForceUnlockStarting, setForceUnlockConfig }),
-	    [isSuperAdmin, setForceUnlockGraceMinutes, setForceUnlockStarting, setForceUnlockConfig]);
-
-	  useEffect(() => {
-	    setPlanDirty?.(planId, !!hasNavigationEdits);
-	    return () => {
-	      setPlanDirty?.(planId, false);
-	    };
-	  }, [hasNavigationEdits, planId, setPlanDirty]);
-
-	  useEffect(() => {
-	    if (!lockRequired) return;
-	    if (!lockState.mine) return;
-	    const dirty = !!hasNavigationEdits;
-	    const now = Date.now();
-	    if (lastPlanDirtyValueRef.current === dirty && now - lastPlanDirtySentAtRef.current < 1500) return;
-	    if (now - lastPlanDirtySentAtRef.current < 900) return;
-	    lastPlanDirtyValueRef.current = dirty;
-	    lastPlanDirtySentAtRef.current = now;
-	    sendWs({ type: 'plan_dirty', planId, dirty });
-	  }, [hasNavigationEdits, lockRequired, lockState.mine, planId, sendWs, lastPlanDirtySentAtRef, lastPlanDirtyValueRef]);
+  usePlanLockEffects({
+    forceUnlockExecuteCommand, setForceUnlockExecuteCommand, executeForceUnlock, user, setUnlockCompose,
+    isSuperAdmin, setForceUnlockGraceMinutes, setForceUnlockStarting, setForceUnlockConfig, setPlanDirty,
+    planId, hasNavigationEdits, lockRequired, lockState, lastPlanDirtyValueRef, lastPlanDirtySentAtRef, sendWs
+  });
 
   useEffect(() => {
     if (!pendingSaveNavigateTo) return;
