@@ -23,7 +23,7 @@ import {
   computeHandleWallMove,
   computeSaveRevisionReason
 } from './planViewMiscTools';
-import { computeHandleQuotePoint, computeConvertMeasurementToQuotes, computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
+import { computeUpdateQuoteLabelPos } from './planViewQuoteScaleTools';
 import { computeHandleUnlockResponse, computeReloadMyMeetings } from './planViewLockMeetingTools';
 import {
   computeGetClosestCorridorEdge,
@@ -110,6 +110,7 @@ import { usePlanMiscDerived } from './usePlanMiscDerived';
 import { usePlanRoomStats } from './usePlanRoomStats';
 import { usePlanMeasureToast } from './usePlanMeasureToast';
 import { usePlanWallToolHandlers } from './usePlanWallToolHandlers';
+import { usePlanQuoteToolHandlers } from './usePlanQuoteToolHandlers';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -2693,117 +2694,14 @@ export const usePlanView = (planId: string) => {
     if (!measureMode) dismissMeasureToast();
   }, [dismissMeasureToast, measureMode]);
 
-  const handleQuotePoint = useCallback(
-    (point: { x: number; y: number }, options?: { shiftKey?: boolean }) =>
-      computeHandleQuotePoint(point, options, {
-        addObject,
-        ensureObjectLayerVisible,
-        getQuoteOrientation,
-        getTypeLabel,
-        isReadOnly,
-        lastQuoteColor,
-        lastQuoteDashed,
-        lastQuoteEndpoint,
-        lastQuoteLabelColor,
-        lastQuoteLabelPosH,
-        lastQuoteLabelPosV,
-        lastQuoteLabelScale,
-        lastQuoteLabelBg,
-        lastQuoteScale,
-        markTouched,
-        quoteMode,
-        quotePoints,
-        renderPlan,
-        resolveAxisLockedPoint,
-        zoom,
-        setQuotePoints,
-        setQuotePointer
-      }),
-    [
-      addObject,
-      ensureObjectLayerVisible,
-      getQuoteOrientation,
-      getTypeLabel,
-      inferDefaultLayerIds,
-      isReadOnly,
-      lastQuoteColor,
-      lastQuoteDashed,
-      lastQuoteEndpoint,
-      lastQuoteLabelPosH,
-      lastQuoteLabelPosV,
-      lastQuoteLabelScale,
-      lastQuoteLabelBg,
-      lastQuoteScale,
-      layerIdSet,
-      markTouched,
-      quoteMode,
-      quotePoints,
-      renderPlan,
-      resolveAxisLockedPoint,
-      t,
-      zoom
-    ]
-  );
-
-  const convertMeasurementToQuotes = useCallback(() => {
-    computeConvertMeasurementToQuotes({
-      addObject,
-      dismissMeasureToast,
-      ensureObjectLayerVisible,
-      getQuoteOrientation,
-      getTypeLabel,
-      inferDefaultLayerIds,
-      isReadOnly,
-      lastQuoteColor,
-      lastQuoteDashed,
-      lastQuoteEndpoint,
-      lastQuoteLabelBg,
-      lastQuoteLabelColor,
-      lastQuoteLabelPosH,
-      lastQuoteLabelPosV,
-      lastQuoteLabelScale,
-      lastQuoteScale,
-      layerIdSet,
-      markTouched,
-      measureMode,
-      push,
-      renderPlan,
-      t,
-      zoom,
-      measurePointsRef,
-      measureClosedRef,
-      measureFinishedRef,
-      setMeasureMode,
-      setMeasurePoints,
-      setMeasurePointer,
-      setMeasureClosed,
-      setMeasureFinished
-    });
-  }, [
-    addObject,
-    dismissMeasureToast,
-    ensureObjectLayerVisible,
-    getQuoteOrientation,
-    getTypeLabel,
-    inferDefaultLayerIds,
-    isReadOnly,
-    lastQuoteColor,
-    lastQuoteDashed,
-    lastQuoteEndpoint,
-    lastQuoteLabelBg,
-    lastQuoteLabelColor,
-    lastQuoteLabelPosH,
-    lastQuoteLabelPosV,
-    lastQuoteLabelScale,
-    lastQuoteScale,
-    layerIdSet,
-    markTouched,
-    measureMode,
-    push,
-    renderPlan,
-    t,
-    zoom
-  ]);
+  const { handleQuotePoint, convertMeasurementToQuotes } = usePlanQuoteToolHandlers({
+    addObject, ensureObjectLayerVisible, getQuoteOrientation, getTypeLabel, inferDefaultLayerIds, isReadOnly,
+    lastQuoteColor, lastQuoteDashed, lastQuoteEndpoint, lastQuoteLabelColor, lastQuoteLabelPosH, lastQuoteLabelPosV,
+    lastQuoteLabelScale, lastQuoteLabelBg, lastQuoteScale, layerIdSet, markTouched, quoteMode, quotePoints,
+    renderPlan, resolveAxisLockedPoint, t, zoom, setQuotePoints, setQuotePointer, dismissMeasureToast, measureMode,
+    push, measurePointsRef, measureClosedRef, measureFinishedRef, setMeasureMode, setMeasurePoints, setMeasurePointer,
+    setMeasureClosed, setMeasureFinished
+  });
 
 
   const { handleToolPoint, handleToolMove, handleToolDoubleClick } = usePlanToolPointHandlers({
