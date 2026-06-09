@@ -5,7 +5,6 @@ import { runRealtimeWsEffect } from './planViewRealtime';
 import { runRoomDepartmentOptionsEffect, runMeetingOverviewEffect } from './planViewDepartmentOptions';
 import { computeRackOverlayLinks } from './planViewExportData';
 import {
-  computeAddWallSegment,
   isPointInRoom,
   getRoomIdAt,
   isUserType,
@@ -108,6 +107,7 @@ import { usePlanModalInitials } from './usePlanModalInitials';
 import { usePlanRoomDrawHandlers } from './usePlanRoomDrawHandlers';
 import { usePlanWallGroupHandlers } from './usePlanWallGroupHandlers';
 import { usePlanRealUserPlacement } from './usePlanRealUserPlacement';
+import { usePlanWallSegments } from './usePlanWallSegments';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -2482,42 +2482,9 @@ export const usePlanView = (planId: string) => {
     setPendingType
   });
 
-  const addWallSegment = useCallback(
-    (payload: {
-      start: { x: number; y: number };
-      end: { x: number; y: number };
-      typeId: string;
-      label: string;
-      layerIds?: string[];
-      strokeColor?: string;
-      opacity?: number;
-      strokeWidth?: number;
-    }) =>
-      computeAddWallSegment(payload, {
-        addObject,
-        ensureObjectLayerVisible,
-        inferDefaultLayerIds,
-        layerIdSet,
-        renderPlan
-      }),
-    [addObject, ensureObjectLayerVisible, getWallTypeColor, inferDefaultLayerIds, layerIdSet, renderPlan]
-  );
-
-  const wallSnapPoints = useMemo(() => {
-    if (!renderPlan) return [];
-    const out: { x: number; y: number }[] = [];
-    const seen = new Set<string>();
-    for (const obj of renderPlan.objects || []) {
-      if (!isWallType(obj.type)) continue;
-      for (const point of obj.points || []) {
-        const key = `${point.x}:${point.y}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push({ x: point.x, y: point.y });
-      }
-    }
-    return out;
-  }, [isWallType, renderPlan]);
+  const { addWallSegment, wallSnapPoints } = usePlanWallSegments({
+    addObject, ensureObjectLayerVisible, inferDefaultLayerIds, layerIdSet, renderPlan, getWallTypeColor, isWallType
+  });
 
   const { resolveWallPoint, splitWallAtPoint } = usePlanWallToolHandlers({
     wallSnapPoints, zoom, wallDraftPointsRef, addWallSegment, deleteObject, getTypeLabel, getWallTypeColor,
