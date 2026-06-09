@@ -3,7 +3,6 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import { meetingIsoDayFromTs, meetingClockFromTs, shiftIsoDay, monthAnchorFromIso, shiftMonthAnchor, hmToMinutes } from './planViewTime';
 import { runRealtimeWsEffect } from './planViewRealtime';
 import { runRoomDepartmentOptionsEffect, runMeetingOverviewEffect } from './planViewDepartmentOptions';
-import { computeModalInitials } from './planViewModalInitials';
 import { computeRackOverlayLinks } from './planViewExportData';
 import {
   computeSnapRoomRectToAdjacentSide,
@@ -109,6 +108,7 @@ import { usePlanQuoteToolHandlers } from './usePlanQuoteToolHandlers';
 import { usePlanPresentation } from './usePlanPresentation';
 import { usePlanSaveRevisionHandlers } from './usePlanSaveRevisionHandlers';
 import { usePlanRoomLayoutExportHandlers } from './usePlanRoomLayoutExportHandlers';
+import { usePlanModalInitials } from './usePlanModalInitials';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -3431,43 +3431,11 @@ export const usePlanView = (planId: string) => {
     setSelectedObject
   });
 
-  const modalInitials = useMemo(
-    () =>
-      computeModalInitials({
-        modalState,
-        renderPlan,
-        renderPlanObjectById,
-        layerIdSet,
-        defaultObjectScale,
-        getTypeLayerIds,
-        inferDefaultLayerIds,
-        formatQuoteLabel,
-        lastQuoteLabelScale,
-        lastQuoteLabelBg,
-        lastQuoteLabelPosH,
-        lastQuoteDashed,
-        lastQuoteEndpoint,
-        lastQuoteColor,
-        lastQuoteLabelColor
-      }),
-    [
-      defaultObjectScale,
-      formatQuoteLabel,
-      getTypeLayerIds,
-      inferDefaultLayerIds,
-      layerIdSet,
-      lastQuoteColor,
-      lastQuoteDashed,
-      lastQuoteEndpoint,
-      lastQuoteLabelColor,
-      lastQuoteLabelPosH,
-      lastQuoteLabelBg,
-      lastQuoteLabelScale,
-      modalState,
-      renderPlan,
-      renderPlanObjectById
-    ]
-  );
+  const modalInitials = usePlanModalInitials({
+    modalState, renderPlan, renderPlanObjectById, layerIdSet, defaultObjectScale, getTypeLayerIds,
+    inferDefaultLayerIds, formatQuoteLabel, lastQuoteLabelScale, lastQuoteLabelBg, lastQuoteLabelPosH,
+    lastQuoteDashed, lastQuoteEndpoint, lastQuoteColor, lastQuoteLabelColor
+  });
 
   const {
     assignedCounts,
