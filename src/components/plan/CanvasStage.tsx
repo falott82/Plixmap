@@ -27,6 +27,7 @@ import { useCanvasPointerHandlers } from './canvas/useCanvasPointerHandlers';
 import { useCanvasCameraRotation } from './canvas/useCanvasCameraRotation';
 import { useCanvasObjectTransforms } from './canvas/useCanvasObjectTransforms';
 import { useCanvasImperativeHandle } from './canvas/useCanvasImperativeHandle';
+import { useCanvasSafetyCardActions } from './canvas/useCanvasSafetyCardActions';
 import { spatialCellSize, buildSpatialIndexCells, selectionCandidatesFromIndex } from './canvas/canvasSpatialIndex';
 import { renderRoomLabels as renderRoomLabelsImpl } from './canvas/renderRoomLabels';
 import {
@@ -34,9 +35,6 @@ import {
   formatMeasure,
   PHOTO_ICON_BASE_SIZE,
   SAFETY_CARD_HELP_TOAST_ID,
-  SAFETY_CARD_COLOR_VARIANTS,
-  SAFETY_CARD_TEXT_BG_VARIANTS,
-  SAFETY_CARD_FONT_VALUES,
   sameSafetyCardDraftLayout,
   getDeskBounds,
   getViewportWorldBounds,
@@ -538,17 +536,6 @@ const CanvasStageImpl = (
   const safetyCardTransformerRef = useRef<any>(null);
   const safetyCardDraggingRef = useRef(false);
   const objectById = useMemo(() => new Map(objects.map((o) => [o.id, o])), [objects]);
-  const isSafetyCardNode = useCallback((node: any) => {
-    let cursor = node;
-    while (cursor) {
-      const name = String(cursor?.attrs?.name || '');
-      if (name === 'safety-card-group' || name.startsWith('safety-card-')) return true;
-      const parent = cursor.getParent?.();
-      if (!parent || parent === cursor) break;
-      cursor = parent;
-    }
-    return false;
-  }, []);
   useEffect(() => {
     safetyCardDraftRef.current = safetyCardDraft;
   }, [safetyCardDraft]);
@@ -596,48 +583,8 @@ const CanvasStageImpl = (
     setSafetyCardSelected(false);
     toast.dismiss(SAFETY_CARD_HELP_TOAST_ID);
   }, [safetyCardSelected, selectedCorridorId, selectedId, selectedIds, selectedLinkId, selectedRoomDoorId, selectedRoomId, selectedRoomIds]);
-  const adjustSafetyCardFont = useCallback(
-    (delta: number) => {
-      if (!safetyCardDraft || !onSafetyCardChange) return;
-      const nextFontSize = Math.max(8, Math.min(22, Number(safetyCardDraft.fontSize || 10) + delta));
-      if (Math.abs(nextFontSize - safetyCardDraft.fontSize) < 0.01) return;
-      const nextLayout = { ...safetyCardDraft, fontSize: nextFontSize };
-      setSafetyCardDraft(nextLayout);
-      onSafetyCardChange(nextLayout, { commit: true });
-    },
-    [onSafetyCardChange, safetyCardDraft]
-  );
-  const cycleSafetyCardFont = useCallback(
-    (delta: number) => {
-      if (!safetyCardDraft || !onSafetyCardChange || !SAFETY_CARD_FONT_VALUES.length) return;
-      const current = Number(safetyCardDraft.fontIndex) || 0;
-      const nextLayout = {
-        ...safetyCardDraft,
-        fontIndex: (current + delta + SAFETY_CARD_FONT_VALUES.length) % SAFETY_CARD_FONT_VALUES.length
-      };
-      setSafetyCardDraft(nextLayout);
-      onSafetyCardChange(nextLayout, { commit: true });
-    },
-    [onSafetyCardChange, safetyCardDraft]
-  );
-  const cycleSafetyCardColor = useCallback(() => {
-    if (!safetyCardDraft || !onSafetyCardChange) return;
-    const nextLayout = {
-      ...safetyCardDraft,
-      colorIndex: (Number(safetyCardDraft.colorIndex) + 1) % SAFETY_CARD_COLOR_VARIANTS.length
-    };
-    setSafetyCardDraft(nextLayout);
-    onSafetyCardChange(nextLayout, { commit: true });
-  }, [onSafetyCardChange, safetyCardDraft]);
-  const cycleSafetyCardTextBg = useCallback(() => {
-    if (!safetyCardDraft || !onSafetyCardChange) return;
-    const nextLayout = {
-      ...safetyCardDraft,
-      textBgIndex: (Number(safetyCardDraft.textBgIndex) + 1) % SAFETY_CARD_TEXT_BG_VARIANTS.length
-    };
-    setSafetyCardDraft(nextLayout);
-    onSafetyCardChange(nextLayout, { commit: true });
-  }, [onSafetyCardChange, safetyCardDraft]);
+  const { isSafetyCardNode, adjustSafetyCardFont, cycleSafetyCardFont, cycleSafetyCardColor, cycleSafetyCardTextBg } =
+    useCanvasSafetyCardActions({ safetyCardDraft, setSafetyCardDraft, onSafetyCardChange });
   const boundsVersionRef = useRef(0);
   const boundsCacheRef = useRef<Map<string, { version: number; bounds: { minX: number; minY: number; maxX: number; maxY: number } | null }>>(
     new Map()
