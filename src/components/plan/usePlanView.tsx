@@ -138,7 +138,6 @@ import { usePlanSelectionState } from './usePlanSelectionState';
 import { usePlanDrawingState } from './usePlanDrawingState';
 export const UNLOCK_REQUEST_EVENT = 'plixmap_unlock_request';
 export const FORCE_UNLOCK_EVENT = 'plixmap_force_unlock';
-const OPEN_MEETING_MANAGER_EVENT = 'plixmap_open_meeting_manager';
 
 type RoomKioskInfoModalState = {
   roomId: string;
@@ -1006,21 +1005,6 @@ export const usePlanView = (planId: string) => {
     setMeetingManagerOpen,
     setPendingClientMeetingsPreset
   });
-
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent)?.detail || {};
-      openMeetingManager({
-        clientId: String(detail?.clientId || '').trim() || undefined,
-        siteId: String(detail?.siteId || '').trim() || undefined,
-        floorPlanId: String(detail?.floorPlanId || '').trim() || undefined,
-        roomId: String(detail?.roomId || '').trim() || undefined,
-        day: String(detail?.day || '').trim() || undefined
-      });
-    };
-    window.addEventListener(OPEN_MEETING_MANAGER_EVENT, handler as EventListener);
-    return () => window.removeEventListener(OPEN_MEETING_MANAGER_EVENT, handler as EventListener);
-  }, [openMeetingManager]);
 
   const myMeetingsModalHandlers = usePlanMyMeetingsModal({
     t, setMyMeetingsModal, setMyMeetingsSearch, reloadMyMeetingsRef, myMeetingsRestoreRef, setMeetingHubModalOpen, myMeetingsModal
