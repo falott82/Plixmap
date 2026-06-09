@@ -109,6 +109,7 @@ import { usePlanMeasureScale } from './usePlanMeasureScale';
 import { usePlanRenderDerived } from './usePlanRenderDerived';
 import { usePlanLinkRackModals } from './usePlanLinkRackModals';
 import { usePlanPaletteDefs } from './usePlanPaletteDefs';
+import { usePlanAccessPermissions } from './usePlanAccessPermissions';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -159,7 +160,6 @@ import { useLang, useT } from '../../i18n/useT';
 import { useShallow } from 'zustand/react/shallow';
 import { postAuditEvent } from '../../api/audit';
 import { hasExternalUsers } from '../../api/customImport';
-import { type MeetingBooking } from '../../api/meetings';
 
 import { useCustomFieldsStore } from '../../store/useCustomFieldsStore';
 import { perfMetrics } from '../../utils/perfMetrics';
@@ -961,50 +961,9 @@ export const usePlanView = (planId: string) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forceDefaultView, navigate, planId, selectedRevisionId]);
 
-  const planAccess = useMemo<'ro' | 'rw'>(() => {
-    if (!user) return 'ro';
-    if (user.isAdmin) return 'rw';
-    const planPerm = permissions.find((p) => p.scopeType === 'plan' && p.scopeId === planId);
-    if (planPerm) return planPerm.access;
-    if (site?.id) {
-      const sitePerm = permissions.find((p) => p.scopeType === 'site' && p.scopeId === site.id);
-      if (sitePerm) return sitePerm.access;
-    }
-    if (client?.id) {
-      const clientPerm = permissions.find((p) => p.scopeType === 'client' && p.scopeId === client.id);
-      if (clientPerm) return clientPerm.access;
-    }
-    return 'ro';
-  }, [client?.id, permissions, planId, site?.id, user]);
-  const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
-  const isMeetingAdminLike = !!user?.isAdmin || !!user?.isSuperAdmin;
-  const canManageMeetingScheduling = useMemo(
-    () =>
-      isMeetingAdminLike ||
-      !!(user as any)?.canCreateMeetings ||
-      !!(user as any)?.isMeetingOperator,
-    [isMeetingAdminLike, user]
-  );
-  const canUseMeetingNotes = useCallback(
-    (booking: MeetingBooking | null | undefined) => {
-      if (!booking) return false;
-      if (isMeetingAdminLike) return true;
-      const linkedExternalClientId = String((user as any)?.linkedExternalClientId || '').trim();
-      const linkedExternalId = String((user as any)?.linkedExternalId || '').trim();
-      const userEmail = String(user?.email || '').trim().toLowerCase();
-      const participants = Array.isArray(booking.participants) ? booking.participants : [];
-      return participants.some((row) => {
-        if (String(row?.kind || 'real_user') === 'manual') return false;
-        const participantExternalId = String(row?.externalId || '').trim();
-        const participantEmail = String(row?.email || '').trim().toLowerCase();
-        if (linkedExternalId && linkedExternalClientId && linkedExternalClientId === String(booking.clientId || '') && participantExternalId === linkedExternalId) {
-          return true;
-        }
-        return !!userEmail && !!participantEmail && participantEmail === userEmail;
-      });
-    },
-    [isMeetingAdminLike, user]
-  );
+  const { planAccess, isSuperAdmin, canManageMeetingScheduling, canUseMeetingNotes } = usePlanAccessPermissions({
+    user, permissions, planId, site, client
+  });
 
   const meetingLocationLabels = useMemo(() => computeMeetingLocationLabels(allClients), [allClients]);
 
