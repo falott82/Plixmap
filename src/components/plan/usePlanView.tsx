@@ -5,14 +5,13 @@ import { meetingIsoDayFromTs, meetingClockFromTs, shiftIsoDay, monthAnchorFromIs
 import { runRealtimeWsEffect } from './planViewRealtime';
 import { runRoomDepartmentOptionsEffect, runMeetingOverviewEffect } from './planViewDepartmentOptions';
 import { computeModalInitials } from './planViewModalInitials';
-import { computeRackOverlayLinks, computeRoomLayoutExportRows } from './planViewExportData';
+import { computeRackOverlayLinks } from './planViewExportData';
 import {
   computeSnapRoomRectToAdjacentSide,
   computeOpenEditRoom,
   computeCreateRoomFromRect,
   computeCreateRoomFromPoly,
   computeSplitWallAtPoint,
-  computeRoomMeasuresData,
   computeAddWallSegment,
   isPointInRoom,
   getRoomIdAt,
@@ -111,6 +110,7 @@ import { usePlanPaletteDefs } from './usePlanPaletteDefs';
 import { usePlanAccessPermissions } from './usePlanAccessPermissions';
 import { usePlanObjectIndex } from './usePlanObjectIndex';
 import { usePlanCollections } from './usePlanCollections';
+import { usePlanRoomExportDerived } from './usePlanRoomExportDerived';
 import type {
   PlanObjectModalState,
   RoomDepartmentConfirmState,
@@ -2384,40 +2384,10 @@ export const usePlanView = (planId: string) => {
     [getCorridorPolygon]
   );
 
-  const roomMeasuresData = useMemo(() => {
-    return computeRoomMeasuresData({
-      computePolygonArea,
-      computePolylineLength,
-      formatCornerLabel,
-      formatNumber,
-      lang,
-      metersPerPixel,
-      renderPlan,
-      renderPlanRoomById,
-      roomMeasuresModal
-    });
-  }, [
-    computePolygonArea,
-    computePolylineLength,
-    formatCornerLabel,
-    formatNumber,
-    getRoomPolygon,
-    lang,
-    metersPerPixel,
-    renderPlan,
-    renderPlanRoomById,
-    roomMeasuresModal
-  ]);
-
-  const roomLayoutExportRows = useMemo(
-    () => computeRoomLayoutExportRows({ allClients, roomLayoutExportModal }),
-    [allClients, roomLayoutExportModal]
-  );
-
-  const roomLayoutExportSource = useMemo(
-    () => roomLayoutExportRows.find((row) => row.isSource) || null,
-    [roomLayoutExportRows]
-  );
+  const { roomMeasuresData, roomLayoutExportRows, roomLayoutExportSource } = usePlanRoomExportDerived({
+    computePolygonArea, computePolylineLength, formatCornerLabel, formatNumber, lang, metersPerPixel,
+    renderPlan, renderPlanRoomById, roomMeasuresModal, getRoomPolygon, allClients, roomLayoutExportModal
+  });
 
   const applyRoomLayoutExportToSelection = useCallback(() => {
     runApplyRoomLayoutExportToSelection({
