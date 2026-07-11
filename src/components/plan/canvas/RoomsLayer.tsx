@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Circle, Group, Layer, Line, Rect, Transformer } from 'react-konva';
 import { FloorPlan, MapObject } from '../../../store/types';
 
@@ -72,7 +72,7 @@ export interface RoomsLayerProps {
   onUpdateRoom?: (roomId: string, payload: any) => void;
 }
 
-export const RoomsLayer = (props: RoomsLayerProps) => {
+const RoomsLayerImpl = (props: RoomsLayerProps) => {
   const {
     plan,
     toolMode,
@@ -787,3 +787,6 @@ export const RoomsLayer = (props: RoomsLayerProps) => {
         </Layer>
   );
 };
+
+RoomsLayerImpl.displayName = 'RoomsLayer';
+export const RoomsLayer = memo(RoomsLayerImpl);

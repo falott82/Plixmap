@@ -175,11 +175,25 @@ const createRealtimeRuntime = (deps) => {
     return map;
   };
 
+  // The plan-path map is a pure function of the state tree, but a single lock/presence
+  // event fans out to computePresence + computeGlobalPresence + getLockedPlansSnapshot +
+  // emitLockState, each of which used to rebuild it from scratch (a full clients→sites→
+  // plans→revisions walk). Memoize by state.updatedAt so an editing burst reuses one build.
+  // The returned map is only ever read by callers, so sharing the cached instance is safe.
+  let planPathMapCache = { updatedAt: null, map: null };
+  const getPlanPathMap = () => {
+    const state = readState();
+    const version = Number(state?.updatedAt || 0) || 0;
+    if (planPathMapCache.map && planPathMapCache.updatedAt === version) return planPathMapCache.map;
+    const map = buildPlanPathMap(state.clients || []);
+    planPathMapCache = { updatedAt: version, map };
+    return map;
+  };
+
   const computePresence = (planId) => {
     const members = wsPlanMembers.get(planId);
     const users = new Map();
-    const state = readState();
-    const planPathMap = buildPlanPathMap(state.clients || []);
+    const planPathMap = getPlanPathMap();
     const lockByUser = new Map();
     for (const [lockPlanId, lock] of planLocks.entries()) {
       if (!lock?.userId) continue;
@@ -218,8 +232,7 @@ const createRealtimeRuntime = (deps) => {
   };
 
   const computeGlobalPresence = () => {
-    const state = readState();
-    const planPathMap = buildPlanPathMap(state.clients || []);
+    const planPathMap = getPlanPathMap();
     const locksByUser = new Map();
     for (const [lockPlanId, lock] of planLocks.entries()) {
       if (!lock?.userId) continue;
@@ -258,8 +271,7 @@ const createRealtimeRuntime = (deps) => {
 
   const getLockedPlansSnapshot = () => {
     const out = {};
-    const state = readState();
-    const planPathMap = buildPlanPathMap(state.clients || []);
+    const planPathMap = getPlanPathMap();
     for (const [planId, lock] of planLocks.entries()) {
       if (!lock?.userId) continue;
       const path = planPathMap.get(planId);
@@ -334,8 +346,7 @@ const createRealtimeRuntime = (deps) => {
   const emitLockState = (planId) => {
     const lock = getValidLock(planId) || null;
     const grant = getValidGrant(planId) || null;
-    const state = readState();
-    const planPathMap = buildPlanPathMap(state.clients || []);
+    const planPathMap = getPlanPathMap();
     const path = planPathMap.get(planId);
     broadcastToPlan(planId, {
       type: 'lock_state',
@@ -562,8 +573,7 @@ const createRealtimeRuntime = (deps) => {
           wsPlanMembers.get(planId).add(ws);
           info.plans.set(planId, Date.now());
 
-          const state = readState();
-          const planPathMap = buildPlanPathMap(state.clients || []);
+          const planPathMap = getPlanPathMap();
           const path = planPathMap.get(planId);
           const lock = getValidLock(planId) || null;
           const grant = lock ? null : getValidGrant(planId) || null;
@@ -718,8 +728,7 @@ const createRealtimeRuntime = (deps) => {
             decisionEndsAt,
             graceMinutes
           });
-          const state = readState();
-          const planPathMap = buildPlanPathMap(state.clients || []);
+          const planPathMap = getPlanPathMap();
           const path = planPathMap.get(planId);
           const payload = {
             type: 'force_unlock',
@@ -891,8 +900,7 @@ const createRealtimeRuntime = (deps) => {
             return;
           }
           const requestId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(10).toString('hex');
-          const state = readState();
-          const planPathMap = buildPlanPathMap(state.clients || []);
+          const planPathMap = getPlanPathMap();
           const path = planPathMap.get(planId);
           const payload = {
             type: 'unlock_request',
@@ -1045,8 +1053,7 @@ const createRealtimeRuntime = (deps) => {
             takeover,
             grant: grantPayload,
             plan: (() => {
-              const state = readState();
-              const planPathMap = buildPlanPathMap(state.clients || []);
+              const planPathMap = getPlanPathMap();
               const path = planPathMap.get(planId);
               return { clientName: path?.clientName || '', siteName: path?.siteName || '', planName: path?.planName || '' };
             })()

@@ -13,6 +13,8 @@ RUN npm install --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY server ./server
 COPY dbsetup.cjs ./dbsetup.cjs
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown -R node:node /app
+# Drop root: the runtime writes only to /app/data (owned by node above).
+USER node
 EXPOSE 8787
 CMD ["sh", "-c", "node ./dbsetup.cjs && node server/index.cjs"]

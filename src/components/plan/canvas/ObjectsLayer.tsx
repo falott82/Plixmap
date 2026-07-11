@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, memo } from 'react';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Text, Transformer } from 'react-konva';
 import { WIFI_RANGE_SCALE_MAX } from '../../../store/data';
 import { isSecurityTypeId } from '../../../store/security';
@@ -23,7 +23,7 @@ import {
 import { ObjectsLayerOverlays } from './ObjectsLayerOverlays';
 
 
-export const ObjectsLayer = (props: ObjectsLayerProps) => {
+const ObjectsLayerImpl = (props: ObjectsLayerProps) => {
   const {
     plan,
     visibleRegularObjects,
@@ -1449,3 +1449,8 @@ export const ObjectsLayer = (props: ObjectsLayerProps) => {
         </Layer>
   );
 };
+
+ObjectsLayerImpl.displayName = 'ObjectsLayer';
+// Presentational Konva layer: memoized so a CanvasStage re-render (e.g. the highlight
+// tick) only rebuilds this layer when its props actually change.
+export const ObjectsLayer = memo(ObjectsLayerImpl);

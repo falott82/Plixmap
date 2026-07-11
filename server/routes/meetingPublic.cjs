@@ -16,6 +16,29 @@ const buildKioskManifest = (roomId) => {
   };
 };
 
+// The public (unauthenticated, capability-URL) kiosk schedule must not leak meeting
+// metadata that the kiosk display never renders. Participant names and external-guest
+// details ARE used by the kiosk attendee list / self check-in, so those stay; the
+// fields below are consumed only by authenticated views, so they are stripped here.
+// videoConferenceLink is stripped to close a meeting-hijacking vector: the kiosk does
+// not render it (the mobile "join" button is fed by the authenticated /api/mobile/agenda).
+const PRIVATE_KIOSK_MEETING_FIELDS = [
+  'notes',
+  'videoConferenceLink',
+  'technicalEmail',
+  'requestedByEmail',
+  'requestedByUsername',
+  'requestedById',
+  'reviewedById'
+];
+const stripPrivateKioskFields = (meeting) => {
+  if (!meeting || typeof meeting !== 'object') return meeting;
+  for (const field of PRIVATE_KIOSK_MEETING_FIELDS) {
+    if (field in meeting) delete meeting[field];
+  }
+  return meeting;
+};
+
 const buildMobileManifest = () => ({
   name: 'Plixmap Mobile',
   short_name: 'Plixmap Mobile',
@@ -517,7 +540,8 @@ const registerMeetingPublicRoutes = (app, deps) => {
       )
       .all(roomId, end, start)
       .map(mapMeetingRow)
-      .filter(Boolean);
+      .filter(Boolean)
+      .map(stripPrivateKioskFields);
     const inProgress = rows.find((row) => Number(row.startAt) <= now && Number(row.endAt) > now) || null;
     const upcoming = rows.filter((row) => Number(row.startAt) > now).slice(0, 20);
     const daySchedule = rows

@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, memo, type ReactNode } from 'react';
 import { Circle, Group, Layer, Line, Rect, Text } from 'react-konva';
 import { Corridor, FloorPlan } from '../../../store/types';
 import { clamp } from '../../../utils/geometry';
@@ -68,7 +68,7 @@ export interface CorridorsLayerProps {
   onAdjustCorridorLabelScale?: (corridorId: string, delta: number) => void;
 }
 
-export const CorridorsLayer = (props: CorridorsLayerProps) => {
+const CorridorsLayerImpl = (props: CorridorsLayerProps) => {
   const {
     plan,
     toolMode,
@@ -554,3 +554,6 @@ export const CorridorsLayer = (props: CorridorsLayerProps) => {
         </Layer>
   );
 };
+
+CorridorsLayerImpl.displayName = 'CorridorsLayer';
+export const CorridorsLayer = memo(CorridorsLayerImpl);

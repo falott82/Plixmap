@@ -831,13 +831,15 @@ const registerUserRoutes = (app, deps) => {
       res.status(403).json({ error: 'Forbidden' });
       return;
     }
-    const row = db.prepare('SELECT id, username, passwordSalt, passwordHash, tokenVersion, isSuperAdmin FROM users WHERE id = ?').get(targetId);
+    const row = db.prepare('SELECT id, username, passwordSalt, passwordHash, tokenVersion, isAdmin, isSuperAdmin FROM users WHERE id = ?').get(targetId);
     if (!row) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    if (!isSelf && row.isSuperAdmin && !req.isSuperAdmin) {
-      res.status(403).json({ error: 'Only superadmin can change superadmin password' });
+    // Only a superadmin may reset another admin's (or the superadmin's) password.
+    // A regular admin resetting a peer admin's password would be an account-takeover path.
+    if (!isSelf && (row.isSuperAdmin || row.isAdmin) && !req.isSuperAdmin) {
+      res.status(403).json({ error: 'Only superadmin can change another admin password' });
       return;
     }
     if (!requesterIsAdmin) {
@@ -878,13 +880,14 @@ const registerUserRoutes = (app, deps) => {
       return;
     }
     const targetId = req.params.id;
-    const target = db.prepare('SELECT id, username, isSuperAdmin, tokenVersion FROM users WHERE id = ?').get(targetId);
+    const target = db.prepare('SELECT id, username, isAdmin, isSuperAdmin, tokenVersion FROM users WHERE id = ?').get(targetId);
     if (!target) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
-    if (target.isSuperAdmin && !req.isSuperAdmin) {
-      res.status(403).json({ error: 'Only superadmin can reset superadmin MFA' });
+    // Only a superadmin may clear another admin's MFA (peer-admin MFA reset would be a takeover path).
+    if (targetId !== req.userId && (target.isSuperAdmin || target.isAdmin) && !req.isSuperAdmin) {
+      res.status(403).json({ error: 'Only superadmin can reset another admin MFA' });
       return;
     }
     db.prepare('UPDATE users SET mfaEnabled = 0, mfaSecretEnc = NULL, tokenVersion = ?, updatedAt = ? WHERE id = ?').run(

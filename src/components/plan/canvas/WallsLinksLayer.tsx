@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Arrow, Circle, Group, Layer, Line, Rect, Text } from 'react-konva';
 import { Corridor, FloorPlan, MapObject, RoomConnectionDoor } from '../../../store/types';
 import { WALL_LAYER_COLOR } from '../../../store/data';
@@ -89,7 +89,7 @@ export interface WallsLinksLayerProps {
   onUpdateCorridor?: (corridorId: string, payload: any) => void;
 }
 
-export const WallsLinksLayer = (props: WallsLinksLayerProps) => {
+const WallsLinksLayerImpl = (props: WallsLinksLayerProps) => {
   const {
     plan,
     wallObjects,
@@ -924,3 +924,6 @@ export const WallsLinksLayer = (props: WallsLinksLayerProps) => {
         </Layer>
   );
 };
+
+WallsLinksLayerImpl.displayName = 'WallsLinksLayer';
+export const WallsLinksLayer = memo(WallsLinksLayerImpl);
