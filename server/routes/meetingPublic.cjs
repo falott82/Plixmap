@@ -16,6 +16,29 @@ const buildKioskManifest = (roomId) => {
   };
 };
 
+// The public (unauthenticated, capability-URL) kiosk schedule must not leak meeting
+// metadata that the kiosk display never renders. Participant names and external-guest
+// details ARE used by the kiosk attendee list / self check-in, so those stay; the
+// fields below are consumed only by authenticated views, so they are stripped here.
+// videoConferenceLink is stripped to close a meeting-hijacking vector: the kiosk does
+// not render it (the mobile "join" button is fed by the authenticated /api/mobile/agenda).
+const PRIVATE_KIOSK_MEETING_FIELDS = [
+  'notes',
+  'videoConferenceLink',
+  'technicalEmail',
+  'requestedByEmail',
+  'requestedByUsername',
+  'requestedById',
+  'reviewedById'
+];
+const stripPrivateKioskFields = (meeting) => {
+  if (!meeting || typeof meeting !== 'object') return meeting;
+  for (const field of PRIVATE_KIOSK_MEETING_FIELDS) {
+    if (field in meeting) delete meeting[field];
+  }
+  return meeting;
+};
+
 const buildMobileManifest = () => ({
   name: 'Plixmap Mobile',
   short_name: 'Plixmap Mobile',
@@ -33,6 +56,8 @@ const registerMeetingPublicRoutes = (app, deps) => {
   const {
     db,
     requireAuth,
+    rateLimit,
+    rateByUser,
     readState,
     serverLog,
     buildKioskPublicUrl,
@@ -40,6 +65,21 @@ const registerMeetingPublicRoutes = (app, deps) => {
     buildKioskPublicUploadUrl,
     meeting
   } = deps;
+  // Unauthenticated public endpoints — keyed on client IP (rateByUser falls back to req.ip
+  // when there is no req.userId). help-request triggers SMTP, so it gets a stricter bucket.
+  // Fall back to a passthrough when the limiter helpers are not wired (e.g. unit tests).
+  const passthrough = (_req, _res, next) => next();
+  const publicReadLimiter = typeof rateByUser === 'function' ? rateByUser('meeting_public_read', 60 * 1000, 60) : passthrough;
+  const publicWriteLimiter = typeof rateByUser === 'function' ? rateByUser('meeting_public_write', 60 * 1000, 30) : passthrough;
+  const helpRequestLimiter =
+    typeof rateLimit === 'function'
+      ? rateLimit({
+          name: 'meeting_public_help',
+          windowMs: 60 * 1000,
+          max: 5,
+          key: (req) => `${req.ip}:${req.params.roomId}`
+        })
+      : passthrough;
   const {
     dayRangeFromIso,
     parseIsoDay,
@@ -461,7 +501,7 @@ const registerMeetingPublicRoutes = (app, deps) => {
     res.json(buildMobileManifest());
   });
 
-  app.get('/api/meeting-room/:roomId/schedule', (req, res) => {
+  app.get('/api/meeting-room/:roomId/schedule', publicReadLimiter, (req, res) => {
     const roomId = String(req.params.roomId || '').trim();
     if (!roomId) {
       res.status(400).json({ error: 'Missing roomId' });
@@ -500,7 +540,8 @@ const registerMeetingPublicRoutes = (app, deps) => {
       )
       .all(roomId, end, start)
       .map(mapMeetingRow)
-      .filter(Boolean);
+      .filter(Boolean)
+      .map(stripPrivateKioskFields);
     const inProgress = rows.find((row) => Number(row.startAt) <= now && Number(row.endAt) > now) || null;
     const upcoming = rows.filter((row) => Number(row.startAt) > now).slice(0, 20);
     const daySchedule = rows
@@ -521,7 +562,7 @@ const registerMeetingPublicRoutes = (app, deps) => {
     });
   });
 
-  app.post('/api/meeting-room/:roomId/checkin-toggle', express.json({ limit: '256kb' }), (req, res) => {
+  app.post('/api/meeting-room/:roomId/checkin-toggle', publicWriteLimiter, express.json({ limit: '256kb' }), (req, res) => {
     const roomId = String(req.params.roomId || '').trim();
     const meetingId = String(req.body?.meetingId || '').trim();
     const key = String(req.body?.key || '').trim();
@@ -559,7 +600,7 @@ const registerMeetingPublicRoutes = (app, deps) => {
     });
   });
 
-  app.post('/api/meeting-room/:roomId/help-request', express.json({ limit: '64kb' }), async (req, res) => {
+  app.post('/api/meeting-room/:roomId/help-request', helpRequestLimiter, express.json({ limit: '64kb' }), async (req, res) => {
     const roomId = String(req.params.roomId || '').trim();
     const service = String(req.body?.service || '').trim().toLowerCase();
     if (!roomId || !['it', 'cleaning', 'coffee'].includes(service)) {

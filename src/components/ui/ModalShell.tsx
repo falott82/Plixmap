@@ -1,6 +1,7 @@
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { Fragment, ReactNode, RefObject, useRef } from 'react';
+import { useT } from '../../i18n/useT';
 
 type Props = {
   open: boolean;
@@ -29,6 +30,7 @@ const ModalShell = ({
   closeDisabled = false,
   initialFocusRef
 }: Props) => {
+  const t = useT();
   // Focus sentinel prevents HeadlessUI FocusTrap warnings when a modal
   // opens before the intended input/button is mounted.
   const fallbackFocusRef = useRef<HTMLButtonElement | null>(null);
@@ -88,7 +90,8 @@ const ModalShell = ({
                     className="icon-button"
                     disabled={closeDisabled}
                     aria-disabled={closeDisabled}
-                    title="Close"
+                    aria-label={t({ it: 'Chiudi', en: 'Close' })}
+                    title={t({ it: 'Chiudi', en: 'Close' })}
                   >
                     <X size={18} />
                   </button>

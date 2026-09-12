@@ -19,14 +19,20 @@ const decryptSecret = (authSecretB64, blob) => {
   if (!blob || typeof blob !== 'string') return null;
   const [ivB64, tagB64, ctB64] = blob.split('.');
   if (!ivB64 || !tagB64 || !ctB64) return null;
-  const key = keyFromAuthSecret(authSecretB64);
-  const iv = Buffer.from(ivB64, 'base64');
-  const tag = Buffer.from(tagB64, 'base64');
-  const ct = Buffer.from(ctB64, 'base64');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(tag);
-  const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
-  return pt.toString('utf8');
+  try {
+    const key = keyFromAuthSecret(authSecretB64);
+    const iv = Buffer.from(ivB64, 'base64');
+    const tag = Buffer.from(tagB64, 'base64');
+    const ct = Buffer.from(ctB64, 'base64');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
+    return pt.toString('utf8');
+  } catch {
+    // Corrupt/tampered blob or wrong key: GCM auth fails in decipher.final().
+    // Callers treat the secret as a null sentinel, so do not throw.
+    return null;
+  }
 };
 
 const generateTotpSecret = (username) => {

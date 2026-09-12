@@ -18,6 +18,7 @@ import type {
 } from './types';
 import {
   ALL_ITEMS_LAYER_ID,
+  SYSTEM_LAYER_IDS,
   DEFAULT_CCTV_TYPES,
   DEFAULT_DESK_TYPES,
   DEFAULT_DEVICE_TYPES,
@@ -32,8 +33,6 @@ import {
   WIFI_DEFAULT_STANDARD
 } from './data';
 import { isSecurityTypeId, SECURITY_LAYER_ID } from './security';
-
-const SYSTEM_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'corridors', 'cabling', 'quotes']);
 
 export const normalizeViews = (views: FloorPlanView[] | undefined): FloorPlanView[] | undefined => {
   if (!Array.isArray(views)) return views;

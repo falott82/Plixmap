@@ -5,7 +5,9 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Corridor, FloorPlan, Room } from '../../store/types';
 import { useT } from '../../i18n/useT';
-import { computeMultiFloorRoute, MultiFloorRouteResult, Point, RoutePlanSegment, RouteResult } from './InternalMapModal';
+import { computeMultiFloorRoute, MultiFloorRouteResult, Point, RoutePlanSegment, RouteResult } from './internalMapRouting';
+import { polygonCentroid as polygonCentroidShared, pointInPolygon, distancePointToSegment } from './planViewUtils';
+import { waitForNodeImagesReady, inlineImagesForExport, rasterizeSvgsForExport, buildCaptureNode } from './EscapeRouteModal.helpers';
 
 type ConnectionTransitionType = 'stairs' | 'elevator';
 
@@ -84,25 +86,8 @@ const googleMapsCoordsLabel = (rawValue: string) => {
 const getAssemblyPointCoordsLabel = (point: EscapeAssemblyPoint) =>
   point.googleCoords || point.gps || `${Math.round(point.point.x)}, ${Math.round(point.point.y)}`;
 
-const polygonCentroid = (polygon: Point[]) => {
-  if (!polygon.length) return { x: 0, y: 0 };
-  let area2 = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    const cross = a.x * b.y - b.x * a.y;
-    area2 += cross;
-    cx += (a.x + b.x) * cross;
-    cy += (a.y + b.y) * cross;
-  }
-  if (Math.abs(area2) < 0.000001) {
-    const sum = polygon.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), { x: 0, y: 0 });
-    return { x: sum.x / polygon.length, y: sum.y / polygon.length };
-  }
-  return { x: cx / (3 * area2), y: cy / (3 * area2) };
-};
+// Shares the area-weighted centroid math; preserves this modal's {0,0}-for-empty contract.
+const polygonCentroid = (polygon: Point[]) => polygonCentroidShared(polygon) ?? { x: 0, y: 0 };
 
 const getRoomLabelLayout = (room: Room, polygon: Point[]) => {
   const minX = Math.min(...polygon.map((point) => point.x));
@@ -160,15 +145,6 @@ const roomPolygon = (room: Room): Point[] => {
   ];
 };
 
-const distancePointToSegment = (point: Point, a: Point, b: Point) => {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq <= 0.0000001) return Math.hypot(point.x - a.x, point.y - a.y);
-  const ratio = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-  const projected = { x: a.x + dx * ratio, y: a.y + dy * ratio };
-  return Math.hypot(point.x - projected.x, point.y - projected.y);
-};
 
 const pointOnPolygonBoundary = (point: Point, polygon: Point[], tolerance = 1.8) => {
   if (polygon.length < 2) return false;
@@ -180,18 +156,6 @@ const pointOnPolygonBoundary = (point: Point, polygon: Point[], tolerance = 1.8)
   return false;
 };
 
-const pointInPolygon = (point: Point, polygon: Point[]) => {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    const xi = polygon[i].x;
-    const yi = polygon[i].y;
-    const xj = polygon[j].x;
-    const yj = polygon[j].y;
-    const intersects = yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi || 0.0000001) + xi;
-    if (intersects) inside = !inside;
-  }
-  return inside;
-};
 
 const getCorridorDoorAnchor = (corridor: Corridor, door: any): Point | null => {
   const points = corridorPolygon(corridor);
@@ -298,165 +262,6 @@ const getArrowPolygonPoints = (from: Point, to: Point, tail = 14, wing = 5) => {
   const left = { x: base.x - uy * wing, y: base.y + ux * wing };
   const right = { x: base.x + uy * wing, y: base.y - ux * wing };
   return `${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`;
-};
-
-const blobToDataUrl = (blob: Blob) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('file-read-error'));
-    reader.readAsDataURL(blob);
-  });
-
-const loadImageAsDataUrl = async (src: string) => {
-  const raw = String(src || '').trim();
-  if (!raw) return '';
-  if (/^data:/i.test(raw)) return raw;
-  try {
-    const response = await fetch(raw, { credentials: 'include', mode: 'cors' });
-    if (!response.ok) throw new Error(`http-${response.status}`);
-    const blob = await response.blob();
-    return await blobToDataUrl(blob);
-  } catch {
-    return raw;
-  }
-};
-
-const waitForNodeImagesReady = async (node: HTMLElement) => {
-  const htmlImgs = Array.from(node.querySelectorAll('img')) as HTMLImageElement[];
-  const svgImgs = Array.from(node.querySelectorAll('image')) as SVGImageElement[];
-  const waitHtml = htmlImgs.map((img) =>
-    img.complete
-      ? Promise.resolve()
-      : new Promise<void>((resolve) => {
-          img.onload = () => resolve();
-          img.onerror = () => resolve();
-        })
-  );
-  const waitSvg = svgImgs.map((svgImg) => {
-    const href = String(svgImg.getAttribute('href') || svgImg.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || '').trim();
-    if (!href) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      const img = new Image();
-      if (/^https?:\/\//i.test(href)) img.crossOrigin = 'anonymous';
-      img.onload = () => resolve();
-      img.onerror = () => resolve();
-      img.src = href;
-    });
-  });
-  await Promise.all([...waitHtml, ...waitSvg]);
-};
-
-const inlineImagesForExport = async (node: HTMLElement) => {
-  const cache = new Map<string, Promise<string>>();
-  const resolveDataUrl = (rawSrc: string) => {
-    const src = String(rawSrc || '').trim();
-    if (!src) return Promise.resolve('');
-    if (/^data:/i.test(src)) return Promise.resolve(src);
-    const cached = cache.get(src);
-    if (cached) return cached;
-    const task = loadImageAsDataUrl(src);
-    cache.set(src, task);
-    return task;
-  };
-
-  const svgImages = Array.from(node.querySelectorAll('svg image'));
-  for (const entry of svgImages) {
-    const href = String(entry.getAttribute('href') || entry.getAttribute('xlink:href') || '').trim();
-    if (!href) continue;
-    const dataUrl = await resolveDataUrl(href);
-    if (!dataUrl || !/^data:/i.test(dataUrl)) continue;
-    entry.setAttribute('href', dataUrl);
-    entry.setAttribute('xlink:href', dataUrl);
-  }
-
-  const htmlImages = Array.from(node.querySelectorAll('img')) as HTMLImageElement[];
-  for (const entry of htmlImages) {
-    const src = String(entry.currentSrc || entry.src || '').trim();
-    if (!src) continue;
-    const dataUrl = await resolveDataUrl(src);
-    if (!dataUrl || !/^data:/i.test(dataUrl)) continue;
-    entry.src = dataUrl;
-    try {
-      if (typeof entry.decode === 'function') await entry.decode();
-    } catch {
-      // ignore decode issues
-    }
-  }
-};
-
-const rasterizeSvgsForExport = async (node: HTMLElement) => {
-  const svgNodes = Array.from(node.querySelectorAll('svg')) as SVGSVGElement[];
-  for (const svg of svgNodes) {
-    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    svg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-    const serialized = new XMLSerializer().serializeToString(svg);
-    const blob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
-    const objectUrl = URL.createObjectURL(blob);
-    const snapshot = new Image();
-    const loaded = await new Promise<boolean>((resolve) => {
-      const done = (ok: boolean) => {
-        snapshot.onload = null;
-        snapshot.onerror = null;
-        URL.revokeObjectURL(objectUrl);
-        resolve(ok);
-      };
-      const timeout = window.setTimeout(() => done(false), 3500);
-      snapshot.onload = () => {
-        window.clearTimeout(timeout);
-        done(true);
-      };
-      snapshot.onerror = () => {
-        window.clearTimeout(timeout);
-        done(false);
-      };
-      snapshot.src = objectUrl;
-    });
-    if (!loaded) continue;
-
-    const computed = window.getComputedStyle(svg);
-    const rect = svg.getBoundingClientRect();
-    const width = Math.max(1, Math.round(rect.width || parseFloat(computed.width) || 1));
-    const height = Math.max(1, Math.round(rect.height || parseFloat(computed.height) || 1));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) continue;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(snapshot, 0, 0, width, height);
-    const replacement = document.createElement('img');
-    replacement.alt = '';
-    replacement.src = canvas.toDataURL('image/png');
-    replacement.width = width;
-    replacement.height = height;
-    replacement.style.display = computed.display === 'inline' ? 'block' : computed.display || 'block';
-    replacement.style.width = computed.width && computed.width !== 'auto' ? computed.width : '100%';
-    replacement.style.height = computed.height && computed.height !== 'auto' ? computed.height : `${height}px`;
-    replacement.style.maxWidth = '100%';
-    replacement.style.verticalAlign = computed.verticalAlign || 'baseline';
-    try {
-      if (typeof replacement.decode === 'function') await replacement.decode();
-    } catch {
-      // ignore decode issues
-    }
-    svg.replaceWith(replacement);
-  }
-};
-
-const buildCaptureNode = (source: HTMLElement) => {
-  const host = document.createElement('div');
-  host.style.position = 'fixed';
-  host.style.left = '-100000px';
-  host.style.top = '-100000px';
-  host.style.pointerEvents = 'none';
-  host.style.opacity = '0';
-  host.style.zIndex = '-1';
-  const clone = source.cloneNode(true) as HTMLElement;
-  host.appendChild(clone);
-  document.body.appendChild(host);
-  return { host, node: clone };
 };
 
 const EscapeRouteModal = ({ open, plans, emergencyContacts = [], startPlanId, startPoint, sourceKind, clientName, siteName, onClose }: Props) => {

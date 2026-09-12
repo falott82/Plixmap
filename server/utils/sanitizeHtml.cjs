@@ -1,48 +1,47 @@
 'use strict';
 
-// Server-side, dependency-free HTML sanitizer used as a defense-in-depth layer
-// before persisting user-authored rich text (e.g. meeting notes).
-//
-// Node has no DOMParser, so this is a conservative regex-based pass that mirrors
-// the intent of the client-side `sanitizeHtmlBasic` (src/utils/sanitizeHtml.ts):
-//   - strip dangerous elements (script/style/iframe/object/embed/link/meta + content)
-//   - strip inline event handlers (on* attributes)
-//   - neutralize `javascript:` URLs in href/src
-//   - strip `srcdoc` and `data:text/html` payloads
-// The client still sanitizes again on render; this prevents stored XSS at the source.
-const FORBIDDEN_TAGS = ['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form'];
+// Server-side allowlist HTML sanitizer (defense-in-depth before persisting user-authored
+// rich text, e.g. meeting/client notes). Uses sanitize-html (pure Node) with an allowlist
+// mirroring the client-side DOMPurify config (src/utils/sanitizeHtml.ts) — same set of tags
+// the Lexical editor emits. The client also re-sanitizes on render.
+const sanitizeHtml = require('sanitize-html');
+
+const ALLOWED_TAGS = [
+  'p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'sub', 'sup', 'mark',
+  'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'pre', 'code',
+  'a', 'span', 'div', 'hr', 'img',
+  'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td'
+];
+
+const OPTIONS = {
+  allowedTags: ALLOWED_TAGS,
+  allowedAttributes: {
+    a: ['href', 'target', 'rel', 'title'],
+    img: ['src', 'alt', 'title', 'width', 'height'],
+    '*': ['style', 'class', 'dir', 'colspan', 'rowspan', 'align', 'valign']
+  },
+  // href/src only via safe schemes; data: allowed on <img> only (embedded images).
+  allowedSchemes: ['http', 'https', 'mailto'],
+  allowedSchemesByTag: { img: ['http', 'https', 'data'] },
+  // Drop these tags AND their text content (executable / non-rendered).
+  nonTextTags: ['script', 'style', 'textarea', 'option', 'noscript'],
+  // Disallowed attributes (on*, srcdoc, etc.) are dropped by the allowlist above.
+  transformTags: {
+    a: (tagName, attribs) => {
+      if (attribs.target) attribs.rel = 'noopener noreferrer';
+      return { tagName, attribs };
+    }
+  }
+};
 
 const sanitizeHtmlBasic = (html) => {
   if (!html || typeof html !== 'string') return '';
-  let out = html;
-
-  // Remove forbidden elements together with their content (script/style/...),
-  // and any self-closing/void variants.
-  for (const tag of FORBIDDEN_TAGS) {
-    const paired = new RegExp(`<${tag}\\b[\\s\\S]*?<\\/${tag}\\s*>`, 'gi');
-    const lone = new RegExp(`<${tag}\\b[^>]*\\/?>`, 'gi');
-    out = out.replace(paired, '').replace(lone, '');
+  try {
+    return sanitizeHtml(html, OPTIONS);
+  } catch {
+    // Fail closed.
+    return '';
   }
-
-  // Strip inline event-handler attributes: on*="..." / on*='...' / on*=value
-  out = out.replace(/\son[a-z0-9_-]+\s*=\s*"(?:[^"]*)"/gi, '');
-  out = out.replace(/\son[a-z0-9_-]+\s*=\s*'(?:[^']*)'/gi, '');
-  out = out.replace(/\son[a-z0-9_-]+\s*=\s*[^\s>]+/gi, '');
-
-  // Neutralize javascript:/vbscript:/data:text/html URLs in href/src/srcdoc/xlink:href.
-  out = out.replace(
-    /\s(href|src|xlink:href)\s*=\s*"(?:\s*(?:javascript|vbscript):[^"]*|\s*data:text\/html[^"]*)"/gi,
-    ' $1="#"'
-  );
-  out = out.replace(
-    /\s(href|src|xlink:href)\s*=\s*'(?:\s*(?:javascript|vbscript):[^']*|\s*data:text\/html[^']*)'/gi,
-    " $1='#'"
-  );
-  // Drop srcdoc entirely (can carry full HTML documents).
-  out = out.replace(/\ssrcdoc\s*=\s*"(?:[^"]*)"/gi, '');
-  out = out.replace(/\ssrcdoc\s*=\s*'(?:[^']*)'/gi, '');
-
-  return out;
 };
 
 module.exports = { sanitizeHtmlBasic };

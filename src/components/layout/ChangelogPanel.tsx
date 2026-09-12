@@ -5,10 +5,10 @@ import { releaseHistory } from '../../version/history';
 import { exportChangelogToPdf } from '../../utils/pdf';
 import { useLang, useT } from '../../i18n/useT';
 import { useUIStore } from '../../store/useUIStore';
-import { shallow } from 'zustand/shallow';
+import { useShallow } from 'zustand/react/shallow';
 
 const ChangelogPanel = () => {
-  const { changelogOpen, closeChangelog } = useUIStore((s) => ({ changelogOpen: s.changelogOpen, closeChangelog: s.closeChangelog }), shallow);
+  const { changelogOpen, closeChangelog } = useUIStore(useShallow((s) => ({ changelogOpen: s.changelogOpen, closeChangelog: s.closeChangelog })));
   const [query, setQuery] = useState('');
   const ref = useRef<HTMLDivElement | null>(null);
   const t = useT();

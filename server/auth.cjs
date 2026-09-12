@@ -41,10 +41,19 @@ const verifyPassword = (password, saltB64, hashB64) => {
   return crypto.timingSafeEqual(computed, expected);
 };
 
+// Passwords are hashed with scrypt (see scryptHash), which — unlike bcrypt —
+// does NOT silently truncate the input at 72 bytes, so the full string is
+// always significant. We still cap the length as defense-in-depth so a
+// pathologically long password can't be used to burn CPU/memory in the KDF.
+// Enforced centrally here, which every registration/change/reset path goes
+// through (server/routes/{auth,users}.cjs, server/reset-superadmin.cjs).
+const MAX_PASSWORD_LENGTH = 128;
+
 const isStrongPassword = (password) => {
   if (!password || typeof password !== 'string') return false;
   const s = password;
   if (s.length < 8) return false;
+  if (s.length > MAX_PASSWORD_LENGTH) return false;
   if (!/[a-z]/.test(s)) return false;
   if (!/[A-Z]/.test(s)) return false;
   if (!/[0-9]/.test(s)) return false;
@@ -171,6 +180,7 @@ module.exports = {
   hashPassword,
   verifyPassword,
   isStrongPassword,
+  MAX_PASSWORD_LENGTH,
   signSession,
   verifySession,
   setSessionCookie,

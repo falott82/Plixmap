@@ -97,7 +97,8 @@ test('registerMeetingPublicRoutes toggles kiosk check-ins and returns updated ma
     body: { meetingId: 'm1', key: 'attendee', checked: true }
   };
   const res = createRes();
-  route.handlers[1](req, res);
+  // The final handler is the route logic; preceding entries are middleware (rate limit, json parser).
+  route.handlers[route.handlers.length - 1](req, res);
 
   assert.equal(res.code, 200);
   assert.deepEqual(res.payload, {

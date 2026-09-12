@@ -5,14 +5,10 @@ import {
   ArrowUp,
   ArrowUpDown,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Crosshair,
   Download,
   ExternalLink,
   History,
-  Maximize2,
-  Minimize2,
   RotateCcw,
   Search,
   X
@@ -22,184 +18,25 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { useDataStore } from '../../store/useDataStore';
 import { useLang, useT } from '../../i18n/useT';
-import { Corridor, FloorPlan, Room, SecurityCheckEntry, SecurityDocumentEntry } from '../../store/types';
 import Icon from '../ui/Icon';
-import { isSecurityTypeId } from '../../store/security';
-import { TEXT_FONT_OPTIONS } from '../../store/data';
 import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import { useAuthStore } from '../../store/useAuthStore';
 
-type Point = { x: number; y: number };
-
-type SafetySortKey =
-  | 'clientName'
-  | 'siteName'
-  | 'planName'
-  | 'typeLabel'
-  | 'name'
-  | 'description'
-  | 'notes'
-  | 'lastVerificationAt'
-  | 'locationName';
-
-type DoorSortKey =
-  | 'clientName'
-  | 'siteName'
-  | 'planName'
-  | 'doorId'
-  | 'description'
-  | 'doorType'
-  | 'lastVerificationAt'
-  | 'verifierCompany'
-  | 'corridorName'
-  | 'nearestRoomName';
-
-type SafetyRow = {
-  rowId: string;
-  objectId: string;
-  clientId: string;
-  clientName: string;
-  siteId: string;
-  siteName: string;
-  planId: string;
-  planName: string;
-  icon: string;
-  typeLabel: string;
-  name: string;
-  description: string;
-  notes: string;
-  lastVerificationAt: string;
-  verifierCompany: string;
-  gpsCoords: string;
-  locationName: string;
-  point: Point;
-  plan: FloorPlan;
-  securityCheckHistory: SecurityCheckEntry[];
-  securityDocuments: SecurityDocumentEntry[];
-};
-
-type EmergencyDoorRow = {
-  rowId: string;
-  clientId: string;
-  siteId: string;
-  planId: string;
-  clientName: string;
-  siteName: string;
-  planName: string;
-  doorId: string;
-  description: string;
-  doorType: string;
-  corridorName: string;
-  nearestRoomName: string;
-  lastVerificationAt: string;
-  verifierCompany: string;
-  openUrl: string;
-  mode: string;
-  isFireDoor: boolean;
-  corridorId: string;
-  plan: FloorPlan;
-  verificationHistory: Array<{ id: string; date?: string; company: string; notes?: string; createdAt: number }>;
-};
-
-const toRectPolygon = (x: number, y: number, width: number, height: number): Point[] => {
-  if (!(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) return [];
-  return [
-    { x, y },
-    { x: x + width, y },
-    { x: x + width, y: y + height },
-    { x, y: y + height }
-  ];
-};
-
-const roomPolygon = (room: Room): Point[] => {
-  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-  if (kind === 'poly' && Array.isArray(room?.points) && room.points.length >= 3) {
-    return room.points.map((p) => ({ x: Number(p?.x || 0), y: Number(p?.y || 0) }));
-  }
-  return toRectPolygon(Number(room?.x || 0), Number(room?.y || 0), Number(room?.width || 0), Number(room?.height || 0));
-};
-
-const corridorPolygon = (corridor: Corridor): Point[] => {
-  const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-  if (kind === 'poly' && Array.isArray(corridor?.points) && corridor.points.length >= 3) {
-    return corridor.points.map((p) => ({ x: Number(p?.x || 0), y: Number(p?.y || 0) }));
-  }
-  return toRectPolygon(
-    Number(corridor?.x || 0),
-    Number(corridor?.y || 0),
-    Number(corridor?.width || 0),
-    Number(corridor?.height || 0)
-  );
-};
-
-const polygonCentroid = (polygon: Point[]): Point | null => {
-  if (!polygon.length) return null;
-  let area2 = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    const cross = a.x * b.y - b.x * a.y;
-    area2 += cross;
-    cx += (a.x + b.x) * cross;
-    cy += (a.y + b.y) * cross;
-  }
-  if (Math.abs(area2) < 1e-6) {
-    const sum = polygon.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
-    return { x: sum.x / polygon.length, y: sum.y / polygon.length };
-  }
-  return { x: cx / (3 * area2), y: cy / (3 * area2) };
-};
-
-const pointInPolygon = (point: Point, polygon: Point[]) => {
-  if (!polygon.length) return false;
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].x;
-    const yi = polygon[i].y;
-    const xj = polygon[j].x;
-    const yj = polygon[j].y;
-    const intersects = yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || 1e-9) + xi;
-    if (intersects) inside = !inside;
-  }
-  return inside;
-};
-
-const getDoorAnchor = (corridor: Corridor, door: any): Point | null => {
-  const points = corridorPolygon(corridor);
-  if (points.length < 2) return null;
-  const edgeIndex = Number(door?.edgeIndex);
-  const t = Number(door?.t);
-  if (!Number.isFinite(edgeIndex) || !Number.isFinite(t)) return null;
-  const idx = ((Math.floor(edgeIndex) % points.length) + points.length) % points.length;
-  const a = points[idx];
-  const b = points[(idx + 1) % points.length];
-  if (!a || !b) return null;
-  const clampedT = Math.max(0, Math.min(1, t));
-  return { x: a.x + (b.x - a.x) * clampedT, y: a.y + (b.y - a.y) * clampedT };
-};
-
-const polygonPath = (points: Point[]) => {
-  if (!points.length) return '';
-  return `${points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} Z`;
-};
-
-const compareText = (a: string, b: string, lang: string) => a.localeCompare(b, lang, { sensitivity: 'base' });
-const DEFAULT_SAFETY_CARD_LAYOUT = { x: 24, y: 24, w: 420, h: 84, fontSize: 10, fontIndex: 0, colorIndex: 0, textBgIndex: 0 } as const;
-const SAFETY_CARD_COLOR_VARIANTS = [
-  { body: '#e0f2fe', header: '#bae6fd', border: '#0ea5e9', title: '#075985', text: '#0f172a' },
-  { body: '#ecfeff', header: '#cffafe', border: '#06b6d4', title: '#0e7490', text: '#0f172a' },
-  { body: '#dbeafe', header: '#bfdbfe', border: '#3b82f6', title: '#1d4ed8', text: '#0f172a' },
-  { body: '#f0f9ff', header: '#e0f2fe', border: '#0284c7', title: '#0c4a6e', text: '#111827' }
-] as const;
-const SAFETY_CARD_TEXT_BG_VARIANTS = ['transparent', '#ecfeff', '#dbeafe', '#e0f2fe'] as const;
-const SAFETY_CARD_FONT_VALUES = (TEXT_FONT_OPTIONS || []).map((entry) => String(entry.value || '').trim()).filter(Boolean);
-
-const parseDateForSort = (value: string) => {
-  const ts = value ? Date.parse(value) : NaN;
-  return Number.isFinite(ts) ? ts : 0;
-};
+import {
+  SafetySortKey, DoorSortKey, SafetyRow, EmergencyDoorRow,
+  compareText, parseDateForSort,
+  computeSafetyMapData,
+  computeSafetyMultiMapData,
+  buildSafetyRowsRaw,
+  buildEmergencyDoorRowsRaw
+} from './SafetyPanel.helpers';
+import { SingleMapPreviewModal, MultiMapPreviewModal } from './SafetyPanelMapModals';
+import {
+  exportElementToPdf,
+  inlineImagesForExport,
+  waitForNodeImagesReady,
+  rasterizeSvgsForExport
+} from './SafetyPanelExport';
 
 const SafetyPanel = () => {
   const t = useT();
@@ -256,136 +93,9 @@ const SafetyPanel = () => {
     return false;
   };
 
-  const safetyRowsRaw = useMemo<SafetyRow[]>(() => {
-    const rows: SafetyRow[] = [];
-    for (const client of clients || []) {
-      for (const site of client.sites || []) {
-        for (const plan of site.floorPlans || []) {
-          const roomShapes = (plan.rooms || []).map((room) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) }));
-          const corridorShapes = ((plan.corridors || []) as Corridor[]).map((corridor) => ({
-            corridor,
-            points: corridorPolygon(corridor),
-            center: polygonCentroid(corridorPolygon(corridor))
-          }));
-          for (const obj of plan.objects || []) {
-            if (!isSecurityTypeId(obj.type)) continue;
-            const typeDef = typeById.get(obj.type);
-            const locationPoint = { x: Number(obj.x || 0), y: Number(obj.y || 0) };
-            const containingRoom = roomShapes.find((entry) => pointInPolygon(locationPoint, entry.points));
-            const containingCorridor = corridorShapes.find((entry) => pointInPolygon(locationPoint, entry.points));
-            let nearestLabel = '';
-            if (containingRoom?.room?.name) nearestLabel = containingRoom.room.name;
-            else if (containingCorridor?.corridor?.name) nearestLabel = containingCorridor.corridor.name;
-            if (!nearestLabel) {
-              const candidates = [
-                ...roomShapes
-                  .filter((entry) => entry.center)
-                  .map((entry) => ({
-                    label: entry.room.name,
-                    dist: Math.hypot(locationPoint.x - (entry.center as Point).x, locationPoint.y - (entry.center as Point).y)
-                  })),
-                ...corridorShapes
-                  .filter((entry) => entry.center)
-                  .map((entry) => ({
-                    label: entry.corridor.name,
-                    dist: Math.hypot(locationPoint.x - (entry.center as Point).x, locationPoint.y - (entry.center as Point).y)
-                  }))
-              ].sort((a, b) => a.dist - b.dist);
-              nearestLabel = candidates[0]?.label || '';
-            }
-            rows.push({
-              rowId: `${client.id}:${site.id}:${plan.id}:${obj.id}`,
-              objectId: obj.id,
-              clientId: client.id,
-              clientName: client.shortName || client.name,
-              siteId: site.id,
-              siteName: site.name,
-              planId: plan.id,
-              planName: plan.name,
-              icon: String(typeDef?.icon || obj.type || 'shield'),
-              typeLabel: String(typeDef?.name?.[lang] || typeDef?.name?.it || typeDef?.name?.en || obj.type),
-              name: String(obj.name || ''),
-              description: String(obj.description || ''),
-              notes: String(obj.notes || ''),
-              lastVerificationAt: String(obj.lastVerificationAt || ''),
-              verifierCompany: String(obj.verifierCompany || ''),
-              gpsCoords: String(obj.gpsCoords || ''),
-              locationName: String(nearestLabel || ''),
-              point: locationPoint,
-              plan,
-              securityCheckHistory: Array.isArray(obj.securityCheckHistory) ? obj.securityCheckHistory : [],
-              securityDocuments: Array.isArray(obj.securityDocuments) ? obj.securityDocuments : []
-            });
-          }
-        }
-      }
-    }
-    return rows;
-  }, [clients, lang, typeById]);
+  const safetyRowsRaw = useMemo<SafetyRow[]>(() => buildSafetyRowsRaw(clients, lang, typeById), [clients, lang, typeById]);
 
-  const emergencyDoorRowsRaw = useMemo<EmergencyDoorRow[]>(() => {
-    const rows: EmergencyDoorRow[] = [];
-    for (const client of clients || []) {
-      for (const site of client.sites || []) {
-        for (const plan of site.floorPlans || []) {
-          const roomCenters = (plan.rooms || [])
-            .map((room) => ({ room, center: polygonCentroid(roomPolygon(room)) }))
-            .filter((entry): entry is { room: Room; center: Point } => !!entry.center);
-          for (const corridor of (plan.corridors || []) as Corridor[]) {
-            for (const door of corridor?.doors || []) {
-              if (!door?.isEmergency) continue;
-              const typeDef = door?.catalogTypeId ? typeById.get(door.catalogTypeId) : null;
-              const typeLabel = typeDef
-                ? String(typeDef?.name?.[lang] || typeDef?.name?.it || typeDef?.name?.en || typeDef.id)
-                : String(door?.catalogTypeId || '');
-              const anchor = getDoorAnchor(corridor, door);
-              const nearestRoomName = anchor
-                ? roomCenters
-                    .map((entry) => ({
-                      name: String(entry.room?.name || ''),
-                      dist: Math.hypot(anchor.x - entry.center.x, anchor.y - entry.center.y)
-                    }))
-                    .sort((a, b) => a.dist - b.dist)[0]?.name || ''
-                : '';
-              const verificationHistory = (Array.isArray((door as any)?.verificationHistory) ? (door as any).verificationHistory : [])
-                .map((entry: any) => ({
-                  id: String(entry?.id || nanoid()),
-                  date: typeof entry?.date === 'string' ? String(entry.date).trim() || undefined : undefined,
-                  company: String(entry?.company || '').trim(),
-                  notes: typeof entry?.notes === 'string' ? String(entry.notes).trim() || undefined : undefined,
-                  createdAt: Number.isFinite(Number(entry?.createdAt)) ? Number(entry.createdAt) : Date.now()
-                }))
-                .filter((entry: any) => !!entry.company || !!entry.date)
-                .sort((a: any, b: any) => b.createdAt - a.createdAt);
-              rows.push({
-                rowId: `${client.id}:${site.id}:${plan.id}:${corridor.id}:${door.id}`,
-                clientId: client.id,
-                siteId: site.id,
-                planId: plan.id,
-                clientName: client.shortName || client.name,
-                siteName: site.name,
-                planName: plan.name,
-                doorId: String(door?.id || ''),
-                description: String((door as any)?.description || ''),
-                doorType: typeLabel || '—',
-                corridorName: String(corridor.name || ''),
-                nearestRoomName,
-                lastVerificationAt: String((door as any)?.lastVerificationAt || ''),
-                verifierCompany: String((door as any)?.verifierCompany || ''),
-                openUrl: String((door as any)?.automationUrl || ''),
-                mode: String((door as any)?.mode || 'static'),
-                isFireDoor: !!(door as any)?.isFireDoor,
-                corridorId: corridor.id,
-                plan,
-                verificationHistory
-              });
-            }
-          }
-        }
-      }
-    }
-    return rows;
-  }, [clients, lang, typeById]);
+  const emergencyDoorRowsRaw = useMemo<EmergencyDoorRow[]>(() => buildEmergencyDoorRowsRaw(clients, lang, typeById), [clients, lang, typeById]);
 
   const clientOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -624,172 +334,12 @@ const SafetyPanel = () => {
     [multiMapPreview, selectedPlanOptions]
   );
 
-  const mapData = useMemo(() => {
-    if (!mapPreview) return null;
-    const plan = mapPreview.row.plan;
-    const planWidth = Math.max(200, Number(plan?.width || 1200));
-    const planHeight = Math.max(200, Number(plan?.height || 800));
-    const corridors = ((plan?.corridors || []) as Corridor[])
-      .map((corridor) => {
-        const points = corridorPolygon(corridor);
-        return { corridor, points, center: polygonCentroid(points) };
-      })
-      .filter((entry) => entry.points.length >= 3);
-    const rooms = (plan?.rooms || []).map((room) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) })).filter((entry) => entry.points.length >= 3);
-    const doorAnchors = corridors.flatMap((entry) =>
-      (entry.corridor.doors || [])
-        .map((door) => ({ door, point: getDoorAnchor(entry.corridor, door), corridorId: entry.corridor.id }))
-        .filter((item): item is { door: any; point: Point; corridorId: string } => !!item.point)
-    );
-    const points = [
-      ...corridors.flatMap((entry) => entry.points),
-      ...rooms.flatMap((entry) => entry.points),
-      ...doorAnchors.map((entry) => entry.point),
-      { x: 0, y: 0 },
-      { x: planWidth, y: planHeight },
-      ...(mapPreview.kind === 'device' ? [mapPreview.row.point] : [])
-    ];
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    for (const point of points) {
-      if (point.x < minX) minX = point.x;
-      if (point.y < minY) minY = point.y;
-      if (point.x > maxX) maxX = point.x;
-      if (point.y > maxY) maxY = point.y;
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
-      minX = 0;
-      minY = 0;
-      maxX = Number(plan?.width || 1200);
-      maxY = Number(plan?.height || 800);
-    }
-    const pad = 24;
-    return {
-      corridors,
-      rooms,
-      doorAnchors,
-      planWidth,
-      planHeight,
-      imageUrl: String(plan?.imageUrl || ''),
-      viewBox: `${minX - pad} ${minY - pad} ${Math.max(100, maxX - minX + pad * 2)} ${Math.max(100, maxY - minY + pad * 2)}`
-    };
-  }, [mapPreview]);
+  const mapData = useMemo(() => computeSafetyMapData(mapPreview), [mapPreview]);
 
-  const multiMapData = useMemo(() => {
-    if (!multiMapPreview) return null;
-    const items = multiMapPreview.keys
-      .map((key) => mapRowsByKey.get(key))
-      .filter((entry): entry is { kind: 'device'; row: SafetyRow } | { kind: 'door'; row: EmergencyDoorRow } => !!entry)
-      .filter((entry) => entry.row.planId === multiMapPreview.planId);
-    if (!items.length) return null;
-    const plan = items[0].row.plan;
-    const planWidth = Math.max(200, Number(plan?.width || 1200));
-    const planHeight = Math.max(200, Number(plan?.height || 800));
-    const corridors = ((plan?.corridors || []) as Corridor[])
-      .map((corridor) => {
-        const points = corridorPolygon(corridor);
-        return { corridor, points, center: polygonCentroid(points) };
-      })
-      .filter((entry) => entry.points.length >= 3);
-    const rooms = (plan?.rooms || []).map((room) => ({ room, points: roomPolygon(room), center: polygonCentroid(roomPolygon(room)) })).filter((entry) => entry.points.length >= 3);
-    const doorAnchors = corridors.flatMap((entry) =>
-      (entry.corridor.doors || [])
-        .map((door) => ({ door, point: getDoorAnchor(entry.corridor, door), corridorId: entry.corridor.id }))
-        .filter((item): item is { door: any; point: Point; corridorId: string } => !!item.point)
-    );
-    const selectedDevices = items
-      .filter((entry): entry is { kind: 'device'; row: SafetyRow } => entry.kind === 'device')
-      .map((entry) => entry.row);
-    const selectedDoors = items
-      .filter((entry): entry is { kind: 'door'; row: EmergencyDoorRow } => entry.kind === 'door')
-      .map((entry) => entry.row);
-    const cardLayoutRaw = (plan as any)?.safetyCardLayout;
-    const safetyCardLayout = {
-      x: Number.isFinite(Number(cardLayoutRaw?.x)) ? Number(cardLayoutRaw.x) : DEFAULT_SAFETY_CARD_LAYOUT.x,
-      y: Number.isFinite(Number(cardLayoutRaw?.y)) ? Number(cardLayoutRaw.y) : DEFAULT_SAFETY_CARD_LAYOUT.y,
-      w: Number.isFinite(Number(cardLayoutRaw?.w)) ? Math.max(220, Number(cardLayoutRaw.w)) : DEFAULT_SAFETY_CARD_LAYOUT.w,
-      h: Number.isFinite(Number(cardLayoutRaw?.h)) ? Math.max(56, Number(cardLayoutRaw.h)) : DEFAULT_SAFETY_CARD_LAYOUT.h,
-      fontSize: Number.isFinite(Number(cardLayoutRaw?.fontSize))
-        ? Math.max(8, Math.min(22, Number(cardLayoutRaw.fontSize)))
-        : DEFAULT_SAFETY_CARD_LAYOUT.fontSize,
-      fontIndex: Number.isFinite(Number(cardLayoutRaw?.fontIndex))
-        ? Math.max(0, Math.floor(Number(cardLayoutRaw.fontIndex)))
-        : DEFAULT_SAFETY_CARD_LAYOUT.fontIndex,
-      colorIndex: Number.isFinite(Number(cardLayoutRaw?.colorIndex))
-        ? Math.max(0, Math.floor(Number(cardLayoutRaw.colorIndex)))
-        : DEFAULT_SAFETY_CARD_LAYOUT.colorIndex,
-      textBgIndex: Number.isFinite(Number(cardLayoutRaw?.textBgIndex))
-        ? Math.max(0, Math.floor(Number(cardLayoutRaw.textBgIndex)))
-        : DEFAULT_SAFETY_CARD_LAYOUT.textBgIndex
-    };
-    const points = [
-      ...corridors.flatMap((entry) => entry.points),
-      ...rooms.flatMap((entry) => entry.points),
-      ...doorAnchors.map((entry) => entry.point),
-      ...selectedDevices.map((entry) => entry.point),
-      { x: safetyCardLayout.x, y: safetyCardLayout.y },
-      { x: safetyCardLayout.x + safetyCardLayout.w, y: safetyCardLayout.y + safetyCardLayout.h },
-      { x: 0, y: 0 },
-      { x: planWidth, y: planHeight }
-    ];
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    for (const point of points) {
-      if (point.x < minX) minX = point.x;
-      if (point.y < minY) minY = point.y;
-      if (point.x > maxX) maxX = point.x;
-      if (point.y > maxY) maxY = point.y;
-    }
-    const firstRow = items[0]?.row as SafetyRow | EmergencyDoorRow | undefined;
-    const clientRef = firstRow?.clientId ? (clients || []).find((entry: any) => String(entry?.id || '') === String(firstRow.clientId)) : undefined;
-    const emergencyContacts = Array.isArray((clientRef as any)?.emergencyContacts) ? ((clientRef as any).emergencyContacts as any[]) : [];
-    const scopedContacts = emergencyContacts
-      .filter((entry) => {
-        const scope = String(entry?.scope || '');
-        const showOnPlanCard = entry?.showOnPlanCard !== false;
-        if (!showOnPlanCard) return false;
-        if (scope === 'global' || scope === 'client') return true;
-        if (scope === 'site') return String(entry?.siteId || '') === String(firstRow?.siteId || '');
-        if (scope === 'plan') return String(entry?.floorPlanId || '') === String(firstRow?.planId || '');
-        return false;
-      })
-      .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), lang, { sensitivity: 'base' }));
-    const meetingPoints = ((plan?.objects || []) as any[])
-      .filter((obj) => String(obj?.type || '') === 'safety_assembly_point')
-      .map((obj) => ({
-        name: String(obj?.name || obj?.type || '').trim(),
-        gps: String(obj?.gpsCoords || '').trim(),
-        coords: `${Math.round(Number(obj?.x || 0))}, ${Math.round(Number(obj?.y || 0))}`
-      }));
-    const pad = 24;
-    return {
-      plan,
-      items,
-      selectedDevices,
-      selectedDoors,
-      corridors,
-      rooms,
-      doorAnchors,
-      planWidth,
-      planHeight,
-      imageUrl: String(plan?.imageUrl || ''),
-      safetyCard: {
-        title: t({ it: 'Scheda sicurezza', en: 'Safety card' }),
-        numbersLabel: t({ it: 'Numeri utili', en: 'Emergency numbers' }),
-        pointsLabel: t({ it: 'Punti di ritrovo', en: 'Meeting points' }),
-        noNumbersText: t({ it: 'Nessun numero', en: 'No numbers' }),
-        noPointsText: t({ it: 'Nessun punto', en: 'No points' }),
-        numbersText: scopedContacts.map((entry) => `${entry?.name || '—'} ${entry?.phone || '—'}`).join(' | '),
-        pointsText: meetingPoints.map((entry) => `${entry.name || '—'} ${entry.gps || entry.coords}`).join(' | '),
-        layout: safetyCardLayout
-      },
-      viewBox: `${minX - pad} ${minY - pad} ${Math.max(100, maxX - minX + pad * 2)} ${Math.max(100, maxY - minY + pad * 2)}`
-    };
-  }, [clients, lang, mapRowsByKey, multiMapPreview, t]);
+  const multiMapData = useMemo(
+    () => computeSafetyMultiMapData(multiMapPreview, mapRowsByKey, clients, lang, t),
+    [clients, lang, mapRowsByKey, multiMapPreview, t]
+  );
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -834,23 +384,6 @@ const SafetyPanel = () => {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [goToSelectedPlanOffset, multiMapPreview, selectedPlanOptions.length]);
 
-  const exportElementToPdf = useCallback(async (element: HTMLElement | null, filename: string) => {
-    if (!element) return;
-    const canvas = await html2canvas(element, { backgroundColor: '#ffffff', scale: 2, useCORS: true });
-    const pdf = new jsPDF({ orientation: 'l', unit: 'pt', format: 'a4', compress: true });
-    const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
-    const margin = 18;
-    const targetW = pageW - margin * 2;
-    const targetH = pageH - margin * 2;
-    const ratio = Math.min(targetW / canvas.width, targetH / canvas.height);
-    const drawW = canvas.width * ratio;
-    const drawH = canvas.height * ratio;
-    const x = (pageW - drawW) / 2;
-    const y = (pageH - drawH) / 2;
-    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', x, y, drawW, drawH, undefined, 'FAST');
-    pdf.save(filename);
-  }, []);
 
   const buildMultiMapPdfCaptureNode = useCallback(
     (
@@ -958,170 +491,6 @@ const SafetyPanel = () => {
     []
   );
 
-  const inlineImagesForExport = useCallback(async (node: HTMLElement) => {
-    const toDataUrl = (blob: Blob) =>
-      new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
-        reader.readAsDataURL(blob);
-      });
-
-    const cache = new Map<string, Promise<string | null>>();
-    const resolveDataUrl = (rawUrl: string): Promise<string | null> => {
-      const url = String(rawUrl || '').trim();
-      if (!url) return Promise.resolve(null);
-      if (url.startsWith('data:')) return Promise.resolve(url);
-      const existing = cache.get(url);
-      if (existing) return existing;
-      const task = (async () => {
-        try {
-          const response = await fetch(url, { credentials: 'include', cache: 'force-cache' });
-          if (!response.ok) return null;
-          const blob = await response.blob();
-          if (!blob || blob.size === 0) return null;
-          return await toDataUrl(blob);
-        } catch {
-          return null;
-        }
-      })();
-      cache.set(url, task);
-      return task;
-    };
-
-    const svgImages = Array.from(node.querySelectorAll('svg image'));
-    for (const entry of svgImages) {
-      const href = entry.getAttribute('href') || entry.getAttribute('xlink:href') || '';
-      const dataUrl = await resolveDataUrl(href);
-      if (!dataUrl) continue;
-      entry.setAttribute('href', dataUrl);
-      entry.setAttribute('xlink:href', dataUrl);
-    }
-
-    const htmlImages = Array.from(node.querySelectorAll('img')) as HTMLImageElement[];
-    for (const entry of htmlImages) {
-      const src = entry.currentSrc || entry.src || '';
-      const dataUrl = await resolveDataUrl(src);
-      if (!dataUrl) continue;
-      entry.src = dataUrl;
-      try {
-        if (typeof entry.decode === 'function') await entry.decode();
-      } catch {
-        // ignore
-      }
-    }
-  }, []);
-
-  const waitForNodeImagesReady = useCallback(async (node: HTMLElement | null) => {
-    if (!node) return;
-    const waitForSource = (rawSrc: string) =>
-      new Promise<void>((resolve) => {
-        const src = String(rawSrc || '').trim();
-        if (!src) {
-          resolve();
-          return;
-        }
-        const probe = new Image();
-        const done = () => {
-          probe.onload = null;
-          probe.onerror = null;
-          resolve();
-        };
-        const timeout = window.setTimeout(done, 2500);
-        probe.onload = () => {
-          window.clearTimeout(timeout);
-          done();
-        };
-        probe.onerror = () => {
-          window.clearTimeout(timeout);
-          done();
-        };
-        probe.src = src;
-      });
-
-    const htmlJobs = Array.from(node.querySelectorAll('img')).map((entry) =>
-      new Promise<void>((resolve) => {
-        const img = entry as HTMLImageElement;
-        if (img.complete && img.naturalWidth > 0) {
-          resolve();
-          return;
-        }
-        const wrappedDone = () => {
-          window.clearTimeout(timeout);
-          img.removeEventListener('load', wrappedDone);
-          img.removeEventListener('error', wrappedDone);
-          resolve();
-        };
-        const timeout = window.setTimeout(wrappedDone, 2500);
-        img.addEventListener('load', wrappedDone, { once: true });
-        img.addEventListener('error', wrappedDone, { once: true });
-      })
-    );
-    const svgJobs = Array.from(node.querySelectorAll('svg image')).map((entry) =>
-      waitForSource(entry.getAttribute('href') || entry.getAttribute('xlink:href') || '')
-    );
-    await Promise.all([...htmlJobs, ...svgJobs]);
-  }, []);
-
-  const rasterizeSvgsForExport = useCallback(async (node: HTMLElement) => {
-    const svgNodes = Array.from(node.querySelectorAll('svg')) as SVGSVGElement[];
-    for (const svg of svgNodes) {
-      svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-      svg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-      const serialized = new XMLSerializer().serializeToString(svg);
-      const svgBlob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
-      const svgObjectUrl = URL.createObjectURL(svgBlob);
-      const snapshot = new Image();
-      const loaded = await new Promise<boolean>((resolve) => {
-        const done = (ok: boolean) => {
-          snapshot.onload = null;
-          snapshot.onerror = null;
-          URL.revokeObjectURL(svgObjectUrl);
-          resolve(ok);
-        };
-        const timeout = window.setTimeout(() => done(false), 3500);
-        snapshot.onload = () => {
-          window.clearTimeout(timeout);
-          done(true);
-        };
-        snapshot.onerror = () => {
-          window.clearTimeout(timeout);
-          done(false);
-        };
-        snapshot.src = svgObjectUrl;
-      });
-      if (!loaded) continue;
-
-      const computed = window.getComputedStyle(svg);
-      const rect = svg.getBoundingClientRect();
-      const width = Math.max(1, Math.round(rect.width || parseFloat(computed.width) || 1));
-      const height = Math.max(1, Math.round(rect.height || parseFloat(computed.height) || 1));
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) continue;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(snapshot, 0, 0, width, height);
-      const replacement = document.createElement('img');
-      replacement.alt = '';
-      replacement.src = canvas.toDataURL('image/png');
-      replacement.width = width;
-      replacement.height = height;
-      replacement.style.display = computed.display === 'inline' ? 'block' : computed.display || 'block';
-      replacement.style.width = computed.width && computed.width !== 'auto' ? computed.width : '100%';
-      replacement.style.height = computed.height && computed.height !== 'auto' ? computed.height : `${height}px`;
-      replacement.style.maxWidth = '100%';
-      replacement.style.verticalAlign = computed.verticalAlign || 'baseline';
-      try {
-        if (typeof replacement.decode === 'function') await replacement.decode();
-      } catch {
-        // ignore decode failures
-      }
-      svg.replaceWith(replacement);
-    }
-  }, []);
 
   const waitForRenderedMultiMapPlan = useCallback(async (planId: string) => {
     const targetPlanId = String(planId || '').trim();
@@ -1210,7 +579,7 @@ const SafetyPanel = () => {
       setMultiMapPreview((prev) => (prev ? { ...prev, planId: originalPlanId } : prev));
       setMultiMapExporting(false);
     }
-  }, [buildMultiMapPdfCaptureNode, clients, inlineImagesForExport, multiMapPreview, rasterizeSvgsForExport, selectedExportPlanIds, selectedPlanOptions, waitForNodeImagesReady, waitForRenderedMultiMapPlan]);
+  }, [buildMultiMapPdfCaptureNode, clients, multiMapPreview, selectedExportPlanIds, selectedPlanOptions, waitForRenderedMultiMapPlan]);
 
   const closeMultiMapPreview = useCallback(() => {
     const panel = multiMapViewportRef.current;
@@ -1844,414 +1213,40 @@ const SafetyPanel = () => {
         </div>
       </div>
 
-      <Transition show={!!mapPreview} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={closeSingleMapPreview}>
-          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
-            <div className="fixed inset-0 bg-black/35 backdrop-blur-sm" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-8">
-              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-6xl modal-panel">
-                  <div className="modal-header items-center">
-                    <Dialog.Title className="modal-title">
-                      {mapPreview?.kind === 'device'
-                        ? t({ it: 'Mirino dispositivo sicurezza', en: 'Safety device crosshair' })
-                        : t({ it: 'Mirino porta emergenza', en: 'Emergency door crosshair' })}
-                    </Dialog.Title>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void exportElementToPdf(singleMapExportRef.current, 'safety-crosshair.pdf')}
-                        className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100"
-                      >
-                        <Download size={13} />
-                        {t({ it: 'Esporta PDF', en: 'Export PDF' })}
-                      </button>
-                      <button onClick={closeSingleMapPreview} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
-                        <X size={18} />
-                      </button>
-                    </div>
-                  </div>
-                  {mapPreview ? (
-                    <div ref={singleMapExportRef}>
-                      <div className="mt-2 text-xs text-slate-600">
-                        <span className="font-semibold">{mapPreview.row.clientName}</span> · <span className="font-semibold">{mapPreview.row.siteName}</span> ·{' '}
-                        <span className="font-semibold">{mapPreview.row.planName}</span>
-                      </div>
-                      <div ref={singleMapRef} className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-2">
-                        <svg viewBox={mapData?.viewBox || '0 0 100 100'} preserveAspectRatio="xMidYMid meet" className="h-[68vh] w-full">
-                          {mapData?.imageUrl ? (
-                            <image
-                              href={mapData.imageUrl}
-                              xlinkHref={mapData.imageUrl}
-                              x={0}
-                              y={0}
-                              width={mapData.planWidth}
-                              height={mapData.planHeight}
-                              preserveAspectRatio="xMidYMid meet"
-                              opacity={0.95}
-                            />
-                          ) : null}
-                          {mapData?.corridors.map((entry) => (
-                            <path key={`c-${entry.corridor.id}`} d={polygonPath(entry.points)} fill="#e2e8f0" stroke="#64748b" strokeWidth={2} opacity={0.95} />
-                          ))}
-                          {mapData?.rooms.map((entry) => (
-                            <Fragment key={`r-${entry.room.id}`}>
-                              <path d={polygonPath(entry.points)} fill="rgba(59,130,246,0.08)" stroke="#3b82f6" strokeWidth={1.6} />
-                              {entry.center ? (
-                                <text x={entry.center.x} y={entry.center.y} fill="#1e3a8a" fontSize={14} textAnchor="middle" dominantBaseline="middle" style={{ fontWeight: 700 }}>
-                                  {entry.room.name}
-                                </text>
-                              ) : null}
-                            </Fragment>
-                          ))}
-                          {mapData?.doorAnchors.map((entry) => {
-                            const selectedDoor =
-                              mapPreview.kind === 'door' &&
-                              entry.corridorId === mapPreview.row.corridorId &&
-                              String(entry.door?.id || '') === String(mapPreview.row.doorId || '');
-                            const doorRow = mapPreview.kind === 'door' ? mapPreview.row : null;
-                            const doorLabel = String(doorRow?.description || doorRow?.doorId || '').trim();
-                            return (
-                              <Fragment key={`d-${entry.corridorId}-${entry.door.id}`}>
-                                <circle
-                                  cx={entry.point.x}
-                                  cy={entry.point.y}
-                                  r={selectedDoor ? 6.5 : 4.5}
-                                  fill={selectedDoor ? '#f97316' : '#334155'}
-                                  stroke={selectedDoor ? '#7c2d12' : '#ffffff'}
-                                  strokeWidth={2}
-                                />
-                                {selectedDoor && doorLabel ? (
-                                  <text x={entry.point.x} y={entry.point.y - 10} fill="#7c2d12" fontSize={11} textAnchor="middle" dominantBaseline="ideographic" style={{ fontWeight: 700 }}>
-                                    {doorLabel}
-                                  </text>
-                                ) : null}
-                              </Fragment>
-                            );
-                          })}
-                          {mapPreview.kind === 'device' ? (
-                            <>
-                              <circle cx={mapPreview.row.point.x} cy={mapPreview.row.point.y} r={7} fill="#ef4444" stroke="#ffffff" strokeWidth={2.2} />
-                              <circle cx={mapPreview.row.point.x} cy={mapPreview.row.point.y} r={13} fill="none" stroke="#ef4444" strokeWidth={1.4} strokeDasharray="4 4" />
-                              {mapPreview.row.name ? (
-                                <text x={mapPreview.row.point.x} y={mapPreview.row.point.y - 12} fill="#7f1d1d" fontSize={11} textAnchor="middle" dominantBaseline="ideographic" style={{ fontWeight: 700 }}>
-                                  {mapPreview.row.name}
-                                </text>
-                              ) : null}
-                            </>
-                          ) : null}
-                        </svg>
-                      </div>
-                    </div>
-                  ) : null}
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-
-      <Transition show={!!multiMapPreview} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={closeMultiMapPreview}>
-          <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
-            <div className="fixed inset-0 bg-black/35 backdrop-blur-sm" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-8">
-              <Transition.Child as={Fragment} enter="ease-out duration-150" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-100" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
-                <Dialog.Panel className="w-full max-w-6xl modal-panel">
-                  <div className="modal-header items-center">
-                    <Dialog.Title className="modal-title">{t({ it: 'Mirino oggetti selezionati', en: 'Selected items crosshair' })}</Dialog.Title>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void exportSelectedMapsToPdf()}
-                        disabled={multiMapExporting}
-                        className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100"
-                      >
-                        <Download size={13} />
-                        {multiMapExporting
-                          ? t({ it: 'Export in corso…', en: 'Exporting…' })
-                          : t({ it: 'Esporta PDF', en: 'Export PDF' })}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void toggleMultiMapFullscreen()}
-                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                        title={t({ it: 'Schermo intero (Esc per uscire)', en: 'Fullscreen (Esc to exit)' })}
-                      >
-                        {multiMapFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-                        {multiMapFullscreen ? t({ it: 'Esci full screen', en: 'Exit fullscreen' }) : t({ it: 'Full screen', en: 'Fullscreen' })}
-                      </button>
-                      <button onClick={closeMultiMapPreview} className="icon-button" title={t({ it: 'Chiudi', en: 'Close' })}>
-                        <X size={18} />
-                      </button>
-                    </div>
-                  </div>
-                  {multiMapPreview ? (
-                    <div ref={multiMapExportRef}>
-                      <div data-pdf-hide="true" className="mt-2 grid gap-2 lg:grid-cols-[1fr_auto] lg:items-center">
-                        <div className="text-xs text-slate-600">
-                          {t({
-                            it: `${selectedRows.length} oggetti selezionati`,
-                            en: `${selectedRows.length} selected items`
-                          })}
-                        </div>
-                        {selectedPlanOptions.length > 1 ? (
-                          <select
-                            value={multiMapPreview.planId}
-                            onChange={(e) => setMultiMapPreview((prev) => (prev ? { ...prev, planId: e.target.value } : prev))}
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                          >
-                            {selectedPlanOptions.map((entry) => (
-                              <option key={entry.planId} value={entry.planId}>
-                                {entry.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : null}
-                      </div>
-                      {selectedPlanOptions.length > 1 ? (
-                        <div data-pdf-hide="true" className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-                          <div className="mb-2 font-semibold">{t({ it: 'Export planimetrie', en: 'Export floor plans' })}</div>
-                          <div className="flex flex-wrap items-center gap-3">
-                            <label className="inline-flex cursor-pointer items-center gap-2">
-                              <input type="checkbox" checked={allSelectedForExport} onChange={(e) => toggleAllExportPlans(e.target.checked)} />
-                              <span className="font-semibold">{t({ it: 'Tutte', en: 'All' })}</span>
-                            </label>
-                            {selectedPlanOptions.map((entry) => (
-                              <label key={`exp-${entry.planId}`} className="inline-flex cursor-pointer items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedExportPlanIds.includes(entry.planId)}
-                                  onChange={(e) => toggleExportPlanId(entry.planId, e.target.checked)}
-                                />
-                                <span>{entry.planName}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      <div data-pdf-hide="true" className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
-                        <label className="inline-flex cursor-pointer items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={multiMapOptions.showRoomNames}
-                            onChange={(e) =>
-                              setMultiMapOptions((prev) => ({
-                                ...prev,
-                                showRoomNames: e.target.checked
-                              }))
-                            }
-                          />
-                          {t({ it: 'Nomi stanze', en: 'Room names' })}
-                        </label>
-                        <label className="inline-flex cursor-pointer items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={multiMapOptions.showCorridorNames}
-                            onChange={(e) =>
-                              setMultiMapOptions((prev) => ({
-                                ...prev,
-                                showCorridorNames: e.target.checked
-                              }))
-                            }
-                          />
-                          {t({ it: 'Nomi corridoi', en: 'Corridor names' })}
-                        </label>
-                        <label className="inline-flex cursor-pointer items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={multiMapOptions.showSafetyCard}
-                            onChange={(e) =>
-                              setMultiMapOptions((prev) => ({
-                                ...prev,
-                                showSafetyCard: e.target.checked
-                              }))
-                            }
-                          />
-                          {t({ it: 'Scheda sicurezza', en: 'Safety card' })}
-                        </label>
-                        {selectedPlanOptions.length > 1 ? (
-                          <span className="ml-auto text-[11px] font-semibold text-slate-500">
-                            {t({ it: 'Frecce tastiera: planimetria precedente/successiva', en: 'Arrow keys: previous/next floor plan' })}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div ref={multiMapViewportRef} data-pdf-map-wrap="true" className="mt-4 relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-2">
-                        <div ref={multiMapRef}>
-                          <svg
-                            viewBox={multiMapData?.viewBox || '0 0 100 100'}
-                            data-export-plan-id={multiMapData?.plan?.id || ''}
-                            preserveAspectRatio="xMidYMid meet"
-                            className={multiMapFullscreen ? 'h-[calc(100vh-1rem)] w-full' : 'h-[68vh] w-full'}
-                          >
-                            {multiMapData?.imageUrl ? (
-                              <image
-                                href={multiMapData.imageUrl}
-                                xlinkHref={multiMapData.imageUrl}
-                                x={0}
-                                y={0}
-                                width={multiMapData.planWidth}
-                                height={multiMapData.planHeight}
-                                preserveAspectRatio="xMidYMid meet"
-                                opacity={0.95}
-                              />
-                            ) : null}
-                            {multiMapData?.corridors.map((entry) => (
-                              <Fragment key={`mc-${entry.corridor.id}`}>
-                                <path d={polygonPath(entry.points)} fill="#e2e8f0" stroke="#64748b" strokeWidth={2} opacity={0.95} />
-                                {multiMapOptions.showCorridorNames && entry.center && String(entry.corridor?.name || '').trim() ? (
-                                  <text x={entry.center.x} y={entry.center.y} fill="#0f172a" fontSize={12} textAnchor="middle" dominantBaseline="middle" style={{ fontWeight: 700 }}>
-                                    {entry.corridor.name}
-                                  </text>
-                                ) : null}
-                              </Fragment>
-                            ))}
-                            {multiMapData?.rooms.map((entry) => (
-                              <Fragment key={`mr-${entry.room.id}`}>
-                                <path d={polygonPath(entry.points)} fill="rgba(59,130,246,0.08)" stroke="#3b82f6" strokeWidth={1.3} />
-                                {multiMapOptions.showRoomNames && entry.center && String(entry.room?.name || '').trim() ? (
-                                  <text x={entry.center.x} y={entry.center.y} fill="#1e3a8a" fontSize={12} textAnchor="middle" dominantBaseline="middle" style={{ fontWeight: 700 }}>
-                                    {entry.room.name}
-                                  </text>
-                                ) : null}
-                              </Fragment>
-                            ))}
-                            {multiMapOptions.showSafetyCard && multiMapData?.safetyCard ? (
-                              (() => {
-                                const layout = multiMapData.safetyCard.layout;
-                                const headerHeight = Math.max(18, Number(layout.fontSize || 10) * 1.48);
-                                const bodyFontSize = Math.max(8, Number(layout.fontSize || 10));
-                                const colorVariant =
-                                  SAFETY_CARD_COLOR_VARIANTS[
-                                    ((Number(layout.colorIndex) % SAFETY_CARD_COLOR_VARIANTS.length) + SAFETY_CARD_COLOR_VARIANTS.length) %
-                                      SAFETY_CARD_COLOR_VARIANTS.length
-                                  ];
-                                const textBgFill =
-                                  SAFETY_CARD_TEXT_BG_VARIANTS[
-                                    ((Number(layout.textBgIndex) % SAFETY_CARD_TEXT_BG_VARIANTS.length) + SAFETY_CARD_TEXT_BG_VARIANTS.length) %
-                                      SAFETY_CARD_TEXT_BG_VARIANTS.length
-                                  ];
-                                const fontFamily = SAFETY_CARD_FONT_VALUES.length
-                                  ? SAFETY_CARD_FONT_VALUES[
-                                      ((Number(layout.fontIndex) % SAFETY_CARD_FONT_VALUES.length) + SAFETY_CARD_FONT_VALUES.length) %
-                                        SAFETY_CARD_FONT_VALUES.length
-                                    ]
-                                  : 'Arial, sans-serif';
-                                const numbersText = `${multiMapData.safetyCard.numbersLabel}: ${
-                                  multiMapData.safetyCard.numbersText || multiMapData.safetyCard.noNumbersText
-                                }`;
-                                const pointsText = `${multiMapData.safetyCard.pointsLabel}: ${
-                                  multiMapData.safetyCard.pointsText || multiMapData.safetyCard.noPointsText
-                                }`;
-                                return (
-                                  <g>
-                                    <rect x={layout.x} y={layout.y} width={layout.w} height={layout.h} fill={colorVariant.body} stroke={colorVariant.border} strokeWidth={1.6} rx={0} />
-                                    <rect
-                                      x={layout.x + 1}
-                                      y={layout.y + 1}
-                                      width={Math.max(1, layout.w - 2)}
-                                      height={Math.max(1, headerHeight - 1)}
-                                      fill={colorVariant.header}
-                                      rx={0}
-                                    />
-                                    <text
-                                      x={layout.x + 10}
-                                      y={layout.y + headerHeight / 2 + 1}
-                                      fill={colorVariant.title}
-                                      fontSize={Math.max(9, bodyFontSize * 0.92)}
-                                      fontFamily={fontFamily}
-                                      dominantBaseline="middle"
-                                      style={{ fontWeight: 700 }}
-                                    >
-                                      {multiMapData.safetyCard.title}
-                                    </text>
-                                    {textBgFill !== 'transparent' ? (
-                                      <>
-                                        <rect x={layout.x + 8} y={layout.y + headerHeight + 1} width={Math.max(24, layout.w - 16)} height={Math.max(10, bodyFontSize * 1.26)} fill={textBgFill} />
-                                        <rect
-                                          x={layout.x + 8}
-                                          y={layout.y + headerHeight + bodyFontSize + 5}
-                                          width={Math.max(24, layout.w - 16)}
-                                          height={Math.max(10, bodyFontSize * 1.26)}
-                                          fill={textBgFill}
-                                        />
-                                      </>
-                                    ) : null}
-                                    <text x={layout.x + 10} y={layout.y + headerHeight + bodyFontSize + 2} fill={colorVariant.text} fontSize={bodyFontSize} fontFamily={fontFamily} style={{ fontWeight: 700 }}>
-                                      {numbersText}
-                                    </text>
-                                    <text x={layout.x + 10} y={layout.y + headerHeight + bodyFontSize * 2 + 6} fill={colorVariant.text} fontSize={bodyFontSize} fontFamily={fontFamily} style={{ fontWeight: 700 }}>
-                                      {pointsText}
-                                    </text>
-                                  </g>
-                                );
-                              })()
-                            ) : null}
-                            {multiMapData?.selectedDoors.map((entry) => {
-                              const anchor = multiMapData.doorAnchors.find((item) => item.corridorId === entry.corridorId && String(item.door.id) === String(entry.doorId));
-                              if (!anchor) return null;
-                              const label = String(entry.description || entry.doorId || '').trim();
-                              return (
-                                <Fragment key={`md-${entry.rowId}`}>
-                                  <circle cx={anchor.point.x} cy={anchor.point.y} r={6.5} fill="#f97316" stroke="#7c2d12" strokeWidth={2} />
-                                  {label ? (
-                                    <text x={anchor.point.x} y={anchor.point.y - 10} fill="#7c2d12" fontSize={11} textAnchor="middle" dominantBaseline="ideographic" style={{ fontWeight: 700 }}>
-                                      {label}
-                                    </text>
-                                  ) : null}
-                                </Fragment>
-                              );
-                            })}
-                            {multiMapData?.selectedDevices.map((entry) => (
-                              <Fragment key={`mdev-${entry.rowId}`}>
-                                <circle cx={entry.point.x} cy={entry.point.y} r={7} fill="#ef4444" stroke="#ffffff" strokeWidth={2.2} />
-                                <circle cx={entry.point.x} cy={entry.point.y} r={13} fill="none" stroke="#ef4444" strokeWidth={1.4} strokeDasharray="4 4" />
-                                {entry.name ? (
-                                  <text x={entry.point.x} y={entry.point.y - 12} fill="#7f1d1d" fontSize={11} textAnchor="middle" dominantBaseline="ideographic" style={{ fontWeight: 700 }}>
-                                    {entry.name}
-                                  </text>
-                                ) : null}
-                              </Fragment>
-                            ))}
-                          </svg>
-                        </div>
-                        {selectedPlanOptions.length > 1 ? (
-                          <>
-                            <button
-                              data-pdf-hide="true"
-                              type="button"
-                              onClick={() => goToSelectedPlanOffset(-1)}
-                              disabled={!canGoPrevPlan}
-                              className="absolute bottom-3 left-3 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white/95 text-slate-700 shadow-card hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
-                              title={t({ it: 'Planimetria precedente (←)', en: 'Previous floor plan (←)' })}
-                            >
-                              <ChevronLeft size={16} />
-                            </button>
-                            <button
-                              data-pdf-hide="true"
-                              type="button"
-                              onClick={() => goToSelectedPlanOffset(1)}
-                              disabled={!canGoNextPlan}
-                              className="absolute bottom-3 right-3 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white/95 text-slate-700 shadow-card hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
-                              title={t({ it: 'Planimetria successiva (→)', en: 'Next floor plan (→)' })}
-                            >
-                              <ChevronRight size={16} />
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
+      <SingleMapPreviewModal
+        t={t}
+        mapPreview={mapPreview}
+        mapData={mapData}
+        closeSingleMapPreview={closeSingleMapPreview}
+        exportElementToPdf={exportElementToPdf}
+        singleMapExportRef={singleMapExportRef}
+        singleMapRef={singleMapRef}
+      />
+      <MultiMapPreviewModal
+        t={t}
+        multiMapPreview={multiMapPreview}
+        setMultiMapPreview={setMultiMapPreview}
+        multiMapData={multiMapData}
+        multiMapOptions={multiMapOptions}
+        setMultiMapOptions={setMultiMapOptions}
+        multiMapExporting={multiMapExporting}
+        multiMapFullscreen={multiMapFullscreen}
+        closeMultiMapPreview={closeMultiMapPreview}
+        exportSelectedMapsToPdf={exportSelectedMapsToPdf}
+        toggleMultiMapFullscreen={toggleMultiMapFullscreen}
+        multiMapExportRef={multiMapExportRef}
+        multiMapViewportRef={multiMapViewportRef}
+        multiMapRef={multiMapRef}
+        selectedRows={selectedRows}
+        selectedPlanOptions={selectedPlanOptions}
+        allSelectedForExport={allSelectedForExport}
+        toggleAllExportPlans={toggleAllExportPlans}
+        selectedExportPlanIds={selectedExportPlanIds}
+        toggleExportPlanId={toggleExportPlanId}
+        goToSelectedPlanOffset={goToSelectedPlanOffset}
+        canGoPrevPlan={canGoPrevPlan}
+        canGoNextPlan={canGoNextPlan}
+      />
 
       <Transition show={!!deviceHistory} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setDeviceHistory(null)}>

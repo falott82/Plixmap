@@ -51,3 +51,26 @@ test('neutralizes data:text/html payloads in src', () => {
 test('drops srcdoc attribute', () => {
   assert.ok(!/srcdoc/i.test(sanitizeHtmlBasic('<iframe srcdoc="<script>x</script>"></iframe>')));
 });
+
+test('allowlist drops unknown/dangerous tags the old denylist missed', () => {
+  // svg + event handlers, math, etc. are not on the allowlist → removed entirely.
+  assert.ok(!/<svg/i.test(sanitizeHtmlBasic('<svg onload="alert(1)"><circle /></svg>')));
+  assert.ok(!/onload/i.test(sanitizeHtmlBasic('<svg onload="alert(1)"></svg>')));
+});
+
+test('strips style-based and srcset/formaction vectors', () => {
+  assert.ok(!/formaction/i.test(sanitizeHtmlBasic('<button formaction="javascript:alert(1)">x</button>')));
+  assert.ok(!/srcset/i.test(sanitizeHtmlBasic('<img srcset="x" src="https://e.com/i.png">')));
+});
+
+test('keeps data:image on <img> but not on <a>', () => {
+  const img = sanitizeHtmlBasic('<img src="data:image/png;base64,iVBOR">');
+  assert.ok(/data:image/i.test(img), img);
+  const a = sanitizeHtmlBasic('<a href="data:image/png;base64,iVBOR">x</a>');
+  assert.ok(!/data:image/i.test(a), a);
+});
+
+test('adds rel=noopener to target=_blank links', () => {
+  const out = sanitizeHtmlBasic('<a href="https://e.com" target="_blank">x</a>');
+  assert.ok(/rel="noopener noreferrer"/.test(out), out);
+});

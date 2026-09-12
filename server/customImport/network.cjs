@@ -453,8 +453,24 @@ const requestImportPayloadViaCurl = (rawUrl, options = {}) =>
       `request = "${escapeCurlConfigValue(options.method || 'POST')}"`,
       'silent',
       'show-error',
+      // Never follow redirects: a 3xx Location could point at a private/internal host
+      // and curl would re-resolve it, bypassing the SSRF guard.
+      'max-redirs = 0',
       `write-out = "\\n${marker}%{http_code}|%{content_type}"`
     ];
+    // Pin the already-validated IP so curl does NOT perform its own DNS lookup
+    // (defeats DNS-rebinding). --resolve keeps the original Host header / TLS SNI intact.
+    if (options.connectAddress && net.isIP(options.connectAddress)) {
+      try {
+        const parsedCurlUrl = new URL(String(rawUrl || '').trim());
+        const curlHost = normalizeHostLiteral(parsedCurlUrl.hostname);
+        const curlPort = parsedCurlUrl.port || (parsedCurlUrl.protocol === 'https:' ? '443' : '80');
+        lines.push(`resolve = "${escapeCurlConfigValue(`${curlHost}:${curlPort}:${options.connectAddress}`)}"`);
+      } catch {
+        // If the URL cannot be parsed here, the upstream validateImportUrl already rejected it;
+        // fall through without a resolve directive only when there is no pinned address.
+      }
+    }
     for (const [name, value] of Object.entries(headers)) {
       if (!value) continue;
       lines.push(`header = "${escapeCurlConfigValue(`${name}: ${value}`)}"`);

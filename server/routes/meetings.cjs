@@ -172,7 +172,12 @@ const registerMeetingRoutes = (app, deps) => {
         );
       });
     if (format === 'csv') {
-      const esc = (value) => `"${String(value || '').replace(/"/g, '""')}"`;
+      const esc = (value) => {
+        let raw = String(value || '');
+        // Defang CSV formula injection (leading = + - @ tab).
+        if (/^[=+\-@\t]/.test(raw)) raw = `'${raw}`;
+        return `"${raw.replace(/"/g, '""')}"`;
+      };
       const lines = [
         'id,bookingId,event,actorUsername,subject,roomName,bookingStatus,timestamp',
         ...rows.map((row) =>
