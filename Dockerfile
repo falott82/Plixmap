@@ -5,7 +5,11 @@ WORKDIR /app
 ENV CI=1
 COPY package.json package-lock.json ./
 # Reproducible install from the lockfile; dev deps are needed for the build.
-RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+# --ignore-scripts: the client build never loads better-sqlite3, whose install script
+# (`prebuild-install || node-gyp rebuild`) would otherwise try to (re)download a binary
+# and, if that fails, fall back to a node-gyp compile that needs python/make/g++.
+# Its binaries already ship inside the package (see the runtime stage below).
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --ignore-scripts
 COPY . .
 RUN npm run build
 
