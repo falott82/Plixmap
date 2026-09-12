@@ -16,7 +16,10 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8787
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund \
+# --ignore-scripts: better-sqlite3 ships prebuilt binaries (incl. Alpine/musl) but
+# still carries a binding.gyp, which would make npm try a node-gyp rebuild that
+# needs python/make/g++. No runtime dependency needs an install script.
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund --ignore-scripts \
  && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY server ./server
