@@ -18,6 +18,24 @@ const AccountPanel = () => {
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const t = useT();
+  const firstName = user?.firstName ?? '';
+  const lastName = user?.lastName ?? '';
+
+  useEffect(() => {
+    let cancelled = false;
+    getMfaStatus()
+      .then((s) => {
+        if (!cancelled) setMfaEnabled(!!s.enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setMfaEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const displayName = useMemo(() => `${firstName} ${lastName}`.trim(), [firstName, lastName]);
 
   if (!user) return null;
 
@@ -29,13 +47,6 @@ const AccountPanel = () => {
       setMfaEnabled(false);
     }
   };
-
-  useEffect(() => {
-    loadMfa();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const displayName = useMemo(() => `${user.firstName} ${user.lastName}`.trim(), [user.firstName, user.lastName]);
 
   const cropSquare = async (dataUrl: string) => {
     try {

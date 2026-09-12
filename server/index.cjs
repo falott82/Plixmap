@@ -327,6 +327,7 @@ const runLogRetentionCleanup = (reason = 'scheduled') => {
 
 const {
   parseDataUrl,
+  base64SizeBytes,
   validateDataUrl,
   validateAssetsInClients,
   externalizeDataUrl,

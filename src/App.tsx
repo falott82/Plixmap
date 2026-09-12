@@ -40,9 +40,8 @@ const SidebarFallback = () => <div className="hidden w-[320px] shrink-0 xl:block
 
 const PlanRoute = () => {
   const { planId } = useParams();
-  if (!planId) return <Navigate to="/" replace />;
-  const planExists = useDataStore((s) => !!s.findFloorPlan(planId));
-  if (!planExists) return <Navigate to="/" replace />;
+  const planExists = useDataStore((s) => (planId ? !!s.findFloorPlan(planId) : false));
+  if (!planId || !planExists) return <Navigate to="/" replace />;
   return <PlanView planId={planId} />;
 };
 

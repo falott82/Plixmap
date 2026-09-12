@@ -19,7 +19,7 @@ export const usePlanSaveRevisionHandlers = (deps: any) => {
   }, [baselineSnapshotRef, getLatestRevisionCached, plan, restoreRevision, setFloorPlanContent]);
 
   const forceSaveNow = useCallback(async () => {
-    return runForceSaveNow({ plan, planId, useDataStoreGetState: useDataStore.getState, savePlanState });
+    return runForceSaveNow({ plan, planId, getDataStoreState: useDataStore.getState, savePlanState });
   }, [plan, planId]);
 
   const saveRevisionForUnlock = useCallback(async () => {

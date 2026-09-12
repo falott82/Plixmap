@@ -441,14 +441,14 @@ export const runRevertUnsavedChanges = (deps: RevertUnsavedChangesDeps): void =>
 export type ForceSaveNowDeps = {
   plan: FloorPlan | null | undefined;
   planId: string;
-  useDataStoreGetState: () => any;
+  getDataStoreState: () => any;
   savePlanState: (planId: string, plan: any, revisions: any[]) => Promise<any>;
 };
 
 export const runForceSaveNow = async (deps: ForceSaveNowDeps): Promise<boolean> => {
-  const { plan, planId, useDataStoreGetState, savePlanState } = deps;
+  const { plan, planId, getDataStoreState, savePlanState } = deps;
   try {
-    const store = useDataStoreGetState() as any;
+    const store = getDataStoreState() as any;
     const currentPlan = store.findFloorPlan(plan?.id || planId);
     const targetPlanId = String(currentPlan?.id || plan?.id || planId || '').trim();
     if (currentPlan && targetPlanId) {
