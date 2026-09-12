@@ -1,6 +1,6 @@
 # Plixmap - Floor Plan Management
 
-Current version: 3.7.0
+Current version: 3.8.0
 
 Plixmap is a web app to plan offices and infrastructure on floor plans using a fixed hierarchy **Client -> Site -> Floor plan**. It combines drag & drop editing, rooms, layers, walls, racks, measurements, and PDF exports in one workspace.
 
@@ -13,6 +13,15 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 - Full release notes: [`CHANGELOG.md`](CHANGELOG.md)
 - GitHub view: [`CHANGELOG.md` on GitHub](https://github.com/falott82/Plixmap/blob/main/CHANGELOG.md)
 - Upgrade instructions for existing installations: [`docs/UPGRADE.md`](docs/UPGRADE.md)
+
+## What's new in 3.8.0
+- Architecture: the god components are gone — `PlanView.tsx` (22k lines) is now a thin shell over ~60 focused `usePlan*` hooks, `CanvasStage` is split into memoised layers, `useDataStore` into normalisation modules and `server/index.cjs` into route modules (`maintenance`, `ops`, …). No file in `src/` or `server/` exceeds 1,500 lines.
+- Performance: the initial JavaScript payload dropped from ~500 KB to ~200 KB gzip. React, routing, UI and icons are the only vendor chunks on the critical path; Konva, jsPDF, Lexical and html2canvas load only where used. Settings panels, the release history and the QR generator are loaded on demand. The server now serves brotli/gzip-compressed responses.
+- Dependencies: every npm package updated to its latest release (Vite 8, TypeScript 6, ESLint 10, React 19.3, Lexical 0.50, nodemailer 10, better-sqlite3 13, lucide-react 1.45, …); `npm audit` reports 0 vulnerabilities.
+- Fixes: server startup crash (`base64SizeBytes is not defined`) introduced by the route decomposition; plan header breadcrumb/toolbar overlapping on ≤1500 px screens; conditional React hooks in `PlanRoute` and `AccountPanel`; `docker-compose.yml` used a non-existent `DESKLY_TRUST_PROXY` variable.
+- UI: self-hosted Inter/Space Grotesk variable fonts (offline-ready, no Google Fonts request, stricter CSP), refreshed shadows/focus/scrollbar tokens, tactile buttons and inputs.
+- Docker: Node 22 image, `npm ci` from the lockfile with layer caching, health check; the compose service is now `plixmap` (data volume unchanged).
+- Testing: Vitest unit tests for frontend helpers, Playwright suite (auth, public meeting endpoints, UI smoke, authenticated editor mounting the Konva canvas) — all green, together with 93 server tests.
 
 ## What's new in 3.7.0
 - Security/supply chain: cleared all production `npm audit` findings (0 vulnerabilities) by updating `ws`, `nodemailer`, and the `dompurify`/`qs`/`path-to-regexp` overrides.
@@ -213,9 +222,9 @@ If the superadmin password is lost, run the dedicated reset script from the proj
 
 ### Docker deployment
 ```bash
-docker compose exec deskly node server/reset-superadmin.cjs
+docker compose exec plixmap node server/reset-superadmin.cjs
 ```
-If your compose service has a different name, replace `deskly` with your service name.
+If your compose service has a different name, replace `plixmap` with your service name.
 
 ### npm / traditional deployment
 ```bash

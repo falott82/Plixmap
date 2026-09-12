@@ -9,3 +9,16 @@ yarn.lock
 data/*.sqlite
 data/*.sqlite-*
 data/uploads
+.git
+.github
+.githooks
+.claude
+.e2e-tmp
+e2e
+test-results
+playwright-report
+docs
+release-data
+data/backups
+*.md
+!README.md
