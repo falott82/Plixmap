@@ -22,10 +22,10 @@ const buildCspHeader = () => {
     "object-src 'none'",
     "frame-ancestors 'none'",
     "img-src 'self' data: blob:",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "style-src 'self' 'unsafe-inline'",
     `script-src ${scriptSrc.join(' ')}`,
     `connect-src ${connectSrc.join(' ')}`,
-    "font-src 'self' data: https://fonts.gstatic.com",
+    "font-src 'self' data:",
     `worker-src ${workerSrc.join(' ')}`
   ].join('; ');
 };

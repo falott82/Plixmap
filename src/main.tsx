@@ -5,6 +5,8 @@ import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import AppErrorBoundary from './components/app/AppErrorBoundary';
 import { appLogger } from './utils/logger';
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/space-grotesk/index.css';
 import './index.css';
 
 registerSW({ immediate: true });
