@@ -36,17 +36,23 @@ export default defineConfig({
   ],
   build: {
     chunkSizeWarningLimit: 750,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks(id) {
-          const normalizedId = id.replace(/\\/g, '/');
-          if (!normalizedId.includes('node_modules')) return;
-          if (normalizedId.includes('react-router') || normalizedId.includes('zustand')) return 'routing-store';
-          if (normalizedId.includes('jspdf') || normalizedId.includes('dompurify')) return 'pdf-vendor';
-          if (normalizedId.includes('lexical') || normalizedId.includes('@lexical')) return 'editor-vendor';
-          if (normalizedId.includes('konva') || normalizedId.includes('react-konva')) return 'canvas-vendor';
-          if (normalizedId.includes('lucide-react')) return 'icons';
-          return;
+        // Explicit vendor groups (rolldown `advancedChunks`). The goal is that the
+        // login/home route only downloads the React runtime + routing, and each
+        // heavy library (Konva, jsPDF, Lexical, html2canvas) is fetched only by the
+        // route that actually uses it.
+        advancedChunks: {
+          groups: [
+            { name: 'react-vendor', test: /node_modules\/(react|react-dom|scheduler)\//, priority: 100 },
+            { name: 'routing-store', test: /node_modules\/(react-router|react-router-dom|zustand|use-sync-external-store)\//, priority: 90 },
+            { name: 'canvas-vendor', test: /node_modules\/(konva|react-konva|react-reconciler|its-fine|use-image)\//, priority: 80 },
+            { name: 'pdf-vendor', test: /node_modules\/(jspdf|fflate|pako|fast-png|iobuffer|canvg|svg-pathdata|stackblur-canvas|rgbcolor|raf|performance-now|core-js|@babel\/runtime)\//, priority: 80 },
+            { name: 'editor-vendor', test: /node_modules\/(lexical|@lexical)\//, priority: 80 },
+            { name: 'html2canvas', test: /node_modules\/html2canvas\//, priority: 80 },
+            { name: 'ui-vendor', test: /node_modules\/(@headlessui|@floating-ui|react-aria|react-stately|sonner)\//, priority: 70 },
+            { name: 'icons', test: /node_modules\/lucide-react\//, priority: 70 }
+          ]
         }
       }
     }

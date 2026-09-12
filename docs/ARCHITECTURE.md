@@ -59,7 +59,7 @@
 - `npm run release:check`: verifies version consistency across:
   - `package.json`
   - `README.md`
-  - `src/version/history.ts`
+  - `src/version/history.ts` (lazy loader) + `src/version/history/*.ts` (notes by era) + `src/version/current.ts` (APP_VERSION)
 - `npm run quality:check`: aggregate quality gate used by CI.
 
 ## CI workflows

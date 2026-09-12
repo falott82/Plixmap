@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import { createElement } from 'react';
 import html2canvas from 'html2canvas';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderToSvgMarkup, svgMarkupToDataUrl } from './svgMarkup';
 import { FloorPlan, IconName, MapObject } from '../store/types';
 import { TEXT_FONT_OPTIONS, WALL_LAYER_COLOR, WALL_TYPE_IDS } from '../store/data';
 import Icon from '../components/ui/Icon';
@@ -64,16 +64,11 @@ const drawRoundRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: n
 };
 
 const svgIconToImage = async (iconName: IconName, opts?: { size?: number; color?: string; strokeWidth?: number }) => {
-  const svg = renderToStaticMarkup(
-    createElement(Icon, {
-      name: iconName,
-      size: opts?.size || 18,
-      color: opts?.color || '#2563eb',
-      strokeWidth: opts?.strokeWidth || 1.8
-    })
-  );
-  const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-  return loadImage(dataUrl);
+  const size = opts?.size || 18;
+  const color = opts?.color || '#2563eb';
+  const strokeWidth = opts?.strokeWidth || 1.8;
+  const svg = renderToSvgMarkup(createElement(Icon, { name: iconName, size, color, strokeWidth }), `${iconName}|${size}|${color}|${strokeWidth}`);
+  return loadImage(svgMarkupToDataUrl(svg));
 };
 
 export const renderFloorPlanToJpegDataUrl = async (

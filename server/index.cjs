@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const express = require('express');
+const compression = require('compression');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { WebSocketServer } = require('ws');
@@ -145,6 +146,12 @@ const UPDATE_MANIFEST_FALLBACK_URL = serverConfig.updateManifestFallbackUrl;
 const CSP_HEADER_VALUE = buildCspHeader();
 
 const app = express();
+// Don't advertise the framework; nothing legitimate depends on this header.
+app.disable('x-powered-by');
+// Compress every compressible response (JS/CSS bundles, JSON API payloads, HTML).
+// Brotli is preferred when the client supports it, gzip otherwise; images/PDFs
+// and already-compressed payloads are skipped by the default filter.
+app.use(compression({ threshold: 1024 }));
 app.use(express.json({ limit: '80mb' }));
 if (serverConfig.trustProxy !== null) app.set('trust proxy', serverConfig.trustProxy);
 app.use((req, res, next) => {

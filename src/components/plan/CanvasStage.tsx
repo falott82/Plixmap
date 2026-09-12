@@ -1,12 +1,12 @@
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Group, Image as KonvaImage, Layer, Line, Rect, Stage } from 'react-konva';
-import { renderToStaticMarkup } from 'react-dom/server';
 import useImage from 'use-image';
 import { toast } from 'sonner';
 import { FloorPlan, IconName, MapObject, MapObjectType } from '../../store/types';
 import { isSecurityTypeId } from '../../store/security';
 import { clamp } from '../../utils/geometry';
 import Icon from '../ui/Icon';
+import { renderToSvgMarkup, svgMarkupToDataUrl } from '../../utils/svgMarkup';
 import { useLang, useT } from '../../i18n/useT';
 import { perfMetrics } from '../../utils/perfMetrics';
 import { isDeskType } from './deskTypes';
@@ -814,12 +814,11 @@ const CanvasStageImpl = (
 
     Object.entries(objectTypeIcons || {}).forEach(([typeId, iconName]) => {
       if (!iconName) return;
-      const svg = renderToStaticMarkup(
-        <Icon name={iconName} size={18} color={isSecurityTypeId(typeId) ? '#dc2626' : '#2563eb'} strokeWidth={1.8} />
-      );
+      const color = isSecurityTypeId(typeId) ? '#dc2626' : '#2563eb';
+      const svg = renderToSvgMarkup(<Icon name={iconName} size={18} color={color} strokeWidth={1.8} />, `${iconName}|18|${color}|1.8`);
       const img = new window.Image();
       imgs.push(img);
-      img.src = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+      img.src = svgMarkupToDataUrl(svg);
       img.onload = () => {
         if (cancelled) return;
         setIconImages((prev) => ({

@@ -5,7 +5,7 @@ import { useUIStore } from '../../store/useUIStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useT } from '../../i18n/useT';
 import { fetchUpdateStatus, type UpdateStatusResponse } from '../../api/update';
-import { releaseHistory } from '../../version/history';
+import { APP_VERSION } from '../../version/current';
 import { useAuthStore } from '../../store/useAuthStore';
 
 const UPDATE_CHECK_CACHE_KEY = 'plixmap_update_check_cache_v1';
@@ -24,7 +24,7 @@ const UpdateCheckModal = () => {
   const t = useT();
   const [updateStatus, setUpdateStatus] = useState<UpdateStatusResponse | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
-  const localVersion = releaseHistory[0]?.version || '0.0.0';
+  const localVersion = APP_VERSION;
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
 
   const currentVersion = updateStatus?.currentVersion || localVersion;

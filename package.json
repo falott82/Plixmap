@@ -52,6 +52,7 @@
     "@lexical/utils": "^0.50.0",
     "better-sqlite3": "^13.0.3",
     "classnames": "^2.5.1",
+    "compression": "^1.8.2",
     "dompurify": "^3.4.15",
     "express": "^5.2.1",
     "html2canvas": "^1.4.1",

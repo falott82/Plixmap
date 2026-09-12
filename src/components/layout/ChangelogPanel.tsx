@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { FileDown, History, Search, X } from 'lucide-react';
-import { releaseHistory } from '../../version/history';
+import { useReleaseHistory } from '../../version/useReleaseHistory';
 import { exportChangelogToPdf } from '../../utils/pdf';
 import { useLang, useT } from '../../i18n/useT';
 import { useUIStore } from '../../store/useUIStore';
@@ -13,6 +13,7 @@ const ChangelogPanel = () => {
   const ref = useRef<HTMLDivElement | null>(null);
   const t = useT();
   const lang = useLang();
+  const releaseHistory = useReleaseHistory(changelogOpen);
 
   useEffect(() => {
     if (!changelogOpen) return;
@@ -31,7 +32,7 @@ const ChangelogPanel = () => {
     return releaseHistory.filter(
       (r) => r.version.includes(q) || r.notes.some((n) => (lang === 'en' ? n.en : n.it).toLowerCase().includes(q))
     );
-  }, [lang, query]);
+  }, [lang, query, releaseHistory]);
 
   const latest = releaseHistory[0];
 
