@@ -53,6 +53,11 @@ export const defaultLayers = (): LayerDefinition[] => [
   { id: 'photos', name: { it: 'Foto', en: 'Photos' }, color: '#14b8a6', order: 16, typeIds: DEFAULT_PHOTO_TYPES }
 ];
 
+// Ids of the preconfigured layers above. normalizeClientLayers re-seeds any of these
+// that go missing (feature code depends on them), so they must never be offered for
+// deletion in the UI — derive the protected set from the same source to avoid drift.
+export const DEFAULT_LAYER_IDS: ReadonlySet<string> = new Set(defaultLayers().map((layer) => String(layer.id)));
+
 export const normalizeSupportContactValue = (value: any) => {
   const email = String(value?.email || '').trim();
   const phone = String(value?.phone || '').trim();

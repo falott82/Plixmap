@@ -196,17 +196,19 @@ export const useDataStore = create<DataState>()(
         version: state.version + 1
       }));
     },
+    // Returns true only when the type was actually removed, so callers can report the
+    // outcome truthfully instead of assuming success (built-in or in-use types are kept).
     deleteObjectType: (id) => {
-      set((state) => {
-        const target = state.objectTypes.find((t) => t.id === id);
-        if (!target || target.builtin) return state;
-        // prevent deletion if used by any object
-        const used = state.clients.some((c) =>
-          c.sites.some((s) => s.floorPlans.some((p) => p.objects.some((o) => o.type === id)))
-        );
-        if (used) return state;
-        return { objectTypes: state.objectTypes.filter((t) => t.id !== id), version: state.version + 1 } as any;
-      });
+      const state = get();
+      const target = state.objectTypes.find((t) => t.id === id);
+      if (!target || target.builtin) return false;
+      // prevent deletion if used by any object
+      const used = state.clients.some((c) =>
+        c.sites.some((s) => s.floorPlans.some((p) => p.objects.some((o) => o.type === id)))
+      );
+      if (used) return false;
+      set({ objectTypes: state.objectTypes.filter((t) => t.id !== id), version: state.version + 1 } as any);
+      return true;
     },
       addClient: (name) => {
         const id = nanoid();

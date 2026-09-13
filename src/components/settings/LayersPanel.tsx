@@ -10,6 +10,7 @@ import { useLang, useT } from '../../i18n/useT';
 import Icon from '../ui/Icon';
 import { isDeskType } from '../plan/deskTypes';
 import { ALL_ITEMS_LAYER_ID } from '../../store/data';
+import { DEFAULT_LAYER_IDS } from '../../store/dataStoreClientNormalization';
 
 const SPECIAL_LAYER_IDS = new Set([ALL_ITEMS_LAYER_ID, 'rooms', 'cabling']);
 
@@ -359,6 +360,19 @@ const LayersPanel = (
   const handleDeleteLayer = () => {
     if (!currentClient || !confirmDelete) return;
     const layerId = String(confirmDelete.id);
+    if (SPECIAL_LAYER_IDS.has(layerId) || DEFAULT_LAYER_IDS.has(layerId)) {
+      // Defense in depth: normalizeClientLayers re-seeds preconfigured layers on every
+      // update, so a "delete" would be silently undone. Refuse instead of faking success.
+      push(
+        t({
+          it: 'Questo layer è predefinito e non può essere eliminato',
+          en: 'This layer is preconfigured and cannot be deleted'
+        }),
+        'danger'
+      );
+      setConfirmDelete(null);
+      return;
+    }
     const nextLayers = planLayers.filter((l) => String(l.id) !== layerId);
     const updateObjects = (obj: any) => {
       if (!Array.isArray(obj.layerIds) || !obj.layerIds.length) return obj;
@@ -506,7 +520,9 @@ const LayersPanel = (
           const counts = objectCountsByLayer.get(layerId) || new Map();
           const totalObjects = Array.from(counts.values()).reduce((acc, v) => acc + v, 0);
           const isSpecial = SPECIAL_LAYER_IDS.has(layerId);
-          const isLockedDelete = isSpecial;
+          // Preconfigured layers stay editable (name/color/order/types) but are never
+          // deletable: normalizeClientLayers would re-seed them on the very next update.
+          const isLockedDelete = isSpecial || DEFAULT_LAYER_IDS.has(layerId);
           return (
             <div key={layerId} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -556,7 +572,10 @@ const LayersPanel = (
 	                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-40"
 	                    title={
                       isLockedDelete
-                        ? t({ it: 'Layer di sistema non eliminabile', en: 'System layer cannot be deleted' })
+                        ? t({
+                            it: "Layer predefinito: non eliminabile perché richiesto dall'applicazione",
+                            en: 'Preconfigured layer: cannot be deleted because the application relies on it'
+                          })
                         : t({ it: 'Elimina layer', en: 'Delete layer' })
                     }
                   >

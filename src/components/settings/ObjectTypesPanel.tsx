@@ -51,7 +51,7 @@ import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal, Do
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
   const lang = useLang();
-  const { objectTypes, addObjectType, updateObjectType, updateClient } = useDataStore();
+  const { objectTypes, addObjectType, updateObjectType, deleteObjectType, updateClient } = useDataStore();
   const allClients = useDataStore((s) => s.clients);
   const { push } = useToastStore();
   const user = useAuthStore((s) => s.user);
@@ -115,6 +115,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   });
   const [confirmDeleteWifiId, setConfirmDeleteWifiId] = useState<string | null>(null);
   const [confirmRemoveType, setConfirmRemoveType] = useState<null | { typeId: string; fieldsCount: number }>(null);
+  const [confirmDeleteType, setConfirmDeleteType] = useState<string | null>(null);
   const [doorSort, setDoorSort] = useState<{ key: DoorRegistrySortKey; dir: 'asc' | 'desc' }>({
     key: 'clientName',
     dir: 'asc'
@@ -399,16 +400,59 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     }
     const next = enabled.filter((x) => x !== typeId);
     const ok = await saveEnabled(next);
-    if (ok) push(t({ it: 'Oggetto rimosso', en: 'Object removed' }), 'info');
+    if (ok) push(t({ it: 'Oggetto nascosto dalla palette', en: 'Object hidden from palette' }), 'info');
   };
 
   const confirmRemoveTypeWithFields = useCallback(async () => {
     if (!confirmRemoveType?.typeId) return;
     const next = enabled.filter((x) => x !== confirmRemoveType.typeId);
     const ok = await saveEnabled(next);
-    if (ok) push(t({ it: 'Oggetto rimosso', en: 'Object removed' }), 'info');
+    if (ok) push(t({ it: 'Oggetto nascosto dalla palette', en: 'Object hidden from palette' }), 'info');
     setConfirmRemoveType(null);
   }, [confirmRemoveType?.typeId, enabled, push, saveEnabled, t]);
+
+  // Permanent deletion of a custom object type (built-in types never expose this).
+  // Unlike removeType (palette-only), this drops the definition from the catalog.
+  const requestDeleteType = (typeId: string) => {
+    const def = defById.get(typeId);
+    if (!def || def.builtin) return;
+    const fieldsForType = (customFields || []).filter((f) => f.typeId === typeId);
+    if (fieldsForType.length) {
+      // Refuse rather than orphan custom-field definitions with a dangling typeId.
+      push(
+        t({
+          it: `Impossibile eliminare: l'oggetto ha ${fieldsForType.length} campo/i personalizzato/i. Rimuovili prima.`,
+          en: `Cannot delete: this object has ${fieldsForType.length} custom field(s). Remove them first.`
+        }),
+        'danger'
+      );
+      return;
+    }
+    setConfirmDeleteType(typeId);
+  };
+
+  // Plain function like removeType/addType: ConfirmDialog is not memoized, so a
+  // stable reference buys nothing and would only drag in the unmemoized saveEnabled dep.
+  const confirmDeleteTypeNow = async () => {
+    const typeId = confirmDeleteType;
+    if (!typeId) return;
+    setConfirmDeleteType(null);
+    // Built-in is already excluded above and fields were pre-checked, so a false
+    // return here can only mean the type is still placed on a floor plan.
+    const deleted = deleteObjectType(typeId);
+    if (!deleted) {
+      push(
+        t({
+          it: "Impossibile eliminare: l'oggetto è ancora in uso su una o più planimetrie.",
+          en: 'Cannot delete: this object is still in use on one or more floor plans.'
+        }),
+        'danger'
+      );
+      return;
+    }
+    if (enabled.includes(typeId)) await saveEnabled(enabled.filter((x) => x !== typeId));
+    push(t({ it: 'Oggetto eliminato', en: 'Object deleted' }), 'success');
+  };
 
   const moveType = (fromId: string, toId: string) => {
     if (fromId === toId) return;
@@ -1363,6 +1407,15 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
                       >
                         {isEnabled ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
+                      {!def.builtin ? (
+                        <button
+                          onClick={() => requestDeleteType(def.id)}
+                          className="flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                          title={t({ it: 'Elimina oggetto', en: 'Delete object' })}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -1457,6 +1510,21 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
         cancelLabel={t({ it: 'Annulla', en: 'Cancel' })}
       />
 
+      <ConfirmDialog
+        open={!!confirmDeleteType}
+        title={t({ it: 'Eliminare oggetto?', en: 'Delete object?' })}
+        description={t({
+          it: `Stai per eliminare definitivamente l'oggetto "${
+            confirmDeleteType ? t(defById.get(confirmDeleteType)?.name || { it: confirmDeleteType, en: confirmDeleteType }) : ''
+          }" dal catalogo. L'operazione non è reversibile.`,
+          en: `You are about to permanently delete the object "${
+            confirmDeleteType ? t(defById.get(confirmDeleteType)?.name || { it: confirmDeleteType, en: confirmDeleteType }) : ''
+          }" from the catalog. This cannot be undone.`
+        })}
+        confirmLabel={t({ it: 'Elimina', en: 'Delete' })}
+        onCancel={() => setConfirmDeleteType(null)}
+        onConfirm={confirmDeleteTypeNow}
+      />
       <ConfirmDialog
         open={!!confirmRemoveType}
         title={t({ it: 'Rimuovere oggetto dalla palette?', en: 'Remove object from palette?' })}
