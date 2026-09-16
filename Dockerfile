@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # ---- build stage: compile the Vite client ---------------------------------
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 WORKDIR /app
 ENV CI=1
 COPY package.json package-lock.json ./
@@ -14,7 +14,7 @@ COPY . .
 RUN npm run build
 
 # ---- runtime stage: production deps + built assets only ---------------------
-FROM node:22-alpine
+FROM node:26-alpine
 WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
