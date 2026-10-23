@@ -1,18 +1,17 @@
 FROM node:24-alpine AS builder
 WORKDIR /app
-RUN apk add --no-cache python3 make g++
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY . .
 RUN npm run build
-RUN npm prune --omit=dev --ignore-scripts --no-audit --no-fund
 
 FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apk upgrade --no-cache
 COPY package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY server ./server
 COPY dbsetup.cjs ./dbsetup.cjs
