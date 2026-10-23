@@ -1,3 +1,4 @@
+import { useModalState } from '../ui/useModalState';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { X } from 'lucide-react';
 import { MapObject, Room } from '../../store/types';
@@ -41,13 +42,9 @@ const SearchResultsPopover = ({
     ],
     [objectResults, roomResults]
   );
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useModalState(open, () => (items.length ? 0 : -1), [items.length]);
   const [style, setStyle] = useState<React.CSSProperties>({});
 
-  useEffect(() => {
-    if (!open) return;
-    setSelectedIndex(items.length ? 0 : -1);
-  }, [items.length, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -83,7 +80,7 @@ const SearchResultsPopover = ({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [items, onClose, onSelectObject, onSelectRoom, open, selectedIndex]);
+  }, [items, onClose, onSelectObject, onSelectRoom, open, selectedIndex, setSelectedIndex]);
 
   useLayoutEffect(() => {
     if (!open) return;

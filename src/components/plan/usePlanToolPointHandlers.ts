@@ -52,7 +52,7 @@ export const usePlanToolPointHandlers = (deps: any) => {
         setMeasureClosed,
         setMeasureFinished
       }),
-    [measureMode, resolveAxisLockedPoint, showMeasureToast, zoom]
+    [measureClosedRef, measureFinishedRef, measureMode, measurePointsRef, resolveAxisLockedPoint, setMeasureClosed, setMeasureFinished, setMeasurePointer, setMeasurePoints, showMeasureToast, zoom]
   );
 
   const handleToolPoint = useCallback(
@@ -97,7 +97,7 @@ export const usePlanToolPointHandlers = (deps: any) => {
         setQuotePointer,
         setMeasurePointer
       }),
-    [isReadOnly, measureMode, quoteMode, quotePoints, resolveAxisLockedPoint, resolveWallPoint, scaleDraft, scaleMode, wallDrawMode, zoom]
+    [isReadOnly, measureFinishedRef, measureMode, measurePointsRef, quoteMode, quotePoints, resolveAxisLockedPoint, resolveWallPoint, scaleDraft, scaleMode, setMeasurePointer, setQuotePointer, setScaleDraftPointer, setWallDraftPointer, wallDraftPointsRef, wallDrawMode, zoom]
   );
 
   const handleToolDoubleClick = useCallback(() => {
@@ -110,7 +110,7 @@ export const usePlanToolPointHandlers = (deps: any) => {
       }
       return;
     }
-  }, [measureMode, showMeasureToast]);
+  }, [measureClosedRef, measureFinishedRef, measureMode, measurePointsRef, setMeasureFinished, setMeasurePointer, showMeasureToast]);
 
   return { handleMeasurePoint, handleToolPoint, handleToolMove, handleToolDoubleClick };
 };

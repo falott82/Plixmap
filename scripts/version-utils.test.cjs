@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { extractHistoryVersion, extractReadmeVersion, validateVersionConsistency } = require('./version-utils.cjs');
+const path = require('node:path');
+const { extractHistoryVersion, readHistoryVersion, extractReadmeVersion, validateVersionConsistency } = require('./version-utils.cjs');
 
 test('extractReadmeVersion returns semantic version', () => {
   const value = extractReadmeVersion('Deskly\nCurrent version: 2.9.1\n');
@@ -10,6 +11,21 @@ test('extractReadmeVersion returns semantic version', () => {
 test('extractHistoryVersion returns first release entry version', () => {
   const value = extractHistoryVersion("export const releaseHistory = [{ version: '2.9.1' }, { version: '2.9.0' }]");
   assert.equal(value, '2.9.1');
+});
+
+test('readHistoryVersion follows array order rather than import declaration order', () => {
+  const root = path.resolve('/virtual/history.ts');
+  const files = new Map([
+    [root, "import { old } from './old'; import { recent as latest } from './recent'; export const releaseHistory: ReleaseNote[] = [...latest, ...old];"],
+    [path.resolve('/virtual/recent.ts'), "export const recent = [{version: '3.7.0'}];"],
+    [path.resolve('/virtual/old.ts'), "export const old = [{version: '1.0.0'}];"]
+  ]);
+  assert.equal(readHistoryVersion(root, (file) => files.get(file)), '3.7.0');
+});
+
+test('readHistoryVersion matches the actual split release history', () => {
+  const pkg = require('../package.json');
+  assert.equal(readHistoryVersion(path.join(__dirname, '../src/version/history.ts')), pkg.version);
 });
 
 test('validateVersionConsistency reports mismatches', () => {

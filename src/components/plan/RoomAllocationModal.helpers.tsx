@@ -1,8 +1,11 @@
 import { useT } from '../../i18n/useT';
 import { FloorPlan, MapObject, Room } from '../../store/types';
 import { polygonCentroid } from './planViewUtils';
+import { roomPolygon } from './internalMapGeometry';
+import type { Point } from './internalMapTypes';
 
-export type Point = { x: number; y: number };
+export { roomPolygon } from './internalMapGeometry';
+export type { Point } from './internalMapTypes';
 
 const USER_TYPE_SET = new Set(['user', 'real_user', 'generic_user']);
 export const isUserObject = (obj: MapObject | null | undefined) => USER_TYPE_SET.has(String(obj?.type || ''));
@@ -27,24 +30,6 @@ export const normalizeTagList = (input: unknown): string[] => {
 export const collectObjectDepartments = (obj: MapObject): string[] =>
   normalizeTagList([(obj as any).externalDept1, (obj as any).externalDept2, (obj as any).externalDept3]);
 
-export const roomPolygon = (room: Room): Point[] => {
-  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-  if (kind === 'poly') {
-    const points = Array.isArray(room?.points) ? room.points : [];
-    if (points.length >= 3) return points;
-  }
-  const x = Number(room?.x || 0);
-  const y = Number(room?.y || 0);
-  const width = Number(room?.width || 0);
-  const height = Number(room?.height || 0);
-  if (!(width > 0 && height > 0)) return [];
-  return [
-    { x, y },
-    { x: x + width, y },
-    { x: x + width, y: y + height },
-    { x, y: y + height }
-  ];
-};
 
 export const formatDistanceLabel = (meters: number | null, px: number | null) => {
   if (meters !== null && Number.isFinite(meters)) {

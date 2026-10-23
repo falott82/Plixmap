@@ -87,7 +87,7 @@ export const usePlanScaleModeHandlers = (deps: any) => {
       scaleToastIdRef,
       t
     });
-  }, [dismissScaleToast, isReadOnly, resetToolClickHistory, t]);
+  }, [dismissScaleToast, isReadOnly, resetToolClickHistory, scaleToastIdRef, setMeasureMode, setPendingType, setQuoteMode, setQuotePointer, setQuotePoints, setRoomDrawMode, setScaleDraft, setScaleDraftPointer, setScaleMetersInput, setScaleModal, setScaleMode, setWallDrawMode, t]);
 
   const cancelScaleMode = useCallback(() => {
     if (!scaleMode) return;
@@ -98,7 +98,7 @@ export const usePlanScaleModeHandlers = (deps: any) => {
     dismissScaleToast();
     resetToolClickHistory();
     push(t({ it: 'Impostazione scala annullata', en: 'Scale setup cancelled' }), 'info');
-  }, [dismissScaleToast, push, resetToolClickHistory, scaleMode, t]);
+  }, [dismissScaleToast, push, resetToolClickHistory, scaleMode, setScaleDraft, setScaleDraftPointer, setScaleMetersInput, setScaleMode, t]);
 
   const handleScalePoint = useCallback(
     (point: { x: number; y: number }, options?: { shiftKey?: boolean }) => {
@@ -118,7 +118,7 @@ export const usePlanScaleModeHandlers = (deps: any) => {
       setScaleMetersInput('');
       setScaleModal({ start, end: resolved, distance });
     },
-    [resolveAxisLockedPoint, scaleDraft, scaleMode]
+    [resolveAxisLockedPoint, scaleDraft, scaleMode, setScaleDraft, setScaleDraftPointer, setScaleMetersInput, setScaleModal, setScaleMode]
   );
 
   const applyScale = useCallback(() => {
@@ -140,22 +140,7 @@ export const usePlanScaleModeHandlers = (deps: any) => {
       setShowScaleLine,
       setScaleModal
     });
-  }, [
-    computeRoomSurfaceSqm,
-    dismissScaleToast,
-    isReadOnly,
-    markTouched,
-    plan,
-    planScale?.labelScale,
-    planScale?.opacity,
-    planScale?.strokeWidth,
-    push,
-    scaleMetersInput,
-    scaleModal,
-    t,
-    updateFloorPlan,
-    updateRoom
-  ]);
+  }, [computeRoomSurfaceSqm, dismissScaleToast, isReadOnly, markTouched, plan, planScale, push, scaleMetersInput, scaleModal, setScaleDraft, setScaleDraftPointer, setScaleModal, setShowScaleLine, t, updateFloorPlan, updateRoom]);
 
   return { startScaleMode, cancelScaleMode, handleScalePoint, applyScale, clearScaleNow, requestClearScale, closeScaleModal };
 };

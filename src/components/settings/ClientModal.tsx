@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment, useEffect, useMemo, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Eye, FileDown, Loader2, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import { nanoid } from 'nanoid';
@@ -51,44 +52,27 @@ const resizeLogo = async (dataUrl: string, size = 256): Promise<string> => {
 const ClientModal = ({ open, initial, onClose, onSubmit }: Props) => {
   const t = useT();
   const push = useToastStore((s) => s.push);
-  const [name, setName] = useState(''); // ragione sociale estesa
-  const [shortName, setShortName] = useState(''); // nome breve (workspace)
-  const [openAiApiKey, setOpenAiApiKey] = useState('');
-  const [openAiDailyTokensPerUser, setOpenAiDailyTokensPerUser] = useState('');
-  const [showOpenAiApiKey, setShowOpenAiApiKey] = useState(false);
-  const [testingOpenAi, setTestingOpenAi] = useState(false);
-  const [openAiTestResult, setOpenAiTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [address, setAddress] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [vatId, setVatId] = useState('');
-  const [pecEmail, setPecEmail] = useState('');
-  const [description, setDescription] = useState('');
-  const [logoUrl, setLogoUrl] = useState<string | undefined>(undefined);
-  const [attachments, setAttachments] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
+  const [name, setName] = useModalState(open, () => (initial?.name || ''), [initial]); // ragione sociale estesa
+  const [shortName, setShortName] = useModalState(open, () => (initial?.shortName || ''), [initial]); // nome breve (workspace)
+  const [openAiApiKey, setOpenAiApiKey] = useModalState(open, () => (initial?.openAiApiKey || ''), [initial]);
+  const [openAiDailyTokensPerUser, setOpenAiDailyTokensPerUser] = useModalState(open, () => (Number.isFinite(Number(initial?.openAiDailyTokensPerUser))
+        ? String(Math.max(0, Math.round(Number(initial?.openAiDailyTokensPerUser))))
+        : ''), [initial]);
+  const [showOpenAiApiKey, setShowOpenAiApiKey] = useModalState(open, () => (false), [initial]);
+  const [testingOpenAi, setTestingOpenAi] = useModalState(open, () => (false), [initial]);
+  const [openAiTestResult, setOpenAiTestResult] = useModalState<{ ok: boolean; message: string } | null>(open, () => (null), [initial]);
+  const [address, setAddress] = useModalState(open, () => (initial?.address || ''), [initial]);
+  const [phone, setPhone] = useModalState(open, () => (initial?.phone || ''), [initial]);
+  const [email, setEmail] = useModalState(open, () => (initial?.email || ''), [initial]);
+  const [vatId, setVatId] = useModalState(open, () => (initial?.vatId || ''), [initial]);
+  const [pecEmail, setPecEmail] = useModalState(open, () => (initial?.pecEmail || ''), [initial]);
+  const [description, setDescription] = useModalState(open, () => (initial?.description || ''), [initial]);
+  const [logoUrl, setLogoUrl] = useModalState<string | undefined>(open, () => (initial?.logoUrl), [initial]);
+  const [attachments, setAttachments] = useModalState<{ id: string; name: string; dataUrl: string }[]>(open, () => (initial?.attachments || []), [initial]);
   const nameRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setName(initial?.name || '');
-    setShortName(initial?.shortName || '');
-    setOpenAiApiKey(initial?.openAiApiKey || '');
-    setOpenAiDailyTokensPerUser(
-      Number.isFinite(Number(initial?.openAiDailyTokensPerUser))
-        ? String(Math.max(0, Math.round(Number(initial?.openAiDailyTokensPerUser))))
-        : ''
-    );
-    setShowOpenAiApiKey(false);
-    setTestingOpenAi(false);
-    setOpenAiTestResult(null);
-    setAddress(initial?.address || '');
-    setPhone(initial?.phone || '');
-    setEmail(initial?.email || '');
-    setVatId(initial?.vatId || '');
-    setPecEmail(initial?.pecEmail || '');
-    setDescription(initial?.description || '');
-    setLogoUrl(initial?.logoUrl);
-    setAttachments(initial?.attachments || []);
     window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [initial, open]);
 

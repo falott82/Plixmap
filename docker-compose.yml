@@ -1,6 +1,7 @@
 services:
   deskly:
     build: .
+    init: true
     ports:
       - '8787:8787'
     volumes:
@@ -11,3 +12,10 @@ services:
 
 volumes:
   deskly_data:
+
+networks:
+  default:
+    # Subnet fissa per evitare sovrapposizioni con la LAN aziendale (172.16.0.0/12 e 192.168.0.0/16).
+    ipam:
+      config:
+        - subnet: 10.99.78.0/24

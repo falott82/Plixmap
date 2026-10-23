@@ -1,4 +1,6 @@
 const nodemailer = require('nodemailer');
+const { buildMailTransportConfig, buildMailFromLabel } = require('../utils/mail.cjs');
+const { requireSuperAdmin } = require('../access.cjs');
 const {
   buildExpiredLogsCsv,
   buildLogRetentionPreview,
@@ -8,12 +10,6 @@ const {
   writeLogRetentionSettings
 } = require('../logRetention.cjs');
 
-const requireSuperAdmin = (req, res) => {
-  if (req.isSuperAdmin) return true;
-  res.status(403).json({ error: 'Forbidden' });
-  return false;
-};
-
 const normalizeLogsMeta = (meta, resolveUsername) => {
   const normalized = {};
   Object.entries(meta || {}).forEach(([kind, info]) => {
@@ -22,23 +18,6 @@ const normalizeLogsMeta = (meta, resolveUsername) => {
     normalized[kind] = { ...info, username: username || null };
   });
   return normalized;
-};
-
-const buildMailTransportConfig = (config) => {
-  const securityMode = config.securityMode || (config.secure ? 'ssl' : 'starttls');
-  return {
-    host: config.host,
-    port: config.port,
-    secure: securityMode === 'ssl',
-    requireTLS: securityMode === 'starttls',
-    ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
-  };
-};
-
-const buildMailFromLabel = (config) => {
-  const fromEmail = config.fromEmail || config.username;
-  if (!fromEmail) return '';
-  return config.fromName ? `"${String(config.fromName).replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
 };
 
 const registerSettingsRoutes = (app, deps) => {
@@ -69,6 +48,11 @@ const registerSettingsRoutes = (app, deps) => {
     resolveUsername,
     markLogsCleared
   } = deps;
+
+  app.get('/api/settings/audit', requireAuth, (req, res) => {
+    if (!requireSuperAdmin(req, res)) return;
+    res.json({ auditVerbose: getAuditVerboseEnabled(db) });
+  });
 
   app.put('/api/settings/audit', requireAuth, (req, res) => {
     if (!requireSuperAdmin(req, res)) return;

@@ -15,7 +15,7 @@ export const usePlanRoomStats = (deps: any) => {
   }>({ key: '', value: new Map() });
   const roomStatsById = useMemo(
     () => computeRoomStatsById({ renderPlan, isUserObject, roomStatsCacheRef }),
-    [isUserObject, renderPlan?.objects]
+    [isUserObject, renderPlan]
   );
   const corridorDoorLinkRoomEntries = useMemo(() => {
     return computeCorridorDoorLinkRoomEntries({
@@ -27,7 +27,7 @@ export const usePlanRoomStats = (deps: any) => {
       renderPlan,
       roomStatsById
     });
-  }, [corridorDoorLinkModal?.magneticRoomIds, corridorDoorLinkModal?.nearestRoomId, corridorDoorLinkQuery, getUserObjectLabel, isUserObject, lang, renderPlan?.rooms, roomStatsById]);
+  }, [corridorDoorLinkModal, corridorDoorLinkQuery, getUserObjectLabel, isUserObject, lang, renderPlan, roomStatsById]);
 
   return { roomStatsById, corridorDoorLinkRoomEntries };
 };

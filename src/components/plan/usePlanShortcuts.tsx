@@ -201,22 +201,7 @@ export const usePlanShortcuts = (deps: PlanShortcutsDeps) => {
         isRackLinkId,
         t
       }),
-    [
-      deleteLink,
-      markTouched,
-      postAuditEvent,
-      push,
-      setConfirmDelete,
-      setConfirmDeleteCorridorId,
-      setConfirmDeleteRoomId,
-      setConfirmDeleteRoomIds,
-      setPendingRoomDeletes,
-      setSelectedCorridorDoor,
-      setSelectedLinkId,
-      setSelectedRoomDoorId,
-      t,
-      updateFloorPlan
-    ]
+    [deleteLink, isRackLinkId, markTouched, postAuditEvent, push, setConfirmDelete, setConfirmDeleteCorridorId, setConfirmDeleteRoomId, setConfirmDeleteRoomIds, setPendingRoomDeletes, setSelectedCorridorDoor, setSelectedLinkId, setSelectedRoomDoorId, t, updateFloorPlan]
   );
 
   const runTextShortcut = useMemo(
@@ -285,20 +270,20 @@ export const usePlanShortcuts = (deps: PlanShortcutsDeps) => {
         isDeskType,
         isCameraType
       }),
-    [isCameraType, markTouched, updateObject]
+    [isCameraType, isDeskType, markTouched, updateObject]
   );
 
   const captureEntrySnapshot = useCallback(
     (fallbackPlan: FloorPlan) => {
       entrySnapshotRef.current = getPlanSnapshot(planRef.current || fallbackPlan);
     },
-    [getPlanSnapshot]
+    [entrySnapshotRef, getPlanSnapshot, planRef]
   );
 
-  const getLastInserted = useCallback(() => lastInsertedRef.current, []);
+  const getLastInserted = useCallback(() => lastInsertedRef.current, [lastInsertedRef]);
   const clearLastInserted = useCallback(() => {
     lastInsertedRef.current = null;
-  }, []);
+  }, [lastInsertedRef]);
 
   const runSaveShortcut = useMemo(
     () =>
@@ -315,17 +300,7 @@ export const usePlanShortcuts = (deps: PlanShortcutsDeps) => {
         getLatestRevisionCached,
         getRevisionVersion
       }),
-    [
-      addRevision,
-      captureEntrySnapshot,
-      getLatestRevisionCached,
-      getPlanUnsavedChanges,
-      postAuditEvent,
-      push,
-      resetTouched,
-      setSaveRevisionModalPreset,
-      t
-    ]
+    [addRevision, captureEntrySnapshot, getLatestRevisionCached, getPlanUnsavedChanges, getRevisionVersion, postAuditEvent, push, resetTouched, setSaveRevisionModalPreset, setSaveRevisionOpen, t]
   );
 
   const runUndoRedoShortcut = useMemo(
@@ -354,7 +329,7 @@ export const usePlanShortcuts = (deps: PlanShortcutsDeps) => {
         push,
         t
       }),
-    [push, setSelection, setSelectedCorridorId, setSelectedCorridorDoor, setSelectedRoomDoorId, t]
+    [setSelectedCorridorId, setSelectedCorridorDoor, setSelectedRoomDoorId, setSelection, setContextMenu, setSelectedRoomId, setSelectedRoomIds, setSelectedLinkId, push, t]
   );
 
   const runEscapeSelectionShortcut = useMemo(
@@ -369,7 +344,7 @@ export const usePlanShortcuts = (deps: PlanShortcutsDeps) => {
         setSelectedRoomDoorId,
         setSelectedLinkId
       }),
-    [clearSelection, setSelectedCorridorId, setSelectedCorridorDoor, setSelectedRoomDoorId]
+    [setContextMenu, clearSelection, setSelectedRoomId, setSelectedRoomIds, setSelectedCorridorId, setSelectedCorridorDoor, setSelectedRoomDoorId, setSelectedLinkId]
   );
 
   const runBlockingUiShortcut = useMemo(
@@ -425,22 +400,7 @@ export const usePlanShortcuts = (deps: PlanShortcutsDeps) => {
         measureFinishedRef,
         measurePointsRef
       }),
-    [
-      cancelScaleMode,
-      convertMeasurementToQuotes,
-      deleteObject,
-      finishWallDraw,
-      markTouched,
-      setMeasureClosed,
-      setMeasureFinished,
-      setMeasurePoints,
-      showMeasureToast,
-      startMeasure,
-      startQuote,
-      startWallDraw,
-      stopMeasure,
-      stopQuote
-    ]
+    [cancelScaleMode, convertMeasurementToQuotes, deleteObject, finishWallDraw, markTouched, measureClosedRef, measureFinishedRef, measurePointsRef, setMeasureClosed, setMeasureFinished, setMeasurePointer, setMeasurePoints, setQuotePointer, setQuotePoints, setWallDraftPointer, setWallDraftPoints, showMeasureToast, startMeasure, startQuote, startWallDraw, stopMeasure, stopQuote, wallDraftPointsRef, wallDraftSegmentIdsRef]
   );
 
   return {

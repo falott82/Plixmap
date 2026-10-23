@@ -241,7 +241,7 @@ export function usePlanContextDerived(deps: UsePlanContextDerivedDeps) {
   const selectionHasDesk = useMemo(() => {
     if (!renderPlan) return false;
     return selectedObjects.some((obj) => isDeskType(obj.type));
-  }, [renderPlan, selectedObjects]);
+  }, [isDeskType, renderPlan, selectedObjects]);
   const selectionHasPhoto = useMemo(() => {
     if (!renderPlan) return false;
     return selectedObjects.some((obj) => obj.type === 'photo');

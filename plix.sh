@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORT="${PLIX_PORT:-8787}"
+PORT="${PLIX_PORT:-${PORT:-8787}}"
 HOST="${PLIX_HOST:-localhost}"
 SERVICE_URL="${PLIX_URL:-http://${HOST}:${PORT}}"
 SERVICE_URL="${SERVICE_URL%/}"
@@ -14,6 +14,22 @@ BUILD_CMD="${PLIX_BUILD_CMD:-npm run build}"
 START_TIMEOUT="${PLIX_START_TIMEOUT:-60}"
 STOP_TIMEOUT="${PLIX_STOP_TIMEOUT:-20}"
 LAST_MATCHED_URL=""
+MODE="${PLIX_MODE:-auto}"
+
+compose() {
+  docker compose --project-directory "$PROJECT_DIR" -f "$PROJECT_DIR/docker-compose.yml" "$@"
+}
+
+if [[ "$MODE" == "auto" ]]; then
+  MODE="native"
+  if command -v docker >/dev/null 2>&1 && [[ -n "$(compose ps -aq deskly 2>/dev/null || true)" ]]; then
+    MODE="docker"
+  fi
+fi
+if [[ "$MODE" != "native" && "$MODE" != "docker" ]]; then
+  printf '[plix] Errore: PLIX_MODE deve essere auto, native o docker.\n' >&2
+  exit 1
+fi
 
 log() {
   printf '[plix] %s\n' "$*"
@@ -36,6 +52,7 @@ Comandi:
   status   Mostra se la porta $PORT e occupata
 
 Variabili opzionali:
+  PLIX_MODE=auto|native|docker (auto rileva il container esistente)
   PLIX_PORT=$PORT
   PLIX_HOST=$HOST
   PLIX_URL=$SERVICE_URL
@@ -67,7 +84,8 @@ wait_for_port_down() {
 wait_for_service_up() {
   local attempt
   for ((attempt = 1; attempt <= START_TIMEOUT; attempt++)); do
-    if curl -fsS --max-time 2 "$SERVICE_ORIGIN/" >/dev/null 2>&1; then
+    if curl -fsS --max-time 2 "$SERVICE_ORIGIN/api/health/ready" >/dev/null 2>&1 &&
+      curl -fsS --max-time 2 "$SERVICE_ORIGIN/" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -119,9 +137,15 @@ on matchesPlixmap(tabUrl, primaryTarget, portNumber)
   if tabUrl is missing value then return false
   set normalizedUrl to tabUrl as text
   if normalizedUrl does not start with "http://" and normalizedUrl does not start with "https://" then return false
-  if normalizedUrl contains primaryTarget then return true
-  if normalizedUrl contains ("localhost:" & portNumber) then return true
-  if normalizedUrl contains ("127.0.0.1:" & portNumber) then return true
+  repeat with targetHost in {primaryTarget, "localhost:" & portNumber, "127.0.0.1:" & portNumber, "[::1]:" & portNumber}
+    repeat with scheme in {"http://", "https://"}
+      set targetOrigin to (scheme as text) & (targetHost as text)
+      if normalizedUrl is targetOrigin then return true
+      repeat with separator in {"/", "?", "#"}
+        if normalizedUrl starts with (targetOrigin & (separator as text)) then return true
+      end repeat
+    end repeat
+  end repeat
   return false
 end matchesPlixmap
 APPLESCRIPT
@@ -162,6 +186,12 @@ open_service_url() {
 stop_service() {
   close_chrome_tabs
 
+  if [[ "$MODE" == "docker" ]]; then
+    log "Stop del solo container Plixmap."
+    compose stop --timeout "$STOP_TIMEOUT" deskly
+    return 0
+  fi
+
   local pids=()
   local pid
   while IFS= read -r pid; do
@@ -171,6 +201,12 @@ stop_service() {
     log "Nessun processo in ascolto sulla porta $PORT."
     return 0
   fi
+
+  for pid in "${pids[@]}"; do
+    if ps -p "$pid" -o comm= | grep -qi docker; then
+      die "La porta e gestita da Docker. Usa PLIX_MODE=docker per fermare il container."
+    fi
+  done
 
   log "Stop del servizio sulla porta $PORT (PID: ${pids[*]})"
   kill "${pids[@]}" 2>/dev/null || true
@@ -200,17 +236,44 @@ stop_service() {
 start_service() {
   local reopen_url="${1:-$SERVICE_URL}"
 
+  if [[ "$MODE" == "docker" ]]; then
+    log "Avvio del container Plixmap."
+    compose up -d deskly
+    if wait_for_service_up; then
+      log "Servizio Docker disponibile su $SERVICE_ORIGIN"
+      open_service_url "$reopen_url"
+      return 0
+    fi
+    compose logs --tail=30 deskly
+    die "Il container non risponde su $SERVICE_ORIGIN"
+  fi
+
   if is_listening; then
     log "La porta $PORT e gia in ascolto. Nessun riavvio eseguito."
     open_service_url "$reopen_url"
     return 0
   fi
 
-  local quoted_project_dir
-  quoted_project_dir="$(printf '%q' "$PROJECT_DIR")"
-
   log "Avvio Plixmap con: $START_CMD"
-  nohup bash -lc "cd $quoted_project_dir && exec $START_CMD" >>"$LOG_FILE" 2>&1 &
+  # A detached session survives the terminal/agent command that starts it.
+  node - "$PROJECT_DIR" "$LOG_FILE" "$PORT" "$START_CMD" <<'NODE'
+const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+const [projectDir, logFile, port, command] = process.argv.slice(2);
+const output = fs.openSync(logFile, 'a');
+const child = spawn('bash', ['-c', `exec ${command}`], {
+  cwd: projectDir,
+  env: { ...process.env, PORT: port },
+  detached: true,
+  stdio: ['ignore', output, output]
+});
+child.on('error', (error) => {
+  console.error(`[plix] ${error.message}`);
+  process.exitCode = 1;
+});
+child.unref();
+fs.closeSync(output);
+NODE
 
   if wait_for_service_up; then
     log "Servizio disponibile su $SERVICE_ORIGIN"
@@ -224,6 +287,10 @@ start_service() {
 }
 
 build_release() {
+  if [[ "$MODE" == "docker" ]]; then
+    compose build deskly
+    return 0
+  fi
   log "Build release con: $BUILD_CMD"
   (
     cd "$PROJECT_DIR"
@@ -233,6 +300,13 @@ build_release() {
 }
 
 status_service() {
+  if [[ "$MODE" == "docker" ]]; then
+    compose ps deskly
+    curl -fsS --max-time 5 "$SERVICE_ORIGIN/api/health/ready" || return 1
+    printf '\n'
+    log "URL servizio: $SERVICE_ORIGIN"
+    return 0
+  fi
   local pids=()
   local pid
   while IFS= read -r pid; do

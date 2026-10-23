@@ -46,7 +46,7 @@ export const usePlanMeetingOpenHandlers = (deps: any) => {
         setMeetingManagerOpen
       });
     },
-    [client?.id, hasNavigationEdits, isReadOnly, planId, push, site?.id, t]
+    [client, hasNavigationEdits, isReadOnly, planId, push, setMeetingManagerOpen, setMeetingManagerPreset, setPendingMeetingManagerPreset, setSaveRevisionModalPreset, setSaveRevisionOpen, site, t]
   );
 
   const dispatchOpenClientMeetingsTimeline = useCallback(
@@ -83,7 +83,7 @@ export const usePlanMeetingOpenHandlers = (deps: any) => {
         setSaveRevisionModalPreset,
         setSaveRevisionOpen
       }),
-    [canManageMeetingScheduling, client?.id, dispatchOpenClientMeetingsTimeline, hasNavigationEdits, isReadOnly, push, site?.id, t]
+    [canManageMeetingScheduling, client, dispatchOpenClientMeetingsTimeline, hasNavigationEdits, isReadOnly, push, setPendingClientMeetingsPreset, setSaveRevisionModalPreset, setSaveRevisionOpen, site, t]
   );
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffectEvent, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDataStore } from '../../store/useDataStore';
 import { useUIStore } from '../../store/useUIStore';
 import { useT } from '../../i18n/useT';
@@ -406,7 +406,7 @@ const SidebarTree = () => {
       }
     }
     return out;
-  }, [clients, permissions, user?.isAdmin]);
+  }, [clients, permissions, user?.isAdmin, user?.isSuperAdmin]);
 
   const fullClient = useDataStore(
     useMemo(
@@ -533,6 +533,9 @@ const SidebarTree = () => {
     () => !!isSuperAdmin || !!user?.isAdmin || (user as any)?.canManageBusinessPartners === true,
     [isSuperAdmin, user]
   );
+
+  // Result-cache writes must not restart the availability request.
+  const readClientAvailabilityCache = useEffectEvent(() => clientMeetingsDuplicateModal?.availabilityByDay);
 
   useEffect(() => {
     if (!clientMenu) setClientMenuRubricaOpen(false);
@@ -775,7 +778,7 @@ const SidebarTree = () => {
   const selectedClientForMeetingsFull = useDataStore(
     useMemo(
       () => (s: any) => (clientMeetingsModal ? s.clients.find((c: any) => c.id === clientMeetingsModal.clientId) || null : null),
-      [clientMeetingsModal?.clientId]
+      [clientMeetingsModal]
     )
   );
 
@@ -1022,14 +1025,28 @@ const SidebarTree = () => {
   }, [clientMeetingsDuplicateRoomPickerOpen]);
 
   useEffect(() => {
-    if (!clientMeetingsDuplicateModal || clientMeetingsDuplicateModal.step !== 'setup') {
+    if (clientMeetingsDuplicateModal?.step !== 'setup') {
       setClientMeetingsDuplicateRoomPickerOpen(false);
     }
   }, [clientMeetingsDuplicateModal?.step, clientMeetingsDuplicateModal?.booking?.id]);
 
   useEffect(() => {
     let cancelled = false;
-    const dup = clientMeetingsDuplicateModal;
+    const requestBooking = clientMeetingsDuplicateModal?.booking;
+    if (!requestBooking) return;
+    const dup = {
+      booking: requestBooking,
+      step: clientMeetingsDuplicateModal?.step,
+      baseDay: clientMeetingsDuplicateModal?.baseDay,
+      monthAnchor: clientMeetingsDuplicateModal?.monthAnchor,
+      availabilityByDay: readClientAvailabilityCache(),
+      roomMode: clientMeetingsDuplicateModal?.roomMode,
+      roomOptions: clientMeetingsDuplicateModal?.roomOptions || [],
+      selectedRoomId: clientMeetingsDuplicateModal?.selectedRoomId,
+      timeMode: clientMeetingsDuplicateModal?.timeMode,
+      customFromHm: clientMeetingsDuplicateModal?.customFromHm,
+      customToHm: clientMeetingsDuplicateModal?.customToHm
+    };
     const bookingId = String(dup?.booking?.id || '').trim();
     if (!dup || !bookingId) return;
     if (dup.step !== 'calendar') return;
@@ -1190,19 +1207,7 @@ const SidebarTree = () => {
     return () => {
       cancelled = true;
     };
-  }, [
-    clientMeetingsDuplicateModal?.step,
-    clientMeetingsDuplicateModal?.booking?.id,
-    clientMeetingsDuplicateModal?.baseDay,
-    clientMeetingsDuplicateModal?.preferredDay,
-    clientMeetingsDuplicateModal?.monthAnchor,
-    clientMeetingsDuplicateModal?.roomMode,
-    clientMeetingsDuplicateModal?.selectedRoomId,
-    clientMeetingsDuplicateModal?.timeMode,
-    clientMeetingsDuplicateModal?.customFromHm,
-    clientMeetingsDuplicateModal?.customToHm,
-    resolveClientDuplicateSlot
-  ]);
+  }, [clientMeetingsDuplicateModal?.step, clientMeetingsDuplicateModal?.booking?.id, clientMeetingsDuplicateModal?.baseDay, clientMeetingsDuplicateModal?.preferredDay, clientMeetingsDuplicateModal?.monthAnchor, clientMeetingsDuplicateModal?.roomMode, clientMeetingsDuplicateModal?.selectedRoomId, clientMeetingsDuplicateModal?.timeMode, clientMeetingsDuplicateModal?.customFromHm, clientMeetingsDuplicateModal?.customToHm, clientMeetingsDuplicateModal?.booking, clientMeetingsDuplicateModal?.roomOptions, t]);
 
   const saveClientMeetingDuplicates = async () => {
     const dup = clientMeetingsDuplicateModal;

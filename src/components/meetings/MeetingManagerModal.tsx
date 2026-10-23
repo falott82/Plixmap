@@ -241,7 +241,7 @@ const MeetingManagerModal = ({
 
   const previewData = useMemo(
     () => computeMeetingRoomPreviewData(roomPreview, selectedSite, selectedClient),
-    [roomPreview, selectedClient?.name, selectedClient?.shortName, selectedSite]
+    [roomPreview, selectedClient, selectedSite]
   );
 
   useEffect(() => {

@@ -107,8 +107,8 @@ const LayersPanel = (
     () => planLayers.filter((layer) => SPECIAL_LAYER_IDS.has(String(layer.id))),
     [planLayers]
   );
-  const resolveLayerLabel = (layer: LayerDefinition) =>
-    (layer?.name?.[lang] as string) || (layer?.name?.it as string) || layer.id;
+  const resolveLayerLabel = useCallback((layer: LayerDefinition) =>
+    (layer?.name?.[lang] as string) || (layer?.name?.it as string) || layer.id, [lang]);
   const normalizedLayerQuery = layerQuery.trim().toLowerCase();
   const matchesLayer = useCallback(
     (layer: LayerDefinition) => {
@@ -168,7 +168,7 @@ const LayersPanel = (
     return (def?.name?.[lang] as string) || (def?.name?.it as string) || typeId;
   };
 
-  const inferDefaultLayerIds = (typeId: string, layerIdSet: Set<string>) => {
+  const inferDefaultLayerIds = useCallback((typeId: string, layerIdSet: Set<string>) => {
     const ids: string[] =
       typeId === 'user' || typeId === 'real_user' || typeId === 'generic_user'
         ? ['users']
@@ -182,7 +182,7 @@ const LayersPanel = (
                 ? ['walls']
                 : ['devices'];
     return ids.filter((id) => layerIdSet.has(id));
-  };
+  }, [isWallType]);
 
   const typeMapping = useMemo(() => {
     const layerIdSet = new Set(planLayers.map((l) => String(l.id)));
@@ -224,7 +224,7 @@ const LayersPanel = (
       }
     }
     return { explicitLayerIdsByType, effectiveLayerIdsByType, typesByLayerId };
-  }, [clientObjects, isDoorType, objectTypes, planLayers]);
+  }, [clientObjects, inferDefaultLayerIds, isDoorType, objectTypes, planLayers]);
 
   const objectCountsByLayer = useMemo(() => {
     const counts = new Map<string, Map<string, number>>();

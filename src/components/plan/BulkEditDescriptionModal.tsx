@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment, useEffect, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -12,12 +13,11 @@ interface Props {
 
 const BulkEditDescriptionModal = ({ open, count, onClose, onSubmit }: Props) => {
   const t = useT();
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useModalState(open, () => (''), []);
   const ref = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setDescription('');
     window.setTimeout(() => ref.current?.focus(), 0);
   }, [open]);
 

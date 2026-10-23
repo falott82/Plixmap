@@ -443,54 +443,7 @@ const ObjectModal = ({
     setIpAddress(initialIp || '');
     setUrlValue(initialUrl || '');
     window.setTimeout(() => nameRef.current?.focus(), 0);
-  }, [
-    initialDescription,
-    initialGpsCoords,
-    initialLastVerificationAt,
-    initialLayerIds,
-    initialName,
-    initialNotes,
-    initialSecurityCheckHistory,
-    initialSecurityDocuments,
-    initialVerifierCompany,
-    initialScale,
-    initialQuoteDashed,
-    initialQuoteEndpoint,
-    initialQuoteLabelPos,
-    initialQuoteLabelScale,
-    initialQuoteLabelBg,
-    initialQuoteLabelColor,
-    initialQuoteLabelOffset,
-    initialQuoteColor,
-    initialTextFont,
-    initialTextSize,
-    initialTextColor,
-    initialTextBg,
-    initialTextBgColor,
-    initialImageUrl,
-    initialImageWidth,
-    initialImageHeight,
-    initialWifiBand24,
-    initialWifiBand5,
-    initialWifiBand6,
-    initialWifiDb,
-    initialWifiStandard,
-    initialWifiBrand,
-    initialWifiModel,
-    initialWifiModelCode,
-    initialWifiCoverageSqm,
-    initialWifiCatalogId,
-    initialWifiShowRange,
-    initialWifiRangeScale,
-    initialIp,
-    initialUrl,
-    objectId,
-    type,
-    open,
-    normalizeLayerIds,
-    wifiModels,
-    wifiModelsById
-  ]);
+  }, [initialDescription, initialGpsCoords, initialLastVerificationAt, initialLayerIds, initialName, initialNotes, initialSecurityCheckHistory, initialSecurityDocuments, initialVerifierCompany, initialScale, initialQuoteDashed, initialQuoteEndpoint, initialQuoteLabelPos, initialQuoteLabelScale, initialQuoteLabelBg, initialQuoteLabelColor, initialQuoteLabelOffset, initialQuoteColor, initialTextFont, initialTextSize, initialTextColor, initialTextBg, initialTextBgColor, initialImageUrl, initialImageWidth, initialImageHeight, initialWifiBand24, initialWifiBand5, initialWifiBand6, initialWifiDb, initialWifiStandard, initialWifiBrand, initialWifiModel, initialWifiModelCode, initialWifiCoverageSqm, initialWifiCatalogId, initialWifiShowRange, initialWifiRangeScale, initialIp, initialUrl, objectId, type, open, normalizeLayerIds, wifiModels, wifiModelsById, quoteOrientation]);
 
   useEffect(() => {
     if (!open || !canEditLayers) return;

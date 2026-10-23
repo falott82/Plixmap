@@ -274,34 +274,7 @@ const RoomModal = ({
       }
       nameRef.current?.focus();
     }, 0);
-  }, [
-    initialDepartmentsOpen,
-    initialColor,
-    initialFillOpacity,
-    initialDepartmentTags,
-    initialLogical,
-    initialMeetingRoom,
-    initialMeetingProjector,
-    initialMeetingTv,
-    initialMeetingVideoConf,
-    initialMeetingCoffeeService,
-    initialMeetingWhiteboard,
-    initialMeetingKioskEnabled,
-    initialNoWindows,
-    initialWifiAvailable,
-    initialFridgeAvailable,
-    initialStorageRoom,
-    initialBathroom,
-    initialTechnicalRoom,
-    initialName,
-    initialNameEn,
-    initialCapacity,
-    initialNotes,
-    initialShowName,
-    initialSurfaceSqm,
-    focusDepartmentSearch,
-    open
-  ]);
+  }, [initialDepartmentsOpen, initialColor, initialFillOpacity, initialDepartmentTags, initialLogical, initialMeetingRoom, initialMeetingProjector, initialMeetingTv, initialMeetingVideoConf, initialMeetingCoffeeService, initialMeetingWhiteboard, initialMeetingKioskEnabled, initialNoWindows, initialWifiAvailable, initialFridgeAvailable, initialStorageRoom, initialBathroom, initialTechnicalRoom, initialName, initialNameEn, initialCapacity, initialNotes, initialShowName, initialSurfaceSqm, focusDepartmentSearch, open, initialLabelScale]);
 
   useEffect(() => {
     if (!open || !departmentsModalOpen) return;
@@ -363,7 +336,7 @@ const RoomModal = ({
     setDepartmentTags((prev) => prev.filter((entry) => entry.toLocaleLowerCase() !== target));
   };
 
-  const moveSelectedDepartments = () => {
+  const moveSelectedDepartments = useCallback(() => {
     const normalized = new Set(availableSelection.map((entry) => String(entry || '').trim().toLocaleLowerCase()).filter(Boolean));
     if (!normalized.size) return;
     const toMove = availableDepartments.filter((entry) => normalized.has(entry.toLocaleLowerCase()));
@@ -371,7 +344,7 @@ const RoomModal = ({
     setDepartmentTags((prev) => canonicalDepartmentTags([...prev, ...toMove]));
     setAvailableSelection([]);
     setAvailableAnchorIndex(null);
-  };
+  }, [availableDepartments, availableSelection]);
 
   const removeSelectedDepartments = () => {
     const normalized = new Set(selectedSelection.map((entry) => String(entry || '').trim().toLocaleLowerCase()).filter(Boolean));
@@ -389,7 +362,7 @@ const RoomModal = ({
     setAvailableActiveIndex(0);
   };
 
-  const addFilteredDepartments = () => {
+  const addFilteredDepartments = useCallback(() => {
     if (availableSelection.length) {
       moveSelectedDepartments();
       return;
@@ -402,7 +375,7 @@ const RoomModal = ({
       return;
     }
     addDepartmentTag(raw);
-  };
+  }, [availableActiveIndex, availableSelection.length, departmentQuery, filteredAvailableDepartments, moveSelectedDepartments]);
 
   const applyRangeSelection = (
     list: string[],

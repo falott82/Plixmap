@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { toast } from 'sonner';
 import {
@@ -248,15 +248,7 @@ const ClientChatDock = () => {
       if (typeof layout.leftGroupsCollapsed === 'boolean') setLeftGroupsCollapsed(layout.leftGroupsCollapsed);
       if (typeof layout.leftUsersCollapsed === 'boolean') setLeftUsersCollapsed(layout.leftUsersCollapsed);
     }
-  }, [
-    setClientChatDividerLeftWidth,
-    setClientChatDockPreferredHeight,
-    setClientChatDockWidth,
-    user?.id,
-    setLeftCompact,
-    setLeftGroupsCollapsed,
-    setLeftUsersCollapsed
-  ]);
+  }, [setClientChatDividerLeftWidth, setClientChatDockPreferredHeight, setClientChatDockWidth, user?.id, setLeftCompact, setLeftGroupsCollapsed, setLeftUsersCollapsed, user]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -427,26 +419,19 @@ const ClientChatDock = () => {
     setSearchHitIdx(0);
   }, [searchQ, clientChatClientId]);
 
-  useEffect(() => {
-    if (!searchOpen) return;
-    if (!searchHits.length) return;
-    const id = searchHits[Math.max(0, Math.min(searchHitIdx, searchHits.length - 1))];
-    if (id) window.setTimeout(() => scrollToMessage(id), 0);
-  }, [searchHitIdx, searchHits, searchOpen]);
-
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
     atBottomRef.current = true;
-  };
+  }, []);
 
-  const scrollToBottomSoon = () => {
+  const scrollToBottomSoon = useCallback(() => {
     // Two rAFs to ensure layout/scrollHeight are correct after store updates.
     window.requestAnimationFrame(() => window.requestAnimationFrame(scrollToBottom));
-  };
+  }, [scrollToBottom]);
 
-  const scrollToMessage = (id: string, behavior: ScrollBehavior = 'smooth') => {
+  const scrollToMessage = useCallback((id: string, behavior: ScrollBehavior = 'smooth') => {
     const el = document.getElementById(`chatmsg-${id}`);
     if (!el) return;
     try {
@@ -454,12 +439,20 @@ const ClientChatDock = () => {
     } catch {
       el.scrollIntoView();
     }
-  };
+  }, []);
 
-  const scrollToMessageSoon = (id: string, behavior: ScrollBehavior = 'smooth') => {
+  useEffect(() => {
+    if (!searchOpen || !searchHits.length) return;
+    const id = searchHits[Math.max(0, Math.min(searchHitIdx, searchHits.length - 1))];
+    if (!id) return;
+    const timer = window.setTimeout(() => scrollToMessage(id), 0);
+    return () => window.clearTimeout(timer);
+  }, [scrollToMessage, searchHitIdx, searchHits, searchOpen]);
+
+  const scrollToMessageSoon = useCallback((id: string, behavior: ScrollBehavior = 'smooth') => {
     // Two rAFs to ensure the message nodes exist after store updates.
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => scrollToMessage(id, behavior)));
-  };
+  }, [scrollToMessage]);
 
   const onListScroll = () => {
     const el = listRef.current;
@@ -516,7 +509,7 @@ const ClientChatDock = () => {
         setErr(e instanceof Error ? e.message : 'Failed to load chat');
       })
       .finally(() => setLoading(false));
-  }, [clearChatUnread, clientChatClientId, clientChatOpen, user?.id]);
+  }, [clearChatUnread, clientChatClientId, clientChatOpen, scrollToBottomSoon, scrollToMessageSoon, setChatUnreadSenderIds, user?.id]);
 
   useEffect(() => {
     if (!clientChatOpen || !clientChatClientId || !user?.id) return;
@@ -586,7 +579,7 @@ const ClientChatDock = () => {
     if (!messages.length) return;
     if (!atBottomRef.current) return;
     scrollToBottomSoon();
-  }, [clientChatClientId, clientChatOpen, messages.length]);
+  }, [clientChatClientId, clientChatOpen, messages.length, scrollToBottomSoon]);
 
   useEffect(() => {
     if (!editingId) return;

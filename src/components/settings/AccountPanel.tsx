@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { KeyRound, Shield, Trash2, Upload } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useToastStore } from '../../store/useToast';
@@ -19,23 +19,17 @@ const AccountPanel = () => {
   const [avatarBusy, setAvatarBusy] = useState(false);
   const t = useT();
 
-  if (!user) return null;
-
-  const loadMfa = async () => {
-    try {
-      const s = await getMfaStatus();
-      setMfaEnabled(!!s.enabled);
-    } catch {
-      setMfaEnabled(false);
-    }
-  };
+  const loadMfa = useCallback(() => getMfaStatus()
+    .then((status) => setMfaEnabled(!!status.enabled))
+    .catch(() => setMfaEnabled(false)), []);
 
   useEffect(() => {
-    loadMfa();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (user?.id) void loadMfa();
+  }, [loadMfa, user?.id]);
 
-  const displayName = useMemo(() => `${user.firstName} ${user.lastName}`.trim(), [user.firstName, user.lastName]);
+  if (!user) return null;
+
+  const displayName = `${user.firstName} ${user.lastName}`.trim();
 
   const cropSquare = async (dataUrl: string) => {
     try {

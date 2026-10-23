@@ -5,11 +5,16 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Corridor, FloorPlan, Room } from '../../store/types';
 import { useT } from '../../i18n/useT';
-import { computeMultiFloorRoute, MultiFloorRouteResult, Point, RoutePlanSegment, RouteResult } from './internalMapRouting';
-import { polygonCentroid as polygonCentroidShared, pointInPolygon, distancePointToSegment } from './planViewUtils';
+import { computeMultiFloorRoute, formatEta, type MultiFloorRouteResult, type Point, type RoutePlanSegment, type RouteResult } from './internalMapRouting';
+import { pointInPolygon, parseGoogleMapsCoordinates, googleMapsUrlFromCoords } from './planViewUtils';
 import { waitForNodeImagesReady, inlineImagesForExport, rasterizeSvgsForExport, buildCaptureNode } from './EscapeRouteModal.helpers';
+import {
+  corridorPolygon, roomPolygon, getCorridorDoorAnchor, getCorridorConnectionAnchor, normalizeTransitionType,
+  polygonCentroid, polylineLength, SPEED_MPS, pointOnPolygonBoundary as isOnBoundary
+} from './internalMapGeometry';
 
-type ConnectionTransitionType = 'stairs' | 'elevator';
+const pointOnPolygonBoundary = (point: Point, polygon: Point[], tolerance = 1.8) =>
+  polygon.length >= 2 && isOnBoundary(point, polygon, tolerance);
 
 type EscapeSourceKind = 'map' | 'room' | 'corridor';
 
@@ -51,32 +56,6 @@ interface EscapeAssemblyPoint {
   mapsUrl: string;
 }
 
-const SPEED_MPS = 1.4;
-
-const parseGoogleMapsCoordinates = (rawValue: string): { lat: number; lng: number } | null => {
-  const raw = String(rawValue || '').trim();
-  if (!raw) return null;
-  const decimal = '[-+]?\\d{1,3}(?:\\.\\d+)?';
-  const pair = new RegExp(`(${decimal})\\s*,\\s*(${decimal})`);
-  const direct = raw.match(pair);
-  const fromPair = direct || raw.match(/[@?&]q=([-+]?\d{1,3}(?:\.\d+)?),\s*([-+]?\d{1,3}(?:\.\d+)?)/);
-  if (!fromPair) return null;
-  const lat = Number(fromPair[1]);
-  const lng = Number(fromPair[2]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-  return { lat, lng };
-};
-
-const googleMapsUrlFromCoords = (rawValue: string) => {
-  const raw = String(rawValue || '').trim();
-  if (!raw) return '';
-  if (/^https?:\/\//i.test(raw)) return raw;
-  const parsed = parseGoogleMapsCoordinates(raw);
-  if (!parsed) return '';
-  return `https://www.google.com/maps?q=${encodeURIComponent(`${parsed.lat},${parsed.lng}`)}`;
-};
-
 const googleMapsCoordsLabel = (rawValue: string) => {
   const parsed = parseGoogleMapsCoordinates(rawValue);
   if (!parsed) return '';
@@ -86,8 +65,6 @@ const googleMapsCoordsLabel = (rawValue: string) => {
 const getAssemblyPointCoordsLabel = (point: EscapeAssemblyPoint) =>
   point.googleCoords || point.gps || `${Math.round(point.point.x)}, ${Math.round(point.point.y)}`;
 
-// Shares the area-weighted centroid math; preserves this modal's {0,0}-for-empty contract.
-const polygonCentroid = (polygon: Point[]) => polygonCentroidShared(polygon) ?? { x: 0, y: 0 };
 
 const getRoomLabelLayout = (room: Room, polygon: Point[]) => {
   const minX = Math.min(...polygon.map((point) => point.x));
@@ -107,105 +84,6 @@ const getRoomLabelLayout = (room: Room, polygon: Point[]) => {
   return { x: center.x, y: center.y, fontSize, rotate: 0 };
 };
 
-const corridorPolygon = (corridor: Corridor): Point[] => {
-  const kind = (corridor?.kind || (Array.isArray(corridor?.points) && corridor.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-  if (kind === 'poly') {
-    const points = Array.isArray(corridor?.points) ? corridor.points : [];
-    if (points.length >= 3) return points;
-  }
-  const x = Number(corridor?.x || 0);
-  const y = Number(corridor?.y || 0);
-  const width = Number(corridor?.width || 0);
-  const height = Number(corridor?.height || 0);
-  if (!(width > 0 && height > 0)) return [];
-  return [
-    { x, y },
-    { x: x + width, y },
-    { x: x + width, y: y + height },
-    { x, y: y + height }
-  ];
-};
-
-const roomPolygon = (room: Room): Point[] => {
-  const kind = (room?.kind || (Array.isArray(room?.points) && room.points.length ? 'poly' : 'rect')) as 'rect' | 'poly';
-  if (kind === 'poly') {
-    const points = Array.isArray(room?.points) ? room.points : [];
-    if (points.length >= 3) return points;
-  }
-  const x = Number(room?.x || 0);
-  const y = Number(room?.y || 0);
-  const width = Number(room?.width || 0);
-  const height = Number(room?.height || 0);
-  if (!(width > 0 && height > 0)) return [];
-  return [
-    { x, y },
-    { x: x + width, y },
-    { x: x + width, y: y + height },
-    { x, y: y + height }
-  ];
-};
-
-
-const pointOnPolygonBoundary = (point: Point, polygon: Point[], tolerance = 1.8) => {
-  if (polygon.length < 2) return false;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    if (distancePointToSegment(point, a, b) <= tolerance) return true;
-  }
-  return false;
-};
-
-
-const getCorridorDoorAnchor = (corridor: Corridor, door: any): Point | null => {
-  const points = corridorPolygon(corridor);
-  if (points.length < 2) return null;
-  const edgeIndex = Number(door?.edgeIndex);
-  const t = Math.max(0, Math.min(1, Number(door?.t) || 0));
-  if (!Number.isFinite(edgeIndex)) return null;
-  const idx = ((Math.floor(edgeIndex) % points.length) + points.length) % points.length;
-  const a = points[idx];
-  const b = points[(idx + 1) % points.length];
-  if (!a || !b) return null;
-  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-};
-
-const getCorridorConnectionAnchor = (corridor: Corridor, connection: any): Point | null => {
-  if (Number.isFinite(Number(connection?.x)) && Number.isFinite(Number(connection?.y))) {
-    return { x: Number(connection.x), y: Number(connection.y) };
-  }
-  const points = corridorPolygon(corridor);
-  if (points.length < 2) return null;
-  const edgeIndex = Number(connection?.edgeIndex);
-  const t = Math.max(0, Math.min(1, Number(connection?.t) || 0));
-  if (!Number.isFinite(edgeIndex)) return null;
-  const idx = ((Math.floor(edgeIndex) % points.length) + points.length) % points.length;
-  const a = points[idx];
-  const b = points[(idx + 1) % points.length];
-  if (!a || !b) return null;
-  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-};
-
-const normalizeTransitionType = (value: any): ConnectionTransitionType => (String(value || '') === 'elevator' ? 'elevator' : 'stairs');
-
-const polylineLength = (points: Point[]) => {
-  let length = 0;
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const a = points[i];
-    const b = points[i + 1];
-    length += Math.hypot(b.x - a.x, b.y - a.y);
-  }
-  return length;
-};
-
-const formatEta = (seconds?: number) => {
-  if (!seconds || !Number.isFinite(seconds)) return '--';
-  const rounded = Math.max(1, Math.round(seconds));
-  const minutes = Math.floor(rounded / 60);
-  const remaining = rounded % 60;
-  if (!minutes) return `${remaining}s`;
-  return `${minutes}m ${remaining}s`;
-};
 
 const formatDistance = (meters?: number, px?: number) => {
   if (typeof meters === 'number' && Number.isFinite(meters)) {
@@ -727,7 +605,7 @@ const EscapeRouteModal = ({ open, plans, emergencyContacts = [], startPlanId, st
         if (runId === computeRunRef.current) setComputing(false);
       }
     }, 0);
-  }, [emergencyDoorCandidates, open, plans, startPlanId, startPoint, t]);
+  }, [emergencyDoorCandidates, open, planById, planOrder, plans, startPlanId, startPoint, t]);
 
   useEffect(
     () => () => {

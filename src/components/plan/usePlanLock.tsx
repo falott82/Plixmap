@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { useT } from '../../i18n/useT';
 
 type LockStateShape = {
@@ -53,14 +53,14 @@ export function usePlanLock(deps: UsePlanLockDeps) {
     return String(Math.round(n * 10) / 10);
   }, []);
 
-  const grantRemainingMinutes = useMemo(() => {
+  const grantRemainingMinutes = (() => {
     const exp = Number(lockState?.grant?.expiresAt || 0);
     if (!Number.isFinite(exp) || exp <= 0) return null;
     const ms = exp - Date.now();
     if (ms <= 0) return 0;
     // Round to nearest 0.5 minute (matches SidebarTree).
     return Math.round((ms / 60_000) * 2) / 2;
-  }, [lockState?.grant?.expiresAt, lockInfoOpen]);
+  })();
 
 	  useEffect(() => {
 	    if (!lockInfoOpen) return;

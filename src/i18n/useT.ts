@@ -1,6 +1,12 @@
 import { useAuthStore } from '../store/useAuthStore';
 
 export type Lang = 'it' | 'en';
+type Translation = { it: string; en: string };
+
+const translators = {
+  it: (message: Translation) => message.it,
+  en: (message: Translation) => message.en
+};
 
 export const useLang = (): Lang => {
   const lang = useAuthStore((s) => (s.user as any)?.language) as Lang | undefined;
@@ -12,5 +18,5 @@ export const useLang = (): Lang => {
 
 export const useT = () => {
   const lang = useLang();
-  return (m: { it: string; en: string }) => (lang === 'en' ? m.en : m.it);
+  return translators[lang];
 };

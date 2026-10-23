@@ -248,7 +248,7 @@ const MeetingNotesModal = ({
 
   const findManagerActionMissingTitleIndex = useCallback((actions: MeetingManagerAction[]) => computeFindManagerActionMissingTitleIndex(actions), []);
 
-  const actionInsights = useMemo(() => computeActionInsights(normalizedManagerActions, t), [normalizedManagerActions]);
+  const actionInsights = useMemo(() => computeActionInsights(normalizedManagerActions, t), [normalizedManagerActions, t]);
 
   const timelineChain = useMemo(
     () =>
@@ -271,7 +271,7 @@ const MeetingNotesModal = ({
 
   const timelineTaskEvents = useMemo(() => computeTimelineTaskEvents(timelineChain, t, sanitizeManagerActionsForPersist), [sanitizeManagerActionsForPersist, t, timelineChain]);
 
-  const load = async (opts?: { keepSelectedId?: string }) => {
+  const load = useCallback(async (opts?: { keepSelectedId?: string }) => {
     if (!meeting?.id) return;
     setLoading(true);
     setError('');
@@ -311,7 +311,7 @@ const MeetingNotesModal = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [meeting?.id]);
 
   useEffect(() => {
     if (!open || !meeting?.id) return;
@@ -495,7 +495,7 @@ const MeetingNotesModal = ({
     setSelectedId(NEW_NOTE_ID);
   }, [dirty, selectedId]);
 
-  const save = async () => {
+  const save = useCallback(async () => {
     if (!meeting?.id || !canEditSelected) return false;
     const normalizedTitle = String(title || '').trim();
     if (!normalizedTitle) {
@@ -534,13 +534,13 @@ const MeetingNotesModal = ({
     } finally {
       setSaving(false);
     }
-  };
+  }, [canEditSelected, load, meeting?.id, push, selectedNote, shared, t, title]);
 
   const getSelectedNoteText = () => {
     return String(editorRef.current?.getSelectedText() || '').trim();
   };
 
-  const runAiTransform = async (mode: 'translate' | 'correct', explicitTargetLanguage?: string) => {
+  const runAiTransform = useCallback(async (mode: 'translate' | 'correct', explicitTargetLanguage?: string) => {
     if (!meeting?.id) return;
     const sourceText = getSelectedNoteText();
     if (!sourceText) {
@@ -579,7 +579,7 @@ const MeetingNotesModal = ({
     } finally {
       setAiBusy(null);
     }
-  };
+  }, [meeting?.id, push, t]);
 
   const closeAiPreview = () => {
     ignoreOuterCloseUntilRef.current = Date.now() + 450;
@@ -592,7 +592,7 @@ const MeetingNotesModal = ({
     setTranslateLanguageModalOpen(false);
   };
 
-  const openTranslateLanguageModal = () => {
+  const openTranslateLanguageModal = useCallback(() => {
     if (!getSelectedNoteText()) {
       push(
         t({
@@ -604,7 +604,7 @@ const MeetingNotesModal = ({
       return;
     }
     setTranslateLanguageModalOpen(true);
-  };
+  }, [push, t]);
 
   const confirmTranslateLanguage = async () => {
     const selected = TRANSLATE_LANGUAGE_OPTIONS.find((entry) => entry.code === translateLanguageCode) || TRANSLATE_LANGUAGE_OPTIONS[0];
@@ -706,7 +706,7 @@ const MeetingNotesModal = ({
     setConfirmState({ kind: 'delete' });
   };
 
-  const deleteSelectedNote = async () => {
+  const deleteSelectedNote = useCallback(async () => {
     if (!meeting?.id || !selectedNote || !canEditSelected) return;
     setSaving(true);
     try {
@@ -720,7 +720,7 @@ const MeetingNotesModal = ({
     } finally {
       setSaving(false);
     }
-  };
+  }, [canEditSelected, load, meeting?.id, push, selectedNote, t]);
 
   const setManagerField = useCallback(
     (field: 'topicsText' | 'summaryText' | 'nextMeetingDate', value: string) => {
@@ -1122,7 +1122,7 @@ const MeetingNotesModal = ({
     if (current.kind === 'delete') {
       await deleteSelectedNote();
     }
-  }, [confirmState, onClose]);
+  }, [confirmState, deleteSelectedNote, onClose, save]);
 
   const continueWithoutSaving = useCallback(() => {
     if (!confirmState) return;

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
 import { Copy, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
 
@@ -17,15 +18,11 @@ export default function CloneFloorPlanModal({
 }) {
   const t = useT();
   const defaultName = useMemo(() => `${sourceName} (Copy)`, [sourceName]);
-  const [name, setName] = useState(defaultName);
+  const [name, setName] = useModalState(open, defaultName, [defaultName]);
   const [includeRooms, setIncludeRooms] = useState(true);
   const [includeObjects, setIncludeObjects] = useState(false);
   const [includeViews, setIncludeViews] = useState(true);
   const [includeLayers, setIncludeLayers] = useState(true);
-
-  useEffect(() => {
-    if (open) setName(defaultName);
-  }, [defaultName, open]);
 
   const normalizeName = (v: string) => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
   const duplicateName = useMemo(() => {

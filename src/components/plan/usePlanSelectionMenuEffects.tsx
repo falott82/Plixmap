@@ -117,61 +117,61 @@ export function usePlanSelectionMenuEffects(deps: UsePlanSelectionMenuEffectsDep
 
   useEffect(() => {
     planRef.current = renderPlan;
-  }, [renderPlan]);
+  }, [planRef, renderPlan]);
   useEffect(() => {
     selectedObjectIdRef.current = selectedObjectId;
-  }, [selectedObjectId]);
+  }, [selectedObjectId, selectedObjectIdRef]);
   useEffect(() => {
     selectedObjectIdsRef.current = selectedObjectIds;
-  }, [selectedObjectIds]);
+  }, [selectedObjectIds, selectedObjectIdsRef]);
   useEffect(() => runMultiSelectionToastEffect({
     contextMenu, renderPlan, selectedObjectIds, renderKeybindToast, selectionHintToastIds,
     multiToastKeyRef, multiToastIdRef
-  }), [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds]);
+  }), [contextMenu, multiToastIdRef, multiToastKeyRef, renderKeybindToast, renderPlan, selectedObjectIds, selectionHintToastIds]);
   useEffect(() => runDeskSelectionToastEffect({
     contextMenu, renderPlan, selectedObjectIds, selectedSingleObject, isDeskType, renderKeybindToast,
     selectionHintToastIds, deskToastKeyRef, deskToastIdRef
-  }), [contextMenu, isDeskType, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject]);
+  }), [contextMenu, deskToastIdRef, deskToastKeyRef, isDeskType, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject, selectionHintToastIds]);
   useEffect(() => runQuoteSelectionToastEffect({
     contextMenu, renderPlan, selectedObjectIds, selectedSingleObject, renderKeybindToast,
     selectionHintToastIds, quoteToastKeyRef, quoteToastIdRef
-  }), [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject]);
+  }), [contextMenu, quoteToastIdRef, quoteToastKeyRef, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject, selectionHintToastIds]);
   useEffect(() => runMediaSelectionToastEffect({
     contextMenu, renderPlan, selectedObjectIds, selectedSingleObject, renderKeybindToast,
     selectionHintToastIds, mediaToastKeyRef, mediaToastIdRef
-  }), [contextMenu, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject]);
+  }), [contextMenu, mediaToastIdRef, mediaToastKeyRef, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject, selectionHintToastIds]);
   useEffect(() => runObjectSelectionToastEffect({
     contextMenu, renderPlan, selectedObjectIds, selectedSingleObject, isDeskType, getTypeLabel, t,
     renderKeybindToast, selectionHintToastIds, selectionToastKeyRef, selectionToastIdRef
-  }), [contextMenu, getTypeLabel, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject, t]);
+  }), [contextMenu, getTypeLabel, isDeskType, renderKeybindToast, renderPlan, selectedObjectIds, selectedSingleObject, selectionHintToastIds, selectionToastIdRef, selectionToastKeyRef, t]);
   useEffect(() => {
     selectedLinkIdRef.current = selectedLinkId;
-  }, [selectedLinkId]);
+  }, [selectedLinkId, selectedLinkIdRef]);
   useEffect(() => {
     if (!internalMapOpen) return;
     dismissSelectionHintToasts();
   }, [dismissSelectionHintToasts, internalMapOpen]);
   useEffect(() => {
     selectedRoomIdRef.current = selectedRoomId;
-  }, [selectedRoomId]);
+  }, [selectedRoomId, selectedRoomIdRef]);
   useEffect(() => {
     if (!selectedCorridorDoor) return;
     if (selectedCorridorId && selectedCorridorDoor.corridorId !== selectedCorridorId) {
       setSelectedCorridorDoor(null);
     }
-  }, [selectedCorridorDoor, selectedCorridorId]);
+  }, [selectedCorridorDoor, selectedCorridorId, setSelectedCorridorDoor]);
   useEffect(() => {
     if (!selectedRoomDoorId) return;
     const currentRoomDoors = Array.isArray(renderPlan?.roomDoors) ? ((renderPlan?.roomDoors as RoomConnectionDoor[]).filter(Boolean)) : [];
     const exists = currentRoomDoors.some((door) => door.id === selectedRoomDoorId);
     if (!exists) setSelectedRoomDoorId(null);
-  }, [renderPlan, selectedRoomDoorId]);
+  }, [renderPlan, selectedRoomDoorId, setSelectedRoomDoorId]);
   useEffect(() => {
     confirmDeleteRef.current = confirmDelete;
-  }, [confirmDelete]);
+  }, [confirmDelete, confirmDeleteRef]);
   useEffect(() => {
     pendingRoomDeletesRef.current = pendingRoomDeletes;
-  }, [pendingRoomDeletes]);
+  }, [pendingRoomDeletes, pendingRoomDeletesRef]);
 
   useEffect(() => {
     if (!wallQuickMenu) return;
@@ -179,17 +179,17 @@ export function usePlanSelectionMenuEffects(deps: UsePlanSelectionMenuEffectsDep
     const stillSelected =
       selectedObjectId === wallQuickMenu.id || (selectedIds.length ? selectedIds.includes(wallQuickMenu.id) : false);
     if (!stillSelected) setWallQuickMenu(null);
-  }, [selectedObjectId, selectedObjectIds, wallQuickMenu]);
+  }, [selectedObjectId, selectedObjectIds, setWallQuickMenu, wallQuickMenu]);
 
   useEffect(() => {
     if (wallQuickMenu) return;
     setWallTypeMenu(null);
-  }, [wallQuickMenu]);
+  }, [setWallTypeMenu, wallQuickMenu]);
 
   useEffect(() => {
     if (!corridorQuickMenu) return;
     if (selectedCorridorId !== corridorQuickMenu.id) setCorridorQuickMenu(null);
-  }, [corridorQuickMenu, selectedCorridorId]);
+  }, [corridorQuickMenu, selectedCorridorId, setCorridorQuickMenu]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -202,17 +202,17 @@ export function usePlanSelectionMenuEffects(deps: UsePlanSelectionMenuEffectsDep
     if (contextMenu.kind === 'map') {
       setMapSubmenu(null);
     }
-  }, [contextMenu, dismissSelectionHintToasts]);
+  }, [contextMenu, dismissSelectionHintToasts, setAlignMenuOpen, setCorridorQuickMenu, setLayersContextMenu, setMapSubmenu, setWallQuickMenu, setWallTypeMenu]);
 
   useEffect(() => {
     if (contextMenu) return;
     setLayersContextMenu(null);
-  }, [contextMenu]);
+  }, [contextMenu, setLayersContextMenu]);
 
   useEffect(() => {
     if (!toolMode) return;
     setWallQuickMenu(null);
     setWallTypeMenu(null);
     setCorridorQuickMenu(null);
-  }, [toolMode]);
+  }, [setCorridorQuickMenu, setWallQuickMenu, setWallTypeMenu, toolMode]);
 }

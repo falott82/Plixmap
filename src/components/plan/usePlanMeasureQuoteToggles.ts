@@ -54,7 +54,7 @@ export const usePlanMeasureQuoteToggles = (deps: any) => {
         showMeasureToast
       });
     },
-    [metersPerPixel, push, showMeasureToast, t]
+    [measureClosedRef, measureFinishedRef, measurePointsRef, metersPerPixel, push, setMeasureClosed, setMeasureFinished, setMeasureMode, setMeasurePointer, setMeasurePoints, setPendingType, setQuoteMode, setQuotePointer, setQuotePoints, setRoomDrawMode, setScaleMode, setWallDrawMode, showMeasureToast, t]
   );
 
   const stopMeasure = useCallback(() => {
@@ -69,7 +69,7 @@ export const usePlanMeasureQuoteToggles = (deps: any) => {
     measureClosedRef.current = false;
     measureFinishedRef.current = false;
     push(t({ it: 'Misurazione annullata', en: 'Measurement cancelled' }), 'info');
-  }, [dismissMeasureToast, measureMode, push, t]);
+  }, [dismissMeasureToast, measureClosedRef, measureFinishedRef, measureMode, measurePointsRef, push, setMeasureClosed, setMeasureFinished, setMeasureMode, setMeasurePointer, setMeasurePoints, t]);
 
   const startQuote = useCallback(
     (point?: { x: number; y: number }) => {
@@ -88,7 +88,7 @@ export const usePlanMeasureQuoteToggles = (deps: any) => {
       setPendingType(null);
       push(t({ it: 'Quota: clicca due punti per fissare la misura.', en: 'Quote: click two points to fix the measurement.' }), 'info');
     },
-    [isReadOnly, metersPerPixel, push, t]
+    [isReadOnly, metersPerPixel, push, setMeasureMode, setPendingType, setQuoteMode, setQuotePointer, setQuotePoints, setRoomDrawMode, setScaleMode, setWallDrawMode, t]
   );
 
   const stopQuote = useCallback(() => {
@@ -97,7 +97,7 @@ export const usePlanMeasureQuoteToggles = (deps: any) => {
     setQuotePoints([]);
     setQuotePointer(null);
     push(t({ it: 'Quota annullata', en: 'Quote cancelled' }), 'info');
-  }, [quoteMode, push, t]);
+  }, [quoteMode, setQuoteMode, setQuotePoints, setQuotePointer, push, t]);
 
   return { startMeasure, stopMeasure, startQuote, stopQuote };
 };

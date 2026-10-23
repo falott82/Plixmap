@@ -9,5 +9,5 @@ import { useEffect, type MutableRefObject } from 'react';
 export function useSyncedRef<T>(ref: MutableRefObject<T>, value: T): void {
   useEffect(() => {
     ref.current = value;
-  }, [value]);
+  }, [ref, value]);
 }

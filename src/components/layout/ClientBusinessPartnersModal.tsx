@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment, useEffect, useMemo } from 'react';
 import { Transition } from '@headlessui/react';
 import { Building2, Plus, Search, Trash2, Upload, X } from 'lucide-react';
 import { nanoid } from 'nanoid';
@@ -50,22 +51,10 @@ const normalizeList = (list: BusinessPartner[]) =>
 const ClientBusinessPartnersModal = ({ open, client, onClose, onSave }: Props) => {
   const t = useT();
   const push = useToastStore((s) => s.push);
-  const [rows, setRows] = useState<BusinessPartner[]>([]);
-  const [query, setQuery] = useState('');
-  const [draft, setDraft] = useState<{ name: string; email: string; phone: string; notes: string; logoUrl?: string }>({
-    name: '',
-    email: '',
-    phone: '',
-    notes: '',
-    logoUrl: undefined
-  });
+  const [rows, setRows] = useModalState<BusinessPartner[]>(open, () => (normalizeList(((client as any)?.businessPartners || []) as BusinessPartner[])), [client]);
+  const [query, setQuery] = useModalState(open, () => (''), [client]);
+  const [draft, setDraft] = useModalState<{ name: string; email: string; phone: string; notes: string; logoUrl?: string }>(open, () => ({ name: '', email: '', phone: '', notes: '', logoUrl: undefined }), [client]);
 
-  useEffect(() => {
-    if (!open) return;
-    setRows(normalizeList(((client as any)?.businessPartners || []) as BusinessPartner[]));
-    setQuery('');
-    setDraft({ name: '', email: '', phone: '', notes: '', logoUrl: undefined });
-  }, [client, open]);
 
   useEffect(() => {
     if (!open) return;

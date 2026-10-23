@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment, useEffect, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Check, Info, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -29,9 +30,9 @@ const SaveRevisionModal = ({
   onConfirm
 }: Props) => {
   const t = useT();
-  const [bump, setBump] = useState<'major' | 'minor'>('minor');
-  const [note, setNote] = useState('');
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [bump, setBump] = useModalState<'major' | 'minor'>(open, () => (initialBump), [initialBump]);
+  const [note, setNote] = useModalState(open, () => (''), [initialBump]);
+  const [helpOpen, setHelpOpen] = useModalState(open, () => (false), [initialBump]);
   const helpRef = useRef<HTMLDivElement | null>(null);
 
   const next = !hasExisting
@@ -40,12 +41,6 @@ const SaveRevisionModal = ({
       ? { major: latestRevMajor + 1, minor: 0 }
       : { major: latestRevMajor, minor: latestRevMinor + 1 };
 
-  useEffect(() => {
-    if (!open) return;
-    setBump(initialBump);
-    setNote('');
-    setHelpOpen(false);
-  }, [initialBump, open]);
 
   useEffect(() => {
     if (!helpOpen) return;
@@ -55,7 +50,7 @@ const SaveRevisionModal = ({
     };
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
-  }, [helpOpen]);
+  }, [helpOpen, setHelpOpen]);
 
   return (
     <Transition show={open} as={Fragment}>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Dialog } from '@headlessui/react';
 import pkg from '../../../package.json';
 import { Box, CheckSquare, Copy, Download, DownloadCloud, FileCode2, PackageOpen, RefreshCw, Search, ShieldCheck, Terminal } from 'lucide-react';
@@ -69,9 +69,11 @@ const backendPackages = new Set([
   '@types/node'
 ]);
 
+const fetchOpsState = () => Promise.all([fetchReadiness(), fetchMigrationStatus()]);
+
 const NerdAreaPanel = () => {
-  const deps = (pkg as any).dependencies || {};
-  const devDeps = (pkg as any).devDependencies || {};
+  const deps = pkg.dependencies;
+  const devDeps = pkg.devDependencies;
   const t = useT();
   const [activeTab, setActiveTab] = useState<'system' | 'packet' | 'code'>('system');
   const [pkgQuery, setPkgQuery] = useState('');
@@ -84,15 +86,16 @@ const NerdAreaPanel = () => {
   const [auditDetailsOpen, setAuditDetailsOpen] = useState(false);
   const [readiness, setReadiness] = useState<ReadinessStatus | null>(null);
   const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
-  const [opsBusy, setOpsBusy] = useState(false);
+  const [opsBusy, setOpsBusy] = useState(true);
   const [packageCheckRunning, setPackageCheckRunning] = useState(false);
   const [packageUpdateResult, setPackageUpdateResult] = useState<PackageUpdateResult | null>(null);
   const [packageLastCheckAt, setPackageLastCheckAt] = useState<number | null>(null);
   const [packageLastCheckBy, setPackageLastCheckBy] = useState<string | null>(null);
   const [packageLastCheckCount, setPackageLastCheckCount] = useState<number | null>(null);
   const [packageCopyOpen, setPackageCopyOpen] = useState(false);
-  const [codeAnalyzerRunning, setCodeAnalyzerRunning] = useState(false);
+  const [codeAnalyzerReloading, setCodeAnalyzerRunning] = useState(false);
   const [codeAnalyzer, setCodeAnalyzer] = useState<CodeAnalyzerResult | null>(null);
+  const codeAnalyzerRunning = codeAnalyzerReloading || (activeTab === 'code' && !codeAnalyzer);
   const { push } = useToastStore();
   // Atomic selectors: returning primitives / stable function refs keeps the store snapshot
   // stable, so this panel no longer re-renders on every unrelated store mutation (zustand v5).
@@ -186,7 +189,7 @@ const NerdAreaPanel = () => {
     if (opsBusy) return;
     setOpsBusy(true);
     try {
-      const [ready, migration] = await Promise.all([fetchReadiness(), fetchMigrationStatus()]);
+      const [ready, migration] = await fetchOpsState();
       setReadiness(ready);
       setMigrationStatus(migration);
     } catch {
@@ -198,19 +201,26 @@ const NerdAreaPanel = () => {
   };
 
   useEffect(() => {
-    void loadOps();
+    let active = true;
+    fetchOpsState()
+      .then(([ready, migration]) => {
+        if (!active) return;
+        setReadiness(ready);
+        setMigrationStatus(migration);
+      })
+      .catch(() => {})
+      .finally(() => { if (active) setOpsBusy(false); });
+    return () => { active = false; };
   }, []);
 
-  const loadCodeAnalyzer = async () => {
-    if (codeAnalyzerRunning) return;
-    setCodeAnalyzerRunning(true);
-    try {
-      const res = await fetchCodeAnalyzer();
+  const loadCodeAnalyzer = useCallback(() => fetchCodeAnalyzer()
+    .then((res) => {
       setCodeAnalyzer(res);
       if (!res.ok) {
         push(t({ it: 'Analisi codice fallita.', en: 'Code analysis failed.' }), 'danger');
       }
-    } catch (err: any) {
+    })
+    .catch((err: any) => {
       setCodeAnalyzer({
         ok: false,
         root: '',
@@ -222,14 +232,12 @@ const NerdAreaPanel = () => {
         error: err?.message || 'Code analysis failed'
       });
       push(t({ it: 'Analisi codice fallita.', en: 'Code analysis failed.' }), 'danger');
-    } finally {
-      setCodeAnalyzerRunning(false);
-    }
-  };
+    })
+    .finally(() => setCodeAnalyzerRunning(false)), [push, t]);
 
   useEffect(() => {
     if (activeTab === 'code' && !codeAnalyzer) void loadCodeAnalyzer();
-  }, [activeTab]);
+  }, [activeTab, codeAnalyzer, loadCodeAnalyzer]);
 
   const handleRunAudit = async () => {
     if (auditRunning) return;
@@ -358,7 +366,7 @@ const NerdAreaPanel = () => {
             </div>
             <button
               type="button"
-              onClick={() => void loadCodeAnalyzer()}
+              onClick={() => { setCodeAnalyzerRunning(true); void loadCodeAnalyzer(); }}
               disabled={codeAnalyzerRunning}
               className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-ink hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={t({ it: 'Aggiorna analisi codice', en: 'Refresh code analysis' })}

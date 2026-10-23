@@ -33,11 +33,11 @@ export function usePlanPaletteSectionEffects(deps: UsePlanPaletteSectionEffectsD
     } else if (paletteSection === 'security' && !securityPaletteDefs.length) {
       setPaletteSection(otherPaletteDefs.length ? 'objects' : 'desks');
     }
-  }, [deskPaletteDefs.length, otherPaletteDefs.length, paletteSection, securityPaletteDefs.length]);
+  }, [deskPaletteDefs.length, otherPaletteDefs.length, paletteSection, securityPaletteDefs.length, setPaletteSection]);
 
   useEffect(() => {
     if (!deskPaletteDefs.length) setDesksOpen(false);
     if (!otherPaletteDefs.length) setObjectsOpen(false);
     if (!securityPaletteDefs.length) setSecurityOpen(false);
-  }, [deskPaletteDefs.length, otherPaletteDefs.length, securityPaletteDefs.length]);
+  }, [deskPaletteDefs.length, otherPaletteDefs.length, securityPaletteDefs.length, setDesksOpen, setObjectsOpen, setSecurityOpen]);
 }

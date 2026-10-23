@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { ChevronLeft, ChevronRight, Crosshair, FileDown, Info, MapPin, Maximize2, Minimize2, Navigation, Route, Search, Server, Trash2, User, X } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -33,18 +33,18 @@ interface Props {
 const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, onClose }: Props) => {
   const t = useT();
   const lang = useLang();
-  const getRoomLabel = (room: Room, fallback = '') => {
+  const getRoomLabel = useCallback((room: Room, fallback = '') => {
     const itName = String(room?.name || '').trim();
     const enName = String((room as any)?.nameEn || '').trim();
     if (lang === 'en') return enName || itName || fallback;
     return itName || enName || fallback;
-  };
-  const getCorridorLabel = (corridor: Corridor, fallback = '') => {
+  }, [lang]);
+  const getCorridorLabel = useCallback((corridor: Corridor, fallback = '') => {
     const itName = String(corridor?.name || '').trim();
     const enName = String((corridor as any)?.nameEn || '').trim();
     if (lang === 'en') return enName || itName || fallback;
     return itName || enName || fallback;
-  };
+  }, [lang]);
   const patternId = useId().replace(/:/g, '-');
   const svgRef = useRef<SVGSVGElement | null>(null);
   const mapPanelRef = useRef<HTMLDivElement | null>(null);
@@ -181,7 +181,7 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
     }
   }, [availablePlans, destinationPlanId, selectedSite, startPlanId]);
 
-  const buildSearchEntries = (plan: FloorPlan | null | undefined) => {
+  const buildSearchEntries = useCallback((plan: FloorPlan | null | undefined) => {
     if (!plan) return [] as SearchEntry[];
     const entries: SearchEntry[] = [];
     const roomNameById = new Map<string, string>();
@@ -292,10 +292,10 @@ const InternalMapModal = ({ open, clients, objectTypeLabels, initialLocation, on
     }
 
     return entries;
-  };
+  }, [getCorridorLabel, getRoomLabel, lang, objectTypeLabels, t]);
 
-  const startSearchEntries = useMemo(() => buildSearchEntries(startPlan), [lang, objectTypeLabels, startPlan, t]);
-  const destinationSearchEntries = useMemo(() => buildSearchEntries(destinationPlan), [destinationPlan, lang, objectTypeLabels, t]);
+  const startSearchEntries = useMemo(() => buildSearchEntries(startPlan), [buildSearchEntries, startPlan]);
+  const destinationSearchEntries = useMemo(() => buildSearchEntries(destinationPlan), [buildSearchEntries, destinationPlan]);
 
   const normalizedStartQuery = startQuery.trim().toLowerCase();
   const filteredStartEntries = useMemo(() => {

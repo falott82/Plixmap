@@ -68,7 +68,7 @@ export const usePlanWallDrawToggles = (deps: any) => {
         { duration: Infinity }
       );
     },
-    [dismissScaleToast, isReadOnly, isWallType, lang, resetToolClickHistory, wallDrawType, wallTypeDefs]
+    [dismissScaleToast, isReadOnly, isWallType, lang, resetToolClickHistory, setMeasureMode, setPendingType, setQuoteMode, setQuotePointer, setQuotePoints, setRoomDrawMode, setScaleMode, setWallDraftPointer, setWallDraftPoints, setWallDrawMode, setWallDrawType, wallDraftPointsRef, wallDraftSegmentIdsRef, wallDrawType, wallToastIdRef, wallTypeDefs]
   );
 
   const finishWallDraw = useCallback(
@@ -88,7 +88,7 @@ export const usePlanWallDrawToggles = (deps: any) => {
         push(t({ it: 'Disegno muro annullato', en: 'Wall drawing cancelled' }), 'info');
       }
     },
-    [push, resetToolClickHistory, t, wallDrawMode]
+    [push, resetToolClickHistory, setWallDraftPointer, setWallDraftPoints, setWallDrawMode, t, wallDraftPointsRef, wallDraftSegmentIdsRef, wallDrawMode, wallToastIdRef]
   );
 
   return { startWallDraw, finishWallDraw };

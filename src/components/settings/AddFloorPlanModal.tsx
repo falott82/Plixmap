@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment, useEffect, useMemo } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Upload, X } from 'lucide-react';
 import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
@@ -23,20 +24,12 @@ const normalize = (value: string) => value.trim().toLowerCase();
 const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) => {
   const t = useT();
   const existing = useMemo(() => new Set(existingNames.map(normalize)), [existingNames]);
-  const [name, setName] = useState('');
-  const [imageUrl, setImageUrl] = useState<string>('');
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const [error, setError] = useState<string>('');
-  const [fileError, setFileError] = useState<string>('');
+  const [name, setName] = useModalState(open, () => (''), []);
+  const [imageUrl, setImageUrl] = useModalState<string>(open, () => (''), []);
+  const [size, setSize] = useModalState<{ width: number; height: number } | null>(open, () => (null), []);
+  const [error, setError] = useModalState<string>(open, () => (''), []);
+  const [fileError, setFileError] = useModalState<string>(open, () => (''), []);
 
-  useEffect(() => {
-    if (!open) return;
-    setName('');
-    setImageUrl('');
-    setSize(null);
-    setError('');
-    setFileError('');
-  }, [open]);
 
   const onPickFile = async (fileList: FileList | null) => {
     if (!fileList || !fileList[0]) return;
@@ -89,7 +82,7 @@ const AddFloorPlanModal = ({ open, existingNames, onClose, onSubmit }: Props) =>
       return;
     }
     setError('');
-  }, [existing, name, open, t]);
+  }, [existing, name, open, setError, t]);
 
   return (
     <Transition show={open} as={Fragment}>

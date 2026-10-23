@@ -245,6 +245,7 @@ const externalizeAssetsInClients = (clients) => {
 
   return {
     parseDataUrl,
+    base64SizeBytes,
     validateDataUrl,
     validateAssetsInClients,
     externalizeDataUrl,

@@ -83,12 +83,6 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 ### Workspace overview + Internal Chat Service
 ![Workspace overview + Internal Chat Service](docs/screenshots/workspace-overview.png)
 
-### Internal map route wizard
-![Internal map route wizard](docs/screenshots/internal-map-route.png)
-
-### Escape route modal
-![Escape route modal](docs/screenshots/escape-route-modal.png)
-
 ### Escape route PDF preview
 ![Escape route PDF preview](docs/screenshots/escape-route-pdf-preview.png)
 

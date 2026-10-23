@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { usePlanLock, type UsePlanLockDeps } from './usePlanLock';
 
@@ -21,6 +21,19 @@ describe('usePlanLock.formatMinutes', () => {
 });
 
 describe('usePlanLock.grantRemainingMinutes', () => {
+  it('refreshes the countdown when opening lock info without changing the grant', () => {
+    vi.useFakeTimers();
+    try {
+      const future = { ...baseLock, grant: { userId: 'u', username: 'x', expiresAt: Date.now() + 5 * 60_000 } };
+      const { result } = render(future);
+      expect(result.current.grantRemainingMinutes).toBe(5);
+      vi.advanceTimersByTime(60_000);
+      act(() => result.current.setLockInfoOpen(true));
+      expect(result.current.grantRemainingMinutes).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('is null without a grant', () => {
     expect(render(baseLock).result.current.grantRemainingMinutes).toBeNull();
   });

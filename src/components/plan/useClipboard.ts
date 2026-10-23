@@ -382,24 +382,7 @@ export const useClipboard = ({
       }
       return newIds;
     },
-    [
-      addObject,
-      ensureObjectLayerVisible,
-      getRoomIdAt,
-      getTypeLabel,
-      inferDefaultLayerIds,
-      isReadOnlyRef,
-      layerIdSet,
-      markTouched,
-      push,
-      pushStack,
-      saveCustomValues,
-      setContextMenu,
-      setSelection,
-      t,
-      updateObject,
-      lastInsertedRef
-    ]
+    [isReadOnlyRef, markTouched, t, getTypeLabel, inferDefaultLayerIds, layerIdSet, addObject, ensureObjectLayerVisible, getRoomIdAt, updateObject, saveCustomValues, lastInsertedRef, setSelection, setContextMenu, pushStack, push, flashObjects]
   );
 
   const copySelection = useCallback(
@@ -552,7 +535,7 @@ export const useClipboard = ({
     performPaste(pasteConfirm.clipboard, currentPlan, pendingPastePointRef.current);
     pendingPastePointRef.current = null;
     setPasteConfirm(null);
-  }, [flashObjects, pasteConfirm, performPaste, planRef]);
+  }, [pasteConfirm, performPaste, planRef]);
 
   const cancelPaste = useCallback(() => {
     setPasteConfirm(null);

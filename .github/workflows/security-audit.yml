@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: "22"
+          node-version: "24"
       - name: Install dependencies
         run: |
           if [ -f package-lock.json ]; then
@@ -25,4 +25,4 @@ jobs:
           else
             npm install
           fi
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=low

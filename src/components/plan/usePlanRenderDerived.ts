@@ -29,7 +29,7 @@ export const usePlanRenderDerived = (deps: any) => {
   );
   const safetyEmergencyContacts = useMemo(
     () => computeSafetyEmergencyContacts({ client, planId, site }),
-    [client, planId, site?.id]
+    [client, planId, site]
   );
   const safetyEmergencyPoints = useMemo(() => {
     const objects = (((renderPlan as any)?.objects || []) as any[]).filter((obj) => String(obj?.type || '') === 'safety_assembly_point');

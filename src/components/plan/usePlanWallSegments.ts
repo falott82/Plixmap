@@ -5,7 +5,7 @@ import { computeAddWallSegment } from './planViewRoomGeometry';
 // Wall-segment creation + wall snap points extracted from usePlanView. Bodies + dep arrays moved
 // verbatim; both feed the downstream wall tool/point handler hooks.
 export const usePlanWallSegments = (deps: any) => {
-  const { addObject, ensureObjectLayerVisible, inferDefaultLayerIds, layerIdSet, renderPlan, getWallTypeColor, isWallType } = deps;
+  const { addObject, ensureObjectLayerVisible, inferDefaultLayerIds, layerIdSet, renderPlan, isWallType } = deps;
 
   const addWallSegment = useCallback(
     (payload: {
@@ -25,7 +25,7 @@ export const usePlanWallSegments = (deps: any) => {
         layerIdSet,
         renderPlan
       }),
-    [addObject, ensureObjectLayerVisible, getWallTypeColor, inferDefaultLayerIds, layerIdSet, renderPlan]
+    [addObject, ensureObjectLayerVisible, inferDefaultLayerIds, layerIdSet, renderPlan]
   );
 
   const wallSnapPoints = useMemo(() => {

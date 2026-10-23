@@ -1,20 +1,21 @@
-const fs = require('fs');
+const { registerOperationsRoutes } = require('./routes/operations.cjs');
+const { registerCapacityRoutes } = require('./routes/capacity.cjs');
+const { registerUpdateRoutes } = require('./routes/updates.cjs');
+const { registerMaintenanceRoutes } = require('./routes/maintenance.cjs');
 const path = require('path');
 const http = require('http');
 const express = require('express');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
 const { WebSocketServer } = require('ws');
-const { normalizeHttpUrl, serverConfig, validateServerConfig } = require('./config.cjs');
-const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret, listMigrationStatus } = require('./db.cjs');
-const { createDatabaseBackup, listBackups, resolveBackupDir, resolveBackupRetention } = require('./backup.cjs');
+const { serverConfig, validateServerConfig } = require('./config.cjs');
+const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret } = require('./db.cjs');
+const { resolveBackupDir, resolveBackupRetention } = require('./backup.cjs');
 const { evaluateCsrfRequest } = require('./csrf.cjs');
 const { createAssetPipeline } = require('./assetPipeline.cjs');
 const { buildCspHeader, normalizeIp, allowPrivateImportForRequest } = require('./network.cjs');
 const { createPlanRevisionStore } = require('./planRevisionStore.cjs');
 const { createAppSettingsStore } = require('./appSettingsStore.cjs');
 const { rateLimit, rateByUser } = require('./rateLimit.cjs');
-const { normalizeSemver, compareSemver } = require('./semver.cjs');
 const { serverLog } = require('./serverLog.cjs');
 const {
   parseCookies,
@@ -123,16 +124,7 @@ const PORT = serverConfig.port;
 const HOST = serverConfig.host;
 const STARTED_AT = Date.now();
 const APP_BRAND = 'Plixmap';
-const UPDATE_CHECK_TIMEOUT_MS = 5000;
-const APP_VERSION = (() => {
-  try {
-    const raw = fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8');
-    const parsed = JSON.parse(raw);
-    return String(parsed?.version || '').trim() || '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-})();
+const APP_VERSION = String(require('../package.json').version || '0.0.0');
 
 
 const buildKioskPublicUrl = (req, roomId) => buildMeetingRoomPublicUrl(req, roomId);
@@ -294,13 +286,7 @@ const {
   markLogsCleared
 } = createAppSettingsStore({ db });
 
-const {
-  CAPACITY_SNAPSHOT_MIN_INTERVAL_MS,
-  resolveVisibleClientsForRequest,
-  buildCapacityTrendSnapshot,
-  buildCapacitySnapshotSignature,
-  createCapacityHistoryStore
-} = require('./capacityTrends.cjs');
+const { createCapacityHistoryStore } = require('./capacityTrends.cjs');
 const { readCapacityHistory, writeCapacityHistory } = createCapacityHistoryStore({ getAppSetting, setAppSetting });
 
 const runLogRetentionCleanup = (reason = 'scheduled') => {
@@ -327,6 +313,7 @@ const runLogRetentionCleanup = (reason = 'scheduled') => {
 
 const {
   parseDataUrl,
+  base64SizeBytes,
   validateDataUrl,
   validateAssetsInClients,
   externalizeDataUrl,
@@ -562,591 +549,44 @@ const getWsClientIp = (req) =>
 
 const shouldUseSecureCookie = (req) => resolveSecureCookie(req);
 
-app.get('/api/settings/audit', requireAuth, (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  res.json({ auditVerbose: getAuditVerboseEnabled(db) });
+registerMaintenanceRoutes(app, {
+  db,
+  requireAuth,
+  rateByUser,
+  getAppSetting,
+  setAppSetting,
+  resolveUsername,
+  writeAuditLog,
+  requestMeta
 });
 
-app.get('/api/settings/npm-audit', requireAuth, (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const raw = getAppSetting('npmAuditLastCheck');
-  let lastCheckAt = null;
-  let lastCheckBy = null;
-  let lastCheckUserId = null;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        lastCheckAt = Number(parsed.ts || parsed.lastCheckAt || 0) || null;
-        lastCheckUserId = parsed.userId || null;
-        lastCheckBy = parsed.username || resolveUsername(parsed.userId) || null;
-      } else {
-        lastCheckAt = Number(raw) || null;
-      }
-    } catch {
-      lastCheckAt = Number(raw) || null;
-    }
-  }
-  res.json({ lastCheckAt, lastCheckBy, lastCheckUserId });
+registerUpdateRoutes(app, {
+  requireAuth,
+  rateByUser,
+  APP_VERSION,
+  UPDATE_MANIFEST_URL,
+  UPDATE_MANIFEST_FALLBACK_URL,
+  serverLog
 });
 
-app.post('/api/settings/npm-audit', requireAuth, rateByUser('npm_audit', 10 * 60 * 1000, 2), (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const startedAt = Date.now();
-  const checkStartedAt = Date.now();
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  execFile(
-    npmCmd,
-    ['audit', '--omit=dev', '--audit-level=high', '--json'],
-    { cwd: process.cwd(), timeout: 120000, maxBuffer: 10 * 1024 * 1024 },
-    (err, stdout, stderr) => {
-      let parsed = null;
-      let summary = null;
-      if (stdout) {
-        try {
-          parsed = JSON.parse(stdout);
-        } catch {}
-      }
-      if (parsed && parsed.metadata && parsed.metadata.vulnerabilities) {
-        const raw = parsed.metadata.vulnerabilities;
-        const levels = ['info', 'low', 'moderate', 'high', 'critical'];
-        let total = 0;
-        summary = {};
-        for (const level of levels) {
-          const count = Number(raw[level] || 0);
-          summary[level] = count;
-          total += count;
-        }
-        summary.total = total;
-      }
-      const durationMs = Date.now() - startedAt;
-      const exitCode = err && typeof err.code === 'number' ? err.code : 0;
-      const trim = (text) => {
-        const src = String(text || '');
-        if (src.length <= 20000) return src;
-        return `${src.slice(0, 20000)}\n... (truncated)`;
-      };
-      const ok = !!parsed;
-      if (ok) {
-        writeAuditLog(db, {
-          level: 'important',
-          event: 'npm_audit_run',
-          userId: req.userId,
-          ...requestMeta(req),
-          details: { summary, exitCode, durationMs }
-        });
-      }
-      setAppSetting(
-        'npmAuditLastCheck',
-        JSON.stringify({
-          ts: checkStartedAt,
-          userId: req.userId || null,
-          username: req.username || resolveUsername(req.userId) || null
-        })
-      );
-      res.json({
-        ok,
-        summary,
-        durationMs,
-        exitCode,
-        lastCheckAt: checkStartedAt,
-        lastCheckBy: req.username || resolveUsername(req.userId) || null,
-        error: !ok ? (err?.message || 'Failed to run npm audit') : undefined,
-        stderr: trim(stderr)
-      });
-    }
-  );
+registerCapacityRoutes(app, {
+  db,
+  requireAuth,
+  rateByUser,
+  readState,
+  readCapacityHistory,
+  writeCapacityHistory
 });
 
-app.get('/api/settings/package-updates', requireAuth, (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const raw = getAppSetting('packageUpdatesLastCheck');
-  let lastCheckAt = null;
-  let lastCheckBy = null;
-  let lastCheckUserId = null;
-  let count = null;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        lastCheckAt = Number(parsed.ts || parsed.lastCheckAt || 0) || null;
-        lastCheckUserId = parsed.userId || null;
-        lastCheckBy = parsed.username || resolveUsername(parsed.userId) || null;
-        count = Number.isFinite(Number(parsed.count)) ? Number(parsed.count) : null;
-      } else {
-        lastCheckAt = Number(raw) || null;
-      }
-    } catch {
-      lastCheckAt = Number(raw) || null;
-    }
-  }
-  res.json({ lastCheckAt, lastCheckBy, lastCheckUserId, count });
-});
-
-app.post('/api/settings/package-updates', requireAuth, rateByUser('package_updates', 5 * 60 * 1000, 6), (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const startedAt = Date.now();
-  const checkedAt = Date.now();
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  execFile(
-    npmCmd,
-    ['outdated', '--json', '--long'],
-    { cwd: process.cwd(), timeout: 120000, maxBuffer: 10 * 1024 * 1024 },
-    (err, stdout, stderr) => {
-      const exitCode = err && typeof err.code === 'number' ? err.code : 0;
-      const trim = (text) => {
-        const src = String(text || '');
-        if (src.length <= 20000) return src;
-        return `${src.slice(0, 20000)}\n... (truncated)`;
-      };
-      let parsed = {};
-      let parseOk = true;
-      if (String(stdout || '').trim()) {
-        try {
-          parsed = JSON.parse(stdout);
-        } catch {
-          parseOk = false;
-        }
-      }
-      const packages = parseOk
-        ? Object.entries(parsed || {})
-            .map(([name, info]) => ({
-              name,
-              current: String(info?.current || ''),
-              wanted: String(info?.wanted || ''),
-              latest: String(info?.latest || ''),
-              scope:
-                info?.type === 'dependencies' ||
-                info?.type === 'devDependencies' ||
-                info?.type === 'optionalDependencies' ||
-                info?.type === 'peerDependencies'
-                  ? info.type
-                  : 'unknown',
-              dependent: info?.dependent || null,
-              homepage: info?.homepage || null,
-              type: info?.type || null
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name))
-        : [];
-      const ok = parseOk && (!err || exitCode === 1);
-      if (ok) {
-        writeAuditLog(db, {
-          level: 'important',
-          event: 'package_updates_check',
-          userId: req.userId,
-          ...requestMeta(req),
-          details: { count: packages.length, exitCode, durationMs: Date.now() - startedAt }
-        });
-        setAppSetting(
-          'packageUpdatesLastCheck',
-          JSON.stringify({
-            ts: checkedAt,
-            userId: req.userId || null,
-            username: req.username || resolveUsername(req.userId) || null,
-            count: packages.length
-          })
-        );
-      }
-      res.json({
-        ok,
-        packages,
-        count: packages.length,
-        checkedAt,
-        durationMs: Date.now() - startedAt,
-        exitCode,
-        lastCheckBy: req.username || resolveUsername(req.userId) || null,
-        lastCheckUserId: req.userId || null,
-        error: !ok ? (err?.message || 'Failed to check package updates') : undefined,
-        stderr: trim(stderr)
-      });
-    }
-  );
-});
-
-app.post('/api/settings/code-analyzer', requireAuth, rateByUser('code_analyzer', 60 * 1000, 20), (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const root = process.cwd();
-  const ignoredDirs = new Set([
-    '.git',
-    '.idea',
-    '.next',
-    '.turbo',
-    '.vite',
-    'coverage',
-    'data',
-    'dist',
-    'node_modules',
-    'release-data',
-    'test-results'
-  ]);
-  const ignoredFiles = new Set(['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'plix.log']);
-  const allowedExt = new Set(['.cjs', '.css', '.html', '.js', '.jsx', '.mjs', '.scss', '.ts', '.tsx']);
-  const maxBytes = 2 * 1024 * 1024;
-  const rows = [];
-  const countMatches = (text, re) => {
-    const matches = text.match(re);
-    return matches ? matches.length : 0;
-  };
-  const isCodeLine = (line) => {
-    const trimmed = String(line || '').trim();
-    if (!trimmed) return false;
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*') || trimmed.startsWith('*/')) return false;
-    return true;
-  };
-  const formatBytes = (bytes) => {
-    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${bytes} B`;
-  };
-  const scanDir = (dir) => {
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (!entry || entry.name.startsWith('.') && entry.name !== '.githooks') continue;
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!ignoredDirs.has(entry.name)) scanDir(fullPath);
-        continue;
-      }
-      if (!entry.isFile() || ignoredFiles.has(entry.name)) continue;
-      const ext = path.extname(entry.name).toLowerCase();
-      if (!allowedExt.has(ext)) continue;
-      let stat = null;
-      try {
-        stat = fs.statSync(fullPath);
-      } catch {
-        continue;
-      }
-      if (!stat || stat.size > maxBytes) continue;
-      let text = '';
-      try {
-        text = fs.readFileSync(fullPath, 'utf8');
-      } catch {
-        continue;
-      }
-      const lines = text.split(/\r?\n/);
-      const codeLines = lines.filter(isCodeLine).length;
-      const isJsxFile = ext === '.tsx' || ext === '.jsx';
-      const rel = path.relative(root, fullPath);
-      rows.push({
-        name: entry.name,
-        path: rel,
-        codeLines,
-        hooks: countMatches(text, /\buse[A-Z0-9]\w*\s*\(/g),
-        responsive: countMatches(text, /\b(?:sm|md|lg|xl|2xl):/g) + countMatches(text, /@media\b/g),
-        jsx: isJsxFile ? countMatches(text, /<\/?[A-Za-z][A-Za-z0-9:._-]*(?:\s|>|\/>)/g) : 0,
-        functions: countMatches(text, /\bfunction\b/g) + countMatches(text, /=>/g),
-        propTypes: countMatches(text, /\b(?:type|interface)\s+\w*Props\b/g),
-        propRefs: countMatches(text, /\bprops\./g) + countMatches(text, /\{[^}\n]*\}\s*:\s*\w*Props\b/g),
-        bytes: stat.size,
-        weight: formatBytes(stat.size)
-      });
-    }
-  };
-  try {
-    scanDir(root);
-    rows.sort((a, b) => b.codeLines - a.codeLines || b.bytes - a.bytes || a.path.localeCompare(b.path));
-    const ranked = rows.slice(0, 150).map((row, idx) => ({ rank: idx + 1, ...row }));
-    const totalLines = rows.reduce((sum, row) => sum + row.codeLines, 0);
-    res.json({
-      ok: true,
-      root,
-      filesScanned: rows.length,
-      totalLines,
-      largestFileLines: rows[0]?.codeLines || 0,
-      updatedAt: Date.now(),
-      files: ranked
-    });
-  } catch (err) {
-    res.status(500).json({ ok: false, root, filesScanned: 0, totalLines: 0, largestFileLines: 0, updatedAt: Date.now(), files: [], error: err?.message || 'Code analysis failed' });
-  }
-});
-
-app.get('/api/update/latest', requireAuth, rateByUser('update_check', 60 * 1000, 30), async (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const checkedAt = Date.now();
-  const manifestUrls = [UPDATE_MANIFEST_URL, UPDATE_MANIFEST_FALLBACK_URL].filter((url, idx, list) => !!url && list.indexOf(url) === idx);
-  const basePayload = {
-    ok: false,
-    currentVersion: APP_VERSION,
-    latestVersion: null,
-    minSupportedVersion: null,
-    updateAvailable: false,
-    unsupported: false,
-    mandatory: false,
-    downloadUrl: null,
-    releaseNotesUrl: null,
-    publishedAt: null,
-    checkedAt
-  };
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
-  try {
-    let chosenPayload = null;
-    let chosenSource = '';
-    let lastError = '';
-    for (const manifestUrl of manifestUrls) {
-      try {
-        const response = await fetch(manifestUrl, {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-          signal: controller.signal
-        });
-        if (!response.ok) {
-          lastError = `Manifest not reachable (${response.status}) from ${manifestUrl}`;
-          continue;
-        }
-        const payload = await response.json();
-        const latestVersion = normalizeSemver(payload?.latestVersion);
-        if (!latestVersion) {
-          lastError = `Manifest missing valid latestVersion at ${manifestUrl}`;
-          continue;
-        }
-        chosenPayload = payload;
-        chosenSource = manifestUrl;
-        break;
-      } catch (error) {
-        lastError = `Manifest request failed for ${manifestUrl}: ${error?.message || 'unknown_error'}`;
-      }
-    }
-    if (!chosenPayload) {
-      res.json({ ...basePayload, error: lastError || 'Manifest not reachable' });
-      return;
-    }
-    const latestVersion = normalizeSemver(chosenPayload?.latestVersion);
-    const minSupportedVersion = normalizeSemver(chosenPayload?.minSupportedVersion);
-    const currentVersion = normalizeSemver(APP_VERSION) || APP_VERSION;
-    const updateAvailable = !!latestVersion && compareSemver(latestVersion, currentVersion) > 0;
-    const unsupported = !!(minSupportedVersion && compareSemver(currentVersion, minSupportedVersion) < 0);
-    const publishedAt =
-      typeof chosenPayload?.publishedAt === 'string' && !Number.isNaN(Date.parse(chosenPayload.publishedAt))
-        ? new Date(chosenPayload.publishedAt).toISOString()
-        : null;
-    res.json({
-      ok: true,
-      currentVersion,
-      latestVersion: latestVersion || null,
-      minSupportedVersion: minSupportedVersion || null,
-      updateAvailable,
-      unsupported,
-      mandatory: !!chosenPayload?.mandatory || unsupported,
-      downloadUrl: normalizeHttpUrl(chosenPayload?.downloadUrl),
-      releaseNotesUrl: normalizeHttpUrl(chosenPayload?.releaseNotesUrl),
-      publishedAt,
-      checkedAt,
-      source: chosenSource
-    });
-  } catch (error) {
-    serverLog('warn', 'update_check_failed', {
-      userId: req.userId || null,
-      requestId: req.requestId || null,
-      error: error?.message || 'unknown_error'
-    });
-    res.json({ ...basePayload, error: 'Unable to check updates right now' });
-  } finally {
-    clearTimeout(timeout);
-  }
-});
-
-app.get('/api/capacity/history', requireAuth, rateByUser('capacity_history', 60 * 1000, 120), (req, res) => {
-  const serverState = readState();
-  const allClients = serverState.clients || [];
-  const visibleClients = resolveVisibleClientsForRequest(req, allClients);
-  const visibleClientIds = new Set((visibleClients || []).map((entry) => String(entry?.id || '').trim()).filter(Boolean));
-  const requestedClientId = String(req.query.clientId || '').trim();
-  if (requestedClientId && !visibleClientIds.has(requestedClientId)) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const requestedLimitRaw = Number(req.query.limit);
-  const requestedLimit = Number.isFinite(requestedLimitRaw) ? Math.max(1, Math.min(720, Math.floor(requestedLimitRaw))) : 180;
-  const store = readCapacityHistory();
-  const snapshots = (store.snapshots || [])
-    .slice(-requestedLimit)
-    .map((snapshot) => {
-      const clients = (snapshot.clients || []).filter((entry) => {
-        const clientId = String(entry?.clientId || '').trim();
-        if (!clientId) return false;
-        if (!visibleClientIds.has(clientId)) return false;
-        if (requestedClientId && clientId !== requestedClientId) return false;
-        return true;
-      });
-      if (!clients.length) return null;
-      return { at: snapshot.at, clients };
-    })
-    .filter(Boolean);
-  res.json({ ok: true, snapshots, lastSnapshotAt: store.lastSnapshotAt || null });
-});
-
-app.post('/api/capacity/snapshot', requireAuth, rateByUser('capacity_snapshot', 60 * 1000, 30), (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const force = !!req.body?.force;
-  const store = readCapacityHistory();
-  const sourceClients = (readState().clients || []).filter(Boolean);
-  const snapshot = buildCapacityTrendSnapshot(sourceClients, Date.now());
-  const signature = buildCapacitySnapshotSignature(snapshot);
-  const lastSnapshot = store.snapshots[store.snapshots.length - 1];
-  let appended = true;
-  if (
-    !force &&
-    lastSnapshot &&
-    signature &&
-    signature === store.lastSignature &&
-    Number(lastSnapshot.at || 0) > 0 &&
-    snapshot.at - Number(lastSnapshot.at || 0) < CAPACITY_SNAPSHOT_MIN_INTERVAL_MS
-  ) {
-    appended = false;
-  }
-  const nextSnapshots = appended ? [...store.snapshots, snapshot] : store.snapshots;
-  const trimmed = writeCapacityHistory({
-    snapshots: nextSnapshots,
-    lastSignature: signature || store.lastSignature || '',
-    lastSnapshotAt: appended ? snapshot.at : store.lastSnapshotAt || lastSnapshot?.at || snapshot.at
-  });
-  res.json({
-    ok: true,
-    appended,
-    snapshotAt: appended ? snapshot.at : Number(store.lastSnapshotAt || lastSnapshot?.at || snapshot.at),
-    totalSnapshots: trimmed.length
-  });
-});
-
-app.get('/api/health/live', (_req, res) => {
-  res.json({
-    ok: true,
-    status: 'live',
-    uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000),
-    ts: Date.now()
-  });
-});
-
-app.get('/api/health/ready', (_req, res) => {
-  try {
-    db.prepare('SELECT 1').get();
-    const migration = listMigrationStatus(db);
-    res.json({
-      ok: true,
-      status: 'ready',
-      db: 'ok',
-      schemaVersion: migration.schemaVersion,
-      latestVersion: migration.latestVersion,
-      wsClients: Number((wss?.clients && wss.clients.size) || 0),
-      ts: Date.now()
-    });
-  } catch (error) {
-    res.status(503).json({
-      ok: false,
-      status: 'not_ready',
-      error: error?.message || 'readiness check failed',
-      ts: Date.now()
-    });
-  }
-});
-
-app.get('/api/settings/db/migrations', requireAuth, (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  res.json(listMigrationStatus(db));
-});
-
-app.get('/api/settings/backups', requireAuth, (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const backups = listBackups().map((entry) => ({
-    fileName: entry.fileName,
-    sizeBytes: entry.sizeBytes,
-    createdAt: entry.createdAt,
-    updatedAt: entry.updatedAt
-  }));
-  res.json({
-    backupDir: resolveBackupDir(),
-    retention: resolveBackupRetention(),
-    backups
-  });
-});
-
-app.post('/api/settings/backups', requireAuth, rateByUser('db_backup', 60 * 1000, 6), async (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  try {
-    const result = await createDatabaseBackup(db, { reason: 'api_manual' });
-    writeAuditLog(db, {
-      level: 'important',
-      event: 'db_backup_create',
-      userId: req.userId,
-      username: req.username,
-      ...requestMeta(req),
-      details: { fileName: result.fileName, sizeBytes: result.sizeBytes, pruned: result.pruned || [] }
-    });
-    res.json({
-      ok: true,
-      backup: {
-        fileName: result.fileName,
-        sizeBytes: result.sizeBytes,
-        createdAt: result.createdAt,
-        pruned: result.pruned || []
-      }
-    });
-  } catch (error) {
-    serverLog('error', 'db_backup_failed', {
-      requestId: req.requestId || null,
-      userId: req.userId || null,
-      message: error?.message || 'backup failed'
-    });
-    res.status(500).json({ error: 'Backup failed' });
-  }
-});
-
-app.get('/api/settings/backups/:fileName', requireAuth, (req, res) => {
-  if (!req.isSuperAdmin) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-  const fileName = String(req.params.fileName || '').trim();
-  if (!fileName || fileName !== path.basename(fileName) || !fileName.endsWith('.sqlite')) {
-    res.status(400).json({ error: 'Invalid file name' });
-    return;
-  }
-  const fullPath = path.join(resolveBackupDir(), fileName);
-  if (!fs.existsSync(fullPath)) {
-    res.status(404).json({ error: 'Backup not found' });
-    return;
-  }
-  res.download(fullPath, fileName);
+registerOperationsRoutes(app, {
+  db,
+  requireAuth,
+  rateByUser,
+  STARTED_AT,
+  getWsClientCount: () => wss.clients.size,
+  writeAuditLog,
+  requestMeta,
+  serverLog
 });
 
 // --- Custom Import: external "real users" per client (superadmin) ---

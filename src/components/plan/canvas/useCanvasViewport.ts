@@ -201,7 +201,7 @@ export const useCanvasViewport = (deps: any) => {
     scheduleWheelCommit(nextZoom, viewportRef.current.pan);
   };
 
-  const applyFocus = (target: { x: number; y: number; zoom?: number; nonce: number }) => {
+  const applyFocus = useCallback((target: { x: number; y: number; zoom?: number; nonce: number }) => {
     if (dimensions.width <= 0 || dimensions.height <= 0) return false;
     if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) return false;
     if (wheelCommitTimer.current) {
@@ -223,19 +223,19 @@ export const useCanvasViewport = (deps: any) => {
     appliedFocusNonceRef.current = target.nonce;
     pendingFocusRef.current = null;
     return true;
-  };
+  }, [applyStageTransform, clampPan, commitViewport, dimensions.height, dimensions.width]);
 
   useEffect(() => {
     if (!focusTarget) return;
     if (appliedFocusNonceRef.current === focusTarget.nonce) return;
     pendingFocusRef.current = focusTarget;
     applyFocus(focusTarget);
-  }, [focusTarget?.nonce]);
+  }, [applyFocus, focusTarget]);
 
   useEffect(() => {
     if (!pendingFocusRef.current) return;
     applyFocus(pendingFocusRef.current);
-  }, [dimensions.width, dimensions.height]);
+  }, [applyFocus, dimensions.width, dimensions.height]);
 
   return { viewportRef, isPanning, applyStageTransform, commitViewport, scheduleWheelCommit, clampPan, fitView, fitViewRef, wheelCommitTimer, panRaf, fitApplied, handleWheel, startPan, movePan, endPan, isPanGesture, isBoxSelectGesture, handleZoomIn, handleZoomOut };
 };

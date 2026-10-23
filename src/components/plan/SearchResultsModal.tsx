@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment, useEffect, useMemo, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { MapObject, Room } from '../../store/types';
@@ -31,12 +32,8 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
     ],
     [objectResults, roomResults]
   );
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useModalState(open, () => (items.length ? 0 : -1), [items.length]);
 
-  useEffect(() => {
-    if (!open) return;
-    setSelectedIndex(items.length ? 0 : -1);
-  }, [items.length, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -61,7 +58,7 @@ const SearchResultsModal = ({ open, term, objectResults, roomResults, onClose, o
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [items, onClose, onSelectObject, onSelectRoom, open, selectedIndex]);
+  }, [items, onClose, onSelectObject, onSelectRoom, open, selectedIndex, setSelectedIndex]);
 
   useEffect(() => {
     if (selectedIndex < 0) return;
