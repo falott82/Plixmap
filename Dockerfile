@@ -10,7 +10,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 RUN apk upgrade --no-cache
 RUN npm install --global npm@12.2.1 --ignore-scripts --no-audit --no-fund \
-    && npm install --prefix /usr/local/lib/node_modules/npm ip-address@10.7.4 --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm install --prefix /tmp/npm-security ip-address@10.7.4 --ignore-scripts --no-audit --no-fund \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/ip-address \
+    && mv /tmp/npm-security/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ip-address \
+    && rm -rf /tmp/npm-security \
     && npm cache clean --force
 COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
