@@ -9,6 +9,8 @@ FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apk upgrade --no-cache
+RUN npm install --global npm@12.2.1 --ignore-scripts --no-audit --no-fund \
+    && npm cache clean --force
 COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && npm cache clean --force
