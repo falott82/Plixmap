@@ -3,7 +3,7 @@
 // documents and share only the low-level loadImage helper.
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { ReleaseNote } from '../version/history';
+import type { ReleaseNote } from '../version/history/types';
 import { sanitizeHtmlBasic } from './sanitizeHtml';
 import { loadImage } from './pdfShared';
 

@@ -11,6 +11,8 @@ RUN npm prune --omit=dev
 FROM node:24-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
+RUN apt-get update && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist

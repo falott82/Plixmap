@@ -66,7 +66,7 @@
 - `npm run release:check`: verifies version consistency across:
   - `package.json`
   - `README.md`
-  - `src/version/history.ts` and its first referenced release-history chunk
+  - `src/version/history.ts` (lazy loader) + `src/version/history/*.ts` (notes by era) + `src/version/current.ts` (APP_VERSION)
 - `npm run quality:check`: aggregate quality gate used by CI.
 - `./plix.sh release`: closes matching local Chrome tabs, stops the configured port, rebuilds and restarts. The page reopens after both the frontend and database readiness probe respond successfully.
 

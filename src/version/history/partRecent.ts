@@ -3,6 +3,37 @@ import { n } from './types';
 
 export const partRecent: ReleaseNote[] = [
   {
+    version: '3.8.0',
+    date: '2026-09-12',
+    type: 'minor',
+    notes: [
+      n(
+        'Architettura: PlanView, CanvasStage, data store e server/index.cjs scomposti in moduli piccoli e focalizzati; nessun file supera le 1500 righe',
+        'Architecture: PlanView, CanvasStage, the data store and server/index.cjs decomposed into small focused modules; no file exceeds 1,500 lines'
+      ),
+      n(
+        'Performance: bundle iniziale da ~500 KB a ~200 KB gzip (vendor chunk separati, pannelli impostazioni, changelog e QR caricati on demand) e risposte server compresse brotli/gzip',
+        'Performance: initial bundle from ~500 KB to ~200 KB gzip (separate vendor chunks; settings panels, changelog and QR loaded on demand) and brotli/gzip compressed server responses'
+      ),
+      n(
+        'Dipendenze: tutti i pacchetti npm aggiornati alle ultime versioni (Vite 8, TypeScript 6, ESLint 10, React 19.3, Lexical 0.50, nodemailer 10, better-sqlite3 13); npm audit a 0 vulnerabilita',
+        'Dependencies: every npm package updated to the latest release (Vite 8, TypeScript 6, ESLint 10, React 19.3, Lexical 0.50, nodemailer 10, better-sqlite3 13); npm audit at 0 vulnerabilities'
+      ),
+      n(
+        'Fix: avvio del server dopo la scomposizione (base64SizeBytes), intestazione della planimetria che si sovrapponeva alla barra strumenti su schermi fino a 1500 px, hook React condizionali, variabile DESKLY_TRUST_PROXY in docker-compose',
+        'Fixes: server startup after the decomposition (base64SizeBytes), plan header overlapping the toolbar on screens up to 1500 px, conditional React hooks, DESKLY_TRUST_PROXY variable in docker-compose'
+      ),
+      n(
+        'UI: font Inter e Space Grotesk self-hosted (offline, nessuna richiesta a Google Fonts, CSP piu stretta), ombre, focus, scrollbar e pulsanti rinnovati',
+        'UI: self-hosted Inter and Space Grotesk fonts (offline, no Google Fonts request, tighter CSP), refreshed shadows, focus ring, scrollbars and buttons'
+      ),
+      n(
+        'Docker: immagine Node 22, npm ci dal lockfile, healthcheck; servizio compose rinominato plixmap (volume dati invariato)',
+        'Docker: Node 22 image, npm ci from the lockfile, health check; compose service renamed plixmap (data volume unchanged)'
+      )
+    ]
+  },
+  {
     version: '3.7.0',
     date: '2026-06-01',
     type: 'minor',

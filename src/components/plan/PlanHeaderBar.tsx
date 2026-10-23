@@ -177,9 +177,9 @@ const PlanHeaderBar = (props: PlanHeaderBarProps) => {
   } = props;
   if (!renderPlan) return null;
   return (
-          <div className={`flex flex-nowrap items-center justify-between gap-2 ${presentationMode ? 'hidden' : ''}`}>
-	        <div className="min-w-0">
-	          <div className="text-[11px] font-semibold uppercase text-slate-500">
+          <div className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-3 ${presentationMode ? 'hidden' : ''}`}>
+	        <div className="min-w-0 flex-1 basis-72">
+	          <div className="truncate text-[11px] font-semibold uppercase tracking-wide text-slate-500" title={`${client?.shortName || client?.name || ''} → ${site?.name || ''}`}>
 	            {client?.shortName || client?.name} → {site?.name}
 	          </div>
 			          {/* Avoid overflow clipping: dropdowns (presence/layers/etc) are positioned absolutely. */}
@@ -541,9 +541,9 @@ const PlanHeaderBar = (props: PlanHeaderBarProps) => {
             </div>
           </div>
         </div>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3">
             <div className="relative">
-            <SearchBar onSearch={handleSearch} onEnter={handleSearchEnter} inputRef={searchInputRef} className="w-96" />
+            <SearchBar onSearch={handleSearch} onEnter={handleSearchEnter} inputRef={searchInputRef} className="w-72 2xl:w-96" />
             <SearchResultsPopover
               open={searchResultsOpen}
               term={searchResultsTerm}

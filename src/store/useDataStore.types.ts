@@ -42,7 +42,7 @@ export interface DataState {
       doorConfig: ObjectTypeDefinition['doorConfig'];
     }>
   ) => void;
-  deleteObjectType: (id: string) => void;
+  deleteObjectType: (id: string) => boolean;
   addClient: (name: string) => string;
   updateClient: (
     id: string,

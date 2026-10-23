@@ -4,7 +4,7 @@ import { X, MousePointerClick, Search, FileDown, UploadCloud, KeyRound, Lock, La
 import { useUIStore } from '../../store/useUIStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useT } from '../../i18n/useT';
-import { releaseHistory } from '../../version/history';
+import { APP_VERSION } from '../../version/current';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -15,7 +15,7 @@ const KeyHint = ({ children }: { children: any }) => (
 const HelpPanel = () => {
   const { helpOpen, closeHelp } = useUIStore(useShallow((s) => ({ helpOpen: s.helpOpen, closeHelp: s.closeHelp })));
   const t = useT();
-  const latestVersion = releaseHistory[0]?.version || '0.0.0';
+  const latestVersion = APP_VERSION;
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [exporting, setExporting] = useState(false);
 

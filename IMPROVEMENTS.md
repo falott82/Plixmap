@@ -3,6 +3,8 @@
 _React 19 + Vite + Express/better-sqlite3 — ~141k LOC_
 _Data: 31 maggio 2026_
 
+> **Aggiornamento 12 settembre 2026 (release 3.8.0):** i refactor architetturali "Grande" indicati sotto (split di `PlanView.tsx`, `CanvasStage.tsx`, `useDataStore.ts`, `server/index.cjs`), i test front-end (Vitest + Playwright) e l'aggiornamento completo delle dipendenze sono stati completati. Nessun file di `src/` o `server/` supera le 1.500 righe. Le sezioni seguenti restano come fotografia storica dell'audit.
+
 ## 1. Sintesi esecutiva (stato di salute)
 
 - **Funzionalmente solido ma architetturalmente sotto pressione.** Il codice usa pattern corretti (SQL parametrizzato, header di sicurezza, CSRF, password bootstrap protetta da `mustChangePassword`), ma è dominato da pochi file monolitici: `PlanView.tsx` (22.064 righe), `CanvasStage.tsx` (7.178 righe), `useDataStore.ts` (2.023 righe), `server/index.cjs` (1.852 righe). Questi concentrano rischio di manutenzione e regressione.

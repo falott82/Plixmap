@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useT } from '../../i18n/useT';
 import { fetchBootstrapStatus, MFARequiredError } from '../../api/auth';
-import { releaseHistory } from '../../version/history';
+import { APP_VERSION } from '../../version/current';
 import { PLIXMAP_WEBSITE_URL } from '../../constants/links';
 
 const LoginView = () => {
@@ -19,7 +19,7 @@ const LoginView = () => {
   const [error, setError] = useState<string | null>(null);
   const [showFirstRunCredentials, setShowFirstRunCredentials] = useState(false);
   const otpRef = useRef<HTMLInputElement | null>(null);
-  const version = releaseHistory[0]?.version || '';
+  const version = APP_VERSION;
 
   useEffect(() => {
     let cancelled = false;

@@ -1,10 +1,12 @@
 import type { ReleaseNote } from './history/types';
-import { partRecent } from './history/partRecent';
-import { partMid } from './history/partMid';
-import { partEarly } from './history/partEarly';
 
 export type { ReleaseNote } from './history/types';
+export { APP_VERSION } from './current';
 
-// Release notes, newest first. Split into era chunks to keep each file < 2k lines;
-// the public surface (releaseHistory + ReleaseNote) is unchanged.
-export const releaseHistory: ReleaseNote[] = [...partRecent, ...partMid, ...partEarly];
+// The full release history is large and only needed when the changelog UI is
+// opened, so it is loaded on demand and cached.
+let pending: Promise<ReleaseNote[]> | null = null;
+export const loadReleaseHistory = (): Promise<ReleaseNote[]> => {
+  if (!pending) pending = import('./history/all').then((m) => m.releaseHistory);
+  return pending;
+};

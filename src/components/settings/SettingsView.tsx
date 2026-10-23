@@ -1,4 +1,4 @@
-import { useCallback, Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, Fragment, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, Mail, Heart, ShieldAlert, History } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -11,25 +11,33 @@ import AddFloorPlanModal from './AddFloorPlanModal';
 import { formatBytes, readFileAsDataUrl, uploadLimits, uploadMimes, validateFile } from '../../utils/files';
 import ReplacePlanImageModal from './ReplacePlanImageModal';
 import { useAuthStore } from '../../store/useAuthStore';
-import UsersPanel from './UsersPanel';
-import AccountPanel from './AccountPanel';
 import UserMenu from '../layout/UserMenu';
-import LogsTabsPanel from './LogsTabsPanel';
-import AuditTrailPanel from './AuditTrailPanel';
 import ClientModal from './ClientModal';
-import NerdAreaPanel from './NerdAreaPanel';
 import { useT } from '../../i18n/useT';
 import SiteModal from './SiteModal';
-import ObjectTypesPanel from './ObjectTypesPanel';
-import BackupPanel from './BackupPanel';
-import ClientImportUnifiedPanel from './ClientImportUnifiedPanel';
-import EmailSettingsPanel from './EmailSettingsPanel';
-import DonationsPanel from './DonationsPanel';
-import LayersPanel from './LayersPanel';
-import SafetyPanel from './SafetyPanel';
 import { SEED_CLIENT_ID } from '../../store/data';
 import ClientEmailSettingsModal from '../layout/ClientEmailSettingsModal';
 import { fetchClientEmailSettingsSummary } from '../../api/email';
+
+// Settings panels are loaded on demand: each tab pulls only its own code.
+const UsersPanel = lazy(() => import('./UsersPanel'));
+const AccountPanel = lazy(() => import('./AccountPanel'));
+const LogsTabsPanel = lazy(() => import('./LogsTabsPanel'));
+const AuditTrailPanel = lazy(() => import('./AuditTrailPanel'));
+const NerdAreaPanel = lazy(() => import('./NerdAreaPanel'));
+const ObjectTypesPanel = lazy(() => import('./ObjectTypesPanel'));
+const BackupPanel = lazy(() => import('./BackupPanel'));
+const ClientImportUnifiedPanel = lazy(() => import('./ClientImportUnifiedPanel'));
+const EmailSettingsPanel = lazy(() => import('./EmailSettingsPanel'));
+const DonationsPanel = lazy(() => import('./DonationsPanel'));
+const LayersPanel = lazy(() => import('./LayersPanel'));
+const SafetyPanel = lazy(() => import('./SafetyPanel'));
+
+const PanelFallback = () => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-card" aria-busy="true">
+    …
+  </div>
+);
 
 const SettingsView = () => {
   const {
@@ -396,6 +404,7 @@ const SettingsView = () => {
       </div>
 
       <div className={modalActive ? 'pointer-events-none opacity-30' : ''} aria-hidden={modalActive}>
+        <Suspense fallback={<PanelFallback />}>
         {tab === 'account' ? <AccountPanel /> : null}
 
         {tab === 'objects' ? <ObjectTypesPanel client={currentClient} /> : null}
@@ -810,6 +819,7 @@ const SettingsView = () => {
             </div>
           )
         ) : null}
+        </Suspense>
       </div>
 
       <Transition show={!!planPreview} as={Fragment}>

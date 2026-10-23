@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileDown, History, Search, X } from 'lucide-react';
-import { releaseHistory } from '../../version/history';
+import { APP_VERSION } from '../../version/current';
+import { useReleaseHistory } from '../../version/useReleaseHistory';
 import { exportChangelogToPdf } from '../../utils/pdf';
 import { useLang, useT } from '../../i18n/useT';
 
@@ -10,6 +11,7 @@ const VersionBadge = () => {
   const t = useT();
   const lang = useLang();
   const ref = useRef<HTMLDivElement | null>(null);
+  const releaseHistory = useReleaseHistory(open);
 
   useEffect(() => {
     if (!open) return;
@@ -30,9 +32,8 @@ const VersionBadge = () => {
     return releaseHistory.filter(
       (r) => r.version.includes(q) || r.notes.some((n) => (lang === 'en' ? n.en : n.it).toLowerCase().includes(q))
     );
-  }, [lang, query]);
+  }, [lang, query, releaseHistory]);
 
-  const latest = releaseHistory[0];
 
   return (
     <div ref={ref} className="relative">
@@ -42,7 +43,7 @@ const VersionBadge = () => {
         title={t({ it: 'Changelog', en: 'Changelog' })}
       >
         <History size={14} />
-        v{latest.version}
+        v{APP_VERSION}
       </button>
       {open ? (
         <div className="absolute right-0 z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white p-3 shadow-card">

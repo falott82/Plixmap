@@ -9,6 +9,12 @@ This guide is for installations that already run Plixmap and need to move to a n
 - If you use customer SMTP/provisioning emails, verify `Settings > Email > Portal public URL` after the upgrade.
 - If you customized service names, ports, or reverse proxy rules, keep your current deployment-specific values.
 
+## Notes for 3.8.0
+- The compose service is now named `plixmap` (was `deskly`); the data volume `deskly_data` is unchanged, so `docker compose up -d --build` keeps your data. Commands that referenced the old service name (e.g. `docker compose exec deskly …`) must use `plixmap`.
+- The compose file now sets `PLIXMAP_TRUST_PROXY=1` (the previous `DESKLY_TRUST_PROXY` was never read). Remove it if you do not run behind a reverse proxy.
+- Fonts are self-hosted: if you had a custom CSP allowing `fonts.googleapis.com`/`fonts.gstatic.com`, it is no longer needed.
+- The Docker image is based on Node 22; `better-sqlite3` 13 ships prebuilt binaries, so no compiler toolchain is required at build time.
+
 ## Upgrade with Docker
 From the existing installation directory:
 

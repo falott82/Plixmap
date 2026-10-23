@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { GitFork, Globe, Heart, Mail, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
-import { releaseHistory } from '../../version/history';
+import { APP_VERSION } from '../../version/current';
 import { useUIStore } from '../../store/useUIStore';
 import { PLIXMAP_PAYPAL_URL, PLIXMAP_REPO_URL, PLIXMAP_WEBSITE_URL } from '../../constants/links';
 
@@ -13,7 +13,7 @@ interface Props {
 const FooterInfo = ({ variant = 'sidebar' }: Props) => {
   const t = useT();
   const openChangelog = useUIStore((s) => s.openChangelog);
-  const latest = releaseHistory[0]?.version || '0.0.0';
+  const latest = APP_VERSION;
   const [donationOpen, setDonationOpen] = useState(false);
 
   const content =

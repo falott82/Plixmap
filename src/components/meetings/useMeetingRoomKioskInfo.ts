@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import QRCode from 'qrcode';
+import { qrToDataUrl } from '../../utils/qr';
 import { fetchMeetingRoomSchedule } from '../../api/meetings';
 
 type Options = {
@@ -31,7 +31,7 @@ export const useMeetingRoomKioskInfo = ({ roomId, enabled = true, qrWidth = 300 
       .then((nextLink) => {
         if (cancelled) return;
         setLink(nextLink);
-        return QRCode.toDataURL(nextLink, { margin: 1, width: qrWidth })
+        return qrToDataUrl(nextLink, { margin: 1, width: qrWidth })
           .then((url: string) => {
             if (!cancelled) setQrDataUrl(url);
           })

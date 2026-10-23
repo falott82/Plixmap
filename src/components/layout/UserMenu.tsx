@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Cog, Copy, ExternalLink, History, Info, LogOut, MessageSquare, QrCode, RefreshCw, Smartphone } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import QRCodeLib from 'qrcode';
+import { qrToDataUrl } from '../../utils/qr';
 import { useAuthStore } from '../../store/useAuthStore';
 import { updateMyProfile } from '../../api/auth';
 import { useT } from '../../i18n/useT';
@@ -52,7 +52,7 @@ const UserMenu = () => {
         if (cancelled) return;
         setMobileAppUrl(url);
         try {
-          const qr = await QRCodeLib.toDataURL(url, { width: 220, margin: 1 });
+          const qr = await qrToDataUrl(url, { width: 220, margin: 1 });
           if (!cancelled) setMobileQrUrl(qr);
         } catch {
           if (!cancelled) setMobileQrUrl('');
@@ -62,7 +62,7 @@ const UserMenu = () => {
         if (cancelled) return;
         setMobileAppUrl(fallback);
         try {
-          const qr = await QRCodeLib.toDataURL(fallback, { width: 220, margin: 1 });
+          const qr = await qrToDataUrl(fallback, { width: 220, margin: 1 });
           if (!cancelled) setMobileQrUrl(qr);
         } catch {}
       }

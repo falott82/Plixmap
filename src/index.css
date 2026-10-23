@@ -1,27 +1,54 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
+/* Fonts are self-hosted (@fontsource-variable/*, imported in src/main.tsx so Vite
+   fingerprints the woff2 files): no third-party request, works offline in the PWA. */
 
 :root {
   /* Theme tokens (used by Tailwind via CSS variables). */
   --c-ink: 15 23 42;
-  --c-mist: 245 247 251;
+  --c-mist: 246 248 251;
   --c-primary: 37 99 235;
   --c-accent: 34 211 238;
 
-  --font-sans: Inter, system-ui, -apple-system, sans-serif;
-  --font-display: "Space Grotesk", var(--font-sans);
+  --font-sans: "Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Space Grotesk Variable", "Space Grotesk", var(--font-sans);
 
-  --shadow-card: 0 10px 40px rgba(15, 23, 42, 0.08);
-  --shadow-pop: 0 24px 70px rgba(15, 23, 42, 0.14);
+  /* Layered, low-spread shadows read as "lifted paper" instead of a blurry halo. */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.16);
+  --shadow-pop: 0 2px 4px rgba(15, 23, 42, 0.06), 0 24px 56px -20px rgba(15, 23, 42, 0.28);
 
+  color-scheme: light;
   font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01", "ss03"; /* Inter: single-storey a, open digits */
   color: rgb(var(--c-ink));
   background-color: rgb(var(--c-mist));
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgb(var(--c-primary) / 0.18);
+}
+
+/* Accessible, consistent focus ring for anything not styled by a component class. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--c-primary) / 0.55);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer components {
   .modal-panel {
-    @apply rounded-2xl border border-slate-200/70 bg-white p-6 shadow-card;
+    @apply rounded-2xl border border-slate-200/70 bg-white p-6 shadow-pop ring-1 ring-slate-900/5;
   }
   .modal-header {
     @apply flex items-start justify-between gap-4 border-b border-slate-200/70 pb-3;
@@ -36,10 +63,10 @@
     @apply mt-6 flex items-center justify-end gap-2 border-t border-slate-200/70 pt-4;
   }
   .btn-secondary {
-    @apply rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition-colors duration-150 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30;
+    @apply rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-[background-color,box-shadow,transform] duration-150 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30;
   }
   .btn-primary {
-    @apply rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white transition-colors duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40;
+    @apply rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white shadow-sm shadow-primary/25 transition-[background-color,box-shadow,transform] duration-150 hover:bg-primary/90 hover:shadow-md hover:shadow-primary/25 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none;
   }
   .btn-inline {
     @apply inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors duration-150 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50;
@@ -48,7 +75,7 @@
     @apply inline-flex items-center justify-center rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 transition-colors duration-150 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-200/60 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .field-input {
-    @apply w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-ink outline-none transition-colors duration-150 placeholder:text-slate-400 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-ink shadow-sm shadow-slate-900/[0.03] outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-slate-400 hover:border-slate-300 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60;
   }
   .badge {
     @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold;
@@ -78,16 +105,24 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
 }
 
 ::-webkit-scrollbar-track {
