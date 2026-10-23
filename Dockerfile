@@ -1,18 +1,16 @@
-FROM node:24-bookworm-slim AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 RUN npm prune --omit=dev
 
-FROM node:24-bookworm-slim
+FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apt-get update && apt-get upgrade -y \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk upgrade --no-cache
 COPY package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
