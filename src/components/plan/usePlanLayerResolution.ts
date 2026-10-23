@@ -62,11 +62,11 @@ export const usePlanLayerResolution = (deps: any) => {
   }, [defaultVisibleLayerIds, normalizeLayerSelection, planId, visibleLayerIdsByPlan]);
   const hideAllLayers = !!hiddenLayersByPlan[planId];
   const allItemsSelected = visibleLayerIds.includes(ALL_ITEMS_LAYER_ID);
-  const effectiveVisibleLayerIds = hideAllLayers
+  const effectiveVisibleLayerIds = useMemo(() => hideAllLayers
     ? []
     : allItemsSelected
       ? nonAllLayerIds
-      : visibleLayerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID);
+      : visibleLayerIds.filter((id) => id !== ALL_ITEMS_LAYER_ID), [allItemsSelected, hideAllLayers, nonAllLayerIds, visibleLayerIds]);
   const visibleLayerCount = hideAllLayers ? 0 : allItemsSelected ? nonAllLayerIds.length : effectiveVisibleLayerIds.length;
   const totalLayerCount = nonAllLayerIds.length;
   const layerActivationRef = useRef<Set<string>>(new Set());
@@ -99,11 +99,11 @@ export const usePlanLayerResolution = (deps: any) => {
       });
       return true;
     },
-    [effectiveVisibleLayerIds, getObjectLayerIdsForVisibility, hideAllLayers]
+    [effectiveVisibleLayerIds, getObjectLayerIdsForVisibility, hideAllLayers, setLayerRevealPrompt]
   );
   const getObjectBoundsForAlign = useCallback(
     (obj: MapObject) => computeGetObjectBoundsForAlign(obj, { canvasStageRef }),
-    []
+    [canvasStageRef]
   );
   const ensureObjectLayerVisible = useCallback(
     (layerIds: string[] | undefined, name: string | undefined, typeId: string) =>

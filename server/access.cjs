@@ -5,7 +5,14 @@ const isStrictSuperAdmin = (value) => {
 
 const isAdminLike = (value) => !!value?.isAdmin || isStrictSuperAdmin(value);
 
+const requireSuperAdmin = (req, res) => {
+  if (req.isSuperAdmin) return true;
+  res.status(403).json({ error: 'Forbidden' });
+  return false;
+};
+
 module.exports = {
   isAdminLike,
-  isStrictSuperAdmin
+  isStrictSuperAdmin,
+  requireSuperAdmin
 };

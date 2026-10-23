@@ -30,13 +30,13 @@ export const usePlanScaleHandlers = (deps: any) => {
   const handleScaleMove = useCallback(
     (payload: { start: { x: number; y: number }; end: { x: number; y: number } }) =>
       computeHandleScaleMove(payload, { plan, isReadOnly, planScale, markTouched, updateFloorPlan }),
-    [isReadOnly, markTouched, plan, planScale?.meters, planScale?.metersPerPixel, updateFloorPlan]
+    [isReadOnly, markTouched, plan, planScale, updateFloorPlan]
   );
 
   const updateScaleStyle = useCallback(
     (payload: { labelScale?: number; strokeWidth?: number }) =>
       computeUpdateScaleStyle(payload, { plan, isReadOnly, planScale, markTouched, updateFloorPlan }),
-    [isReadOnly, markTouched, plan, planScale?.end, planScale?.meters, planScale?.metersPerPixel, planScale?.opacity, planScale?.start, updateFloorPlan]
+    [isReadOnly, markTouched, plan, planScale, updateFloorPlan]
   );
 
   const openScaleEdit = useCallback(() => {

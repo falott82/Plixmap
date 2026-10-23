@@ -14,10 +14,17 @@
 import reactHooks from 'eslint-plugin-react-hooks';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
+import globals from 'globals';
 
 export default [
   {
     ignores: ['dist/**', 'node_modules/**', 'data/**', 'release-data/**', 'public/**', 'e2e/**']
+  },
+  {
+    files: ['server/**/*.cjs'],
+    languageOptions: { ecmaVersion: 'latest', sourceType: 'commonjs', globals: globals.node },
+    linterOptions: { reportUnusedDisableDirectives: 'off' },
+    rules: { 'no-undef': 'error' }
   },
   {
     files: ['src/**/*.{ts,tsx}'],

@@ -531,7 +531,7 @@ const MeetingRoomDisplayPage = () => {
   };
 
   const inProgress = payload?.inProgress || null;
-  const daySchedule = payload?.daySchedule || [];
+  const daySchedule = useMemo(() => payload?.daySchedule || [], [payload?.daySchedule]);
   const progress = progressOf(inProgress, now);
   const remainingToEndLabel = formatRemainingToEnd(inProgress, now);
   const clientLogoUrl = resolveLogoUrl(String((payload?.room as any)?.clientLogoUrl || '').trim() || '');

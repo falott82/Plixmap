@@ -53,7 +53,7 @@ export const usePlanCollections = (deps: any) => {
     for (const corridor of corridors) map.set(corridor.id, corridor);
     return map;
   }, [corridors]);
-  const roomDoors = useMemo(() => ((renderPlan as any)?.roomDoors || []) as RoomConnectionDoor[], [(renderPlan as any)?.roomDoors]);
+  const roomDoors = useMemo(() => ((renderPlan as any)?.roomDoors || []) as RoomConnectionDoor[], [renderPlan]);
 
   return {
     objectsByType,

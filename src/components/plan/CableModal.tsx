@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment, useEffect, useMemo, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Check, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -24,21 +25,15 @@ const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(ma
 const CableModal = ({ open, initial, onClose, onSubmit }: Props) => {
   const t = useT();
   const nameRef = useRef<HTMLInputElement | null>(null);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [color, setColor] = useState('#2563eb');
-  const [width, setWidth] = useState(3);
-  const [dashed, setDashed] = useState(false);
-  const [route, setRoute] = useState<'vh' | 'hv'>('vh');
+  const [name, setName] = useModalState(open, () => (String(initial?.name || '')), [initial?.name, initial?.description, initial?.color, initial?.width, initial?.dashed, initial?.route]);
+  const [description, setDescription] = useModalState(open, () => (String(initial?.description || '')), [initial?.name, initial?.description, initial?.color, initial?.width, initial?.dashed, initial?.route]);
+  const [color, setColor] = useModalState(open, () => (String(initial?.color || '#2563eb')), [initial?.name, initial?.description, initial?.color, initial?.width, initial?.dashed, initial?.route]);
+  const [width, setWidth] = useModalState(open, () => (clamp(Number(initial?.width || 3), 1, 10)), [initial?.name, initial?.description, initial?.color, initial?.width, initial?.dashed, initial?.route]);
+  const [dashed, setDashed] = useModalState(open, () => (!!initial?.dashed), [initial?.name, initial?.description, initial?.color, initial?.width, initial?.dashed, initial?.route]);
+  const [route, setRoute] = useModalState<'vh' | 'hv'>(open, () => ((initial?.route as any) === 'hv' ? 'hv' : 'vh'), [initial?.name, initial?.description, initial?.color, initial?.width, initial?.dashed, initial?.route]);
 
   useEffect(() => {
     if (!open) return;
-    setName(String(initial?.name || ''));
-    setDescription(String(initial?.description || ''));
-    setColor(String(initial?.color || '#2563eb'));
-    setWidth(clamp(Number(initial?.width || 3), 1, 10));
-    setDashed(!!initial?.dashed);
-    setRoute((initial?.route as any) === 'hv' ? 'hv' : 'vh');
     window.setTimeout(() => nameRef.current?.focus(), 0);
   }, [open, initial?.name, initial?.description, initial?.color, initial?.width, initial?.dashed, initial?.route]);
 

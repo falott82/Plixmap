@@ -13,7 +13,7 @@ import { computeGetPlanUnsavedChanges } from './planViewComputeBits2';
 // history-track / entry-track effects. The baseline/entry/touched refs are HOST-owned (shared with
 // save + markTouched) and passed in. Bodies + dep arrays moved verbatim.
 export const usePlanHistory = (deps: any) => {
-  const { plan, planId, markTouched, setFloorPlanContent, touchedRef, setTouchedTick, touchedTick } = deps;
+  const { plan, planId, markTouched, setFloorPlanContent, touchedRef, setTouchedTick } = deps;
 
   type PlanBaselineSnapshot = {
     imageUrl: string;
@@ -69,7 +69,7 @@ export const usePlanHistory = (deps: any) => {
   type HistorySnapshot = PlanHistorySnapshot;
   type HistoryEntry = { snap: HistorySnapshot; key: string };
 
-  const [historyTick, setHistoryTick] = useState(0);
+  const [, setHistoryTick] = useState(0);
   const historySnapshotRef = useRef<HistorySnapshot | null>(null);
   const historyKeyRef = useRef('');
   const undoStackRef = useRef<HistoryEntry[]>([]);
@@ -191,13 +191,8 @@ export const usePlanHistory = (deps: any) => {
     [getLatestRevisionCached, getPlanSnapshot, getRevisionSnapshotCached, samePlanSnapshot, baselineSnapshotRef]
   );
 
-  const { canUndo, canRedo } = useMemo(
-    () => ({
-      canUndo: undoStackRef.current.length > 0,
-      canRedo: redoStackRef.current.length > 0
-    }),
-    [historyTick]
-  );
+  const canUndo = undoStackRef.current.length > 0;
+  const canRedo = redoStackRef.current.length > 0;
 
   const hasLocalEdits = useMemo(() => {
     if (!plan) return false;
@@ -206,11 +201,7 @@ export const usePlanHistory = (deps: any) => {
     return !samePlanSnapshotIgnoringDims(entry, getPlanSnapshot(plan));
   }, [plan, samePlanSnapshotIgnoringDims, getPlanSnapshot]);
 
-  const hasNavigationEdits = useMemo(
-    () => touchedRef.current && hasLocalEdits,
-    // touchedRef is a ref; touchedTick is used to re-evaluate when touched changes.
-    [hasLocalEdits, touchedTick]
-  );
+  const hasNavigationEdits = touchedRef.current && hasLocalEdits;
   // UI "Unsaved" badge should reflect user edits only, not legacy normalization differences in old revisions.
   const hasUnsavedUi = hasNavigationEdits;
 

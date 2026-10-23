@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { extractCurrentVersion, extractHistoryVersion, extractReadmeVersion, validateVersionConsistency } = require('./version-utils.cjs');
+const { extractCurrentVersion, readHistoryVersion, extractReadmeVersion, validateVersionConsistency } = require('./version-utils.cjs');
 
 const ROOT = process.cwd();
 
@@ -11,11 +11,10 @@ const readUtf8 = (relPath) => fs.readFileSync(path.join(ROOT, relPath), 'utf8');
 const main = () => {
   const pkg = JSON.parse(readUtf8('package.json'));
   const readme = readUtf8('README.md');
-  const history = readUtf8('src/version/history/partRecent.ts');
   const current = readUtf8('src/version/current.ts');
   const packageVersion = String(pkg.version || '');
   const readmeVersion = extractReadmeVersion(readme);
-  const historyVersion = extractHistoryVersion(history);
+  const historyVersion = readHistoryVersion(path.join(ROOT, 'src/version/history/all.ts'));
   const currentVersion = extractCurrentVersion(current);
   const errors = validateVersionConsistency({ packageVersion, readmeVersion, historyVersion });
   if (!currentVersion) errors.push('Unable to parse src/version/current.ts APP_VERSION');

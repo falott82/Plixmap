@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const { buildMailTransportConfig, buildMailFromLabel } = require('../utils/mail.cjs');
 
 const { isAdminLike, isStrictSuperAdmin } = require('../access.cjs');
 const {
@@ -118,15 +119,8 @@ const createProvisioningMailSender = (deps) => {
     }
     const fromEmail = config.fromEmail || config.username;
     if (!fromEmail) return { ok: false, skipped: true, reason: 'smtp_missing_from' };
-    const fromLabel = config.fromName ? `"${String(config.fromName).replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
-    const securityMode = config.securityMode || (config.secure ? 'ssl' : 'starttls');
-    const transport = transportFactory({
-      host: config.host,
-      port: config.port,
-      secure: securityMode === 'ssl',
-      requireTLS: securityMode === 'starttls',
-      ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
-    });
+    const fromLabel = buildMailFromLabel(config);
+    const transport = transportFactory(buildMailTransportConfig(config));
     const portalUrl = getPortalPublicUrl(db, fallbackPortalPublicUrl || '');
     if (!portalUrl) {
       return { ok: false, skipped: true, reason: 'portal_url_not_configured' };

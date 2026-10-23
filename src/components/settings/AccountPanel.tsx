@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { KeyRound, Shield, Trash2, Upload } from 'lucide-react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useToastStore } from '../../store/useToast';
@@ -18,35 +18,18 @@ const AccountPanel = () => {
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const t = useT();
-  const firstName = user?.firstName ?? '';
-  const lastName = user?.lastName ?? '';
+
+  const loadMfa = useCallback(() => getMfaStatus()
+    .then((status) => setMfaEnabled(!!status.enabled))
+    .catch(() => setMfaEnabled(false)), []);
 
   useEffect(() => {
-    let cancelled = false;
-    getMfaStatus()
-      .then((s) => {
-        if (!cancelled) setMfaEnabled(!!s.enabled);
-      })
-      .catch(() => {
-        if (!cancelled) setMfaEnabled(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const displayName = useMemo(() => `${firstName} ${lastName}`.trim(), [firstName, lastName]);
+    if (user?.id) void loadMfa();
+  }, [loadMfa, user?.id]);
 
   if (!user) return null;
 
-  const loadMfa = async () => {
-    try {
-      const s = await getMfaStatus();
-      setMfaEnabled(!!s.enabled);
-    } catch {
-      setMfaEnabled(false);
-    }
-  };
+  const displayName = `${user.firstName} ${user.lastName}`.trim();
 
   const cropSquare = async (dataUrl: string) => {
     try {

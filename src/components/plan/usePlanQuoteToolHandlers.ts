@@ -40,30 +40,7 @@ export const usePlanQuoteToolHandlers = (deps: any) => {
         setQuotePoints,
         setQuotePointer
       }),
-    [
-      addObject,
-      ensureObjectLayerVisible,
-      getQuoteOrientation,
-      getTypeLabel,
-      inferDefaultLayerIds,
-      isReadOnly,
-      lastQuoteColor,
-      lastQuoteDashed,
-      lastQuoteEndpoint,
-      lastQuoteLabelPosH,
-      lastQuoteLabelPosV,
-      lastQuoteLabelScale,
-      lastQuoteLabelBg,
-      lastQuoteScale,
-      layerIdSet,
-      markTouched,
-      quoteMode,
-      quotePoints,
-      renderPlan,
-      resolveAxisLockedPoint,
-      t,
-      zoom
-    ]
+    [addObject, ensureObjectLayerVisible, getQuoteOrientation, getTypeLabel, isReadOnly, lastQuoteColor, lastQuoteDashed, lastQuoteEndpoint, lastQuoteLabelColor, lastQuoteLabelPosH, lastQuoteLabelPosV, lastQuoteLabelScale, lastQuoteLabelBg, lastQuoteScale, markTouched, quoteMode, quotePoints, renderPlan, resolveAxisLockedPoint, zoom, setQuotePoints, setQuotePointer]
   );
 
   const convertMeasurementToQuotes = useCallback(() => {
@@ -100,31 +77,7 @@ export const usePlanQuoteToolHandlers = (deps: any) => {
       setMeasureClosed,
       setMeasureFinished
     });
-  }, [
-    addObject,
-    dismissMeasureToast,
-    ensureObjectLayerVisible,
-    getQuoteOrientation,
-    getTypeLabel,
-    inferDefaultLayerIds,
-    isReadOnly,
-    lastQuoteColor,
-    lastQuoteDashed,
-    lastQuoteEndpoint,
-    lastQuoteLabelBg,
-    lastQuoteLabelColor,
-    lastQuoteLabelPosH,
-    lastQuoteLabelPosV,
-    lastQuoteLabelScale,
-    lastQuoteScale,
-    layerIdSet,
-    markTouched,
-    measureMode,
-    push,
-    renderPlan,
-    t,
-    zoom
-  ]);
+  }, [addObject, dismissMeasureToast, ensureObjectLayerVisible, getQuoteOrientation, getTypeLabel, inferDefaultLayerIds, isReadOnly, lastQuoteColor, lastQuoteDashed, lastQuoteEndpoint, lastQuoteLabelBg, lastQuoteLabelColor, lastQuoteLabelPosH, lastQuoteLabelPosV, lastQuoteLabelScale, lastQuoteScale, layerIdSet, markTouched, measureClosedRef, measureFinishedRef, measureMode, measurePointsRef, push, renderPlan, setMeasureClosed, setMeasureFinished, setMeasureMode, setMeasurePointer, setMeasurePoints, t, zoom]);
 
   return { handleQuotePoint, convertMeasurementToQuotes };
 };

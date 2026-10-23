@@ -1,28 +1,21 @@
 services:
-  plixmap:
+  deskly:
     build: .
-    image: plixmap:local
-    container_name: plixmap
+    init: true
     ports:
       - '8787:8787'
     volumes:
-      # Volume name kept from earlier releases so existing data is preserved on upgrade.
       - deskly_data:/app/data
     environment:
-      # Behind a reverse proxy (nginx/traefik/caddy): trust X-Forwarded-* headers.
-      - PLIXMAP_TRUST_PROXY=1
-      # Uncomment to force cookies to be marked Secure even without X-Forwarded-Proto=https.
-      # - PLIXMAP_COOKIE_SECURE=1
-      # Recommended: persist secrets outside the DB (see README "Environment").
-      # - PLIXMAP_AUTH_SECRET=change-me-please-32-chars-minimum
-      # - PLIXMAP_DATA_SECRET=change-me-too-32-chars-minimum
+      - DESKLY_TRUST_PROXY=1
     restart: unless-stopped
-    healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8787/api/health/live']
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
 
 volumes:
   deskly_data:
+
+networks:
+  default:
+    # Subnet fissa per evitare sovrapposizioni con la LAN aziendale (172.16.0.0/12 e 192.168.0.0/16).
+    ipam:
+      config:
+        - subnet: 10.99.78.0/24

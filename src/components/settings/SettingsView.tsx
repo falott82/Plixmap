@@ -1,4 +1,4 @@
-import { Fragment, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, Fragment, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { FolderPlus, Home, Map, MapPinned, Trash, ArrowLeftCircle, Pencil, Upload, Users, UserCircle2, Plus, LayoutGrid, Layers, ChevronUp, ChevronDown, DownloadCloud, Eye, X, Mail, Heart, ShieldAlert, History } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -94,7 +94,7 @@ const SettingsView = () => {
   const { user } = useAuthStore();
   const isSuperAdmin = !!user?.isSuperAdmin && user?.username === 'superadmin';
   const isAdmin = !!user?.isAdmin || isSuperAdmin;
-  const resolveTab = (search: string) => {
+  const resolveTab = useCallback((search: string) => {
     const next = new URLSearchParams(search).get('tab')?.toLowerCase() || '';
     if (next === 'account') return 'account';
     if (next === 'objects') return 'objects';
@@ -109,7 +109,7 @@ const SettingsView = () => {
     if (next === 'donations') return 'donations';
     if (next === 'data' && isAdmin) return 'data';
     return isAdmin ? 'data' : 'account';
-  };
+  }, [isAdmin, isSuperAdmin]);
   const [tab, setTab] = useState<'data' | 'objects' | 'safety' | 'layers' | 'users' | 'account' | 'logs' | 'email' | 'backup' | 'import' | 'nerd' | 'donations'>(
     () => resolveTab(location.search)
   );
@@ -151,7 +151,7 @@ const SettingsView = () => {
   useEffect(() => {
     const next = resolveTab(location.search);
     if (next !== tab) setTab(next);
-  }, [isAdmin, isSuperAdmin, location.search, tab]);
+  }, [isAdmin, isSuperAdmin, location.search, resolveTab, tab]);
 
   useEffect(() => {
     if (selectedClient && !clients.some((c) => c.id === selectedClient)) {

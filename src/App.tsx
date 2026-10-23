@@ -40,7 +40,7 @@ const SidebarFallback = () => <div className="hidden w-[320px] shrink-0 xl:block
 
 const PlanRoute = () => {
   const { planId } = useParams();
-  const planExists = useDataStore((s) => (planId ? !!s.findFloorPlan(planId) : false));
+  const planExists = useDataStore((s) => !!planId && !!s.findFloorPlan(planId));
   if (!planId || !planExists) return <Navigate to="/" replace />;
   return <PlanView planId={planId} />;
 };
@@ -116,6 +116,7 @@ const App = () => {
   );
   const presentationMode = useUIStore((s) => s.presentationMode || false);
   const { user, hydrated: authHydrated, hydrate: hydrateAuth } = useAuthStore();
+  const userLanguage = (user as any)?.language;
   const pushToast = useToastStore((s) => s.push);
   const location = useLocation();
   const navigate = useNavigate();
@@ -248,7 +249,7 @@ const App = () => {
       });
     }
     return () => observer.disconnect();
-  }, [(user as any)?.language]);
+  }, [userLanguage]);
 
   useEffect(() => {
     if (isMeetingRoomRoute) return;
@@ -431,7 +432,7 @@ const App = () => {
         lastMustChangeRef.current = user.mustChangePassword ?? null;
         setHydrated(true);
       });
-  }, [authHydrated, isMobileAppRoute, markSaved, setServerState, user]);
+  }, [authHydrated, isMobileAppRoute, markSaved, setSelectedPlan, setServerState, user]);
 
   useEffect(() => {
     if (!authHydrated || !user) return;

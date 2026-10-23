@@ -1,37 +1,30 @@
-# syntax=docker/dockerfile:1.7
-# ---- build stage: compile the Vite client ---------------------------------
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
-ENV CI=1
-COPY package.json package-lock.json ./
-# Reproducible install from the lockfile; dev deps are needed for the build.
-# --ignore-scripts: the client build never loads better-sqlite3, whose install script
-# (`prebuild-install || node-gyp rebuild`) would otherwise try to (re)download a binary
-# and, if that fails, fall back to a node-gyp compile that needs python/make/g++.
-# Its binaries already ship inside the package (see the runtime stage below).
-RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --ignore-scripts
+COPY package*.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-# ---- runtime stage: production deps + built assets only ---------------------
-FROM node:22-alpine
+FROM node:24-alpine
 WORKDIR /app
-ENV NODE_ENV=production \
-    HOST=0.0.0.0 \
-    PORT=8787
-COPY package.json package-lock.json ./
-# --ignore-scripts: better-sqlite3 ships prebuilt binaries (incl. Alpine/musl) but
-# still carries a binding.gyp, which would make npm try a node-gyp rebuild that
-# needs python/make/g++. No runtime dependency needs an install script.
-RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund --ignore-scripts \
- && npm cache clean --force
+ENV NODE_ENV=production
+RUN apk upgrade --no-cache
+RUN npm install --global npm@12.2.1 --ignore-scripts --no-audit --no-fund \
+    && npm install --prefix /tmp/npm-security ip-address@10.7.4 --ignore-scripts --no-audit --no-fund \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/ip-address \
+    && mv /tmp/npm-security/node_modules/ip-address /usr/local/lib/node_modules/npm/node_modules/ip-address \
+    && rm -rf /tmp/npm-security \
+    && npm cache clean --force
+COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY server ./server
 COPY dbsetup.cjs ./dbsetup.cjs
-# Runs as root on purpose: named volumes created by earlier releases are root-owned
-# and must stay writable after an upgrade.
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown -R node:node /app
+# Drop root: the runtime writes only to /app/data (owned by node above).
+USER node
 EXPOSE 8787
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8787/api/health/live >/dev/null || exit 1
-CMD ["sh", "-c", "node ./dbsetup.cjs && node server/index.cjs"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:8787/api/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+CMD ["sh", "-c", "node ./dbsetup.cjs && exec node server/index.cjs"]

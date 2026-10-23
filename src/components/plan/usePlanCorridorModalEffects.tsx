@@ -39,7 +39,7 @@ export function usePlanCorridorModalEffects(deps: UsePlanCorridorModalEffectsDep
     setCorridorNameInput(corridorModal.initialName || '');
     setCorridorNameEnInput(corridorModal.initialNameEn || '');
     setCorridorShowNameInput(corridorModal.initialShowName !== false);
-  }, [corridorModal]);
+  }, [corridorModal, setCorridorNameEnInput, setCorridorNameInput, setCorridorShowNameInput]);
 
   useEffect(() => {
     if (!corridorModal) return;
@@ -55,10 +55,10 @@ export function usePlanCorridorModalEffects(deps: UsePlanCorridorModalEffectsDep
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [corridorModal]);
+  }, [corridorModal, corridorNameInputRef]);
 
   useEffect(() => {
     if (corridorDoorLinkModal) return;
     if (corridorDoorLinkQuery) setCorridorDoorLinkQuery('');
-  }, [corridorDoorLinkModal, corridorDoorLinkQuery]);
+  }, [corridorDoorLinkModal, corridorDoorLinkQuery, setCorridorDoorLinkQuery]);
 }

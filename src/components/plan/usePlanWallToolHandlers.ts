@@ -7,7 +7,7 @@ import { computeSplitWallAtPoint } from './planViewRoomGeometry';
 // usePlanView. Delegate to the matching compute* helpers; bodies + dep arrays moved verbatim.
 export const usePlanWallToolHandlers = (deps: any) => {
   const {
-    wallSnapPoints, zoom, wallDraftPointsRef, addWallSegment, deleteObject, getTypeLabel, getWallTypeColor,
+    wallSnapPoints, zoom, wallDraftPointsRef, addWallSegment, deleteObject, getTypeLabel,
     inferDefaultLayerIds, isReadOnly, isWallType, layerIdSet, markTouched, projectPointOnSegment, renderPlan,
     setSelectedObject, lastInsertedRef
   } = deps;
@@ -39,22 +39,7 @@ export const usePlanWallToolHandlers = (deps: any) => {
         zoom,
         lastInsertedRef
       }),
-    [
-      addWallSegment,
-      deleteObject,
-      getTypeLabel,
-      getWallTypeColor,
-      inferDefaultLayerIds,
-      isReadOnly,
-      isWallType,
-      layerIdSet,
-      markTouched,
-      projectPointOnSegment,
-      renderPlan,
-      setSelectedObject,
-      zoom,
-      lastInsertedRef
-    ]
+    [addWallSegment, deleteObject, getTypeLabel, inferDefaultLayerIds, isReadOnly, isWallType, layerIdSet, markTouched, projectPointOnSegment, renderPlan, setSelectedObject, zoom, lastInsertedRef]
   );
 
   return { resolveWallPoint, splitWallAtPoint };

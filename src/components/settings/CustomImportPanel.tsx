@@ -517,17 +517,6 @@ const CustomImportPanel = (
     await Promise.all([loadConfig(clientId), loadLdapConfig(clientId)]);
   };
 
-  const openUsers = async (clientId: string) => {
-    setActiveClientId(clientId);
-    setUsersOpen(true);
-    setConfigOpen(false);
-    setUsersQuery('');
-    setIncludeMissing(false);
-    setOnlyMissing(false);
-    setUsersSortState({ key: 'name', dir: 'asc' });
-    setCsvFile(null);
-    await Promise.all([loadUsers(clientId), loadPortalUsers()]);
-  };
 
   const refreshWebApiPreview = useCallback(async (clientId: string) => {
     if (!clientId) return;
@@ -601,6 +590,19 @@ const CustomImportPanel = (
     push,
     t
   });
+
+const openUsers = useCallback(async (clientId: string) => {
+    setActiveClientId(clientId);
+    setUsersOpen(true);
+    setConfigOpen(false);
+    setUsersQuery('');
+    setIncludeMissing(false);
+    setOnlyMissing(false);
+    setUsersSortState({ key: 'name', dir: 'asc' });
+    setCsvFile(null);
+    await Promise.all([loadUsers(clientId), loadPortalUsers()]);
+  }, [loadPortalUsers, loadUsers, setCsvFile]);
+
 
   const {
     savingCfg,

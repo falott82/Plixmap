@@ -11,6 +11,7 @@
 - `src/store/`: state domains (data/auth/ui/chat/custom fields).
 - `src/utils/`: shared logic (PDF export, perf metrics, files, websocket helpers, layer-visibility helpers, logging).
 - Shared meeting time SSOT now lives in `src/utils/meetingTime.ts` and is reused by mobile agenda, meeting timelines, and follow-up views.
+- Routing is split into `internalMapTypes.ts`, `internalMapGeometry.ts`, `internalMapGrid.ts` and `internalMapPathfinding.ts`. `internalMapRouting.ts` preserves the public API. Internal maps, escape routes and room allocation reuse the same polygon and door geometry.
 
 ## Server shared services
 - `server/config.cjs`: shared runtime env/config parsing with defaults for server modules.
@@ -18,6 +19,10 @@
 - `server/publicUrls.cjs`: shared public URL builders for kiosk, mobile, and public uploads.
 - `server/services/users.cjs`: user-link normalization, imported-user conflict checks, and shared permission replacement helpers.
 - `server/services/meetings.cjs`: meeting domain logic reused by extracted meeting routes.
+- `server/utils/mail.cjs`: shared SMTP transport and sender configuration for settings, meeting notifications and user provisioning.
+- `server/routes/maintenance.cjs`, `updates.cjs`, `capacity.cjs` and `operations.cjs`: operational endpoints kept separate from server startup. Capacity permission resolution receives its database explicitly.
+- `server/services/packageChecks.cjs`: npm execution, report validation and last-check metadata. Exit code 1 denotes findings; process failures and npm error payloads are rejected.
+- `server/services/codeAnalysis.cjs`: source scanning and ranking, independent of HTTP handling.
 
 ## Realtime flow
 - WebSocket endpoint: `/ws`.
@@ -54,6 +59,8 @@
 
 ## Build and quality gates
 - `npm run lint`: TypeScript typecheck.
+- `npm run lint:server`: rejects undefined symbols in backend modules.
+- `npm run test:unit`: frontend helper and component regressions, including shared routing geometry and connected paths.
 - `npm run test`: node:test suite for release/version guards plus focused shared-rule regressions (`access`, DB migrations, portal URL SSOT, public URL builders).
 - `npm run build`: production bundle.
 - `npm run release:check`: verifies version consistency across:
@@ -61,6 +68,7 @@
   - `README.md`
   - `src/version/history.ts` (lazy loader) + `src/version/history/*.ts` (notes by era) + `src/version/current.ts` (APP_VERSION)
 - `npm run quality:check`: aggregate quality gate used by CI.
+- `./plix.sh release`: closes matching local Chrome tabs, stops the configured port, rebuilds and restarts. The page reopens after both the frontend and database readiness probe respond successfully.
 
 ## CI workflows
 - `i18n-lint.yml`: translation key consistency.

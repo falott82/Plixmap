@@ -14,7 +14,7 @@ export const usePlanMyMeetingsModal = (deps: any) => {
 
   const myMeetingsFiltered = useMemo(
     () => computeMyMeetingsFiltered({ myMeetingsModal, myMeetingsSearch, meetingLocationLabels }),
-    [meetingLocationLabels, myMeetingsModal?.meetings, myMeetingsSearch]
+    [meetingLocationLabels, myMeetingsModal, myMeetingsSearch]
   );
 
   const reloadMyMeetings = useCallback(async () => {

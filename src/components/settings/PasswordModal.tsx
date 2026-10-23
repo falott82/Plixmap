@@ -1,4 +1,5 @@
-import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { FormEvent, Fragment, useEffect, useMemo, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -13,16 +14,13 @@ interface Props {
 
 const PasswordModal = ({ open, title, requireOld = false, onClose, onSubmit }: Props) => {
   const t = useT();
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
+  const [oldPassword, setOldPassword] = useModalState(open, () => (''), []);
+  const [newPassword, setNewPassword] = useModalState(open, () => (''), []);
+  const [confirm, setConfirm] = useModalState(open, () => (''), []);
   const newRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setOldPassword('');
-    setNewPassword('');
-    setConfirm('');
     window.setTimeout(() => newRef.current?.focus(), 0);
   }, [open]);
 

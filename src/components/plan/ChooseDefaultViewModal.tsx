@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { useMemo } from 'react';
 import { Star } from 'lucide-react';
 import { FloorPlanView } from '../../store/types';
 import { useT } from '../../i18n/useT';
@@ -13,13 +14,9 @@ interface Props {
 
 const ChooseDefaultViewModal = ({ open, views, onClose, onConfirm }: Props) => {
   const firstId = useMemo(() => views[0]?.id, [views]);
-  const [selectedId, setSelectedId] = useState<string>(firstId || '');
+  const [selectedId, setSelectedId] = useModalState<string>(open, () => (firstId || ''), [firstId]);
   const t = useT();
 
-  useEffect(() => {
-    if (!open) return;
-    setSelectedId(firstId || '');
-  }, [firstId, open]);
 
   return (
     <ModalShell

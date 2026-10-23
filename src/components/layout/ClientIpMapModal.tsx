@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { ChevronDown, ChevronUp, Crosshair, ExternalLink, FileDown, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -42,20 +43,12 @@ const ClientIpMapModal = ({ open, client, onClose }: Props) => {
   const objectTypeDefs = useDataStore((s) => s.objectTypes || []);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const [query, setQuery] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('ip');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [query, setQuery] = useModalState(open, () => (''), [client?.id]);
+  const [sortKey, setSortKey] = useModalState<SortKey>(open, () => ('ip'), [client?.id]);
+  const [sortDir, setSortDir] = useModalState<'asc' | 'desc'>(open, () => ('asc'), [client?.id]);
+  const [selectedIndex, setSelectedIndex] = useModalState(open, () => (0), [client?.id]);
+  const [collapsedGroups, setCollapsedGroups] = useModalState<Record<string, boolean>>(open, () => ({}), [client?.id]);
 
-  useEffect(() => {
-    if (!open) return;
-    setQuery('');
-    setSortKey('ip');
-    setSortDir('asc');
-    setSelectedIndex(0);
-    setCollapsedGroups({});
-  }, [client?.id, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -178,7 +171,7 @@ const ClientIpMapModal = ({ open, client, onClose }: Props) => {
       if (prev < 0) return 0;
       return Math.min(prev, flatEntries.length - 1);
     });
-  }, [flatEntries.length, open]);
+  }, [flatEntries.length, open, setSelectedIndex]);
 
   useEffect(() => {
     if (!open) return;
@@ -221,7 +214,7 @@ const ClientIpMapModal = ({ open, client, onClose }: Props) => {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [flatEntries, open, push, selectedIndex, t]);
+  }, [flatEntries, open, push, selectedIndex, setSelectedIndex, t]);
 
   const selectedEntry = selectedIndex >= 0 ? flatEntries[selectedIndex] : null;
   const indexById = useMemo(() => new Map(flatEntries.map((entry, index) => [entry.objectId, index])), [flatEntries]);

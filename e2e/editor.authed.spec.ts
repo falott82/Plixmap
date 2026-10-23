@@ -61,9 +61,9 @@ test.describe('authenticated editor', () => {
       .then(() => true)
       .catch(() => false);
 
-    test.skip(!appeared, 'no plan/canvas available for this account — seed a plan to cover the editor');
+    expect(errors, `runtime errors while the editor mounted:\n${errors.join('\n')}`).toHaveLength(0);
+    test.skip(Boolean(U && P) && !appeared, 'no plan/canvas available for this account');
 
     await expect(canvas).toBeVisible();
-    expect(errors, `runtime errors while the editor mounted:\n${errors.join('\n')}`).toHaveLength(0);
   });
 });

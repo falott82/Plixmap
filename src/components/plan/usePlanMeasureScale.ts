@@ -28,15 +28,7 @@ export const usePlanMeasureScale = (deps: any) => {
   }, [lastObjectScale, recommendedObjectScale]);
   const scaleLine = useMemo(
     () => computeScaleLine({ showScaleLine, planScale, scaleLabel }),
-    [
-      planScale?.end,
-      planScale?.labelScale,
-      planScale?.opacity,
-      planScale?.start,
-      planScale?.strokeWidth,
-      scaleLabel,
-      showScaleLine
-    ]
+    [planScale, scaleLabel, showScaleLine]
   );
   const measurePreviewPoints = useMemo(() => {
     if (!measurePoints.length) return [];

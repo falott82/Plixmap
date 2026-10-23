@@ -229,7 +229,7 @@ const ClientChatWs = () => {
       closeSocketSafely(wsRef.current);
       wsRef.current = null;
     };
-  }, [user?.id]);
+  }, [t, user?.id]);
 
   return null;
 };

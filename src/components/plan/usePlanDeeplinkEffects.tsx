@@ -71,7 +71,7 @@ export function usePlanDeeplinkEffects(deps: UsePlanDeeplinkEffectsDeps) {
     params.delete('tm');
     const search = params.toString();
     navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
-  }, [location.pathname, location.search, navigate]);
+  }, [location.pathname, location.search, navigate, setRevisionsOpen]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -106,5 +106,5 @@ export function usePlanDeeplinkEffects(deps: UsePlanDeeplinkEffectsDeps) {
     params.delete('faSite');
     const search = params.toString();
     navigate({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
-  }, [location.pathname, location.search, navigate]);
+  }, [location.pathname, location.search, navigate, setRoomAllocationOpen, setRoomAllocationPreset]);
 }

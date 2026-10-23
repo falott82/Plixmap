@@ -1,6 +1,4 @@
-// Capacity-trend computations + history store, extracted verbatim from server/index.cjs to
-// keep that file under 2k lines. Pure helpers are exported directly; the DB-backed history
-// read/write pair is a factory over the app-settings accessors (which close over the DB).
+const { getUserWithPermissions, computePlanAccess, filterStateForUser } = require('./permissions.cjs');
 
 const CAPACITY_HISTORY_SETTING_KEY = 'capacityHistoryV1';
 const CAPACITY_HISTORY_LIMIT = 540;
@@ -19,7 +17,7 @@ const capacityToPositive = (value) => {
   return numeric;
 };
 
-const resolveVisibleClientsForRequest = (req, allClients) => {
+const resolveVisibleClientsForRequest = (req, allClients, db) => {
   if (req.isAdmin || req.isSuperAdmin) return allClients;
   const ctx = getUserWithPermissions(db, req.userId);
   if (!ctx) return [];

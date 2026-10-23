@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Check, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -13,12 +14,8 @@ interface Props {
 
 const ReplacePlanImageModal = ({ open, planName, hasObjects, onClose, onConfirm }: Props) => {
   const t = useT();
-  const [carryObjects, setCarryObjects] = useState(false);
+  const [carryObjects, setCarryObjects] = useModalState(open, () => (false), []);
 
-  useEffect(() => {
-    if (!open) return;
-    setCarryObjects(false);
-  }, [open]);
 
   return (
     <Transition show={open} as={Fragment}>

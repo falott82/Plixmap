@@ -1,20 +1,22 @@
-const fs = require('fs');
+const { registerOperationsRoutes } = require('./routes/operations.cjs');
+const { registerCapacityRoutes } = require('./routes/capacity.cjs');
+const { registerUpdateRoutes } = require('./routes/updates.cjs');
+const { registerMaintenanceRoutes } = require('./routes/maintenance.cjs');
 const path = require('path');
 const http = require('http');
 const express = require('express');
 const compression = require('compression');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
-const { normalizeHttpUrl, serverConfig, validateServerConfig } = require('./config.cjs');
-const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret, listMigrationStatus } = require('./db.cjs');
-const { createDatabaseBackup, listBackups, resolveBackupDir, resolveBackupRetention } = require('./backup.cjs');
+const { serverConfig, validateServerConfig } = require('./config.cjs');
+const { openDb, getOrCreateAuthSecret, getOrCreateDataSecret } = require('./db.cjs');
+const { resolveBackupDir, resolveBackupRetention } = require('./backup.cjs');
 const { evaluateCsrfRequest } = require('./csrf.cjs');
 const { createAssetPipeline } = require('./assetPipeline.cjs');
 const { buildCspHeader, normalizeIp, allowPrivateImportForRequest } = require('./network.cjs');
 const { createPlanRevisionStore } = require('./planRevisionStore.cjs');
 const { createAppSettingsStore } = require('./appSettingsStore.cjs');
 const { rateLimit, rateByUser } = require('./rateLimit.cjs');
-const { normalizeSemver, compareSemver } = require('./semver.cjs');
 const { serverLog } = require('./serverLog.cjs');
 const {
   parseCookies,
@@ -40,8 +42,6 @@ const { registerExternalDirectoryRoutes } = require('./routes/externalDirectory.
 const { registerDataRoutes } = require('./routes/dataRoutes.cjs');
 const { registerObjectTypeRequestRoutes } = require('./routes/objectTypeRequests.cjs');
 const { registerAdminLogRoutes } = require('./routes/adminLogs.cjs');
-const { registerMaintenanceRoutes } = require('./routes/maintenance.cjs');
-const { registerOpsRoutes } = require('./routes/ops.cjs');
 const { registerSettingsRoutes } = require('./routes/settings.cjs');
 const { hasStoredLogRetentionSettings, purgeExpiredLogs, readLogRetentionSettings } = require('./logRetention.cjs');
 const { createRealtimeRuntime } = require('./realtime.cjs');
@@ -125,16 +125,7 @@ const PORT = serverConfig.port;
 const HOST = serverConfig.host;
 const STARTED_AT = Date.now();
 const APP_BRAND = 'Plixmap';
-const UPDATE_CHECK_TIMEOUT_MS = 5000;
-const APP_VERSION = (() => {
-  try {
-    const raw = fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8');
-    const parsed = JSON.parse(raw);
-    return String(parsed?.version || '').trim() || '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-})();
+const APP_VERSION = String(require('../package.json').version || '0.0.0');
 
 
 const buildKioskPublicUrl = (req, roomId) => buildMeetingRoomPublicUrl(req, roomId);
@@ -302,13 +293,7 @@ const {
   markLogsCleared
 } = createAppSettingsStore({ db });
 
-const {
-  CAPACITY_SNAPSHOT_MIN_INTERVAL_MS,
-  resolveVisibleClientsForRequest,
-  buildCapacityTrendSnapshot,
-  buildCapacitySnapshotSignature,
-  createCapacityHistoryStore
-} = require('./capacityTrends.cjs');
+const { createCapacityHistoryStore } = require('./capacityTrends.cjs');
 const { readCapacityHistory, writeCapacityHistory } = createCapacityHistoryStore({ getAppSetting, setAppSetting });
 
 const runLogRetentionCleanup = (reason = 'scheduled') => {
@@ -575,44 +560,37 @@ registerMaintenanceRoutes(app, {
   db,
   requireAuth,
   rateByUser,
-  requestMeta,
-  writeAuditLog,
-  getAuditVerboseEnabled,
   getAppSetting,
   setAppSetting,
   resolveUsername,
-  serverLog,
-  normalizeHttpUrl,
-  normalizeSemver,
-  compareSemver,
-  APP_VERSION,
-  UPDATE_CHECK_TIMEOUT_MS,
-  UPDATE_MANIFEST_URL,
-  UPDATE_MANIFEST_FALLBACK_URL
+  writeAuditLog,
+  requestMeta
 });
-
-registerOpsRoutes(app, {
+registerUpdateRoutes(app, {
+  requireAuth,
+  rateByUser,
+  APP_VERSION,
+  UPDATE_MANIFEST_URL,
+  UPDATE_MANIFEST_FALLBACK_URL,
+  serverLog
+});
+registerCapacityRoutes(app, {
   db,
   requireAuth,
   rateByUser,
-  requestMeta,
-  writeAuditLog,
-  serverLog,
   readState,
-  resolveVisibleClientsForRequest,
-  buildCapacityTrendSnapshot,
-  buildCapacitySnapshotSignature,
   readCapacityHistory,
-  writeCapacityHistory,
-  CAPACITY_SNAPSHOT_MIN_INTERVAL_MS,
-  listMigrationStatus,
-  createDatabaseBackup,
-  listBackups,
-  resolveBackupDir,
-  resolveBackupRetention,
+  writeCapacityHistory
+});
+registerOperationsRoutes(app, {
+  db,
+  requireAuth,
+  rateByUser,
   STARTED_AT,
-  // wss is created after the routes are registered; resolve lazily.
-  getWsClientCount: () => (wss?.clients ? wss.clients.size : 0)
+  getWsClientCount: () => wss.clients.size,
+  writeAuditLog,
+  requestMeta,
+  serverLog
 });
 // --- Custom Import: external "real users" per client (superadmin) ---
 const parseCsvRows = (text) => {

@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import type { Client, Site } from '../../store/types';
+import type { Client } from '../../store/types';
 import { listExternalUsers } from '../../api/customImport';
 import { fetchMeetingOverview } from '../../api/meetings';
 import { currentLocalIsoDay } from '../../utils/localDate';
@@ -7,18 +7,18 @@ import { currentLocalIsoDay } from '../../utils/localDate';
 type MeetingStatus = { hasMeetingToday: boolean; inProgress: boolean; hasFutureToday: boolean };
 
 export type MeetingOverviewDeps = {
-  client: Client | undefined;
-  site: Site | undefined;
+  clientId: string | undefined;
+  siteId: string | undefined;
   planId: string;
   setMeetingStatusByRoomId: Dispatch<SetStateAction<Record<string, MeetingStatus>>>;
 };
 
 export const runMeetingOverviewEffect = (deps: MeetingOverviewDeps): void | (() => void) => {
-  const { client, site, planId, setMeetingStatusByRoomId } = deps;
+  const { clientId, siteId, planId, setMeetingStatusByRoomId } = deps;
 
   let cancelled = false;
-  const cid = String(client?.id || '').trim();
-  const sid = String(site?.id || '').trim();
+  const cid = String(clientId || '').trim();
+  const sid = String(siteId || '').trim();
   if (!cid || !sid) {
     setMeetingStatusByRoomId({});
     return;
@@ -54,16 +54,16 @@ export const runMeetingOverviewEffect = (deps: MeetingOverviewDeps): void | (() 
 };
 
 export type RoomDepartmentOptionsDeps = {
-  client: Client | undefined;
+  clientId: string | undefined;
   allClients: Client[] | undefined;
   setRoomDepartmentOptions: Dispatch<SetStateAction<string[]>>;
 };
 
 export const runRoomDepartmentOptionsEffect = (deps: RoomDepartmentOptionsDeps): void | (() => void) => {
-  const { client, allClients, setRoomDepartmentOptions } = deps;
+  const { clientId: requestedClientId, allClients, setRoomDepartmentOptions } = deps;
 
   let cancelled = false;
-  const clientId = String(client?.id || '').trim();
+  const clientId = String(requestedClientId || '').trim();
   if (!clientId) {
     setRoomDepartmentOptions([]);
     return;

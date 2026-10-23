@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const { buildMailTransportConfig, buildMailFromLabel } = require('../utils/mail.cjs');
 
 const createMeetingServices = (deps) => {
   const {
@@ -457,15 +458,8 @@ const createMeetingServices = (deps) => {
     }
     const fromEmail = config.fromEmail || config.username;
     if (!fromEmail) return { ok: false, skipped: true, reason: 'smtp_missing_from' };
-    const fromLabel = config.fromName ? `"${config.fromName.replace(/"/g, '')}" <${fromEmail}>` : fromEmail;
-    const securityMode = config.securityMode || (config.secure ? 'ssl' : 'starttls');
-    const transport = nodemailer.createTransport({
-      host: config.host,
-      port: config.port,
-      secure: securityMode === 'ssl',
-      requireTLS: securityMode === 'starttls',
-      ...(config.username ? { auth: { user: config.username, pass: config.password } } : {})
-    });
+    const fromLabel = buildMailFromLabel(config);
+    const transport = nodemailer.createTransport(buildMailTransportConfig(config));
     try {
       const info = await transport.sendMail({
         from: fromLabel,

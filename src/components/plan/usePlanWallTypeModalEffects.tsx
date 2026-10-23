@@ -23,7 +23,7 @@ export function usePlanWallTypeModalEffects(deps: UsePlanWallTypeModalEffectsDep
   useEffect(() => {
     if (!wallTypeModal) return;
     setWallTypeDraft(wallTypeModal.typeId);
-  }, [wallTypeModal]);
+  }, [setWallTypeDraft, wallTypeModal]);
 
   useEffect(() => {
     if (!roomWallTypeModal) {
@@ -36,5 +36,5 @@ export function usePlanWallTypeModalEffects(deps: UsePlanWallTypeModalEffectsDep
         ? roomWallTypeModal.wallTypes
         : roomWallTypeModal.segments.map(() => nextDefault);
     setRoomWallTypeSelections(desired);
-  }, [defaultWallTypeId, roomWallTypeModal]);
+  }, [defaultWallTypeId, roomWallTypeModal, setRoomWallTypeSelections]);
 }

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+
 import { Check } from 'lucide-react';
 import { PdfExportOptions, PdfOrientation } from '../../utils/pdf';
 import { useT } from '../../i18n/useT';
@@ -11,13 +12,9 @@ interface Props {
 }
 
 const PdfExportModal = ({ open, onClose, onConfirm }: Props) => {
-  const [orientation, setOrientation] = useState<PdfOrientation>('auto');
+  const [orientation, setOrientation] = useModalState<PdfOrientation>(open, () => ('auto'), []);
   const t = useT();
 
-  useEffect(() => {
-    if (!open) return;
-    setOrientation('auto');
-  }, [open]);
 
   return (
     <ModalShell

@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef } from 'react';
+import { useModalState } from '../ui/useModalState';
 import { Dialog, Transition } from '@headlessui/react';
 import { FileDown, History, Search, X } from 'lucide-react';
 import { useReleaseHistory } from '../../version/useReleaseHistory';
@@ -9,7 +10,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 const ChangelogPanel = () => {
   const { changelogOpen, closeChangelog } = useUIStore(useShallow((s) => ({ changelogOpen: s.changelogOpen, closeChangelog: s.closeChangelog })));
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useModalState(changelogOpen, '');
   const ref = useRef<HTMLDivElement | null>(null);
   const t = useT();
   const lang = useLang();
@@ -17,7 +18,6 @@ const ChangelogPanel = () => {
 
   useEffect(() => {
     if (!changelogOpen) return;
-    setQuery('');
     // Scroll to top when reopening.
     window.setTimeout(() => {
       try {

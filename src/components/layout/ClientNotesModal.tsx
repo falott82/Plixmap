@@ -1,3 +1,4 @@
+import { useModalState } from '../ui/useModalState';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { ChevronDown, Eye, FileDown, FileText, Languages, Loader2, Plus, Search, SpellCheck, Trash2, Upload, X } from 'lucide-react';
@@ -86,7 +87,7 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
   const [translateLanguageCode, setTranslateLanguageCode] = useState('en');
   const newTitleRef = useRef<HTMLInputElement | null>(null);
 
-  const [attachments, setAttachments] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
+  const [attachments, setAttachments] = useModalState<{ id: string; name: string; dataUrl: string }[]>(open, () => (client?.attachments || []), [client?.attachments]);
   const [query, setQuery] = useState('');
   const initializedRef = useRef<{ open: boolean; clientId?: string }>({ open: false, clientId: undefined });
   const [noteMenu, setNoteMenu] = useState<null | { noteId: string; x: number; y: number }>(null);
@@ -136,13 +137,8 @@ const ClientNotesModal = ({ open, client, readOnly = false, onClose, onSave }: P
         });
       }
     }
-  }, [client?.id, open]);
+  }, [client, client?.id, onSave, open, setAttachments, t]);
 
-  useEffect(() => {
-    if (!open) return;
-    // Keep attachments in sync while the modal is open (without re-initializing notes selection).
-    setAttachments(client?.attachments || []);
-  }, [client?.attachments, open]);
 
   useEffect(() => {
     if (!open) {

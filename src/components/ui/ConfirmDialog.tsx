@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
+import { useModalState } from './useModalState';
 import { Dialog, Transition } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -38,8 +39,8 @@ const ConfirmDialog = ({
   const cancelRef = useRef<HTMLButtonElement | null>(null);
   const confirmRef = useRef<HTMLButtonElement | null>(null);
   const phraseRef = useRef<HTMLInputElement | null>(null);
-  const [typedPhrase, setTypedPhrase] = useState('');
   const needsPhrase = !!confirmPhrase;
+  const [typedPhrase, setTypedPhrase] = useModalState(open, '', [needsPhrase]);
   const normalizedTypedPhrase = typedPhrase.trim();
   const phraseMatches = !needsPhrase || normalizedTypedPhrase === confirmPhrase;
   const okLabel = confirmLabel || t({ it: 'Conferma', en: 'Confirm' });
@@ -48,7 +49,6 @@ const ConfirmDialog = ({
 
   useEffect(() => {
     if (!open) return;
-    setTypedPhrase('');
     if (!needsPhrase) return;
     window.setTimeout(() => phraseRef.current?.focus(), 0);
   }, [needsPhrase, open]);

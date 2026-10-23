@@ -48,7 +48,7 @@ export const usePlanRoomDoorDraftHandlers = (deps: any) => {
         setCorridorDoorDraft,
         setCorridorQuickMenu
       }),
-    [corridorDoorDraft, defaultDoorCatalogId, markTouched, objectTypeById, push, t, updateFloorPlan]
+    [corridorDoorDraft, defaultDoorCatalogId, isReadOnlyRef, markTouched, objectTypeById, planRef, push, setCorridorDoorDraft, setCorridorQuickMenu, setSelectedCorridorDoor, t, updateFloorPlan]
   );
 
   const createRoomDoorFromDraft = useCallback(
@@ -67,7 +67,7 @@ export const usePlanRoomDoorDraftHandlers = (deps: any) => {
         setSelectedRoomDoorId,
         setContextMenu
       }),
-    [defaultDoorCatalogId, markTouched, objectTypeById, push, roomDoorDraft, t, updateFloorPlan]
+    [defaultDoorCatalogId, isReadOnlyRef, markTouched, objectTypeById, planRef, push, roomDoorDraft, setContextMenu, setRoomDoorDraft, setSelectedRoomDoorId, t, updateFloorPlan]
   );
 
   const startRoomDoorDraft = useCallback(
@@ -82,7 +82,7 @@ export const usePlanRoomDoorDraftHandlers = (deps: any) => {
         setSelectedRoomDoorId,
         setContextMenu
       }),
-    [getSharedRoomSides, push, renderPlan, t]
+    [getSharedRoomSides, isReadOnlyRef, push, renderPlan, setContextMenu, setRoomDoorDraft, setSelectedRoomDoorId, t]
   );
 
   return { handleCorridorDoorDraftPoint, createRoomDoorFromDraft, startRoomDoorDraft };

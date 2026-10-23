@@ -1,5 +1,5 @@
 import { Dialog } from '@headlessui/react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowRight, Link2, Search, X } from 'lucide-react';
 import { RackDefinition, RackItem, RackItemType, RackLink, RackPortKind } from '../../store/types';
@@ -170,112 +170,7 @@ const RackPortsModal = ({
 
   const isDualSide = (device: RackItem | null) => device?.type === 'patchpanel' || device?.type === 'optical_drawer';
 
-  const getLinkForPort = (deviceId: string, kind: RackPortKind, index: number, side?: PortSide) => {
-    const device = rackItems.find((d) => d.id === deviceId);
-    const dual = isDualSide(device || null);
-    const matchSide = dual && side;
-    return activeRackLinks.find((l) => {
-      if (l.fromItemId === deviceId && l.fromPortKind === kind && l.fromPortIndex === index) {
-        if (!matchSide) return true;
-        const fromSide = l.fromSide || 'female';
-        return fromSide === side;
-      }
-      if (l.toItemId === deviceId && l.toPortKind === kind && l.toPortIndex === index) {
-        if (!matchSide) return true;
-        const toSide = l.toSide || 'female';
-        return toSide === side;
-      }
-      return false;
-    });
-  };
-
-  const getOtherSide = (link: RackLink, deviceId: string) => {
-    if (link.fromItemId === deviceId) {
-      return { itemId: link.toItemId, kind: link.toPortKind, index: link.toPortIndex, side: link.toSide };
-    }
-    return { itemId: link.fromItemId, kind: link.fromPortKind, index: link.fromPortIndex, side: link.fromSide };
-  };
-
-  const getDeviceLabel = (device: RackItem | null) => {
-    if (!device) return '';
-    const hasHost =
-      device.type === 'switch' || device.type === 'router' || device.type === 'firewall' || device.type === 'server';
-    if (hasHost) {
-      return device.hostName?.trim() || t({ it: 'Senza hostname', en: 'No hostname' });
-    }
-    return device.name;
-  };
-
-  const getRackName = (rackId: string) => racks.find((r) => r.id === rackId)?.name || '';
-
-  const rackName = item ? getRackName(item.rackId) : '';
-
-  const getDefaultPortName = (device: RackItem | null, kind: RackPortKind, index: number) => {
-    if (!device) return `${index}`;
-    if (device.type === 'switch') {
-      return kind === 'ethernet' ? `GE${index}` : `SFP${index}`;
-    }
-    return kind === 'ethernet' ? `ETH${index}` : `FIB${index}`;
-  };
-
-  const getPortDisplayName = (device: RackItem | null, kind: RackPortKind, index: number) => {
-    if (!device) return `${index}`;
-    const names = kind === 'ethernet' ? device.ethPortNames : device.fiberPortNames;
-    const custom = names?.[index - 1];
-    if (custom && custom.trim()) return custom.trim();
-    return getDefaultPortName(device, kind, index);
-  };
-
-  const getPortNote = (device: RackItem | null, kind: RackPortKind, index: number) => {
-    if (!device) return '';
-    const notes = kind === 'ethernet' ? device.ethPortNotes : device.fiberPortNotes;
-    const note = notes?.[index - 1];
-    return note ? note.trim() : '';
-  };
-
-  const getGroupForType = (type?: RackItemType) => {
-    if (type === 'server') return 'server';
-    if (type === 'switch' || type === 'router' || type === 'firewall') return 'switch';
-    if (type === 'patchpanel' || type === 'optical_drawer') return 'patch';
-    return 'other';
-  };
-
-  const orientPath = (parts: PathPart[]) => {
-    if (parts.length < 2) return parts;
-    const available: Record<'server' | 'switch' | 'patch' | 'other', boolean> = {
-      server: parts.some((p) => getGroupForType(p.deviceType) === 'server'),
-      switch: parts.some((p) => getGroupForType(p.deviceType) === 'switch'),
-      patch: parts.some((p) => getGroupForType(p.deviceType) === 'patch'),
-      other: true
-    };
-    const pickGroup = (order: Array<'server' | 'switch' | 'patch' | 'other'>, fallback: 'server' | 'switch' | 'patch' | 'other') =>
-      order.find((g) => available[g]) || fallback;
-    const endGroup = pickGroup(['server', 'switch', 'patch', 'other'], 'other');
-    const edgeGroup = pickGroup(['switch', 'patch', 'server', 'other'], endGroup);
-    const middleGroup = pickGroup(['patch', 'switch', 'server', 'other'], endGroup);
-    const length = parts.length;
-    const expectedGroupFor = (pos: number) => {
-      if (length === 2 && pos === 1) return edgeGroup;
-      const dist = Math.min(pos, length - 1 - pos);
-      if (dist === 0) return endGroup;
-      if (dist === 1) return edgeGroup;
-      return middleGroup;
-    };
-    const score = (list: { deviceType?: RackItemType }[]) =>
-      list.reduce((acc, part, idx) => acc + (getGroupForType(part.deviceType) === expectedGroupFor(idx) ? 1 : 0), 0);
-    const forwardScore = score(parts);
-    const reversed = [...parts].reverse();
-    const reverseScore = score(reversed);
-    if (reverseScore > forwardScore) return reversed;
-    if (reverseScore < forwardScore) return parts;
-    const priority: Record<string, number> = { server: 3, switch: 2, patch: 1, other: 0 };
-    const forwardStart = getGroupForType(parts[0].deviceType);
-    const reverseStart = getGroupForType(reversed[0].deviceType);
-    if (priority[reverseStart] > priority[forwardStart]) return reversed;
-    return parts;
-  };
-
-  const activeRackLinks = useMemo(() => {
+const activeRackLinks = useMemo(() => {
     if (!rackLinks.length) return [];
     const byId = new Map(rackItems.map((device) => [device.id, device]));
     const cleaned: RackLink[] = [];
@@ -310,6 +205,113 @@ const RackPortsModal = ({
     return deduped;
   }, [rackItems, rackLinks]);
 
+
+  const getLinkForPort = useCallback((deviceId: string, kind: RackPortKind, index: number, side?: PortSide) => {
+    const device = rackItems.find((d) => d.id === deviceId);
+    const dual = isDualSide(device || null);
+    const matchSide = dual && side;
+    return activeRackLinks.find((l) => {
+      if (l.fromItemId === deviceId && l.fromPortKind === kind && l.fromPortIndex === index) {
+        if (!matchSide) return true;
+        const fromSide = l.fromSide || 'female';
+        return fromSide === side;
+      }
+      if (l.toItemId === deviceId && l.toPortKind === kind && l.toPortIndex === index) {
+        if (!matchSide) return true;
+        const toSide = l.toSide || 'female';
+        return toSide === side;
+      }
+      return false;
+    });
+  }, [activeRackLinks, rackItems]);
+
+  const getOtherSide = (link: RackLink, deviceId: string) => {
+    if (link.fromItemId === deviceId) {
+      return { itemId: link.toItemId, kind: link.toPortKind, index: link.toPortIndex, side: link.toSide };
+    }
+    return { itemId: link.fromItemId, kind: link.fromPortKind, index: link.fromPortIndex, side: link.fromSide };
+  };
+
+  const getDeviceLabel = useCallback((device: RackItem | null) => {
+    if (!device) return '';
+    const hasHost =
+      device.type === 'switch' || device.type === 'router' || device.type === 'firewall' || device.type === 'server';
+    if (hasHost) {
+      return device.hostName?.trim() || t({ it: 'Senza hostname', en: 'No hostname' });
+    }
+    return device.name;
+  }, [t]);
+
+  const getRackName = useCallback((rackId: string) => racks.find((r) => r.id === rackId)?.name || '', [racks]);
+
+  const rackName = item ? getRackName(item.rackId) : '';
+
+  const getDefaultPortName = (device: RackItem | null, kind: RackPortKind, index: number) => {
+    if (!device) return `${index}`;
+    if (device.type === 'switch') {
+      return kind === 'ethernet' ? `GE${index}` : `SFP${index}`;
+    }
+    return kind === 'ethernet' ? `ETH${index}` : `FIB${index}`;
+  };
+
+  const getPortDisplayName = useCallback((device: RackItem | null, kind: RackPortKind, index: number) => {
+    if (!device) return `${index}`;
+    const names = kind === 'ethernet' ? device.ethPortNames : device.fiberPortNames;
+    const custom = names?.[index - 1];
+    if (custom && custom.trim()) return custom.trim();
+    return getDefaultPortName(device, kind, index);
+  }, []);
+
+  const getPortNote = (device: RackItem | null, kind: RackPortKind, index: number) => {
+    if (!device) return '';
+    const notes = kind === 'ethernet' ? device.ethPortNotes : device.fiberPortNotes;
+    const note = notes?.[index - 1];
+    return note ? note.trim() : '';
+  };
+
+  const getGroupForType = (type?: RackItemType) => {
+    if (type === 'server') return 'server';
+    if (type === 'switch' || type === 'router' || type === 'firewall') return 'switch';
+    if (type === 'patchpanel' || type === 'optical_drawer') return 'patch';
+    return 'other';
+  };
+
+  const orientPath = useCallback((parts: PathPart[]) => {
+    if (parts.length < 2) return parts;
+    const available: Record<'server' | 'switch' | 'patch' | 'other', boolean> = {
+      server: parts.some((p) => getGroupForType(p.deviceType) === 'server'),
+      switch: parts.some((p) => getGroupForType(p.deviceType) === 'switch'),
+      patch: parts.some((p) => getGroupForType(p.deviceType) === 'patch'),
+      other: true
+    };
+    const pickGroup = (order: Array<'server' | 'switch' | 'patch' | 'other'>, fallback: 'server' | 'switch' | 'patch' | 'other') =>
+      order.find((g) => available[g]) || fallback;
+    const endGroup = pickGroup(['server', 'switch', 'patch', 'other'], 'other');
+    const edgeGroup = pickGroup(['switch', 'patch', 'server', 'other'], endGroup);
+    const middleGroup = pickGroup(['patch', 'switch', 'server', 'other'], endGroup);
+    const length = parts.length;
+    const expectedGroupFor = (pos: number) => {
+      if (length === 2 && pos === 1) return edgeGroup;
+      const dist = Math.min(pos, length - 1 - pos);
+      if (dist === 0) return endGroup;
+      if (dist === 1) return edgeGroup;
+      return middleGroup;
+    };
+    const score = (list: { deviceType?: RackItemType }[]) =>
+      list.reduce((acc, part, idx) => acc + (getGroupForType(part.deviceType) === expectedGroupFor(idx) ? 1 : 0), 0);
+    const forwardScore = score(parts);
+    const reversed = [...parts].reverse();
+    const reverseScore = score(reversed);
+    if (reverseScore > forwardScore) return reversed;
+    if (reverseScore < forwardScore) return parts;
+    const priority: Record<string, number> = { server: 3, switch: 2, patch: 1, other: 0 };
+    const forwardStart = getGroupForType(parts[0].deviceType);
+    const reverseStart = getGroupForType(reversed[0].deviceType);
+    if (priority[reverseStart] > priority[forwardStart]) return reversed;
+    return parts;
+  }, []);
+
+
   const getPortKey = (deviceId: string, kind: RackPortKind, index: number, side?: PortSide) => {
     const device = rackItems.find((d) => d.id === deviceId) || null;
     const normalizedSide = isDualSide(device) ? side || 'female' : '';
@@ -325,14 +327,14 @@ const RackPortsModal = ({
     });
   };
 
-  const getPortLabel = (deviceId: string, kind: RackPortKind, index: number, side?: PortSide) => {
+  const getPortLabel = useCallback((deviceId: string, kind: RackPortKind, index: number, side?: PortSide) => {
     const device = rackItems.find((d) => d.id === deviceId);
     const rack = device ? getRackName(device.rackId) : '';
     const portLabel = getPortDisplayName(device || null, kind, index);
     const deviceLabel = getDeviceLabel(device || null);
     const sideLabel = side ? ` · ${side === 'female' ? 'Femmina' : 'Cablaggio'}` : '';
     return `${rack ? `${rack} / ` : ''}${deviceLabel} · ${portLabel}${sideLabel}`;
-  };
+  }, [getDeviceLabel, getPortDisplayName, getRackName, rackItems]);
 
   const getConnectionTitle = (link: RackLink | null, deviceId: string) => {
     if (!link) return '';
@@ -357,12 +359,12 @@ const RackPortsModal = ({
     return ports;
   };
 
-  const getAllPorts = (deviceId: string, kind: RackPortKind) => {
+  const getAllPorts = useCallback((deviceId: string, kind: RackPortKind) => {
     const device = rackItems.find((d) => d.id === deviceId);
     const count = getPortCount(device || null, kind);
     if (!count) return [];
     return Array.from({ length: count }, (_, idx) => idx + 1);
-  };
+  }, [rackItems]);
 
   const linkableItems = useMemo(() => {
     return rackItems.filter((device) => device.id !== itemId);
@@ -381,14 +383,14 @@ const RackPortsModal = ({
   const targetPortLink = useMemo(() => {
     if (!linkPrompt || !targetItemId || !targetPortIndex) return null;
     return getLinkForPort(targetItemId, linkPrompt.kind, targetPortIndex, targetSide);
-  }, [linkPrompt, targetItemId, targetPortIndex, targetSide]);
+  }, [getLinkForPort, linkPrompt, targetItemId, targetPortIndex, targetSide]);
 
   const canSaveLink = !!targetItemId && !!targetPortIndex;
 
   const portPickerPorts = useMemo(() => {
     if (!linkPrompt || !targetItemId) return [];
     return getAllPorts(targetItemId, linkPrompt.kind);
-  }, [linkPrompt, targetItemId]);
+  }, [getAllPorts, linkPrompt, targetItemId]);
 
   const openLinkPrompt = (kind: RackPortKind, index: number, side?: PortSide) => {
     if (readOnly) return;
@@ -525,7 +527,7 @@ const RackPortsModal = ({
     onClose();
   };
 
-  const buildPathParts = (kind: RackPortKind, index: number, side?: PortSide): PathPart[] => {
+  const buildPathParts = useCallback((kind: RackPortKind, index: number, side?: PortSide): PathPart[] => {
     if (!item) return [];
     const visited = new Set<string>();
     const parts: PathPart[] = [];
@@ -548,7 +550,7 @@ const RackPortsModal = ({
       current = getOtherSide(link, current.itemId);
     }
     return orientPath(parts);
-  };
+  }, [getLinkForPort, getPortLabel, getRackName, item, orientPath, rackItems]);
 
   const connections = useMemo(() => {
     if (!item) return [];
@@ -601,7 +603,7 @@ const RackPortsModal = ({
       }
     });
     return items;
-  }, [item, rackItems, activeRackLinks, t]);
+  }, [item, getPortDisplayName, getLinkForPort, t, buildPathParts]);
 
   const connectionCollator = useMemo(() => new Intl.Collator('it', { sensitivity: 'base' }), []);
 

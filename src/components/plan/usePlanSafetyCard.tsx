@@ -71,7 +71,7 @@ export function usePlanSafetyCard(deps: UsePlanSafetyCardDeps) {
         normalized.textBgIndex !== baseLayout.textBgIndex;
       if (hasDiff) updateFloorPlan((planRef.current as any).id, { safetyCardLayout: normalized } as any);
     },
-    [normalizeSafetyCardLayout, updateFloorPlan]
+    [isReadOnlyRef, normalizeSafetyCardLayout, planRef, updateFloorPlan]
   );
 
   useEffect(() => {

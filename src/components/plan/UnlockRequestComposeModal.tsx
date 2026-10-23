@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+import { Fragment, useMemo } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { MessageSquare, Send, Unlock, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -32,16 +33,10 @@ const formatLockLabel = (l: UnlockRequestLock) => {
 
 const UnlockRequestComposeModal = ({ open, target, locks, onClose, onSend }: Props) => {
   const t = useT();
-  const [planId, setPlanId] = useState('');
-  const [message, setMessage] = useState('');
-  const [grantMinutes, setGrantMinutes] = useState(10);
+  const [planId, setPlanId] = useModalState(open, () => (String(locks?.[0]?.planId || '')), [locks]);
+  const [message, setMessage] = useModalState(open, () => (''), [locks]);
+  const [grantMinutes, setGrantMinutes] = useModalState(open, () => (10), [locks]);
 
-  useEffect(() => {
-    if (!open) return;
-    setMessage('');
-    setPlanId(String(locks?.[0]?.planId || ''));
-    setGrantMinutes(10);
-  }, [open, locks]);
 
   const options = useMemo(
     () =>

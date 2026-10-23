@@ -89,6 +89,10 @@ Plixmap is a web app to plan offices and infrastructure on floor plans using a f
 ### Meeting room kiosk mode
 ![Meeting room kiosk mode](docs/screenshots/meeting-room-kiosk-showcase.png)
 
+### Workspace overview + Internal Chat Service
+![Workspace overview + Internal Chat Service](docs/screenshots/workspace-overview.png)
+### Escape route PDF preview
+![Escape route PDF preview](docs/screenshots/escape-route-pdf-preview.png)
 ### Rack editor
 ![Rack editor](docs/screenshots/rack-editor.png)
 

@@ -1,3 +1,4 @@
+import { useModalState } from '../ui/useModalState';
 import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { KeyRound, Shield, X } from 'lucide-react';
@@ -17,26 +18,17 @@ export default function MfaModal({
   onChanged: () => void;
 }) {
   const t = useT();
-  const [password, setPassword] = useState('');
-  const [otp, setOtp] = useState('');
+  const [password, setPassword] = useModalState(open, () => (''), []);
+  const [otp, setOtp] = useModalState(open, () => (''), []);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useModalState<string | null>(open, () => (null), []);
 
-  const [setupSecret, setSetupSecret] = useState<string | null>(null);
-  const [setupUrl, setSetupUrl] = useState<string | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [setupSecret, setSetupSecret] = useModalState<string | null>(open, () => (null), []);
+  const [setupUrl, setSetupUrl] = useModalState<string | null>(open, () => (null), []);
+  const [qrDataUrl, setQrDataUrl] = useModalState<string | null>(open, () => (null), []);
 
   const otpRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    setPassword('');
-    setOtp('');
-    setError(null);
-    setSetupSecret(null);
-    setSetupUrl(null);
-    setQrDataUrl(null);
-  }, [open]);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +43,7 @@ export default function MfaModal({
     return () => {
       cancelled = true;
     };
-  }, [setupUrl]);
+  }, [setQrDataUrl, setupUrl]);
 
   const canSubmit = useMemo(() => {
     if (enabled) return !!password.trim() && !!otp.trim();

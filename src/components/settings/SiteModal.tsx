@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef } from 'react';
+import { useModalState } from '../ui/useModalState';
 import { Dialog, Transition } from '@headlessui/react';
 import { MapPinned, X } from 'lucide-react';
 import { useT } from '../../i18n/useT';
@@ -44,68 +45,43 @@ const parseCoords = (value: string): { lat: number; lng: number } | null => {
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 type DayKey = (typeof DAY_KEYS)[number];
 
+const scheduleDraft = (schedule: Site['siteSchedule']) => ({
+  weekly: Object.fromEntries(DAY_KEYS.map((key) => {
+    const row = schedule?.weekly?.[key];
+    return [key, {
+      closed: !!row?.closed,
+      open: String(row?.open || '09:00'),
+      close: String(row?.close || (key === 'sat' || key === 'sun' ? '13:00' : '18:00'))
+    }];
+  })) as Record<DayKey, { closed: boolean; open: string; close: string }>,
+  holidaysText: (schedule?.holidays || [])
+    .map((holiday) => `${holiday.date || ''}${holiday.label ? `|${holiday.label}` : ''}`)
+    .filter(Boolean)
+    .join('\n')
+});
+
 const SiteModal = ({ open, initialName = '', initialCoords = '', initialSupportContacts, initialSiteSchedule, title, onClose, onSubmit }: Props) => {
   const t = useT();
-  const [name, setName] = useState(initialName);
-  const [coords, setCoords] = useState(initialCoords);
-  const [cleaningEmail, setCleaningEmail] = useState('');
-  const [cleaningPhone, setCleaningPhone] = useState('');
-  const [itEmail, setItEmail] = useState('');
-  const [itPhone, setItPhone] = useState('');
-  const [coffeeEmail, setCoffeeEmail] = useState('');
-  const [coffeePhone, setCoffeePhone] = useState('');
-  const [weeklyHours, setWeeklyHours] = useState<Record<DayKey, { closed: boolean; open: string; close: string }>>({
-    mon: { closed: false, open: '09:00', close: '18:00' },
-    tue: { closed: false, open: '09:00', close: '18:00' },
-    wed: { closed: false, open: '09:00', close: '18:00' },
-    thu: { closed: false, open: '09:00', close: '18:00' },
-    fri: { closed: false, open: '09:00', close: '18:00' },
-    sat: { closed: true, open: '09:00', close: '13:00' },
-    sun: { closed: true, open: '09:00', close: '13:00' }
-  });
-  const [holidaysText, setHolidaysText] = useState('');
+  const initialSchedule = useMemo(() => scheduleDraft(initialSiteSchedule), [initialSiteSchedule]);
+  const resetInputs = [initialCoords, initialName, initialSupportContacts, initialSiteSchedule];
+  const [name, setName] = useModalState(open, initialName, resetInputs);
+  const [coords, setCoords] = useModalState(open, initialCoords, resetInputs);
+  const [cleaningEmail, setCleaningEmail] = useModalState(open, String(initialSupportContacts?.cleaning?.email || ''), resetInputs);
+  const [cleaningPhone, setCleaningPhone] = useModalState(open, String(initialSupportContacts?.cleaning?.phone || ''), resetInputs);
+  const [itEmail, setItEmail] = useModalState(open, String(initialSupportContacts?.it?.email || ''), resetInputs);
+  const [itPhone, setItPhone] = useModalState(open, String(initialSupportContacts?.it?.phone || ''), resetInputs);
+  const [coffeeEmail, setCoffeeEmail] = useModalState(open, String(initialSupportContacts?.coffee?.email || ''), resetInputs);
+  const [coffeePhone, setCoffeePhone] = useModalState(open, String(initialSupportContacts?.coffee?.phone || ''), resetInputs);
+  const [weeklyHours, setWeeklyHours] = useModalState(open, initialSchedule.weekly, resetInputs);
+  const [holidaysText, setHolidaysText] = useModalState(open, initialSchedule.holidaysText, resetInputs);
   const initialScheduleComparableRef = useRef('');
   const nameRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setName(initialName);
-    setCoords(initialCoords);
-    setCleaningEmail(String(initialSupportContacts?.cleaning?.email || ''));
-    setCleaningPhone(String(initialSupportContacts?.cleaning?.phone || ''));
-    setItEmail(String(initialSupportContacts?.it?.email || ''));
-    setItPhone(String(initialSupportContacts?.it?.phone || ''));
-    setCoffeeEmail(String(initialSupportContacts?.coffee?.email || ''));
-    setCoffeePhone(String(initialSupportContacts?.coffee?.phone || ''));
-    const nextWeekly = { ...weeklyHours };
-    for (const key of DAY_KEYS) {
-      const row = (initialSiteSchedule?.weekly as any)?.[key];
-      nextWeekly[key] = {
-        closed: !!row?.closed,
-        open: String(row?.open || nextWeekly[key].open || ''),
-        close: String(row?.close || nextWeekly[key].close || '')
-      };
-    }
-    setWeeklyHours(nextWeekly);
-    setHolidaysText(
-      Array.isArray(initialSiteSchedule?.holidays)
-        ? initialSiteSchedule!.holidays!
-            .map((h) => `${String(h.date || '')}${h?.label ? `|${String(h.label)}` : ''}`)
-            .filter(Boolean)
-            .join('\n')
-        : ''
-    );
-    initialScheduleComparableRef.current = JSON.stringify({
-      weekly: nextWeekly,
-      holidaysText: Array.isArray(initialSiteSchedule?.holidays)
-        ? initialSiteSchedule!.holidays!
-            .map((h) => `${String(h.date || '')}${h?.label ? `|${String(h.label)}` : ''}`)
-            .filter(Boolean)
-            .join('\n')
-        : ''
-    });
+    initialScheduleComparableRef.current = JSON.stringify(initialSchedule);
     window.setTimeout(() => nameRef.current?.focus(), 0);
-  }, [initialCoords, initialName, initialSupportContacts, initialSiteSchedule, open]);
+  }, [initialSchedule, initialCoords, initialName, initialSupportContacts, open]);
 
   const canSubmit = useMemo(() => !!name.trim(), [name]);
   const parsed = useMemo(() => parseCoords(coords), [coords]);

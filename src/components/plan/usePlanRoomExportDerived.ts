@@ -8,7 +8,7 @@ import { computeRoomLayoutExportRows } from './planViewExportData';
 export const usePlanRoomExportDerived = (deps: any) => {
   const {
     computePolygonArea, computePolylineLength, formatCornerLabel, formatNumber, lang, metersPerPixel,
-    renderPlan, renderPlanRoomById, roomMeasuresModal, getRoomPolygon, allClients, roomLayoutExportModal
+    renderPlan, renderPlanRoomById, roomMeasuresModal, allClients, roomLayoutExportModal
   } = deps;
 
   const roomMeasuresData = useMemo(() => {
@@ -23,18 +23,7 @@ export const usePlanRoomExportDerived = (deps: any) => {
       renderPlanRoomById,
       roomMeasuresModal
     });
-  }, [
-    computePolygonArea,
-    computePolylineLength,
-    formatCornerLabel,
-    formatNumber,
-    getRoomPolygon,
-    lang,
-    metersPerPixel,
-    renderPlan,
-    renderPlanRoomById,
-    roomMeasuresModal
-  ]);
+  }, [computePolygonArea, computePolylineLength, formatCornerLabel, formatNumber, lang, metersPerPixel, renderPlan, renderPlanRoomById, roomMeasuresModal]);
 
   const roomLayoutExportRows = useMemo(
     () => computeRoomLayoutExportRows({ allClients, roomLayoutExportModal }),

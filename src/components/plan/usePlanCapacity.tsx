@@ -122,7 +122,7 @@ export function usePlanCapacity(deps: UsePlanCapacityDeps) {
       });
       return true;
     },
-    [notifyNonPeopleRoomBlocked, plan, roomStatsById, rooms, t]
+    [getRoomIdAt, notifyNonPeopleRoomBlocked, plan, roomStatsById, rooms, t]
   );
 
   return {

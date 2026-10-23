@@ -48,6 +48,15 @@ import ConfirmDialog from '../ui/ConfirmDialog';
 
 import { DoorRegistrySortKey, DoorRegistryRow, computeDoorMapPreviewData, OBJECT_TYPE_ICON_OPTIONS, buildDoorRegistryRowsRaw, buildDoorRowsCsv, sortWifiModels, computeObjectTypePaletteDefs, computeWifiModelLists, computeWallDefLists, filterSortDoorRegistryRows } from './ObjectTypesPanel.helpers';
 import { RequestsModal, CustomTypeModal, DoorMapPreviewModal, WifiModelModal, DoorHistoryModal, PendingRequestsPromptModal } from './ObjectTypesPanelModals';
+const makeFieldId = () => {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+    return `field_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  };
+
+const toDraftFields = (fields?: CustomFieldDraft[]) =>
+    (fields || []).map((f) => ({ id: makeFieldId(), label: f.label, valueType: f.valueType }));
+
+
 const ObjectTypesPanel = ({ client }: { client?: Client }) => {
   const t = useT();
   const lang = useLang();
@@ -373,7 +382,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
     setLastAddedFieldId(null);
   }, [lastAddedFieldId]);
 
-  const saveEnabled = async (next: string[]) => {
+  const saveEnabled = useCallback(async (next: string[]) => {
     try {
       await updateMyProfile({ paletteFavorites: next });
       useAuthStore.setState((s) =>
@@ -384,7 +393,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
       push(t({ it: 'Salvataggio non riuscito', en: 'Save failed' }), 'danger');
       return false;
     }
-  };
+  }, [push, t]);
 
   const addType = async (typeId: string) => {
     const next = [...enabled, typeId];
@@ -568,13 +577,7 @@ const ObjectTypesPanel = ({ client }: { client?: Client }) => {
 
   const hasTypeId = (id: string) => objectTypes.some((t) => t.id === id);
 
-  const makeFieldId = () => {
-    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-    return `field_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  };
 
-  const toDraftFields = (fields?: CustomFieldDraft[]) =>
-    (fields || []).map((f) => ({ id: makeFieldId(), label: f.label, valueType: f.valueType }));
 
   const serializeDraftFields = (fields: Array<CustomFieldDraft & { id: string }>) =>
     fields.map(({ label, valueType }) => ({ label, valueType }));

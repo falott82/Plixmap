@@ -435,7 +435,7 @@ const CanvasStageImpl = (
     presentationMode, plan, autoFit, bgImage, focusTarget, panToolActive, pendingType, roomDrawMode,
     readOnly, corridorDrawMode, printAreaMode, toolMode, perfEnabled
   });
-  const objects = plan.objects || [];
+  const objects = useMemo(() => plan.objects || [], [plan.objects]);
   const lastContextMenuAtRef = useRef(0);
   const lastBoxSelectAtRef = useRef(0);
   const [roomHighlightNow, setRoomHighlightNow] = useState(Date.now());
@@ -799,10 +799,11 @@ const CanvasStageImpl = (
   }, [objectById, readOnly, selectedId, selectedIds]);
 
   useEffect(() => {
+    const frames = { pan: panRaf, hover: hoverRaf };
     return () => {
       if (wheelCommitTimer.current) window.clearTimeout(wheelCommitTimer.current);
-      if (panRaf.current) cancelAnimationFrame(panRaf.current);
-      if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
+      if (frames.pan.current) cancelAnimationFrame(frames.pan.current);
+      if (frames.hover.current) cancelAnimationFrame(frames.hover.current);
     };
   }, [panRaf, wheelCommitTimer]);
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffectEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { currentLocalIsoDay } from '../../utils/localDate';
 import {
@@ -181,10 +181,13 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
     [roomMeetingEditExternalCandidates, siteMeetingParticipantCandidates]
   );
 
+  // Result-cache writes must not restart the availability request.
+  const readRoomAvailabilityCache = useEffectEvent(() => roomMeetingDuplicateModal?.availabilityByDay);
+
   useEffect(() => {
     let cancelled = false;
     const cid = String(client?.id || '').trim();
-    if (!cid || !roomMeetingsTimelineBookingDetail || roomMeetingsTimelineBookingDetail.mode !== 'edit') return;
+    if (!cid || roomMeetingsTimelineBookingDetail?.mode !== 'edit') return;
     listExternalUsers({ clientId: cid, includeHidden: false, includeMissing: true, limit: 5000 })
       .then((resp) => {
         if (cancelled) return;
@@ -319,23 +322,24 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
   }, [roomMeetingDuplicateRoomPickerOpen]);
 
   useEffect(() => {
-    if (!roomMeetingDuplicateModal || roomMeetingDuplicateModal.step !== 'setup') {
+    if (roomMeetingDuplicateModal?.step !== 'setup') {
       setRoomMeetingDuplicateRoomPickerOpen(false);
     }
   }, [roomMeetingDuplicateModal?.step, roomMeetingDuplicateModal?.booking?.id]);
 
   useEffect(() => {
-    const modal = roomMeetingsTimelineModal;
-    if (!modal?.roomId) return;
+    const roomId = roomMeetingsTimelineModal?.roomId;
+    const day = roomMeetingsTimelineModal?.day;
+    if (!roomId || !day) return;
     const timer = window.setInterval(() => {
-      void reloadRoomMeetingsTimeline(modal.roomId, modal.day);
+      void reloadRoomMeetingsTimeline(roomId, day);
     }, 4000);
     return () => window.clearInterval(timer);
   }, [reloadRoomMeetingsTimeline, roomMeetingsTimelineModal?.day, roomMeetingsTimelineModal?.roomId]);
 
 
   useEffect(() => {
-    const modal = roomMeetingsTimelineModal;
+    const roomId = roomMeetingsTimelineModal?.roomId;
     const resetSearchStateIfNeeded = () => {
       if (
         !roomMeetingsTimelineSearchLoading &&
@@ -350,7 +354,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
       if (roomMeetingsTimelineSearchActiveIndex !== -1) setRoomMeetingsTimelineSearchActiveIndex(-1);
       if (roomMeetingsTimelineSearchError !== null) setRoomMeetingsTimelineSearchError(null);
     };
-    if (!modal?.roomId) {
+    if (!roomId) {
       resetSearchStateIfNeeded();
       return;
     }
@@ -366,7 +370,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
       try {
         const now = Date.now();
         const response = await fetchMeetings({
-          roomId: modal.roomId,
+          roomId,
           fromAt: now - 365 * 24 * 60 * 60 * 1000,
           toAt: now + 365 * 24 * 60 * 60 * 1000
         });
@@ -393,16 +397,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [
-    meetingIsoDayFromTs,
-    roomMeetingsTimelineModal?.roomId,
-    roomMeetingsTimelineSearchTerm,
-    roomMeetingsTimelineSearchLoading,
-    roomMeetingsTimelineSearchResults.length,
-    roomMeetingsTimelineSearchActiveIndex,
-    roomMeetingsTimelineSearchError,
-    t
-  ]);
+  }, [roomMeetingsTimelineModal?.roomId, roomMeetingsTimelineSearchTerm, roomMeetingsTimelineSearchLoading, roomMeetingsTimelineSearchResults.length, roomMeetingsTimelineSearchActiveIndex, roomMeetingsTimelineSearchError, t]);
 
   const jumpToTimelineMeetingFromSearch = useCallback(
     (result: { booking: MeetingBooking; dayIso: string }) => {
@@ -417,7 +412,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
       setRoomMeetingsTimelineModal((prev) => (prev ? { ...prev, day: targetDay } : prev));
       void reloadRoomMeetingsTimeline(roomId, targetDay);
     },
-    [meetingIsoDayFromTs, reloadRoomMeetingsTimeline, roomMeetingsTimelineModal?.roomId]
+    [reloadRoomMeetingsTimeline, roomMeetingsTimelineModal?.roomId]
   );
 
 
@@ -446,7 +441,8 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
     roomMeetingsTimelineHighlightBookingId,
     roomMeetingsTimelineModal?.day,
     roomMeetingsTimelineModal?.loading,
-    roomMeetingsTimelineModal?.bookings
+    roomMeetingsTimelineModal?.bookings,
+    roomMeetingsTimelineModal
   ]);
 
   useEffect(() => {
@@ -469,7 +465,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
     if (!restoreSnapshot) {
       void reloadMyMeetingsRef.current?.();
     }
-  }, []);
+  }, [myMeetingsRestoreRef, reloadMyMeetingsRef, setMyMeetingsModal]);
 
   const openRoomMeetingBookingDetail = useCallback(
     (
@@ -521,7 +517,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
       setRoomMeetingEditManualCompanyIsOther(false);
       setRoomMeetingEditBusinessPartnersModalOpen(false);
     },
-    [meetingClockFromTs, meetingIsoDayFromTs, myMeetingsModal, t]
+    [myMeetingsModal, myMeetingsRestoreRef, setMyMeetingsModal, t]
   );
 
   const closeRoomMeetingBookingDetail = useCallback((options?: { bookingOverride?: MeetingBooking | null }) => {
@@ -744,19 +740,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
         setRoomMeetingExtendBusyId(null);
       }
     },
-    [
-      client?.id,
-      getRoomMeetingExtendMaxEndTs,
-      meetingIsoDayFromTs,
-      planId,
-      push,
-      reloadRoomMeetingsTimeline,
-      roomMeetingsTimelineBookingDetail,
-      roomMeetingsTimelineModal,
-      site?.id,
-      t,
-      toLocalHmFromTs
-    ]
+    [client?.id, planId, push, reloadRoomMeetingsTimeline, roomMeetingsTimelineBookingDetail, roomMeetingsTimelineModal, site?.id, t]
   );
 
   const adjustRoomMeetingEditEndTime = useCallback(
@@ -803,7 +787,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
         return { ...prev, endTime: toLocalHmFromTs(targetEndTs) };
       });
     },
-    [roomMeetingsTimelineModal?.bookings, toLocalHmFromTs]
+    [roomMeetingsTimelineModal?.bookings]
   );
 
   const openRoomMeetingDuplicateModal = useCallback(
@@ -864,12 +848,26 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
       });
       setRoomMeetingTimelineContextMenu(null);
     },
-    [meetingIsoDayFromTs, monthAnchorFromIso, site?.floorPlans]
+    [site?.floorPlans]
   );
 
   useEffect(() => {
     let cancelled = false;
-    const modal = roomMeetingDuplicateModal;
+    const requestBooking = roomMeetingDuplicateModal?.booking;
+    if (!requestBooking) return;
+    const modal = {
+      booking: requestBooking,
+      step: roomMeetingDuplicateModal?.step,
+      baseDay: roomMeetingDuplicateModal?.baseDay,
+      monthAnchor: roomMeetingDuplicateModal?.monthAnchor,
+      availabilityByDay: readRoomAvailabilityCache(),
+      roomMode: roomMeetingDuplicateModal?.roomMode,
+      roomOptions: roomMeetingDuplicateModal?.roomOptions || [],
+      selectedRoomId: roomMeetingDuplicateModal?.selectedRoomId,
+      timeMode: roomMeetingDuplicateModal?.timeMode,
+      customFromHm: roomMeetingDuplicateModal?.customFromHm,
+      customToHm: roomMeetingDuplicateModal?.customToHm
+    };
     const cid = String(client?.id || '').trim();
     const sid = String(site?.id || '').trim();
     const activeBookingId = String(modal?.booking?.id || '').trim();
@@ -1106,23 +1104,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
     return () => {
       cancelled = true;
     };
-  }, [
-    client?.id,
-    site?.id,
-    planId,
-    roomMeetingDuplicateModal?.step,
-    roomMeetingDuplicateModal?.booking?.id,
-    roomMeetingDuplicateModal?.baseDay,
-    roomMeetingDuplicateModal?.preferredDay,
-    roomMeetingDuplicateModal?.monthAnchor,
-    roomMeetingDuplicateModal?.roomMode,
-    roomMeetingDuplicateModal?.selectedRoomId,
-    roomMeetingDuplicateModal?.timeMode,
-    roomMeetingDuplicateModal?.customFromHm,
-    roomMeetingDuplicateModal?.customToHm,
-    hmToMinutes,
-    resolveRoomDuplicateSlot
-  ]);
+  }, [client?.id, site?.id, planId, roomMeetingDuplicateModal?.step, roomMeetingDuplicateModal?.booking?.id, roomMeetingDuplicateModal?.baseDay, roomMeetingDuplicateModal?.preferredDay, roomMeetingDuplicateModal?.monthAnchor, roomMeetingDuplicateModal?.roomMode, roomMeetingDuplicateModal?.selectedRoomId, roomMeetingDuplicateModal?.timeMode, roomMeetingDuplicateModal?.customFromHm, roomMeetingDuplicateModal?.customToHm, roomMeetingDuplicateModal?.booking, roomMeetingDuplicateModal?.roomOptions, t]);
 
   const saveRoomMeetingDuplicates = useCallback(async () => {
     const dup = roomMeetingDuplicateModal;
@@ -1220,16 +1202,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
     if (roomMeetingsTimelineModal?.roomId) {
       void reloadRoomMeetingsTimeline(roomMeetingsTimelineModal.roomId, roomMeetingsTimelineModal.day);
     }
-  }, [
-    planId,
-    push,
-    reloadRoomMeetingsTimeline,
-    resolveRoomDuplicateSlot,
-    roomMeetingDuplicateModal,
-    roomMeetingNotesModalBooking,
-    roomMeetingsTimelineModal,
-    t
-  ]);
+  }, [planId, push, reloadRoomMeetingsTimeline, roomMeetingDuplicateModal, roomMeetingNotesModalBooking, roomMeetingsTimelineModal, t]);
 
   const saveRoomMeetingBookingEdit = useCallback(async () => {
     const detail = roomMeetingsTimelineBookingDetail;
@@ -1345,7 +1318,7 @@ export function useRoomMeetingsTimeline(deps: UseRoomMeetingsTimelineDeps) {
     } catch (err: any) {
       setRoomMeetingsTimelineBookingDetail((prev) => (prev ? { ...prev, saving: false, error: err?.message || 'Update failed' } : prev));
     }
-  }, [client?.id, closeRoomMeetingBookingDetail, meetingClockFromTs, push, reloadRoomMeetingsTimeline, roomMeetingsTimelineBookingDetail, roomMeetingsTimelineModal, site?.id, t]);
+  }, [client?.id, closeRoomMeetingBookingDetail, push, reloadRoomMeetingsTimeline, roomMeetingsTimelineBookingDetail, roomMeetingsTimelineModal, site?.id, t]);
 
   const deleteRoomMeetingBookingDirect = useCallback(
     async (booking: MeetingBooking) => {

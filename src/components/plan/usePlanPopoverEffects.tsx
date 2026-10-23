@@ -60,12 +60,12 @@ export function usePlanPopoverEffects(deps: UsePlanPopoverEffectsDeps) {
     if (!countsOpen) return;
     setObjectListQuery('');
     setExpandedType(null);
-  }, [countsOpen]);
+  }, [countsOpen, setExpandedType, setObjectListQuery]);
 
   useEffect(() => {
     if (countsOpen) return;
     setTypeMenu(null);
-  }, [countsOpen]);
+  }, [countsOpen, setTypeMenu]);
 
   useEffect(() => {
     if (!typeMenu) return;
@@ -76,14 +76,14 @@ export function usePlanPopoverEffects(deps: UsePlanPopoverEffectsDeps) {
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [typeMenu]);
+  }, [setTypeMenu, typeMenu, typeMenuRef]);
 
   useEffect(() => {
     if (!typeLayerModal) return;
     setTypeLayerName(typeLayerModal.label);
     setTypeLayerColor('#0ea5e9');
     window.setTimeout(() => typeLayerNameRef.current?.focus(), 0);
-  }, [typeLayerModal]);
+  }, [setTypeLayerColor, setTypeLayerName, typeLayerModal, typeLayerNameRef]);
 
   useEffect(() => {
     if (!presenceOpen) return;
@@ -94,7 +94,7 @@ export function usePlanPopoverEffects(deps: UsePlanPopoverEffectsDeps) {
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [presenceOpen]);
+  }, [presenceOpen, presenceRef, setPresenceOpen]);
 
   useEffect(() => {
     if (!layersPopoverOpen) return;
@@ -105,7 +105,7 @@ export function usePlanPopoverEffects(deps: UsePlanPopoverEffectsDeps) {
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [layersPopoverOpen]);
+  }, [layersPopoverOpen, layersPopoverRef, setLayersPopoverOpen]);
 
   useEffect(() => {
     if (!layersQuickMenu) return;
@@ -115,11 +115,11 @@ export function usePlanPopoverEffects(deps: UsePlanPopoverEffectsDeps) {
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [layersQuickMenu]);
+  }, [layersQuickMenu, layersQuickMenuRef, setLayersQuickMenu]);
 
   useEffect(() => {
     if (!roomsOpen) return;
     setExpandedRoomId(null);
     setNewRoomMenuOpen(false);
-  }, [roomsOpen]);
+  }, [roomsOpen, setExpandedRoomId, setNewRoomMenuOpen]);
 }

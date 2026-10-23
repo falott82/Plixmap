@@ -27,11 +27,11 @@ export const usePlanMiscCallbacks = (deps: any) => {
       pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction,
       pendingNavigateRef
     });
-  }, [pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingPostSaveAction]);
+  }, [pendingClientMeetingsPreset, pendingMeetingManagerPreset, pendingNavigateRef, pendingPostSaveAction]);
 
   const getSubmenuStyle = useCallback(
     (submenuWidth: number) => computeSubmenuStyle(submenuWidth, { contextMenu, contextMenuRef }),
-    [contextMenu]
+    [contextMenu, contextMenuRef]
   );
 
   const toggleMapSubmenu = useCallback((section: any) => {

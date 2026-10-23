@@ -23,18 +23,7 @@ export const usePlanRoomModalDerived = (deps: any) => {
       roomModal,
       renderPlanRoomById
     });
-  }, [
-    computePolygonArea,
-    computePolylineLength,
-    formatCornerLabel,
-    formatNumber,
-    getRoomPolygon,
-    lang,
-    metersPerPixel,
-    renderPlan,
-    roomModal,
-    renderPlanRoomById
-  ]);
+  }, [computePolygonArea, computePolylineLength, formatCornerLabel, formatNumber, lang, metersPerPixel, renderPlan, roomModal, renderPlanRoomById]);
   const roomModalPreview = useMemo(() => {
     if (!roomModal) return null;
     let points: { x: number; y: number }[] = [];

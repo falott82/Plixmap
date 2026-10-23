@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { meetingIsoDayFromTs, meetingClockFromTs, shiftIsoDay, monthAnchorFromIso, shiftMonthAnchor, hmToMinutes } from './planViewTime';
 import { runRoomDepartmentOptionsEffect, runMeetingOverviewEffect } from './planViewDepartmentOptions';
 import { computeRackOverlayLinks } from './planViewExportData';
@@ -455,7 +455,7 @@ export const usePlanView = (planId: string) => {
     [siteFloorPlans]
   );
   useEffect(() => runMeetingOverviewEffect({
-    client, site, planId,
+    clientId: client?.id, siteId: site?.id, planId,
     setMeetingStatusByRoomId
   }), [client?.id, planId, site?.id]);
 
@@ -481,7 +481,7 @@ export const usePlanView = (planId: string) => {
   });
 
   useEffect(() => runRoomDepartmentOptionsEffect({
-    client,
+    clientId: client?.id,
     allClients,
     setRoomDepartmentOptions
   }), [allClients, client?.id]);
@@ -548,7 +548,7 @@ export const usePlanView = (planId: string) => {
     setLinksModalObjectId(null);
     setWallQuickMenu(null);
     setWallTypeMenu(null);
-  }, [planId]);
+  }, [planId, setLinksModalObjectId, setWallQuickMenu, setWallTypeMenu]);
 
   useEffect(() => {
     if (!forceDefaultView) return;
@@ -631,7 +631,7 @@ export const usePlanView = (planId: string) => {
     setScaleMode, setScaleDraft, setScaleDraftPointer, setScaleModal, setScaleMetersInput, setShowScaleLine, planScale,
     setMeasureMode, setMeasurePoints, setMeasurePointer, setMeasureClosed, setMeasureFinished, setQuoteMode, setQuotePoints,
     setQuotePointer, setScalePromptDismissed
-  }), [planId, planScale]);
+  }), [planId, planScale, setMeasureClosed, setMeasureFinished, setMeasureMode, setMeasurePointer, setMeasurePoints, setQuoteMode, setQuotePointer, setQuotePoints, setScaleDraft, setScaleDraftPointer, setScaleMetersInput, setScaleModal, setScaleMode, setShowScaleLine, setWallDraftPointer, setWallDraftPoints, setWallDrawMode, setWallDrawType]);
   const {
     scaleLabel, defaultObjectScale, scaleLine, measureLabel, measureAreaLabel, formatQuoteLabel,
     quoteDraftLabel,
@@ -750,7 +750,7 @@ export const usePlanView = (planId: string) => {
     (revisionId: string, nextValue: boolean) => {
       runToggleRevisionImmutable(revisionId, nextValue, { isSuperAdmin, user, updateRevision, planId, postAuditEvent, push, t });
     },
-    [isSuperAdmin, planId, postAuditEvent, push, t, updateRevision, user?.id, user?.username]
+    [isSuperAdmin, planId, push, t, updateRevision, user]
   );
 
 
@@ -851,16 +851,18 @@ export const usePlanView = (planId: string) => {
   useLayoutEffect(() => runViewportInitEffect({
     renderPlan, planId, selectedRevisionId, location, viewportInitRef, forceDefaultView, selectedViewId,
     setAutoFitEnabled, setZoom, setPan, saveViewport, setSelectedViewId, loadViewport
-  }), [forceDefaultView, loadViewport, location.key, planId, renderPlan, saveViewport, selectedRevisionId, setPan, setZoom]);
+  }), [forceDefaultView, loadViewport, location, planId, renderPlan, saveViewport, selectedRevisionId, selectedViewId, setAutoFitEnabled, setSelectedViewId, setPan, setZoom]);
 
   useEffect(() => runViewportAutoCenterEffect({
     renderPlan, planId, selectedRevisionId, autoCenterRef, mapRef, canvasStageRef, zoom, pan
-  }), [pan?.x, pan?.y, planId, renderPlan, renderPlan?.height, renderPlan?.width, selectedRevisionId, zoom]);
+  }), [pan, planId, renderPlan, selectedRevisionId, zoom]);
 
-  useEffect(() => runViewportPresentationEffect({
+  const syncPresentationViewport = useEffectEvent(() => runViewportPresentationEffect({
     canvasStageRef, presentationMode, presentationViewportRef, zoom, pan, autoFitEnabled,
     setAutoFitEnabled, setZoom, setPan, saveViewport, planId
-  }), [planId, presentationMode, saveViewport, setAutoFitEnabled, setPan, setZoom]);
+  }));
+  // Capture the current viewport only when entering/leaving presentation mode.
+  useEffect(() => syncPresentationViewport(), [planId, presentationMode]);
 
   useEffect(() => {
     // entering/leaving read-only mode clears pending placement and context menu
@@ -879,7 +881,7 @@ export const usePlanView = (planId: string) => {
     setSelectedLinkId(null);
     setRoomDoorDraft(null);
     setLinkFromId(null);
-  }, [isReadOnly]);
+  }, [clearSelection, isReadOnly, setCorridorDoorDraft, setCorridorQuickMenu, setLinkFromId, setRoomDoorDraft, setSelectedCorridorDoor, setSelectedCorridorId, setSelectedLinkId, setSelectedRoomDoorId, setSelectedRoomId, setSelectedRoomIds, setWallQuickMenu, setWallTypeMenu]);
 
   useEffect(() => {
     // If the user selects an object to place while drawing an area, cancel creation mode.
@@ -888,7 +890,7 @@ export const usePlanView = (planId: string) => {
     setRoomDrawMode(null);
     setCorridorDrawMode(null);
     setNewRoomMenuOpen(false);
-  }, [corridorDrawMode, pendingType, roomDrawMode]);
+  }, [corridorDrawMode, pendingType, roomDrawMode, setCorridorDrawMode, setRoomDrawMode]);
 
   const saveTimer = useRef<number | null>(null);
   useEffect(() => {

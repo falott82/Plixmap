@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useModalState } from '../ui/useModalState';
+
 import { useT } from '../../i18n/useT';
 import ModalShell from '../ui/ModalShell';
 
@@ -24,16 +25,10 @@ const ViewModal = ({
   existingDefaultName = ''
 }: Props) => {
   const t = useT();
-  const [name, setName] = useState(initialName);
-  const [description, setDescription] = useState(initialDescription);
-  const [isDefault, setIsDefault] = useState(initialDefault);
+  const [name, setName] = useModalState(open, () => (initialName), [initialDefault, initialDescription, initialName]);
+  const [description, setDescription] = useModalState(open, () => (initialDescription), [initialDefault, initialDescription, initialName]);
+  const [isDefault, setIsDefault] = useModalState(open, () => (initialDefault), [initialDefault, initialDescription, initialName]);
 
-  useEffect(() => {
-    if (!open) return;
-    setName(initialName);
-    setDescription(initialDescription);
-    setIsDefault(initialDefault);
-  }, [open, initialDefault, initialDescription, initialName]);
 
   const trimmedName = name.trim();
   const isNameValid = trimmedName.length > 0;

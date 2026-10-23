@@ -1,3 +1,4 @@
+import { useModalState } from '../ui/useModalState';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { History, Trash, X, Diff, Eraser, RotateCcw, Lock } from 'lucide-react';
@@ -50,27 +51,20 @@ const RevisionsModal = ({
 }: Props) => {
   const t = useT();
   const defs = useDataStore((s) => s.objectTypes);
-  const [term, setTerm] = useState('');
+  const [term, setTerm] = useModalState(open, () => (''), []);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [confirmDeleteImmutableId, setConfirmDeleteImmutableId] = useState<string | null>(null);
   const [diffOpenId, setDiffOpenId] = useState<string | null>(null);
   const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
-  const [comparePickOpen, setComparePickOpen] = useState(false);
-  const [compareIds, setCompareIds] = useState<string[]>([]);
-  const [compareOpen, setCompareOpen] = useState(false);
+  const [comparePickOpen, setComparePickOpen] = useModalState(open, () => (false), []);
+  const [compareIds, setCompareIds] = useModalState<string[]>(open, () => ([]), []);
+  const [compareOpen, setCompareOpen] = useModalState(open, () => (false), []);
   const [avatarByUserId, setAvatarByUserId] = useState<Record<string, string>>({});
 
   const byId = useMemo(() => new Map(defs.map((d) => [d.id, d])), [defs]);
   const iconOf = (id: string) => byId.get(id)?.icon;
 
-  useEffect(() => {
-    if (!open) return;
-    setTerm('');
-    setComparePickOpen(false);
-    setCompareOpen(false);
-    setCompareIds([]);
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;

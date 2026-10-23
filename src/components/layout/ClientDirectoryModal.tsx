@@ -1,3 +1,4 @@
+import { useModalState } from '../ui/useModalState';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { ChevronDown, ChevronUp, ChevronsUpDown, Mail, Search, Users, X } from 'lucide-react';
@@ -22,10 +23,10 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
   const inFlightRef = useRef<Record<string, Promise<ExternalUserRow[]> | null>>({});
   const [rows, setRows] = useState<ExternalUserRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [query, setQuery] = useState('');
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [sortKey, setSortKey] = useState<'lastName' | 'firstName' | 'role' | 'dept' | 'email' | 'mobile' | 'ext'>('dept');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [query, setQuery] = useModalState(open, () => (''), [client?.id]);
+  const [selectedIndex, setSelectedIndex] = useModalState(open, () => (0), [client?.id]);
+  const [sortKey, setSortKey] = useModalState<'lastName' | 'firstName' | 'role' | 'dept' | 'email' | 'mobile' | 'ext'>(open, () => ('dept'), [client?.id]);
+  const [sortDir, setSortDir] = useModalState<'asc' | 'desc'>(open, () => ('asc'), [client?.id]);
   const [exportGroupBy, setExportGroupBy] = useState<'dept' | 'surname'>('dept');
   const [pdfColumnsModalOpen, setPdfColumnsModalOpen] = useState(false);
   const [pdfColumns, setPdfColumns] = useState<ClientDirectoryPdfColumnKey[]>([
@@ -52,13 +53,6 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
     [t]
   );
 
-  useEffect(() => {
-    if (!open) return;
-    setQuery('');
-    setSelectedIndex(0);
-    setSortKey('dept');
-    setSortDir('asc');
-  }, [client?.id, open]);
 
   useEffect(() => {
     if (open) return;
@@ -179,7 +173,7 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
       if (prev < 0) return 0;
       return Math.min(prev, sorted.length - 1);
     });
-  }, [open, sorted.length]);
+  }, [open, setSelectedIndex, sorted.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -224,7 +218,7 @@ const ClientDirectoryModal = ({ open, client, onClose }: Props) => {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [open, push, selectedIndex, sorted, t]);
+  }, [open, push, selectedIndex, setSelectedIndex, sorted, t]);
 
   const selectedRow = selectedIndex >= 0 ? sorted[selectedIndex] : null;
 

@@ -1291,7 +1291,7 @@ const MobileAppPage = () => {
         setMeetingNotesLoading(false);
       }
     },
-    [user?.id]
+    [tr, user?.id]
   );
 
   const saveMeetingSimpleNote = useCallback(async () => {
@@ -1316,7 +1316,7 @@ const MobileAppPage = () => {
     } finally {
       setMeetingNotesSaving(false);
     }
-  }, [meetingNotesOpen?.id, meetingDetailOpen?.id, meetingMyNoteId, meetingMyNoteShared, meetingMyNoteText, meetingMyNoteTitle, loadMeetingNotes]);
+  }, [meetingNotesOpen?.id, meetingDetailOpen?.id, meetingMyNoteId, meetingMyNoteTitle, tr, meetingMyNoteText, meetingMyNoteShared, loadMeetingNotes]);
 
   useEffect(() => {
     if (!meetingNotesOpen?.id) return;
@@ -1353,7 +1353,7 @@ const MobileAppPage = () => {
         setMobileConfirm(null);
       }
     });
-  }, [meetingNotesDirty]);
+  }, [meetingNotesDirty, tr]);
 
   useEffect(() => {
     if (!pendingQrAutoCheckInRoomId || qrAutoCheckInBusy || !user) return;

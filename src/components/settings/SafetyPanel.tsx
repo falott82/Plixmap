@@ -83,7 +83,7 @@ const SafetyPanel = () => {
     for (const def of objectTypes || []) map.set(def.id, def);
     return map;
   }, [objectTypes]);
-  const canManageScope = (clientId?: string, siteId?: string, planId?: string) => {
+  const canManageScope = useCallback((clientId?: string, siteId?: string, planId?: string) => {
     if (isSuperAdmin) return true;
     if (!user?.isAdmin) return false;
     const perms = permissions || [];
@@ -91,7 +91,7 @@ const SafetyPanel = () => {
     if (siteId && perms.some((entry) => entry.scopeType === 'site' && entry.scopeId === siteId && entry.access === 'rw')) return true;
     if (planId && perms.some((entry) => entry.scopeType === 'plan' && entry.scopeId === planId && entry.access === 'rw')) return true;
     return false;
-  };
+  }, [isSuperAdmin, permissions, user?.isAdmin]);
 
   const safetyRowsRaw = useMemo<SafetyRow[]>(() => buildSafetyRowsRaw(clients, lang, typeById), [clients, lang, typeById]);
 
@@ -679,11 +679,11 @@ const SafetyPanel = () => {
   };
   const deviceEditorReadOnly = useMemo(
     () => !deviceHistory || !canManageScope(deviceHistory.clientId, deviceHistory.siteId, deviceHistory.planId),
-    [deviceHistory, permissions, user?.isAdmin, user?.isSuperAdmin, user?.username]
+    [canManageScope, deviceHistory]
   );
   const doorEditorReadOnly = useMemo(
     () => !doorHistory || !canManageScope(doorHistory.clientId, doorHistory.siteId, doorHistory.planId),
-    [doorHistory, permissions, user?.isAdmin, user?.isSuperAdmin, user?.username]
+    [canManageScope, doorHistory]
   );
 
   const appendDeviceDocument = async (files: FileList | null) => {
